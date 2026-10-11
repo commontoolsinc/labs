@@ -111,4 +111,18 @@ describe("readRevision", () => {
       );
     });
   });
+
+  it("refuses a stored row whose op it does not know", async () => {
+    // The revision table carries no CHECK on `op`; a row the engine never
+    // wrote is reported, not decoded as something it is not.
+    await withEngine(100, (engine) => {
+      const seq = installThenAppendTwice(engine);
+      engine.database.exec(
+        `UPDATE revision SET op = 'splice' WHERE id = '${DOC}' AND seq = ${seq} AND op_index = 1`,
+      );
+      expect(() => readRevision(engine, { id: DOC, seq, opIndex: 1 })).toThrow(
+        "unexpected stored revision op",
+      );
+    });
+  });
 });
