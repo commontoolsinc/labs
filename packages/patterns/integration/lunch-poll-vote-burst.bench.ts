@@ -301,7 +301,7 @@ async function loopCost(run: () => Promise<void>): Promise<string> {
     );
   return `${after.waves - before.waves} waves (${
     after.exhausted - before.exhausted
-  } at the deadline), watermark ${after.lag} behind; ${
+  } at the deadline), watermark ${after.lag} behind at the end and ${before.lag} behind before the burst; ${
     phases.join(", ")
   }; top rows: ${grown.join(", ")}`;
 }

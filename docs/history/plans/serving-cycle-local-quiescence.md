@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-10-11
+archived: 2026-10-11
+reason: "Executed plan; its five stages were built and measured, stage 4 reverted on the measurement, and the record names where the remaining cost sits."
+---
+
 # The serving cycle without server round trips
 
 The serving loop's cost on bursty input is not the derivations and not the
@@ -5,7 +12,7 @@ commit. Over a 30-topic Topics seed the scheduler's runs amount to four to
 five seconds of work, and the seed takes 60 s on the main thread and 30 s in
 the worker: 378 cycles at a 118 ms median on the main thread, 84 cycles at
 329 ms in the worker, with the settle alone at 102 and 133 ms
-([the 2026-10-11 record](../history/development/performance/2026-10-11-serving-loop-in-a-worker.md)).
+([the 2026-10-11 record](../development/performance/2026-10-11-serving-loop-in-a-worker.md)).
 A client running the same program pays none of that: a node commits its
 transaction and the next node runs. This plan keeps the wave as the commit
 unit, which the watermark, the consequence list, exactly-once events and the
@@ -131,7 +138,14 @@ deadline as the multi-user latency bound; the OFF arm and clients.
    settle reaches the deadline, no probe completes, and no cycle proves
    coverage. Either piece alone did the same (167 and 128 behind). The
    publish and the drain stay inside the cycle, after the commit.
-5. [ ] **Cadence and the number.** The coalescing knob, measured on the vote
+5. [x] **Cadence and the number.** Measured, and the deadline stays at
+   100 ms; the record is
+   [`2026-10-11-serving-cycle-local-quiescence.md`](../development/performance/2026-10-11-serving-cycle-local-quiescence.md).
+   The burst stayed an order of magnitude above the client arm, and the
+   record says why the write-class split is not the next design: the order
+   of magnitude is in what a vote re-derives on the serving side, not in
+   how the loop waits for it or commits it.
+   The plan as written: The coalescing knob, measured on the vote
    burst and the seed under both postures against the client arm: the
    burst's wave count and settled time are the target, a watch add near its
    loop-absent cost and a watermark lag of one are the constraints. If the
