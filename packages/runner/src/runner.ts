@@ -13367,6 +13367,24 @@ export class Runner {
       tx,
     );
     this.#preparedCarryOvers.delete(this.#getDocKey(resultCell));
+    // A name the parent ran an instance under, which `pattern` no longer
+    // gives, leaves that instance's child behind: an instance renamed from it
+    // starts fresh.
+    const named = new Set(
+      (pattern.derivedInternalCells ?? []).map((descriptor) =>
+        instanceNameOfPartialCause(descriptor.partialCause)
+      ),
+    );
+    for (const entry of storedManifestOf(resultCell.withTx(tx))) {
+      const name = instanceNameOfPartialCause(entry.partialCause);
+      if (name === undefined || named.has(name)) continue;
+      logger.warn("instance-carry-over", () => [
+        debugStr`instance $quote${name} of ` +
+        `${resultCell.getAsNormalizedFullLink().id} is no longer named, so ` +
+        "its child is left where it is, and an instance renamed from it " +
+        "starts fresh",
+      ]);
+    }
     for (const { name, legacyPartialCause, leftBehind } of uncarried) {
       logger.warn("instance-carry-over", () => [
         debugStr`instance $quote${name} of ` +

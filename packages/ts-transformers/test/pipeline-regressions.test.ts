@@ -149,11 +149,6 @@ function isInsideExtractedComputeCallback(node: ts.Node): boolean {
 }
 
 /**
- * True when `node` has an ancestor call whose target name (bare or member) is
- * `name` — e.g. it is nested inside a `derive(...)` / `__cfHelpers.derive(...)`
- * call.
- */
-/**
  * Whether `call` is the sub-pattern instance `const <name>` binds, which the
  * pipeline names for its binding:
  * `const <name> = __cfHelpers.nameInstance(call, "<name>")`.
@@ -172,6 +167,11 @@ function isNamedInstance(call: ts.CallExpression, name: string): boolean {
     ts.isIdentifier(wrapper.parent.name) && wrapper.parent.name.text === name;
 }
 
+/**
+ * True when `node` has an ancestor call whose target name (bare or member) is
+ * `name` — e.g. it is nested inside a `derive(...)` / `__cfHelpers.derive(...)`
+ * call.
+ */
 function isInsideCallNamed(node: ts.Node, name: string): boolean {
   let current: ts.Node | undefined = node.parent;
   while (current) {

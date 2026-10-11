@@ -580,6 +580,37 @@ describe("instance-carry-over", () => {
       ]).toEqual([7, 9]);
     });
 
+    it("starts fresh, and reports it, when it is renamed", async () => {
+      const named = await compile(NAMED);
+      const tx = rt.edit();
+      const cell = rt.getCell<Record<string, unknown>>(
+        space,
+        "renamed",
+        undefined,
+        tx,
+      );
+      const running = rt.run(tx, named, {}, cell);
+      await tx.commit().settled;
+      await running.pull();
+      const write = rt.edit();
+      cell.withTx(write).key("aCount").set(7);
+      expect((await write.commit().settled).error).toBeUndefined();
+      await rt.idle();
+      rt.runner.stop(cell);
+      const before = freshStarts();
+
+      const result = await update(
+        cell,
+        parentProgram([
+          "  const b = Counter({ label: 'a' });",
+          "  return { views: [b], aCount: b.count };",
+        ].join("\n")),
+      );
+
+      expect(result.aCount).toBe(0);
+      expect(freshStarts() - before).toBe(1);
+    });
+
     it("keeps the child it carried over across a further update", async () => {
       const cell = await deployedParent("further-update");
       await update(cell, NAMED_WITH_SIBLING);

@@ -217,6 +217,16 @@ its own, so a seed derived from it re-runs partway through the run and takes
 the pattern's state with it. See
 [Seeding Stored State](../workflows/pattern-testing.md#seeding-stored-state).
 
+## A Sub-Pattern Bound to a `const` Is Known by Its Name
+
+A sub-pattern instance bound to a `const` keeps its state under that name,
+wherever it sits in the pattern and whatever is added around it. Renaming the
+`const` starts the instance fresh: its state stays with the old name, which
+nothing reaches any more, and the update logs `instance-carry-over`. An
+instance written inline, such as `{ItemCard({ item })}`, is known by its
+position instead, so a sub-pattern added ahead of it can move it onto another
+instance's state. Bind a sub-pattern that holds state to a `const`.
+
 ## See Also
 
 - [Pattern Primitives](./primitives.md) — the contract for embedding reusable
