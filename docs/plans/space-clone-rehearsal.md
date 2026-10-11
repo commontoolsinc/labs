@@ -82,7 +82,7 @@ exists to buy.
 `{source, cause}` and do **not** include the space DID (`createRef` in
 `packages/runner/src/create-ref.ts`), so the document graph is space-agnostic.
 Same-space links elide the `space` field entirely when it matches the base
-(the base/baseSpace elision in `packages/runner/src/link-utils.ts`). On those two dimensions a re-key
+(the `base` elision in `packages/runner/src/link-utils.ts`). On those two dimensions a re-key
 is a no-op.
 
 **What would break.**

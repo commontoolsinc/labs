@@ -781,7 +781,6 @@ declare module "@commonfabric/api" {
     getAsLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: MemorySpace;
         includeSchema?: boolean;
         keepAsCell?: KeepAsCell;
       },
@@ -789,7 +788,6 @@ declare module "@commonfabric/api" {
     getAsWriteRedirectLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: MemorySpace;
         includeSchema?: boolean;
         keepAsCell?: KeepAsCell;
       },
@@ -3795,7 +3793,6 @@ export class CellImpl<T extends FabricValue>
   getAsLink(
     options?: {
       base?: Cell<any>;
-      baseSpace?: MemorySpace;
       includeSchema?: boolean;
       keepAsCell?: KeepAsCell;
     },
@@ -3809,7 +3806,6 @@ export class CellImpl<T extends FabricValue>
   getAsWriteRedirectLink(
     options?: {
       base?: Cell<any>;
-      baseSpace?: MemorySpace;
       includeSchema?: boolean;
       keepAsCell?: KeepAsCell;
     },
