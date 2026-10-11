@@ -1028,6 +1028,15 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
+
+  /**
+   * Whether `originTx`'s writes are applied to this runtime's replicas, in
+   * `space` and in every other space its commit closes.
+   */
+  readonly isOriginAppliedLocally: (
+    originTx: IExtendedStorageTransaction,
+    space: MemorySpace,
+  ) => boolean;
   readonly snapshotEventPreflightTraceContext: (
     trace: EventPreflightTraceContext,
   ) => SchedulerEventPreflightStats;
@@ -1354,10 +1363,15 @@ export async function processPullQueuedEventDuringExecute(
 
   if (queuedEvent.originTx !== undefined) {
     const originStatus = state.lineageStatus(queuedEvent.originTx);
-    const sameSpace = state.getOriginLocalSeq(
+    // The event runs against its origin's speculative state only once that
+    // state is all here. A split commit applies each later space's writes
+    // only after the space before it is accepted, so having one of them
+    // applied, even the event's own, is not enough: the handler reads what
+    // the origin wrote in the others too.
+    const sameSpace = state.isOriginAppliedLocally(
       queuedEvent.originTx,
       queuedEvent.eventLink.space,
-    ) !== undefined;
+    );
     if (originStatus === "failed") {
       state.dropEvent(
         queuedEvent,

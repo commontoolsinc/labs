@@ -58,6 +58,42 @@ export function getCommitLocalSeq(
   return localSeqBySource.get(source)?.get(space);
 }
 
+// The spaces a source transaction's split commit closes, in order, recorded
+// before the first of them is committed (storage/v2-transaction.ts). A split
+// commit applies each space's writes to its replica only once the space before
+// it has been accepted, so a recorded local seq for one of its spaces says
+// nothing of the others.
+const splitSpacesBySource = new WeakMap<object, readonly MemorySpace[]>();
+
+/**
+ * Records that `source` commits to `spaces` one space at a time, in order.
+ */
+export function recordSplitCommitSpaces(
+  source: IStorageTransaction,
+  spaces: readonly MemorySpace[],
+): void {
+  splitSpacesBySource.set(source, [...spaces]);
+}
+
+/**
+ * Whether `source`'s writes are applied to this runtime's replicas: its
+ * commit to `space` was built, and so was its commit to every other space a
+ * split commit of it closes. Follow-up work reads what its origin wrote
+ * wherever the origin wrote it, so it may run against the origin's
+ * speculative state only once all of that state is there (scheduler-v2
+ * §7.6: the depended-upon commit lands before the depending action
+ * proceeds).
+ */
+export function isCommitAppliedLocally(
+  source: IStorageTransaction | undefined,
+  space: MemorySpace,
+): boolean {
+  if (!source || getCommitLocalSeq(source, space) === undefined) return false;
+  const spaces = splitSpacesBySource.get(source);
+  return spaces === undefined ||
+    spaces.every((split) => getCommitLocalSeq(source, split) !== undefined);
+}
+
 /** Records the store seq `space` accepted `source`'s commit at. */
 export function recordCommitSeq(
   source: IStorageTransaction,

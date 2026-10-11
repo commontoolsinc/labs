@@ -21,7 +21,10 @@ import type {
   Runtime,
 } from "../runtime.ts";
 import { startReadStats } from "../read-stats.ts";
-import { getCommitLocalSeq } from "../storage/commit-identity.ts";
+import {
+  getCommitLocalSeq,
+  isCommitAppliedLocally,
+} from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -3354,6 +3357,8 @@ export class Scheduler {
       lineageRunsAgain: (originTx) => this.#lineage.runsAgain(originTx),
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
+      isOriginAppliedLocally: (originTx, targetSpace) =>
+        isCommitAppliedLocally(originTx.tx, targetSpace),
       snapshotEventPreflightTraceContext: (trace) =>
         snapshotEventPreflightTraceContext(
           this.#eventPreflightDependencyState,
@@ -3968,8 +3973,7 @@ export class Scheduler {
     const head = this.#eventQueue[0];
     if (head?.originTx === undefined) return false;
     if (this.#lineage.originStatus(head.originTx) !== "pending") return false;
-    return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
-      undefined;
+    return !isCommitAppliedLocally(head.originTx.tx, head.eventLink.space);
   }
 
   #updateMaterializerRegistration(action: Action): void {

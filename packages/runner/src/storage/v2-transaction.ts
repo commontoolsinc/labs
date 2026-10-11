@@ -38,7 +38,11 @@ import {
 } from "../../../memory/v2/path.ts";
 import type { CellScope } from "../builder/types.ts";
 import { normalizeCellScope } from "../scope.ts";
-import { getCommitLocalSeq, getCommitSeq } from "./commit-identity.ts";
+import {
+  getCommitLocalSeq,
+  getCommitSeq,
+  recordSplitCommitSpaces,
+} from "./commit-identity.ts";
 import { createTransactionCommitReceipt } from "./commit-receipt.ts";
 import { diagnosticPrefix, type PendingCommitContext } from "./diagnostics.ts";
 import type {
@@ -2787,6 +2791,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     commits: { space: MemorySpace; native: NativeStorageCommit }[],
     options?: NativeCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    recordSplitCommitSpaces(this, commits.map(({ space }) => space));
     for (let i = 0; i < commits.length; i++) {
       const { space, native } = commits[i];
       // The claim check that admitted the transaction ran before the first
