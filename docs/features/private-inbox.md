@@ -291,13 +291,14 @@ advertise.
 While the record holds a refusal, Home shows a notice above its tabs, whichever
 tab is open, saying that what others share may not arrive. It shows the code,
 with a sentence saying what the code means when it is one of the host's codes
-that Home knows, and `refusedAt`, in UTC, with the zone named, since a pattern
-formats a date in UTC whatever the viewer's zone is. It reads the record's
-`reason` and `refusedAt` and nothing else, so it never reads through the
-record's link to the refused inbox, and nothing the refused inbox's owner labels
-reaches Home's rendering. A code Home doesn't know is shown as given, and an
-empty one as `none given`. The notice goes when the record is cleared.
-`packages/patterns/system/home.test.tsx` tests it.
+that Home knows, and `refusedAt`, in UTC, with the zone named. The pattern
+sandbox formats a date given no zone in UTC and one given a zone in that zone,
+while a date's local getters read the host's zone, so the notice gives UTC
+explicitly. It reads the record's `reason` and `refusedAt` and nothing else, so
+it never reads through the record's link to the refused inbox, and nothing the
+refused inbox's owner labels reaches Home's rendering. A code Home doesn't know
+is shown as given, and an empty one as `none given`. The notice goes when the
+record is cleared. `packages/patterns/system/home.test.tsx` tests it.
 
 A notice alone can only say that shares may not reach the owner. The record is
 shaped so that a remedy can sit beside it in Home's result as an owner-only

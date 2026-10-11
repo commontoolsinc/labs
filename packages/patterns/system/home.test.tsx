@@ -316,7 +316,9 @@ export default pattern(() => {
   });
   const assert_unknown_code_shown_as_given = assert(() =>
     hasText(refusalNoticeIn(home[UI]), "Reason: inbox-from-a-newer-host.") &&
-    !hasText(refusalNoticeIn(home[UI]), "does not make you its owner")
+    REFUSAL_SENTENCES.every(([, fragment]) =>
+      !hasText(refusalNoticeIn(home[UI]), fragment)
+    )
   );
   const action_clear_refusal = action(() => {
     home.privateInboxRefusal.set({});

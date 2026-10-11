@@ -573,8 +573,9 @@ const Home = pattern(
               const reason = typeof stored === "string" ? stored : "";
               const explanation = refusalReasonText(reason) ?? "";
               const code = reason || "none given";
-              // The sandbox formats a date in UTC whatever the viewer's zone
-              // is, so the time names its zone.
+              // The sandbox formats a date given no zone in UTC and one given
+              // a zone in that zone, while a date's local getters read the
+              // host's zone, so the zone is given here and named in the text.
               const noticed = new Date(at).toLocaleString("en-US", {
                 timeZone: "UTC",
                 timeZoneName: "short",
