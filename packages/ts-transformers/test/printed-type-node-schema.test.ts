@@ -2941,6 +2941,36 @@ export default pattern<{ ${input} }>(({ a, b }) => (${result}));`,
       expect(lift).toMatchObject({ ifc: policy("readers") });
     });
 
+    for (
+      const [form, result] of [
+        ["in parentheses", "{ out: computed(() => (a)) }"],
+        [
+          "in parentheses from a block",
+          "{ out: computed(() => { return (a); }) }",
+        ],
+      ]
+    ) {
+      it(`reads the policy of a lift's result that returns a binding ${form}`, async () => {
+        const { lift } = await inferred(
+          "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+          result!,
+        );
+
+        expect(lift).toMatchObject({ ifc: policy("readers") });
+      });
+    }
+
+    it("reads the policy of a lift's result member written from a binding in parentheses", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: (a), length: a.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+    });
+
     it("reads the policy of a pattern's result member written from a binding", async () => {
       const { pattern } = await inferred(
         "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",

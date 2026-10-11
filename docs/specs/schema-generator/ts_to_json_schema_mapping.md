@@ -1856,9 +1856,11 @@ or a printed generation root is formatted (`formatChildType` and
   The object formatter applies the same rule where it has no node for a
   member: a member of an object literal, read from its type, is read at the
   annotation of the binding or member its value reads, written `p: a`,
-  `p: x.a` or `{ a }`, where that annotation denotes the member's type and
-  names a value binding (`readBindingAnnotation` in
-  `src/typescript/value-annotation.ts`, called from `object-formatter.ts`). A
+  `p: x.a`, `p: (a)` or `{ a }`, a binding a nested pattern destructures
+  included, and a getter read at the type it returns, where that annotation
+  denotes the member's type and names a value binding
+  (`readBindingAnnotation` in `src/typescript/value-annotation.ts`, called
+  from `object-formatter.ts`). A
   callback's inferred result is a print of such a type, so a result written
   `{ whole: a }` keeps the policy `a`'s annotation names. Only an annotation
   whose every `typeof` is a `PolicyOf`'s rules is read so

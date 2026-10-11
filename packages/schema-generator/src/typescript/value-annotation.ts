@@ -148,12 +148,9 @@ export function destructuredSourceProperty(
   ) {
     return undefined;
   }
-  const host = binding.parent.parent;
-  const aggregateType = ts.isParameter(host)
-    ? checker.getTypeAtLocation(host)
-    : ts.isVariableDeclaration(host) && host.initializer
-    ? checker.getTypeAtLocation(host.initializer)
-    : undefined;
+  // The pattern's type is the aggregate it destructures, at any depth of a
+  // nested pattern (`{ nested: { x } }`).
+  const aggregateType = checker.getTypeAtLocation(binding.parent);
   const key = binding.propertyName;
   const sourceName = !key
     ? binding.dotDotDotToken ? undefined : localName
@@ -168,7 +165,8 @@ export function destructuredSourceProperty(
 
 /**
  * The node `symbol`'s declaration writes its type with, where it writes one:
- * the node schema generation reads a property through.
+ * the node schema generation reads a property through. A getter writes the
+ * type it returns.
  */
 export function declaredTypeNode(
   symbol: ts.Symbol | undefined,
@@ -177,6 +175,7 @@ export function declaredTypeNode(
   return declaration &&
       (ts.isPropertySignature(declaration) ||
         ts.isPropertyDeclaration(declaration) ||
+        ts.isGetAccessorDeclaration(declaration) ||
         ts.isParameter(declaration) ||
         ts.isVariableDeclaration(declaration))
     ? declaration.type
@@ -184,15 +183,19 @@ export function declaredTypeNode(
 }
 
 /**
- * The symbol whose declaration spells the value `expression` reads, where it
- * reads one by name: the property of a destructured aggregate that a binding
- * reads (`destructuredSourceProperty()`), else the binding an identifier
- * names, or the member a property access names.
+ * The symbol whose declaration spells the value `written` reads, where it
+ * reads one by name, inside any parentheses: the property of a destructured
+ * aggregate that a binding reads (`destructuredSourceProperty()`), else the
+ * binding an identifier names, or the member a property access names.
  */
 export function readDeclaringSymbol(
-  expression: ts.Expression,
+  written: ts.Expression,
   checker: ts.TypeChecker,
 ): ts.Symbol | undefined {
+  let expression = written;
+  while (ts.isParenthesizedExpression(expression)) {
+    expression = expression.expression;
+  }
   if (ts.isIdentifier(expression)) {
     return destructuredSourceProperty(expression, expression.text, checker) ??
       readValueSymbol(expression, checker);

@@ -1359,6 +1359,11 @@ export class SchemaGenerator {
       ...(schemaHints && { schemaHints }),
     };
     context = this.#withGenericBindings(type, context);
+    // A print read as the annotation that spells it keeps the print's own
+    // hints, as a member does (`formatChildType()`).
+    const hintContext = typeNode && hintsNode
+      ? { ...context, typeNode: hintsNode }
+      : context;
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
@@ -1370,13 +1375,13 @@ export class SchemaGenerator {
         checker,
         context,
       );
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
       // Build final schema with $schema and $defs
       result = this.#buildFinalSchemaForSynthetic(schema, context);
     } else {
       // Use type-based analysis (normal path)
       schema = this.#formatType(type, context, true);
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
 
       // Attach root-level description from JSDoc if available
       schema = this.#attachRootDescription(schema, type, context);

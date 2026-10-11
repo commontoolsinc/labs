@@ -2494,7 +2494,7 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   `test/cfc-narrowed-capture-floor.test.ts`)
 - a lift-applied callback whose result is inferred, and which returns the value
   of one binding or member, as its expression body or as the one statement of
-  its block, records that binding's annotation as its printed result's
+  its block, inside any parentheses, records that binding's annotation as its printed result's
   `spelledBy` hint, by the same rule (`returnedValue` in
   `closures/strategies/lift-applied-strategy.ts`), where every `typeof` the
   annotation names is a `PolicyOf`'s rules. One that names a writer leaves the

@@ -1705,7 +1705,10 @@ function recordNarrowing(
  * built from a type, or rebuilt afresh, keeps no trace of the node it stands
  * for, and only that node's record says which value it narrows, or which
  * declaration spells what a print of its type cannot
- * (`CrossStageState.recordNarrowedFrom()`, `recordDeclaredValue()`).
+ * (`CrossStageState.recordNarrowedFrom()`, `recordDeclaredValue()`). A print
+ * of the whole value is read as the node spelling it, where that node names a
+ * value binding, and a print rebuilt from a print keeps its hint
+ * (`SchemaHint.spelledBy`).
  */
 function carryNarrowing(
   base: ts.TypeNode,

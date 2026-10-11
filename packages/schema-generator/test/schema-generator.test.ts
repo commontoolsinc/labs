@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
+import type { SchemaHint } from "../src/interface.ts";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import {
   createTestProgram,
@@ -4696,6 +4697,55 @@ interface HasImage {
       }), "count");
 
       expect(schema).toEqual({ type: "number" });
+    });
+
+    it("applies the hints of a printed root read as its annotation", async () => {
+      // The print stands for `Root`'s `field`, and carries every hint a
+      // caller may record on a result: the spelling, a value it narrows, and
+      // a UI contract.
+      const { checker, sourceFile } = await createTestProgram(PROGRAM);
+      const members = new Map<string, ts.PropertySignature>();
+      let field: ts.Type | undefined;
+      ts.forEachChild(sourceFile, (node) => {
+        if (ts.isTypeAliasDeclaration(node) && node.name.text === "Root") {
+          field = checker.getTypeFromTypeNode(
+            (node.type as ts.TypeLiteralNode).members.filter(
+              ts.isPropertySignature,
+            ).find((member) => (member.name as ts.Identifier).text === "field")!
+              .type!,
+          );
+        } else if (
+          ts.isInterfaceDeclaration(node) && node.name.text === "Members"
+        ) {
+          for (const member of node.members.filter(ts.isPropertySignature)) {
+            members.set((member.name as ts.Identifier).text, member);
+          }
+        }
+      });
+      const printed = ts.factory.createKeywordTypeNode(
+        ts.SyntaxKind.UnknownKeyword,
+      );
+      const labeled = members.get("labeled")!;
+
+      const schema = new SchemaGenerator().generateSchema(
+        field!,
+        checker,
+        printed,
+        { printedFrom: (node) => node === printed ? field : undefined },
+        new WeakMap<ts.Node, SchemaHint>([[printed, {
+          spelledBy: members.get("annotated")!.type!,
+          narrowedFrom: {
+            type: checker.getTypeFromTypeNode(labeled.type!),
+            typeNode: labeled.type!,
+          },
+          cfcUiContract: { helper: "UiAction", action: "Go" },
+        }]]),
+      ) as { ifc?: Record<string, unknown> };
+
+      expect(schema.ifc).toMatchObject({
+        confidentiality: [MODULE_POLICY, "x"],
+        uiContract: { helper: "UiAction", action: "Go" },
+      });
     });
   });
 
