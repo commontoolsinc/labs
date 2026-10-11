@@ -1028,15 +1028,6 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
-
-  /**
-   * Whether a follow-up in `space` dispatches against `originTx`'s
-   * speculative state (scheduler-v2 §7.6's same-space origin).
-   */
-  readonly isSameSpaceOrigin: (
-    originTx: IExtendedStorageTransaction,
-    space: MemorySpace,
-  ) => boolean;
   readonly snapshotEventPreflightTraceContext: (
     trace: EventPreflightTraceContext,
   ) => SchedulerEventPreflightStats;
@@ -1363,12 +1354,10 @@ export async function processPullQueuedEventDuringExecute(
 
   if (queuedEvent.originTx !== undefined) {
     const originStatus = state.lineageStatus(queuedEvent.originTx);
-    // A split-commit origin is same-space only where the event's space is the
-    // last it closes (`isSameSpaceOrigin`).
-    const sameSpace = state.isSameSpaceOrigin(
+    const sameSpace = state.getOriginLocalSeq(
       queuedEvent.originTx,
       queuedEvent.eventLink.space,
-    );
+    ) !== undefined;
     if (originStatus === "failed") {
       state.dropEvent(
         queuedEvent,

@@ -74,21 +74,19 @@ export function recordSplitCommitSpaces(
 }
 
 /**
- * Whether follow-up work in `space` may run against `source`'s speculative
- * state, as a same-space follow-up does (scheduler-v2 §7.6): `source`'s
- * commit to `space` is built, and it is the last commit `source` makes. A
- * split commit closes each space only once the one before it is accepted, so
- * where `space` is not the last, `source`'s writes to the later spaces are not
- * applied yet and a precondition on its commit to `space` would not cover
- * them; the follow-up waits for `source`'s verdict, as a cross-space one does.
+ * The client commit sequence of `source`'s commit to `space`, where that
+ * commit's acceptance implies all of `source`'s: `source` committed to `space`
+ * and to no other space. A split commit closes its spaces one at a time, so
+ * none of its commits covers the others, and it has no such sequence.
+ * Follow-up work names this commit in its *origin committed* precondition
+ * (scheduler-v2 §7.6).
  */
-export function isSameSpaceOrigin(
+export function getCoveringCommitLocalSeq(
   source: IStorageTransaction | undefined,
   space: MemorySpace,
-): boolean {
-  if (!source || getCommitLocalSeq(source, space) === undefined) return false;
-  const spaces = splitSpacesBySource.get(source);
-  return spaces === undefined || spaces[spaces.length - 1] === space;
+): number | undefined {
+  if (!source || splitSpacesBySource.has(source)) return undefined;
+  return getCommitLocalSeq(source, space);
 }
 
 /** Records the store seq `space` accepted `source`'s commit at. */

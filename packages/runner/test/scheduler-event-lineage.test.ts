@@ -1199,6 +1199,7 @@ describe("scheduler event lineage", () => {
             false,
           ),
         seen: () => seen.get(),
+        first,
       };
     }
 
@@ -1226,6 +1227,43 @@ describe("scheduler event lineage", () => {
       } finally {
         gate.confirm();
         gate.restore();
+        await idlePromise?.catch(() => {});
+      }
+    });
+
+    it("waits for the origin's verdict where the follow-up's space is the last it closes", async () => {
+      const origin = await splitOrigin("split last", [secondSpace, space]);
+      const firstGate = delayNextServerTransact(storageManager);
+      let lastGate: ReturnType<typeof delayNextServerTransact> | undefined;
+      let idlePromise: Promise<void> | undefined;
+      // A reader of the origin's last-space write, as a UI is, so its local
+      // apply wakes the scheduler.
+      const cancel = origin.first.sink(() => {});
+      try {
+        origin.send();
+        await waitForSignal(firstGate.started, "origin commit did not start");
+        lastGate = delayNextServerTransact(storageManager);
+        firstGate.confirm();
+        // The origin's last commit, to `space`, is applied and held.
+        await waitForSignal(lastGate.started, "last commit did not start");
+        idlePromise = runtime.idle();
+        await expectIdlePending(idlePromise);
+        expect(origin.seen()).toEqual([]);
+
+        lastGate.confirm();
+        await idlePromise;
+        await waitForSchedulerCondition(
+          runtime,
+          () => origin.seen().length === 1,
+          "follow-up did not dispatch after its origin's verdict",
+        );
+        expect(origin.seen()).toEqual([1]);
+      } finally {
+        cancel();
+        firstGate.confirm();
+        lastGate?.confirm();
+        lastGate?.restore();
+        firstGate.restore();
         await idlePromise?.catch(() => {});
       }
     });

@@ -21,10 +21,7 @@ import type {
   Runtime,
 } from "../runtime.ts";
 import { startReadStats } from "../read-stats.ts";
-import {
-  getCommitLocalSeq,
-  isSameSpaceOrigin,
-} from "../storage/commit-identity.ts";
+import { getCoveringCommitLocalSeq } from "../storage/commit-identity.ts";
 import type {
   ChangeGroup,
   IExtendedStorageTransaction,
@@ -3356,9 +3353,7 @@ export class Scheduler {
       },
       lineageRunsAgain: (originTx) => this.#lineage.runsAgain(originTx),
       getOriginLocalSeq: (originTx, targetSpace) =>
-        getCommitLocalSeq(originTx.tx, targetSpace),
-      isSameSpaceOrigin: (originTx, targetSpace) =>
-        isSameSpaceOrigin(originTx.tx, targetSpace),
+        getCoveringCommitLocalSeq(originTx.tx, targetSpace),
       snapshotEventPreflightTraceContext: (trace) =>
         snapshotEventPreflightTraceContext(
           this.#eventPreflightDependencyState,
@@ -3973,7 +3968,8 @@ export class Scheduler {
     const head = this.#eventQueue[0];
     if (head?.originTx === undefined) return false;
     if (this.#lineage.originStatus(head.originTx) !== "pending") return false;
-    return !isSameSpaceOrigin(head.originTx.tx, head.eventLink.space);
+    return getCoveringCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
+      undefined;
   }
 
   #updateMaterializerRegistration(action: Action): void {
