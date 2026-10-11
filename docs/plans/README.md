@@ -27,6 +27,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   reads the store on its own SQLite connections, sends wave commits and
   everything else it needs from the memory server over a `MessagePort`, and
   the request thread stops waiting behind waves.
+- [The serving cycle without server round trips](serving-cycle-local-quiescence.md)
+  removes the per-cycle waits and passes around the wave that make server
+  execution slow on bursty input: quiescence decided from the loop's own feed
+  and scheduler instead of a server-wide idle and a frame barrier, demand
+  crossing as deltas, the post-commit work off the critical path, and the
+  cycle cadence measured before it is chosen.
 - [Memory router security requirements](memory-router-security-requirements.md)
   defines the authentication, authorization, isolation, and public-ingress
   gates for multiplexed Memory WebSockets routed to toolsheds.
