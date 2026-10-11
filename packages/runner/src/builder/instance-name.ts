@@ -18,6 +18,9 @@ import type { JSONObject, OpaqueCell } from "./types.ts";
 /** The name each instance root was given, keyed by its root cell. */
 const instanceNames = new WeakMap<OpaqueCell<unknown>, string>();
 
+/** Whether `nameInstance()` names anything; off only under a test. */
+let namingInstances = true;
+
 /**
  * Gives the sub-pattern instance `value` the instance name `name`, and returns
  * `value`. A value that is not a cell is returned as it is, unnamed.
@@ -29,8 +32,22 @@ export function nameInstance<T>(value: T, name: string): T {
   const cell = isCellResultForDereferencing(value)
     ? getCellOrThrow(value)
     : value;
-  if (isCell(cell)) instanceNames.set(exportCell(cell).cell, name);
+  if (namingInstances && isCell(cell)) {
+    instanceNames.set(exportCell(cell).cell, name);
+  }
   return value;
+}
+
+/**
+ * Makes `nameInstance()` name nothing, so that a test can leave the state a
+ * runtime without instance names leaves, and returns a function that undoes
+ * it.
+ */
+export function stopNamingInstancesForTesting(): () => void {
+  namingInstances = false;
+  return () => {
+    namingInstances = true;
+  };
 }
 
 /** The instance name given to the root cell `root`, if any. */
