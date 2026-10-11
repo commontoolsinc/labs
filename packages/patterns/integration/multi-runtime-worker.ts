@@ -33,6 +33,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import type { JSONSchema } from "@commonfabric/api";
 import type { Cell, MemorySpace } from "@commonfabric/runner";
 import {
   cellRuntime,
@@ -874,6 +875,22 @@ const handlers: Record<
     }
     if (boundedReads) cell.get();
     if (boundedReads) await cell.pull();
+    return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
+  },
+
+  /**
+   * Read the value of the cell reached from the piece result by `path`,
+   * through `schema` rather than the result schema. Nothing above `path` is
+   * pulled, so no value cached there shapes what `schema` reads; links are
+   * converted as `read` converts them.
+   */
+  async readAs({ path, schema, piece }) {
+    let cell = await resultAt(piece);
+    for (const segment of path as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    cell = cell.asSchema(schema as JSONSchema);
+    await cell.pull();
     return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
   },
 

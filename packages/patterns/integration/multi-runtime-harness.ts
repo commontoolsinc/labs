@@ -36,6 +36,7 @@
 import { fromFileUrl } from "@std/path/from-file-url";
 import { join } from "@std/path/join";
 
+import type { JSONSchema } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
 import {
   fabricFromRealmValue,
@@ -528,6 +529,25 @@ export class MultiRuntimeSession {
     opts: { piece?: PieceAddress } = {},
   ): Promise<FabricValue> {
     return await this.#client.call("read", { path, piece: opts.piece });
+  }
+
+  /**
+   * Read a value from the piece result through `schema`, a reader's own
+   * schema, rather than through the result schema: as a client that demands
+   * the fields it draws reads them. The result above `path` is not pulled
+   * first, so the value is the one `schema` shapes. Links and `piece` are as
+   * for {@link read}.
+   */
+  async readAs(
+    path: (string | number)[],
+    schema: JSONSchema,
+    opts: { piece?: PieceAddress } = {},
+  ): Promise<FabricValue> {
+    return await this.#client.call("readAs", {
+      path,
+      schema,
+      piece: opts.piece,
+    });
   }
 
   /**
