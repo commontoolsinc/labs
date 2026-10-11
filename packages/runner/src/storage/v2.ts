@@ -67,6 +67,7 @@ import {
   type SqliteQueryReader,
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
+  type SyncCrossing,
   toDocumentPath,
   type ViewInterest,
   type ViewPlan,
@@ -1257,6 +1258,7 @@ export class StorageManager implements IStorageManager {
   #spaceAccessErrors = new Map<MemorySpace, Error>();
   #spaceAccessObservers = new Set<(space: MemorySpace, error: Error) => void>();
   #spaceAccessChangeObservers = new Set<(space: MemorySpace) => void>();
+  #spaceSessionReplacedObservers = new Set<(space: MemorySpace) => void>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
 
@@ -1265,6 +1267,18 @@ export class StorageManager implements IStorageManager {
    * replica's through this map, so a replica built after the install and
    * a replacement replica both see it. */
   readonly #storeReadThroughs = new Map<MemorySpace, StoreReadThrough>();
+
+  /** The crossing loads kicked, by target and selector (see
+   * `#loadCrossings`): one kick per manager, in flight or landed. */
+  readonly #crossingKicks = new Set<string>();
+
+  /** The crossing loads in flight, by their pending-load key: the address
+   * each names (IStorageManager.pendingCrossingLoadAddresses) and how many
+   * loads of it — one per selector — have yet to settle. */
+  readonly #pendingCrossingLoads = new Map<string, {
+    address: { space: MemorySpace; scope: CellScope; id: URI };
+    count: number;
+  }>();
 
   /**
    * Schema-registry retention lease: held for the manager's open lifetime,
@@ -1924,6 +1938,7 @@ export class StorageManager implements IStorageManager {
         // providers refuse (see Options.servingHomeSpace).
         refuseForeignScopedReads: this.#refusesForeignScopedReadsIn(space),
         storeReadThrough: () => this.#storeReadThroughs.get(space),
+        loadCrossings: (crossings) => this.#loadCrossings(crossings),
         routeState,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? (routeGeneration, routeSignal) =>
@@ -1942,6 +1957,15 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.#syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        onSessionReplaced: () => {
+          for (const observer of [...this.#spaceSessionReplacedObservers]) {
+            try {
+              observer(space);
+            } catch (cause) {
+              console.error("space-session-replaced subscriber threw:", cause);
+            }
+          }
+        },
         onAccessChange: (error) => {
           const alreadyDenied = this.#spaceAccessErrors.has(space);
           if (error === undefined) {
@@ -2314,6 +2338,14 @@ export class StorageManager implements IStorageManager {
   subscribeSpaceAccessChange(observer: (space: MemorySpace) => void): Cancel {
     this.#spaceAccessChangeObservers.add(observer);
     return () => this.#spaceAccessChangeObservers.delete(observer);
+  }
+
+  /** @inheritDoc */
+  subscribeSpaceSessionReplaced(
+    observer: (space: MemorySpace) => void,
+  ): Cancel {
+    this.#spaceSessionReplacedObservers.add(observer);
+    return () => this.#spaceSessionReplacedObservers.delete(observer);
   }
 
   trackPendingCommit(
@@ -2726,6 +2758,85 @@ export class StorageManager implements IStorageManager {
       throw error;
     } finally {
       releaseLoad(loadFailure);
+    }
+  }
+
+  /** @inheritDoc */
+  followsCrossings(space: MemorySpace): boolean {
+    return this.open(space).replica.crossingsReported?.() === true;
+  }
+
+  /** @inheritDoc */
+  pendingCrossingLoadAddresses(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[] {
+    return [...this.#pendingCrossingLoads.values()].map(
+      (entry) => entry.address,
+    );
+  }
+
+  /**
+   * Kicks the loads a frame's crossings name (ProviderOptions.loadCrossings):
+   * each target from its own space, under the path and schema the server's
+   * walk needed there, registered as a pending load like `syncCell`'s so
+   * the preflight park and `loadsSettled()` see it, and listed by
+   * `pendingCrossingLoadAddresses()` while it is in flight. Each (target,
+   * selector) is kicked once per manager: a crossing's own frame can report
+   * a crossing back, and a kick already in flight or landed ends that chain.
+   * A load that fails hands its kick back, so a frame carrying the crossing
+   * again kicks it again; the target stays absent and the frame that
+   * carried the crossing is unaffected.
+   */
+  #loadCrossings(crossings: readonly SyncCrossing[]): void {
+    for (const crossing of crossings) {
+      const space = crossing.space as MemorySpace;
+      const id = crossing.id as URI;
+      const scope = normalizeCellScope(crossing.scope);
+      // A scoped read of a foreign space is one a serving manager refuses
+      // by construction (ProviderOptions.refuseForeignScopedReads); the
+      // run that reads it is failed at dispatch, so no load is kicked.
+      if (scope !== "space" && this.#refusesForeignScopedReadsIn(space)) {
+        continue;
+      }
+      const key = `${space}\0${scope}\0${id}\0${
+        JSON.stringify(crossing.path)
+      }\0${crossing.schema === undefined ? "" : hashStringOf(crossing.schema)}`;
+      if (this.#crossingKicks.has(key)) continue;
+      this.#crossingKicks.add(key);
+      const address = { space, scope, id };
+      const releaseLoad = this.#registerPendingLoad(address);
+      // One ledger entry per target, however many selectors load it: the
+      // entry stays while any of them is in flight.
+      const ledgerKey = entityKey(address, this.scopeKeyIdentity());
+      const entry = this.#pendingCrossingLoads.get(ledgerKey) ??
+        { address, count: 0 };
+      entry.count++;
+      this.#pendingCrossingLoads.set(ledgerKey, entry);
+      const load = (async () => {
+        let loadFailure: unknown;
+        try {
+          const result = await this.open(space).sync(
+            id,
+            { path: crossing.path, schema: crossing.schema ?? false },
+            crossing.scope,
+          );
+          loadFailure = result.error;
+          if (loadFailure !== undefined) {
+            this.#logSyncLoadFailure(space, id, loadFailure);
+          }
+        } catch (error) {
+          loadFailure = error;
+          this.#logSyncLoadFailure(space, id, error);
+        } finally {
+          if (loadFailure !== undefined) this.#crossingKicks.delete(key);
+          releaseLoad(loadFailure);
+          entry.count--;
+          if (entry.count === 0) this.#pendingCrossingLoads.delete(ledgerKey);
+        }
+      })();
+      this.trackUntilSettled(load);
     }
   }
 
@@ -3158,6 +3269,9 @@ type ProviderOptions = {
   subscription: IStorageSubscription;
   onAccessChange?: (error: Error | undefined) => void;
 
+  /** Called when the space's memory session is replaced on reconnect. */
+  onSessionReplaced?: () => void;
+
   /**
    * The owning manager's authenticated session identity
    * (IStorageManager.scopeKeyIdentity) — what the replica's notification
@@ -3198,6 +3312,14 @@ type ProviderOptions = {
    * (see IStorageManager.installStoreReadThrough). Absent or resolving
    * to `undefined`: every load goes over the session. */
   storeReadThrough?: () => StoreReadThrough | undefined;
+
+  /**
+   * Kicks the loads a frame's crossings name (`SessionSync.crossings`): the
+   * documents in other spaces the server's walk followed links to, each
+   * under the selector the read needed, registered as pending loads for a
+   * caller to await. Absent: a frame's crossings are not acted on.
+   */
+  loadCrossings?: (crossings: readonly SyncCrossing[]) => void;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -4057,6 +4179,11 @@ export class SpaceReplica
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
 
+  /** See ProviderOptions.loadCrossings. */
+  readonly #loadCrossings:
+    | ((crossings: readonly SyncCrossing[]) => void)
+    | undefined;
+
   /**
    * Depth of frame integrations in progress (`#applySessionSync()`). A
    * read made while a frame integrates — the differential checkout's
@@ -4262,6 +4389,7 @@ export class SpaceReplica
   #lastAuthorizationError: IAuthorizationError | null = null;
   #onAccessChange?: (error: Error | undefined) => void;
   #cancelAccessLoss: Cancel | undefined;
+  #onSessionReplaced?: () => void;
 
   readonly #routeState: ProviderRouteState;
   readonly #routeGeneration: number;
@@ -4292,6 +4420,7 @@ export class SpaceReplica
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
+    this.#onSessionReplaced = options.onSessionReplaced;
     this.#scopeKeyIdentity = options.scopeKeyIdentity;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
@@ -4302,6 +4431,7 @@ export class SpaceReplica
     this.#eventAppendPacing = options.eventAppendPacing;
     this.#refuseForeignScopedReads = options.refuseForeignScopedReads === true;
     this.#storeReadThrough = options.storeReadThrough ?? (() => undefined);
+    this.#loadCrossings = options.loadCrossings;
     // Eager queue init (LT9; verdict blocker, 2026-08-12): a dead
     // predecessor replica's intents in the manager-shared store must
     // discharge WITHOUT waiting for a fresh fire. The constructor's
@@ -5197,6 +5327,15 @@ export class SpaceReplica
   /** Whether the current connection retains the negotiated view protocol. */
   viewReplicationSupported(): boolean {
     return this.#sessionClient?.serverFlags?.viewScopedReplicationV1 === true;
+  }
+
+  /**
+   * Whether the server this replica's session is on reports the links its
+   * walks follow out of the space (`syncCrossingsV1`), so a sync here loads
+   * what a read through the synced documents reaches in other spaces.
+   */
+  crossingsReported(): boolean {
+    return this.#sessionClient?.serverFlags?.syncCrossingsV1 === true;
   }
 
   /** Waits for session authentication and watch restoration after reconnect. */
@@ -8284,6 +8423,15 @@ export class SpaceReplica
     } finally {
       this.#frameApplyDepth -= 1;
     }
+    // The frame's crossings name documents in other spaces: their loads
+    // are kicked once the frame's own documents are in. Nothing here waits
+    // for them — this apply can sit inside the one watch refresh in flight,
+    // and a crossing's load can report a crossing back into this space —
+    // so a caller that needs them awaits them through the pending-load
+    // ledger (IStorageManager.pendingCrossingLoadAddresses).
+    if (sync.crossings !== undefined && sync.crossings.length > 0) {
+      this.#loadCrossings?.(sync.crossings);
+    }
   }
 
   /** Helper for `#applySessionSync()`, which carries the integration
@@ -9792,6 +9940,7 @@ export class SpaceReplica
             // event intents re-submit under fresh localSeqs (the target's
             // eventId dedupe keeps a landed original sound — events.md §5).
             this.#eventAppendQueue?.kick();
+            this.#onSessionReplaced?.();
           };
           // A reconnect declares what this replica holds, so the server
           // re-delivers exactly what it lacks (see `holdings`).
