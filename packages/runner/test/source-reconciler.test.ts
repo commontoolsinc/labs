@@ -29,6 +29,7 @@ import {
 } from "../src/index.ts";
 import { PatternsRoute } from "../src/harness/patterns-route.deno.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("piece source reconciliation");
 const PARENT_PATH = "/api/patterns/system/reconcile-parent.tsx";
@@ -434,6 +435,90 @@ describe("piece source reconciliation", () => {
         symbol: SYMBOL,
       });
       expect((await piece.pull())?.marker).toBe("v2");
+    });
+
+    describe("when the space's memory session is replaced", () => {
+      /** Captures the observer the reconciler subscribes when the runtime is
+       * constructed, so a test can report a replacement itself. */
+      function captureSessionReplaced(): (space: MemorySpace) => void {
+        let observer: ((space: MemorySpace) => void) | undefined;
+        storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
+          observer = subscribed;
+          return () => {
+            observer = undefined;
+          };
+        };
+        return (space) => observer?.(space);
+      }
+
+      /** A running piece following the tracked pattern's system origin, current
+       * at v1, with the route's advertised source switchable to v2. */
+      async function followingPiece() {
+        const v1Identity = await identityFor(source("v1"));
+        const v2Identity = await identityFor(source("v2"));
+        let served = "v1";
+        const piece = await preparePiece(
+          servingFetch(
+            () => served === "v1" ? v1Identity : v2Identity,
+            () => source(served),
+          ),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        expect(await runtime.start(piece)).toBe(true);
+        expect(await reconcile(piece)).toBe("current");
+        return { piece, v1Identity, v2Identity, redeploy: () => served = "v2" };
+      }
+
+      async function settle() {
+        await runtime.sourceReconciler.idle();
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+      }
+
+      it("adopts the source the restarted host serves", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v2Identity, redeploy } = await followingPiece();
+
+        redeploy();
+        replace(piece.space);
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v2Identity,
+          symbol: SYMBOL,
+        });
+        expect((await piece.pull())?.marker).toBe("v2");
+      });
+
+      it("leaves the piece on its source for a replacement in another space", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v1Identity, redeploy } = await followingPiece();
+        const other = await Identity.fromPassphrase("another reconciled space");
+
+        redeploy();
+        replace(other.did());
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
+
+      it("leaves the piece on its source once it stopped following", async () => {
+        const replace = captureSessionReplaced();
+        const { piece, v1Identity, redeploy } = await followingPiece();
+
+        runtime.sourceReconciler.unwatch(piece);
+        redeploy();
+        replace(piece.space);
+        await settle();
+
+        expect(getPatternIdentityRef(piece)).toEqual({
+          identity: v1Identity,
+          symbol: SYMBOL,
+        });
+      });
     });
 
     it("treats a pattern index that errors as an artifact that will not load", async () => {

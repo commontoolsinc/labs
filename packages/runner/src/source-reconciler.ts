@@ -40,6 +40,7 @@ import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Pattern } from "./builder/types.ts";
+import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
@@ -287,6 +288,14 @@ export class SourceReconciler {
   readonly #pending = new Map<string, PendingReconcile>();
   readonly #fabricFollowers = new Map<string, FabricFollower>();
   readonly #stoppedFabricFollowers = new Set<string>();
+
+  /**
+   * The pieces following a system origin, by follower key. A host serves one
+   * source for the life of its process, and a restart replaces every memory
+   * session it held, so each is reconciled again when its space's session is
+   * replaced.
+   */
+  readonly #systemFollowers = new Map<string, Cell<unknown>>();
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
     capacity: 32,
@@ -305,10 +314,15 @@ export class SourceReconciler {
     string,
     { promise: Promise<Pattern | undefined>; epoch: number }
   >();
+  readonly #cancelSessionReplaced: Cancel | undefined;
   #disposed = false;
 
   constructor(runtime: Runtime) {
     this.#runtime = runtime;
+    this.#cancelSessionReplaced = runtime.storageManager
+      .subscribeSpaceSessionReplaced?.((space) =>
+        this.#followSystemSources(space)
+      );
   }
 
   /** The retained supplied sources, which a test reads to see what is kept. */
@@ -445,6 +459,8 @@ export class SourceReconciler {
     for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
     this.#fabricFollowers.clear();
+    this.#cancelSessionReplaced?.();
+    this.#systemFollowers.clear();
     await this.idle();
   }
 
@@ -458,7 +474,7 @@ export class SourceReconciler {
     } else {
       this.#stoppedFabricFollowers.delete(key);
     }
-    this.#unwatchFabricSource(resultCell);
+    this.#unwatchSource(resultCell);
   }
 
   #singleFlight(resultCell: Cell<unknown>): Promise<ReconcileOutcome> {
@@ -493,6 +509,13 @@ export class SourceReconciler {
     return pending.promise;
   }
 
+  /** Reconciles each piece following a system origin in `space` again. */
+  #followSystemSources(space: MemorySpace): void {
+    for (const follower of this.#systemFollowers.values()) {
+      if (follower.space === space) this.#reconcileFromSourceEvent(follower);
+    }
+  }
+
   /** Re-enter after the current pass, for a followed source that moved. */
   #reconcileFromSourceEvent(resultCell: Cell<unknown>): void {
     const key = this.#followerKey(resultCell);
@@ -517,7 +540,7 @@ export class SourceReconciler {
     const running = getPatternIdentityRef(resultCell);
     const storedSource = getPatternSource(resultCell);
     if (running === undefined || storedSource === undefined) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       // Nothing supplies code for this piece, which the panel reads off the
       // absent origin. An outcome would describe a relationship it does not
       // have.
@@ -604,7 +627,7 @@ export class SourceReconciler {
       // resolve against the host and fetch whatever the site answers for an
       // unrouted path, so nothing follows it.
       if (origin.ref === undefined) {
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
         return "unusable";
       }
       const migrated = await this.#recordOrigin(
@@ -635,6 +658,8 @@ export class SourceReconciler {
     origin: PieceOriginKind,
     signal: AbortSignal,
   ): Promise<ReconcileOutcome> {
+    const key = this.#followerKey(resultCell);
+    this.#systemFollowers.delete(key);
     switch (origin.kind) {
       case "unusable":
         logger.warn("unusable-origin", () => [
@@ -642,13 +667,14 @@ export class SourceReconciler {
           state.space,
           origin.reason,
         ]);
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
         return Promise.resolve("unusable");
       case "fabric-pattern":
       case "fabric-entity":
         return this.#followFabric(resultCell, state, origin, signal);
       case "system":
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
+        this.#systemFollowers.set(key, resultCell);
         return this.#followSystem(
           resultCell,
           state,
@@ -1059,12 +1085,12 @@ export class SourceReconciler {
     const destinationSpace = state.space;
     const ref = origin.ref;
     if (ref.subpath !== undefined || ref.ref.kind !== "uri") {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unusable";
     }
     const named = ref.space ?? destinationSpace;
     if (!isDID(named)) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unusable";
     }
     const sourceSpace = named;
@@ -1075,13 +1101,13 @@ export class SourceReconciler {
         runtime.hostForSpace(sourceSpace),
       )
     ) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unavailable";
     }
 
     let target: { identity: string; symbol: string } | undefined;
     if (origin.kind === "fabric-pattern") {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       target = { identity: origin.identity, symbol: state.running.symbol };
     } else {
       const sourceCell = runtime.getCellFromEntityId(
@@ -1493,9 +1519,11 @@ export class SourceReconciler {
     });
   }
 
-  #unwatchFabricSource(follower: Cell<unknown>): void {
+  /** Stops following the source of `follower`, whichever kind it is. */
+  #unwatchSource(follower: Cell<unknown>): void {
     const key = this.#followerKey(follower);
     this.#fabricFollowers.get(key)?.cancel();
     this.#fabricFollowers.delete(key);
+    this.#systemFollowers.delete(key);
   }
 }
