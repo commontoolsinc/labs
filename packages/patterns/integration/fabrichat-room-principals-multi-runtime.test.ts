@@ -20,6 +20,7 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
+import type { JSONSchema } from "@commonfabric/api";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -39,6 +40,13 @@ const PRINCIPALS = ["$VIEWS", "room", "participantPrincipals"];
 
 // Where it reads each participant paired with whom they stand for.
 const ENTRIES = ["$VIEWS", "room", "participantEntries"];
+
+// How a client that demands the fields as plain arrays, with no scope, asks
+// for the entries.
+const ENTRIES_DEMAND = {
+  type: "array",
+  items: { type: "object", properties: { principal: { type: "string" } } },
+} as const satisfies JSONSchema;
 
 /** Whether this run's harness serves handlers from a serving loop. */
 const SERVER_EXECUTION = resolveServerExecution();
@@ -127,6 +135,18 @@ describe("fabrichat room principals across runtimes", () => {
       .toBe(member.identity.did());
     expect(await starter.read([...ENTRIES, 1, "principal"], { piece: room }))
       .toBe(SERVER_EXECUTION ? member.identity.did() : undefined);
+
+    // A client that demands the entries as a plain array reads each reader's
+    // own all the same.
+    const demanded = async (session: MultiRuntimeSession) =>
+      ((await session.readAs(ENTRIES, ENTRIES_DEMAND, { piece: room })) as {
+        principal?: string;
+      }[]).map((entry) => entry.principal ?? "none");
+    expect(await demanded(member)).toEqual(["none", member.identity.did()]);
+    expect(await demanded(starter)).toEqual([
+      "none",
+      SERVER_EXECUTION ? member.identity.did() : "none",
+    ]);
 
     // Each session reads instances of its own: one instance for every reader
     // is a document the readers' runtimes hold differently.

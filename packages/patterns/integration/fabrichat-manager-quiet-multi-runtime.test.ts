@@ -19,6 +19,7 @@
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
+import type { JSONSchema } from "@commonfabric/api";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -35,6 +36,16 @@ const ROOT_PATH = join(import.meta.dirname!, "..");
 // The reviewed action a start is admitted from, as
 // `../fabrichat/schemas.tsx` names it.
 const START_ACTION = { surface: "ChatStartSurface", action: "ChatStart" };
+
+// Where a client that draws natively reads the user's rooms.
+const ROOMS = ["$VIEWS", "chats", "rooms"];
+
+// How a client that demands the fields as plain arrays, with no scope, asks
+// for them.
+const ROOMS_DEMAND = {
+  type: "array",
+  items: { type: "object", properties: { kind: { type: "string" } } },
+} as const satisfies JSONSchema;
 
 describe("fabrichat manager across runtimes", () => {
   let harness: MultiRuntimeHarness;
@@ -86,6 +97,15 @@ describe("fabrichat manager across runtimes", () => {
       .toBe("Team");
     await expect(stranger.read(["about", "title"], { piece: room })).rejects
       .toThrow(`lacks READ on space ${room.space}`);
+
+    // Each reader's `rooms` lists the room only where its space admits them,
+    // and a client that demands them as a plain array reads each reader's own.
+    const demanded = async (session: MultiRuntimeSession) =>
+      ((await session.readAs(ROOMS, ROOMS_DEMAND)) as { kind?: string }[])
+        .map((entry) => entry.kind);
+    expect(await demanded(starter)).toEqual(["group"]);
+    expect(await demanded(member)).toEqual(["group"]);
+    expect(await demanded(stranger)).toEqual([]);
 
     // A whole settle of every runtime and the server, with nothing left to
     // happen, admits no commit. Each document written is named with the

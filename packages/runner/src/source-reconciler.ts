@@ -4,7 +4,10 @@
  * {@link SourceReconciler.reconcile} runs when a piece is opened: it reads the
  * origin the piece records, resolves it, and adopts the source it names when
  * that source has moved. Nothing reconciles a piece nobody opened, and no kind
- * of piece — a space root included — has a path of its own.
+ * of piece — a space root included — has a path of its own. A piece it follows
+ * is reconciled again when its source can have moved since: a fabric origin
+ * when the entity it names changes, and a `system:` origin when its space's
+ * memory session is replaced, as a host restart replaces every session.
  *
  * A user opening a piece is what opens most of them. The runtime also opens the
  * surfaces it instantiates for itself, and {@link SourceReconciler.open} is how:
@@ -40,6 +43,7 @@ import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Pattern } from "./builder/types.ts";
+import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
@@ -69,14 +73,17 @@ import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 
 /**
- * What went wrong, as a reason a record can carry. Falls back through the
- * error's name to a fixed phrase, because an empty one is dropped when the
- * record is read and would make an unchanging failure rewrite itself forever.
+ * What went wrong, as a reason a record can carry: a thrown error, or the
+ * rejection a commit returns, which has an error's name and message without
+ * being one. Falls back through the error's name to a fixed phrase, because an
+ * empty one is dropped when the record is read and would make an unchanging
+ * failure rewrite itself forever.
  */
 function reconciliationDetail(error: unknown): string {
-  if (error instanceof Error) {
-    if (error.message.length > 0) return error.message;
-    if (error.name.length > 0) return error.name;
+  if (error instanceof Error || isObjectNotArray(error)) {
+    const { message, name } = error;
+    if (typeof message === "string" && message.length > 0) return message;
+    if (typeof name === "string" && name.length > 0) return name;
   } else {
     const described = String(error);
     if (described.length > 0) return described;
@@ -103,8 +110,9 @@ const logger = getLogger("runner.source-reconcile", {
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
  * - `unavailable`: the origin's current source could not be adopted this
- *   time — it could not be reached, or the piece changed underneath the
- *   attempt and the write it was going to make no longer describes it.
+ *   time — it could not be reached, the write that adopts it did not commit,
+ *   or the piece changed underneath the attempt and the write it was going to
+ *   make no longer describes it.
  */
 export type ReconcileOutcome =
   | "detached"
@@ -283,6 +291,14 @@ export class SourceReconciler {
   readonly #pending = new Map<string, PendingReconcile>();
   readonly #fabricFollowers = new Map<string, FabricFollower>();
   readonly #stoppedFabricFollowers = new Set<string>();
+
+  /**
+   * The pieces following a system origin, by follower key. A host serves one
+   * source for the life of its process, and a restart replaces every memory
+   * session it held, so each is reconciled again when its space's session is
+   * replaced.
+   */
+  readonly #systemFollowers = new Map<string, Cell<unknown>>();
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
     capacity: 32,
@@ -301,10 +317,15 @@ export class SourceReconciler {
     string,
     { promise: Promise<Pattern | undefined>; epoch: number }
   >();
+  readonly #cancelSessionReplaced: Cancel | undefined;
   #disposed = false;
 
   constructor(runtime: Runtime) {
     this.#runtime = runtime;
+    this.#cancelSessionReplaced = runtime.storageManager
+      .subscribeSpaceSessionReplaced?.((space) =>
+        this.#followSystemSources(space)
+      );
   }
 
   /** The retained supplied sources, which a test reads to see what is kept. */
@@ -441,6 +462,8 @@ export class SourceReconciler {
     for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
     this.#fabricFollowers.clear();
+    this.#cancelSessionReplaced?.();
+    this.#systemFollowers.clear();
     await this.idle();
   }
 
@@ -454,7 +477,7 @@ export class SourceReconciler {
     } else {
       this.#stoppedFabricFollowers.delete(key);
     }
-    this.#unwatchFabricSource(resultCell);
+    this.#unwatchSource(resultCell);
   }
 
   #singleFlight(resultCell: Cell<unknown>): Promise<ReconcileOutcome> {
@@ -489,6 +512,13 @@ export class SourceReconciler {
     return pending.promise;
   }
 
+  /** Reconciles each piece following a system origin in `space` again. */
+  #followSystemSources(space: MemorySpace): void {
+    for (const follower of [...this.#systemFollowers.values()]) {
+      if (follower.space === space) this.#reconcileFromSourceEvent(follower);
+    }
+  }
+
   /** Re-enter after the current pass, for a followed source that moved. */
   #reconcileFromSourceEvent(resultCell: Cell<unknown>): void {
     const key = this.#followerKey(resultCell);
@@ -513,7 +543,7 @@ export class SourceReconciler {
     const running = getPatternIdentityRef(resultCell);
     const storedSource = getPatternSource(resultCell);
     if (running === undefined || storedSource === undefined) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       // Nothing supplies code for this piece, which the panel reads off the
       // absent origin. An outcome would describe a relationship it does not
       // have.
@@ -600,7 +630,7 @@ export class SourceReconciler {
       // resolve against the host and fetch whatever the site answers for an
       // unrouted path, so nothing follows it.
       if (origin.ref === undefined) {
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
         return "unusable";
       }
       const migrated = await this.#recordOrigin(
@@ -631,6 +661,8 @@ export class SourceReconciler {
     origin: PieceOriginKind,
     signal: AbortSignal,
   ): Promise<ReconcileOutcome> {
+    const key = this.#followerKey(resultCell);
+    this.#systemFollowers.delete(key);
     switch (origin.kind) {
       case "unusable":
         logger.warn("unusable-origin", () => [
@@ -638,13 +670,18 @@ export class SourceReconciler {
           state.space,
           origin.reason,
         ]);
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
         return Promise.resolve("unusable");
       case "fabric-pattern":
       case "fabric-entity":
         return this.#followFabric(resultCell, state, origin, signal);
       case "system":
-        this.#unwatchFabricSource(resultCell);
+        this.#unwatchSource(resultCell);
+        // A pass that a stop aborted while a legacy origin migrated must not
+        // follow the piece the stop released.
+        if (!signal.aborted && !this.#disposed) {
+          this.#systemFollowers.set(key, resultCell);
+        }
         return this.#followSystem(
           resultCell,
           state,
@@ -1055,12 +1092,12 @@ export class SourceReconciler {
     const destinationSpace = state.space;
     const ref = origin.ref;
     if (ref.subpath !== undefined || ref.ref.kind !== "uri") {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unusable";
     }
     const named = ref.space ?? destinationSpace;
     if (!isDID(named)) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unusable";
     }
     const sourceSpace = named;
@@ -1071,13 +1108,13 @@ export class SourceReconciler {
         runtime.hostForSpace(sourceSpace),
       )
     ) {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       return "unavailable";
     }
 
     let target: { identity: string; symbol: string } | undefined;
     if (origin.kind === "fabric-pattern") {
-      this.#unwatchFabricSource(resultCell);
+      this.#unwatchSource(resultCell);
       target = { identity: origin.identity, symbol: state.running.symbol };
     } else {
       const sourceCell = runtime.getCellFromEntityId(
@@ -1244,7 +1281,7 @@ export class SourceReconciler {
     // loaded replaces the document the store holds, so they are named too,
     // with what the candidate's nodes read, each under its reader's schema.
     await runtime.runner.syncStoredPieceCells(resultCell, candidate);
-    const committed = await this.#commit(resultCell, state, signal, (tx) => {
+    const failure = await this.#commit(resultCell, state, signal, (tx) => {
       if (!argumentUnchanged(resultCell.withTx(tx))) return false;
       if (sourceUpdate !== undefined) {
         runtime.patternManager.stageSourceUpdate(
@@ -1273,7 +1310,9 @@ export class SourceReconciler {
       });
       return true;
     }, sourceUpdate);
-    return committed ? "updated" : "unavailable";
+    if (failure === undefined) return "updated";
+    state.detail = failure;
+    return "unavailable";
   }
 
   /**
@@ -1341,7 +1380,7 @@ export class SourceReconciler {
       origin: ref,
       expected: state.snapshot,
     };
-    const committed = await this.#commit(
+    const failure = await this.#commit(
       resultCell,
       state,
       undefined,
@@ -1356,13 +1395,19 @@ export class SourceReconciler {
         return true;
       },
     );
-    return committed ? "migrated" : "unavailable";
+    if (failure === undefined) return "migrated";
+    state.detail = failure;
+    return "unavailable";
   }
 
   /**
    * Apply a write under the state this reconciliation read. Every attempt
    * re-checks that state, so a concurrent edit, detach, or repoint is never
    * overwritten by a decision taken before it.
+   *
+   * Returns `undefined` once the write commits, and otherwise why it did not,
+   * as a reason a record can carry: the error that stopped the commit, or the
+   * piece having changed under the write.
    */
   async #commit(
     resultCell: Cell<unknown>,
@@ -1370,7 +1415,7 @@ export class SourceReconciler {
     signal: AbortSignal | undefined,
     write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
     sourceUpdate?: PreparedSourceUpdate,
-  ): Promise<boolean> {
+  ): Promise<string | undefined> {
     const runtime = this.#runtime;
     const result = await runtime.editWithRetry(
       (tx) => {
@@ -1405,16 +1450,18 @@ export class SourceReconciler {
       undefined,
       { sourceUpdate },
     );
-    if (signal?.aborted) return false;
+    if (signal?.aborted) return "the reconciliation was stopped";
     if (result.error) {
       logger.warn("reconcile-commit-failed", () => [
         "source reconciliation could not commit",
         state.space,
         result.error,
       ]);
-      return false;
+      return reconciliationDetail(result.error);
     }
-    return result.ok === true;
+    return result.ok === true
+      ? undefined
+      : "the piece changed while its write was being prepared";
   }
 
   /**
@@ -1479,9 +1526,11 @@ export class SourceReconciler {
     });
   }
 
-  #unwatchFabricSource(follower: Cell<unknown>): void {
+  /** Stops following the source of `follower`, whichever kind it is. */
+  #unwatchSource(follower: Cell<unknown>): void {
     const key = this.#followerKey(follower);
     this.#fabricFollowers.get(key)?.cancel();
     this.#fabricFollowers.delete(key);
+    this.#systemFollowers.delete(key);
   }
 }

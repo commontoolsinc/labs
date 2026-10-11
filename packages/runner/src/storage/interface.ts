@@ -517,6 +517,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   subscribeSpaceAccessChange?(observer: (space: MemorySpace) => void): Cancel;
 
   /**
+   * Observes a space's memory session being replaced on reconnect rather than
+   * resumed: the host no longer held the session, as when its process
+   * restarted, so what it serves may have changed. The initial open and a
+   * resumed reconnect do not emit.
+   */
+  subscribeSpaceSessionReplaced?(
+    observer: (space: MemorySpace) => void,
+  ): Cancel;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit
@@ -754,6 +764,32 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
     address: { space: MemorySpace; id: URI; scope?: CellScope },
     identity: ScopeKeyIdentity,
   ): Promise<void>;
+
+  /**
+   * Whether a sync of a document in `space` also kicks the loads of what
+   * the server's walk reached through links into other spaces: the server
+   * reports those links with the frame (`SessionSync.crossings`), and the
+   * manager loads each from its space as a pending load, listed by
+   * `pendingCrossingLoadAddresses()` and awaited through `loadsSettled()`.
+   * A caller that would otherwise read each synced document to find such
+   * links has nothing to find. Optional: managers without lazy remote
+   * replication, and sessions on servers that do not report crossings,
+   * answer false or nothing.
+   */
+  followsCrossings?(space: MemorySpace): boolean;
+
+  /**
+   * The crossing loads in flight (see `followsCrossings`): the address of
+   * each document a frame's crossing named that has not landed or failed
+   * yet. A caller awaits them through `loadsSettled()` by their
+   * pending-load keys, those its identity can resolve, and asks again
+   * once they settle, since a crossing's own frame can report crossings.
+   */
+  pendingCrossingLoadAddresses?(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[];
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -3192,6 +3228,10 @@ export interface ISpaceReplica extends ISpace {
   /** Whether the current connection retains the negotiated view protocol. */
   viewReplicationSupported?(): boolean;
 
+  /** Whether the server this replica's session is on reports the links
+   * its walks follow out of the space (`syncCrossingsV1`). */
+  crossingsReported?(): boolean;
+
   /** Waits for session restoration before issuing fallback subscriptions. */
   whenSessionRestored?(): Promise<void>;
 
@@ -3251,6 +3291,31 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /**
+   * The commit sequence through which every document this replica watches
+   * holds every change, or `undefined` when it cannot say: before the first
+   * server push applies; after a frame failed to apply or was applied with
+   * entries quarantined, until the replica resets; and while the session's
+   * server runs server execution or does not say whether it does, since its
+   * executor commits waves outside the publication turn a push is complete
+   * under. A document a watch mutation delivered may hold a later state than
+   * this sequence.
+   */
+  completeThroughSeq?(): number | undefined;
+
+  /**
+   * Whether the replica's state for the document is confirmed: the document
+   * is watched and delivered, no local write to it is pending, and its value
+   * is neither a refused write folded locally nor an own write promoted past
+   * what a push has covered. An absent document a push delivered is
+   * confirmed.
+   */
+  isConfirmedDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   commitNative?(
     transaction: NativeStorageCommit,
