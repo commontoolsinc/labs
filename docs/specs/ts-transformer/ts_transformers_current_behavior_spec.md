@@ -504,17 +504,34 @@ every level of property/element access chains. `unwrapExpression` is applied to
 the receiver after each property/element step, so for example `(state as any)
 .foo` resolves to a read of `state.foo`. This means single casts (or
 `satisfies`/`!` wrappers) do not hide property accesses from capability
-analysis.
+analysis. The same holds where the receiver is the element a lookup finds:
+`rows.find(...)!.id` reads the found row's `id` exactly as `rows.find(...)?.id`
+does (`test/policy/capability-analysis-array-callbacks.test.ts`).
 
 When interprocedural analysis is enabled (compute-context builders like `lift`,
-`handler`), read paths discovered in helper function bodies propagate
-back to the caller's parameter summary, but the current MVP intentionally only
-does this for resolved helper bodies in the same source file. Cross-file or
-otherwise unsupported helper calls fall back to the conservative wildcard path
-instead of taking partial transitive precision. This means a `lift` callback
-that delegates to a local helper which reads `(x as any).foo` will trigger
-shrink validation on the caller's parameter type, while the same helper body in
-another file will conservatively disable shrinking for that parameter.
+and every handler's event and state parameters), the read and write paths
+discovered in helper function bodies propagate back to the caller's parameter
+summary, at the path the caller passed the argument from, but the current MVP
+intentionally only does this for resolved helper bodies in the same source
+file. Cross-file or otherwise unsupported helper calls fall back to the
+conservative wildcard path instead of taking partial transitive precision. This
+means a `lift` callback that delegates to a local helper which reads
+`(x as any).foo` will trigger shrink validation on the caller's parameter type,
+while the same helper body in another file will conservatively disable
+shrinking for that parameter. A helper is analyzed in its caller's mode, so a
+handler's analysis, which sees into the callbacks nested in its body, sees into
+the helper's too: a read or write inside a closure the helper declares, or an
+arrow it invokes on the spot, is charged like one in the helper's body. A
+handler that hands a state cell to a local helper which writes it emits that
+cell writable, and one whose helper only reads it emits it read-only (fixture
+`handler-schema/helper-writes-capture`).
+A helper parameter the analysis marks wildcard still reports its reads and
+writes, which the caller records at the path it passed, or at the static
+prefix of a dynamic one. The unknown access reaches only what was passed: a
+member argument such as `state.count` is kept whole while the members beside
+it narrow as their own reads say, and write-exhaustiveness is left unverified;
+a whole parameter or a dynamically keyed one is wildcarded
+(`test/policy/capability-analysis-interprocedural.test.ts`).
 
 When a wildcard parameter (one passed to an opaque/unanalyzable function like
 `console.log`) is typed `unknown`, validation emits `schema:unknown-type-access`
@@ -703,13 +720,6 @@ Diagnostics emitted in all modes:
     itself: a local holding the input (`const i = input; i[SELF]`) is not
     followed back to it, and the message says so rather than calling the read
     `undefined`
-  - in pattern context, a well-known key other than `SELF` (`NAME`, `UI`,
-    `FS`) read through `input[SELF]` on the input parameter, as in
-    `input[SELF][NAME]`: the data-flow analyzer
-    counts only `SELF` among those keys as static, so the read is lifted and
-    is `undefined` against the plain value the lift sees. The message suggests
-    `const me = input[SELF]` and reading the key off `me`, which lowers in
-    place
   - `SELF` names the pattern's own result only on the reactive proxy a
     `pattern(...)` body receives as its input. A compute callback sees plain
     values, a reactive collection callback sees a captured reference to the
@@ -1764,12 +1774,66 @@ Primary behaviors:
 - recursively rewrites lift-applied callback bodies so locally-declared
   opaque/reactive aliases created inside compute callbacks (including inside
   nested blocks) also receive `.key(...)` lowering
+- in such a body, a well-known key read off a callback parameter is rewritten
+  to its helper-backed form, `row[NAME]` to `row[__cfHelpers.NAME]`. The
+  rebuilt callback's nodes are given parent pointers, which capability
+  analysis reads to tell the root of a member access from a read of the whole
+  value, so the read is recorded as the path `$NAME` under the capture and the
+  lift's input schema declares that key alone: `row[NAME] + "!"` lifts over
+  `{ row: { $NAME } }`, not over all of `row` (golden
+  `closures/pattern-body-well-known-key-computation`,
+  `test/static-key-reads.test.ts`)
 - local opaque-root discovery is symbol-scoped and block-aware to avoid
   same-name false rewrites across scopes
+- reads an element access with a static key in place, wherever it is
+  written: `row[key]` on a tracked reactive root lowers to `row.key(...)` in
+  the pattern body, in JSX, and in a reactive collection callback alike. One
+  rule decides which keys are static, in `src/utils/reactive-keys.ts`, and
+  the data-flow analyzer, the shared expression-site policy, the opaque-root
+  path walk, the pattern-body lowering, and the collection-method receiver
+  lowering all ask it. A key's type fixes the member it names
+  (`hasStaticKeyType()`) when it is a literal; a well-known Common Fabric
+  key, the set `COMMON_FABRIC_KEY_NAMES` in
+  `packages/schema-generator/src/typescript/property-name.ts` defines (as of
+  this writing `NAME`, `UI`, `SELF`, `FS`, `VIEWS`); or an expression whose
+  type is a single string or number literal, such as a reference to
+  `const KEY = "k"`. What is emitted follows the kind of key
+  (`getStaticKeySegment()`): a literal as its string, a numeric one under its
+  decimal name (`groups[1e2]` -> `.key("groups", "100")`); a well-known key as
+  its `__cfHelpers` member (`row[NAME]` -> `row.key(__cfHelpers.NAME)`,
+  `row[VIEWS].row.rendered` ->
+  `row.key(__cfHelpers.VIEWS, "row", "rendered")`); and any other static key
+  as written, so `row[KEY]` -> `row.key(KEY)` and `row[getKey()]` ->
+  `row.key(getKey())`, the key evaluated where the read is. A destructured
+  well-known key is keyed by its string instead:
+  `const { [NAME]: n, [VIEWS]: v } = Row(...)` reads `.key("$NAME")` and
+  `.key("$VIEWS")`. A key read from a reactive value is the exception: its
+  type may name one member, but the key is a cell, and written out it would
+  hand `.key()` the cell in place of the key. So a key is static
+  (`isStaticElementKey()`) when its type fixes the member and it is not read
+  from a reactive value. The stages that write a key out, through
+  `getStaticKeySegment()`, and the pattern-body lowering ask that. The
+  data-flow analyzer asks the type question and rules a reactive key out from
+  its own analysis, and the expression-site policy asks the type question
+  alone, since it decides whether the access may become a computation, which
+  such an access may. `row[field]`, with `field` a pattern input typed
+  `"rendered"`, is a computation over `row` and `field`:
+  it lifts where the site can hold a computation (a pattern-body value, JSX,
+  the receiver of a collection method in JSX), and is reported as the
+  dynamic key access of §6.5 where it cannot (the receiver of a collection
+  method in a plain value, `lists[field].map(...)`, and a plain value in a
+  reactive collection callback) (goldens
+  `closures/pattern-body-factory-result-key-access`,
+  `closures/map-pattern-factory-result-key-access`,
+  `closures/map-pattern-factory-result-views-access`,
+  `closures/pattern-factory-result-key-destructure`,
+  `closures/pattern-body-literal-typed-key-access`;
+  `test/static-key-reads.test.ts`). Which path a read contributes to a
+  schema is decided separately, by the stricter rule §10.7 gives for
+  capability analysis
 - reads `input[SELF]` in place, as the destructured `[SELF]: self` binding is
-  read: the data-flow analyzer counts a `SELF` element key as static on any
-  receiver (`isSelfElementAccess` in `src/ast/dataflow.ts`), so the access is
-  not lifted. Outside a standalone function definition, validation has
+  read: `SELF` is a static key on any receiver, as the item above describes,
+  so the access is not lifted. Outside a standalone function definition, validation has
   already rejected every receiver but the pattern's input parameter (§6.5). A
   `pattern(...)` callback held in a `const` is read as a standalone
   definition, so there an `x[SELF]` on another receiver is not reported, and
@@ -1790,10 +1854,12 @@ Primary behaviors:
   receiver-method call over it, such as `input[SELF].title.toUpperCase()`,
   lifts with the authored `input[SELF].title` as its capture, read off the
   reactive input when the lift is applied (golden
-  `closures/pattern-input-self-index`). Other well-known keys (`UI`, `NAME`,
-  `FS`) keep their dynamic-access analysis, so `input[SELF][NAME]` would lift
-  and read `undefined`; §6.5 reports it instead, and a local bound to
-  `input[SELF]`, or a destructured `[SELF]: self`, reads `[NAME]` in place
+  `closures/pattern-input-self-index`). A well-known key read through it is
+  keyed off the self reference like any other segment: `input[SELF][NAME]`
+  becomes `input[__cfHelpers.SELF].key(__cfHelpers.NAME)`, the read a local
+  bound to `input[SELF]` makes as `me[NAME]`
+  (`test/pattern-input-self.test.ts`,
+  `packages/patterns/test/input-self/main.test.tsx`)
 - extracts static destructuring defaults into capability summaries for schema
   default application
 - registers capability summaries for transformed callbacks/builders for
@@ -1854,6 +1920,16 @@ builder call it rebuilds carries the replaced call's source-map range (§11.5).
 - Common Fabric generic aliases retain their authored type arguments when
   qualified through `__cfHelpers`; argument pairing uses the alias arguments,
   which can differ from the arguments of its underlying reference type.
+- a printed type that carries a scope's brand with no alias to print it by,
+  as the checker leaves a type it narrowed (assignment narrows
+  `PerUser<boolean> | null` to the brand over `false` and `true`), is written
+  as the wrapper around its payload, `__cfHelpers.PerUser<...>`, each member of
+  the payload printed afresh. One the printer writes by an alias, its own or
+  each branded member's, as `PerUser<A> | null`, is left to the printer. A
+  recursive one is written once: where the print of its payload holds the type
+  again, that print is kept as the printer wrote it
+  (`qualifyCommonFabricTypeRefs` in `ast/type-building.ts`;
+  `test/scope-wrapper-alias-schema.test.ts`).
 - a printed commonfabric type is qualified through `__cfHelpers` whatever the
   printer calls its module. The printer writes `import("commonfabric").X` only
   while the program declares `"commonfabric"` as an ambient module, as the
@@ -1955,6 +2031,19 @@ If schemas are not already present via type args:
 - a result type the checker prints no node for, and that no recovery reads, is
   carried as an `unknown` placeholder recorded as printed from it, so the
   result schema is generated from the type (§6.6)
+- a result type its author did not write declares no scope: one a pass printed
+  from the callback's inferred return type, as for `computed(() => …)`, a JSX
+  expression, or a `lift` with neither a result type argument nor a return
+  type annotation, is marked `SchemaHint.declaresNoScope`, and its schema is
+  generated with the generator's `declaresNoScope` option (the schema-generator
+  mapping spec's §10). The runtime stores a lift's result at the narrowest
+  scope its callback reads (`effectiveOutputScope` in `runner.ts`), and a type
+  inferred through `??` or a union keeps or drops a scope wrapper by how
+  TypeScript reduces it. A result type the author wrote, a lift's second type
+  argument or a callback's return type annotation, keeps the scope it names
+  (`test/scope-wrapper-alias-schema.test.ts`;
+  `packages/runner/test/lift-result-read-scope.test.ts`;
+  `packages/patterns/test/inferred-result-scope/`)
 - unresolved generic helper-definition-site type parameters degrade to
   `{ type: "unknown" }` when schemas are injected from explicit builder type
   arguments
@@ -2072,6 +2161,14 @@ adjustments:
   function's parameter, `x[SELF]` is recorded as the path `$SELF`
   (`test/policy/capability-analysis.test.ts`, `test/pattern-input-self.test.ts`)
 - wildcard roots disable path shrinking for affected parameters/arguments
+- the cell `resolveAsCell()` returns is an alias of its receiver: a read or a
+  write through it, or through a `.key()` of it, is charged to the receiver's
+  path, so `message.resolveAsCell().key("body").set(x)` writes
+  `["message", "body"]`. The receiver itself is read in full, since the
+  resolved cell may be handed anywhere and read there, and write-exhaustiveness
+  stays unverified for what is done through it where the alias is not followed
+  (`test/policy/capability-analysis.test.ts`; fixture
+  `ast-transform/handler-nullable-cell-const`)
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read.
@@ -2140,6 +2237,17 @@ each operand of a fallback, wherever on the member spine it sits, a call on
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
+- a primitive reached as an array item or as an object member, whether a plain
+  primitive, an optional one, or a union of literals, is kept whole whatever
+  its paths read: `rows[0].length` over a `string[]` keeps `rows: string[]`. A
+  string has a numeric index and `length` through its apparent type, so a
+  shrink would describe it as an array (`unknown[]`) or as an object holding
+  `length`, which the stored string is not. A property chain captured at its
+  member, as `obj.name.length` is, hands the lift an object holding `length`,
+  and its schema describes that object (`isPrimitiveValuedType` in
+  `transformers/type-shrinking.ts`; fixtures
+  `closures/computed-primitive-array-item`, `closures/computed-array-length`;
+  `packages/patterns/regression/primitive-array-item-read.test.tsx`)
 - reads inside an inline array-method callback count as reads of the enclosing
   builder's parameter: the element parameter is bound to the receiver's item
   path, so `table.find((row) => equals(self, row.topic))` records
@@ -2169,7 +2277,12 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   summary carries what the helper let leave whole, and the caller charges it to
   the argument it passed. What a helper returns counts: a function declaration,
   or a function bound to a variable or a property, hands its result straight
-  back into the caller's body, so a parameter it returns has left whole. A
+  back into the caller's body, so a parameter it returns has left whole. The
+  element a lookup finds (`find`, `findLast`, `at`) and the array of elements a
+  subset returns (`filter`, `sort`, `toSorted`, `slice`) are tracked like the
+  receiver they came from, so one that leaves whole is charged the same way:
+  a helper returning `rows.find(...)` reports the elements of `rows` as left
+  whole (`test/policy/capability-analysis-whole-value-escapes.test.ts`). A
   primitive has nothing below it to keep and is left alone. A
   value bound to a local or written into a local collection stays tracked and
   narrows as its reads say. So does a value handed on by reference, which the
@@ -2193,16 +2306,26 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   `event.details`, the field survives the shrink, and cell-likeness is judged
   on the value rather than on the recording helper's untyped result
   (`unwrapAssertCapture` in `utils/expression.ts`;
-  `test/assert-diagnostics.test.ts`). Only the receiver is read through. A
-  recording in argument position still hides what it wraps from the callee's
-  capability contract, so `assert(() => helper(count))` charges `count`
-  whatever its own use in the body says, while `computed(() => helper(count))`
-  charges it the wrapper capability `helper` declares for that parameter
+  `test/assert-diagnostics.test.ts`). A known identity call's arguments are
+  read through the same way, so `equals(refusal.inbox, x)` in an `assert` body
+  records `inbox` as a comparable use, as it does in a `computed`. Beyond
+  those two, a recording in argument position still hides what it wraps from
+  the callee's capability contract, so `assert(() => helper(count))` charges
+  `count` whatever its own use in the body says, while
+  `computed(() => helper(count))` charges it the wrapper capability `helper`
+  declares for that parameter
 - node-driven shrinking can still shrink the inner type of cell-like wrappers
   when `.get()` contributes an empty path but coexists with more specific
   non-empty paths
 - a node the type-driven shrink builds keeps the scope wrapper and the default
-  of the type it stands for, at every level it retains. A scope wrapper wraps
+  of the type it stands for, at every level it retains. A scoped value read
+  whole is printed as its type, which keeps the wrapper and is read as the
+  annotation spelling the value where one does (`SchemaHint.spelledBy`), so
+  what only that annotation's syntax says, a `typeof` binding in an alias's
+  declaration among it, is kept; an array that paths through its elements read
+  as well is the exception, since those paths narrow it from its payloads, and
+  a path that reads the array itself, as `length` does, is not one of them.
+  Otherwise a scope wrapper wraps
   the shrunk value as `__cfHelpers.PerUser<...>` (or the wrapper of its scope)
   whether the type's alias names it or the type carries only its scope brand,
   as a wrapper reached through an alias of the author's own does
@@ -2227,6 +2350,12 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   candidate holds an authored `Default` (`getScopeWrapper` and
   `restoreDefault` in `transformers/type-shrinking.ts`;
   `test/shrunk-capture-wrappers.test.ts`)
+- a property a shrink or an identity-only path rebuilds is optional where its
+  declaration says so, or where its rebuilt node admits `undefined`, a scope
+  wrapper's argument included, so `PerUser<T | undefined>` and
+  `PerUser<T> | undefined` both capture as optional properties
+  (`typeNodeIncludesUndefined` in `transformers/type-shrinking.ts`;
+  `test/scope-wrapper-alias-schema.test.ts`)
 - a node built from part of a value keeps the value's CFC labels. The literal a
   property chain builds, each node a type-driven or node-driven shrink builds,
   and a node the narrowing of cells rebuilds is recorded as narrowing the value
@@ -2289,14 +2418,28 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   for its type would, every part a pass keeps is read by its type, and no pass
   builds a node from a piece of a print
   (`test/printed-type-node-schema.test.ts`). A scoped cell
-  (`PerUser<Writable<T>>`), whose scope only its alias names, is rebuilt when
-  the narrowing of cells reaches its scope wrapper directly: its cell, printed
-  afresh, is narrowed inside a rebuilt scope wrapper registered with the scoped
-  cell's type, through which node-driven shrinking and identity-only paths then
-  reach the cell. Schema generation reads the scope from the wrapper's name and
-  the cell from the node inside it. Capability narrowing does not reach a scoped
-  cell through the printed union of an optional member, so that cell keeps its
-  authored capability and value shape. Node-driven shrinking keeps the print of
+  (`PerUser<Writable<T>>`), whose scope only its wrapper names, by its alias or
+  its brand, is rebuilt when the narrowing of cells reaches its scope wrapper
+  directly: its cell, printed afresh, is narrowed inside a rebuilt scope wrapper
+  registered with the scoped cell's type, through which node-driven shrinking
+  and identity-only paths then reach the cell. A scoped cell may hold CFC
+  carriers beside it, whose labels the capture's schema keeps, and other
+  members, as `PerSpace<Cell<A> & Extra>` does, beside which the cell is
+  rebuilt alone, as schema generation reads it. A scoped cell beside `null` or
+  `undefined` is rebuilt with them inside the wrapper,
+  `PerSession<ReadonlyCell<boolean> | null>`, which schema generation refuses,
+  as it refuses the union its author wrote. The print of an optional member's
+  type holds the `undefined` its `?` adds, which the rebuilt wrapper leaves
+  out, as the member is written without it: `handle?: PerSession<Writable<A>>`
+  read as `input.handle?.get()` is captured as
+  `handle?: PerSession<ReadonlyCell<A>>`, and an optional `PerUser<Stream<T>>`
+  a `.map` callback binds by shorthand keeps its scope and stream cap
+  (`scopedCellParts`; `test/scope-wrapper-alias-schema.test.ts`). A cell in a
+  scope that the narrowing of cells cannot take it apart from keeps the type it
+  was declared with: rebuilt from its value, it would lose the scope, and the
+  cap on its handle, that only the wrapper names. Schema generation reads the
+  scope from the wrapper's name and the cell from the node inside it.
+  Node-driven shrinking keeps the print of
   a scoped cell whole. Two rules keep what a print says through the unfolding: a
   narrowed wrapper around a nullable cell's value alternatives is not registered
   with the union's type, which schema generation would read in the wrapper's
@@ -3104,13 +3247,17 @@ a handler-body `const` from a plain call gets no cause
 referenced binding:
 
 ```ts
-// Shown inside a pattern body.
+// Shown at module scope.
 // (test: "re-roots reactive identifier members in pattern results")
-const foo = Writable.of(1, /* schema */).for("foo", true);
-return {
+import type { Cell } from "@commonfabric/runner";
+
+function emittedResult(value: Cell<number>) {
+  const foo = value.for("foo", true);
+  return {
     foo: foo.for(["__patternResult", "foo"], true),
     explicit: foo.for(["__patternResult", "explicit"], true),
-};
+  };
+}
 ```
 
 Pattern-factory identifiers are exempt (`isPatternFactoryHelperExpression`),

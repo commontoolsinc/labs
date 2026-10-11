@@ -101,7 +101,7 @@ import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { spaceReaderRole } from "./cfc/space-membership.ts";
 import { isTrustedGesture } from "./cfc/ui-contract.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
-import type { EntityKind } from "./entity-kind.ts";
+import { type EntityKind, entityKindOfIdString } from "./entity-kind.ts";
 import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
 import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
 import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";
@@ -174,6 +174,7 @@ import {
 } from "./scheduler.ts";
 import { deriveEventKey } from "./scheduler/event-identity.ts";
 import { entityKey } from "./scheduler/keys.ts";
+import { CooperativeYield } from "./scheduler/cooperative-yield.ts";
 import {
   InSpaceTargetUnresolved,
   RetryImmediately,
@@ -2367,6 +2368,41 @@ export class Runner {
   >(RESULT_SHORTCUT_LIMIT);
 
   /**
+   * The nested instances a resume pre-sync of this runner has planned and
+   * named, by family key, each with the identity key of the pattern it was
+   * planned under. A pre-sync plans each nested instance's nodes against
+   * its stored argument and names what they read, so a name-sync of that
+   * instance under the same pattern would make the same requests and
+   * deliver nothing more; the gate before such an instance's own start
+   * probes its owned cells, which a seed may still be owed, and skips the
+   * argument walk. Bounded like `#locallyPreparedResults`: a missing entry
+   * costs a walk, never a wrong verdict.
+   */
+  readonly #presyncNamedInstances = new BoundedKeyMap<string, string>(
+    RESULT_SHORTCUT_LIMIT,
+  );
+
+  /**
+   * Observer of every node plan the resume pre-sync builds, by the piece
+   * planned and the node, for a test counting plans against the tree's
+   * `(instance, node)` pairs; `node` is the plan of one of the pattern's
+   * nodes, `owned` the plan of a pattern node made to find its child.
+   * Unset outside tests.
+   */
+  #presyncPlanRecorder:
+    | ((piece: string, node: Node, site: "node" | "owned") => void)
+    | undefined;
+
+  /**
+   * The macrotask yield the resume pre-sync takes between the syncs of a
+   * wave. Issuing a sync sends its watch frame, and the walk that prepares
+   * each is synchronous work, so a wave of hundreds would otherwise send
+   * for seconds while the answers to its first frames waited unread at the
+   * socket.
+   */
+  #resumeYield = new CooperativeYield();
+
+  /**
    * Two-level memo of what each result cell holds: outer key the result _doc_
    * (space/id), inner key the resolved scope _instance_, value a hash of the
    * pattern's encodable form — what `#writeJavaScriptActionResult()` compares
@@ -2454,8 +2490,9 @@ export class Runner {
    * The result and pointer tables, the start-attempt set, the dependency
    * syncer and deferred-start committer a test may supply, the setup,
    * storage-subscription, commit-gated run, ownership, key, sync, walk, and
-   * retry steps, the implementation invoker, and the node planner, which a
-   * test drives directly.
+   * retry steps, the implementation invoker, the node planner, which a
+   * test drives directly, the wave kick, and the pre-sync plan recorder and
+   * resume yield a test installs.
    */
   get accessForTestingOnly(): {
     scopedProgramCounts(): Array<{ piece: string; variants: number }>;
@@ -2529,6 +2566,14 @@ export class Runner {
       resultCell: Cell<any>,
       pattern: Pattern,
     ): NodePlan | undefined;
+    presyncPlanRecorder:
+      | ((piece: string, node: Node, site: "node" | "owned") => void)
+      | undefined;
+    resumeYield: CooperativeYield;
+    kickResumeWave(
+      cells: readonly Cell<any>[],
+      kick: (cell: Cell<any>) => Promise<unknown>,
+    ): Promise<void>;
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;
@@ -2633,6 +2678,19 @@ export class Runner {
         this.#invokeJavaScriptImplementation(module, fn, argument),
       nodePlan: (tx, node, resultCell, pattern) =>
         this.#nodePlan(tx, node, resultCell, pattern),
+      get presyncPlanRecorder() {
+        return outerThis.#presyncPlanRecorder;
+      },
+      set presyncPlanRecorder(value) {
+        outerThis.#presyncPlanRecorder = value;
+      },
+      get resumeYield() {
+        return outerThis.#resumeYield;
+      },
+      set resumeYield(value) {
+        outerThis.#resumeYield = value;
+      },
+      kickResumeWave: (cells, kick) => this.#kickResumeWave(cells, kick),
     };
   }
 
@@ -6542,6 +6600,7 @@ export class Runner {
     return this.#familyAbsent(
         resolved.pattern,
         entryKey,
+        key,
         argument,
         argumentLink,
         resultCell,
@@ -6623,11 +6682,16 @@ export class Runner {
    * or of a sub-piece it instantiates. The store delivers none of these with
    * the result document; a run that reads one absent commits against a
    * document the store holds and is refused, so a caller that finds one
-   * absent names the family before it runs.
+   * absent names the family before it runs. For the family `familyKey`
+   * names, when a pre-sync of this runner planned it under this pattern
+   * (`#presyncNamedInstances`), the argument's links are not walked: that
+   * pre-sync named what the nodes read through them, and a name-sync here
+   * would ask for the same documents again.
    */
   #familyAbsent(
     pattern: Pattern,
     entryKey: string,
+    familyKey: string,
     argument: unknown,
     argumentLink: NormalizedFullLink,
     resultCell: Cell<any>,
@@ -6638,11 +6702,12 @@ export class Runner {
     // read set: the run that follows the name-sync reads these for real.
     // The document itself is what is probed (`#documentPresent`), not a
     // value read through a schema, which returns the schema's default for an
-    // absent document. A cell nothing has written yet — a derived cell whose
-    // producer never ran — reads absent here too, and holds the run once; the
-    // probes stop at a budget (`NAMING_PROBE_BUDGET`), and a budget spent
-    // reads absent as well: a hold costs one name-sync, a wrong local verdict
-    // costs a conflicting commit.
+    // absent document. A link in the argument to a derived cell or to
+    // another piece's stream is not probed at all: a name-sync could deliver
+    // nothing for either, and holding every run that reads one would name a
+    // whole family per piece for nothing. The probes stop at a budget
+    // (`NAMING_PROBE_BUDGET`), and a budget spent reads absent: a hold costs
+    // one name-sync, a wrong local verdict costs a conflicting commit.
     const readTx = this.#familyReadTx(identity);
     const cell = resultCell.withTx(readTx);
     let probes = this.#namingProbeBudget;
@@ -6674,68 +6739,18 @@ export class Runner {
       return true;
     };
     if (!present(argumentLink)) return hold("the argument document");
-    // What the run reads through the argument: every document the caller's
-    // argument and the stored argument link to, followed through the
-    // targets those links resolve into — a coordinator's element link is a
-    // chain of redirects, and setup reads each hop. Bounded by depth, by a
-    // document being probed once, and by the probe budget.
-    // Presence is a fact about a document, probed once; what a link reaches
-    // depends on its path, so two links into one document at different
-    // paths are each walked.
-    const probed = new Set<string>();
-    const walked = new Set<string>();
-    const linksAbsent = (value: unknown, depth: number): boolean => {
-      const link = parseLink(value, resultCell);
-      if (link !== undefined) {
-        const probeKey = `${link.space}/${link.scope}/${link.id}`;
-        if (!probed.has(probeKey)) {
-          probed.add(probeKey);
-          if (!present(link)) return true;
-        }
-        if (depth === 0) return false;
-        const walkKey = `${probeKey}/${link.path.join("/")}`;
-        if (walked.has(walkKey)) return false;
-        walked.add(walkKey);
-        return linksAbsent(
-          readTx.readOrThrow(
-            {
-              space: link.space,
-              id: link.id,
-              path: ["value", ...link.path],
-              ...(link.scope !== undefined && { scope: link.scope }),
-            },
-            { meta: ignoreReadForScheduling },
-          ),
-          depth - 1,
-        );
+    if (this.#presyncNamedInstances.get(familyKey) !== entryKey) {
+      if (
+        this.#argumentLinksAbsent(
+          argument,
+          argumentLink,
+          resultCell,
+          readTx,
+          present,
+        )
+      ) {
+        return hold("a document the argument links to");
       }
-      if (!isKeyableObjectOrArray(value)) return false;
-      for (const field in value) {
-        if (linksAbsent((value as Record<string, unknown>)[field], depth)) {
-          return true;
-        }
-      }
-      return false;
-    };
-    if (linksAbsent(argument, 4)) {
-      return hold("a document the caller's argument links to");
-    }
-    if (
-      linksAbsent(
-        readTx.readOrThrow(
-          {
-            space: argumentLink.space,
-            id: argumentLink.id,
-            path: ["value"],
-            ...(argumentLink.scope !== undefined &&
-              { scope: argumentLink.scope }),
-          },
-          { meta: ignoreReadForScheduling },
-        ),
-        4,
-      )
-    ) {
-      return hold("a document the stored argument links to");
     }
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
@@ -6755,6 +6770,96 @@ export class Runner {
       }
     }
     return false;
+  }
+
+  /**
+   * Whether a document the run reads through its argument is absent from
+   * this replica: every document the caller's `argument` and the stored
+   * argument at `argumentLink` link to, followed through the targets those
+   * links resolve into — a coordinator's element link is a chain of
+   * redirects, and setup reads each hop — each probed through `present`.
+   * Bounded by depth, by a document being probed once, and by the probe
+   * budget `present` enforces. Presence is a fact about a document, probed
+   * once; what a link reaches depends on its path, so two links into one
+   * document at different paths are each walked.
+   */
+  #argumentLinksAbsent(
+    argument: unknown,
+    argumentLink: NormalizedFullLink,
+    resultCell: Cell<any>,
+    readTx: IExtendedStorageTransaction,
+    present: (link: NormalizedFullLink) => boolean,
+  ): boolean {
+    const probed = new Set<string>();
+    const walked = new Set<string>();
+    const linksAbsent = (value: unknown, depth: number): boolean => {
+      const link = parseLink(value, resultCell);
+      if (link !== undefined) {
+        // A derived cell's document is what its computation produces, here
+        // or elsewhere, and a run reads it reactively: one that finds it
+        // absent runs again when it lands. The store's walk reports nothing
+        // for such a document it reaches and lacks, so no name-sync could
+        // learn of it, and a hold on it names the family for nothing.
+        if (entityKindOfIdString(link.id) === "computed") return false;
+        // A stream handed down in the argument is some other piece's: its
+        // document holds no value a run reads, a send to it is an event the
+        // store appends, and the name-sync names a stream only as a hop of a
+        // handler's own `$event` slot. The piece's own streams are probed
+        // with its owned cells below.
+        if (ContextualFlowControl.declaresStream(link.schema)) return false;
+        const probeKey = `${link.space}/${link.scope}/${link.id}`;
+        if (!probed.has(probeKey)) {
+          probed.add(probeKey);
+          if (!present(link)) return true;
+        }
+        if (depth === 0) return false;
+        const walkKey = `${probeKey}/${link.path.join("/")}`;
+        if (walked.has(walkKey)) return false;
+        walked.add(walkKey);
+        const next = readTx.readOrThrow(
+          {
+            space: link.space,
+            id: link.id,
+            path: ["value", ...link.path],
+            ...(link.scope !== undefined && { scope: link.scope }),
+          },
+          { meta: ignoreReadForScheduling },
+        );
+        // Only a redirect's hop continues the walk: what it redirects to is
+        // the next document of the chain the argument's link forms. The
+        // content of a value document is what the piece's nodes read through
+        // it, under their plans' schemas, and the pre-sync names it that
+        // way; a link inside that content is not one the argument holds.
+        if (
+          link.overwrite !== "redirect" ||
+          parseLink(next, resultCell) === undefined
+        ) {
+          return false;
+        }
+        return linksAbsent(next, depth - 1);
+      }
+      if (!isKeyableObjectOrArray(value)) return false;
+      for (const field in value) {
+        if (linksAbsent((value as Record<string, unknown>)[field], depth)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (linksAbsent(argument, 4)) return true;
+    return linksAbsent(
+      readTx.readOrThrow(
+        {
+          space: argumentLink.space,
+          id: argumentLink.id,
+          path: ["value"],
+          ...(argumentLink.scope !== undefined &&
+            { scope: argumentLink.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ),
+      4,
+    );
   }
 
   /**
@@ -8805,7 +8910,7 @@ export class Runner {
     // wall cost is bounded by the enclosing `#syncCellsForRunningPattern()`
     // span).
     const cellSyncWaveStart = performance.now();
-    await Promise.all(cells.map((c) => {
+    await this.#kickResumeWave(cells, (c) => {
       const cellSyncStart = performance.now();
       const synced = this.#syncFamilyCell(c, identity).finally(() =>
         logger.time(cellSyncStart, "start", "resumeCellSync")
@@ -8823,7 +8928,7 @@ export class Runner {
           ]);
         })
         : synced;
-    }));
+    });
     logger.time(cellSyncWaveStart, "start", "resumeCellSyncWave");
 
     await this.#syncCrossSpaceReads(plans, identity);
@@ -8883,9 +8988,10 @@ export class Runner {
     pattern: Pattern,
     resultCell: Cell<any>,
     argumentLink: NormalizedFullLink,
-  ): { cells: Cell<any>[]; plans: NodePlan[] } {
+  ): { cells: Cell<any>[]; plans: NodePlan[]; skipped: number } {
     const cells: Cell<any>[] = [];
     const plans: NodePlan[] = [];
+    let skipped = 0;
     for (const node of pattern.nodes) {
       let plan: NodePlan | undefined;
       try {
@@ -8902,10 +9008,16 @@ export class Runner {
           "skipping a node whose bindings did not unwrap",
           error,
         ]);
+        skipped++;
         continue;
       }
       if (plan === undefined) continue;
       plans.push(plan);
+      this.#presyncPlanRecorder?.(
+        resultCell.getAsNormalizedFullLink().id,
+        node,
+        "node",
+      );
       // Each node's plan, synced under the schema its run reads through. The
       // inputs document is a data URI, so syncing it under a schema hands the
       // server one selector per binding link, and the server's query walk
@@ -8920,7 +9032,7 @@ export class Runner {
         cells.push(this.#runtime.getCellFromLink(link));
       }
     }
-    return { cells, plans };
+    return { cells, plans, skipped };
   }
 
   /**
@@ -8943,17 +9055,24 @@ export class Runner {
   /**
    * Names what the plans' reads reach in other spaces. The server's query
    * walk delivers what a plan's selector reaches within its space and stops
-   * at a link into another, so after the plan syncs land this reads each
-   * plan's inputs under its read schema through a read transaction: a read
-   * that dead-ends on such a link kicks that document's load. Pending loads
-   * for documents the transaction read are awaited before the next read,
-   * which reaches one space further. Each round awaits only loads no
-   * earlier round awaited, by document, so a link whose target never arrives,
-   * kicked again by every read, ends the pass rather than extending it, and a round
-   * whose reads leave no new load pending ends it. The manager's settled
-   * pool is not what is awaited: on a client it holds the runtime's other
-   * work, sinks' first loads and coordinators' republishes among it, which
-   * a resume must not wait behind.
+   * at a link into another. A server that reports those links
+   * (`followsCrossings`) has the storage manager kick each target's load
+   * as the frame arrives, so for a plan in such a space this awaits the
+   * crossing loads in flight, by document and only those the family's
+   * identity can resolve, and asks again once they settle, since a
+   * crossing's own frame can report crossings. For a plan in a space whose
+   * server does not, this reads the plan's inputs under its read schema
+   * through a read transaction of the plan's own after its sync lands: a
+   * read that dead-ends on such a link kicks that document's load. Pending
+   * loads for documents a plan's read reached are awaited before that plan
+   * is read again, which reaches one space further; a plan whose read left
+   * no load pending is done. Either way each round awaits only loads no
+   * earlier round awaited, by document, so a link whose target never
+   * arrives, kicked again by every read, ends the pass rather than
+   * extending it, and a round that leaves no new load pending ends it.
+   * The manager's settled pool is not what is awaited: on a client it
+   * holds the runtime's other work, sinks' first loads and coordinators'
+   * republishes among it, which a resume must not wait behind.
    */
   async #syncCrossSpaceReads(
     plans: readonly NodePlan[],
@@ -8962,12 +9081,58 @@ export class Runner {
     const manager = this.#runtime.storageManager;
     if (!manager.loadsSettled || !manager.pendingLoadAddresses) return;
     const awaited = new Set<string>();
+    const readIdentity = identity ?? this.#runtime.scopeKeyIdentity;
+    type PlanRead = {
+      plan: Exclude<NodePlan, { kind: "pattern" }>;
+      schema: JSONSchema;
+    };
+    let remaining: PlanRead[] = [];
+    let followed = false;
+    for (const plan of plans) {
+      if (plan.kind === "pattern") continue;
+      if (manager.followsCrossings?.(plan.inputsCell.space) === true) {
+        followed = true;
+        continue;
+      }
+      const schema = this.#planReadSchema(plan);
+      if (schema !== undefined) remaining.push({ plan, schema });
+    }
+    const settle = async (keys: Iterable<string>): Promise<void> => {
+      const settleStart = performance.now();
+      try {
+        await manager.loadsSettled!([...keys]);
+      } catch (error) {
+        // A load that failed leaves its document absent; the next round
+        // reads past it, and the run reads the same absence.
+        logger.debug("resume-pre-sync", () => [
+          "a load a cross-space read kicked did not land",
+          error,
+        ]);
+      }
+      logger.time(settleStart, "start", "resumeCrossSpaceSettle");
+    };
+    while (followed && manager.pendingCrossingLoadAddresses !== undefined) {
+      const keys: string[] = [];
+      for (const address of manager.pendingCrossingLoadAddresses()) {
+        if (!canResolveScopeKey(address.scope, readIdentity)) continue;
+        const key = entityKey(address, this.#runtime.scopeKeyIdentity);
+        if (awaited.has(key)) continue;
+        awaited.add(key);
+        keys.push(key);
+      }
+      if (keys.length === 0) break;
+      await settle(keys);
+    }
     for (;;) {
-      const readTx = this.#familyReadTx(identity);
-      for (const plan of plans) {
-        if (plan.kind === "pattern") continue;
-        const schema = this.#planReadSchema(plan);
-        if (schema === undefined) continue;
+      // Each plan reads in a transaction of its own, so the loads its read
+      // kicked are its own: a plan whose read left none pending is done,
+      // and the next round reads only the plans whose reads did.
+      const next: PlanRead[] = [];
+      const keys = new Set<string>();
+      for (const read of remaining) {
+        const { plan, schema } = read;
+        const readTx = this.#familyReadTx(identity);
+        const readStart = performance.now();
         try {
           plan.inputsCell.asSchema(schema).withTx(readTx).get();
         } catch (error) {
@@ -8978,36 +9143,29 @@ export class Runner {
             error,
           ]);
         }
-      }
-      const pending = manager.pendingLoadAddresses();
-      if (pending.length === 0) return;
-      const readIdentity = identity ?? this.#runtime.scopeKeyIdentity;
-      const readKeys = new Set<string>();
-      for (const read of getTransactionReadActivities(readTx)) {
-        if (
-          read.scopeKey !== undefined ||
-          canResolveScopeKey(read.scope, readIdentity)
-        ) {
-          readKeys.add(entityKey(read, readIdentity));
+        logger.time(readStart, "start", "resumeCrossSpaceRead");
+        const pending = manager.pendingLoadAddresses();
+        if (pending.length === 0) continue;
+        const readKeys = new Set<string>();
+        for (const read of getTransactionReadActivities(readTx)) {
+          if (
+            read.scopeKey !== undefined ||
+            canResolveScopeKey(read.scope, readIdentity)
+          ) {
+            readKeys.add(entityKey(read, readIdentity));
+          }
         }
+        const planKeys = pending
+          .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
+          .filter((key) => readKeys.has(key) && !awaited.has(key));
+        if (planKeys.length === 0) continue;
+        for (const key of planKeys) keys.add(key);
+        next.push(read);
       }
-      const keys = pending
-        .map((address) => entityKey(address, this.#runtime.scopeKeyIdentity))
-        .filter((key) => readKeys.has(key) && !awaited.has(key));
-      if (keys.length === 0) return;
+      if (keys.size === 0) return;
       for (const key of keys) awaited.add(key);
-      const settleStart = performance.now();
-      try {
-        await manager.loadsSettled(keys);
-      } catch (error) {
-        // A load that failed leaves its document absent; the next round
-        // reads past it, and the run reads the same absence.
-        logger.debug("resume-pre-sync", () => [
-          "a load a cross-space read kicked did not land",
-          error,
-        ]);
-      }
-      logger.time(settleStart, "start", "resumeCrossSpaceSettle");
+      remaining = next;
+      await settle(keys);
     }
   }
 
@@ -9048,6 +9206,13 @@ export class Runner {
     while (pending.size > 0) {
       const cells: Cell<any>[] = [];
       const plans: NodePlan[] = [];
+      // The instances with a stored setup this round plans whole, by family
+      // key and the pattern planned under, recorded once everything the
+      // round names has landed. An instance with a node the pre-sync could
+      // not plan, or a round with a sync that failed, is not recorded: its
+      // own start then walks its argument as before.
+      const planned: [familyKey: string, entryKey: string][] = [];
+      let syncFailed = false;
       const planTx = this.#runtime.edit();
       if (identity !== undefined) planTx.tx.scopeKeyIdentity = identity;
       try {
@@ -9061,14 +9226,26 @@ export class Runner {
             );
           if (argumentLink === undefined) continue;
           pending.delete(key);
-          const planned = this.#cellsPatternNodes(
+          const nodes = this.#cellsPatternNodes(
             planTx,
             pattern,
             resultCell,
             argumentLink,
           );
-          for (const cell of planned.cells) cells.push(cell);
-          for (const plan of planned.plans) plans.push(plan);
+          for (const cell of nodes.cells) cells.push(cell);
+          for (const plan of nodes.plans) plans.push(plan);
+          // The policy manifests the instance's pattern names, as the root
+          // wave names the root pattern's.
+          for (const digest of modulePolicyDigestsOf(pattern)) {
+            cells.push(
+              this.#runtime.getCellFromEntityId(
+                resultCell.space,
+                cfcPolicyManifestDocId(digest),
+                [],
+                CFC_POLICY_MANIFEST_DOC_SCHEMA,
+              ),
+            );
+          }
           if (argumentMetaLink !== undefined) {
             cells.push(
               this.#runtime.getCellFromLink({
@@ -9076,6 +9253,12 @@ export class Runner {
                 schema: undefined,
               }),
             );
+            if (nodes.skipped === 0) {
+              planned.push([
+                this.#getFamilyKey(resultCell, identity),
+                patternIdentityKey(this.#entryRefForPattern(pattern)),
+              ]);
+            }
           }
         }
       } finally {
@@ -9083,19 +9266,52 @@ export class Runner {
       }
       if (cells.length === 0) return;
       const waveStart = performance.now();
-      await Promise.all(
-        cells.map((cell) =>
+      await this.#kickResumeWave(
+        cells,
+        (cell) =>
           this.#syncFamilyCell(cell, identity).catch((error) => {
+            syncFailed = true;
             logger.warn("resume-pre-sync", () => [
               "instance node sync failed; resuming without it",
               error,
             ]);
-          })
-        ),
+          }),
       );
       logger.time(waveStart, "start", "resumeInstanceNodeSyncWave");
       await this.#syncCrossSpaceReads(plans, identity);
+      if (!syncFailed) {
+        for (const [familyKey, entryKey] of planned) {
+          this.#presyncNamedInstances.set(familyKey, entryKey);
+        }
+      }
     }
+  }
+
+  /**
+   * Issues one sync per cell of a pre-sync wave through `kick` and resolves
+   * once every one has landed, yielding a macrotask turn between cells
+   * whenever the slice of continuous issuing is spent, so the answers to
+   * the wave's first frames are read while the rest are still being sent.
+   * No transaction is open across the yield: a wave is kicked only once
+   * its planning transaction has been aborted.
+   */
+  async #kickResumeWave(
+    cells: readonly Cell<any>[],
+    kick: (cell: Cell<any>) => Promise<unknown>,
+  ): Promise<void> {
+    const landed: Promise<unknown>[] = [];
+    for (const cell of cells) {
+      const sync = kick(cell);
+      // A sync that rejects while the loop is still issuing, or awaiting a
+      // turn, has no handler yet: the `Promise.all` below attaches its own
+      // only once the loop ends. This one keeps the rejection from reaching
+      // the host as unhandled; the `Promise.all` still reports it.
+      sync.catch(() => {});
+      landed.push(sync);
+      const turn = this.#resumeYield.maybeYield();
+      if (turn !== undefined) await turn;
+    }
+    await Promise.all(landed);
   }
 
   /**
@@ -9543,6 +9759,7 @@ export class Runner {
         continue;
       }
       if (plan?.kind !== "pattern") continue;
+      this.#presyncPlanRecorder?.(link.id, node, "owned");
       if (plan.childResultCell === undefined) {
         // The same two skips as the catch above — this node's owned-cell
         // pre-sync AND the recursion that would reach the child's own
@@ -9847,6 +10064,7 @@ export class Runner {
     // canceled
     this.#resultPatternCache.clear();
     this.#locallyPreparedResults.clear();
+    this.#presyncNamedInstances.clear();
     this.#locallyStoppedResults.clear();
     this.#locallyCommittedHandlerResultStarts.clear();
     this.#startGenerationByDoc.clear();
