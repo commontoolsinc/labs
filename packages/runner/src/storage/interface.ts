@@ -517,6 +517,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   subscribeSpaceAccessChange?(observer: (space: MemorySpace) => void): Cancel;
 
   /**
+   * Observes a space's memory session being replaced on reconnect rather than
+   * resumed: the host no longer held the session, as when its process
+   * restarted, so what it serves may have changed. The initial open and a
+   * resumed reconnect do not emit.
+   */
+  subscribeSpaceSessionReplaced?(
+    observer: (space: MemorySpace) => void,
+  ): Cancel;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit

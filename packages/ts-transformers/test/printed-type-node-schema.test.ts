@@ -2693,6 +2693,21 @@ export default pattern<{ value: Secret }>(({ value }) => {
       ).toMatchObject({ ifc: { confidentiality: [policy] } });
     });
 
+    it("reads the policy of a scoped value captured whole once", async () => {
+      expect(
+        await captured({
+          "/main.tsx":
+            `import { computed, pattern, type Confidential, type PerUser } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { rules } from "./rules.ts";
+interface Secret { a: string; b: string; }
+export default pattern<{ secret: PerUser<Confidential<Secret, [PolicyOf<typeof rules>]>> }>(
+  ({ secret }) => ({ out: computed(() => ({ whole: secret })) }),
+);`,
+        }, "secret"),
+      ).toMatchObject({ ifc: { confidentiality: [policy] }, scope: "user" });
+    });
+
     it("reads the policy of a value an alias of a nullable union names", async () => {
       expect(
         await captured({
@@ -2840,6 +2855,142 @@ export default pattern(() => {
             ],
           },
         },
+      });
+    });
+  });
+
+  describe("an inferred result that reads a binding whose annotation names one", () => {
+    // `readers` and `writers` are declared with one type, so only the
+    // annotation each value is read at tells their policies apart.
+    const RULES =
+      `import { type CfcExchangeRulesDeclaration, exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+const release = (role: string) => exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: { integrity: [role] },
+  post: { dropClause: true },
+});
+export const readers: CfcExchangeRulesDeclaration = exchangeRules([release("reader")]);
+export const writers: CfcExchangeRulesDeclaration = exchangeRules([release("writer")]);`;
+
+    const policy = (binding: string) => ({
+      confidentiality: [{
+        type: "https://commonfabric.org/cfc/atom/Policy",
+        policyRefKind: "module",
+        __ctPolicyIdentityOf: { file: "/rules.ts", path: [binding] },
+      }],
+    });
+
+    /**
+     * The result schema of the one `computed()` in a module whose pattern
+     * takes `input` and returns `result`, and a reader of the pattern's own.
+     */
+    async function inferred(
+      input: string,
+      result: string,
+    ): Promise<{ lift?: Schema; pattern: () => Schema }> {
+      const output = await transformFiles({
+        "/rules.ts": RULES,
+        "/main.tsx":
+          `import { computed, pattern, type Confidential } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { readers, writers } from "./rules.ts";
+export default pattern<{ ${input} }>(({ a, b }) => (${result}));`,
+      }, { types: COMMONFABRIC_TYPES, typeCheck: true });
+      const root = parseModule(output["/main.tsx"]!);
+      const [lift] = callsNamed(root, "lift");
+      const resultSchema = lift?.arguments[2];
+      return {
+        ...(resultSchema && ts.isSatisfiesExpression(resultSchema) && {
+          lift: literalToValue(resultSchema.expression) as Schema,
+        }),
+        pattern: () => patternSchemas(root).output.properties as Schema,
+      };
+    }
+
+    it("reads the policy of a lift's result member written from a binding", async () => {
+      const { lift, pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: a, length: a.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+      expect(
+        ((pattern().out as Schema).properties as Schema).whole,
+      ).toMatchObject({ ifc: policy("readers") });
+    });
+
+    it("reads the policy of a lift's result member written from a nullable binding", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[] | null, [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: a, length: a?.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+    });
+
+    it("reads the policy of a lift's result that returns a binding", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => a) }",
+      );
+
+      expect(lift).toMatchObject({ ifc: policy("readers") });
+    });
+
+    for (
+      const [form, result] of [
+        ["in parentheses", "{ out: computed(() => (a)) }"],
+        [
+          "in parentheses from a block",
+          "{ out: computed(() => { return (a); }) }",
+        ],
+      ]
+    ) {
+      it(`reads the policy of a lift's result that returns a binding ${form}`, async () => {
+        const { lift } = await inferred(
+          "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+          result!,
+        );
+
+        expect(lift).toMatchObject({ ifc: policy("readers") });
+      });
+    }
+
+    it("reads the policy of a lift's result member written from a binding in parentheses", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: (a), length: a.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+    });
+
+    it("reads the policy of a pattern's result member written from a binding", async () => {
+      const { pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: a }",
+      );
+
+      expect(pattern().out).toMatchObject({ ifc: policy("readers") });
+    });
+
+    it("reads each member at its own binding's policy where the two policies' rules share a type", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string, [PolicyOf<typeof readers>]>; b: Confidential<string, [PolicyOf<typeof writers>]>",
+        "{ out: computed(() => ({ r: a, w: b })) }",
+      );
+
+      expect((lift!.properties as Schema).r).toMatchObject({
+        ifc: policy("readers"),
+      });
+      expect((lift!.properties as Schema).w).toMatchObject({
+        ifc: policy("writers"),
       });
     });
   });
