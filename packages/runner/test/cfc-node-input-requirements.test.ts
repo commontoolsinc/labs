@@ -904,6 +904,25 @@ describe("cfc node input requirements", () => {
         expect(reason(refusals({ gate: link(undefined, ["nowhere"]) }))).toBe(
           "input requiredIntegrity failed at /gate of code",
         );
+        // A schema not the code's that would fill the absent collection
+        // hands the code members no one vouched for.
+        const filled = { default: ["open"] };
+        expect(
+          refusals({ gate: link(filled) }, undefined, undefined, members)
+            .length,
+        ).toBe(1);
+        expect(
+          refusals(
+            { gate: link() },
+            { properties: { gate: filled } },
+            undefined,
+            members,
+          ).length,
+        ).toBe(1);
+        expect(
+          refusals({}, { properties: { gate: filled } }, undefined, members)
+            .length,
+        ).toBe(1);
       });
     });
 

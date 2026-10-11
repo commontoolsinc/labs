@@ -39,7 +39,9 @@
  *   container or document on the way to it, is empty or absent (whether the
  *   declared path or a reference's own path led there), the member
  *   requirement consumes nothing, in a stored document and in the binding
- *   alike; a member that is there is held to it.
+ *   alike; a member that is there is held to it. A schema other than the
+ *   code's that would fill the absent collection with a default is the
+ *   wiring's choice of members, and carries no evidence, as below.
  * - A path read and found absent from a container is a `shape` observation
  *   (§4.6.3) carrying the integrity minted for the container's own current
  *   value (`ownEvidenceAt`): never a label it inherits from an ancestor, a
@@ -501,8 +503,11 @@ const reachThroughInput = (
       : undefined;
     if (child === undefined) {
       // An absent container on the way to a collection's members, wherever
-      // the path to it came from: no member to hold to the requirement.
-      if (remaining.includes("*")) return;
+      // the path to it came from: no member to hold to the requirement,
+      // unless a schema not the code's would hand the code members there.
+      if (remaining.includes("*")) {
+        return defaulting ? noEvidence(through) : undefined;
+      }
       // A segment of a reference's own path that is not there is the
       // reference's choice, not an absence its container vouches for.
       if (fixed > 0) return noEvidence(through);
@@ -559,7 +564,9 @@ const reachThroughInput = (
     // A document with no value at all is no container to be absent from,
     // and holds no member of a collection the requirement is on.
     if (value === undefined) {
-      return walk.includes("*") ? undefined : noEvidence(through);
+      return walk.includes("*") && !carriesDefault
+        ? undefined
+        : noEvidence(through);
     }
     inDocument(
       root,
@@ -599,14 +606,18 @@ const reachThroughInput = (
     // Absent or empty on the way to a collection's members, as in a stored
     // document: no member to hold to the requirement. Otherwise the wiring
     // leaving a path out is the wiring's choice, and carries no evidence.
-    if (value === undefined && rest.includes("*")) return;
+    if (value === undefined && rest.includes("*")) {
+      return graphDefaults ? noEvidence([]) : undefined;
+    }
     if (!isPlainContainer(value)) return noEvidence([]);
     if (segment === "*") {
       for (const child of Object.values(value)) inBinding(child, remaining);
       return;
     }
     if (!Object.hasOwn(value, segment)) {
-      return remaining.includes("*") ? undefined : noEvidence([]);
+      return remaining.includes("*") && !graphDefaults
+        ? undefined
+        : noEvidence([]);
     }
     inBinding(Reflect.get(value, segment), remaining);
   };
