@@ -512,6 +512,9 @@ describe("resume node plan pre-sync", () => {
       "late handle parent",
     );
     await rt2.idle();
+    // The resume found nothing to deliver, so the arrival waited on below is
+    // the write's.
+    expect(localOnB(counter)).toBe(false);
 
     const tx2 = rt1.edit();
     counter.withTx(tx2).set({ n: 1 });
