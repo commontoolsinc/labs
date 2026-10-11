@@ -333,24 +333,30 @@ export class CFCheckbox extends BaseElement {
         return;
       }
 
-      // Toggle checked state. Outside a form, the cell controller computes
-      // it from what the cell holds, asking the worker first where it has
-      // read nothing; in a form, the toggle is buffered until the form
-      // submits.
-      if (this._formField.inFormContext) {
-        this.setChecked(!this.getChecked());
-      } else {
-        void this._checkedCellController.toggle().then(() =>
-          this._updateAriaAttributes()
-        );
-      }
-
-      // Clear indeterminate state when clicked
+      // A click settles an indeterminate checkbox, so the change it makes
+      // reports `indeterminate: false`.
       if (this.indeterminate) {
         this.indeterminate = false;
       }
 
-      // Note: cf-change event is emitted by the cell controller's onChange callback
+      // Toggle checked state. In a form, the toggle is buffered until the
+      // form submits. Outside one, the cell controller computes it from what
+      // a bound cell holds, asking the worker first where it has read
+      // nothing, and its onChange fires cf-change; a plain boolean is the
+      // checkbox's own property, which it flips itself.
+      if (this._formField.inFormContext) {
+        this.setChecked(!this.getChecked());
+      } else if (this._checkedCellController.hasCell()) {
+        void this._checkedCellController.toggle().then(() =>
+          this._updateAriaAttributes()
+        );
+      } else {
+        this.checked = !this.getChecked();
+        this.emit("cf-change", {
+          checked: this.checked,
+          indeterminate: this.indeterminate,
+        });
+      }
     }
 
     private _handleKeydown(event: KeyboardEvent) {
