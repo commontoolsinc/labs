@@ -76,6 +76,25 @@ export type LifecycleVerbDescriptor = {
 };
 
 /**
+ * One step the serving side timed while running a lifecycle verb: `phase`
+ * names it as `<verb>.<step>`, `ms` is its length in whole milliseconds.
+ */
+export type LifecyclePhaseTiming = { phase: string; ms: number };
+
+/**
+ * What running a lifecycle verb from a descriptor yields: the verb's receipt,
+ * and the steps the serving side timed in the order they happened — the
+ * session it opened (`session`), the wait for a cycle of the loop to take the
+ * verb (`queue`), the verb's run (`run`), the wave commit after it (`commit`)
+ * and the durability read (`confirm`). A step that never finished is left
+ * out.
+ */
+export type LifecycleVerbRun = {
+  receipt: unknown;
+  timings: LifecyclePhaseTiming[];
+};
+
+/**
  * What the serving loop's realm logged: its loggers' counts and timing
  * statistics, which are the process's own where the loop runs on the main
  * thread and the worker's where it runs there.
@@ -216,7 +235,7 @@ export type BridgeRequests = {
   "host.diagnostics": { params: null; result: ServingLoopDiagnostics };
   "host.runLifecycleVerb": {
     params: { space: MemorySpace; verb: LifecycleVerbDescriptor };
-    result: unknown;
+    result: LifecycleVerbRun;
   };
   "host.close": { params: null; result: void };
 };

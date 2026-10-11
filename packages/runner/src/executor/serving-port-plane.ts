@@ -32,6 +32,7 @@ import {
   type BridgeNotices,
   type BridgeRequests,
   type LifecycleVerbDescriptor,
+  type LifecycleVerbRun,
   type PlaneNotices,
   type PlaneRequests,
   PortEndpoint,
@@ -74,7 +75,7 @@ export type ServingPlaneHost = {
   runLifecycleVerb: (
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
-  ) => Promise<unknown>;
+  ) => Promise<LifecycleVerbRun>;
   close: () => Promise<void>;
 };
 

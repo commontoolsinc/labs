@@ -163,7 +163,12 @@ import {
   diskHandleSeed,
   type DiskHandleValue,
 } from "./sqlite-source.ts";
-import { timeCliPhase } from "./trace-timing.ts";
+import {
+  cliPhaseTrace,
+  type PhaseTrace,
+  reportCliPhase,
+  timeCliPhase,
+} from "./trace-timing.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
 import { noteWroteTo } from "./write-receipt.ts";
@@ -500,6 +505,10 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   getPinnedProgramFromFile?: typeof getPinnedProgramFromFile;
   instantiatePieceOnServer?: typeof instantiatePieceOnServer;
   setPieceSourceOnServer?: typeof setPieceSourceOnServer;
+
+  /** Where creation's phases report; the process-wide trace by default. */
+  phaseTrace?: PhaseTrace;
+
   reportSearchError?: (
     pieceId: string,
     source: "input data" | "result data" | "metadata",
@@ -1697,6 +1706,10 @@ async function lifecycleClient(
  * the same operation locally. Registration retains its delivery identity, so
  * an uncertain response can be retried without reinitializing the document.
  * `boundStart` bounds only the local start, after creation and registration.
+ *
+ * With phase tracing on, each step reports as `newPiece.create.<step>`, and
+ * a served creation reports the steps the serving side timed as
+ * `newPiece.create.server.<phase>`.
  */
 async function createWithReceipt(
   config: SpaceConfig,
@@ -1714,6 +1727,7 @@ async function createWithReceipt(
   boundStart: <T>(start: Promise<T>) => Promise<T>,
 ): Promise<{ id: string; getCell: () => Cell<unknown> }> {
   const requestKey = options?.requestKey ?? crypto.randomUUID();
+  const trace = deps.phaseTrace ?? cliPhaseTrace;
   const receipt = await (async () => {
     try {
       const client = await lifecycleClient(config, deps);
@@ -1728,23 +1742,40 @@ async function createWithReceipt(
         register: true,
       };
       if (servesLifecycleVerbs(pieces)) {
-        return await (deps.instantiatePieceOnServer ??
-          instantiatePieceOnServer)(client, {
-            ...request,
-            space: pieces.getSpace(),
-            program,
-            ...(options?.start === false ? { start: false } : {}),
-          });
+        const served = await timeCliPhase(
+          "newPiece.create.instantiate",
+          () =>
+            (deps.instantiatePieceOnServer ?? instantiatePieceOnServer)(
+              client,
+              {
+                ...request,
+                space: pieces.getSpace(),
+                program,
+                ...(options?.start === false ? { start: false } : {}),
+              },
+            ),
+          trace,
+        );
+        for (const { phase, ms } of served.timings ?? []) {
+          reportCliPhase(`newPiece.create.server.${phase}`, ms, trace);
+        }
+        return served;
       }
-      const created = await servedInstantiatePiece(pieces, {
-        ...request,
-        source: { program },
-        actingUser: client.identity.did(),
-      });
-      return await completeServedRegistration(
-        pieces,
-        created,
-        client.identity.did(),
+      const created = await timeCliPhase(
+        "newPiece.create.instantiate",
+        () =>
+          servedInstantiatePiece(pieces, {
+            ...request,
+            source: { program },
+            actingUser: client.identity.did(),
+          }),
+        trace,
+      );
+      return await timeCliPhase(
+        "newPiece.create.register",
+        () =>
+          completeServedRegistration(pieces, created, client.identity.did()),
+        trace,
       );
     } catch (error) {
       if (
@@ -1770,8 +1801,18 @@ async function createWithReceipt(
         (receipt.registration?.error ?? ""),
     );
   }
-  const cell = await pieces.getPieceCell(receipt.pieceId, false);
-  if (options?.start !== false) await boundStart(pieces.startPiece(cell));
+  const cell = await timeCliPhase(
+    "newPiece.create.getPieceCell",
+    () => pieces.getPieceCell(receipt.pieceId, false),
+    trace,
+  );
+  if (options?.start !== false) {
+    await timeCliPhase(
+      "newPiece.create.start",
+      () => boundStart(pieces.startPiece(cell)),
+      trace,
+    );
+  }
   return { id: receipt.pieceId, getCell: () => cell };
 }
 

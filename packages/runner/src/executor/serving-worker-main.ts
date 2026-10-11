@@ -16,10 +16,11 @@ import {
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
 import { setPatternEnvironment } from "../builder/env.ts";
 import type { ModuleByteCache, RuntimeFetch } from "../runtime.ts";
-import { ExecutorHost, type LifecycleVerb } from "./host.ts";
+import { ExecutorHost } from "./host.ts";
 import { ServingPlane, servingPlaneEndpoint } from "./serving-port-plane.ts";
 import type {
   LifecycleVerbDescriptor,
+  LifecycleVerbRun,
   PortLike,
 } from "./serving-port-protocol.ts";
 import { servingRuntimeFactory } from "./serving-runtime.ts";
@@ -27,14 +28,16 @@ import { servingRuntimeFactory } from "./serving-runtime.ts";
 /** What an entry module adds to the host the init request describes. */
 export type ServingWorkerMainOptions = {
   /**
-   * Builds the verb a lifecycle descriptor names, to run on the space's
-   * serving runtime as the service identity. Absent, every verb is refused.
+   * Runs the verb a lifecycle descriptor names through `host`, on the
+   * space's serving runtime as the service identity, timing its steps.
+   * Absent, every verb is refused.
    */
-  buildLifecycleVerb?: (
+  runLifecycleVerb?: (
+    host: Pick<ExecutorHost, "runLifecycleVerb">,
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
     serviceIdentity: Identity,
-  ) => LifecycleVerb<unknown>;
+  ) => Promise<LifecycleVerbRun>;
 
   /** The serving runtimes' outbound fetch; absent, the platform fetch. */
   fetch?: RuntimeFetch;
@@ -103,18 +106,15 @@ export function serveFromPort(
         timingStats: getTimingStatsBreakdown(),
       }),
       runLifecycleVerb: (space, verb) => {
-        if (options.buildLifecycleVerb === undefined) {
+        if (options.runLifecycleVerb === undefined) {
           return Promise.reject(
             new Error(
-              `this serving worker builds no lifecycle verbs, so "${verb.name}" ` +
+              `this serving worker runs no lifecycle verbs, so "${verb.name}" ` +
                 `cannot run on ${space}`,
             ),
           );
         }
-        return host.runLifecycleVerb(
-          space,
-          options.buildLifecycleVerb(space, verb, identity),
-        );
+        return options.runLifecycleVerb(host, space, verb, identity);
       },
       close: async () => {
         try {

@@ -146,6 +146,7 @@ export {
 } from "./served-lifecycle.ts";
 export {
   buildServedLifecycleVerb,
+  runServedLifecycleVerb,
   type ServedLifecycleReceipts,
   servedLifecycleRunner,
   type ServedLifecycleVerbDescriptor,

@@ -24,6 +24,7 @@ import {
   type BridgeRequests,
   type DelegatedAppendEntry,
   type LifecycleVerbDescriptor,
+  type LifecycleVerbRun,
   type PlaneNotices,
   type PlaneRequests,
   PortEndpoint,
@@ -188,11 +189,14 @@ export class ServingPortBridge {
     return this.#endpoint.request("host.diagnostics", null);
   }
 
-  /** Runs a lifecycle verb on the worker's host; its receipt comes back as data. */
+  /**
+   * Runs a lifecycle verb on the worker's host; its receipt and the steps the
+   * worker timed come back as data.
+   */
   runLifecycleVerb(
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
-  ): Promise<unknown> {
+  ): Promise<LifecycleVerbRun> {
     return this.#endpoint.request("host.runLifecycleVerb", { space, verb });
   }
 

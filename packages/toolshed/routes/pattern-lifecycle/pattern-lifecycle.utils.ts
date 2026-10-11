@@ -7,6 +7,8 @@
 // this module holds the transport's half and is tested against a real
 // memory server and serving host.
 
+import type { AttributeValue } from "@opentelemetry/api";
+
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   streamEntriesDocId,
@@ -26,6 +28,7 @@ import type {
   ServedSetSourceReceipt,
 } from "@commonfabric/piece/ops";
 import type { RuntimeProgram } from "@commonfabric/runner";
+import type { LifecyclePhaseTiming } from "@commonfabric/runner/executor/host";
 import {
   authorizeSpaceWriter,
   type SpaceAuthorityDeps,
@@ -55,7 +58,23 @@ export interface LifecycleDeps {
     warn: (obj: unknown, msg: string) => void;
     info: (obj: unknown, msg: string) => void;
   };
+
+  /**
+   * The request's trace span, marked with the creation key and the duration
+   * of each timed step; absent where nothing traces the request.
+   */
+  requestSpan?: RequestSpan;
 }
+
+/** The part of a trace span a lifecycle request marks. */
+export interface RequestSpan {
+  setAttribute(key: string, value: AttributeValue): unknown;
+}
+
+/** An `instantiate` receipt with the steps the serving side timed. */
+export type InstantiateReceipt = ServedInstantiateReceipt & {
+  timings: LifecyclePhaseTiming[];
+};
 
 /** A refusal's stable name on the wire. */
 export type LifecycleErrorCode =
@@ -129,12 +148,18 @@ const servedRefusalOf = (
 /**
  * Authorize the caller and run one verb on the space's serving runtime,
  * resolving with the receipt the verb's name promises.
+ *
+ * `timings` collects the verb's steps in the order they happened: the writer
+ * check (`<verb>.authorize`) here, then the steps the serving side times and
+ * returns with the receipt, its session, the wait for a cycle of the loop to
+ * take the verb, the run, the wave commit and the durability read.
  */
 async function runServedVerb<Verb extends ServedLifecycleVerbDescriptor>(
   deps: LifecycleDeps,
   callerDid: string,
   space: string,
   verb: Verb,
+  timings?: LifecyclePhaseTiming[],
 ): Promise<LifecycleResult<ServedLifecycleReceipts[Verb["name"]]>> {
   const host = deps.host();
   if (host === undefined) {
@@ -145,11 +170,16 @@ async function runServedVerb<Verb extends ServedLifecycleVerbDescriptor>(
         "verbs cannot run on it (EXPERIMENTAL_SERVER_EXECUTION).",
     );
   }
+  const authorizing = performance.now();
   const authority = await authorizeSpaceWriter(
     deps.authority,
     space,
     callerDid,
   );
+  timings?.push({
+    phase: `${verb.name}.authorize`,
+    ms: Math.round(performance.now() - authorizing),
+  });
   if (!authority.ok) {
     deps.logger?.warn(
       { space, caller: callerDid, detail: authority.logDetail },
@@ -158,10 +188,11 @@ async function runServedVerb<Verb extends ServedLifecycleVerbDescriptor>(
     return refuse(403, "forbidden", authority.message);
   }
   try {
-    const receipt = await host.runLifecycleVerb(space as MemorySpace, verb);
+    const run = await host.runLifecycleVerb(space as MemorySpace, verb);
+    for (const timing of run.timings) timings?.push(timing);
     return {
       status: 200,
-      body: receipt as ServedLifecycleReceipts[Verb["name"]],
+      body: run.receipt as ServedLifecycleReceipts[Verb["name"]],
     };
   } catch (error) {
     const refusal = servedRefusalOf(error);
@@ -200,26 +231,76 @@ export async function processUpload(
     : uploaded;
 }
 
+/** What the `instantiate` verb takes from its request. */
+type InstantiateInput = WireSource & {
+  space: string;
+  argument?: Record<string, unknown>;
+  repository?: string;
+  slug?: string;
+  force?: boolean;
+  register?: boolean;
+  start?: boolean;
+  requestKey?: string;
+};
+
 /**
  * The `instantiate` verb: create a piece from the request's pattern, named
  * and registered as asked, and — unless `start` is `false` — name its root
  * as the loop's demand so the cycle after the creation's commit derives
  * it. A piece created without that demand runs when something first
  * demands it, the served meaning of a setup-only creation.
+ *
+ * The receipt carries `timings`, the steps of each served verb the
+ * creation ran (`instantiate`, then `registration-prepare` and
+ * `registration-finish` when it registers) together with
+ * `registration.delivery`, the wait for the registration event to take
+ * effect. The request span, when there is one, is marked with the same
+ * durations and with the request key.
  */
 export async function processInstantiate(
   deps: LifecycleDeps,
   callerDid: string,
-  input: WireSource & {
-    space: string;
-    argument?: Record<string, unknown>;
-    repository?: string;
-    slug?: string;
-    force?: boolean;
-    register?: boolean;
-    start?: boolean;
-    requestKey?: string;
-  },
+  input: InstantiateInput,
+): Promise<LifecycleResult<InstantiateReceipt>> {
+  const timings: LifecyclePhaseTiming[] = [];
+  const result = await instantiate(deps, callerDid, input, timings);
+  // A caller that sends no key gets the one the server generated, in the
+  // receipt; a refusal has only the caller's.
+  annotateRequestSpan(
+    deps.requestSpan,
+    result.status === 200 ? result.body.requestKey : input.requestKey,
+    timings,
+  );
+  return result.status === 200
+    ? { status: 200, body: { ...result.body, timings } }
+    : result;
+}
+
+/**
+ * Marks a request's span with its creation key and each timed step, so a
+ * slow creation a caller reports by its key can be found among the traces.
+ */
+function annotateRequestSpan(
+  span: LifecycleDeps["requestSpan"],
+  requestKey: string | undefined,
+  timings: readonly LifecyclePhaseTiming[],
+): void {
+  if (span === undefined) return;
+  if (requestKey !== undefined) span.setAttribute("cf.request_key", requestKey);
+  for (const { phase, ms } of timings) {
+    span.setAttribute(`cf.lifecycle.${phase}_ms`, ms);
+  }
+}
+
+/**
+ * The `instantiate` verb's creation and registration, timing each served
+ * step into `timings`.
+ */
+async function instantiate(
+  deps: LifecycleDeps,
+  callerDid: string,
+  input: InstantiateInput,
+  timings: LifecyclePhaseTiming[],
 ): Promise<LifecycleResult<ServedInstantiateReceipt>> {
   const source = wireSource(input);
   if (source === undefined) {
@@ -246,7 +327,7 @@ export async function processInstantiate(
       actingUser: callerDid,
       start: input.start !== false,
     },
-  });
+  }, timings);
   if (result.status !== 200) return result;
   if (
     result.body.registration.status === "skipped" ||
@@ -273,10 +354,11 @@ export async function processInstantiate(
   const prepared = await runServedVerb(deps, callerDid, input.space, {
     name: "registration-prepare",
     request: { receipt: result.body, actingUser: callerDid },
-  });
+  }, timings);
   if (prepared.status !== 200) {
     return incomplete(result.body, "preparation", prepared.body.code);
   }
+  const delivering = performance.now();
   const outcome = prepared.body.delivery === undefined
     ? {}
     : await observeRegistrationDelivery(
@@ -284,10 +366,16 @@ export async function processInstantiate(
       callerDid,
       prepared.body.delivery,
     );
+  if (prepared.body.delivery !== undefined) {
+    timings.push({
+      phase: "registration.delivery",
+      ms: Math.round(performance.now() - delivering),
+    });
+  }
   const finished = await runServedVerb(deps, callerDid, input.space, {
     name: "registration-finish",
     request: { prepared: prepared.body, actingUser: callerDid, outcome },
-  });
+  }, timings);
   return finished.status === 200
     ? finished
     : incomplete(prepared.body.receipt, "completion", finished.body.code);

@@ -1,4 +1,9 @@
 import ts from "typescript";
+import {
+  namesOnlyPolicyBindings,
+  readBindingAnnotation,
+  readDeclaringSymbol,
+} from "@commonfabric/schema-generator/value-annotation";
 import type {
   CapabilityParamSummary,
   CrossStageState,
@@ -557,6 +562,21 @@ export function transformLiftAppliedCall(
         },
         state.typeRegistry,
       );
+      // A print spells a `typeof` binding as the structural type of the value
+      // it names, so a callback that returns a binding's value is read at
+      // that binding's annotation, where it names one. An annotation that
+      // names a writer leaves the result read from its type, as the result
+      // views the document that stores the writer's policy.
+      const returned = returnedValue(callback);
+      const spelledBy = returned &&
+        readBindingAnnotation(
+          readDeclaringSymbol(returned, checker),
+          resultType,
+          checker,
+        );
+      if (spelledBy && namesOnlyPolicyBindings(spelledBy, checker)) {
+        state.recordSchemaHint(resultTypeNode, { spelledBy });
+      }
     }
   }
 
@@ -660,4 +680,20 @@ export function transformLiftAppliedCall(
   );
 
   return rebuiltCall;
+}
+
+/**
+ * The expression `callback` returns, where it returns that one alone: its
+ * expression body, or the one statement of its block body. A callback with
+ * several returns may return the values of several bindings, whose types can
+ * be one type although the bindings name different values.
+ */
+function returnedValue(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): ts.Expression | undefined {
+  if (!ts.isBlock(callback.body)) return callback.body;
+  const [only, ...rest] = callback.body.statements;
+  return only && rest.length === 0 && ts.isReturnStatement(only)
+    ? only.expression
+    : undefined;
 }

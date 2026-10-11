@@ -55,6 +55,10 @@ import {
 } from "./stats.ts";
 
 export type { LifecycleVerb } from "./space-server.ts";
+export type {
+  LifecyclePhaseTiming,
+  LifecycleVerbRun,
+} from "./serving-port-protocol.ts";
 
 /**
  * Thrown by {@link ExecutorHost.runLifecycleVerb} when this process cannot

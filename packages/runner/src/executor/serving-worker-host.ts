@@ -18,6 +18,7 @@ import { type ExecutorHost, failureParkBackoffDelayMs } from "./host.ts";
 import { ServingPortBridge } from "./serving-port-bridge.ts";
 import type {
   LifecycleVerbDescriptor,
+  LifecycleVerbRun,
   ServingLoopDiagnostics,
   ServingWorkerInit,
 } from "./serving-port-protocol.ts";
@@ -138,7 +139,7 @@ export class ServingWorker {
   async runLifecycleVerb(
     space: MemorySpace,
     verb: LifecycleVerbDescriptor,
-  ): Promise<unknown> {
+  ): Promise<LifecycleVerbRun> {
     await this.ready;
     return await this.#bridge().runLifecycleVerb(space, verb);
   }

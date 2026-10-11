@@ -10,7 +10,7 @@
  */
 
 import {
-  buildServedLifecycleVerb,
+  runServedLifecycleVerb,
   type ServedLifecycleVerbDescriptor,
 } from "@commonfabric/piece/ops";
 import { serveFromPort } from "@commonfabric/runner/executor/serving-worker-main";
@@ -21,8 +21,9 @@ import { selfDirectedFetch } from "@/lib/internal-api-origin.ts";
 const fetch = selfDirectedFetch(env);
 
 serveFromPort(self as unknown as Parameters<typeof serveFromPort>[0], {
-  buildLifecycleVerb: (space, verb, identity) =>
-    buildServedLifecycleVerb(
+  runLifecycleVerb: (host, space, verb, identity) =>
+    runServedLifecycleVerb(
+      host,
       space,
       verb as ServedLifecycleVerbDescriptor,
       identity,

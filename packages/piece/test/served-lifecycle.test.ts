@@ -869,25 +869,47 @@ export default pattern(() => {
   describe("descriptors", () => {
     it("runs the verbs their descriptors name through the host, and demands the piece's root when asked", async () => {
       const runner = servedLifecycleRunner(host, serviceSigner);
-      const ref = await runner.runLifecycleVerb(space, {
+      const uploaded = await runner.runLifecycleVerb(space, {
         name: "upload",
         request: { program: authorizedWriterProgram("v1") },
-      }) as { identity: string; symbol: string };
+      });
+      const ref = uploaded.receipt as { identity: string; symbol: string };
       expect(ref.symbol).toBe("default");
-      const created = await runner.runLifecycleVerb(space, {
+      // A verb without a confirm times its commit from the end of its run.
+      expect(uploaded.timings.map((timing) => timing.phase)).toEqual([
+        "upload.session",
+        "upload.queue",
+        "upload.run",
+        "upload.commit",
+      ]);
+      const creation = await runner.runLifecycleVerb(space, {
         name: "instantiate",
         request: {
           source: { pattern: ref },
           actingUser: aliceSigner.did(),
           start: true,
         },
-      }) as { pieceId: string; pattern: { identity: string } };
+      });
+      const created = creation.receipt as {
+        pieceId: string;
+        pattern: { identity: string };
+      };
       expect(created.pattern).toEqual(ref);
-      const successor = await runner.runLifecycleVerb(space, {
+      expect(creation.timings.map((timing) => timing.phase)).toEqual([
+        "instantiate.session",
+        "instantiate.queue",
+        "instantiate.run",
+        "instantiate.commit",
+        "instantiate.confirm",
+      ]);
+      for (const { ms } of creation.timings) {
+        expect(Number.isInteger(ms) && ms >= 0).toBe(true);
+      }
+      const successor = (await runner.runLifecycleVerb(space, {
         name: "upload",
         request: { program: authorizedWriterProgram("v2") },
-      }) as { identity: string; symbol: string };
-      const replaced = await runner.runLifecycleVerb(space, {
+      })).receipt as { identity: string; symbol: string };
+      const replaced = (await runner.runLifecycleVerb(space, {
         name: "setsrc",
         request: {
           pieceId: created.pieceId,
@@ -895,7 +917,7 @@ export default pattern(() => {
           actingUser: aliceSigner.did(),
           start: false,
         },
-      }) as { pieceId: string; pattern: { identity: string } };
+      })).receipt as { pieceId: string; pattern: { identity: string } };
       expect(replaced.pieceId).toBe(created.pieceId);
       expect(replaced.pattern.identity).toBe(successor.identity);
       const pieces = await clientPieces();
@@ -913,17 +935,17 @@ export default pattern(() => {
       await pieces.linkDefaultPattern(
         (await pieces.get(root.pieceId)).getCell(),
       );
-      const prepared = await runner.runLifecycleVerb(space, {
+      const prepared = (await runner.runLifecycleVerb(space, {
         name: "registration-prepare",
         request: { receipt: pending, actingUser: aliceSigner.did() },
-      }) as ServedRegistrationPreparation;
+      })).receipt as ServedRegistrationPreparation;
       expect(prepared.error).toBe(
         "The default pattern has no addPiece handler",
       );
-      const finished = await runner.runLifecycleVerb(space, {
+      const finished = (await runner.runLifecycleVerb(space, {
         name: "registration-finish",
         request: { prepared, actingUser: aliceSigner.did(), outcome: {} },
-      }) as ServedInstantiateReceipt;
+      })).receipt as ServedInstantiateReceipt;
       expect(finished.registration.status).toBe("failed");
     });
 
@@ -932,7 +954,7 @@ export default pattern(() => {
         buildServedLifecycleVerb(
           space,
           { name: "frobnicate", request: {} } as never,
-          serviceSigner,
+          createSession({ identity: serviceSigner, spaceDid: space as DID }),
         )
       ).toThrow('no served lifecycle verb is named "frobnicate"');
     });
