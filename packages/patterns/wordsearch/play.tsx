@@ -71,9 +71,10 @@ export const WordSearchPlay = pattern<
 >(({ title, puzzle, found }) => {
   // The cell tapped first, waiting for a word's other end, in the
   // arrangement it was tapped in, and what the last second tap came to (a
-  // find or a miss), to say until the next tap: this tab's alone.
+  // find or a miss) in the arrangement it was said in, to say until the next
+  // tap: this tab's alone.
   const anchor = Writable.perSession.of({ at: "", index: -1 });
-  const said = Writable.perSession.of("");
+  const said = Writable.perSession.of({ at: "", text: "" });
 
   // The arrangement: a first tap in another one waits for nothing.
   const arrangement = computed(() =>
@@ -107,7 +108,7 @@ export const WordSearchPlay = pattern<
         `WordSearchPlay: no cell ${index} in a ${puzzle.rows}×${puzzle.cols} grid`,
       );
     }
-    said.set("");
+    said.set({ at: "", text: "" });
     const first = anchor.get().at === arrangement ? anchor.get().index : -1;
     if (first < 0) {
       anchor.set({ at: arrangement, index });
@@ -120,7 +121,7 @@ export const WordSearchPlay = pattern<
     const hits = placementsBetween(puzzle, first, index);
     if (hits.length === 0) {
       // Not a word's two ends: say so, and take this tap as a new first one.
-      said.set("Not a word");
+      said.set({ at: arrangement, text: "Not a word" });
       anchor.set({ at: arrangement, index });
       return;
     }
@@ -131,14 +132,14 @@ export const WordSearchPlay = pattern<
     const hit = hits.find((p) => !current.includes(placementKey(p)));
     if (hit !== undefined) {
       found.set([...current, placementKey(hit)]);
-      said.set(`Found ${hit.label}`);
+      said.set({ at: arrangement, text: `Found ${hit.label}` });
     }
   });
 
   const restart = action(() => {
     found.set([]);
     anchor.set({ at: "", index: -1 });
-    said.set("");
+    said.set({ at: "", text: "" });
   });
 
   const grid = computed(() => gridStyle(puzzle.cols));
@@ -181,8 +182,9 @@ export const WordSearchPlay = pattern<
       : `${foundHere.length} of ${puzzle.placements.length} found`
   );
   const status = computed(() =>
-    said.get()
-      ? said.get()
+    // What the last tap came to, unless the puzzle has moved since.
+    said.get().at === arrangement && said.get().text
+      ? said.get().text
       : changed
       ? "Puzzle changed"
       : foundHere.length === 0

@@ -204,13 +204,24 @@ export default pattern(() => {
       // do not count for it.
       { action: tapEnds({ puzzle, tap, n: 0, reversed: false }) },
       { assertion: assert(() => play.foundCount === 1) },
-      { action: action(() => play.tap.send({ index: 5 })) },
+      // A miss leaves a first tap waiting and "Not a word" said.
+      {
+        action: action(() => {
+          const cells = placementCells(puzzle.placements[2], puzzle.cols);
+          play.tap.send({ index: cells[0] });
+          play.tap.send({ index: cells[1] });
+        }),
+      },
       { action: action(() => seed.set(2)) },
       { assertion: assert(() => play.foundCount === 0) },
       {
         assertion: assert(() =>
           textContent(play[UI]).includes("Puzzle changed")
         ),
+      },
+      // What was said in the old arrangement is not said in this one.
+      {
+        assertion: assert(() => !textContent(play[UI]).includes("Not a word")),
       },
       // A first tap made in the old arrangement waits for nothing.
       { assertion: assert(() => waiting(play[UI]) === -1) },
