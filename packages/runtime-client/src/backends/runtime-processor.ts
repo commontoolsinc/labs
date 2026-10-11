@@ -76,7 +76,6 @@ import {
   isCell,
   isCellResult,
   isLoopbackHostname,
-  isPieceRoot,
   markDurableReadTx,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -408,8 +407,6 @@ function spaceAclResponse(
     },
   };
 }
-
-const displayLogger = getLogger("runtime-client.display");
 
 // Split-timing for the CFC label IPC path. Counts/timing are readable via
 // getLoggerCounts(); enabled silently so the hot path pays only the timestamp.
@@ -4097,17 +4094,7 @@ export class RuntimeProcessor {
       if (active) cancelRender = reconciler.mount(cell);
       return { rootId: reconciler.getRootNodeId() };
     };
-    // A view the server replicates is itself the demand that a visible root
-    // run; anywhere else a display has to ask (`runsPiece`).
-    const runPiece = () => {
-      if (request.runsPiece !== undefined) {
-        this.#runDisplayedPiece(request.runsPiece);
-      }
-    };
-    if (!this.#runtime.viewScopedReplicationRequested) {
-      runPiece();
-      return render();
-    }
+    if (!this.#runtime.viewScopedReplicationRequested) return render();
     return this.#runtime.viewReplication.mount(
       rawCell,
       key,
@@ -4115,8 +4102,6 @@ export class RuntimeProcessor {
     ).then((cancel) => {
       if (!active) cancel?.();
       else cancelView = cancel;
-      // No cancel: the space does not replicate views, or has fallen back.
-      if (active && cancel === undefined) runPiece();
       return render();
     }).catch((error) => {
       mount.cancel();
@@ -4124,38 +4109,6 @@ export class RuntimeProcessor {
       if (this.#vdomMounts.get(key) === mount) this.#vdomMounts.delete(key);
       throw error;
     });
-  }
-
-  /**
-   * Starts the piece a mount displays, as opening it directly does
-   * (`VDomMountRequest.runsPiece`), and as the view-replication fallback
-   * starts a mounted root. A cell that is not a piece, once its document has
-   * loaded, runs nothing, and a reference that names no cell only warns: the
-   * render goes on either way. Not awaited: the render does not wait on a
-   * start, and `Runtime.settled()` covers it.
-   */
-  #runDisplayedPiece(ref: CellRef): void {
-    let piece: Cell<unknown>;
-    try {
-      piece = getCell(this.#runtime, ref);
-    } catch (error) {
-      displayLogger.warn("display-start", () => [
-        "A displayed piece's reference names no cell",
-        error,
-      ]);
-      return;
-    }
-    const start = piece.sync()
-      .then(() =>
-        isPieceRoot(this.#runtime, piece) ? this.#runtime.start(piece) : false
-      )
-      .catch((error: unknown) => {
-        displayLogger.warn("display-start", () => [
-          "Starting a displayed piece failed",
-          error,
-        ]);
-      });
-    this.#runtime.trackAsyncWork(start, piece);
   }
 
   /**

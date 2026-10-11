@@ -1131,9 +1131,9 @@ describe("CFRender variants", () => {
     expect(outcomes[1]).toEqual(outcomes[0]);
   });
 
-  it("names the piece a link leads to as the one to run, when it renders the link in full", async () => {
+  it("opens the piece a link leads to, as navigating to it does, when it renders the link in full", async () => {
     // A profile or a grid hands cf-render a link its own document holds; the
-    // piece to run is the one the link leads to, not that document.
+    // piece to open is the one the link leads to, not that document.
     const mockDocument = installMockDocument();
     const element = new CFRender();
     try {
@@ -1149,6 +1149,13 @@ describe("CFRender variants", () => {
       }) as CellHandle;
       Object.assign(link, { resolveAsCell: () => Promise.resolve(piece) });
       Object.assign(link.runtime(), { signal: new AbortController().signal });
+      const opened: unknown[][] = [];
+      Object.assign(piece.runtime(), {
+        getPiece: (...args: unknown[]) => {
+          opened.push(args);
+          return Promise.resolve(null);
+        },
+      });
       const internals = element as unknown as Internals & {
         _watchLinkTarget(
           cell: CellHandle,
@@ -1165,7 +1172,12 @@ describe("CFRender variants", () => {
       expect(log.mounted.map((reference) => reference.path)).toEqual([
         ["elements", "0", "cell"],
       ]);
-      expect(log.runsPiece).toEqual([piece.ref()]);
+      expect(opened).toEqual([[
+        piece.id(),
+        piece.space(),
+        true,
+        piece.ref().scope,
+      ]]);
     } finally {
       element.disconnectedCallback();
       mockDocument.restore();
@@ -1211,6 +1223,13 @@ describe("CFRender variants", () => {
         undefined,
         { id: "of:fid1:piece-abcdef" as CellRef["id"] },
       );
+      const opened: unknown[][] = [];
+      Object.assign(piece.runtime(), {
+        getPiece: (...args: unknown[]) => {
+          opened.push(args);
+          return Promise.resolve(null);
+        },
+      });
       const reads: string[] = [];
       Object.assign(piece, {
         sync: () => {
@@ -1254,8 +1273,8 @@ describe("CFRender variants", () => {
       expect(log.mounted.map((reference) => reference.path)).toEqual([
         ["$NAME"],
       ]);
-      // A chip only names the piece, so it does not ask the piece to run.
-      expect(log.runsPiece).toEqual([undefined]);
+      // A chip only names the piece, so it does not open it.
+      expect(opened).toEqual([]);
       expect(reads).toEqual([]);
 
       let stopped = 0;

@@ -611,38 +611,6 @@ describe("connection", () => {
       }
     });
 
-    it("names the piece to run only for a mount that displays it", async () => {
-      const transport = new FakeTransport();
-      const connection = await initializedConnection(transport);
-      const session = connection.attachVDom(() => {});
-      try {
-        const piece = {
-          id: "of:displayed-piece",
-          space: "did:key:test",
-          scope: "space",
-          path: [],
-        } as const;
-        const field = { ...piece, path: ["$TILE_UI"] };
-        await session.mount(1, field, { runsPiece: piece });
-        await session.mount(2, field);
-        const mounts = transport.sent.filter(
-          (message): message is IPCClientMessage =>
-            "msgId" in message && message.data.type === RequestType.VDomMount,
-        );
-        expect(mounts.map((message) => message.data)).toEqual([
-          expect.objectContaining({
-            mountId: 1,
-            cell: field,
-            runsPiece: piece,
-          }),
-          expect.not.objectContaining({ runsPiece: expect.anything() }),
-        ]);
-      } finally {
-        session.detach();
-        await connection.dispose();
-      }
-    });
-
     it("mounts, unmounts, and routes batch notifications via the session", async () => {
       const transport = new FakeTransport();
       const connection = await initializedConnection(transport);

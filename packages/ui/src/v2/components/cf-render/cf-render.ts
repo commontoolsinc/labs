@@ -560,10 +560,10 @@ export class CFRender extends BaseElement {
    * Mounts `cell` into `container` as the root of a render of its own, which
    * decides under the viewer's render policy what reaches the page. Every
    * caller displays `piece` itself (full, an exported variant, the default
-   * tile), so the piece runs, as opening it directly makes it run
-   * (`runsPiece`); the default chip, which only names the piece, renders
-   * through `createNameChip()` instead. `piece` is the resolved target, since
-   * `cell` can be a link to it held in another piece's document.
+   * tile), so it opens the piece as navigating to it does; the default chip,
+   * which only names the piece, renders through `createNameChip()` instead.
+   * `piece` is the resolved target, since `cell` can be a link to it held in
+   * another piece's document.
    */
   private _mount(
     container: HTMLElement,
@@ -571,11 +571,29 @@ export class CFRender extends BaseElement {
     piece: CellHandle,
     generation: number,
   ): () => void {
+    this.#openDisplayed(piece);
     return render(
       container,
       cell as CellHandle<VNode>,
-      { ...this.#renderErrorOptions(generation), runsPiece: piece },
+      this.#renderErrorOptions(generation),
     );
+  }
+
+  /**
+   * Opens the piece a render displays, through the request the shell opens a
+   * piece with (`getPiece` with `runIt`): the worker reconciles its source and
+   * starts it, or leaves both to the view where the space replicates views.
+   * Not awaited, as the render does not wait on a start. A value inside a
+   * piece is not one to open, and a document that is not a piece fails to
+   * start, which a display of plain data shrugs off.
+   */
+  #openDisplayed(piece: CellHandle): void {
+    if (piece.ref().path.length > 0) return;
+    const runtime = piece.runtime();
+    runtime.getPiece(piece.id(), piece.space(), true, piece.ref().scope)
+      .catch((error: unknown) => {
+        this._log("opening the displayed piece failed:", error);
+      });
   }
 
   /**

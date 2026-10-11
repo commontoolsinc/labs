@@ -154,11 +154,9 @@ export interface VDomConnection {
   /** The connection's lifetime signal; aborts on disposal. */
   readonly signal: AbortSignal;
 
-  /** `options.runsPiece`: see `VDomMountRequest.runsPiece`. */
   mount(
     mountId: number,
     cellRef: CellRef,
-    options?: { runsPiece?: CellRef },
   ): Promise<VDomMountResponse>;
   unmount(mountId: number): Promise<void>;
   sendEvent(
@@ -778,8 +776,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     const signal = this.#lifetime.signal;
     return {
       signal,
-      mount: (mountId, cellRef, options) =>
-        this.#mountVDom(mountId, cellRef, options),
+      mount: (mountId, cellRef) => this.#mountVDom(mountId, cellRef),
       unmount: (mountId) => this.#unmountVDom(mountId),
       sendEvent: (mountId, handlerId, event, nodeId) =>
         this.#notify({
@@ -808,16 +805,12 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   async #mountVDom(
     mountId: number,
     cellRef: CellRef,
-    options?: { runsPiece?: CellRef },
   ): Promise<VDomMountResponse> {
     try {
       const response = await this.request<RequestType.VDomMount>({
         type: RequestType.VDomMount,
         mountId,
         cell: cellRef,
-        ...(options?.runsPiece !== undefined
-          ? { runsPiece: options.runsPiece }
-          : {}),
       });
       return response!;
     } catch (error) {

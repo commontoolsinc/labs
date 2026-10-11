@@ -86,7 +86,7 @@ first invoked it.
 A result acquires a lifetime of its own when something starts it in its own
 right rather than as part of an enclosing pattern — `Runner.start`. Navigating
 to a nested result opens it as a page, which is the case this rule exists for.
-A `cf-render` that displays a result starts it the same way, so a displayed
+A `cf-render` that displays a result opens it the same way, so a displayed
 child acquires a lifetime too. An enclosing pattern releasing such a result
 leaves it running; only stopping it directly ends it.
 
