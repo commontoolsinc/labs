@@ -9,7 +9,10 @@ import {
   setParentPointers,
   typeToTypeNodeWithRegistry,
 } from "../../ast/mod.ts";
-import { isErasedAtEmit } from "../../ast/erased-syntax.ts";
+import {
+  hasOnlyErasedDeclarations,
+  isErasedAtEmit,
+} from "../../ast/erased-syntax.ts";
 import { isModuleScopedDeclaration } from "../../ast/scope-analysis.ts";
 import { unwrapTransparentWrapperOnce } from "../../utils/expression.ts";
 import { TransformationContext } from "../../core/mod.ts";
@@ -305,11 +308,13 @@ function unionWithEnclosingScopeFreeIdentifiers(
         !alreadyCoveredNames.has(node.text) && !addedNames.has(node.text)
       ) {
         const symbol = checker.getSymbolAtLocation(node);
-        // Only capture value-space symbols; type parameters are also filtered
-        // by `isEnclosingScopeDeclaration` below.
+        // Only capture value-space symbols that have a runtime binding: a
+        // `const enum` is inlined, so it is not an input. Type parameters are
+        // also filtered by `isEnclosingScopeDeclaration` below.
         if (
           symbol &&
           (symbol.flags & ts.SymbolFlags.Value) !== 0 &&
+          !hasOnlyErasedDeclarations(symbol) &&
           !isNestedFunctionLocalCapture(node, expression, checker) &&
           isEnclosingScopeDeclaration(symbol)
         ) {

@@ -86,6 +86,19 @@ describe("isErasedAtEmit()", () => {
       expect(isErasedAtEmit(node)).toBe(true);
     });
 
+    it("returns `true` for a `const enum` and `false` for a regular `enum`", () => {
+      const constEnum = findNode(
+        "const enum Mode { Alpha = 'alpha' }",
+        ts.isEnumDeclaration,
+      );
+      const regularEnum = findNode(
+        "enum Kind { Beta = 'beta' }",
+        ts.isEnumDeclaration,
+      );
+      expect(isErasedAtEmit(constEnum)).toBe(true);
+      expect(isErasedAtEmit(regularEnum)).toBe(false);
+    });
+
     it("returns `true` for a class's index signature", () => {
       const node = findNode(
         "class Bag { [key: string]: number; }",

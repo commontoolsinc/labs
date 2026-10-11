@@ -1,6 +1,9 @@
 import ts from "typescript";
 import { getMethodCallTarget, isMethodCall } from "../ast/mod.ts";
-import { isErasedAtEmit } from "../ast/erased-syntax.ts";
+import {
+  hasOnlyErasedDeclarations,
+  isErasedAtEmit,
+} from "../ast/erased-syntax.ts";
 import {
   isDeclaredWithinFunction,
   isFunctionDeclaration,
@@ -202,6 +205,9 @@ export class CaptureCollector {
 
     const symbol = this.#checker.getSymbolAtLocation(root);
     if (!symbol) return undefined;
+    // A `const enum` has no runtime object: `Mode.Alpha` becomes the member's
+    // value, so it is nothing a callback closes over.
+    if (hasOnlyErasedDeclarations(symbol)) return undefined;
 
     const declarations = symbol.getDeclarations();
     if (!declarations || declarations.length === 0) return undefined;
@@ -320,7 +326,7 @@ export class CaptureCollector {
     }
 
     const symbol = this.#checker.getSymbolAtLocation(node);
-    if (!symbol) {
+    if (!symbol || hasOnlyErasedDeclarations(symbol)) {
       return undefined;
     }
 

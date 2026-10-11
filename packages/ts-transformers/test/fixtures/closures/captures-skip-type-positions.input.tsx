@@ -40,6 +40,10 @@ function formatterFor(name: string): <T>(value: T) => string {
 //   (item.value as { get: (key: string) => … })  → neither `get` nor `key`
 //   interface Setter { set(next: string): void } → no `next` capture
 //   interface Local extends Tagged / implements → no `Tagged` capture
+//   Mode.Alpha (a `const enum`, inlined)        → no `Mode` capture, in a
+//                                                 callback and in a JSX
+//                                                 expression; the regular
+//                                                 `enum` Kind is captured
 // and that a value inside a type-shaped node is still captured:
 //   class extends labeledBase(title)            → `title` captured
 //   formatterFor(title)<string>                 → `title` captured
@@ -51,6 +55,12 @@ export default pattern<State, { [UI]: VNode }>(
   ({ view, items, log, title }) => {
     interface Tagged {
       tag: string;
+    }
+    const enum Mode {
+      Alpha = "alpha",
+    }
+    enum Kind {
+      Beta = "beta",
     }
 
     const setIt = action(() => {
@@ -87,6 +97,10 @@ export default pattern<State, { [UI]: VNode }>(
       log.set(format(view.label));
     });
 
+    const viaEnums = action(() => {
+      log.set(`${Mode.Alpha}:${Kind.Beta}`);
+    });
+
     const summary = computed(() => {
       const copy: typeof view = view;
       const value = copy.value;
@@ -102,11 +116,13 @@ export default pattern<State, { [UI]: VNode }>(
           <button type="button" onClick={viaDeclarations}>declarations</button>
           <button type="button" onClick={viaClassExtends}>extends</button>
           <button type="button" onClick={viaInstantiation}>instantiate</button>
+          <button type="button" onClick={viaEnums}>enums</button>
           {items.map((item) => (
             <span>
               {typeof item.value === "object" && item.value !== null
                 ? String((item.value as { get: (key: string) => unknown }))
                 : item.name}
+              <b>{item.name + Mode.Alpha + Kind.Beta}</b>
             </span>
           ))}
         </div>

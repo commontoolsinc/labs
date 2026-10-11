@@ -154,6 +154,27 @@ const __cfHandler_4 = __cfHelpers.handler(false as const satisfies __cfHelpers.J
     const format = formatterFor(title)<string>;
     log.set(format(view.label));
 });
+const __cfHandler_5 = __cfHelpers.handler(false as const satisfies __cfHelpers.JSONSchema, {
+    type: "object",
+    properties: {
+        Kind: {
+            type: "object",
+            properties: {
+                Beta: {
+                    type: "string"
+                }
+            },
+            required: ["Beta"]
+        },
+        log: {
+            type: "string",
+            asCell: ["writeonly"]
+        }
+    },
+    required: ["Kind", "log"]
+} as const satisfies __cfHelpers.JSONSchema, (_, { log, Kind }) => {
+    log.set(`${Mode.Alpha}:${Kind.Beta}`);
+});
 const __cfLift_1 = __cfHelpers.lift<{
     view: View;
 }, string>(({ view }) => {
@@ -274,8 +295,41 @@ const __cfLift_4 = __cfHelpers.lift<{
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
+const __cfLift_5 = __cfHelpers.lift<{
+    item: {
+        name: string;
+    };
+    Kind: typeof Kind;
+}, string>(({ item, Kind }) => item.name + Mode.Alpha + Kind.Beta, {
+    type: "object",
+    properties: {
+        item: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string"
+                }
+            },
+            required: ["name"]
+        },
+        Kind: {
+            type: "object",
+            properties: {
+                Beta: {
+                    type: "string",
+                    "enum": ["beta"]
+                }
+            },
+            required: ["Beta"]
+        }
+    },
+    required: ["item", "Kind"]
+} as const satisfies __cfHelpers.JSONSchema, {
+    type: "string"
+} as const satisfies __cfHelpers.JSONSchema);
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
+    const Kind = __cf_pattern_input.params.Kind;
     return (<span>
               {__cfHelpers.ifElse({
         type: "boolean"
@@ -298,15 +352,36 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
         } })), __cfLift_4({ item: {
             value: item.key("value")
         } }), item.key("name"))}
+              <b>{__cfLift_5({
+        item: {
+            name: item.key("name")
+        },
+        Kind: Kind
+    })}</b>
             </span>);
 }, {
     type: "object",
     properties: {
         element: {
             $ref: "#/$defs/Item"
+        },
+        params: {
+            type: "object",
+            properties: {
+                Kind: {
+                    type: "object",
+                    properties: {
+                        Beta: {
+                            type: "string"
+                        }
+                    },
+                    required: ["Beta"]
+                }
+            },
+            required: ["Kind"]
         }
     },
-    required: ["element"],
+    required: ["element", "params"],
     $defs: {
         Item: {
             type: "object",
@@ -359,6 +434,10 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 //   (item.value as { get: (key: string) => … })  → neither `get` nor `key`
 //   interface Setter { set(next: string): void } → no `next` capture
 //   interface Local extends Tagged / implements → no `Tagged` capture
+//   Mode.Alpha (a `const enum`, inlined)        → no `Mode` capture, in a
+//                                                 callback and in a JSX
+//                                                 expression; the regular
+//                                                 `enum` Kind is captured
 // and that a value inside a type-shaped node is still captured:
 //   class extends labeledBase(title)            → `title` captured
 //   formatterFor(title)<string>                 → `title` captured
@@ -373,6 +452,12 @@ export default pattern((__cf_pattern_input) => {
     const title = __cf_pattern_input.key("title");
     interface Tagged {
         tag: string;
+    }
+    const enum Mode {
+        Alpha = "alpha"
+    }
+    enum Kind {
+        Beta = "beta"
     }
     const setIt = __cfHandler_1({
         view: view,
@@ -392,6 +477,12 @@ export default pattern((__cf_pattern_input) => {
             label: view.key("label")
         }
     }).for({ stream: "viaInstantiation" }, true);
+    const viaEnums = __cfHandler_5({
+        log: log,
+        Kind: {
+            Beta: Kind.Beta
+        }
+    }).for({ stream: "viaEnums" }, true);
     const summary = __cfLift_1({ view: view }).for("summary", true);
     return {
         [UI]: (<div>
@@ -399,7 +490,12 @@ export default pattern((__cf_pattern_input) => {
           <button type="button" onClick={viaDeclarations}>declarations</button>
           <button type="button" onClick={viaClassExtends}>extends</button>
           <button type="button" onClick={viaInstantiation}>instantiate</button>
-          {items.mapWithPattern(__cfPattern_1, {})}
+          <button type="button" onClick={viaEnums}>enums</button>
+          {items.mapWithPattern(__cfPattern_1, {
+                Kind: {
+                    Beta: Kind.Beta
+                }
+            })}
         </div>),
     };
 }, {
@@ -474,9 +570,11 @@ __cfReg({
     __cfHandler_2,
     __cfHandler_3,
     __cfHandler_4,
+    __cfHandler_5,
     __cfLift_1,
     __cfLift_2,
     __cfLift_3,
     __cfLift_4,
+    __cfLift_5,
     __cfPattern_1
 });
