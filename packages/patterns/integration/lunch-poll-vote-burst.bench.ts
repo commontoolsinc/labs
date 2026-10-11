@@ -4,8 +4,8 @@
  * Ten voters each cast a vote on each of ten lunch options, every one of the
  * hundred fired before any of them settles, and the measurement runs until
  * every one of the ten clients holds the whole result in its own vote list,
- * read at its runtime's quiescence: the moment each client's view is settled,
- * whichever arm served it. That is the quantity a person actually waits on at
+ * read at its runtime's quiescence with its rendered view demanded: the moment
+ * each client's view is settled, whichever arm served it. That is the quantity a person actually waits on at
  * lunchtime, and it is the one no other benchmark in the repository can see:
  * every other bench file drives a single runtime against its own private
  * storage server, where a second writer does not exist and a write conflict is
@@ -59,9 +59,11 @@
  * `diagnostics.log`.
  *
  * The harness hosts its own storage server, with a serving loop attached when
- * server execution is enabled. Both modes use ordinary worker clients without
- * renderer mounts, so the view-scoped web-client flag does not activate
- * selective replication here.
+ * server execution is enabled. Both modes use ordinary worker clients with no
+ * browser, each holding the worker reconciler's demand over the view as a
+ * mounted tab does, so the clients derive what they would show; the
+ * reconciler registers no view with the session, so the view-scoped
+ * web-client flag does not activate selective replication here.
  * The poll uses the `lunch-poll-keyed-votes` fixture's identity seam because
  * these clients do not render the `#profile` create surface.
  */
@@ -105,7 +107,17 @@ const TITLES = Array.from({ length: OPTIONS }, (_, i) => `Place ${i + 1}`);
 const harness = await MultiRuntimeHarness.create({
   programPath: PROGRAM_PATH,
   rootPath: ROOT_PATH,
-  sessions: NAMES.map((_, index) => ({ label: `voter-${index + 1}` })),
+  // Each voter holds a rendered view and nothing else, as a browser tab does:
+  // the clients derive the tallies and cards they would show, the burst's end
+  // is the moment that view is current rather than the moment the vote list
+  // is, and no client re-reads the whole result on every change, which the
+  // harness's default root watch would make it do.
+  watchPaths: [],
+  input: { renderPoll: true },
+  sessions: NAMES.map((_, index) => ({
+    label: `voter-${index + 1}`,
+    renderView: true,
+  })),
 });
 const voters = harness.sessions;
 

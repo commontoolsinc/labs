@@ -16,6 +16,7 @@ import {
   agentQueueIndexCell,
   AgentRunRecordSchema,
 } from "@commonfabric/runner/agent-run";
+import { WorkerReconciler } from "@commonfabric/html/worker";
 import { patternCoverageCollector } from "@commonfabric/integration/pattern-coverage";
 import { rowKeyOf } from "@commonfabric/integration/row-key";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
@@ -95,6 +96,15 @@ let resultSchema: unknown;
 let resultSinkCancel: (() => void) | undefined;
 let boundedReads = false;
 let watchPaths: readonly (readonly (string | number)[])[] = [[]];
+
+/**
+ * Whether this session holds a rendered view of the piece, as a mounted
+ * browser does: the worker reconciler's recursive demand over `$UI`, its
+ * operations discarded. Without it a session derives only what its watched
+ * paths read, and the view's own derivations never run on this client.
+ */
+let renderView = false;
+let viewMountCancel: (() => void) | undefined;
 
 /**
  * The result cells of the pieces other than the attached one that a command
@@ -234,6 +244,15 @@ async function attachPiece(next: PieceController): Promise<void> {
   resultSinkCancel = () => {
     for (const cancel of cancels) cancel();
   };
+  viewMountCancel?.();
+  viewMountCancel = renderView
+    ? new WorkerReconciler({
+      onOps: () => {},
+      onError: (error) => {
+        console.error("view render failed:", error);
+      },
+    }).mount(result().key("$UI").asSchema(rendererVDOMSchema))
+    : undefined;
 }
 
 /**
@@ -483,6 +502,7 @@ const handlers: Record<
       cfcWriteFloor,
       cfc,
       watchPaths: requestedWatchPaths,
+      renderView: requestedRenderView,
     },
   ) {
     const identity = await Identity.fromKeyPair(
@@ -494,6 +514,7 @@ const handlers: Record<
       (cfc as MultiRuntimeCfcOptions | undefined)?.cfcReadMaxConfidentiality !==
         undefined;
     if (Array.isArray(requestedWatchPaths)) watchPaths = requestedWatchPaths;
+    renderView = requestedRenderView === true;
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,
@@ -1397,6 +1418,8 @@ const handlers: Record<
 
   async dispose() {
     for (const intake of shareIntakes.splice(0)) intake.stop();
+    viewMountCancel?.();
+    viewMountCancel = undefined;
     resultSinkCancel?.();
     resultSinkCancel = undefined;
     piece = undefined;

@@ -140,6 +140,16 @@ export interface MultiRuntimeSessionSpec {
 
   /** Routes this session through a test relay backed by the same storage server. */
   apiUrl?: URL;
+
+  /**
+   * Hold a rendered view of the piece for the session's life, as a mounted
+   * browser does: the worker reconciler's recursive demand over `$UI`, its
+   * operations discarded. Without it a session derives only what its watched
+   * paths read, so the view's own derivations never run on the client and a
+   * measurement of "the view is current" measures the data alone.
+   */
+  renderView?: boolean;
+
   /**
    * Write-side `requiredIntegrity` floor for this session's runtime,
    * overriding the harness-wide setting. Set it per session to model a fleet
@@ -943,6 +953,7 @@ export class MultiRuntimeHarness {
           recordRejections: options.recordRejections === true,
           cfc: cfcFor(started),
           watchPaths: options.watchPaths as FabricValue,
+          ...(started.renderView === true ? { renderView: true } : {}),
           ...(started.wsDelayMs !== undefined
             ? { wsDelayMs: started.wsDelayMs }
             : {}),

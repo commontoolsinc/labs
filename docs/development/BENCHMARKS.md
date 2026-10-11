@@ -760,10 +760,14 @@ the harness no `apiUrl`, so it hosts an in-process storage server whether or
 not `API_URL` is set, matching the resolved posture: a plain one when server
 execution resolves OFF, and one with a serving loop attached when it resolves
 ON, by `EXPERIMENTAL_SERVER_EXECUTION=true` or by the first-party default.
-Both modes use ordinary worker
-clients, without a browser or renderer mounts. The view-scoped web-client flag
-therefore does not activate selective replication in this benchmark. Use the
-browser Topics benchmarks to measure that mode, and hold server execution
+Both modes use ordinary worker clients with no browser, each holding the
+worker reconciler's demand over the piece's view for the run, as a mounted tab
+does (`renderView` on the session, with the fixture showing the poll's own
+view under its `renderPoll` input), so a client derives the tallies and cards
+it would show and the measured end is the moment that view is current. The
+reconciler alone registers no view with the session, so the view-scoped
+web-client flag does not activate selective replication in this benchmark. Use
+the browser Topics benchmarks to measure that mode, and hold server execution
 constant when comparing replication flags.
 
 A burst's measured interval ends when every client's own vote list, read at
