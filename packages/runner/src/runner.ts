@@ -987,7 +987,8 @@ function readInstanceChildren(
 type UncarriedInstance = {
   name: string;
   legacyPartialCause?: JSONValue;
-  leftBehind?: string;
+  // The child at `legacyPartialCause`, and whether another instance keeps it.
+  atSpot?: { id: string; kept: boolean };
 };
 
 /** The instance name stamped on the child `child`, if any. */
@@ -13385,15 +13386,16 @@ export class Runner {
         "starts fresh",
       ]);
     }
-    for (const { name, legacyPartialCause, leftBehind } of uncarried) {
+    for (const { name, legacyPartialCause, atSpot } of uncarried) {
       logger.warn("instance-carry-over", () => [
         debugStr`instance $quote${name} of ` +
         `${resultCell.getAsNormalizedFullLink().id} starts fresh: it found ` +
         "no child to carry over from where a version without instance names " +
         "set one up" +
-        (leftBehind === undefined
+        (atSpot === undefined
           ? ""
-          : debugStr`; the child ${leftBehind} at its positional cause $quote${legacyPartialCause} is left where it is`),
+          : debugStr`; the child ${atSpot.id} at its positional cause $quote${legacyPartialCause} ` +
+            (atSpot.kept ? "is another instance's" : "is left where it is")),
       ]);
     }
     if (carried.size === 0) return;
@@ -13425,7 +13427,8 @@ export class Runner {
    * this is exact wherever that pattern is loaded in this runtime and names
    * the instance. Otherwise an instance carries over the one child, among the
    * positional spots the parent's manifest records, that runs the instance's
-   * own child pattern identity; failing that, the child at its own positional
+   * own child pattern identity and that no positional node of `pattern` sets
+   * up at its own spot; failing that, the child at its own positional
    * cause, unless the parent shows the children have moved spots. A child is
    * carried over by one instance at most.
    */
@@ -13492,6 +13495,26 @@ export class Runner {
       }
       claimed.add(documentKey(child));
       carried.set(name, child);
+    }
+    // A child that a positional node of `pattern` sets up at its own spot,
+    // under that node's own pattern identity, stays that node's child.
+    for (const node of nodes) {
+      if (!isPositionalPartialCause(node.partialCause)) continue;
+      const child = this.#childAtPartialCause(
+        tx,
+        parent,
+        node.module,
+        node.partialCause,
+      );
+      const held = getPatternIdentityRef(child);
+      const own = this.#runtime.patternManager.getArtifactEntryRef(
+        node.module.implementation as Pattern,
+      );
+      if (
+        held !== undefined && own !== undefined && samePatternRef(held, own)
+      ) {
+        claimed.add(documentKey(child.getAsNormalizedFullLink()));
+      }
     }
     // Without the previous pattern, or where it does not name the instance,
     // an instance carries over the one child, among the positional spots the
@@ -13565,7 +13588,7 @@ export class Runner {
         name,
         legacyPartialCause: descriptor.legacyPartialCause,
         ...(getPatternIdentityRef(left) !== undefined && {
-          leftBehind: left.getAsNormalizedFullLink().id,
+          atSpot: { id: link.id, kept: claimed.has(documentKey(link)) },
         }),
       });
     }

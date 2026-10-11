@@ -128,6 +128,14 @@ const POSITIONAL_WITH_SIBLING = parentProgram([
   "  return { views: [s, a], aCount: a.count, sCount: s.count };",
 ].join("\n"));
 
+// `DEPLOYED` with a second child of the same pattern, `n`, added after `a`
+// and bound to a `const`.
+const DEPLOYED_WITH_NAMED_ADDED = parentProgram([
+  "  const [a] = [Counter({ label: 'a' })];",
+  "  const n = Counter({ label: 'n' });",
+  "  return { views: [a, n], aCount: a.count, nCount: n.count };",
+].join("\n"));
+
 // The parent as deployed with an `Other` child ahead of two `Counter`
 // children.
 const DEPLOYED_THREE = parentProgram([
@@ -680,6 +688,33 @@ describe("instance-carry-over", () => {
         expect({ qCount: result.qCount, sCount: result.sCount }).toEqual({
           qCount: 7,
           sCount: 0,
+        });
+      });
+
+      it("leaves a child its pattern still sets up positionally to that spot, when a `const` instance of the same pattern is added", async () => {
+        const cell = await deployedParent("positional-kept-named-added", {
+          named: DEPLOYED,
+        });
+
+        const result = await update(cell, DEPLOYED_WITH_NAMED_ADDED);
+
+        expect({ aCount: result.aCount, nCount: result.nCount }).toEqual({
+          aCount: 7,
+          nCount: 0,
+        });
+      });
+
+      it("leaves a child its pattern still sets up positionally to that spot, when a `const` instance of the same pattern is added to a parent with no setup marker", async () => {
+        const cell = await deployedParent(
+          "positional-kept-named-added-no-marker",
+          { marker: "absent", named: DEPLOYED },
+        );
+
+        const result = await update(cell, DEPLOYED_WITH_NAMED_ADDED);
+
+        expect({ aCount: result.aCount, nCount: result.nCount }).toEqual({
+          aCount: 7,
+          nCount: 0,
         });
       });
     });

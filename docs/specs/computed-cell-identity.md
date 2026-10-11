@@ -150,12 +150,13 @@ these that applies:
    there, goes on to the next steps.
 2. Otherwise, it is the one set-up child, among the positional spots the
    parent's manifest records, whose `patternIdentity` is the instance's own
-   child pattern identity. More than one such child, or one
-   that two instances would each take, goes on to the next step. So an
-   instance bound to a `const` in place of an inline one takes the inline
-   one's child, and so does a new instance of the same pattern added where an
-   inline one was deleted, when that child is the only unclaimed positional
-   child of its identity.
+   child pattern identity, leaving out a child that a positional node of the
+   pattern still sets up at its own spot under that same identity. More than one
+   such child, or one that two instances would each take, goes on to the next
+   step. So an instance bound to a `const` in place of an inline one takes the
+   inline one's child, and so does a new instance of the same pattern added
+   where an inline one was deleted, when that child is the only unclaimed
+   positional child of its identity.
 3. Otherwise, it is the child at the instance's own `legacyPartialCause`,
    which is where the child runs with no instance names, unless the parent
    shows the children have moved spots: that child carries an instance name
@@ -165,7 +166,7 @@ these that applies:
    records.
 4. Otherwise nothing is carried over. The instance starts fresh, and the setup
    logs `instance-carry-over` naming it, its positional cause and the child
-   left set up there, if any.
+   set up there, if any, and whether another instance keeps that child.
 
 A child is carried over by one instance at most. A start's pre-sync loads the
 previous pattern by identity first. The carried child's link is recorded by
