@@ -144,12 +144,18 @@ names it carries the child over (`planInstanceCarryOver`), taking the first of
 these that applies:
 
 1. Where the pattern the parent last set up, which `patternSetupIdentity`
-   names, is loaded, the child is the one at the `legacyPartialCause` that
-   pattern gives the same instance name. This is exact.
+   names, is loaded and names the instance, the child is the one at the
+   `legacyPartialCause` that pattern gives the same instance name. This is
+   exact. An instance that pattern does not name, being new or positional
+   there, goes on to the next steps.
 2. Otherwise, it is the one set-up child, among the positional spots the
    parent's manifest records, whose `patternIdentity` is the instance's own
-   child pattern identity. This is exact too. More than one such child, or one
-   that two instances would each take, goes on to the next step.
+   child pattern identity. More than one such child, or one
+   that two instances would each take, goes on to the next step. So an
+   instance bound to a `const` in place of an inline one takes the inline
+   one's child, and so does a new instance of the same pattern added where an
+   inline one was deleted, when that child is the only unclaimed positional
+   child of its identity.
 3. Otherwise, it is the child at the instance's own `legacyPartialCause`,
    which is where the child runs with no instance names, unless the parent
    shows the children have moved spots: that child carries an instance name
@@ -179,8 +185,12 @@ where a schema then refuses the stored argument.
 A named instance stamps its name on the child it sets up, in the child's
 `instanceName` meta. The parent's setup refuses (`refuseDisplacedChildren`),
 with an error naming both pattern identities, before anything it stages
-commits, so a refused update leaves the piece running the pattern it ran
-before. A child is refused where it would set up:
+commits, so a refused update changes none of the piece's state, and a live
+update the guard refuses leaves the previous pattern running. The piece's
+pattern pointer still names the refused pattern, though, so a fresh start
+sets that pattern up, refuses again, and does not start the piece until the
+pointer names a pattern the guard accepts. A child is refused where it would
+set up:
 
 - over a child stamped with another instance's name, for a named instance or
   for a positional spot;

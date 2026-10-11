@@ -13422,12 +13422,12 @@ export class Runner {
    * child a version of the pattern without the name set up under the
    * instance's positional cause. That cause is the one the pattern the parent
    * last set up, which `patternSetupIdentity` names, gives the same name;
-   * this is exact wherever that pattern is loaded in this runtime. Where it is
-   * not, an instance carries over the one child, among the positional spots
-   * the parent's manifest records, that runs the instance's own child pattern
-   * identity; failing that, the child at its own positional cause, unless the
-   * parent shows the children have moved spots. A child is carried over by
-   * one instance at most.
+   * this is exact wherever that pattern is loaded in this runtime and names
+   * the instance. Otherwise an instance carries over the one child, among the
+   * positional spots the parent's manifest records, that runs the instance's
+   * own child pattern identity; failing that, the child at its own positional
+   * cause, unless the parent shows the children have moved spots. A child is
+   * carried over by one instance at most.
    */
   #planInstanceCarryOver(
     resultCell: Cell<any>,
@@ -13454,23 +13454,26 @@ export class Runner {
       module: Module;
       descriptor: DerivedInternalCellDescriptor;
     }[] = [];
+    const unnamedBefore: typeof unmatched = [];
     for (const descriptor of pending) {
       const name = instanceNameOfPartialCause(descriptor.partialCause)!;
-      // An instance the previous pattern does not name is new, with nothing
-      // to carry over.
+      const node = nodes.find((candidate) =>
+        deepEqual(candidate.partialCause, descriptor.partialCause)
+      );
+      if (node === undefined) {
+        uncarried.push({ name });
+        continue;
+      }
+      // An instance the previous pattern does not name is new, or was
+      // positional there: what it carries over, it finds by identity or at
+      // its own positional spot.
       if (
         previous !== undefined &&
         !previous.derivedInternalCells?.some((candidate) =>
           deepEqual(candidate.partialCause, descriptor.partialCause)
         )
       ) {
-        continue;
-      }
-      const node = nodes.find((candidate) =>
-        deepEqual(candidate.partialCause, descriptor.partialCause)
-      );
-      if (node === undefined) {
-        uncarried.push({ name });
+        unnamedBefore.push({ name, module: node.module, descriptor });
         continue;
       }
       if (previous === undefined) {
@@ -13490,11 +13493,12 @@ export class Runner {
       claimed.add(documentKey(child));
       carried.set(name, child);
     }
-    // Without the previous pattern, an instance carries over the one child,
-    // among the positional spots the parent's manifest records, whose pattern
-    // identity is the instance's own child pattern identity. A child two
-    // instances would each take goes to neither.
-    const picks = unmatched.map((entry) => ({
+    // Without the previous pattern, or where it does not name the instance,
+    // an instance carries over the one child, among the positional spots the
+    // parent's manifest records, whose pattern identity is the instance's own
+    // child pattern identity. A child two instances would each take goes to
+    // neither.
+    const picks = [...unmatched, ...unnamedBefore].map((entry) => ({
       entry,
       child: this.#soleRecordedChild(
         tx,
@@ -13517,12 +13521,15 @@ export class Runner {
       }
       claimed.add(documentKey(child));
       carried.set(pick.entry.name, child);
-      unmatched.splice(unmatched.indexOf(pick.entry), 1);
+      for (const list of [unmatched, unnamedBefore]) {
+        if (list.includes(pick.entry)) list.splice(list.indexOf(pick.entry), 1);
+      }
     }
     // What is left takes the child at its own positional spot, which is where
     // the child runs with no instance names, unless the parent shows the
     // children have moved spots.
-    for (const { name, module, descriptor } of unmatched) {
+    for (const entry of [...unmatched, ...unnamedBefore]) {
+      const { name, module, descriptor } = entry;
       const left = this.#childAtPartialCause(
         tx,
         parent,
@@ -13545,6 +13552,13 @@ export class Runner {
       ) {
         claimed.add(documentKey(link));
         carried.set(name, link);
+        continue;
+      }
+      // A new instance with nothing at its spot is simply new.
+      if (
+        unnamedBefore.includes(entry) &&
+        getPatternIdentityRef(left) === undefined
+      ) {
         continue;
       }
       uncarried.push({
@@ -13802,16 +13816,17 @@ export class Runner {
         pattern,
         module.implementation as Pattern,
         child,
-        instanceName,
+        partialCause,
       );
     }
   }
 
   /**
-   * Throws rather than let the child of `childPattern` set up over
-   * `storedChild` when that cell holds a different child the parent
-   * `resultCell` keeps elsewhere: a child a named instance of the parent
-   * carried over, or, at a positional spot, a sign that the parent's
+   * Throws rather than let the child of `childPattern`, at the spot
+   * `partialCause` names, set up over `storedChild` when that cell holds a
+   * different child the parent `resultCell` keeps elsewhere: a child stamped
+   * with another instance's name, a child another named instance carried
+   * over, or, where `partialCause` is positional, a sign that the parent's
    * positional children have moved spots, which is a child of
    * `childPattern`'s identity running at another positional spot, or another
    * positional spot of `pattern` setting up the identity `storedChild` runs.
@@ -13824,8 +13839,10 @@ export class Runner {
     pattern: Pattern,
     childPattern: Pattern,
     storedChild: Cell<any>,
-    instanceName: string | undefined,
+    partialCause: JSONValue,
   ): void {
+    const instanceName = instanceNameOfPartialCause(partialCause);
+    const positional = isPositionalPartialCause(partialCause);
     const stored = getPatternSetupIdentityRef(storedChild) ??
       getPatternIdentityRef(storedChild);
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
@@ -13834,9 +13851,11 @@ export class Runner {
     if (stored === undefined || incoming === undefined) return;
     const describe = (ref: { identity: string; symbol: string }) =>
       `${ref.identity}#${ref.symbol}`;
-    const holder = instanceName === undefined
+    const holder = instanceName !== undefined
+      ? `instance "${instanceName}"`
+      : positional
       ? "a positional spot"
-      : `instance "${instanceName}"`;
+      : debugStr`the spot $quote${partialCause}`;
     const stamped = getInstanceNameStamp(storedChild);
     if (stamped !== undefined && stamped !== instanceName) {
       throw new Error(
@@ -13860,7 +13879,7 @@ export class Runner {
           `the child of ${describe(stored)} that instance "${name}" carries`,
       );
     }
-    if (instanceName !== undefined || samePatternRef(stored, incoming)) return;
+    if (!positional || samePatternRef(stored, incoming)) return;
     for (const { module, partialCause } of subPatternNodes(pattern)) {
       if (!isPositionalPartialCause(partialCause)) continue;
       const other = this.#childAtPartialCause(

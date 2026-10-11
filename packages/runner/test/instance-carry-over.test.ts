@@ -12,6 +12,11 @@ import {
 } from "../src/builder/instance-name.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import {
+  getPatternSource,
+  getPieceSourceSnapshot,
+  preparePieceSourceTransitionBaseline,
+} from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("instance-carry-over");
@@ -611,6 +616,74 @@ describe("instance-carry-over", () => {
       expect(freshStarts() - before).toBe(1);
     });
 
+    describe("bound to a `const` where the deployed source left it positional", () => {
+      it("keeps its child's state", async () => {
+        const cell = await deployedParent("bound-later", {
+          named: DEPLOYED,
+        });
+
+        const result = await update(cell, NAMED);
+
+        expect(result.aCount).toBe(7);
+      });
+
+      it("keeps its child's state when a named sibling is inserted ahead of it", async () => {
+        const cell = await deployedParent("bound-later-named-sibling", {
+          named: DEPLOYED,
+        });
+
+        const result = await update(cell, NAMED_WITH_SIBLING);
+
+        expect({ aCount: result.aCount, sCount: result.sCount }).toEqual({
+          aCount: 7,
+          sCount: 0,
+        });
+      });
+
+      it("refuses to let a positional sibling inserted ahead of it take its child's state", async () => {
+        const cell = await deployedParent("bound-later-positional-sibling", {
+          named: DEPLOYED,
+        });
+
+        await expect(update(cell, POSITIONAL_SIBLING_OF_NAMED)).rejects
+          .toThrow(
+            /refusing to set up .*#Other for a positional spot over the child of .*#Counter that instance "a" carries/,
+          );
+      });
+
+      it("carries the one positional child of its pattern over, though the deployed source's instance was deleted", async () => {
+        // The judgment this makes: `p` is deleted, and `q`, a new instance of
+        // the same pattern elsewhere, takes `p`'s state, since `p`'s child was
+        // the only unclaimed positional child of that identity.
+
+        const cell = await deployedParent("deleted-then-added", {
+          deployed: parentProgram([
+            "  const [p] = [Counter({ label: 'p' })];",
+            "  return { views: [p], pCount: p.count };",
+          ].join("\n")),
+          named: parentProgram([
+            "  const [p] = [Counter({ label: 'p' })];",
+            "  return { views: [p], pCount: p.count };",
+          ].join("\n")),
+          counts: { pCount: 7 },
+        });
+
+        const result = await update(
+          cell,
+          parentProgram([
+            "  const s = Other({ label: 's' });",
+            "  const q = Counter({ label: 'q' });",
+            "  return { views: [s, q], qCount: q.count, sCount: s.count };",
+          ].join("\n")),
+        );
+
+        expect({ qCount: result.qCount, sCount: result.sCount }).toEqual({
+          qCount: 7,
+          sCount: 0,
+        });
+      });
+    });
+
     it("keeps the child it carried over across a further update", async () => {
       const cell = await deployedParent("further-update");
       await update(cell, NAMED_WITH_SIBLING);
@@ -761,6 +834,110 @@ describe("instance-carry-over", () => {
       await expect(update(cell, NAMED_TWO)).rejects.toThrow(
         /refusing to set up .*#Counter for instance "a" over the child of .*#Counter that instance "b" set up/,
       );
+    });
+  });
+
+  describe("an independently managed child", () => {
+    it("is resumed, not judged, when its parent updates beside a positional child of the pattern it started from", async () => {
+      // The child sits at a positional spot, and its own source moved on
+      // independently, so its identity is not the one its parent's node sets
+      // up, while the positional sibling runs exactly that one.
+
+      const target = (await Identity.fromPassphrase("independent child"))
+        .did();
+      const childPath = "/api/patterns/system/child.tsx";
+      const parentPath = "/api/patterns/system/parent.tsx";
+      const childSource = (marker: string) =>
+        [
+          "import { computed, pattern } from 'commonfabric';",
+          "export default pattern<{ value: string }, { marker: string }>(",
+          `  ({ value }) => ({ marker: computed(() => '${marker} ' + value) }),`,
+          ");",
+          "",
+        ].join("\n");
+      const parentProgramOf = (extra: string): RuntimeProgram => ({
+        main: parentPath,
+        files: [
+          {
+            name: parentPath,
+            contents: [
+              "import { pattern } from 'commonfabric';",
+              "import Child from './child.tsx';",
+              "export default pattern<Record<string, never>>(() => ({",
+              "  views: [",
+              `    Child.inSpace('${target}')({ value: 'parent' }),`,
+              "    Child({ value: 'inline' }),",
+              "  ],",
+              extra,
+              "}));",
+              "",
+            ].join("\n"),
+          },
+          { name: childPath, contents: childSource("original") },
+        ],
+      });
+      const parentPattern = await compile(parentProgramOf(""));
+      const cell = rt.getCell<Record<string, unknown>>(space, "independent");
+      const tx = rt.edit();
+      rt.runner.run(tx, parentPattern, {}, cell, {
+        sourceOrigin: "system:system/parent.tsx",
+      });
+      rt.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await cell.pull();
+      await rt.idle();
+      const child = cell.key("views").key(0).resolveAsCell();
+      await child.pull();
+      expect(getPatternSource(child)).toBe("system:system/child.tsx");
+      const candidate = await rt.patternManager.compilePattern({
+        main: childPath,
+        files: [{ name: childPath, contents: childSource("updated") }],
+      }, { space: child.space });
+      const expected = getPieceSourceSnapshot(child)!;
+      await rt.runner.runSynced(child, candidate, { value: "owner" }, {
+        pieceSourceTransition: {
+          revisionId: crypto.randomUUID(),
+          timestamp: Date.now(),
+          operation: "origin-update",
+          origin: expected.origin,
+          expected,
+          baseline: await preparePieceSourceTransitionBaseline(
+            rt,
+            child,
+            expected,
+          ),
+        },
+      });
+      await rt.idle();
+      rt.runner.stop(cell);
+
+      await update(cell, parentProgramOf("  extra: 1,"));
+
+      await child.pull();
+      expect(child.key("marker").get()).toBe("updated owner");
+    });
+  });
+
+  describe("a child at a spot a result key names", () => {
+    it("takes another pattern there without a refusal, beside positional children whose patterns were swapped", async () => {
+      // A named spot cannot shift, so the swap at the positional spot beside
+      // it is no sign that its child moved, as it would be for a positional
+      // one.
+
+      const keyed = (child: string, inline: string) =>
+        parentProgram([
+          `  const [i] = [${inline}({ label: 'i' })];`,
+          `  return { shown: ${child}({ label: 'k' }), views: [i] };`,
+        ].join("\n"));
+      const cell = await deployedParent("keyed-spot", {
+        deployed: keyed("Counter", "Other"),
+        named: keyed("Counter", "Other"),
+        counts: {},
+      });
+
+      const result = await update(cell, keyed("Other", "Counter"));
+
+      expect(result.shown).toBeDefined();
     });
   });
 
