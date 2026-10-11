@@ -146,7 +146,9 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // space other viewers reach, and each of them sees their OWN profile here.
   // A space-scoped draft or toggle would carry one viewer's edit form and
   // drafts into another's view, and that viewer's save would send them into
-  // their own profile.
+  // their own profile. The drafts share the toggle's scope: entering edit
+  // mode reseeds them, so per-user drafts would be overwritten by another of
+  // the same person's sessions opening its form.
   const nameDraft = Writable.perSession.of<string>("");
   const avatarDraft = Writable.perSession.of<string>("");
   const bioDraft = Writable.perSession.of<string>("");

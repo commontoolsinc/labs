@@ -3,7 +3,8 @@
  * in a space other viewers reach. Its edit-mode toggle, and the drafts beside
  * it, must therefore be each session's own: `isEditing`, computed from the
  * toggle, is placed behind one shared redirect that names a per-session
- * instance, as `profile-home.tsx`'s own toggle is.
+ * instance, as `profile-home.tsx`'s edit toggle is. The drafts beside it are
+ * not exported, so this covers the toggle.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
