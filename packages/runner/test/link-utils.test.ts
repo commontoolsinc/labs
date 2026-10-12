@@ -15,6 +15,7 @@ import {
   createSigilLinkFromParsedLink,
   decodeJsonPointer,
   encodeJsonPointer,
+  externalizeLinkSchemasInValue,
   inlineExternalSchemaRefsInValue,
   isCellLink,
   isSigilLink,
@@ -809,6 +810,48 @@ describe("link-utils", () => {
       ).schema;
       expect(first).toEqual(document);
       expect(second).toBe(first);
+    });
+  });
+
+  describe("externalizeLinkSchemasInValue", () => {
+    it("stamps a reference on an inline link schema and leaves the rest as it is", () => {
+      setContentAddressedSchemasConfig(true);
+      const document: JSONSchema = {
+        type: "object",
+        properties: { name: { type: "string" } },
+      };
+      const link = (schema: JSONSchema) => ({
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:externalized-target",
+            path: [],
+            schema,
+          },
+        },
+      });
+      const value = {
+        inline: link(document),
+        trivial: link({}),
+        plain: { name: "Ada" },
+      };
+      const stored = externalizeLinkSchemasInValue(value);
+      const stamped = linkRefPayload(stored.inline).schema as { $ref: string };
+      expect(stamped.$ref).toBe(
+        `cid:${internSchemaAsTaggedHashString(document)}`,
+      );
+      expect(resolvedSchema(stamped)).toEqual(document);
+      expect(stored.trivial).toBe(value.trivial);
+      expect(stored.plain).toBe(value.plain);
+      // A second pass finds nothing to rewrite.
+      expect(externalizeLinkSchemasInValue(stored)).toBe(stored);
+    });
+
+    it("returns a value carrying no inline link schema as it is", () => {
+      setContentAddressedSchemasConfig(true);
+      const value = {
+        entry: { "/": { [LINK_V1_TAG]: { id: "of:x", path: [] } } },
+      };
+      expect(externalizeLinkSchemasInValue(value)).toBe(value);
     });
   });
 

@@ -361,6 +361,41 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
 }
 
 /**
+ * Rewrites inline link schemas inside `value` to their reference form, the
+ * form a link created by `createSigilLinkFromParsedLink()` carries with the
+ * flag on, registering each closure in the realm registry as that does. A
+ * value copied out of a `data:` document carries its link schemas inline
+ * (`inlineExternalSchemaRefsInValue`), and written as it stands into an
+ * ordinary document it would store, and send, every closure in full for
+ * every link: a nested instance's argument document carries one per captured
+ * input. A reference already stamped, a trivial schema, and a schema
+ * decomposition refuses ride through unchanged. The value is rebuilt only
+ * along the paths that change, so a value carrying nothing to rewrite is
+ * returned as it is.
+ */
+export function externalizeLinkSchemasInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
+    if (!isObjectNotArray(schema) || !isNontrivialSchema(schema)) {
+      return schema;
+    }
+    if (typeof schema.$ref === "string" && isExternalSchemaRef(schema.$ref)) {
+      return schema;
+    }
+    const externalized = externalizeLinkSchema(
+      schema as JSONSchema,
+      KeepAsCell.All,
+    );
+    return isObjectNotArray(externalized) &&
+        typeof externalized.$ref === "string" &&
+        isExternalSchemaRef(externalized.$ref)
+      ? externalized as FabricValue
+      : schema;
+  }) as T;
+}
+
+/**
  * Creates a sigil link, optionally a write redirect, with shared logic
  */
 export function createSigilLinkFromParsedLink(
