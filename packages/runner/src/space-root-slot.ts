@@ -22,8 +22,11 @@ export class SpaceRootMissingError extends Error {
     super(
       `${space} has no root yet, so a write beneath its \`defaultPattern\` ` +
         `slot is refused rather than landing in the space cell. A client ` +
-        `runtime brings a user's Home root up ahead of a handler that writes ` +
-        `under it; any other space gets its root when it is first opened.`,
+        `runtime brings a user's Home root up ahead of a handler that holds ` +
+        `a cell beneath it. Any other space gets its root when an OWNER of ` +
+        `it opens it on a client runtime, or, under server execution, from ` +
+        `the space's own server once the space is active and its owner ` +
+        `resolves; a user with WRITE alone does not bring it up by opening it.`,
     );
     this.name = "SpaceRootMissingError";
   }
