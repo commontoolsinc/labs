@@ -1736,7 +1736,15 @@ export class V2StorageTransaction implements IStorageTransaction {
         journalIndex: this.#activityClock++,
       };
       this.#recordReadActivity(readActivity);
-      this.#invalidateReactivityLog();
+      // The log lists a read the scheduler ignores only as an attempted
+      // write, so any other such read leaves the log it was built from
+      // standing (`#buildReactivityLog`).
+      if (
+        !isReadIgnoredForScheduling(readActivity.meta) ||
+        isReadMarkedAsAttemptedWrite(readActivity.meta)
+      ) {
+        this.#invalidateReactivityLog();
+      }
     }
     if (options?.trackReadWithoutLoad === true) {
       if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {

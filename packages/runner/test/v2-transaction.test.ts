@@ -1053,6 +1053,31 @@ describe("v2-transaction", () => {
       return { storage, address, tx: storage.edit() };
     };
 
+    it("keeps the log across a read the scheduler ignores", async () => {
+      const { storage, address, tx } = await writerOverCommittedDocument(
+        "of:v2-transaction-log-ignored-read",
+      );
+      try {
+        expect(tx.write({ ...address, path: ["value", "b"] }, 2).ok)
+          .toBeTruthy();
+        const built = tx.getReactivityLog!();
+        expect(
+          tx.read({ ...address, path: ["value", "a"] }, {
+            meta: stableInternalVerifierRead,
+          }).ok,
+        ).toBeTruthy();
+        expect(tx.getReactivityLog!()).toBe(built);
+        expect(tx.read({ ...address, path: ["value", "a"] }).ok)
+          .toBeTruthy();
+        const after = tx.getReactivityLog!();
+        expect(after).not.toBe(built);
+        expect(after.reads.map(({ path }) => path)).toEqual([["value", "a"]]);
+      } finally {
+        tx.abort();
+        await storage.close();
+      }
+    });
+
     it("returns a write made after the log was last built", async () => {
       const { storage, address, tx } = await writerOverCommittedDocument(
         "of:v2-transaction-log-after-build",
