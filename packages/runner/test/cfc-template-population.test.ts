@@ -27,6 +27,7 @@ import {
   linkResolutionProbe,
   machineryRead,
 } from "../src/storage/reactivity-log.ts";
+import { labelsThroughLink } from "./support/reached-labels.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-template-population");
 const foreignSigner = await Identity.fromPassphrase(
@@ -785,8 +786,10 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     // A dereference retains the restrictions of the reference it follows
     // (CFC §4.6.3, §8.2.4): the probe of the followed slot consumes what a
     // standalone probe of it does, the pointer label and the membership
-    // template. A probe carrying `machineryRead` consumes nothing, traced or
-    // not.
+    // template. The element's own label is not among them: the slot stores
+    // nothing of it (§8.2, §8.12.8), and only a content read of the element
+    // consumes it. A probe carrying `machineryRead` consumes nothing, traced
+    // or not.
 
     const rt = makeRuntime();
     const elId = await seedDoc(rt, "gp-el-tc", { n: 4 }, [
@@ -810,7 +813,12 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
 
     const followed = await flowJoinOf(rt, tracedProbe);
     expect(followed).toContainEqual("memb-secret");
-    expect(followed).toContainEqual("el-label");
+    expect(followed).not.toContainEqual("el-label");
+    const content = await flowJoinOf(rt, (tx) => {
+      tracedProbe(tx);
+      tx.readOrThrow(readAddress(elId, []));
+    });
+    expect(content).toContainEqual("el-label");
     expect(
       await flowJoinOf(
         rt,
@@ -819,21 +827,22 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     ).toEqual([]);
   });
 
-  it("puts a labeled element's own label at the slot that holds it", async () => {
+  it("stores none of a labeled element's label at the slot that holds it, and reaches it through the slot", async () => {
     // The marked-read case earlier in this block runs over an element
     // carrying no label, so the empty join it measures would be empty
     // whatever the classification did. This one gives the element a label of
     // its own, which is what a coordinator's marked scope stops consuming,
     // and asks where that label is instead.
     //
-    // It is at the slot. `list.set(members)` writes a link per member, and
-    // the link write mints the source document's label at the slot the link
-    // lands in, so a reader reaching element 0 through the container consumes
-    // it. The marked wiring reads add nothing beyond that; the same reads
-    // unmarked add the coarser copy over the transaction.
+    // It is on the element. `list.set(members)` writes a link per member,
+    // and the slot stores the reference's own label and nothing of the
+    // element's (CFC §8.2, §8.12.8), so a reader that dereferences element 0
+    // through the slot reaches the label where it is, and only a content
+    // read of the element consumes it. The wiring probe of the slot consumes
+    // none of it, marked or not.
 
     const rt = makeRuntime();
-    await seedDoc(rt, "gp-el-lab", { n: 1 }, [
+    const elId = await seedDoc(rt, "gp-el-lab", { n: 1 }, [
       { path: [], label: { confidentiality: ["el-label"] } },
     ]);
     const criteriaId = await seedDoc(rt, "gp-criteria-lab", { keep: true }, []);
@@ -845,7 +854,14 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
       entry.origin === "link" && entry.path.join("/") === "0"
     );
     expect(slotEntries.flatMap((entry) => entry.label.confidentiality ?? []))
-      .toEqual(["el-label"]);
+      .toEqual([]);
+    expect(
+      labelsThroughLink(rt, { space, id: listId, path: ["0"] }, {
+        space,
+        id: elId,
+        path: [],
+      }).confidentiality,
+    ).toContainEqual("el-label");
 
     const probeSlot = (tx: ReturnType<Runtime["edit"]>) =>
       tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
@@ -855,10 +871,15 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     });
     expect(marked).toEqual([]);
 
-    // The control: the same probe unmarked does consume it, so the label the
-    // marked probe left alone was there to be consumed.
     const unmarked = await flowJoinOf(rt, (tx) => probeSlot(tx));
-    expect(unmarked).toContainEqual("el-label");
+    expect(unmarked).not.toContainEqual("el-label");
+
+    // The control: a content read of the element does consume it, so the
+    // label the probes left alone was there to be consumed.
+    const content = await flowJoinOf(rt, (tx) => {
+      tx.readOrThrow(readAddress(elId, []));
+    });
+    expect(content).toContainEqual("el-label");
   });
 });
 

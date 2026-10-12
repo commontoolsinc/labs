@@ -2498,10 +2498,19 @@ class VerifierMetadataResolver {
     return label;
   }
 
-  /** Reuses projections while their validated source envelope is unchanged. */
+  /**
+   * Reuses projections while their validated source envelope is unchanged.
+   *
+   * A path that holds a reference is a slot: the principal claims its
+   * containers declare above it describe content their authors wrote, and a
+   * reference staged into a container is not that content (CFC §8.15.4), so
+   * with `holdsReference` those claims are left out of the projection as a
+   * link entry at the slot would leave them out.
+   */
   projection(
     metadata: CfcMetadata | undefined,
     path: readonly string[],
+    holdsReference = false,
   ): LinkSourceProjection | undefined {
     if (metadata === undefined) return undefined;
     let views = this.#views.get(metadata);
@@ -2509,7 +2518,7 @@ class VerifierMetadataResolver {
       views = new Map();
       this.#views.set(metadata, views);
     }
-    const key = pathKey(path);
+    const key = holdsReference ? `${pathKey(path)}\u0000ref` : pathKey(path);
     if (!views.has(key)) {
       let index = this.#viewIndexes.get(metadata);
       if (index === undefined) {
@@ -2522,10 +2531,18 @@ class VerifierMetadataResolver {
         this.#viewIndexes.set(metadata, index);
       }
       const logicalPath = canonicalizeLogicalPath(path);
-      const projected = withoutShadowedPrincipalClaims(
+      const covering = withoutShadowedPrincipalClaims(
         index.overlapping(logicalPath).map(({ entry }) => entry),
         logicalPath,
       );
+      const projected = holdsReference
+        ? covering.map((entry) =>
+          entry.path.length < logicalPath.length &&
+            isPrefix(entry.path, logicalPath)
+            ? { ...entry, label: withoutPrincipalClaims(entry.label) }
+            : entry
+        )
+        : covering;
       views.set(key, {
         view: cfcLabelViewFromMetadata({
           ...metadata,
@@ -4115,8 +4132,8 @@ const forEachFlowObservation = (
     // and the list coordinators' scaffolding, which probe prior slots to
     // compare identities. What such a probe does with the reference it finds
     // is write that same reference somewhere else, and the link write
-    // carries the source's label to the slot it lands in
-    // (`derivePersistedLinkLabel` below), so the pointer's protection
+    // carries the reference's own restriction to the slot it lands in
+    // (`linkSlotLabel` below), so the pointer's protection
     // arrives pointwise at the destination. Joining it into the flow stamp
     // as well smears it over everything else the wiring transaction wrote —
     // in a piece's case over the whole result projection, which is what took
@@ -5245,6 +5262,14 @@ const schemaClaimsForLinkWrites = (
   }
   for (const entry of cfcSchemaEntries(schema)) {
     if (!targetPaths.overlaps(entry.path)) {
+      continue;
+    }
+    // A claim inside an `anyOf` or `oneOf` branch holds for the values that
+    // branch matches, which a reference slot does not show; the value's own
+    // write, in the document the reference reaches, is where that branch is
+    // selected and its claim checked. Overlaying it here unconditionally
+    // would make every branch a carrier, which the merge refuses.
+    if (entry.conditional === true) {
       continue;
     }
     const policySchema = linkWritePolicyOnlySchema(entry.schema, entry.path);
@@ -8317,8 +8342,16 @@ const withCheckedPrincipalClaims = (
   };
 };
 
-/** Derives the link's root label and its authoritative source view. */
-const derivePersistedLinkLabel = (
+/**
+ * The evidence a link's source holds at the linked path: its stored label
+ * there, joined with the label the schemas this transaction holds for the
+ * source declare at that path, and with the link's own schema and carried
+ * view. A write floor on the receiving slot consults it (CFC §8.2.6: a floor
+ * that governs linked contents resolves the current evidence at the target),
+ * and nothing persists it: the slot's own label is `linkSlotLabel`, and the
+ * source's labels stay with the source (§8.2.5).
+ */
+const linkedSourceEvidence = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
   candidateSchemas: ReadonlyMap<string, JSONSchema>,
@@ -8330,6 +8363,34 @@ const derivePersistedLinkLabel = (
   pendingSourceView?: CfcLabelView,
 ): { label?: IFCLabel; reason?: string; sourceView?: CfcLabelView } => {
   metadataResolver.refresh();
+  // Where the source reaches its value through a link stored before this
+  // transaction, the evidence is the label of the document holding the
+  // value, at the value's own position: a stored link's slot describes the
+  // reference, not what its target holds now (CFC §8.2.6). Links this
+  // transaction stages into the source are resolved through the pending
+  // source view instead, so only a walk that followed a stored link moves.
+  const resolvedSource = resolveValueThroughLinks(tx, input.source);
+  if (
+    resolvedSource !== undefined && resolvedSource !== "absent" &&
+    resolvedSource.stored &&
+    (targetKey(resolvedSource.held) !== targetKey(input.source) ||
+      !arraysEqual(
+        canonicalizeLogicalPath(resolvedSource.held.path),
+        canonicalizeLogicalPath(input.source.path),
+      ))
+  ) {
+    return linkedSourceEvidence(
+      tx,
+      { ...input, source: resolvedSource.held },
+      candidateSchemas,
+      authoringIdentity,
+      metadataResolver,
+      valueTargets,
+      linkWrites,
+      bindCreator,
+      pendingSourceView,
+    );
+  }
   let sourceMetadata = metadataResolver.read(
     input.source.space,
     input.source.id as URI,
@@ -8421,9 +8482,9 @@ const derivePersistedLinkLabel = (
       input.target.path,
     ),
   ));
-  // Counted without the principal claims `persistedLinkEntries` strips from
-  // the view, so a view carrying only those does not stand in for the
-  // source's labels.
+  // Counted without the principal claims a link write never takes from its
+  // value, so a view carrying only those does not stand in for the source's
+  // labels.
   const hasCarriedLabel =
     input.cfcLabelView?.entries.some((entry) =>
       hasLabelValues(withoutPrincipalClaims(entry.label))
@@ -8487,9 +8548,19 @@ const derivePersistedLinkLabel = (
       };
     }
   }
+  // The source path holds a reference where the transaction's final value
+  // there is a link: the source's containers then vouch for nothing it
+  // reaches.
+  const sourceHoldsReference = isPrimitiveCellLink(tx.readValueOrThrow({
+    space: input.source.space,
+    id: input.source.id as URI,
+    scope: input.source.scope,
+    path: [...input.source.path],
+  }, { meta: INTERNAL_VERIFIER_META }));
   const storedSource = metadataResolver.projection(
     projectionMetadata,
     input.source.path,
+    sourceHoldsReference,
   );
   const storedSourceView = storedSource?.view;
   const sourceView = pendingSourceView === undefined
@@ -8548,85 +8619,122 @@ const derivePersistedLinkLabel = (
 };
 
 /**
- * Collects the labels a link write persists, relative to its receiving slot.
- * Every hop gates evidence and joins carried views with authoritative labels.
+ * The label a link write persists at its receiving slot: the reference's own
+ * restrictions (CFC §8.2.3, §8.12.8). Its confidentiality is the link
+ * schema's declared confidentiality, bound to the acting principal where it
+ * names the current one, joined with the restriction the written handle
+ * carries at its root, which is how the handle was acquired. Its integrity is
+ * the link schema's, gated against runtime-minted evidence an author could
+ * forge, plus the runtime's own `LinkReference`. Nothing of the source's
+ * labels is in it: the source's labels stay with the source and are consumed
+ * when the reference is followed (§8.2.4), and the persist loop joins the
+ * creating attempt's flow join onto the entry where flow labels persist.
+ *
+ * A handle's carried view below its root describes positions of the target,
+ * which the target labels itself, so only the root is read.
  */
-const persistedLinkEntries = (
+const linkSlotLabel = (
   tx: IExtendedStorageTransaction,
   input: LinkWritePolicyInput,
-  result: ReturnType<typeof derivePersistedLinkLabel>,
-  linkIdentity: ImplementationIdentity | undefined,
+  authoringIdentity: ImplementationIdentity | undefined,
+  bindCreator: CreatorBinding,
   metadataResolver: VerifierMetadataResolver,
-): { entries: CfcLabelView["entries"]; reasons: string[] } => {
-  const entries: CfcLabelView["entries"] = [];
-  const reasons: string[] = [];
-  if (result.label !== undefined && hasLabelValues(result.label)) {
-    entries.push({
-      path: [],
-      label: result.label,
-    });
-  }
-  const pushGatedLinkEntry = (entry: {
-    path: readonly string[];
-    label: IFCLabel;
-  }) => {
-    const gated = gateRuntimeMintedIntegrity(
-      cloneLabel(entry.label),
-      linkIdentity,
+): { label?: IFCLabel; reason?: string } => {
+  const mintOptions = labelMintOptionsAt(
+    tx,
+    input.target,
+    input.target.path,
+  );
+  let linkSchemaLabel = withoutPrincipalClaims(rootLabelFromSchema(
+    tx,
+    input.linkSchema,
+    input.source.space,
+    mintOptions,
+  ));
+  const carriedRoot = joinLabels(
+    (input.cfcLabelView?.entries ?? [])
+      .filter((entry) => canonicalizeLogicalPath(entry.path).length === 0)
+      .map((entry) => ({ confidentiality: entry.label.confidentiality })),
+  );
+  // A declaration naming the current principal, in the link's schema or in
+  // the handle's carried restriction, is a reader placeholder. The schema is
+  // the source's own as often as not, so the reader it names is the one the
+  // source stores at the linked path where it stores one; a declaration the
+  // source does not resolve binds as a declaration on the receiving document
+  // does, and one that resolves neither way refuses the write.
+  const needsReader = (label: IFCLabel): boolean =>
+    (label.confidentiality ?? []).some(isCurrentPrincipalUserClause);
+  if (needsReader(linkSchemaLabel) || needsReader(carriedRoot)) {
+    const sourceMetadata = metadataResolver.read(
+      input.source.space,
+      input.source.id as URI,
+      input.source.scope,
+      "application/json",
     );
-    if (!hasLabelValues(gated)) {
-      return;
+    const stored = sourceMetadata === undefined ? [] : metadataResolver.label(
+      sourceMetadata,
+      canonicalizeLogicalPath(input.source.path),
+    )?.confidentiality ?? [];
+    const boundCarried = bindLinkCurrentPrincipalClauses(
+      carriedRoot.confidentiality ?? [],
+      stored,
+    );
+    if (boundCarried === undefined) {
+      return {
+        reason: verdictReason(
+          "Link CurrentPrincipal confidentiality requires a concrete reader",
+        ),
+      };
     }
-    entries.push({
-      path: canonicalizeLogicalPath(entry.path),
-      label: gated,
-    });
-  };
-  const rederivedView = result.sourceView;
-  for (const entry of rederivedView?.entries ?? []) {
-    pushGatedLinkEntry(entry);
-  }
-  // A carried child view must include its authoritative cover: a more
-  // specific entry shadows its ancestor during longest-prefix reads.
-  const authoritativeCoverFor = (
-    entryPath: readonly string[],
-  ): IFCLabel | undefined => {
-    tx.noteCfcPreparationWork?.("authoritativeCoverCalls");
-    return metadataResolver.cover(
-      rederivedView,
-      entryPath,
-      result.label !== undefined && hasLabelValues(result.label)
-        ? result.label
-        : undefined,
+    carriedRoot.confidentiality = [...boundCarried];
+    let boundSchema = bindLinkCurrentPrincipalClauses(
+      linkSchemaLabel.confidentiality ?? [],
+      stored,
     );
-  };
-  for (const entry of input.cfcLabelView?.entries ?? []) {
-    const gated = withoutPrincipalClaims(gateRuntimeMintedIntegrity(
-      cloneLabel(entry.label),
-      linkIdentity,
-    ));
-    if (!hasLabelValues(gated)) {
-      continue;
-    }
-    const entryPath = canonicalizeLogicalPath(entry.path);
-    const cover = authoritativeCoverFor(entryPath);
-    const bound = bindLinkCurrentPrincipalClauses(
-      gated.confidentiality ?? [],
-      cover?.confidentiality ?? [],
-    );
-    if (bound === undefined) {
-      reasons.push(verdictReason(
-        "Link CurrentPrincipal confidentiality requires a concrete stored reader",
+    if (boundSchema === undefined && input.linkSchema !== undefined) {
+      linkSchemaLabel = withoutPrincipalClaims(rootLabelFromSchema(
+        tx,
+        bindCreator(input.linkSchema, targetKey(input.target)),
+        input.source.space,
+        mintOptions,
       ));
-      continue;
+      boundSchema = needsReader(linkSchemaLabel)
+        ? undefined
+        : linkSchemaLabel.confidentiality ?? [];
     }
-    gated.confidentiality = [...bound];
-    entries.push({
-      path: entryPath,
-      label: cover !== undefined ? mergeLabels(cover, gated) : gated,
-    });
+    if (boundSchema === undefined) {
+      return {
+        reason: verdictReason(
+          "Link CurrentPrincipal confidentiality requires a concrete reader",
+        ),
+      };
+    }
+    linkSchemaLabel = { ...linkSchemaLabel, confidentiality: [...boundSchema] };
   }
-  return { entries, reasons };
+  const gatedIntegrity = gateRuntimeMintedIntegrity(
+    { integrity: linkSchemaLabel.integrity },
+    authoringIdentity,
+  ).integrity;
+  const own: IFCLabel = {
+    confidentiality: mergeLabelValues(
+      linkSchemaLabel.confidentiality,
+      carriedRoot.confidentiality,
+    ),
+    integrity: gatedIntegrity,
+  };
+  // A reference with no restriction of its own persists no entry: the
+  // runtime's endorsement restates the link beside it, and an entry holding
+  // only that would say nothing a reader of the slot does not already see.
+  if (!hasLabelValues(own)) return {};
+  return {
+    label: {
+      ...own,
+      integrity: mergeLabelValues(
+        own.integrity,
+        [linkReferenceIntegrity(input)],
+      ),
+    },
+  };
 };
 
 /** Result of resolving a link write through its pending reference sources. */
@@ -8643,8 +8751,15 @@ type DerivedLink = {
 
 /** Resolves recorded links through the references staged into their sources. */
 type LinkLabelDeriver = {
-  /** Derives the labels a recorded link persists at its receiving slot. */
+  /** Derives the label a recorded link persists at its receiving slot. */
   persisted: (input: LinkWritePolicyInput) => Generator<void, DerivedLink>;
+
+  /**
+   * Derives the evidence a recorded link's source holds at the linked path,
+   * through the references staged into the source, for a write floor on the
+   * receiving slot. Nothing persists it.
+   */
+  evidence: (input: LinkWritePolicyInput) => Generator<void, DerivedLink>;
 
   /**
    * Derives the label a recorded link carries at `relativePath` below its
@@ -8901,7 +9016,7 @@ const createLinkLabelDeriver = (
     }
     yield;
     const identity = identityForInput(input);
-    const result = derivePersistedLinkLabel(
+    const result = linkedSourceEvidence(
       tx,
       input,
       candidates,
@@ -8916,40 +9031,63 @@ const createLinkLabelDeriver = (
       return { entries: [], reasons: [result.reason] };
     }
     yield;
-    // A back-edge supplies only the finite projection its caller requested.
-    // Its complete carried view is checked at the first occurrence of this
-    // link, where all of that view's authoritative paths are expanded.
-    const carriedInput = walk.expanded.has(input) && input.cfcLabelView
-      ? {
-        ...input,
-        cfcLabelView: {
-          ...input.cfcLabelView,
-          entries: input.cfcLabelView.entries.filter((entry) =>
-            walk.requested.some(({ path }) =>
-              pathPatternsOverlap(canonicalizeLogicalPath(entry.path), path)
-            )
-          ),
-        },
-      }
-      : input;
-    const derived = persistedLinkEntries(
-      tx,
-      carriedInput,
-      result,
-      identity,
-      metadataResolver,
-    );
-    const resolved = {
-      ...derived,
-      label: derived.reasons.length === 0 ? result.label : undefined,
-    };
+    // What a downstream hop sees of this one: the label at the linked path
+    // and the source's entries beneath it, the runtime-minted evidence an
+    // author could have written into a schema or a carried view gated out.
+    const entries: CfcLabelView["entries"] = [];
+    if (result.label !== undefined && hasLabelValues(result.label)) {
+      entries.push({ path: [], label: result.label });
+    }
+    for (const entry of result.sourceView?.entries ?? []) {
+      const gated = gateRuntimeMintedIntegrity(
+        cloneLabel(entry.label),
+        identity,
+      );
+      if (!hasLabelValues(gated)) continue;
+      entries.push({ path: canonicalizeLogicalPath(entry.path), label: gated });
+    }
+    // A carried view is the writer's to choose, so a principal claim in it is
+    // no evidence of anyone's authorship.
+    for (const entry of input.cfcLabelView?.entries ?? []) {
+      const gated = withoutPrincipalClaims(
+        gateRuntimeMintedIntegrity(cloneLabel(entry.label), identity),
+      );
+      if (!hasLabelValues(gated)) continue;
+      entries.push({ path: canonicalizeLogicalPath(entry.path), label: gated });
+    }
+    const resolved: DerivedLink = { label: result.label, entries, reasons: [] };
     memo?.set(input, resolved);
     return resolved;
   };
 
-  const persisted = (
+  const evidence = (
     input: LinkWritePolicyInput,
   ): Generator<void, DerivedLink> => derive(input, emptyWalk());
+
+  // The slot's own label needs no walk: it depends on the link schema, the
+  // written handle and the acting principal, never on what the source holds.
+  const persisted = function* (
+    input: LinkWritePolicyInput,
+  ): Generator<void, DerivedLink> {
+    const result = linkSlotLabel(
+      tx,
+      input,
+      identityForInput(input),
+      bindCreator,
+      metadataResolver,
+    );
+    if (result.reason !== undefined) {
+      return { entries: [], reasons: [result.reason] };
+    }
+    yield;
+    return {
+      label: result.label,
+      entries: result.label !== undefined && hasLabelValues(result.label)
+        ? [{ path: [], label: result.label }]
+        : [],
+      reasons: [],
+    };
+  };
 
   // The label below the receiving slot is the source's own label at the
   // matching path, credited only when the link itself derives. The carried
@@ -8979,7 +9117,7 @@ const createLinkLabelDeriver = (
     };
     const pending = yield* pendingSourceView(nested, emptyWalk());
     if (pending.reasons.length > 0) return undefined;
-    return derivePersistedLinkLabel(
+    return linkedSourceEvidence(
       tx,
       nested,
       candidates,
@@ -8992,7 +9130,7 @@ const createLinkLabelDeriver = (
     ).label;
   };
 
-  return { persisted, labelAt };
+  return { persisted, evidence, labelAt };
 };
 
 const cloneLabel = (label: IFCLabel): IFCLabel => ({
@@ -10589,10 +10727,9 @@ const verifyWriteFloor = function* (
     // when plain data was written (crediting the flow meet when available).
     const contributions: (readonly CfcAtom[])[] = [];
     for (const input of linksHere) {
-      const derived = yield* ctx.linkLabels.persisted(input);
+      const derived = yield* ctx.linkLabels.evidence(input);
       // An underivable link (`reasons` set, `label` undefined) contributes empty
-      // integrity — it fails the floor, fail-closed, alongside the persist
-      // loop's own missing-source reason (both reject).
+      // integrity — it fails the floor, fail-closed.
       contributions.push(derived.label?.integrity ?? []);
     }
     for (const input of ancestorLinks) {
@@ -11003,11 +11140,10 @@ export function* prepareBoundaryCommitSteps(
     // predicate. An entry is ELIGIBLE for the representation transform when
     // the observations that fed it originate OUTSIDE this target's space:
     //
-    // - link-origin entries (the source-path label, the re-derived label
-    //   view, and the carried in-value `cfcLabelView`) when the link
-    //   SOURCE's space differs from the target's — the source address on
-    //   the link-write input is the provenance `derivePersistedLinkLabel`
-    //   itself resolves metadata by;
+    // - link-origin entries (the slot's own label, the carried in-value
+    //   `cfcLabelView` root among its parts) when the link SOURCE's space
+    //   differs from the target's — the reference names a document of
+    //   that space, and its restriction may name readers there;
     // - flow-derived stamps (`derived`/`structure` value/shape/enumerate)
     //   when any labeled flow observation came from another space. The join
     //   is one per-tx union with no per-atom attribution, so a single
@@ -11129,16 +11265,26 @@ export function* prepareBoundaryCommitSteps(
     // The full stored-to-candidate merge validates migrations above. Its
     // affected claims overlay the candidate for input verification; the
     // policy-only fragment does not carry a document's required-field shape.
-    const verificationSchema = storedSchema !== undefined &&
-        linkWriteInputs.length > 0
-      ? undefinedCandidate
-        ? schemaClaimsForLinkWrites(storedSchema, linkWriteInputs)
-        : mergeCfcSchemaEnvelopes(
-          schema,
-          schemaClaimsForLinkWrites(mergedSchema, linkWriteInputs),
-          { generatedOutputPaths: generatedOutputPaths.get(key) },
-        )
-      : schema;
+    const linkClaims = storedSchema !== undefined && linkWriteInputs.length > 0
+      ? schemaClaimsForLinkWrites(
+        undefinedCandidate ? storedSchema : mergedSchema,
+        linkWriteInputs,
+      )
+      : undefined;
+    // A fragment holding no claim overlays nothing, and the merge is left
+    // out: it would re-check the candidate's own shape, which the merge
+    // above has already admitted where it admits it at all.
+    const verificationSchema = linkClaims === undefined
+      ? schema
+      : undefinedCandidate
+      ? linkClaims
+      : isObjectOrArray(linkClaims) && Object.keys(linkClaims).length === 0
+      ? schema
+      : mergeCfcSchemaEnvelopes(
+        schema,
+        linkClaims,
+        { generatedOutputPaths: generatedOutputPaths.get(key) },
+      );
     // A value write's candidate is the writer's own schema whenever that
     // schema declares a label, so it can omit a requirement the document
     // stores: a `writeAuthorizedBy`, a `uiContract`, a floor, a copy claim.
@@ -11815,6 +11961,12 @@ export function* prepareBoundaryCommitSteps(
         ) {
           remintCleared = true;
         }
+        // A link-origin entry at a slot this transaction writes a link to
+        // labels the pointer that stood there; the link written now mints
+        // its own entry below, or none, so the envelope changes either way.
+        if (entry.origin === "link") {
+          linkCleared = true;
+        }
         // A link write replacing a previously content-labeled path — or a
         // declared entry re-minting at the same path — drops the old
         // derived entries here, through a different skip than the
@@ -11922,9 +12074,18 @@ export function* prepareBoundaryCommitSteps(
       // labels to the value this transaction stores at the slot.
       if (!currentLinkWriteInputs.has(input)) continue;
       for (const entry of result.entries) {
+        // The creating attempt's join is part of the reference's own
+        // restriction (CFC §8.2.3): which reference the slot holds was
+        // decided under everything the attempt observed. Its confidentiality
+        // joins the slot entry where flow labels persist; the flow stage
+        // leaves recorded link slots to it.
         const persisted: LabelMapEntry = {
           path: [...canonicalizeLogicalPath(input.target.path), ...entry.path],
-          label: entry.label,
+          label: flowPersist && flowConfidentiality.length > 0
+            ? mergeLabels(entry.label, {
+              confidentiality: [...flowConfidentiality],
+            })
+            : entry.label,
           origin: "link",
         };
         if (input.source.space !== space) crossSpaceEligible?.add(persisted);
@@ -11939,20 +12100,23 @@ export function* prepareBoundaryCommitSteps(
       // operational guidance). Last-write-wins per path is trivially
       // satisfied for the same reason.
       //
-      // Link-covered writes are skipped: the link machinery attaches the
-      // source's own label at those paths — strictly finer than the per-tx
-      // join. Stamping J there too would smear every reference a routing
-      // transaction passes along with everything else it routed (the list
-      // builtins' coordinators being the canonical case); the per-slot
-      // link labels are exactly the pointwise answer.
+      // A written reference is a selection made under what the attempt
+      // observed (CFC §8.2.3), so the join's confidentiality reaches its
+      // slot on the link entry the link write mints, which holds the
+      // reference's own declared and carried restriction beside it. The
+      // join's integrity stays off the slot: it certifies what the attempt
+      // computed, not what its pointer reaches (§3.7.2). A routing
+      // transaction that observed nothing but its own wiring, as the list
+      // builtins' coordinators do under the machinery marker, has an empty
+      // join to leave.
       //
       // Pure-link-structure writes split per the pointer/content rule:
-      // the references carry per-slot link labels (no covering stamp —
-      // that would smear), but the container SHAPE (which slots exist —
-      // a filter's membership decision, §8.5.6.1/SC-7) was computed by
-      // this tx, so each container node gets an exact-path `structure`
-      // stamp with J. Shape observers (reading the container itself,
-      // length, enumeration) join it; slot pointer reads below it don't.
+      // the slots take the `*` templates minted below rather than a
+      // covering stamp, and the container SHAPE (which slots exist — a
+      // filter's membership decision, §8.5.6.1/SC-7) was computed by this
+      // tx, so each container node gets an exact-path `structure` stamp
+      // with J. Shape observers (reading the container itself, length,
+      // enumeration) join it; slot pointer reads below it don't.
       const seenFlowPaths = new Set<string>();
       const derivedStampPaths: (readonly string[])[] = [];
       const structureStampPaths: (readonly string[])[] = [];
@@ -11962,6 +12126,7 @@ export function* prepareBoundaryCommitSteps(
           continue;
         }
         seenFlowPaths.add(flowKey);
+        // A recorded link write carries the join on its link entry, below.
         if (currentLinkWritePaths.has(flowKey)) {
           continue;
         }

@@ -332,7 +332,7 @@ tension 8).
 ## Provenance
 
 Runner seams: envelope persist loop + `ensureSchemaDocument`
-(`cfc/prepare.ts`), `derivePersistedLinkLabel` + `LinkReference` mint
+(`cfc/prepare.ts`), `linkSlotLabel` + `LinkReference` mint
 (`cfc/prepare.ts`), flow join `deriveFlowJoin` (`cfc/prepare.ts`),
 `redactCaveatSourceAtom`/`redactCaveatSourcesForDisplay` + the
 keep-source-intact scope comment (`cfc/label-view-core.ts`), the three IPC

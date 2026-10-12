@@ -2010,10 +2010,8 @@ export async function loadCompiledClosure(
     // process byte cache, storage-served compile bodies, repair and
     // replication write-backs). Written back into another space, a live view
     // serializes as a link to the place it was read from — a cross-space
-    // `/sourceMap` link instead of the map, which either lands silently
-    // corrupt (fresh target doc) or aborts the write-back when the target doc
-    // already carries its stored CFC envelope ("missing link source metadata
-    // … at /sourceMap" — the ensure-ON sx2-scale red). Materialize it to a
+    // `/sourceMap` link instead of the map, which lands silently corrupt in
+    // the target document (the ensure-ON sx2-scale red). Materialize it to a
     // plain value here, at the one read boundary every consumer funnels
     // through, exactly as `policyManifests` are snapshotted above. The other
     // verbatim-reused fields are immune: strings and string arrays either

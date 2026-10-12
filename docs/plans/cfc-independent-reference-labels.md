@@ -1,7 +1,8 @@
 # Independent reference labels: retiring the carried target view and the `LinkReference` atom
 
-_Proposed 2026-10-12. No stage is in place; stage 1 is in flight as a separate
-change. Each stage below says what it depends on and what lands with it._
+_Proposed 2026-10-12. Stages 1 and 2 are implemented on the branch that
+carries this plan and await review; each stage below says what it depends on
+and what lands with it._
 
 ## What this plan holds to
 
@@ -22,14 +23,12 @@ when the reference at the slot is rewritten.
 
 A runtime may instead add historical target restrictions to the reference
 label, but only as a declared over-approximation, and that posture "is not the
-precise reference profile" (§8.2.5). The runtime in this repository is in that
-posture without declaring it: `derivePersistedLinkLabel` in
-`packages/runner/src/cfc/prepare.ts` joins the source path's stored label into
-the link entry, and `persistedLinkEntries` persists every source entry at or
-below the source path, rebased under the slot. `docs/specs/cfc-conformance-statement.md`
-says the precise profile is not claimed; nothing says the over-approximation is
-in force. This plan moves the runtime to the specified contract, and then
-removes the atom that the over-approximation left behind.
+precise reference profile" (§8.2.5). Stage 1 of this plan holds the runtime to
+the specified contract: `linkSlotLabel` in `packages/runner/src/cfc/prepare.ts`
+persists the reference's own label at the slot and nothing of the source's,
+and `linkedSourceEvidence` keeps the source-derived label, through the
+references staged into the source, for write floors alone. The later stages
+remove the atom that the over-approximation left behind.
 
 ## The atom and what reads it
 
@@ -98,24 +97,28 @@ resolves through the link resolver against the current source and keeps doing.
 
 ## Stages
 
-### Stage 1: a link write persists its own label, not the target's (in flight)
+### Stage 1: a link write persists its own label, not the target's
 
-A separate change is landing this. What the later stages depend on it leaving
-behind:
+Implemented. What the later stages depend on it leaving behind:
 
-- `derivePersistedLinkLabel` no longer joins the source path's stored label or
-  projects the source view; `persistedLinkEntries` persists the slot entry
-  alone. `createLinkLabelDeriver`'s pending-source walk, which follows links
-  staged into the source in the same transaction to project their views, is
-  reduced to what a staged reference's acquisition needs.
-- The slot entry carries the creating attempt's join. Today a link-covered path
-  is skipped by the flow stamp because "the link machinery attaches the
-  source's own label at those paths"; with no source label attached, the join
-  lands at the slot as the link entry's confidentiality. The wildcard `*`
-  templates a coordinator mints at a pure-link container already carry the join
-  to its children, so coordinator slots change little; a single link written by
-  a handler newly carries the handler's join on pointer reads, which is the
-  §8.2.3 precision the contract asks for.
+- `linkSlotLabel` derives the slot's entry from the link schema, the handle's
+  carried root restriction and the acting principal, and nothing the source
+  holds; the persist loop joins the creating attempt's flow join onto it where
+  flow labels persist. A reference with no restriction of its own persists no
+  entry. `linkedSourceEvidence` keeps the source-derived label, through the
+  references staged into the source, for write floors alone, which the deriver
+  exposes as `evidence` beside `persisted`.
+- `recordLinkWritePolicyInput` in `data-updating.ts` no longer reads the
+  source's envelope; a link write is recorded when the link schema declares a
+  label, the handle carries a restriction, the slot carries policy, or flow
+  labels persist.
+- The slot entry carries the creating attempt's join. A link-covered path is
+  still skipped by the flow stamp; the join lands at the slot as the link
+  entry's confidentiality instead. The wildcard `*` templates a coordinator
+  mints at a pure-link container already carry the join to its children, so
+  coordinator slots change little; a single link written by a handler newly
+  carries the handler's join on pointer reads, which is the §8.2.3 precision
+  the contract asks for.
 - The live documents that describe the copy are rewritten:
   `docs/specs/cfc-cross-space-integrity.md` (its premise that a reference
   carries the label across a space boundary becomes: a reference carries its
@@ -125,14 +128,17 @@ behind:
   statement, which stops needing the over-approximation that was never
   declared.
 - The tests that pin copying are reshaped, not deleted:
-  `cfc-cross-space-integrity.test.ts` scenarios 1c, 3b, 3d and 3e;
-  `cfc-list-link-labels.test.ts`, whose "labels of a linked element at its
-  position" become "the labels at a position are the creation label, and the
-  element's labels are read at the element"; `cfc-link-integrity-gate.test.ts`.
-  Two §8.2 scenarios are added as the contract's own tests: a publicly acquired
-  reference to confidential content stays public on identity reads and is
-  denied on content; a private selection among public targets labels the
-  pointer with the selection.
+  `cfc-cross-space-integrity.test.ts` scenarios 1c, 1d, 3b, 3d and 3e assert
+  that the slot stores nothing of the source and that a dereference view
+  composed by `cfcLabelViewForDereference` reaches the source's labels;
+  `cfc-list-link-labels.test.ts` links the labeled element under its own
+  schema, so the slot carries the link schema's declaration and nothing below
+  it, and its refusals of an unlabeled element at a declared position become
+  acceptances that keep the declaration; `cfc-link-integrity-gate.test.ts`
+  binds a link schema's `CurrentPrincipal` reader to the acting principal.
+  Scenario 1c is the contract's "publicly acquired reference to confidential
+  content" case; `cfc-probe-slot-anchoring.test.ts` covers "a private
+  selection among public targets labels the pointer".
 
 Acceptance for stage 1: the first-run commit of the thirty-row fabrichat room
 (the capture `docs/plans/resume-presync-cost.md` tracks) writes no `["array",
@@ -149,24 +155,31 @@ Depends on nothing; can land beside stage 1.
 The envelope a transaction writes at the document's reserved position is a
 whole-member replace, computed against the list the transaction read. The
 mergeable tail operation beside it is resolved by the server against the live
-list. Two concurrent labeled appends both commit today, and the later envelope
-describes the earlier list. The fix is that a commit whose document envelope
-moved under it conflicts and retries, the way a whole-value write to the same
-document already does. The handler re-runs against the live list, the append is
-re-recorded as a tail operation, and preparation stamps the live position. The
-tail operation stays mergeable; what stops merging is a stale envelope. The
-seam is the memory engine's conflict decision for the reserved position when
-the commit's other operations on the document are mergeable; confirm it with
-the existing `packages/memory/test/v2*.test.ts` conflict suites before
-changing it, and record the retry cost on the chat-room workload (every
-message append under persisted flow labels is a labeled append).
+list. The seam is `SpaceReplica.#commitReadActivities` in
+`packages/runner/src/storage/v2.ts`, which drops the envelope read from the
+commit's conflict set on two arms: every verifier read of the label, and every
+read of a document with a mergeable op. Both are right for a transaction that
+only reads the label and wrong for one that writes it: without the dependency,
+two concurrent labeled appends both commit, the later envelope describes the
+earlier list, the element the store moved to the tail has no slot entry, and
+the earlier writer's entries are dropped. The fix keeps every read of a
+document whose envelope the transaction writes beside a mergeable op, so the
+commit conflicts and the handler re-runs against the live list through
+`editWithRetry`; preparation then stamps the live position. The tail operation
+stays mergeable, an append that persists no labels keeps its zero-read merge,
+and what stops merging is a stale envelope. `docs/specs/memory-v2/08-conflict-granularity.md`
+§4 states the rule. The retry cost on the chat-room workload, where every
+message append under persisted flow labels is a labeled append, is measured
+with the rest of this plan's probes.
 
 With that in place, a value stamp at a slot describes the value the slot holds
 in the committed document. `cfc-transformed-by-input-witness-concurrent-append.test.ts`
-is reshaped so that each scenario asserts the stamps' positions after the
-retry rather than the guard's refusal; the "copied reference" attack is still
-refused, because the slot holding the copy carries the attacker's stamp, not
-the submit step's.
+appends through `editWithRetry` and asserts that a labeled append whose list
+moved under it lands its stamp beside its own element; the "copied reference"
+attack is still refused, because the slot holding the copy carries the
+attacker's stamp, not the submit step's. Its seeded scenarios, which stamp a
+slot beside another writer's reference by hand, remain the legacy case the
+guard still answers until stage 4.
 
 If the retry cost on contended lists proves too high, the follow-on is an
 append operation that carries the entries for the elements it appends,
@@ -340,3 +353,17 @@ specification does not require.
   around that refusal in `derivePersistedLinkLabel` goes with it.
 - A labeled append to a list another session appended to concurrently retries
   instead of committing a misplaced envelope.
+- A link to a piece document that holds no value yet carries nothing of the
+  piece's result schema, which the piece's setup wrote as its schema meta. The
+  slot used to copy that schema's root declaration. The piece's own writes
+  label its content when it arrives, under that schema; until then there is
+  nothing to read through the link.
+- A reference-identity probe of a slot consumes the slot's own entries and
+  the wildcard templates at it, and nothing of the element's labels, which a
+  content read of the element consumes. Tests that read a labeled element's
+  taint off a pointer probe now read it off the content read.
+- Outside this change and left as found: a cross-space link write whose link
+  schema declares a `PolicyOf` installs the policy manifest in the source's
+  space, which opens a second space writer in the transaction and fails with
+  a write-isolation error. `linkSlotLabel` passes the same owning space to
+  `rootLabelFromSchema` that the previous derivation did.

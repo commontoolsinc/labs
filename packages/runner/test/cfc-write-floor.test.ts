@@ -15,8 +15,10 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import type { CfcCellLinkRefPayload } from "../src/cfc/link-label-view.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { CfcWriteFloorMode, IFCLabel } from "../src/cfc/mod.ts";
 import { recordReferencedArgumentFields } from "../src/cfc/reference-initialization.ts";
+import type { LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
@@ -425,129 +427,131 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  for (const storedReader of [true, false]) {
-    it(`${storedReader ? "binds" : "refuses"} a carried reader through an object back-reference ${storedReader ? "with" : "without"} an authoritative reader`, async () => {
-      const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
-      try {
-        await seedLabelMap(runtime, "reader-cycle", { reader: "r" }, [
-          { path: [], label: { integrity: ["object-proof"] } },
-          {
-            path: ["reader"],
-            label: storedReader
-              ? {
-                confidentiality: [{
-                  type: CFC_ATOM_TYPE.User,
-                  subject: signer.did(),
-                }],
-              }
-              : { integrity: ["reader-proof"] },
-          },
-        ]);
-        const tx = runtime.edit();
-        const source = runtime.getCell(
-          signer.did(),
-          "reader-cycle",
-          undefined,
-          tx,
-        );
-        const link = linkRefFrom<CfcCellLinkRefPayload>({
-          ...linkRefPayload(source.getAsLink()),
-          cfcLabelView: {
-            version: 1,
-            entries: [{
-              path: ["loop", "reader"],
-              label: {
-                confidentiality: [{
-                  type: CFC_ATOM_TYPE.User,
-                  subject: { __ctCurrentPrincipal: true },
-                }],
-              },
+  // A link to the document holding it, written with a carried view that
+  // names the current principal at `viewPath`. At the view's root the reader
+  // placeholder is the reference's own restriction, bound to the reader the
+  // source stores at the linked path and to nothing else; below the root the
+  // view is not persisted.
+  const backReferenceWithCarriedReader = async (
+    runtime: Runtime,
+    id: string,
+    viewPath: string[],
+  ): Promise<{ error?: Error; stored: LabelMapEntry[] }> => {
+    const tx = runtime.edit();
+    const source = runtime.getCell(signer.did(), id, undefined, tx);
+    const link = linkRefFrom<CfcCellLinkRefPayload>({
+      ...linkRefPayload(source.getAsLink()),
+      cfcLabelView: {
+        version: 1,
+        entries: [{
+          path: viewPath,
+          label: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.User,
+              subject: { __ctCurrentPrincipal: true },
             }],
           },
-        });
-        source.key("loop").setRaw(link);
-        tx.recordCfcWritePolicyInput({
-          kind: "link-write",
-          target: { ...source.getAsNormalizedFullLink(), path: ["loop"] },
-          source: source.getAsNormalizedFullLink(),
-          cfcLabelView: linkRefPayload(link).cfcLabelView,
-        });
-        recordReferencedArgumentFields(tx, source.getAsNormalizedFullLink(), [
-          "loop",
-        ]);
-        tx.prepareCfc();
-        const error = (await tx.commit().settled).error;
-        if (storedReader) {
-          expect(error).toBeUndefined();
-        } else {
-          expect(error?.message).toContain(
-            "Link CurrentPrincipal confidentiality requires a concrete stored reader",
-          );
-        }
-      } finally {
-        await runtime.dispose();
-        await storageManager.close();
-      }
+        }],
+      },
     });
-  }
+    source.key("loop").setRaw(link);
+    tx.recordCfcWritePolicyInput({
+      kind: "link-write",
+      target: { ...source.getAsNormalizedFullLink(), path: ["loop"] },
+      source: source.getAsNormalizedFullLink(),
+      cfcLabelView: linkRefPayload(link).cfcLabelView,
+    });
+    recordReferencedArgumentFields(tx, source.getAsNormalizedFullLink(), [
+      "loop",
+    ]);
+    tx.prepareCfc();
+    const error = (await tx.commit().settled).error;
+    const read = runtime.edit();
+    try {
+      return {
+        error,
+        stored: readStoredCfcMetadata(read, source.getAsNormalizedFullLink())
+          ?.labelMap.entries ?? [],
+      };
+    } finally {
+      read.abort();
+    }
+  };
 
-  it("fails a nested link floor under a link whose label view carries a reader the source does not store", async () => {
-    // The link itself cannot be derived, so the floor credits nothing from it,
-    // in agreement with the persisted labels it would have left.
+  it("binds a carried reader at the root of a back-reference's view to the reader the source stores", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabelMap(runtime, "reader-cycle", { reader: "r" }, [{
+        path: [],
+        label: {
+          integrity: ["object-proof"],
+          confidentiality: [{
+            type: CFC_ATOM_TYPE.User,
+            subject: signer.did(),
+          }],
+        },
+      }]);
+      const { error, stored } = await backReferenceWithCarriedReader(
+        runtime,
+        "reader-cycle",
+        [],
+      );
+      expect(error).toBeUndefined();
+      const slot = stored.find((entry) => entry.path.join("/") === "loop");
+      expect(slot?.origin).toBe("link");
+      expect(slot?.label.confidentiality).toEqual([{
+        type: CFC_ATOM_TYPE.User,
+        subject: signer.did(),
+      }]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("refuses a carried reader at the root of a back-reference's view when the source stores none", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabelMap(runtime, "reader-cycle", { reader: "r" }, [
+        { path: [], label: { integrity: ["object-proof"] } },
+        { path: ["reader"], label: { integrity: ["reader-proof"] } },
+      ]);
+      const { error } = await backReferenceWithCarriedReader(
+        runtime,
+        "reader-cycle",
+        [],
+      );
+      expect(error?.message).toContain(
+        "Link CurrentPrincipal confidentiality requires a concrete reader",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("drops a carried reader below the root of a back-reference's view", async () => {
+    // Below its root a carried view describes positions of the target, which
+    // the target labels itself, so a placeholder there binds nothing and
+    // refuses nothing.
 
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {
-      await seedLabeledDoc(
+      await seedLabelMap(runtime, "reader-cycle", { reader: "r" }, [
+        { path: [], label: { integrity: ["object-proof"] } },
+        { path: ["reader"], label: { integrity: ["reader-proof"] } },
+      ]);
+      const { error, stored } = await backReferenceWithCarriedReader(
         runtime,
-        "unbound-reader-source",
-        {
-          approved: "yes",
-        },
-        { integrity: [ADMIN_ATOM] },
-        ["approved"],
+        "reader-cycle",
+        ["loop", "reader"],
       );
-      const tx = runtime.edit();
-      const source = runtime.getCell(
-        signer.did(),
-        "unbound-reader-source",
-        undefined,
-        tx,
-      );
-      const link = linkRefFrom<CfcCellLinkRefPayload>({
-        ...linkRefPayload(source.getAsLink()),
-        cfcLabelView: {
-          version: 1,
-          entries: [{
-            path: ["reader"],
-            label: {
-              confidentiality: [{
-                type: CFC_ATOM_TYPE.User,
-                subject: { __ctCurrentPrincipal: true },
-              }],
-            },
-          }],
-        },
-      });
-      const sink = runtime.getCell(signer.did(), "unbound-reader-sink", {
-        type: "object",
-        properties: {
-          out: {
-            type: "object",
-            properties: {
-              approved: {
-                type: "string",
-                ifc: { requiredIntegrity: [ADMIN_ATOM] },
-              },
-            },
-          },
-        },
-      }, tx);
-      sink.set({ out: link });
-      tx.prepareCfc();
-      const message = (await tx.commit().settled).error?.message;
-      expect(message).toContain("write floor failed at /out/approved");
+      expect(error).toBeUndefined();
+      expect(stored.filter((entry) => entry.path[0] === "loop")).toEqual([]);
+      expect(JSON.stringify(stored)).not.toContain("__ctCurrentPrincipal");
     } finally {
       await runtime.dispose();
       await storageManager.close();

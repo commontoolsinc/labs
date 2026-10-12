@@ -709,11 +709,13 @@ describe("CFC label view helpers", () => {
         runtime.prepareTxForCommit(tx);
         expect((await tx.commit().settled).ok).toBeDefined();
 
-        // The broader slot holds a redirect, whose link entry labels that
-        // pointer, reference integrity atom included.
+        // The broader slot holds a redirect under the slot's declared label.
+        // A slot stores the reference's own label and nothing of the
+        // instance it points at (CFC §8.2, §8.12.8); the redirect declares
+        // nothing beyond the slot's declaration, so the declared entry is
+        // all the slot holds.
         const slot = labelsAt(runtime.getCell(space, "narrowed-label"));
-        expect(slot.confidentiality).toEqual(["secret", "secret"]);
-        expect(slot.integrity).not.toEqual([]);
+        expect(slot).toEqual({ confidentiality: ["secret"], integrity: [] });
         const scoped = labelsAt(
           runtime.getCell(
             space,

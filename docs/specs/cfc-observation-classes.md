@@ -379,7 +379,9 @@ instead of the flow join:
   link carries them, as spec §4.6.3 and §8.2.4 require, where the slot's own
   `followRef` entry is dropped below the target. An eager schema read carries
   nothing else from the slot. The other paths also keep the slot's own
-  entries, integrity included, and the labels stored below the slot.
+  entries, integrity included. A slot stores nothing below itself: a link
+  write persists the reference's own label at the slot (spec §8.12.8), and the
+  labels of what the link reaches are read at the target.
 
 That precision win is what pays for the epic on the LLM/agent surface.
 

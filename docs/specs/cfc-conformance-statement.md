@@ -184,6 +184,19 @@ class-less confidentiality of every entry resolving at the slot, wildcard
 templates included, and the render path reads them through
 `cfcLabelViewForResolvedTarget` in `packages/html/src/worker/reconciler.ts`.
 
+**What a link write persists.** `linkSlotLabel` in `cfc/prepare.ts` persists
+at the receiving slot the reference's own label as §8.2.3 and §8.12.8 state
+it: the link schema's declarations, the restriction the written handle
+carries at its root, and, where flow labels persist, the creating attempt's
+flow join. Nothing of the source's labels is copied to the slot, and the
+write takes no dependency on the source's envelope. A write floor on the slot
+resolves the source's current evidence through `linkedSourceEvidence`, as
+§8.2.6 requires, and persists none of it. A handle's carried view is still
+built from the labels of the read that produced it, so its root restriction
+over-approximates the acquisition restriction of §8.2.3 where that read
+reached labeled content; `docs/plans/cfc-independent-reference-labels.md`
+stages the narrowing.
+
 **This runtime does not claim the precise reference profile.** No labs
 document claims it, and the following is not established:
 

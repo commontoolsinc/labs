@@ -312,8 +312,8 @@ Each of these refuses an honest release rather than admitting a crafted one:
 - **References the writer did not supply.** A reference stored any way other
   than by anchoring an object the writer put in an array — a cell set into a
   slot, a reference copied from another list — earns its slot no value stamp,
-  and its link entry (`LinkReference` provenance and the carried
-  confidentiality) has no `TransformedBy`. A transformation that reads such a
+  and its link entry (the reference's own restriction and `LinkReference`
+  provenance) has no `TransformedBy`. A transformation that reads such a
   slot retains no witness, whoever wrote it. So does a standalone reference
   probe, which consumes the link entry alone.
 - **A list whose own node is confidential, grown by collection operations.** A

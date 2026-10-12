@@ -34,7 +34,6 @@ import {
   recordWriteDestinationPolicyInput,
 } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { canonicalizeLogicalPath } from "./cfc/canonical.ts";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import {
   type CfcLabelView,
@@ -44,11 +43,6 @@ import {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
 } from "./cfc/link-label-view.ts";
-import {
-  readStoredCfcMetadata,
-  storedCfcMetadataAppliesToPath,
-  StoredCfcMetadataError,
-} from "./cfc/metadata.ts";
 import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -144,18 +138,6 @@ const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   scope: link.scope,
   path: [...link.path],
 });
-
-const isPrefix = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) => segment === path[index]);
-
-const pathsOverlap = (
-  left: readonly string[],
-  right: readonly string[],
-): boolean => isPrefix(left, right) || isPrefix(right, left);
 
 const pathSegmentMatches = (left: string, right: string): boolean =>
   left === right || left === "*" || right === "*";
@@ -281,42 +263,6 @@ export const writeAuthorizationCoversPath = (
   );
 };
 
-/**
- * Helper for {@link recordLinkWritePolicyInput}, which reports whether a
- * write authorization arriving with this transaction covers `target`. A claim
- * a commit has already stored is found by `storedCfcMetadataAppliesToPath`;
- * this finds one that is not stored yet, as on the write that creates a
- * protected list.
- */
-const hasPendingWriteAuthorization = (
-  tx: IExtendedStorageTransaction,
-  target: NormalizedFullLink,
-): boolean => {
-  const targetPath = canonicalizeLogicalPath(target.path);
-  return tx.getCfcSchemaPolicyInputs(target.space, target.id).some((input) =>
-    writeAuthorizationCoversPath(
-      input.schema,
-      canonicalizeLogicalPath(input.target.path),
-      targetPath,
-    )
-  );
-};
-
-const hasPendingSchemaPolicyInput = (
-  tx: IExtendedStorageTransaction,
-  source: NormalizedFullLink,
-): boolean => {
-  const sourcePath = canonicalizeLogicalPath(source.path);
-  return tx.getCfcSchemaPolicyInputs(source.space, source.id).some((input) =>
-    pathsOverlap(canonicalizeLogicalPath(input.target.path), sourcePath) &&
-    schemaIfcOverlapsPath(
-      input.schema,
-      canonicalizeLogicalPath(input.target.path),
-      sourcePath,
-    )
-  );
-};
-
 const recordLinkWritePolicyInput = (
   tx: IExtendedStorageTransaction,
   target: NormalizedFullLink,
@@ -336,38 +282,16 @@ const recordLinkWritePolicyInput = (
     return;
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
-  let sourceMetadata: ReturnType<typeof readStoredCfcMetadata>;
-  let sourceEnvelopeUninterpretable = false;
-  try {
-    sourceMetadata = readStoredCfcMetadata(tx, source);
-  } catch (error) {
-    // A source envelope this build cannot produce labels from still makes
-    // the link CFC-relevant (fail closed): recording the policy input
-    // routes the write to prepare, where the unreadable envelope rejects
-    // it in enforcing modes instead of the labels silently not carrying.
-    if (!(error instanceof StoredCfcMetadataError)) throw error;
-    sourceEnvelopeUninterpretable = true;
-  }
-  const sourceRelevant = schemaIfcOverlapsPath(source.schema, [], []) ||
-    sourceMetadata !== undefined || sourceEnvelopeUninterpretable ||
-    hasPendingSchemaPolicyInput(tx, source) ||
-    cfcLabelViewHasValues(carriedCfcLabelView);
-  // A link stored below a document's root under a write authorization that
-  // arrives with this write is held to the same source check as one stored
-  // under the claim once a commit has persisted it: otherwise the write that
-  // creates a protected list admits a first entry every later one is refused.
-  // A link AT the root is excluded — the document then aliases its source and
-  // stores no entry of its own. The stored labels that the pointer this write
-  // replaces brought to the slot do not count: they leave with it (see
-  // `storedCfcMetadataAppliesToPath`).
-  const targetRelevant =
-    storedCfcMetadataAppliesToPath(tx, target, { replacingLink: true }) ||
-    hasPendingSchemaPolicyInput(tx, target) ||
-    (target.path.length > 0 && hasPendingWriteAuthorization(tx, target));
-  if (!sourceRelevant && !targetRelevant) {
-    return;
-  }
-
+  // The slot's label is the reference's own (CFC §8.2.3): the link schema's
+  // declarations and the handle's carried restriction, which the persist
+  // loop joins with the creating attempt's flow join where flow labels
+  // persist. The source's labels stay with the source, so what the source
+  // stores decides nothing here, and this write takes no dependency on the
+  // source's envelope. Every link write is recorded: a floor or a claim the
+  // receiving slot's schema declares is checked against the reference, a
+  // declaration in a document the link places under a stored parent binds
+  // to that parent's readers, and the entry a reference this write replaces
+  // left is dropped, whatever the source holds.
   tx.markCfcRelevant(`link-write:${target.id}`);
   tx.recordCfcWritePolicyInput({
     kind: "link-write",

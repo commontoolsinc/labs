@@ -45,7 +45,7 @@
 // every reason was a verdict unless marked. A producer audit found that false
 // in both directions — several families are mixed, and several DISCARD an
 // availability reason they received upstream (`verifyWriteFloor` drops
-// `derivePersistedLinkLabel`'s; the `maxConfidentiality` input gate reports
+// `linkedSourceEvidence`'s; the `maxConfidentiality` input gate reports
 // its resolution failures and withholds the tag; the sink-ceiling gate tags
 // its refusal only when its enforce-mode rewrite resolved every module
 // policy, since an unresolved manifest might carry the discharge that admits
