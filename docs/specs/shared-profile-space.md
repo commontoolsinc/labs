@@ -172,14 +172,13 @@ until then. The display name is independent of the space identity: it flows to
 `name` cell, and into that cell itself at creation. The cell is initialized
 statically so it keeps its identity — and the name saved in it — across
 releases of the profile pattern; the create handler
-queues a second step (`seedProfileName` in `profile-create.tsx`, handed a link
-to the new profile rather than reading `profiles`) that stores the creation
-name through `setName`, the cell's owner-protected writer, once the profile's
-docs have loaded, so `#profile` readers find the name in storage without
-running the profile. The step fails loudly when its profile does not resolve.
-A profile renamed under an earlier release, whose `name` cell was derived from
-`initialName`, loses that saved name once, at its first release under the
-static initializer, and keeps every name saved after. The home default
+queues a second step (`seedProfileName` in `profile-create.tsx`, addressed by
+the new entry's position in `profiles`) that stores the creation name through
+`setName`, the cell's owner-protected writer, once the profile's docs have
+loaded, so `#profile` readers find the name in storage without running the
+profile. A profile renamed under an earlier release, whose `name` cell was
+derived from `initialName`, loses that saved name once, at its first release
+under the static initializer, and keeps every name saved after. The home default
 pattern's `profile` link is the durable source of truth after creation, and
 runtime-only `.inSpace` annotations are rewritten to the resolved DID during
 post-run.

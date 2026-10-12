@@ -10,11 +10,11 @@ import {
   TESTS,
   Writable,
 } from "commonfabric";
-import {
-  seedProfileName,
-  type SeedProfileNameEvent,
-} from "./profile-create.tsx";
-import ProfileHome, { type ProfileInbox } from "./profile-home.tsx";
+import { seedProfileName } from "./profile-create.tsx";
+import ProfileHome, {
+  type BackwardsCompatibleProfile,
+  type ProfileInbox,
+} from "./profile-home.tsx";
 import PrivateInbox, {
   ensurePrivateInbox,
   type EnsurePrivateInboxEvent,
@@ -133,10 +133,11 @@ const MalformedPointerProfile = pattern<
  * embedder gives it or leaves it out.
  */
 const Seeder = pattern<
-  { privateInbox?: ProfileInbox },
-  { seed: Stream<SeedProfileNameEvent> }
->(({ privateInbox }) => ({
-  seed: seedProfileName({ privateInbox }),
+  { profiles: BackwardsCompatibleProfile[]; privateInbox?: ProfileInbox },
+  { seed: Stream<{ name?: string; index?: number }> }
+>(({ profiles, privateInbox }) => ({
+  // deno-lint-ignore no-explicit-any
+  seed: seedProfileName({ profiles: profiles as any, privateInbox }),
 }));
 
 /**
@@ -511,13 +512,28 @@ export default pattern(() => {
   const freshForInbox = ProfileHome({ initialName: "" });
   const freshWithoutInbox = ProfileHome({ initialName: "" });
   const freshPointedElsewhere = ProfileHome({ initialName: "" });
-  const seederWithInbox = Seeder({ privateInbox: home });
-  const seederWithoutInbox = Seeder({});
-  // A profile whose name is stored already, as when the seed event is
-  // delivered again: left alone.
-  const alreadyNamed = ProfileHome({ initialName: "" });
+  // deno-lint-ignore no-explicit-any
+  const seederWithInbox = Seeder({
+    profiles: [freshForInbox] as any,
+    privateInbox: home,
+  });
+  // deno-lint-ignore no-explicit-any
+  const seederWithoutInbox = Seeder({ profiles: [freshWithoutInbox] as any });
+  const seederOverPointed = Seeder({
+    // deno-lint-ignore no-explicit-any
+    profiles: [freshPointedElsewhere] as any,
+    privateInbox: home,
+  });
+  // An existing, named profile at the index the seed step is handed, as when
+  // the create read its index from a list it had not loaded: left alone.
+  const namedAtIndex = ProfileHome({ initialName: "" });
+  const seederOverNamed = Seeder({
+    // deno-lint-ignore no-explicit-any
+    profiles: [namedAtIndex] as any,
+    privateInbox: home,
+  });
   const action_name_the_existing_profile = action(() => {
-    alreadyNamed.setName.send({ name: "Ada" });
+    namedAtIndex.setName.send({ name: "Ada" });
   });
   const action_point_fresh_elsewhere = action(() => {
     freshPointedElsewhere.setInbox.send({
@@ -525,13 +541,10 @@ export default pattern(() => {
     });
   });
   const action_seed_fresh_profiles = action(() => {
-    seederWithInbox.seed.send({ name: "Fresh", profile: freshForInbox });
-    seederWithoutInbox.seed.send({ name: "Fresh", profile: freshWithoutInbox });
-    seederWithInbox.seed.send({
-      name: "Fresh",
-      profile: freshPointedElsewhere,
-    });
-    seederWithInbox.seed.send({ name: "Fresh", profile: alreadyNamed });
+    seederWithInbox.seed.send({ name: "Fresh", index: 0 });
+    seederWithoutInbox.seed.send({ name: "Fresh", index: 0 });
+    seederOverPointed.seed.send({ name: "Fresh", index: 0 });
+    seederOverNamed.seed.send({ name: "Fresh", index: 0 });
   });
   const assert_only_the_unpointed_fresh_profile_is_pointed = assert(() =>
     equals(freshForInbox.inbox?.piece, home.get().piece) &&
@@ -541,7 +554,7 @@ export default pattern(() => {
     equals(freshPointedElsewhere.inbox?.piece, elsewhere.get().piece)
   );
   const assert_existing_named_profile_left_alone = assert(() =>
-    alreadyNamed.inbox?.piece === undefined && alreadyNamed.name === "Ada"
+    namedAtIndex.inbox?.piece === undefined && namedAtIndex.name === "Ada"
   );
 
   // Ensuring Home's inbox. Which inbox Home should hold is the host's decision
@@ -650,7 +663,11 @@ export default pattern(() => {
     profiles: [unnamedAdvertising] as any,
   });
   const freshAfterAdoption = ProfileHome({ initialName: "" });
-  const seederAfterAdoption = Seeder({ privateInbox: adoptingOne });
+  const seederAfterAdoption = Seeder({
+    // deno-lint-ignore no-explicit-any
+    profiles: [freshAfterAdoption] as any,
+    privateInbox: adoptingOne,
+  });
 
   // Homes holding Home's inbox.
   const readoptingAdvertising = ProfileHome({
@@ -929,10 +946,7 @@ export default pattern(() => {
       aliasKeepingRetained.get().length === 0,
   );
   const action_seed_after_adoption = action(() => {
-    seederAfterAdoption.seed.send({
-      name: "Fresh",
-      profile: freshAfterAdoption,
-    });
+    seederAfterAdoption.seed.send({ name: "Fresh", index: 0 });
   });
   const assert_a_new_profile_is_pointed_at_the_adopted_inbox = assert(() =>
     equals(freshAfterAdoption.inbox?.piece, elsewhere.get().piece)
