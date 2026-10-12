@@ -119,6 +119,7 @@ import {
 } from "./multi-user-test-runner.ts";
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
 import { inferProgramRoot } from "./program-root.ts";
+import { collectServedErrors, servedRuntimeErrors } from "./served-errors.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 /**
@@ -1295,6 +1296,9 @@ export async function runTestPattern(
   const servedConsequences = async (): Promise<void> => {
     await runtime.speculationOverlay?.waitForIntentQuiescence();
   };
+  const servedErrors = experimental.serverExecution
+    ? collectServedErrors(runtime)
+    : [];
   if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
   else if (options.verbose) {
     console.log("  Idempotency verification disabled for this measurement.");
@@ -2288,6 +2292,10 @@ export async function runTestPattern(
 
     const errorMessages = [
       ...runtimeErrors.map((e) => String(e)),
+      ...servedRuntimeErrors(
+        servedErrors,
+        runtimeErrors.map((e) => e.message),
+      ),
       ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
     ];
     return {
@@ -2346,6 +2354,10 @@ export async function runTestPattern(
 
     const errorMessages = [
       ...runtimeErrors.map((e) => String(e)),
+      ...servedRuntimeErrors(
+        servedErrors,
+        runtimeErrors.map((e) => e.message),
+      ),
       ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
     ];
     return {

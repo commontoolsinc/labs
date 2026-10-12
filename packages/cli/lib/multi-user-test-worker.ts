@@ -72,6 +72,7 @@ import {
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import { waitForMarkerCommit } from "./multi-user-marker-commit.ts";
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
+import { collectServedErrors, servedRuntimeErrors } from "./served-errors.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
@@ -161,7 +162,10 @@ let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
 let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
-const runtimeErrors: string[] = [];
+const runtimeErrors: Error[] = [];
+
+/** Errors of served runs of this runtime's events; see `served-errors.ts`. */
+let servedErrors: string[] = [];
 
 /** Channel 1: console.error calls captured via the harness console event. */
 const consoleErrors: string[] = [];
@@ -404,7 +408,7 @@ const handlers: Record<
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager as never,
       experimental,
-      errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
+      errorHandlers: [(error: Error) => runtimeErrors.push(error)],
       moduleByteCache: getDefaultModuleByteCache(),
       // The collector is the runtime's, which makes every compile an
       // instrumented one and names the instrumented variant wherever the
@@ -417,6 +421,9 @@ const handlers: Record<
         ? { cfcEnforcementMode: requestedMode }
         : {}),
     }));
+    if (experimental.serverExecution) {
+      servedErrors = collectServedErrors(runtime);
+    }
     if (args.noIdempotencyCheck !== true) runtime.enableIdempotencyCheck();
     if (args.cfcDenials === true) {
       // This worker runs one participant for its whole life, so nothing stops
@@ -680,7 +687,11 @@ const handlers: Record<
     );
     return Promise.resolve({
       runtimeErrors: [
-        ...runtimeErrors,
+        ...runtimeErrors.map((error) => String(error)),
+        ...servedRuntimeErrors(
+          servedErrors,
+          runtimeErrors.map((error) => error.message),
+        ),
         ...continuousUiErrors.map((error) =>
           `[continuous $UI] ${String(error)}`
         ),
