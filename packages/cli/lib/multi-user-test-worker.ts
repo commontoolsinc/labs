@@ -47,7 +47,6 @@ import {
   type ConsoleHandler,
   ConsoleMethod,
   type Engine,
-  experimentalOptionsFromEnv,
   type Pattern,
   PatternCoverageCollector,
   patternCoverageOutputPath,
@@ -72,6 +71,7 @@ import {
 } from "./console-capture.ts";
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import { waitForMarkerCommit } from "./multi-user-marker-commit.ts";
+import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
@@ -348,6 +348,8 @@ const handlers: Record<
         }, not off, observe, or persist`,
       );
     }
+    // Resolved before anything is opened, so a refusal leaves nothing to close.
+    const experimental = patternTestExperimentalOptions(Deno.env.get);
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(
         args.identity as RealmEncodedValue,
@@ -383,13 +385,13 @@ const handlers: Record<
       : undefined;
     patternCoverageRoot = typeof args.root === "string" ? args.root : undefined;
     // `runtimePresets.patternTest` carries the shared first-party posture
-    // (CT-1814) and the same env-honored experimental flags as the
-    // single-user runner (this worker previously ignored EXPERIMENTAL_*, so
-    // the two harness modes could run under different flags).
+    // (CT-1814), and `experimental` comes from the function the single-user
+    // runner resolves its flags with, so the two harness modes run under the
+    // same flags.
     runtime = new Runtime(runtimePresets.patternTest({
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager as never,
-      experimental: experimentalOptionsFromEnv(Deno.env.get),
+      experimental,
       errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
       moduleByteCache: getDefaultModuleByteCache(),
       // The collector is the runtime's, which makes every compile an
