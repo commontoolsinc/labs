@@ -367,7 +367,6 @@ export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
   options: {
     base?: Cell<any> | NormalizedFullLink;
-    baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
     // Which asCell entries to preserve in the included schema. When omitted,
@@ -399,9 +398,7 @@ export function createSigilLinkFromParsedLink(
     }
   } else {
     reference.id = link.id;
-
-    // Handle baseSpace option - only include space if different from baseSpace
-    if (link.space !== options.baseSpace) reference.space = link.space;
+    if (link.space) reference.space = link.space;
     if (link.scope) reference.scope = link.scope;
   }
 
