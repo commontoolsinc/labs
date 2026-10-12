@@ -122,8 +122,14 @@ describe("wish-home-root", () => {
     });
 
     /** Runs `query` as a wish in a space other than Home, and demands it. */
-    async function runWish(query: string, label: string) {
-      const wishPattern = pattern(() => ({ found: wishFn({ query }) }));
+    async function runWish(
+      query: string,
+      label: string,
+      options: { headless?: boolean; scope?: ("~" | ".")[] } = {},
+    ) {
+      const wishPattern = pattern(() => ({
+        found: wishFn({ query, ...options }),
+      }));
       const tx = runtime.edit();
       const resultCell = runtime.getCell<Record<string, any>>(
         patternSpace,
@@ -153,6 +159,9 @@ describe("wish-home-root", () => {
         const root = await resolveSpaceRootPattern(runtime, home);
         expect(getPatternIdentityRef(root!)).toBeDefined();
 
+        expect(
+          found.key(UI).key("props").key("data-profile-create-ui").get(),
+        ).toBe("wish");
         const surface = found.key(UI).key("props").key("$cell")
           .resolveAsCell() as Cell<any>;
         await surface.pull();
@@ -191,6 +200,64 @@ describe("wish-home-root", () => {
       }
     });
 
+    it("offers no create surface for a headless `#profile` with no profile, and creates no Home root", async () => {
+      const { found, stop } = await runWish("#profile", "headless profile", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBe("No profile exists yet");
+        expect(
+          found.key(UI).key("props").key("data-profile-create-ui").get(),
+        ).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("resolves a headless `#agent_queue` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#agent_queue", "headless queue", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("resolves a headless `~`-scoped `#default` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish(
+        "#default",
+        "headless home default",
+        {
+          headless: true,
+          scope: ["~"],
+        },
+      );
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("reports no chat manager for a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#chatManager", "chat manager");
+      try {
+        expect(String(found.get()?.error)).toContain(
+          "The home space holds no chat manager",
+        );
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
     it("reports a Home root that could not be created as the wish's error", async () => {
       files.delete(HOME_PATH);
       const { found, stop } = await runWish("#favorites", "unservable home");
@@ -203,7 +270,7 @@ describe("wish-home-root", () => {
     });
   });
 
-  it("reports a Home with no root on a serving runtime, and creates none", async () => {
+  it("resolves a headless wish to nothing for a Home with no root on a serving runtime, and creates none", async () => {
     const service = await Identity.fromPassphrase("wish home root service");
     const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     const holder = executionLeaseHolder(service.did());
@@ -269,8 +336,10 @@ describe("wish-home-root", () => {
       // finds it absent.
       await run();
       await run();
-      expect(String((observed.at(-1) as { error?: string })?.error))
-        .toContain("a serving runtime does not create one");
+      expect(observed.at(-1)).toBeDefined();
+      expect((observed.at(-1) as { error?: string }).error).toBeUndefined();
+      expect((observed.at(-1) as { result?: unknown }).result)
+        .toBeUndefined();
       expect(
         (runtime.getCell(home, home).getRaw() as
           | { defaultPattern?: unknown }
