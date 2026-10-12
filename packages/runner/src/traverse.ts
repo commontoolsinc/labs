@@ -1638,6 +1638,18 @@ export type TraversalContext = {
   traverseCells: boolean;
 
   /**
+   * Whether an inline object or array held in an array is traversed at its
+   * address in the document that stores it. Otherwise the traversal gives
+   * such an element a `data:` address carrying a snapshot of its value, which
+   * is what gives the object a read returns its value identity. A walk that
+   * selects documents for a storage engine sets this: it returns no object,
+   * its storage holds no document at a `data:` address, and a link inside
+   * the element that names no document resolves against the storing
+   * document only at the element's own address.
+   */
+  inlineArrayItemsInPlace: boolean;
+
+  /**
    * Reports a followed link whose target document is absent from the local
    * replica. Cross-space targets (target space !== `sourceSpace`) can never
    * be covered by the source doc's per-space subscription; same-space
@@ -1780,6 +1792,7 @@ export function createTraversalContext(
     schemaTracker,
     scopeKeyIdentity,
     traverseCells,
+    inlineArrayItemsInPlace: false,
     onMissingLinkTarget,
     missingLinkTargets: 0,
     missingLinkTargetDocs: new Set<string>(),
@@ -5444,12 +5457,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // into cells: We want to then refer to the actual object by default,
       // not the array location.
       //
-      // If the element is an object, but not a link, an eager read creates an
-      // immutable cell to hold the object, except when it is requested as
-      // Cell. While this means updates aren't propagated, it seems like the
-      // right trade-off for stability of links and the ability to mutate them
-      // without creating loops (see below). A traversal with `traverseCells`
-      // set traverses the element where it is stored.
+      // If the element is an object, but not a link, we create an immutable
+      // cell to hold the object, except when it is requested as Cell. While
+      // this means updates aren't propagated, it seems like the right trade-off
+      // for stability of links and the ability to mutate them without creating
+      // loops (see below). A traversal whose context sets
+      // `inlineArrayItemsInPlace` traverses the element where it is stored
+      // instead.
       //
       // This makes
       // ```ts
@@ -5589,21 +5603,20 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
         }
       } else if (
-        !this.traverseCells &&
+        !this.context.inlineArrayItemsInPlace &&
         arrayItemUsesValueIdentity(item, curSelector.schema)
       ) {
-        // An eager read gives an inline object or array a `data:` address
-        // carrying a snapshot of its value, so that the object the read
-        // returns copies the data when written elsewhere; a link to this slot
-        // would name whatever the slot holds next.
+        // An inline object or array gets a `data:` address carrying a
+        // snapshot of its value, so that the object a read returns copies
+        // the data when written elsewhere; a link to this slot would name
+        // whatever the slot holds next.
         //
-        // With `traverseCells` set, the traversal is establishing what a
-        // reader depends on, as the query walk does when it selects documents,
-        // and it does not take this branch. It traverses the element at its
-        // address in the document that stores it, like any other nested
-        // value. That address is the one a link inside the element naming no
-        // document resolves against, so the traversal goes on to the
-        // documents such a link reaches.
+        // A context that sets `inlineArrayItemsInPlace` does not take this
+        // branch. Its traversal goes through the element at its address in
+        // the document that stores it, like any other nested value. That
+        // address is the one a link inside the element naming no document
+        // resolves against, so the traversal goes on to the documents such a
+        // link reaches.
         //
         // The element link exists to give the snapshot an id for the links
         // inside the element that name no document.
