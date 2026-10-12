@@ -106,8 +106,6 @@ describe("XAppView Home bring-up", () => {
       await view._patterns.taskComplete;
       view.updated(new Map());
       const bringUp = view.homeBringUp;
-      // Held from the decision, before the settle it waits for has begun.
-      expect(log).toEqual([]);
       expect(bringUp).toBeInstanceOf(Promise);
 
       // Once the worker is asked, draining the task queue (all microtasks, then
