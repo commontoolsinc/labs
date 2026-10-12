@@ -18,6 +18,8 @@ import {
   orderProfileCandidates,
   profileCellIsValid,
   type Runtime,
+  sendEvent,
+  transactionFailureMessage,
 } from "@commonfabric/runner";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -103,7 +105,10 @@ const pointerSchema = {
  * nothing, and Home creates an inbox only if it holds none. A Home without the
  * stream is left as it is.
  *
- * Resolves once the event is sent, which is before Home's handler runs.
+ * Resolves once Home's handler has run on the event and its run has
+ * committed, on the server that runs it under server execution, so that a
+ * caller waiting on the ensure waits for Home's handling of it too. Rejects
+ * when that handling fails.
  * Rejects, sending nothing, when a profile ordered ahead of the deciding one
  * cannot be loaded, since which profile decides is then unknown. Sends
  * nothing, and returns `abandoned`, when `signal` has aborted or `runtime`
@@ -128,7 +133,14 @@ export async function ensurePrivateInboxOf(
       found.inbox.getAsNormalizedFullLink(),
     ]);
   }
-  await ensure.send(ensureEventOf(found));
+  await new Promise<void>((resolve, reject) =>
+    sendEvent(ensure, ensureEventOf(found), (tx) => {
+      const status = tx.status();
+      if (status.status === "error") {
+        reject(new Error(transactionFailureMessage(status.error)));
+      } else resolve();
+    })
+  );
   return found;
 }
 
