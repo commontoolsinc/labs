@@ -56,6 +56,10 @@ const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
   "SpeculativeBasisError",
   "CfcCommitRefusalError",
+  // The server refused the frame for standing for more slots than it admits
+  // from an untrusted sender (`MAX_UNTRUSTED_MESSAGE_SLOTS`); the same
+  // writes re-sent stand for the same slots.
+  "MessageTooLargeError",
 ]);
 
 /**
