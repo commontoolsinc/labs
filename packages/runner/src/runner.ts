@@ -940,6 +940,30 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
     Object.keys(partialCause).length === 1;
 }
 
+/**
+ * The numbers of the positional spots, `{ $generated: N }`, that the stored
+ * manifest of derived internal cells on the parent `cell` records: the spots
+ * at which a child of the parent can already be set up.
+ */
+function recordedPositionalSpots(cell: Cell<any>): Set<number> {
+  const stored = convertibleJsFromFabricValue(
+    cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+  );
+  const spots = new Set<number>();
+  if (!Array.isArray(stored)) return spots;
+  for (const entry of stored as InternalCellDescriptor[]) {
+    if (isPositionalPartialCause(entry.partialCause)) {
+      spots.add(positionalNumber(entry.partialCause));
+    }
+  }
+  return spots;
+}
+
+/** The number in the positional partial cause `partialCause`. */
+function positionalNumber(partialCause: unknown): number {
+  return (partialCause as { $generated: number }).$generated;
+}
+
 /** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
 function subPatternNodes(
   pattern: Pattern,
@@ -2346,6 +2370,13 @@ export class Runner {
     | undefined;
 
   /**
+   * Observer of every child document the displaced-child guard reads, by
+   * document id, for a test of which children a setup reads. Unset outside
+   * tests.
+   */
+  #displacedChildReadRecorder: ((child: string) => void) | undefined;
+
+  /**
    * The macrotask yield the resume pre-sync takes between the syncs of a
    * wave. Issuing a sync sends its watch frame, and the walk that prepares
    * each is synchronous work, so a wave of hundreds would otherwise send
@@ -2521,6 +2552,7 @@ export class Runner {
     presyncPlanRecorder:
       | ((piece: string, node: Node, site: "node" | "owned") => void)
       | undefined;
+    displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
       cells: readonly Cell<any>[],
@@ -2635,6 +2667,12 @@ export class Runner {
       },
       set presyncPlanRecorder(value) {
         outerThis.#presyncPlanRecorder = value;
+      },
+      get displacedChildReadRecorder() {
+        return outerThis.#displacedChildReadRecorder;
+      },
+      set displacedChildReadRecorder(value) {
+        outerThis.#displacedChildReadRecorder = value;
       },
       get resumeYield() {
         return outerThis.#resumeYield;
@@ -13383,14 +13421,41 @@ export class Runner {
    * `resultCell` keeps at another positional spot (`#refuseDisplacedChild()`),
    * for each such node whose child this parent owns: not a child that is its
    * space's root, nor one managed in a space of its own.
+   *
+   * Only a parent its updater has pointed at `pattern` is judged: its stored
+   * `patternIdentity` already names `pattern`, while its setup marker names
+   * another pattern or none. A parent that runs whichever pattern a
+   * computation returns is set up with a pattern its pointer does not yet
+   * name, and an unrelated pattern there is no sign that children moved. So a
+   * parent set up as part of an update of an enclosing pattern is not judged
+   * either, and a root an updater points at an unrelated pattern is judged as
+   * though it ran a newer version of its own. Only spots the parent's stored
+   * manifest records are read, since no child can be set up at any other.
    */
   #refuseDisplacedChildren(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     resultCell: Cell<any>,
   ): void {
+    const parent = resultCell.withTx(tx);
+    const incoming = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    const pointer = getPatternIdentityRef(parent);
+    const marker = getPatternSetupIdentityRef(parent);
+    if (
+      incoming === undefined || pointer === undefined ||
+      !samePatternRef(pointer, incoming) ||
+      (marker !== undefined && samePatternRef(marker, incoming))
+    ) {
+      return;
+    }
+    const recorded = recordedPositionalSpots(parent);
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      if (!isPositionalPartialCause(partialCause)) continue;
+      if (
+        !isPositionalPartialCause(partialCause) ||
+        !recorded.has(positionalNumber(partialCause))
+      ) {
+        continue;
+      }
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
@@ -13407,6 +13472,7 @@ export class Runner {
         pattern,
         module.implementation as Pattern,
         child,
+        recorded,
       );
     }
   }
@@ -13417,9 +13483,11 @@ export class Runner {
    * positional children have moved spots: `storedChild` runs another pattern
    * identity, and either a child of `childPattern`'s identity runs at another
    * positional spot, or another positional spot of `pattern` sets up the
-   * identity `storedChild` runs. A spot whose node sets up a space's root is
-   * not counted. A child whose identity differs with no such sign is the same
-   * child under a newer version of its own source.
+   * identity `storedChild` runs. A child is looked for only at the positional
+   * spots in `recorded`, the ones the parent's stored manifest records, and no
+   * spot whose node sets up a space's root is counted. A child whose identity
+   * differs with no such sign is the same child under a newer version of its
+   * own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -13427,7 +13495,11 @@ export class Runner {
     pattern: Pattern,
     childPattern: Pattern,
     storedChild: Cell<any>,
+    recorded: ReadonlySet<number>,
   ): void {
+    this.#displacedChildReadRecorder?.(
+      storedChild.getAsNormalizedFullLink().id,
+    );
     const stored = getPatternSetupIdentityRef(storedChild) ??
       getPatternIdentityRef(storedChild);
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
@@ -13456,8 +13528,14 @@ export class Runner {
         partialCause,
       );
       if (documentKey(other.getAsNormalizedFullLink()) === storedKey) continue;
-      const otherRef = getPatternSetupIdentityRef(other) ??
-        getPatternIdentityRef(other);
+      // A child is set up only at a spot the stored manifest records, so the
+      // child at any other spot is not read.
+      let otherRef: { identity: string; symbol: string } | undefined;
+      if (recorded.has(positionalNumber(partialCause))) {
+        this.#displacedChildReadRecorder?.(other.getAsNormalizedFullLink().id);
+        otherRef = getPatternSetupIdentityRef(other) ??
+          getPatternIdentityRef(other);
+      }
       const wanted = this.#runtime.patternManager.getArtifactEntryRef(
         module.implementation as Pattern,
       );

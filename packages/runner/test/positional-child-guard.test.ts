@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import {
   getPatternSource,
@@ -80,6 +82,12 @@ const WITH_SIBLING = parentProgram([
 
 // The parent as deployed with two children of one pattern, `a` and `b`.
 const DEPLOYED_TWO = parentProgram([
+  "  const [a, b] = [Counter({ label: 'a' }), Counter({ label: 'b' })];",
+  "  return { views: [a, b], aCount: a.count, bCount: b.count };",
+].join("\n"));
+
+// `DEPLOYED` with a second `Counter` child, `b`, added after `a`.
+const WITH_CHILD_ADDED = parentProgram([
   "  const [a, b] = [Counter({ label: 'a' }), Counter({ label: 'b' })];",
   "  return { views: [a, b], aCount: a.count, bCount: b.count };",
 ].join("\n"));
@@ -166,6 +174,23 @@ describe("positional-child-guard", () => {
     await rt.idle();
     await cell.pull();
     return cell.get() as Record<string, unknown>;
+  };
+
+  // How many times a piece's start has failed to commit.
+  const failedStarts = (): number =>
+    (getLoggerCountsBreakdown()["runner"]?.["piece-start-commit-failed"] as
+      | { error?: number }
+      | undefined)?.error ?? 0;
+
+  // The id of the child the parent at `cell` runs at the positional cause
+  // `{ $generated: n }`.
+  const positionalChild = (cell: Cell<unknown>, n: number): string => {
+    const spot = getDerivedInternalCellLink(cell, {
+      partialCause: { $generated: n },
+    });
+    return rt.getCell(space, {
+      resultFor: { space: spot.space, id: spot.id, path: [] },
+    }).getAsNormalizedFullLink().id;
   };
 
   describe("a positional child", () => {
@@ -349,6 +374,135 @@ describe("positional-child-guard", () => {
 
       await child.pull();
       expect(child.key("marker").get()).toBe("updated owner");
+    });
+  });
+
+  describe("a parent that runs whichever pattern a computation returns", () => {
+    it("sets up the other pattern's positional children over the first's without a refusal", async () => {
+      // `shown` runs `First` or `Second` on one cell. `Second`'s `Other` child
+      // takes the spot `First`'s `Counter` child held, while another spot of
+      // `Second` sets up `Counter`: a move, were `Second` a newer `First`.
+
+      const program: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          { name: "/counter.tsx", contents: COUNTER },
+          { name: "/other.tsx", contents: OTHER },
+          {
+            name: "/first.tsx",
+            contents: [
+              "import { pattern } from 'commonfabric';",
+              "import { Counter } from './counter.tsx';",
+              "export default pattern<Record<string, never>>(() => {",
+              "  const [x] = [Counter({ label: 'x' })];",
+              "  return { views: [x], xCount: x.count };",
+              "});",
+              "",
+            ].join("\n"),
+          },
+          {
+            name: "/second.tsx",
+            contents: [
+              "import { pattern } from 'commonfabric';",
+              "import { Counter } from './counter.tsx';",
+              "import { Other } from './other.tsx';",
+              "export default pattern<Record<string, never>>(() => {",
+              "  const [y, z] = [Other({ label: 'y' }), Counter({ label: 'z' })];",
+              "  return { views: [y, z], yCount: y.count, zCount: z.count };",
+              "});",
+              "",
+            ].join("\n"),
+          },
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { computed, pattern } from 'commonfabric';",
+              "import First from './first.tsx';",
+              "import Second from './second.tsx';",
+              "export default pattern<{ which: string }>(({ which }) => {",
+              "  const shown = computed(() =>",
+              "    which === 'first' ? First({}) : Second({})",
+              "  );",
+              "  return { shown };",
+              "});",
+              "",
+            ].join("\n"),
+          },
+        ],
+      };
+      const host = await compile(program);
+      const tx = rt.edit();
+      const cell = rt.getCell<Record<string, unknown>>(
+        space,
+        "swapping-parent",
+        undefined,
+        tx,
+      );
+      const running = rt.run(tx, host, { which: "first" }, cell);
+      await tx.commit().settled;
+      await running.pull();
+      await rt.idle();
+      const shown = cell.key("shown") as Cell<Record<string, unknown>>;
+      await shown.pull();
+      expect(shown.get().xCount).toBe(0);
+      const before = failedStarts();
+
+      const swap = rt.edit();
+      cell.getArgumentCell()!.withTx(swap).key("which").set("second");
+      expect((await swap.commit().settled).error).toBeUndefined();
+      await rt.idle();
+      await shown.pull();
+
+      expect({
+        yCount: shown.get().yCount,
+        zCount: shown.get().zCount,
+        failedStarts: failedStarts() - before,
+      }).toStrictEqual({ yCount: 0, zCount: 0, failedStarts: 0 });
+    });
+  });
+
+  describe("what the guard reads", () => {
+    // Records, until disposed, each child document the guard reads, by id.
+    const guardReads = (): { ids: string[]; [Symbol.dispose](): void } => {
+      const ids: string[] = [];
+      const access = rt.runner.accessForTestingOnly;
+      access.displacedChildReadRecorder = (child) => ids.push(child);
+      return {
+        ids,
+        [Symbol.dispose]: () => {
+          access.displacedChildReadRecorder = undefined;
+        },
+      };
+    };
+
+    it("reads no child in a fresh parent's setup, and reads the stored child in an update", async () => {
+      let fresh: string[];
+      let cell: Cell<Record<string, unknown>>;
+      {
+        using reads = guardReads();
+        cell = await deployedParent("reads-fresh-then-update");
+        fresh = [...reads.ids];
+      }
+
+      using reads = guardReads();
+      await update(cell, DEPLOYED_TWO_NEWER_COUNTER);
+
+      expect({ fresh, update: [...new Set(reads.ids)] }).toStrictEqual({
+        fresh: [],
+        update: [positionalChild(cell, 0)],
+      });
+    });
+
+    it("reads no child at a spot the parent's stored manifest does not record", async () => {
+      // `b` is added at a spot no child of the deployed parent has held, and
+      // `a` keeps its own pattern, so the guard reads `a`'s child alone.
+
+      const cell = await deployedParent("reads-unrecorded-spot");
+
+      using reads = guardReads();
+      await update(cell, WITH_CHILD_ADDED);
+
+      expect([...new Set(reads.ids)]).toStrictEqual([positionalChild(cell, 0)]);
     });
   });
 });
