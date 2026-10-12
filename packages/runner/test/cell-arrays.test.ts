@@ -9,6 +9,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
+import { getContainersHashedForTestingOnly } from "@commonfabric/data-model/for-testing-only";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
@@ -95,6 +96,52 @@ describe("Cell array element conversion", () => {
         { type: "object", properties: { foo: { type: "number" } } },
       );
     }
+  });
+});
+
+describe("resolving an inline array element as a cell", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit().settled;
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("names the same snapshot on a second resolve without encoding the element again", async () => {
+    const list = runtime.getCell<{ foo: number }[]>(
+      space,
+      "inline-elements",
+      undefined,
+      tx,
+    );
+    list.setRaw([{ foo: 1 }, { foo: 2 }]);
+    await tx.commit().settled;
+    await runtime.idle();
+    tx = runtime.edit();
+
+    const first = list.withTx(tx).key(0).resolveAsCell()
+      .getAsNormalizedFullLink();
+    expect(first.id.startsWith("data:")).toBe(true);
+    const hashedBefore = getContainersHashedForTestingOnly();
+    const again = list.withTx(tx).key(0).resolveAsCell()
+      .getAsNormalizedFullLink();
+    expect(again.id).toBe(first.id);
+    expect(getContainersHashedForTestingOnly()).toBe(hashedBefore);
+    expect(
+      list.withTx(tx).key(1).resolveAsCell().getAsNormalizedFullLink().id,
+    ).not.toBe(first.id);
   });
 });
 

@@ -32,6 +32,7 @@ import { listInstanceCoordinator } from "./list-instance-coordinator.ts";
 import {
   LIST_OP_CAPTURED_ARGUMENT_FIELDS,
   LIST_OP_REFERENCED_ARGUMENT_FIELDS,
+  unusedListOpArgumentFields,
 } from "./list-op-argument-usage.ts";
 import { resumeContainerWait } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
@@ -341,6 +342,7 @@ function createFilterInstance(
         { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
+    const droppedArgumentFields = unusedListOpArgumentFields(argumentUsage);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -464,6 +466,7 @@ function createFilterInstance(
                 parentPieceRootId,
                 referencedArgumentFields: LIST_OP_REFERENCED_ARGUMENT_FIELDS,
                 capturedArgumentFields: LIST_OP_CAPTURED_ARGUMENT_FIELDS,
+                droppedArgumentFields,
               },
             );
             // The whole setup, every time, because issuing it takes the debt
@@ -502,6 +505,7 @@ function createFilterInstance(
             parentPieceRootId,
             referencedArgumentFields: LIST_OP_REFERENCED_ARGUMENT_FIELDS,
             capturedArgumentFields: LIST_OP_CAPTURED_ARGUMENT_FIELDS,
+            droppedArgumentFields,
           },
         );
         linkElementCell(boundResultCell);
