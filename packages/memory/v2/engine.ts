@@ -7258,10 +7258,11 @@ const resolvePendingReads = (
  * established that the stored document at the layer's seq is the one the
  * layer's transaction computed from its own view, and the reader's view
  * through the layer is that document when the layer's operations on it begin
- * with a `set`, whose value is independent of any base, or when the layer's
- * own read of the document sat on the basis the reader declares, through no
- * own layer the reader does not name. Below that seq the document holds
- * exactly what the reader saw, so nothing there can make the read stale.
+ * with a `set`, whose value is independent of any base, or when the read of
+ * the document the proof reconstructed the layer's view from sat on the basis
+ * the reader declares, through no own layer the reader does not name. Below
+ * that seq the document holds exactly what the reader saw, so nothing there
+ * can make the read stale.
  */
 const identityLayerBasis = (
   engine: Engine,
@@ -7300,16 +7301,23 @@ const identityLayerBasis = (
       }) as RevisionRow[]).map((revision) => revision.op_index),
     );
     if (opIndexes.some((opIndex) => written.has(opIndex))) continue;
+    // The read the identity proof reconstructed the layer's view from, chosen
+    // as `applyCommitTransaction()`'s `basisOf()` chooses it: the first
+    // pending read of the document, else its first confirmed read on the
+    // branch. Another read of the document beside it proved nothing.
+    const provedPending = layer.reads.pending.find(sameDocument);
+    const provedConfirmed = provedPending === undefined
+      ? layer.reads.confirmed.find((candidate) =>
+        sameDocument(candidate) && (candidate.branch ?? branch) === branch
+      )
+      : undefined;
     const viewIsProved = layer.operations[opIndexes[0]].op === "set" ||
-      layer.reads.pending.some((candidate) =>
-        sameDocument(candidate) && candidate.basisSeq === basisSeq &&
-        pendingReadLayers(candidate).every((named) => layers.includes(named))
-      ) ||
-      layer.reads.confirmed.some((candidate) =>
-        sameDocument(candidate) &&
-        (candidate.branch ?? branch) === branch &&
-        candidate.seq === basisSeq
-      );
+      (provedPending !== undefined &&
+        provedPending.basisSeq === basisSeq &&
+        pendingReadLayers(provedPending).every((named) =>
+          layers.includes(named)
+        )) ||
+      provedConfirmed?.seq === basisSeq;
     if (viewIsProved) identityBasis = row.seq;
   }
   return identityBasis;

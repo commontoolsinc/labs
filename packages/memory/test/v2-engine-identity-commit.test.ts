@@ -463,6 +463,61 @@ describe("applyCommit() with an identity commit", () => {
     ).toThrow(ConflictError);
   });
 
+  it("refuses a commit whose pending read sits on an elided own patch from the basis of a read the identity proof did not use", () => {
+    // The elided splice carries two reads of the list. The identity proof
+    // takes the first, at the install; the second, at the empty basis, is a
+    // view nobody proved, so a reader declaring that basis is scanned from
+    // it and conflicts with session a's own install, which it does not name.
+    const install = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, { operations: [setOp("of:list", ["a"])] }),
+    });
+    applyCommit(engine, {
+      sessionId: "s:b",
+      commit: commit(1, {
+        operations: [patchOp("of:list", [
+          { op: "splice", path: "/value", index: 1, remove: 0, add: ["x"] },
+        ])],
+      }),
+    });
+    const elided = applyCommit(engine, {
+      sessionId: "s:a",
+      elidedVerdicts: true,
+      commit: commit(2, {
+        reads: {
+          confirmed: [
+            { id: "of:list", path: [], seq: install.seq },
+            { id: "of:list", path: ["value"], seq: 0 },
+          ],
+          pending: [],
+        },
+        operations: [patchOp("of:list", [
+          { op: "splice", path: "/value", index: 1, remove: 0, add: ["x"] },
+        ])],
+      }),
+    });
+    expect(elided.elidedOpIndexes).toEqual([0]);
+
+    expect(() =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        elidedVerdicts: true,
+        commit: commit(3, {
+          reads: {
+            confirmed: [],
+            pending: [{
+              id: "of:list",
+              path: ["value"],
+              localSeq: [2],
+              basisSeq: 0,
+            }],
+          },
+          operations: [setOp("of:other", { m: 1 })],
+        }),
+      })
+    ).toThrow(ConflictError);
+  });
+
   it("judges a patch on a document the commit did not read by its effect on the stored one", () => {
     const installSeq = installThenRewrite();
     applyCommit(engine, {
