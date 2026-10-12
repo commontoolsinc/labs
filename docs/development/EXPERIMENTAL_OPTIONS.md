@@ -433,11 +433,11 @@ flags it adopts from the deployment it runs against.
   entry here, and a delta in the plan's live coordination block; workflow
   job topology, probes, skip placement, coverage ownership, test record
   variants, and every other document follow automatically.
-  Single-process harnesses do not
-  read the constant: a bare `new Runtime` and the `patternTest` /
-  `localDev` / `unitTest` presets have no serving host, so they resolve the
-  ambient baseline (OFF) by construction, and the unit suites run the
-  derive-and-commit model. `cf test` builds its runtimes with
+  A bare `new Runtime` and the `patternTest` / `localDev` / `unitTest`
+  presets do not read the constant: they have no serving host, so they
+  resolve the ambient baseline (OFF) by construction, and the unit suites
+  run the derive-and-commit model. A single-process harness that hosts a
+  serving loop does read it. `cf test` builds its runtimes with
   `patternTest`, but resolves the posture itself as a deployed entry point
   does, and hosts a serving loop beside its memory server when that is ON.
   The integration runner sets the flag OFF for its `pattern-tests` and

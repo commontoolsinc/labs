@@ -73,6 +73,7 @@ import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import { waitForMarkerCommit } from "./multi-user-marker-commit.ts";
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
 import { collectServedErrors, servedRuntimeErrors } from "./served-errors.ts";
+import { servedConsequences, settleServed } from "./served-settle.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
@@ -189,23 +190,22 @@ function rt(): Runtime {
 }
 
 /**
- * Settles the runtime and its storage, until a round finds nothing to do.
- *
- * On the server-execution arm each round also waits for every event this
- * runtime fired to reach its terminal consequence, and for that consequence
- * to arrive back here, since the handlers are the serving loop's and their
- * writes reach this replica only then. An event a served handler fires on
- * its own account is no event of this runtime's, and is not waited for. On
- * the other arm the runtime has no overlay, and there is nothing to wait for.
+ * Settles the runtime and its storage, until a round finds nothing to do,
+ * and on the server-execution arm until every event this runtime fired has
+ * its served consequence back here; see `served-settle.ts`.
  */
 async function settle(maxIterations = 20): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    const start = performance.now();
-    await rt().idle();
-    await rt().speculationOverlay?.waitForIntentQuiescence();
-    await storageManager!.synced();
-    if (performance.now() - start < SETTLE_FAST_MS) return;
-  }
+  await settleServed(rt(), async () => {
+    for (let i = 0; i < maxIterations; i++) {
+      const start = performance.now();
+      await rt().idle();
+      await servedConsequences(rt());
+      await storageManager!.synced();
+      // What the sync delivered may have scheduled work of its own.
+      await rt().idle();
+      if (performance.now() - start < SETTLE_FAST_MS) return;
+    }
+  });
 }
 
 function markersCellFor(participant: string): Cell<Record<string, boolean>> {

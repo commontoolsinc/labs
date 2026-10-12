@@ -74,7 +74,6 @@ import {
   type CfcFlowLabelsMode,
   resetCfcDenialAnnouncements,
 } from "@commonfabric/runner/cfc";
-import type { ServingMemoryServer } from "@commonfabric/runner/executor/serving-memory-server.deno";
 import {
   type CDFPoint,
   clearTimingMeasures,
@@ -120,6 +119,7 @@ import {
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
 import { inferProgramRoot } from "./program-root.ts";
 import { collectServedErrors, servedRuntimeErrors } from "./served-errors.ts";
+import { servedConsequences, settleServed } from "./served-settle.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 /**
@@ -1205,7 +1205,11 @@ export async function runTestPattern(
   // On the server-execution arm the memory server has a serving loop beside
   // it, whose runtimes run the handlers this test's events fire. They fetch
   // through the same mock, so a served handler sees the test's `fetchMocks`.
-  let serving: ServingMemoryServer | undefined;
+  // The loop closes when this function returns or throws, which is after the
+  // `finally` below has disposed the runtime connected to it, and a setup
+  // failure before that `try` closes it all the same. A failure to close is
+  // logged and raised, since the loop may still be running.
+  await using servingCleanup = new AsyncDisposableStack();
   // A caller-supplied store is FILE-BACKED, which the default emulation is not:
   // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
   // snapshot. See `TestRunnerOptions.storageHost`.
@@ -1227,12 +1231,22 @@ export async function runTestPattern(
         const { startServingMemoryServer } = await import(
           "@commonfabric/runner/executor/serving-memory-server.deno"
         );
-        serving = await startServingMemoryServer({
+        const serving = await startServingMemoryServer({
           apiUrl,
           experimental,
           fetch: mockFetch,
           moduleByteCache,
         });
+        servingCleanup.defer(() =>
+          serving.close().catch((error) => {
+            console.error(
+              `[cf test] closing the serving loop failed for ${testPath}: ${
+                formatError(error)
+              }`,
+            );
+            throw error;
+          })
+        );
         return EmulatedStorageManager.connectTo(serving.server, {
           as: identity,
         });
@@ -1286,16 +1300,6 @@ export async function runTestPattern(
   console.log(
     `  CFC posture: enforcement=${runtime.cfcEnforcementMode} flowLabels=${runtime.cfcFlowLabels}`,
   );
-  // On the server-execution arm a handler's writes are the serving loop's,
-  // and neither `runtime.idle()` nor `storageManager.synced()` waits for them
-  // to arrive. This does: every event this runtime has fired has reached its
-  // terminal consequence, and that consequence has arrived back here. A
-  // served handler's own events are no event of this runtime's, so it says
-  // nothing about them. On the other arm the runtime has no overlay, and
-  // there is nothing to wait for.
-  const servedConsequences = async (): Promise<void> => {
-    await runtime.speculationOverlay?.waitForIntentQuiescence();
-  };
   const servedErrors = experimental.serverExecution
     ? collectServedErrors(runtime)
     : [];
@@ -1612,16 +1616,17 @@ export async function runTestPattern(
     initializationBudgetSettlement = withPhase([
       "runTestPattern",
       "initialSettle",
-    ], async () => {
-      // Wait for initial setup to complete
-      await runtime.idle();
-      await servedConsequences();
-      // Also wait for all in-flight storage subscriptions to settle.
-      // replica.poll() fires without await during mount(), so subscription
-      // updates can arrive after idle() resolves, scheduling more work.
-      await storageManager.synced();
-      await runtime.idle();
-    });
+    ], () =>
+      settleServed(runtime, async () => {
+        // Wait for initial setup to complete
+        await runtime.idle();
+        await servedConsequences(runtime);
+        // Also wait for all in-flight storage subscriptions to settle.
+        // replica.poll() fires without await during mount(), so subscription
+        // updates can arrive after idle() resolves, scheduling more work.
+        await storageManager.synced();
+        await runtime.idle();
+      }));
     await initializationBudgetSettlement;
     initializationBudgetSettlement = undefined;
 
@@ -1694,55 +1699,56 @@ export async function runTestPattern(
     const settleRuntime = async (stepLabel: string): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", stepLabel, "settle"],
-        async () => {
-          for (let settle = 0; settle < MAX_SETTLE_ROUNDS; settle++) {
-            const iterStart = performance.now();
+        () =>
+          settleServed(runtime, async () => {
+            for (let settle = 0; settle < MAX_SETTLE_ROUNDS; settle++) {
+              const iterStart = performance.now();
+              await withPhase(
+                [
+                  "runTestPattern",
+                  "step",
+                  stepLabel,
+                  "settle",
+                  `iter-${settle}`,
+                  "idle",
+                ],
+                () => runtime.idle(),
+              );
+              await withPhase(
+                [
+                  "runTestPattern",
+                  "step",
+                  stepLabel,
+                  "settle",
+                  `iter-${settle}`,
+                  "servedConsequences",
+                ],
+                () => servedConsequences(runtime),
+              );
+              await withPhase(
+                [
+                  "runTestPattern",
+                  "step",
+                  stepLabel,
+                  "settle",
+                  `iter-${settle}`,
+                  "synced",
+                ],
+                () => storageManager.synced(),
+              );
+              const totalMs = performance.now() - iterStart;
+              if (options.verbose && totalMs > 1) {
+                console.log(`      settle[${settle}]: ${fmtMs(totalMs)}`);
+              }
+              // If both resolved nearly instantly, the system is settled.
+              // synced() has ~1ms of overhead even when idle, so use 2ms.
+              if (settle > 0 && totalMs < 2) break;
+            }
             await withPhase(
-              [
-                "runTestPattern",
-                "step",
-                stepLabel,
-                "settle",
-                `iter-${settle}`,
-                "idle",
-              ],
+              ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
               () => runtime.idle(),
             );
-            await withPhase(
-              [
-                "runTestPattern",
-                "step",
-                stepLabel,
-                "settle",
-                `iter-${settle}`,
-                "servedConsequences",
-              ],
-              servedConsequences,
-            );
-            await withPhase(
-              [
-                "runTestPattern",
-                "step",
-                stepLabel,
-                "settle",
-                `iter-${settle}`,
-                "synced",
-              ],
-              () => storageManager.synced(),
-            );
-            const totalMs = performance.now() - iterStart;
-            if (options.verbose && totalMs > 1) {
-              console.log(`      settle[${settle}]: ${fmtMs(totalMs)}`);
-            }
-            // If both resolved nearly instantly, the system is settled.
-            // synced() has ~1ms of overhead even when idle, so use 2ms.
-            if (settle > 0 && totalMs < 2) break;
-          }
-          await withPhase(
-            ["runTestPattern", "step", stepLabel, "settle", "finalIdle"],
-            () => runtime.idle(),
-          );
-        },
+          }),
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -1759,10 +1765,11 @@ export async function runTestPattern(
     const settleFully = async (stepIndex: number): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
-        async () => {
-          await runtime.settled();
-          await servedConsequences();
-        },
+        () =>
+          settleServed(runtime, async () => {
+            await runtime.settled();
+            await servedConsequences(runtime);
+          }),
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -2413,9 +2420,7 @@ export async function runTestPattern(
       () =>
         runtime.dispose({ closeStorage: options.storageHost === undefined }),
     );
-    // The serving loop closes after the runtime, whose storage manager was
-    // connected to the memory server beside it and does not own that server.
-    await teardown.finally(() => serving?.close()).catch((error) => {
+    await teardown.catch((error) => {
       console.error(
         `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
       );

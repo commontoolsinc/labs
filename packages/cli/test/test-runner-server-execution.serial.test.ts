@@ -2,6 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import { Identity } from "@commonfabric/identity";
+import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { withEnv } from "./utils.ts";
 import { runTestPattern, runTests } from "../lib/test-runner.ts";
@@ -56,6 +58,28 @@ describe(
       expect(outcome?.failed).toBe(0);
       expect(outcome?.passed).toBe(1);
       expect(outcome?.results[0].results[0].name).toBe("bob/assertion_1");
+    });
+
+    it("closes its serving loop when the runtime cannot be built", async () => {
+      // A live serving host holds the process's server-execution flag on, so
+      // the flag reads as on after the run exactly when the loop is left
+      // running. An unknown CFC mode fails the runtime's construction, which
+      // comes after the loop starts and before the run's own `try`.
+      expect(getServerExecutionConfig()).toBe(false);
+      const dir = await Deno.makeTempDir({ prefix: "cf-test-on-setup-" });
+      try {
+        await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
+          await expect(
+            runTestPattern(resolve(dir, "never-read.test.tsx"), {
+              root: dir,
+              cfcEnforcementMode: "unknown" as CfcEnforcementMode,
+            }),
+          ).rejects.toThrow('Runtime `cfcEnforcementMode` is "unknown"');
+        });
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+      expect(getServerExecutionConfig()).toBe(false);
     });
 
     it("rejects a run against a caller-supplied storage host", async () => {

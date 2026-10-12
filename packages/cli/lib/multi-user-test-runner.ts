@@ -321,20 +321,22 @@ export async function runMultiUserTestPattern(
   const nonIdempotent: string[] = [];
   let runResult: TestRunResult | undefined;
 
-  // On the server-execution arm the storage server has a serving loop beside
-  // it, as a toolshed running that arm has, so the events the participants
-  // commit are served. Like the plain server, it is given no access list.
   const experimental = patternTestExperimentalOptions(Deno.env.get);
-  const server = experimental.serverExecution
-    ? await listenServingMemoryServer({
-      apiUrl: new URL(import.meta.url),
-      experimental,
-    })
-    : StandaloneMemoryServer.start();
+  let server: { readonly url: URL; close(): Promise<void> } | undefined;
   const participants: ParticipantState[] = [];
   const workers: ParticipantWorker[] = [];
 
   try {
+    // On the server-execution arm the storage server has a serving loop
+    // beside it, as a toolshed running that arm has, so the events the
+    // participants commit are served. Like the plain server, it is given no
+    // access list.
+    server = experimental.serverExecution
+      ? await listenServingMemoryServer({
+        apiUrl: new URL(import.meta.url),
+        experimental,
+      })
+      : StandaloneMemoryServer.start();
     const identities = new Map<string, Identity>();
     for (const spec of meta.participants) {
       if (!identities.has(spec.user)) {
@@ -675,7 +677,16 @@ export async function runMultiUserTestPattern(
       });
       await participant.worker.terminate();
     }
-    await server.close().catch(() => {});
+    // A server that fails to close may leave its serving loop running after
+    // this returns, so its failure is raised like a participant's.
+    await server?.close().catch((error: Error) => {
+      console.error(
+        `[cf test] closing the storage server failed for ${testPath}: ${
+          formatError(error)
+        }`,
+      );
+      teardownError ??= error;
+    });
     if (teardownError) {
       // A throw from `finally` replaces the pending result. Keep that result
       // visible, including step and runtime health failures, before raising.
