@@ -8,13 +8,15 @@
  * instantiation. It keeps the types it is read within and asks
  * `expandsWithoutEnd()` before it descends further.
  *
- * The cut is small because what these readings read, they write: a reading
- * left to a depth bound alone writes out every level up to it. A cut that is
- * wrong, as it is for a chain that shrinks toward its end through one
- * declaration more than `MAX_EXPANDING_NESTING` times, leaves the remainder
- * reported as unread or, in the overlay, as written; it refuses nothing. The
- * writer-policy reading (`writer-policy.ts`) writes nothing out and can refuse
- * a schema on its answer, so it is bounded by depth and by count instead.
+ * What these readings read, they write out, so the cut counts instantiations
+ * of one declaration rather than every type: a bound on depth alone writes out
+ * every level up to it. A finite chain that recurses through one declaration
+ * more than the cut allows is cut too. The schema generator reports what it
+ * leaves unread; the overlay marks every cell past its cut opaque, which is
+ * what reading the remainder in full would give a cell no use reaches. Neither
+ * refuses anything. The writer-policy reading (`writer-policy.ts`) writes
+ * nothing out and can refuse a schema on its answer, so it is bounded by depth
+ * and by count instead.
  */
 
 import ts from "typescript";
@@ -22,18 +24,19 @@ import ts from "typescript";
 /**
  * How many readings of one declaration, each instantiated after the one it is
  * read inside, may nest before the innermost is taken for a recursion that
- * instantiates the declaration without end (`expandsWithoutEnd()`). The
- * checker takes three for a recursion where its answer is only "maybe"; this
- * is set past the nesting data is written with and past the period of a
- * recursion that returns to a type it has read.
+ * instantiates the declaration without end (`expandsWithoutEnd()`), unless a
+ * reading passes its own. The checker takes three for a recursion where its
+ * answer is only "maybe"; this is set past the depth a finite chain written in
+ * a pattern's types reaches, as a tuple of a dozen elements a recursive alias
+ * walks one at a time.
  */
-export const MAX_EXPANDING_NESTING = 8;
+export const MAX_EXPANDING_NESTING = 32;
 
 /**
  * Whether `type`, read inside `path`, the types it is read within, outermost
  * first, is a recursion that instantiates its declaration without end, as
- * `Nest<T[]>` inside `Nest<T>` does: `MAX_EXPANDING_NESTING` readings of one
- * declaration, `type` among them, each instantiated after the last, as the ids
+ * `Nest<T[]>` inside `Nest<T>` does: `max` readings of one declaration, `type`
+ * among them, each instantiated after the last, as the ids
  * the checker numbers its types with in creation order show. A nesting its
  * author wrote out, `Pair<Pair<Pair<string>>>`, is instantiated from the
  * inside out, so its readings are not counted. The checker tells the two apart
@@ -43,6 +46,7 @@ export const expandsWithoutEnd = (
   type: ts.Type,
   path: readonly ts.Type[],
   checker: ts.TypeChecker,
+  max: number = MAX_EXPANDING_NESTING,
 ): boolean =>
   recursionIdentities(type, checker).some((identity) => {
     let count = 0;
@@ -50,7 +54,7 @@ export const expandsWithoutEnd = (
     for (const outer of [...path, type]) {
       if (!recursionIdentities(outer, checker).includes(identity)) continue;
       const id = (outer as ts.Type & { id?: number }).id ?? 0;
-      if (id >= lastId && ++count >= MAX_EXPANDING_NESTING) return true;
+      if (id >= lastId && ++count >= max) return true;
       lastId = id;
     }
     return false;

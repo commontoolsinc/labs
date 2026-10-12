@@ -288,6 +288,17 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
     };
   }
 
+  /** Every `asCell` entry list in `schema`, in reading order. */
+  function capabilitiesOf(schema: unknown): unknown[] {
+    if (Array.isArray(schema)) return schema.flatMap(capabilitiesOf);
+    if (typeof schema !== "object" || schema === null) return [];
+    const { asCell, ...rest } = schema as Record<string, unknown>;
+    return [
+      ...(asCell === undefined ? [] : [asCell]),
+      ...Object.values(rest).flatMap(capabilitiesOf),
+    ];
+  }
+
   it("reports nothing unread for an event holding arrays of objects nested nine deep", async () => {
     // Compiled with no type check first, as `cf` deploys a pattern unless
     // asked to check it, the checker instantiates the arrays as the reading
@@ -367,7 +378,7 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
       });
     }
 
-    it("overlays the capability the callback earns on a cell the event holds, and opaque on the same cell a level in", async () => {
+    it("gives a cell the event holds the capability the callback earns, and every other cell, past the cut too, opaque", async () => {
       const { event, reported } = await eventSchema(
         "type Nest<T> = { c: Writable<number>; v: T; children: Nest<T[]>[] };",
         "Nest<string>",
@@ -382,6 +393,11 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
 
       expect(properties.c!.asCell).toEqual(["readonly"]);
       expect(child.c!.asCell).toEqual(["opaque"]);
+      expect(
+        capabilitiesOf(event).filter((capability) =>
+          JSON.stringify(capability) !== '["opaque"]'
+        ),
+      ).toEqual([["readonly"]]);
       for (const diagnostic of reported) {
         expect(diagnostic).toEqual({
           type: "schema-type:unread",
@@ -389,35 +405,81 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
         });
       }
     });
+  });
 
-    it("keeps the capability written for a cell past the cut of a finite chain that shrinks toward it", async () => {
-      // A known limit of the cut. The chain ends after twelve levels, but
-      // each level is a newer instantiation of one declaration, so the
-      // expansion stops at the cut as it would for a recursion without end,
-      // and the cell at the chain's end keeps the capability written for it
-      // where reading the chain in full would give the callback's `opaque`.
+  describe("an event holding a finite chain of one declaration deeper than the cut", () => {
+    // Each level of these chains is a newer instantiation of one declaration,
+    // as in a recursion without end, so the overlay's cut takes them for one.
+    // Past the cut, every cell is opaque, the capability a cell no use reaches
+    // earns, as reading each chain to its end would give it.
 
-      const ones = Array.from({ length: 12 }, () => "1").join(", ");
+    /** `Chain<[1, …]>`, `length` ones long. */
+    const chainOf = (length: number) =>
+      `Chain<[${Array.from({ length }, () => "1").join(", ")}]>`;
+    const chain =
+      `type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { value: string; next: Chain<R> }
+  : { c: Writable<number> };`;
+
+    it("gives the cell at the end of a chain twelve long the `opaque` capability", async () => {
       const { event, reported } = await eventSchema(
-        `interface Chain<N extends unknown[]> {
-  value: string;
-  next?: N extends [unknown, ...infer R] ? Chain<R> : { c: Writable<number> };
-}`,
-        `Chain<[${ones}]>`,
-        "(e, { c }) => { c.set(e.value.length); }",
+        chain,
+        chainOf(12),
+        "(e, { c }) => { c.set(e ? 1 : 0); }",
       );
-      const capabilities: unknown[] = [];
-      const collect = (schema: unknown): void => {
-        if (Array.isArray(schema)) return schema.forEach(collect);
-        if (typeof schema !== "object" || schema === null) return;
-        const { asCell, ...rest } = schema as Record<string, unknown>;
-        if (asCell !== undefined) capabilities.push(asCell);
-        Object.values(rest).forEach(collect);
-      };
-      collect(event);
 
-      expect(capabilities).toEqual([["cell"]]);
+      expect(capabilitiesOf(event)).toEqual([["opaque"]]);
       expect(reported).toEqual([]);
+    });
+
+    it("gives the cell at the end of a chain twelve long, read past the cut, the `readonly` capability the callback earns", async () => {
+      // A use that reaches past the cut carries the expansion along its path.
+
+      const { event } = await eventSchema(
+        chain,
+        chainOf(12),
+        `(e, { c }) => { c.set(e${".next".repeat(12)}.c.get()); }`,
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["readonly"]]);
+    });
+
+    for (const deepFirst of [true, false]) {
+      it(
+        `gives \`opaque\` to the cells of a deep and a shallow chain, ${
+          deepFirst ? "the deep one" : "the shallow one"
+        } declared first`,
+        async () => {
+          // Cutting the deep chain leaves its search incomplete, which no
+          // reading of the shallow chain may take for a search that found no
+          // cell.
+
+          const members = [`deep: ${chainOf(12)};`, `shallow: ${chainOf(5)};`];
+          const { event } = await eventSchema(
+            `${chain}
+type Ev<T> = { v: T; ${
+              (deepFirst ? members : [...members].reverse()).join(" ")
+            } };`,
+            "Ev<string>",
+            "(e, { c }) => { c.set(e.v.length); }",
+          );
+
+          expect(capabilitiesOf(event)).toEqual([["opaque"], ["opaque"]]);
+        },
+      );
+    }
+
+    it("gives a cell read through a short chain `readonly`, and the cell at the end of a chain that grows to it past the cut `opaque`", async () => {
+      const { event } = await eventSchema(
+        `type Step<N extends unknown[]> = N["length"] extends 9
+  ? { c: Writable<number> }
+  : { deep: Step<[...N, 1]> };
+type Ev<T> = { near: Step<[1, 1, 1, 1, 1, 1, 1]>; far: Step<[]>; v: T };`,
+        "Ev<string>",
+        "(e, { c }) => { c.set(e.near.deep.deep.c.get()); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["readonly"], ["opaque"]]);
     });
   });
 });

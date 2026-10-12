@@ -55,6 +55,14 @@ export type SchemaHint = {
    * defining a document (`SchemaGenerationOptions.definesDocument`).
    */
   readonly definesDocument?: true;
+
+  /**
+   * Set on the remainder of a recursion the contract overlay cuts
+   * (`overlayContractCapabilities()`): every cell its reading reaches, outside
+   * the value of another cell, is opaque, since no use the body makes reaches
+   * it. Schema generation reads it as `SchemaHint.cellsOpaque`.
+   */
+  readonly cellsOpaque?: true;
 };
 
 export type ReactiveCapability =

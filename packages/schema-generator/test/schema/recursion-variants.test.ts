@@ -183,4 +183,64 @@ describe("Schema: Recursion variants", () => {
     expect(depth).toBe(9);
     expect(diagnostics).toEqual([]);
   });
+
+  for (
+    const [shape, declaration] of [
+      [
+        "a tuple",
+        "type Chain<N extends unknown[]> = [number, N extends [unknown, ...infer R] ? Chain<R> : { end: string }];",
+      ],
+      [
+        "an array",
+        "type Chain<N extends unknown[]> = (N extends [unknown, ...infer R] ? Chain<R> : { end: string })[];",
+      ],
+    ] as const
+  ) {
+    it(`reads every level of a finite chain twelve long that recurses through ${shape} an alias writes`, async () => {
+      // Each level is a newer instantiation of the alias, as in a recursion
+      // without end, but the chain ends, and twelve levels are within the cut.
+
+      const ones = Array.from({ length: 12 }, () => "1").join(", ");
+      const code = `
+        ${declaration}
+        interface Root { a: Chain<[${ones}]> }
+      `;
+      const { type, checker } = await getTypeFromCode(code, "Root");
+      const diagnostics: SchemaGenerationDiagnostic[] = [];
+      const s = new SchemaGenerator().generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      });
+
+      expect(JSON.stringify(s)).toContain('"end"');
+      expect(diagnostics).toEqual([]);
+    });
+  }
+
+  it("reads every level of a nesting written out nine deep under a mapped type, at a type parameter no binding names", async () => {
+    // The mapped type is read as the type it maps over, and the nesting
+    // inside it is written out.
+
+    const written = `${"Pair<".repeat(9)}T${">".repeat(9)}`;
+    const code = `
+      type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };
+      type Pair<T> = { v: T };
+      interface Root<T> { a: DeepReadonly<${written}> }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = asObjectSchema(
+      new SchemaGenerator().generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+    let depth = 0;
+    let level = (s.properties as Record<string, Record<string, unknown>>).a;
+    while ((level?.properties as Record<string, unknown> | undefined)?.v) {
+      level = (level!.properties as Record<string, Record<string, unknown>>).v;
+      depth++;
+    }
+
+    expect(depth).toBe(9);
+    expect(diagnostics).toEqual([]);
+  });
 });

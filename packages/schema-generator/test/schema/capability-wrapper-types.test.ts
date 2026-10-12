@@ -466,4 +466,66 @@ describe("Schema: Capability wrapper types", () => {
       });
     });
   });
+
+  describe("a member whose reading marks its cells opaque", () => {
+    // The contract overlay marks so the remainder past a recursion it cuts,
+    // whose cells no use reaches (`SchemaHint.cellsOpaque`).
+
+    it("narrows every cell the member reaches to opaque, keeping a stream's brand and the cells inside a cell's value", async () => {
+      const code = `
+        interface Inner {
+          a: Writable<number>;
+          r: ReadonlyCell<string>;
+          s: Stream<number>;
+          nested: Writable<{ d: Writable<number> }>;
+          list: Writable<number>[];
+        }
+        interface X {
+          hinted: Inner;
+          plain: Inner;
+        }
+      `;
+      const { checker, sourceFile } = await createTestProgram(code);
+      const symbol = checker.getSymbolsInScope(
+        sourceFile,
+        ts.SymbolFlags.Interface,
+      ).find((candidate) => candidate.name === "X");
+      if (!symbol) throw new Error("Interface X not found");
+      const type = checker.getDeclaredTypeOfSymbol(symbol);
+      const schemaHints = new WeakMap<ts.Node, { cellsOpaque?: true }>();
+      schemaHints.set(findInterfaceMemberTypeNode(sourceFile, "X", "hinted"), {
+        cellsOpaque: true,
+      });
+
+      const result = asObjectSchema(
+        new SchemaGenerator().generateSchema(
+          type,
+          checker,
+          undefined,
+          undefined,
+          schemaHints,
+        ),
+      );
+      const definitions = (result.$defs ?? {}) as Record<
+        string,
+        Record<string, any>
+      >;
+      const resolve = (schema: Record<string, any>) =>
+        typeof schema.$ref === "string"
+          ? definitions[schema.$ref.split("/").pop()!]!
+          : schema;
+      const properties = result.properties as Record<string, any>;
+      const hinted = resolve(properties.hinted).properties;
+      const plain = resolve(properties.plain).properties;
+
+      expect(hinted.a.asCell).toEqual(["opaque"]);
+      expect(hinted.r.asCell).toEqual(["opaque"]);
+      expect(hinted.s.asCell).toEqual(["stream"]);
+      expect(hinted.nested.asCell).toEqual(["opaque"]);
+      expect(hinted.nested.properties.d.asCell).toEqual(["cell"]);
+      expect(hinted.list.items.asCell).toEqual(["opaque"]);
+      expect(plain.a.asCell).toEqual(["cell"]);
+      expect(plain.r.asCell).toEqual(["readonly"]);
+    });
+  });
 });

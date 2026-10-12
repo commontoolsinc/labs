@@ -579,16 +579,15 @@ an alias that recurses through the tuple or array it writes,
 `type Tup<T> = [T, Tup<T[]>?]`, which is read under bindings by its
 instantiation, whose arguments differ at each level. The cut comes where one
 declaration, or one such deferred reference, is instantiated
-`MAX_EXPANDING_NESTING` (8) deep inside itself, each instantiation newer than
+`MAX_EXPANDING_NESTING` (32) deep inside itself, each instantiation newer than
 the one it is read within, as the checker's `isDeeplyNestedType` counts. The
 innermost reading then accepts any value and is reported as the
 `schema-type:unread` warning. A nesting written out, whose inner
 instantiations are the older, is never cut, and an array or tuple no alias
-writes is not counted. A finite chain that shrinks toward its end through one
-declaration more than eight times is cut too, which is the cut's known limit;
-the remainder is reported, never refused. The writer-policy reading
-(`writer-policy.ts`) writes nothing out and can refuse a schema on its answer,
-so it is bounded by depth and by count instead.
+writes is not counted. A finite chain that recurses through one declaration
+more than the cut allows is cut too; the remainder is reported, never refused.
+The writer-policy reading (`writer-policy.ts`) writes nothing out and can
+refuse a schema on its answer, so it is bounded by depth and by count instead.
 
 ## 6. Wrapper Types And The `asCell` Vocabulary
 
@@ -1775,7 +1774,7 @@ producing alias in this package as of this writing.
 Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,
 SchemaHint>`, where `SchemaHint` is `{ items?: unknown; cfcUiContract?:
 UiContractHint; narrowedFrom?: NarrowedFrom; spelledBy?: ts.TypeNode;
-definesDocument?: true }`,
+definesDocument?: true; cellsOpaque?: true }`,
 `UiContractHint` is
 `{ helper: "UiAction" | "UiPromptSlot" | "UiDisclosure"; action?; surface?;
 role?; kind?; trustedPattern?; requiredEventIntegrity? }`, and `NarrowedFrom`
@@ -1783,13 +1782,13 @@ is `{ type: ts.Type; typeNode?: ts.TypeNode }`. Every member is read-only: the
 generator only reads hints, and copies the `requiredEventIntegrity` list on the
 way into the emitted schema. A node holds a hint of each kind, recorded apart
 from the others. The producer writes `items` and `cfcUiContract` to the node
-and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy` and
-`definesDocument` to the node alone. A `cfcUiContract` lookup tries the node and
+and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
+`definesDocument` and `cellsOpaque` to the node alone. A `cfcUiContract` lookup tries the node and
 `ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`definesDocument` lookup reads the node (`formatChildType` in
+`definesDocument` or `cellsOpaque` lookup reads the node (`formatChildType` in
 `schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
 or a printed generation root is formatted (`formatChildType` and
 `#generateSchemaInternal` in
@@ -1896,6 +1895,15 @@ or a printed generation root is formatted (`formatChildType` and
   policy, and reads that policy in part (§11, `definesDocument`). A value
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
+- **`cellsOpaque`** marks the remainder of a recursion the contract overlay of
+  a handler's event cuts (`overlayContractCapabilities()`), whose cells no use
+  the callback makes reaches. Every cell the node's reading reaches, outside
+  the value of another cell, is `opaque`, whatever capability its wrapper
+  writes; a stream or a SQLite handle keeps its brand
+  (`isCellCapabilityKind`), and the cells inside a cell's value are read as
+  written, as the overlay leaves a cell's value. A named type read there is
+  stored under a definition of its own, `<Name>:opaque`, apart from other
+  readings of the same type.
 
 ## 14. Options
 

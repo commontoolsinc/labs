@@ -1452,6 +1452,12 @@ export class SchemaGenerator {
     ) {
       context = { ...context, definesDocument: true, documentWithinView: true };
     }
+    if (
+      typeNode && !context.cellsOpaque &&
+      context.schemaHints?.get(typeNode)?.cellsOpaque
+    ) {
+      context = { ...context, cellsOpaque: true };
+    }
     // A bound type parameter reads as its argument: its node where it has one,
     // under the bindings of the place it is written, and its type where it
     // does not. A `Default` around one is read as the wrapper, whose value
@@ -2251,7 +2257,8 @@ export class SchemaGenerator {
    * take it.
    */
   #definitionKey(name: string, context: GenerationContext): string {
-    return context.documentWithinView ? `${name}:document` : name;
+    const key = context.documentWithinView ? `${name}:document` : name;
+    return context.cellsOpaque ? `${key}:opaque` : key;
   }
 
   /**
