@@ -73,7 +73,10 @@ whose Home exists, and Home's start stays off the path to that first piece. A
 page whose view fails to load a piece starts none. None of these waits for the
 ensure. A client's `idle()` does: the worker answers it once the ensure, the
 adoption of name-only entries, and the share intake's start have finished,
-and the intake has taken up every change it has been told of. The shell's
+and the intake has taken up every change it has been told of. The ensure has
+finished once Home's handler has run on the event it sends and that run has
+committed, which under server execution is on the server, after the event
+itself has committed. The shell's
 `commonfabric.viewSettled` waits for its own request to bring Home up as well,
 from the moment it decides to make one, so a page that has settled has none of
 this still running. A request for another space's root starts no ensure, nor does a read
@@ -170,12 +173,12 @@ asks Home to ensure its inbox when Home has the stream and adopts the result.
 Either would need the loom side to agree.
 
 Home opens without waiting for the ensure, which reads every profile's pointer
-and loads inbox documents in other spaces. The host learns only whether the
-event was sent, not whether Home's handler committed: a stream's `send` returns
-before the handler runs. So an exception raised while sending it, such as Home
-failing to come up, is logged, and the next time that worker brings up Home it
-sends the event again; a failure inside the handler is not seen, and the event
-is not sent again until another worker brings Home up.
+and loads inbox documents in other spaces. The ensure itself waits for Home's
+handling of the event it sends: it finishes once the handler's run has
+committed, on the server under server execution, and fails when that run
+fails. Either kind of failure, one raised while sending the event, such as Home
+failing to come up, or one inside the handler, is logged, and the next time
+that worker brings up Home it sends the event again.
 
 A profile is pointed in one of three ways:
 

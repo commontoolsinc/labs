@@ -4062,11 +4062,10 @@ describe("runtime-processor", () => {
      * A processor over a real runtime on emulated storage, whose Home pattern
      * is a stand-in holding `rows` as its space list and recording what is
      * sent to its streams. The space creation, the site table, and the
-     * adoption run for real. `onEnsurePrivateInbox` runs as each event sent to
-     * `ensurePrivateInbox` is recorded, and a throw from it is a throw from the
-     * send itself. That is the one failure of the ensure the host sees: a
-     * stream's `send` returns before its handler runs, so a failure inside
-     * Home's handler never reaches the host, and this stand-in has none. Each
+     * adoption run for real. Its `ensurePrivateInbox` is a real stream, whose
+     * handler records the event and runs `onEnsurePrivateInbox`, so a throw
+     * from that is a failure of Home's handling, which the host's ensure
+     * waits for and reports. Each
      * read the inbox ensure makes of Home waits for `inboxReadable`. The share
      * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
      * each is made, a throw from it being a throw from the subscription. Every
@@ -4094,6 +4093,21 @@ describe("runtime-processor", () => {
       const sent: { stream: string; event: unknown }[] = [];
       const subscribed: string[] = [];
       const unsubscribed: string[] = [];
+      const streams = runtime.getCell<{ ensurePrivateInbox: unknown }>(
+        signer.did(),
+        "home-worker-streams",
+      );
+      await runtime.editWithRetry((tx) =>
+        streams.withTx(tx).setRaw({ ensurePrivateInbox: { $stream: true } })
+      );
+      const ensurePrivateInbox = streams.key("ensurePrivateInbox");
+      const cancelEnsureHandler = runtime.scheduler.addEventHandler(
+        (_tx, event: unknown) => {
+          sent.push({ stream: "ensurePrivateInbox", event });
+          onEnsurePrivateInbox();
+        },
+        ensurePrivateInbox.getAsNormalizedFullLink(),
+      );
       const home = {
         getAsLink: () => cellRefToSigilLink(homeRef),
         // The pattern Home's root records that it runs.
@@ -4104,6 +4118,8 @@ describe("runtime-processor", () => {
         key: (name: string) =>
           name === "spaces"
             ? { get: typeof rows === "function" ? rows : () => rows }
+            : name === "ensurePrivateInbox"
+            ? ensurePrivateInbox
             : {
               getRaw: () => ({ $stream: true }),
               // Home's `privateInbox` and `profiles`, as the inbox ensure
@@ -4123,7 +4139,6 @@ describe("runtime-processor", () => {
               }),
               send: (event: unknown): void => {
                 sent.push({ stream: name, event });
-                if (name === "ensurePrivateInbox") onEnsurePrivateInbox();
               },
             },
       };
@@ -4185,6 +4200,7 @@ describe("runtime-processor", () => {
         /** How many times Home's root was ensured, which may create it. */
         rootEnsures: () => ensure.calls.length,
         async [Symbol.asyncDispose]() {
+          cancelEnsureHandler();
           ensure.restore();
           stored.restore();
           // A space context's first sync, unfinished at disposal, is logged
@@ -4331,10 +4347,10 @@ describe("runtime-processor", () => {
       });
     });
 
-    it("opens Home when sending the private inbox ensure throws, and sends it again on the next ensure", async () => {
+    it("opens Home when Home's handling of the private inbox ensure fails, and sends it again on the next ensure", async () => {
       let attempts = 0;
       await using worker = await homeWorker([], () => {
-        if (attempts++ === 0) throw new Error("transient send failure");
+        if (attempts++ === 0) throw new Error("transient handling failure");
       });
       const warn = stub(console, "warn", () => {});
       try {
@@ -4581,11 +4597,11 @@ describe("runtime-processor", () => {
         expect(worker.privateInboxSends()).toBe(1);
       });
 
-      it("returns the root when sending the private inbox ensure throws, and reports the failure", async () => {
+      it("returns the root when Home's handling of the private inbox ensure fails, and reports the failure", async () => {
         const attempted = Promise.withResolvers<void>();
         await using worker = await homeWorker([], () => {
           attempted.resolve();
-          throw new Error("send failure");
+          throw new Error("handling failure");
         });
         const warn = stub(console, "warn", () => {});
         try {
