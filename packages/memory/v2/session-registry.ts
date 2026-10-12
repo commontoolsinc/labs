@@ -120,8 +120,10 @@ export type SessionState = {
   /**
    * Set when the opening connection's client advertised `elidedVerdicts`:
    * its replica drops a layer the verdict elides rather than folding it, so
-   * the engine may elide a positional write for this session. Fresh per
-   * open, since it is the connection's.
+   * the engine may elide a positional write for this session. Set per open
+   * from the opening connection, and a resume by a client without the
+   * capability is refused, since a replayed verdict may carry an elision only
+   * such a replica handles.
    */
   elidedVerdicts?: boolean;
 };
@@ -179,6 +181,15 @@ export class SessionRegistry {
     const existing = this.#sessions.get(key);
     if (existing?.routedAuthority !== undefined && !routed) {
       throw authorizationError("A routed session requires a routed connection");
+    }
+    // A commit this session had accepted under the waived identity proof
+    // may replay as an elided positional write, which only a replica that
+    // drops elided layers folds correctly; a client that no longer advertises
+    // the capability opens a fresh session instead of resuming this one.
+    if (existing?.elidedVerdicts === true && !elidedVerdicts) {
+      throw authorizationError(
+        "A session opened with elidedVerdicts requires a client that advertises it",
+      );
     }
     if (
       existing?.principal !== undefined &&

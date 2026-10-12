@@ -1489,9 +1489,13 @@ export type AppliedCommit = {
   replayed?: true;
 
   /**
-   * Operation indexes whose `cid:` set matched the stored content exactly
-   * and applied as a no-op: no revision, no head advance, no dirty mark.
-   * The commit itself still records and advances the space log.
+   * Operation indexes that applied as a no-op: a `cid:` set that matched
+   * the stored content exactly, or every operation of an identity commit
+   * (03-commit-model.md §3.6.1). An elided operation produced no revision,
+   * advanced no head, and marked nothing dirty. The commit itself still
+   * records and advances the space log, and a replica that advertised
+   * `elidedVerdicts` drops a pending layer every operation of which is
+   * listed here rather than promoting it.
    */
   elidedOpIndexes?: number[];
 

@@ -5644,6 +5644,35 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("promotes an elided splice over the base it read when no frame has moved the list", async () => {
+      // Elided or not, the store holds the list the splice computed. With no
+      // frame delivered since the layer was laid, the confirmed value is the
+      // one the splice was diffed from, so replaying it there is exact, and
+      // dropping the layer would show a list the store no longer holds.
+      const harness = await createHarness();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          elideOps: true,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "c"] },
+            }],
+          },
+        });
+        const splice = growTo(harness, { items: ["a", "b", "c"] }, ["c"]);
+        await expectResultOk(splice);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+      } finally {
+        await harness.close();
+      }
+    });
+
     it("keeps the splice's list over a frame that changed another field", async () => {
       const harness = await createHarness();
       const responseGate = Promise.withResolvers<void>();

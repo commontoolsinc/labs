@@ -403,10 +403,15 @@ patches it is judged as one write of the final value:
 An accept reports the operations it elided on the verdict
 (`elidedOpIndexes`, 04-protocol.md §4.3.1). A replica that advertised
 `elidedVerdicts` drops a pending layer every operation of which the verdict
-elided: the store already holds what the layer would have written, the frame
-that carries it covers the layer, and a promotion would fold the layer's ops
-over the confirmed base a second time and give the document a confirmed seq
-the store never gave it.
+elided, where a frame has moved the document past the layer's base: the store
+already holds what the layer would have written, the frame carries it, and a
+promotion would fold the layer's ops over a base they were not diffed from,
+a splice a second time, and give the document a confirmed seq the store never
+gave it. Where no frame has moved the document, the confirmed value is the one
+the layer read, and the replica promotes as it does any accept, replaying the
+ops over exactly that base. A session opened with the capability is resumed
+only by a client that advertises it: a replayed verdict may carry an elision
+only such a replica handles.
 
 The reader's view of a document is reconstructed from the commit's own read
 of it, on the commit's branch: for a pending read, the document at the read's

@@ -9606,13 +9606,18 @@ export class SpaceReplica
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
       // An accept that elided every operation on this document wrote
-      // nothing: the store already held what the layer would have written,
-      // and the frame carrying that is what covers the layer. The layer is
-      // dropped rather than promoted — a promotion would fold its ops over
-      // the confirmed base, a splice a second time, and would give the
-      // document a confirmed seq the store never gave it.
+      // nothing: the store already held what the layer would have written.
+      // Where a frame has moved the document past the layer's base, that
+      // frame carries the value and covers the layer, which is dropped
+      // rather than promoted — a promotion would fold its ops over a base
+      // they were not diffed from, a splice a second time, and would give
+      // the document a confirmed seq the store never gave it. Where no frame
+      // has, the confirmed value is the one the layer read, and the
+      // promotion below replays the ops over exactly that base, which is
+      // the value the store holds.
       if (
         applied.elidedOpIndexes !== undefined &&
+        record.confirmed.seq > record.pending[firstPendingIndex]!.baseSeq &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
         )
