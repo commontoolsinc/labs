@@ -841,6 +841,17 @@ describe("compactStore", () => {
       )
         .rejects.toThrow("never overwritten");
       await Deno.remove(out);
+      // A symlink whose target does not exist is still something at the
+      // path, and the result would be written through it.
+      await Deno.symlink(`${dir}/nowhere.sqlite`, out);
+      await expect(
+        compactStore({
+          store: backup,
+          out,
+          selection: { prefixes: ["computed:"] },
+        }),
+      ).rejects.toThrow("never overwritten");
+      await Deno.remove(out);
 
       await Deno.writeTextFile(`${backup}-wal`, "not empty");
       await expect(

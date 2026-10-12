@@ -780,6 +780,19 @@ const statIfPresent = (path: string): Deno.FileInfo | undefined => {
 
 const fileSize = (path: string): number => statIfPresent(path)?.size ?? 0;
 
+/** Whether any directory entry is at `path` — a file, a directory, or a
+ * symlink whether or not its target exists. The result is written through
+ * whatever is there, so nothing may be. */
+const entryExists = (path: string): boolean => {
+  try {
+    Deno.lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+};
+
 type SchemaObject = { type: string; name: string; tbl_name: string };
 type SchemaColumn = {
   name: string;
@@ -991,7 +1004,7 @@ export const compactStore = async (
       );
     }
   }
-  if (statIfPresent(out) !== undefined) {
+  if (entryExists(out)) {
     throw new CompactionRefused(
       `${out} exists; the result is never overwritten`,
     );

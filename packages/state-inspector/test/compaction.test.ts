@@ -7,6 +7,7 @@ import { Database } from "@db/sqlite";
 
 import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
 import { compactStore } from "@commonfabric/memory/v2/compact";
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 
 import {
   type CompactionVerification,
@@ -82,10 +83,12 @@ async function buildStore(
     }]);
   }
   // What I7 keeps: a blob, and a table a pattern made through the builtin.
+  // The second column collates NOCASE: a comparison that inherited the
+  // declared collation would not see a change of case.
   engine.database.exec(
     `INSERT INTO blob_store (hash, data, content_type, size) VALUES ('h1', X'0102', 'application/octet-stream', 2);
-     CREATE TABLE "pattern notes" (k TEXT, v TEXT);
-     INSERT INTO "pattern notes" VALUES ('a', '1'), ('a', '1'), ('b', '2');`,
+     CREATE TABLE "pattern notes" (k TEXT, v TEXT COLLATE NOCASE);
+     INSERT INTO "pattern notes" VALUES ('a', '1'), ('a', '1'), ('b', 'ImportantCase');`,
   );
   applyCommit(engine, {
     sessionId: "s:a",
@@ -115,6 +118,10 @@ async function withCompacted(
     keepPayloadsMs?: number;
     keepLast?: number;
     twice?: boolean;
+    /** Interrupt the first run after one instance and resume it. */
+    interrupt?: boolean;
+    /** Between the two runs of `twice`, tombstone the ACL document. */
+    tombstoneBetween?: boolean;
   } = {},
 ): Promise<void> {
   const dir = await Deno.makeTempDir({ prefix: "compaction-verify-" });
@@ -124,7 +131,7 @@ async function withCompacted(
     const result = `${dir}/result.sqlite`;
     await buildStore(store, options.withAcl ?? true, options.deleteAcl);
     await Deno.copyFile(store, backup);
-    await compactStore({
+    const first = {
       store,
       out: result,
       selection: { prefixes: ["computed:"] },
@@ -132,13 +139,46 @@ async function withCompacted(
       ...(options.keepLast === undefined
         ? {}
         : { cut: { keepLast: options.keepLast } }),
-      runId: "first",
-    });
+    };
+    if (options.interrupt) {
+      const stop = new Error("stop");
+      await compactStore({
+        ...first,
+        runId: "interrupted",
+        onProgress: (progress) => {
+          if (progress.phase === "instance" && progress.completed === 1) {
+            throw stop;
+          }
+        },
+      }).catch((error) => {
+        if (error !== stop) throw error;
+      });
+      await compactStore({ ...first, runId: "resumed" });
+      await run({ backup, result, dir });
+      return;
+    }
+    await compactStore({ ...first, runId: "first" });
     if (options.twice) {
       // A second run over the first's output, against that output as its
       // backup: an earlier run's markers are in both files.
       await Deno.copyFile(result, `${dir}/second-backup.sqlite`);
-      await Deno.copyFile(result, `${dir}/second-work.sqlite`);
+      if (options.tombstoneBetween) {
+        // The owner deletes the ACL document after the first run; the second
+        // run finds a tombstone whose history holds the first run's audit.
+        const engine = await open({
+          url: toFileUrl(`${dir}/second-backup.sqlite`),
+        });
+        applyCommit(engine, {
+          sessionId: `session:${SPACE}:owner`,
+          principal: SPACE,
+          commit: commit(1, [{ op: "delete", id: ACL }]),
+        } as never);
+        close(engine);
+      }
+      await Deno.copyFile(
+        `${dir}/second-backup.sqlite`,
+        `${dir}/second-work.sqlite`,
+      );
       await compactStore({
         store: `${dir}/second-work.sqlite`,
         out: `${dir}/second-result.sqlite`,
@@ -265,7 +305,77 @@ Deno.test("verifyCompaction passes on a second run whose backup already holds ma
     const acl = verification.checks.find((check) =>
       check.name === "ACL document"
     )!;
-    assert(acl.detail.includes("2 audit revision(s) for 2 run(s)"), acl.detail);
+    assert(
+      acl.detail.includes("1 audit revision(s) for 1 new run(s)"),
+      acl.detail,
+    );
+    assert(
+      verification.checks.find((check) =>
+        check.name === "compaction commit added"
+      )!
+        .detail.includes("1 already in the backup"),
+    );
+  }, { twice: true });
+});
+
+Deno.test("verifyCompaction passes on a run interrupted after one instance and resumed", async () => {
+  await withCompacted(({ backup, result }) => {
+    const verification = verifyCompaction({ result, against: backup });
+    assertEquals(
+      failing(verification),
+      [],
+      formatCompactionVerification(verification),
+    );
+    assertEquals(verification.compactionCommits.length, 2);
+    const acl = verification.checks.find((check) =>
+      check.name === "ACL document"
+    )!;
+    assert(
+      acl.detail.includes("1 audit revision(s) for 2 new run(s)"),
+      acl.detail,
+    );
+    // Two runs this result adds, so the plan cross-check has no single plan
+    // to hold it to.
+    assertFalse(
+      verification.checks.some((check) =>
+        check.name === "the run did what it planned"
+      ),
+    );
+  }, { interrupt: true });
+});
+
+Deno.test("verifyCompaction passes on a second run after the ACL document was tombstoned", async () => {
+  await withCompacted(({ backup, result }) => {
+    const verification = verifyCompaction({ result, against: backup });
+    assertEquals(
+      failing(verification),
+      [],
+      formatCompactionVerification(verification),
+    );
+    const acl = verification.checks.find((check) =>
+      check.name === "ACL document"
+    )!;
+    assert(acl.detail.startsWith("tombstone in the backup at "), acl.detail);
+  }, { twice: true, tombstoneBetween: true });
+});
+
+Deno.test("verifyCompaction holds an earlier run's commit to the backup", async () => {
+  await withCompacted(async ({ backup, result, dir }) => {
+    const copy = `${dir}/earlier-run-tampered.sqlite`;
+    await Deno.copyFile(result, copy);
+    const db = new Database(copy);
+    db.exec(
+      `UPDATE "commit" SET created_at = '1900-01-01 00:00:00', resolution = '{"seq":-1}'
+       WHERE session_id = 'compaction:first'`,
+    );
+    db.close();
+    const verification = verifyCompaction({ result: copy, against: backup });
+    assert(
+      failing(verification).includes(
+        "every commit row survives; only payloads go",
+      ),
+      formatCompactionVerification(verification),
+    );
   }, { twice: true });
 });
 
@@ -348,6 +458,22 @@ Deno.test("verifyCompaction names what a tampered result lost", async () => {
     await tampered(
       `DELETE FROM revision WHERE id = 'of:topic' AND op = 'set'`,
       "deleted rows lie below a boundary and above no surviving row",
+    );
+    // A case change in a NOCASE column: the declared collation must not
+    // hide it.
+    await tampered(
+      `UPDATE "pattern notes" SET v = 'importantcase' WHERE k = 'b'`,
+      "tables outside the history are untouched",
+    );
+    // The ACL document's marker replaced by null: a failed check, not a
+    // thrown one.
+    await tampered(
+      `UPDATE revision SET data = '${
+        encodeMemoryBoundary(
+          { compaction: null, value: { [SPACE]: "OWNER" } } as never,
+        )
+      }' WHERE id = '${ACL}' AND seq = (SELECT seq FROM head WHERE id = '${ACL}')`,
+      "ACL document",
     );
     // Live data outside the history lost: a blob row, a pattern's table
     // dropped, a duplicate row removed from a table without a key.

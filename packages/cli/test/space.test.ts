@@ -11,7 +11,7 @@ import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { clonePaths } from "@commonfabric/state-inspector";
 import { cf, stripAnsi } from "./utils.ts";
-import { toFileUrl } from "@std/path";
+import { join, toFileUrl } from "@std/path";
 import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
 
 /**
@@ -22,6 +22,9 @@ import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
  * where the developer ran it.
  */
 const text = (lines: string[]): string => stripAnsi(lines.join("\n"));
+
+/** The directory `cf` runs in under test: the CLI package. */
+const cliDir = join(import.meta.dirname!, "..");
 
 /**
  * Staging directories `--from <url>` may have created, by name.
@@ -288,6 +291,28 @@ describe("cf space compact", () => {
       expect(text(outServed.stderr)).toContain("write the result to");
       expect(await Deno.stat(`${liveDir}/result.sqlite`).catch(() => undefined))
         .toBeUndefined();
+      // A dangling symlink into the served directory is an entry at the
+      // result path, and refused as one.
+      await Deno.symlink(`${liveDir}/new.sqlite`, `${root}/link.sqlite`);
+      const dangling = await cf(
+        `space compact ${work} --documents computed: --out ${root}/link.sqlite`,
+        { env: { DB_PATH: `${liveDir}/space.sqlite` } },
+      );
+      expect(dangling.code).not.toBe(0);
+      expect(text(dangling.stderr)).toContain("exists");
+      expect(await Deno.lstat(`${liveDir}/new.sqlite`).catch(() => undefined))
+        .toBeUndefined();
+      // A result named by a bare file name lands in the working directory.
+      const bare = `cf-space-compact-test-${crypto.randomUUID()}.sqlite`;
+      const relative = await cf(
+        `space compact ${work} --documents computed: --out ${bare}`,
+      );
+      try {
+        expect(relative.code).toBe(0);
+        expect((await Deno.stat(`${cliDir}/${bare}`)).size).toBeGreaterThan(0);
+      } finally {
+        await Deno.remove(`${cliDir}/${bare}`).catch(() => {});
+      }
     } finally {
       await Deno.remove(root, { recursive: true });
     }

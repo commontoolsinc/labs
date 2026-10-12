@@ -28,6 +28,7 @@
 // snapshot across operators).
 
 import { Command, ValidationError } from "@cliffy/command";
+import { basename, dirname } from "@std/path";
 import { configuredStorePath } from "@commonfabric/memory/v2/storage-path";
 import {
   CompactionRefused,
@@ -88,15 +89,29 @@ function liveStoreDirs(): string[] {
  * the rule is that the owning instance is stopped first.
  */
 function assertNotLiveStore(path: string, role: "store" | "result"): void {
-  // The result does not exist yet, so it is placed by its directory; the
-  // store by itself. Both resolve through symlinks, as the server would.
+  // The result must not exist yet — not as a file, not as a symlink whose
+  // target does not exist either, which `VACUUM INTO` would write through —
+  // so it is placed by its directory, resolved through symlinks as the
+  // server would. The store is resolved by itself.
   let real: string;
+  if (role === "result") {
+    let present = false;
+    try {
+      Deno.lstatSync(path);
+      present = true;
+    } catch {
+      // Nothing there, which is what a result path must be.
+    }
+    if (present) {
+      throw new ValidationError(
+        `${path} exists; the result is never overwritten.`,
+      );
+    }
+  }
   try {
     real = role === "store"
       ? Deno.realPathSync(path)
-      : `${Deno.realPathSync(path.replace(/\/[^/]*$/, "") || ".")}/${
-        path.replace(/^.*\//, "")
-      }`;
+      : `${Deno.realPathSync(dirname(path))}/${basename(path)}`;
   } catch {
     throw new ValidationError(
       role === "store"
