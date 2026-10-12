@@ -1601,8 +1601,13 @@ it, as [protected initialization](./cfc-protected-initialization.md) states. A
 served run with no actor, which keeps the ambient service snapshot (SC-38), is
 refused a write whose persisted label would mint the claim on a position
 without an `ownerPrincipal`, so such a claim never names the service; a value
-it initializes on nobody's behalf mints no claim and is admitted. This entry
-leaves the `ownerPrincipal` arm as it is. What the claim never permits is
+it initializes on nobody's behalf mints no claim and is admitted. The
+runtime decides it by the transaction's trust snapshot: a write under the
+serving runtime's own snapshot is the one refused. The `ownerPrincipal` arm
+refuses such a write the same way, everything but an initialization on
+nobody's behalf at a placeholder owner, as specs pull request 64 states for
+owner binding; the runtime holds that refusal under a `SPEC-PENDING` marker
+naming it. What the claim never permits is
 unchanged: its subject is the run's acting principal, never a literal a
 pattern supplies, so no principal's runtime mints a claim naming another.
 Proposed edit: state the authority reading, the declared-writer

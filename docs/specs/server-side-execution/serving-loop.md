@@ -1031,11 +1031,14 @@ action's public write. Therefore, normatively:
   the event's server-stamped actor, the demanded instance's principal,
   or the delegated carriage's actor — never the serving runtime's
   ambient identity; a run with no acting principal keeps the service
-  snapshot and cannot mint USER-NAMED current-principal claims. (The
-  actor-less setup/defaults mint carve-out can still resolve a
-  placeholder to the SERVICE under keep-service — the same ruling's
-  flagged Q3 caveat, recorded in the OW34 design of record and
-  arbitrated by the OW59 row's store audit.) (OW34-family,
+  snapshot and cannot mint USER-NAMED current-principal claims. A
+  transaction under the service snapshot is refused a write that would
+  resolve a current-principal placeholder or an owner binding to the
+  SERVICE, initialization included (`currentPrincipalIntegrityReason`).
+  A bookkeeping run the loop attaches a principal's snapshot to — the
+  space-root ensure's resolved owner — hands that snapshot to the piece
+  starts it defers, so their initializations resolve to the owner.
+  (OW34-family,
   RULED 2026-08-21. The snapshot attaches at the SpaceServer's run
   stamp, before the run's first read, so the mid-run grant writes and
   the commit-prep label mints of one run read one value. SC-38 in

@@ -61,7 +61,7 @@ import {
   type ForeignPositions,
 } from "./claim-preservation.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { waveRunActorOf, waveRunContextOf } from "../executor/wave.ts";
+import { waveRunActorOf } from "../executor/wave.ts";
 import {
   decomposeSchema,
   recomposeSchema,
@@ -227,6 +227,7 @@ import {
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
   type StoredCfcMetadata,
+  type TrustSnapshot,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -5608,6 +5609,26 @@ const storedRepresentedPrincipalsAt = (
   ];
 };
 
+/**
+ * Whether `trustSnapshot`, the one `tx` takes its trust from, is the serving
+ * runtime's own: it names the runtime's identity, and no run on `tx` is
+ * stamped as acting for that identity. A serving runtime gives a run with no
+ * actor this ambient snapshot, and a claim or an owner resolved under it would
+ * name the service. A run it attaches a principal's snapshot to — a handler's
+ * actor, or the owner the space-root ensure resolves — takes its trust from
+ * that principal instead. Off the serving posture no snapshot is the serving
+ * runtime's.
+ */
+const trustIsServingRuntimeOwn = (
+  tx: IExtendedStorageTransaction,
+  trustSnapshot: TrustSnapshot,
+): boolean => {
+  const servingIdentity = tx.getCfcState().servingIdentity;
+  return servingIdentity !== undefined &&
+    trustSnapshot.actingPrincipal === servingIdentity &&
+    waveRunActorOf(tx) !== servingIdentity;
+};
+
 const currentPrincipalIntegrityReason = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -5669,6 +5690,18 @@ const currentPrincipalIntegrityReason = (
       return `ownerPrincipal requires matching represents-principal integrity at /${
         path.join("/")
       }`;
+    }
+    // Under the serving runtime's own trust snapshot, an owner the write
+    // matched or bound would be the service. Only an initialization on
+    // nobody's behalf at a placeholder owner checks no owner and binds no
+    // one, so only that is left to admit.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/64
+    if (
+      trustIsServingRuntimeOwn(tx, trustSnapshot) &&
+      (!isCurrentPrincipalPlaceholder(ownerPrincipalSpec) ||
+        !pathHoldsUnattributedInitialization(tx, target, path))
+    ) {
+      return `ownerPrincipal requires the run's actor at /${path.join("/")}`;
     }
     if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
       return `ownerPrincipal mismatch at /${path.join("/")}`;
@@ -5733,10 +5766,10 @@ const currentPrincipalIntegrityReason = (
       path.join("/")
     }`;
   }
-  // A served run with no actor keeps the serving runtime's own trust
-  // snapshot, so a claim it minted would name the service.
+  // Under the serving runtime's own trust snapshot, a claim the write minted
+  // would name the service.
   if (
-    waveRunContextOf(tx) !== undefined && waveRunActorOf(tx) === undefined &&
+    trustIsServingRuntimeOwn(tx, trustSnapshot) &&
     claimsCurrentPrincipalAt(tx, target, path)
   ) {
     return `current-principal integrity requires the run's actor at /${
