@@ -598,25 +598,92 @@ export function batchesOf(
 /** What running one invocation came to. */
 interface Outcome {
   ok: boolean;
+
+  /** Whether the lane passed a signal on to the invocation. */
+  interrupted: boolean;
+
   seconds: number;
+}
+
+/**
+ * Whether a lane has been told to stop, and the commands it passes that
+ * on to.
+ *
+ * A job stops a step that reaches its bound by sending it SIGINT, and
+ * SIGTERM if it is still running a few seconds later. The lane passes
+ * each signal on to the commands it is running and starts nothing more.
+ * A test runner told to stop names the tests it was in the middle of and
+ * writes its report before it exits, so a lane cut off by its bound keeps
+ * the records of what it finished and says what held it up.
+ */
+export class LaneStop {
+  #signal: Deno.Signal | undefined;
+  #running = new Set<Deno.ChildProcess>();
+  #signalled = new WeakSet<Deno.ChildProcess>();
+
+  /** The first signal the lane was sent, or undefined if none was. */
+  get signal(): Deno.Signal | undefined {
+    return this.#signal;
+  }
+
+  /** Stops the lane, and passes `signal` on to every command running. */
+  receive(signal: Deno.Signal): void {
+    this.#signal ??= signal;
+    for (const child of this.#running) this.#passOn(child, signal);
+  }
+
+  /**
+   * Waits for `child` to exit, passing on whatever the lane is sent
+   * meanwhile, and says whether it passed anything on. A child that
+   * starts after the lane was told to stop is sent the first signal the
+   * lane was sent.
+   */
+  async wait(
+    child: Deno.ChildProcess,
+  ): Promise<{ status: Deno.CommandStatus; interrupted: boolean }> {
+    if (this.#signal !== undefined) this.#passOn(child, this.#signal);
+    this.#running.add(child);
+    try {
+      const status = await child.status;
+      return { status, interrupted: this.#signalled.has(child) };
+    } finally {
+      this.#running.delete(child);
+    }
+  }
+
+  /** Sends `signal` to `child`, which may have exited already. */
+  #passOn(child: Deno.ChildProcess, signal: Deno.Signal): void {
+    try {
+      child.kill(signal);
+      this.#signalled.add(child);
+    } catch {
+      // Deno refuses to signal a child that has exited, and one that has
+      // exited has nothing left to stop.
+    }
+  }
 }
 
 /** Runs one invocation, with the capabilities' environment around it. */
 export async function runInvocation(
   invocation: Invocation,
   env: Record<string, string>,
+  stop: LaneStop = new LaneStop(),
 ): Promise<Outcome> {
   const [command, ...args] = invocation.command;
   const startedAt = performance.now();
-  const result = await new Deno.Command(command!, {
-    args,
-    cwd: invocation.cwd,
-    env: { ...Deno.env.toObject(), ...env, ...invocation.env },
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
+  const { status, interrupted } = await stop.wait(
+    new Deno.Command(command!, {
+      args,
+      cwd: invocation.cwd,
+      env: { ...Deno.env.toObject(), ...env, ...invocation.env },
+      stdin: "null",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn(),
+  );
   return {
-    ok: result.success,
+    ok: status.success,
+    interrupted,
     seconds: (performance.now() - startedAt) / 1000,
   };
 }
@@ -838,6 +905,9 @@ async function directoriesIn(at: string): Promise<string[]> {
  * not failed for it: the mistake is in the metadata, and the tests it
  * came with either passed or did not. The record then belongs to no
  * suite, which is what the store half of the drift guard fails on.
+ *
+ * A batch whose lane is told to stop gathers what the execution running
+ * then recorded, and starts no other.
  */
 export async function runBatch(
   batch: Batch,
@@ -846,6 +916,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  stop: LaneStop = new LaneStop(),
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -896,6 +967,7 @@ export async function runBatch(
   // Seconds the records the suite places in a unit took, over every pass.
   let ran = 0;
   for (let run = 1; run <= batchRepeats(batch); run++) {
+    if (stop.signal !== undefined) break;
     console.log(
       `ci-lane: starting ${batch.suite.id}, run ${run} of ` +
         `${batchRepeats(batch)}`,
@@ -934,6 +1006,7 @@ export async function runBatch(
       }),
     });
     for (const invocation of invocations) {
+      if (stop.signal !== undefined) break;
       const outcome = await runInvocation(invocation, {
         ...env,
         // Each execution writes into a spool of its own, so a repeat
@@ -941,11 +1014,12 @@ export async function runBatch(
         // way through keeps what finished.
         CF_TEST_RECORDS_DIR: batchSpool,
         ...invocation.env,
-      });
+      }, stop);
       seconds += outcome.seconds;
       if (!outcome.ok) ok = false;
       const collected = await collectRecords({
         spoolDir: batchSpool,
+        interrupted: outcome.interrupted,
         junit: (invocation.junit ?? []).map((output) => ({
           kind: output.kind,
           scope: output.scope,
@@ -1003,6 +1077,9 @@ export async function runBatch(
       if (!heard.has(request.unit)) silent.add(request.unit);
     }
   }
+  // A batch that stopped part way measured only the part it ran, and the
+  // cost fit reads only a passing batch's measurements.
+  if (stop.signal !== undefined) ok = false;
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
@@ -1355,7 +1432,8 @@ export interface Reruns {
  * order, so the budget is spread over the lane's failures before it is
  * spent on one of them. A unit starts only where what the packer charges
  * for it fits in what the reruns have left of `RERUN_BUDGET_SECONDS`, and
- * the reruns' own time is what they take off it.
+ * the reruns' own time is what they take off it. A lane told to stop
+ * starts no rerun.
  */
 export async function rerunFailures(
   reruns: readonly Rerun[],
@@ -1364,6 +1442,7 @@ export async function rerunFailures(
   options: LaneOptions,
   workDir: string,
   spool: string | undefined,
+  stop: LaneStop = new LaneStop(),
 ): Promise<Reruns> {
   let seconds = 0;
   let passes = 0;
@@ -1390,7 +1469,7 @@ export async function rerunFailures(
         .map(({ entry }) => ({ entry, repeats: 1 })),
     );
   };
-  for (;;) {
+  while (stop.signal === undefined) {
     const left = RERUN_BUDGET_SECONDS - seconds;
     let next: number | undefined;
     let least = Infinity;
@@ -1447,6 +1526,8 @@ export async function rerunFailures(
       path.join(workDir, `rerun-${passes}`),
       undefined,
       env,
+      undefined,
+      stop,
     );
     seconds += (performance.now() - startedAt) / 1000;
     if (spool !== undefined) spoolRecords(spool, result.records);
@@ -1775,6 +1856,13 @@ export interface LaneDeps {
    * the run testing it and its spool ships.
    */
   spool?: () => string | undefined;
+
+  /**
+   * What tells the lane to stop part way through, made once the lane is
+   * about to run anything. The command line stops it on SIGINT and
+   * SIGTERM; a lane run from inside a test is stopped by the test.
+   */
+  stop?: () => LaneStop;
 }
 
 /**
@@ -2148,6 +2236,7 @@ export async function runLane(
     describeWithheld(laid.withheld, seen.mandatory);
   }
   if (options.dryRun) return true;
+  const stop = deps.stop?.() ?? new LaneStop();
 
   // Asked before any batch runs, because the first pattern a batch
   // compiles writes the file whatever the cache held.
@@ -2234,7 +2323,8 @@ export async function runLane(
       const env = opened.envFor(batch.suite.needs);
       // A failure never stops the lane: one failing batch would otherwise
       // hide every batch and every repeat after it, and the point of a
-      // lane is what it measured.
+      // lane is what it measured. Being told to stop does.
+      if (stop.signal !== undefined) break;
       const result = await runBatch(
         batch,
         options,
@@ -2242,6 +2332,7 @@ export async function runLane(
         spool,
         env,
         batchCoverage(options, batch.suite.id, seen.coverage),
+        stop,
       );
       for (const conflict of result.conflicts) conflicts.push(conflict);
       // The records decide, rather than the command's exit status: a
@@ -2282,6 +2373,14 @@ export async function runLane(
         if (failing.size > 0) reruns.push({ batch, env, failing });
       }
     }
+    if (stop.signal !== undefined) {
+      ok = false;
+      console.log(
+        `ci-lane: stopped by ${stop.signal} before finishing its plan; ` +
+          `it passes the signal on to whatever test command is running ` +
+          `and starts nothing more`,
+      );
+    }
     // Written once every batch has run, so that a batch that withdrew an
     // excusal is heard before any is recorded, and a report of this run
     // says what it did not fail for from what it did rather than from
@@ -2305,6 +2404,7 @@ export async function runLane(
         options,
         workDir,
         spool,
+        stop,
       );
       for (const conflict of rerun.conflicts) conflicts.push(conflict);
     }
@@ -2321,17 +2421,28 @@ export async function runLane(
     // and the logs are large.
     if (!ok) await describeCapabilityLogs(opened.logs);
     await opened.close();
-    await leaveWorkDir(ok);
+    if (!ok) await leaveWorkDir(false);
   }
+  // A lane that has passed so far keeps its directory until its coverage
+  // is converted, which can still fail it.
+  const undecided = ok;
   describeConflicts(conflicts);
   if (rerun !== undefined) describeReruns(rerun);
   // After the capabilities are closed, because a conversion is the lane's
   // own work and needs nothing a suite opened. A conversion that lost a
   // tracked file fails the lane: every line of that file reads as
   // uncovered downstream, so a gate scored from it would fail somebody
-  // for a report that was never complete.
-  const converted = await convertCoverage(options);
+  // for a report that was never complete. A lane told to stop converts
+  // nothing: the job ends it seconds after asking, and a conversion takes
+  // minutes.
+  const converted = stop.signal === undefined
+    ? await convertCoverage(options)
+    : { ok: true, reports: [] };
   if (!converted.ok) ok = false;
+  // A signal can arrive while the conversion runs, and a lane told to stop
+  // has failed whenever it was told.
+  if (stop.signal !== undefined) ok = false;
+  if (undecided) await leaveWorkDir(ok);
   const marked = await markMeasuredFailures(options, suites, failedUnits);
   if (compileCacheState !== undefined) {
     await writeCompileCacheState(options, compileCacheState);
@@ -2445,8 +2556,21 @@ export async function main(
   return await runLane(options, deps) ? 0 : 1;
 }
 
-/** What the lane the command line runs reads its manifest from. */
-const store: LaneDeps = { manifest: fetchManifest };
+/**
+ * What the lane the command line runs reads its manifest from, and what
+ * stops it: the signals a job stops a step with. A lane that only plans
+ * or counts leaves those signals to end it as they would any process.
+ */
+const store: LaneDeps = {
+  manifest: fetchManifest,
+  stop: () => {
+    const stop = new LaneStop();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      Deno.addSignalListener(signal, () => stop.receive(signal));
+    }
+    return stop;
+  },
+};
 
 // `Deno.exitCode` rather than `Deno.exit`, which would end the process
 // before the unload handlers run — and one of those is what writes a

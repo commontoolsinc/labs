@@ -101,6 +101,12 @@ export interface CollectOptions {
   junit: readonly JUnitSpec[];
 
   /**
+   * Whether the execution that wrote the reports was interrupted by a
+   * signal, which decides what a test they report as cancelled was.
+   */
+  interrupted?: boolean;
+
+  /**
    * The configuration these records were produced in. Every record takes
    * this value, replacing whatever a producer supplied, which is what
    * makes a variant a property of the suite that ran rather than of the
@@ -186,6 +192,7 @@ export async function collectRecords(
             kind: spec.kind,
             scope: spec.scope,
             fileByName,
+            interrupted: options.interrupted ?? false,
           };
           if (spec.prefix !== undefined) ingestOptions.filePrefix = spec.prefix;
           if (options.known !== undefined) ingestOptions.known = options.known;
