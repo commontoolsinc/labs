@@ -36,6 +36,9 @@ describe("list builtin edge paths", () => {
   //     its op so the index argument it observes is current.
   //   - The non-array guard: a list input that resolves to a non-array value
   //     makes the reconcile throw.
+  //   - The declared-usage branch: an op whose argument schema names only
+  //     `element` is run with that alone; `index` and `array` reach it only
+  //     when its schema names them.
   //
   // Both are driven against a live runtime (no resume needed): cell-link
   // elements give stable identity across a reorder, and a direct set() of a
@@ -132,6 +135,48 @@ describe("list builtin edge paths", () => {
     await result.pull();
     // [3*100+0, 2*100+1, 1*100+2]
     expect(result.key("tagged").get()).toEqual([300, 201, 102]);
+  });
+
+  it("runs a map op without index or array when its schema names only element", async () => {
+    // The transformer declares only the arguments a callback names, and
+    // names them under a schema that carries no `additionalProperties`, so
+    // the dialect reads it as closed to the rest. The op below observes
+    // `index` through an alias its schema does not name: with nothing passed
+    // at that slot it reads `undefined`, and the lift tags the element alone.
+    const tagIfIndexed = lift(
+      (input: { element: number; index?: number }) =>
+        input.index === undefined ? input.element * 100 : -1,
+    );
+    const op = pattern(
+      // deno-lint-ignore no-explicit-any
+      ({ element, index }: any) => tagIfIndexed({ element, index }),
+      {
+        type: "object",
+        properties: { element: { type: "number" } },
+        required: ["element"],
+      },
+    );
+
+    const mapPattern = pattern<{ values: number[] }>(({ values }) => ({
+      values,
+      tagged: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
+        // deno-lint-ignore no-explicit-any
+        op as any,
+        {},
+      ),
+    }));
+
+    const resultCell = runtime.getCell<
+      { values: number[]; tagged: number[] }
+    >(space, "map-element-only", undefined, tx);
+    const result = runtime.run(tx, mapPattern, {
+      values: [1, 2, 3],
+    }, resultCell);
+    await commitTx();
+    tx = runtime.edit();
+
+    await result.pull();
+    expect(result.key("tagged").get()).toEqual([100, 200, 300]);
   });
 
   it("re-runs a reused filter element when its index changes (usesIndex)", async () => {
