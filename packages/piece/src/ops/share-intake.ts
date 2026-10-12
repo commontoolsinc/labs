@@ -262,6 +262,17 @@ export class ShareIntake {
     await Promise.all(this.#pending);
   }
 
+  /**
+   * Whether {@link idle} has nothing to wait for right now: no change is
+   * being taken up and no registration is awaiting its handling. A caller
+   * that awaits `idle()` and then something else checks this afterwards,
+   * since a change arriving during the second wait is one the first had
+   * stopped watching.
+   */
+  isIdle(): boolean {
+    return !this.#draining && this.#pending.size === 0;
+  }
+
   /** Stops following the inboxes; an offer being vetted is not sent. */
   stop(): void {
     this.#stopped = true;

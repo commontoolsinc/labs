@@ -137,7 +137,10 @@ Waits split into two groups with different primitives.
 - `awaitViewSettled(page)` resolves once the worker has settled reactively, the
   resulting vdom batch has crossed to the main thread and been applied, and Lit
   has finished its update cycle. This is the "is the control interactive yet"
-  signal.
+  signal. It also waits for the bring-up of the user's Home that the shell
+  starts once a page's first piece is on screen, and the runtime's `idle()`
+  waits for the housekeeping that bring-up starts in the worker, so a settled
+  page has neither still running.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
   primitives above for common waits and interactions. Each of them settles and

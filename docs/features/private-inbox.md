@@ -71,7 +71,12 @@ and registers offers in Home's catalog, so without Home it has nothing to do. So
 any page of the shell that shows a piece starts the ensure for a user
 whose Home exists, and Home's start stays off the path to that first piece. A
 page whose view fails to load a piece starts none. None of these waits for the
-ensure. A request for another space's root starts no ensure, nor does a read
+ensure. A client's `idle()` does: the worker answers it once the ensure, the
+adoption of name-only entries, and the share intake's start have finished,
+and the intake has taken up every change it has been told of. The shell's
+`commonfabric.viewSettled` waits for its own request to bring Home up as well,
+from the moment it decides to make one, so a page that has settled has none of
+this still running. A request for another space's root starts no ensure, nor does a read
 of Home's root with `start: false`, which reads what the root exported
 without running it. The `cf` CLI brings Home up through `PiecesController`
 directly and never starts one.
