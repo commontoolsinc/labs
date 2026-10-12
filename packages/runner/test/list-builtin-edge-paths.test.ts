@@ -182,99 +182,115 @@ describe("list builtin edge paths", () => {
     expect(result.key("tagged").get()).toEqual([100, 200, 300]);
   });
 
-  it("drops a stored index and array from a resumed map element whose op names neither", async () => {
-    // A row's argument document written under the earlier reading of the
-    // schema holds `index` and a link to the whole list at `array`. The
-    // coordinator that resumes the row stages its argument over the stored
-    // slots, and leaves those two out, so the replay removes them instead of
-    // carrying them forward.
-    const program: RuntimeProgram = {
-      main: "/main.tsx",
-      files: [{
-        name: "/main.tsx",
-        contents: [
-          "import { pattern } from 'commonfabric';",
-          "export default pattern<{ items: number[] }>(({ items }) => ({",
-          "  items,",
-          "  tagged: items.map((item) => item * 100),",
-          "}));",
-        ].join("\n"),
-      }],
-    };
-    const elementCellsSchema = {
-      type: "array",
-      items: { type: "unknown", asCell: ["cell"] },
-      // deno-lint-ignore no-explicit-any
-    } as any;
-    const argumentOf = (
-      rt: Runtime,
-      // deno-lint-ignore no-explicit-any
-      resultCell: any,
-      transaction: IExtendedStorageTransaction,
-    ) => {
-      const [first] = resultCell.key("tagged").asSchema(elementCellsSchema)
+  for (
+    const [replay, resumedCallback] of [
+      ["the same op", "item * 100"],
+      ["a changed op", "item * 100 + 0"],
+    ] as const
+  ) {
+    it(`drops a stored index and array from a map element resumed under ${replay} that names neither`, async () => {
+      // A row's argument document written under the earlier reading of the
+      // schema holds `index` and a link to the whole list at `array`. The
+      // coordinator that resumes the row stages its argument over the stored
+      // slots, and leaves those two out, so the replay removes them instead
+      // of carrying them forward. The two replays take different paths in
+      // the runner: the same op restages over the stored slots directly, a
+      // changed op restages through the stored-slot validation.
+      const programWith = (callback: string): RuntimeProgram => ({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: [
+            "import { pattern } from 'commonfabric';",
+            "export default pattern<{ items: number[] }>(({ items }) => ({",
+            "  items,",
+            `  tagged: items.map((item) => ${callback}),`,
+            "}));",
+          ].join("\n"),
+        }],
+      });
+      const elementCellsSchema = {
+        type: "array",
+        items: { type: "unknown", asCell: ["cell"] },
         // deno-lint-ignore no-explicit-any
-        .get() as any[];
-      return rt.getCellFromLink(
-        getMetaLink(first, "argument")!,
-        undefined,
-        transaction,
+      } as any;
+      const argumentOf = (
+        rt: Runtime,
+        // deno-lint-ignore no-explicit-any
+        resultCell: any,
+        transaction: IExtendedStorageTransaction,
+      ) => {
+        const [first] = resultCell.key("tagged").asSchema(elementCellsSchema)
+          // deno-lint-ignore no-explicit-any
+          .get() as any[];
+        return rt.getCellFromLink(
+          getMetaLink(first, "argument")!,
+          undefined,
+          transaction,
+        );
+      };
+
+      // Run the list, then write the legacy slots into the first row's
+      // argument document the way a run under the earlier reading left them.
+      const compiled = await runtime.patternManager.compilePattern(
+        programWith("item * 100"),
+        { space, tx },
       );
-    };
+      const resultCell = runtime.getCell<
+        { items: number[]; tagged: number[] }
+      >(space, `map-legacy-slots-${replay}`, compiled.resultSchema, tx);
+      runtime.run(tx, compiled, { items: [1, 2, 3] }, resultCell);
+      await commitTx();
+      tx = runtime.edit();
+      await resultCell.pull();
+      expect(resultCell.key("tagged").get()).toEqual([100, 200, 300]);
 
-    // Run the list, then write the legacy slots into the first row's
-    // argument document the way a run under the earlier reading left them.
-    const compiled = await runtime.patternManager.compilePattern(program, {
-      space,
-      tx,
+      const legacyArgument = argumentOf(runtime, resultCell, tx);
+      legacyArgument.key("index").set(0);
+      legacyArgument.key("array").set(resultCell.key("items"));
+      await commitTx();
+      tx = runtime.edit();
+      expect(Object.keys(legacyArgument.withTx(tx).getRaw() as object).sort())
+        .toEqual(["array", "element", "index"]);
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+      await commitTx();
+      await runtime.dispose({ closeStorage: false });
+
+      // Resume in a fresh runtime over the same store, with the program the
+      // replay names.
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+      const resumed = await runtime.patternManager.compilePattern(
+        programWith(resumedCallback),
+        { space, tx },
+      );
+      const resumedCell = runtime.getCell<
+        { items: number[]; tagged: number[] }
+      >(space, `map-legacy-slots-${replay}`, compiled.resultSchema, tx);
+      await commitTx();
+      tx = runtime.edit();
+      if (replay === "the same op") {
+        await runtime.start(resumedCell);
+      } else {
+        runtime.run(tx, resumed, undefined, resumedCell);
+        await commitTx();
+        tx = runtime.edit();
+      }
+      await resumedCell.pull();
+      await runtime.settled();
+      expect(resumedCell.key("tagged").get()).toEqual([100, 200, 300]);
+
+      const resumedArgument = argumentOf(runtime, resumedCell, tx);
+      await resumedArgument.sync();
+      expect(Object.keys(resumedArgument.getRaw() as object).sort()).toEqual(
+        ["element"],
+      );
     });
-    const resultCell = runtime.getCell<{ items: number[]; tagged: number[] }>(
-      space,
-      "map-legacy-slots",
-      compiled.resultSchema,
-      tx,
-    );
-    runtime.run(tx, compiled, { items: [1, 2, 3] }, resultCell);
-    await commitTx();
-    tx = runtime.edit();
-    await resultCell.pull();
-    expect(resultCell.key("tagged").get()).toEqual([100, 200, 300]);
-
-    const legacyArgument = argumentOf(runtime, resultCell, tx);
-    legacyArgument.key("index").set(0);
-    legacyArgument.key("array").set(resultCell.key("items"));
-    await commitTx();
-    tx = runtime.edit();
-    expect(Object.keys(legacyArgument.withTx(tx).getRaw() as object).sort())
-      .toEqual(["array", "element", "index"]);
-    await runtime.patternManager.flushCompileCacheWrites();
-    await storageManager.synced();
-    await commitTx();
-    await runtime.dispose({ closeStorage: false });
-
-    // Resume in a fresh runtime over the same store.
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    tx = runtime.edit();
-    await runtime.patternManager.compilePattern(program, { space, tx });
-    const resumedCell = runtime.getCell<
-      { items: number[]; tagged: number[] }
-    >(space, "map-legacy-slots", compiled.resultSchema, tx);
-    await commitTx();
-    tx = runtime.edit();
-    await runtime.start(resumedCell);
-    await resumedCell.pull();
-    await runtime.settled();
-    expect(resumedCell.key("tagged").get()).toEqual([100, 200, 300]);
-
-    const resumedArgument = argumentOf(runtime, resumedCell, tx);
-    await resumedArgument.sync();
-    expect(Object.keys(resumedArgument.getRaw() as object).sort()).toEqual(
-      ["element"],
-    );
-  });
+  }
 
   it("re-runs a reused filter element when its index changes (usesIndex)", async () => {
     // Keep elements at even observed indices. A reorder changes which elements

@@ -3511,7 +3511,9 @@ export class Runner {
    * one. Where what is staged still fails the schema as a whole, every stored
    * slot the caller does not name is left out. Each slot left out is logged
    * as a warning naming the pattern, the piece, the slot and the mismatch.
-   * Returns the argument staged.
+   * A slot named in `droppedArgumentFields` is left out from the start and
+   * not logged: the caller leaves it out on purpose. Returns the argument
+   * staged.
    *
    * @throws Error carrying `STORED_ARGUMENT_SCHEMA_REFUSAL` when the argument
    *   fails the schema with no stored slot carried over.
@@ -3526,6 +3528,7 @@ export class Runner {
     stored: unknown,
     previousArgumentSchema: JSONSchema | undefined,
     defaults: FabricValue,
+    droppedArgumentFields: ReadonlySet<string>,
   ): T {
     const argumentCell = this.#runtime.getCellFromLink(
       argumentLink,
@@ -3540,7 +3543,12 @@ export class Runner {
     let staged = projection;
     const stage = (leaveOut: ReadonlySet<string>): string | undefined => {
       staged = mergeSchemaDefaults<T>(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument, leaveOut),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set([...droppedArgumentFields, ...leaveOut]),
+        ),
         defaults as Partial<T>,
         pattern.argumentSchema,
       );
@@ -3572,7 +3580,9 @@ export class Runner {
     const carried = foldStoredArgumentSlots(argument, stored) === argument ||
         !isObjectNotArray(argument) || !isObjectNotArray(stored)
       ? []
-      : Object.keys(stored).filter((slot) => !Object.hasOwn(argument, slot));
+      : Object.keys(stored).filter((slot) =>
+        !Object.hasOwn(argument, slot) && !droppedArgumentFields.has(slot)
+      );
     const dropped = storedArgumentSlotIssues(
       argumentCell,
       pattern.argumentSchema,
@@ -3817,6 +3827,7 @@ export class Runner {
             previousArgument,
             previousArgumentSchema,
             defaults,
+            new Set(droppedArgumentFields),
           );
         }
         argumentUpdated = true;

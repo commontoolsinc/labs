@@ -67,9 +67,12 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Each element runs the op pattern over the arguments its argument schema
+ * names, of `element`, `index`, `array` and `params`: the transformer names
+ * the parameters a callback declares, with `params` holding the bindings it
+ * captures. A slot the schema does not name is not passed, and a stored
+ * argument that holds one from an earlier run loses it when the element is
+ * set up again. An op with no argument schema receives all four.
  *
  * The goal is to keep the output array current without recomputing too much.
  *

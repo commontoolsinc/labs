@@ -33,8 +33,10 @@ export function unusedListOpArgumentFields(
   usage: ListOpArgumentUsage,
 ): readonly string[] {
   return [
+    ...(usage.usesElement ? [] : ["element"]),
     ...(usage.usesIndex ? [] : ["index"]),
     ...(usage.usesArray ? [] : ["array"]),
+    ...(usage.usesParams ? [] : ["params"]),
   ];
 }
 
