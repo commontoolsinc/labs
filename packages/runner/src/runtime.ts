@@ -967,6 +967,12 @@ export interface CfcRuntimeStats {
   /** Containers receiving child templates from flow persistence. */
   flowTemplateContainers: number;
 
+  /** Target verifications for which a boundary pass built its read set. */
+  inputReadViewsBuilt: number;
+
+  /** Target verifications that reused the read set a pass already held. */
+  inputReadViewsReused: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -1021,6 +1027,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   stagedReferenceCacheHits: 0,
   flowTemplateEntriesMinted: 0,
   flowTemplateContainers: 0,
+  inputReadViewsBuilt: 0,
+  inputReadViewsReused: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
