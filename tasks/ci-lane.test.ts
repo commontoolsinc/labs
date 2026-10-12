@@ -1649,7 +1649,11 @@ describe("running a lane's work", () => {
     expect(ok).toBe(false);
     expect(
       records.map((record) => [record.test.n, record.outcome]).sort(),
-    ).toEqual([["probe > hangs", "skip"], ["probe > passes", "pass"]]);
+    ).toEqual([
+      ["probe > hangs", "skip"],
+      ["probe > passes", "pass"],
+      ["probe", "skip"],
+    ]);
     expect(await exists(after)).toBe(false);
     connection.close();
     started.close();
