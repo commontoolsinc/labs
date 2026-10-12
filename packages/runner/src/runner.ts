@@ -902,6 +902,19 @@ export function firstResolvedOutputRedirect(
 }
 
 /**
+ * Whether the child `child` of the parent `parent` is managed independently:
+ * a child in a space of its own that owns its code and inputs, which it keeps
+ * after its owner detaches it. Its parent resumes it rather than setting it
+ * up.
+ */
+function resumesIndependently(child: Cell<any>, parent: Cell<any>): boolean {
+  return child.space !== parent.space &&
+    getPatternIdentityRef(child) !== undefined &&
+    (getPatternSource(child) !== undefined ||
+      getPieceSourceRevisions(child).length > 0);
+}
+
+/**
  * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
  * both of `#collectResumeOwnedCells`'s skip exits so a console trace names the
  * same things either way: the result cell being resumed and enough about the
@@ -13053,6 +13066,31 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
+    return {
+      ...io,
+      childResultCell: this.#mintChildResultCell(
+        tx,
+        module,
+        child,
+        outputRedirect,
+        resultCell,
+      ),
+      sendToBindings: true,
+    };
+  }
+
+  /**
+   * The result cell a sub-pattern node with module `module` and child `child`
+   * runs under, minted from `spot`, the resolved output spot it writes
+   * through.
+   */
+  #mintChildResultCell(
+    tx: IExtendedStorageTransaction,
+    module: Module,
+    child: Pattern,
+    spot: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): Cell<any> {
     const resultScope = patternDefaultScope(child) ?? module.defaultScope;
     const targetSpace = module.targetSpace ?? resultCell.space;
     let childResultCell = this.#runtime.getCell(
@@ -13061,9 +13099,9 @@ export class Runner {
       // reservation fixed before this output existed.
       module.targetSpaceRoot ? inSpaceRootCause(targetSpace) : {
         resultFor: {
-          space: outputRedirect.space,
-          id: outputRedirect.id,
-          path: [...outputRedirect.path],
+          space: spot.space,
+          id: spot.id,
+          path: [...spot.path],
         },
       },
       child.resultSchema,
@@ -13078,7 +13116,7 @@ export class Runner {
         tx,
       );
     }
-    return { ...io, childResultCell, sendToBindings: true };
+    return childResultCell;
   }
 
   #instantiatePatternNode(
@@ -13114,10 +13152,10 @@ export class Runner {
       // An independently managed child owns its code and inputs, including
       // after an owner detaches it. History keeps that fact after the origin
       // is cleared; ordinary untracked nested children still bind inputs.
-      const resumeExisting = crossSpace &&
-        getPatternIdentityRef(storedChild) !== undefined &&
-        (getPatternSource(storedChild) !== undefined ||
-          getPieceSourceRevisions(storedChild).length > 0);
+      const resumeExisting = resumesIndependently(
+        storedChild,
+        parentResultCell,
+      );
       if (crossSpace && !resumeExisting) {
         // Cross-space child pattern: run it inline in a multi-space transaction
         // (child space committed first) rather than re-instantiating it in a
