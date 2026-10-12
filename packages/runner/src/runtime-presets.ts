@@ -470,7 +470,9 @@ interface CoreParams {
  * `unitTest`) deliberately do NOT apply it: an emulated-storage runtime
  * has no serving host, so it runs the derive-and-commit model (the
  * ambient baseline, OFF) by construction — see
- * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ * `docs/development/EXPERIMENTAL_OPTIONS.md`. A harness that hosts a
+ * serving loop beside its own storage when the posture is ON applies this
+ * itself, and passes the result to the preset it builds with.
  *
  * Exported for the deployed-topology test clients that construct a bare
  * `Runtime` against a lane's toolshed (the runner integration tests, the

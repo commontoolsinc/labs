@@ -551,11 +551,10 @@ environment-selected flags into its workers. `/api/meta`'s
 `shellServerExecutionDefine` describes a packaged shell build and can be null
 with local dev servers; it does not report the defines in the dev bundle.
 
-The `generated-patterns` and `pattern-tests` targets use in-process, emulated
-stores without a serving host. The integration runner explicitly disables
-`serverExecution` for these two harnesses while preserving the other inherited
-flags; `cf test` refuses server execution on, so the `pattern-tests` target
-would otherwise fail every file. Server-backed targets receive the supplied
+The `generated-patterns` and `pattern-tests` targets host their storage in
+process. The integration runner explicitly disables `serverExecution` for
+these two harnesses while preserving the other inherited flags, so both run
+the OFF arm in every lane. Server-backed targets receive the supplied
 server-execution setting.
 
 For view-scoped replication, run the complete default integration suite with:
@@ -582,11 +581,28 @@ too. Without it the server admits the event and nothing ever delivers it, so
 a wait on the consequence never resolves and the test hangs rather than
 failing.
 
-`cf test` hosts no serving loop: it runs a single-user test over emulated
-storage and a multi-user test against a plain memory server. It therefore
-refuses to run with `EXPERIMENTAL_SERVER_EXECUTION=true`, failing each test
-file with a message naming the missing loop, rather than run clients whose
-events nothing serves.
+`cf test` resolves the posture as a deployed entry point does, the explicit
+`EXPERIMENTAL_SERVER_EXECUTION` and else `SERVER_EXECUTION_DEFAULT_ENABLED`,
+and on the ON arm hosts the loop with the pair below: a single-user test
+connects to `startServingMemoryServer()`, whose serving runtimes fetch through
+the test's `fetchMocks`, and a multi-user test's participants to
+`listenServingMemoryServer()`, with no access list, as on the OFF arm. Each
+settle also waits until every event the runtime fired has its consequence
+back at the runtime, which `runtime.idle()` and `storageManager.synced()` do
+not cover, so an assertion after an action reads what the served handler
+wrote, and a multi-user marker is announced after it. An event a served
+handler fires on its own account is no client's, and nothing waits for it.
+A run against a caller-supplied `storageHost` is refused on the ON arm,
+since the store is the caller's and there is no memory server to host a loop
+beside.
+
+On the ON arm, most of the checks `cf test` makes of a run observe the test's
+own runtime and not the serving one: the idempotency check, read budgets,
+pattern coverage, runtime errors, and a pattern's `console` calls. Logger
+warnings and errors are counted per process instead, so a single-user run,
+whose serving loop shares its process, counts the serving loop's as well. A
+served handler runs under the serving runtime's CFC posture rather than the
+test's.
 
 `@commonfabric/runner/executor/serving-memory-server.deno` supplies the pair:
 a memory server over a fresh non-persistent store, with an `ExecutorHost`
