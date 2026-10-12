@@ -397,6 +397,16 @@ export class XAppView extends BaseView {
     undefined;
 
   /**
+   * The runtime and space this view last asked to have the user join the room
+   * shown, and the request itself, from that decision until the worker has
+   * answered. A piece shown in the same space under the same runtime asks
+   * nothing more.
+   */
+  #visitJoin:
+    | { rt: RuntimeInternals; space: DID; done: Promise<void> }
+    | undefined = undefined;
+
+  /**
    * The revision the slug watch bumps to make the selection run again, which
    * a test reads to tell a reload from a resolution that changed nothing.
    */
@@ -423,6 +433,16 @@ export class XAppView extends BaseView {
     return bringUp !== undefined && bringUp.rt === this.rt
       ? bringUp.done
       : undefined;
+  }
+
+  /**
+   * The join this view has asked for of the room it shows, under its current
+   * runtime, which resolves, never rejecting, once the worker has answered;
+   * `undefined` before a piece under that runtime is on screen.
+   */
+  get visitJoin(): Promise<void> | undefined {
+    const join = this.#visitJoin;
+    return join !== undefined && join.rt === this.rt ? join.done : undefined;
   }
 
   #debuggerController = new DebuggerController(this);
@@ -1004,6 +1024,19 @@ export class XAppView extends BaseView {
     ) {
       this.#homeBringUp = { rt, done: this.#bringUpHome(rt) };
     }
+
+    // Each space a runtime shows a piece of, in turn, is one whose room the
+    // user may have joined by visiting it. The worker decides whether it is a
+    // room, and the user's chat manager whether that changes anything.
+    const space = this.space;
+    if (
+      rt !== undefined && space !== undefined &&
+      this._patterns.status === TaskStatus.COMPLETE &&
+      this._patterns.value?.activePattern !== undefined &&
+      (rt !== this.#visitJoin?.rt || space !== this.#visitJoin.space)
+    ) {
+      this.#visitJoin = { rt, space, done: this.#joinVisitedRoom(rt, space) };
+    }
   }
 
   /**
@@ -1028,6 +1061,28 @@ export class XAppView extends BaseView {
     } catch (error) {
       if (!rt.signal.aborted) {
         console.error("[AppView] Failed to bring up Home:", error);
+      }
+    }
+  }
+
+  /**
+   * Helper for `updated()`, which asks `rt`'s worker to have the user join the
+   * room in `space`, a piece of which is on screen, once Home's bring-up has
+   * answered and the view has settled. The worker joins the user only to a
+   * FabriChat room they can write to, and does nothing for a user with no
+   * Home, so every space shown is asked about. Joining a room makes it one of
+   * the user's chats, and lists a forgotten one again: in this shell, visiting
+   * a room is joining it.
+   */
+  async #joinVisitedRoom(rt: RuntimeInternals, space: DID): Promise<void> {
+    try {
+      await this.#homeBringUp?.done;
+      await createViewSettled(() => rt.runtime())();
+      if (rt.signal.aborted) return;
+      await rt.runtime().joinVisitedRoom(space);
+    } catch (error) {
+      if (!rt.signal.aborted) {
+        console.error("[AppView] Failed to join the visited room:", error);
       }
     }
   }

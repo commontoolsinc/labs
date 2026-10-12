@@ -1,0 +1,105 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the view's module
+// graph reaches @commonfabric/ui, whose components extend a bare HTMLElement as
+// they load, so it can only load once the test has installed one.
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import type { DID } from "@commonfabric/identity";
+
+import { installBrowserGlobals } from "./browser-globals.ts";
+
+const PAGE_HREF = "http://localhost:8000/visit-join";
+
+const FIRST_SPACE = "did:key:z6Mk-shell-visit-join-first" as DID;
+const SECOND_SPACE = "did:key:z6Mk-shell-visit-join-second" as DID;
+
+/**
+ * A runtime that answers the space's root with a piece, and records in `log`
+ * each request to idle, each to bring Home up, and each to join a visited
+ * room, with its space.
+ */
+function stubRuntime(log: string[]) {
+  const client = {
+    idle: () => {
+      log.push("idle");
+      return Promise.resolve();
+    },
+    ensureHomePatternRunning: () => {
+      log.push("ensure");
+      return Promise.resolve({});
+    },
+    joinVisitedRoom: (space: DID) => {
+      log.push(`join ${space}`);
+      return Promise.resolve("sent");
+    },
+  };
+  return {
+    signal: new AbortController().signal,
+    getSpaceRootPattern: () => Promise.resolve({ id: () => "root" }),
+    runtime: () => client,
+  };
+}
+
+describe("XAppView visit join", () => {
+  it("asks its runtime to join the shown space's room once Home's bring-up has answered and the view has settled", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const view = new XAppView();
+      view.app = { view: { spaceDid: FIRST_SPACE } } as never;
+      view.space = FIRST_SPACE;
+      view.rt = stubRuntime(log) as never;
+
+      // An update with no piece on screen yet asks nothing.
+      view.updated(new Map());
+      expect(view.visitJoin).toBeUndefined();
+
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      expect(log).toEqual(["idle", "ensure", "idle", `join ${FIRST_SPACE}`]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("asks again for each new space shown, and not again for the same one", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const view = new XAppView();
+      view.app = { view: { spaceDid: FIRST_SPACE } } as never;
+      view.space = FIRST_SPACE;
+      view.rt = stubRuntime(log) as never;
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      await view.visitJoin;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      view.space = SECOND_SPACE;
+      view.updated(new Map());
+      await view.visitJoin;
+      view.space = FIRST_SPACE;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      expect(log.filter((entry) => entry.startsWith("join "))).toEqual([
+        `join ${FIRST_SPACE}`,
+        `join ${SECOND_SPACE}`,
+        `join ${FIRST_SPACE}`,
+      ]);
+    } finally {
+      restore();
+    }
+  });
+});
