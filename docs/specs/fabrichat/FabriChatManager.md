@@ -84,8 +84,9 @@ create a space for the conversation, with the room as its root, in four steps:
 2. Grant each other member OWNER on the room's space, by principal, so any
    member may add others.
 3. Offer the room to each other member whose profile the request names,
-   through the share inbox the profile points at, and add to the room's
-   participants each member it is offered to. Add a notice to
+   through each distinct share inbox their profiles point at, once per inbox,
+   and add to the room's participants each member it is offered to, once, by
+   the first profile it is offered through. Add a notice to
    `outgoingNotices`, for a client to deliver, for each other member offered
    nothing: one the request names only by principal, or one whose profile
    points at no inbox.
@@ -108,6 +109,14 @@ control per person, which picks the first profile `people` lists for them,
 from the newest room whose roster holds one. Creating the
 group names the picked profiles as `createGroup`'s `profiles`, so each picked
 person is offered the room, and empties the draft.
+
+Someone a user adds to a room later is told of it through `offerRoom`, which
+the room's `addMember` sends once it has granted them access. It runs as an
+event of its own, after the add has committed, and offers the room through the
+same steps as step 3: through the profile the add named, or, for an add naming
+only an address, through the profiles `people` lists for that person, as the
+session sending it reads `people`. It records `offered` or `noticed` under the
+request's id, which the room reads back as the add's `delivery`.
 
 ## Prerequisites
 
