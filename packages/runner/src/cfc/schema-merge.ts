@@ -19,6 +19,7 @@ import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { registerSchemaDocument } from "../schema-registry.ts";
+import { schemaTypesAreDisjoint } from "../schema-type-disjointness.ts";
 import type { CfcConfClause } from "./clause.ts";
 import { normalizeClause } from "./clause.ts";
 import {
@@ -793,35 +794,21 @@ const unionBranchShape = (schema: JSONSchema): JSONSchema => {
   return shape;
 };
 
-/**
- * The JSON types `branch` admits, with its reference resolved against
- * `definitions`; `undefined` where it declares no `type`. `number` and
- * `integer` admit each other's integers, so each set holds both or neither.
- */
-const branchTypes = (
+/** `branch`'s `type` keyword, with its reference resolved against `definitions`. */
+const branchType = (
   branch: JSONSchema,
   definitions: SchemaDefinitions,
-): ReadonlySet<unknown> | undefined => {
+): JSONSchemaObj["type"] => {
   const resolved = isObjectNotArray(branch) && typeof branch.$ref === "string"
     ? resolveKeepingBodyClaims(branch, { $defs: definitions })
     : branch;
-  if (!isObjectNotArray(resolved) || resolved.type === undefined) {
-    return undefined;
-  }
-  const types = new Set<unknown>(
-    Array.isArray(resolved.type) ? resolved.type : [resolved.type],
-  );
-  if (types.has("number") || types.has("integer")) {
-    types.add("number");
-    types.add("integer");
-  }
-  return types;
+  return isObjectNotArray(resolved) ? resolved.type : undefined;
 };
 
 /**
  * Pairs every stored policy-bearing union branch with the one candidate branch
  * of its shape. A candidate branch with no stored counterpart is admitted only
- * where its declared types share none with any stored branch's, so that no
+ * where its declared types share no value with any stored branch's, so that no
  * value a stored branch admits can match it instead and leave that branch's
  * claims behind. Such a branch is `undefined` in the result.
  */
@@ -836,19 +823,16 @@ const correspondingUnionBranches = (
     hashStringOf(unionBranchShape(branch))
   );
   const added = candidate.filter((_, index) => !left.includes(right[index]));
-  const storedTypes = existing.map((branch) =>
-    branchTypes(branch, definitions)
-  );
+  const storedTypes = existing.map((branch) => branchType(branch, definitions));
   if (
     new Set(left).size !== left.length ||
     new Set(right).size !== right.length ||
     left.some((shape) => !right.includes(shape)) ||
     added.some((branch) => {
-      const types = branchTypes(branch, definitions);
-      return types === undefined ||
-        storedTypes.some((stored) =>
-          stored === undefined || [...types].some((type) => stored.has(type))
-        );
+      const type = branchType(branch, definitions);
+      return storedTypes.some((stored) =>
+        !schemaTypesAreDisjoint(type, stored)
+      );
     })
   ) {
     throw new Error(

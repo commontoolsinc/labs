@@ -244,35 +244,48 @@ describe("schema-merge-unions", () => {
       expect(droppedStoredClaim(stored, merged)).toBeUndefined();
     });
 
+    const held = (
+      moduleIdentity: string,
+      storedType: string,
+      more: readonly JSONSchema[],
+    ): JSONSchema => ({
+      anyOf: [{ $ref: "#/$defs/Held" }, ...more],
+      $defs: {
+        Held: {
+          type: storedType,
+          ifc: { writeAuthorizedBy: writer(moduleIdentity) },
+        } as JSONSchemaObj,
+      },
+    });
+
+    it("is kept when every type it declares is one no stored branch admits", () => {
+      const stored = held("stored", "object", []);
+      const merged = mergeCfcSchemaEnvelopes(
+        stored,
+        held("successor", "object", [{ type: ["null", "string"] }]),
+      );
+      expect(droppedStoredClaim(stored, merged)).toBeUndefined();
+    });
+
     for (
-      const [name, added] of [
-        ["an integer beside a stored number", { type: "integer" }],
-        ["a type a stored branch also admits", { type: ["null", "object"] }],
-        ["no declared type", { enum: [null] }],
+      const [storedType, added] of [
+        ["number", { type: "integer" }],
+        ["integer", { type: "number" }],
+        ["object", { type: "unknown" }],
+        ["unknown", { type: "null" }],
+        ["FabricEpochDay", { type: "object" }],
+        ["object", { type: "FabricEpochDay" }],
+        ["object", { type: ["null", "object"] }],
+        ["string", { type: ["null", "unknown"] }],
+        ["string", { enum: [null] }],
       ] as const
     ) {
-      it(`is refused when it declares ${name}`, () => {
-        const numbered = (moduleIdentity: string, more: JSONSchema[]) =>
-          ({
-            anyOf: [
-              {
-                type: "object",
-                properties: { addedBy: { $ref: "#/$defs/Adder" } },
-              },
-              { type: "number" },
-              ...more,
-            ],
-            $defs: {
-              Adder: {
-                type: "string",
-                ifc: { writeAuthorizedBy: writer(moduleIdentity) },
-              },
-            },
-          }) as JSONSchema;
+      const declared = "type" in added ? JSON.stringify(added.type) : "no type";
+      it(`is refused when it declares ${declared} beside a stored ${storedType} branch`, () => {
         expect(() =>
           mergeCfcSchemaEnvelopes(
-            numbered("stored", []),
-            numbered("successor", [added as JSONSchema]),
+            held("stored", storedType, []),
+            held("successor", storedType, [added as JSONSchema]),
           )
         ).toThrow(/union branches/);
       });
