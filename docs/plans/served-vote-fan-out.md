@@ -36,7 +36,8 @@ Read, in this order, before changing anything:
 What is on by default and what is not, as the branch leaves it:
 
 - The serving loop itself (`EXPERIMENTAL_SERVER_EXECUTION`) is off by default;
-  every measurement here sets it on.
+  every served-arm measurement here sets it on, and the loop-off arm leaves it
+  off.
 - The worker (`SERVER_EXECUTION_WORKER`), the store read-through
   (`SERVER_EXECUTION_STORE_READ_THROUGH`) and the overlapped commit
   (`SERVER_EXECUTION_OVERLAP_COMMIT`) are all off by default. The arm the
@@ -118,10 +119,18 @@ recipe below, decide which change to make:
    `memory/refresh/walk/<phase>` rows split a session's refresh by phase.
    Sum them over a burst per arm.
 2. **How much of the work is the same across sessions?** Five sessions hold
-   the same view of the same documents under different identities. Count,
-   per flush pass, the distinct (schema, document revision) pairs walked
-   against the walks made, and the distinct frame payloads against the frames
-   encoded. A ratio near five is a sharing lever; a ratio near one is not.
+   the same view of the same documents under different identities. The
+   evaluation cache in `packages/memory/v2/query.ts` already shares an entry
+   across identities when the evaluation's whole reach resolved under the
+   `space` scope, and keys it to the evaluating identity once it touched a
+   session- or user-scoped instance (the identity-bound invariant of
+   `key-vocabulary.md` §5, which `assertSchemaMemoIdentity` enforces for the
+   inner schema memos). So the count to take, per flush pass, is how many of
+   the walks made resolved space-pure and were served from a shared entry,
+   how many were identity-keyed and why (which scoped instance the poll's
+   view reaches), and the distinct frame payloads against the frames
+   encoded. Identity-keyed walks whose scoped reach is one small instance
+   are a sharing lever; walks that are space-pure already are not.
 3. **Does a commit re-walk what it did not touch?** Compare the documents a
    pass re-walks with the commit's own writes; the refresh has an
    incremental path (`refreshed.updates`, `changedMisses`), and the question
@@ -133,11 +142,17 @@ recipe below, decide which change to make:
 Candidate changes, each a hypothesis until a question above says it is the
 one:
 
-- **Share the walk across sessions.** Memoize the schema traversal per
-  (schema, document revision) within one flush pass, or per pass, so the
-  second session's walk of a document the first session walked is a lookup.
-  Verified by question 2's ratio and a walk count that falls with the session
-  count held.
+- **Share the space-pure part of an identity-keyed walk.** An evaluation that
+  touched one scoped instance is keyed to its identity whole, so five sessions
+  of the poll re-walk the same space-scoped documents five times when only the
+  scoped tail differs between them. Splitting the evaluation so the
+  space-pure reach is shared across identities under the existing rule and
+  only the scoped tail is evaluated per identity would keep the identity-bound
+  invariant (no cross-identity reuse of anything that resolved a scoped
+  instance, and nothing recipient-shaped inside the shared part) while taking
+  the shared part out of the per-session cost. Verified by question 2's
+  counts and a space-scoped traversal count that stops growing with the
+  session count.
 - **Narrow the re-walk to the commit.** Make the incremental path the only
   path for a commit that touched a bounded set of documents. Verified by
   question 3 and by `traverseSchema` per pass falling with the size of the
