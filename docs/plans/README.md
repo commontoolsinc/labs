@@ -31,9 +31,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Independent reference labels](cfc-independent-reference-labels.md) moves a
   link write to the specified contract (§8.2, §8.12.8): the slot persists the
   creating attempt's own label and nothing copied from the target, a label
-  envelope beside a mergeable append describes the committed list, and the
-  `LinkReference` atom is retired through a specs ruling once nothing reads it.
-  Legacy entries stay as conservative restrictions; no migration runs.
+  envelope beside a mergeable append describes the committed list, and a
+  specs ruling retires the `LinkReference` atom, after which the runtime stops
+  minting and reading it. Legacy entries stay as conservative restrictions; no
+  migration runs.
 - [Release gates without an integrity union](cfc-release-gate-integrity.md)
   keeps one consumed value's evidence from releasing another value's clause:
   the write, sink and display gates run value-intrinsic rules at each location

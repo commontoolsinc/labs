@@ -357,15 +357,6 @@ const recordLinkWritePolicyInput = (
   if (tx.getCfcState().enforcementMode === "disabled") {
     return;
   }
-  // A content-addressed document is a runtime surface outside labeling:
-  // immutable, named by its own content, and never given an envelope —
-  // the write-policy and flow-read passes exclude `cid:` ids on the same
-  // ground. A link to one carries nothing a label could describe, so it
-  // records no policy input; recording one would demand source metadata
-  // the document can never carry.
-  if (source.id.startsWith("cid:")) {
-    return;
-  }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
   // The slot's label is the reference's own (CFC §8.2.3): the link schema's
   // declarations and the handle's carried restriction, which the persist
@@ -389,6 +380,16 @@ const recordLinkWritePolicyInput = (
   // carries the attempt's join.
   const referenceRelevant = linkSchemaDeclaresPolicy(source.schema) ||
     cfcLabelViewHasValues(carriedCfcLabelView);
+  // A content-addressed document is a runtime surface outside labeling:
+  // immutable, named by its own content, and never given an envelope — the
+  // write-policy and flow-read passes exclude `cid:` ids on the same ground.
+  // The reference is labeled all the same: a handle to one acquired under a
+  // restriction, or written under a link schema that declares one, carries
+  // that at its slot, and is recorded for it. A bare pointer to one has
+  // nothing to persist and no slot policy to meet, and records nothing.
+  if (source.id.startsWith("cid:") && !referenceRelevant) {
+    return;
+  }
   // A link stored below a document's root under a write authorization that
   // arrives with this write is held to the same check as one stored under
   // the claim once a commit has persisted it: otherwise the write that

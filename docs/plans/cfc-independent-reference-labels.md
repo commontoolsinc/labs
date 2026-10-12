@@ -61,10 +61,11 @@ Two readers depend on it, and both exist because of something else:
   writer's label. That is an under-taint of "which reference sits at this slot"
   that stage 2 closes at the append, after which the guard has nothing to
   guard.
-- The root entry at every accepted link. `persistedLinkEntries` keeps an entry
-  only when its label has values, and for a link to an unlabeled source by an
-  attempt with an empty join, the atom is the only value. The entry exists to
-  hold the atom. With the slot carrying the creation join, a slot with nothing
+- The root entry at every accepted link, as the runtime persisted it before
+  stage 1: `persistedLinkEntries` kept an entry only when its label had
+  values, and for a link to an unlabeled source by an attempt with an empty
+  join, the atom was the only value. The entry existed to hold the atom. With
+  the slot carrying the creation join, which stage 1 does, a slot with nothing
   to say persists nothing, and every consumer of a missing link entry already
   reads it as "no restriction".
 
@@ -90,10 +91,14 @@ One entry at the slot, and nothing beneath it:
 A dereference composes the slot's restriction with the target's own labels.
 That is already how `cfcLabelViewForDereference` builds a label view and how
 the flow join's `followRef` probe consumes the followed slot; neither reads the
-copies beneath the slot. A link write no longer reads the source document's
-stored envelope at all unless an assertion about linked content (a write floor,
-an exact-copy claim) needs the source's evidence, which `verifyWriteFloor`
-resolves through the link resolver against the current source and keeps doing.
+copies beneath the slot. A link write takes nothing of the source's labels
+from its stored envelope. It reads that envelope for one thing of its own: a
+`CurrentPrincipal` reader placeholder in the link schema or the carried
+restriction is bound to the reader the source stores at the linked path,
+before the acting principal. Beyond that, the envelope is read only when an
+assertion about linked content (a write floor, an exact-copy claim) needs the
+source's evidence, which `verifyWriteFloor` resolves through the link resolver
+against the current source and keeps doing.
 
 ## Stages
 

@@ -2571,7 +2571,9 @@ class VerifierMetadataResolver {
       views = new Map();
       this.#views.set(metadata, views);
     }
-    const key = holdsReference ? `${pathKey(path)}\u0000ref` : pathKey(path);
+    // The mode leads the key: a pointer never starts with a letter, so the
+    // two modes of one path cannot meet, whatever its segments hold.
+    const key = `${holdsReference ? "r" : "v"}${pathKey(path)}`;
     if (!views.has(key)) {
       let index = this.#viewIndexes.get(metadata);
       if (index === undefined) {
@@ -12204,7 +12206,14 @@ export function* prepareBoundaryCommitSteps(
             : mergeLabels(entry.label, joined),
           origin: "link",
         };
-        if (input.source.space !== space) crossSpaceEligible?.add(persisted);
+        // A clause the join brought from another space is protected here
+        // as it is on a flow stamp, whichever space the reference names.
+        if (
+          input.source.space !== space ||
+          (joined !== undefined && flowJoinIsCrossSpace)
+        ) {
+          crossSpaceEligible?.add(persisted);
+        }
         persistedLabelEntries.push(persisted);
       }
     }
