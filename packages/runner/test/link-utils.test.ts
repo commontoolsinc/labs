@@ -865,6 +865,54 @@ describe("link-utils", () => {
       expect(externalizeLinkSchemasInValue(value)).toBe(value);
     });
 
+    it("measures a schema against its reference in wire bytes, not characters", () => {
+      setContentAddressedSchemasConfig(true);
+      // Shorter than a reference in UTF-16 code units, longer in the UTF-8
+      // bytes a frame carries.
+      const document: JSONSchema = { type: "string", title: "日".repeat(20) };
+      expect(JSON.stringify(document).length).toBeLessThan(63);
+      const value = {
+        entry: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:wide-title-target",
+              path: [],
+              schema: document,
+            },
+          },
+        },
+      };
+      const stored = externalizeLinkSchemasInValue(value);
+      const stamped = linkRefPayload(stored.entry).schema as { $ref: string };
+      expect(stamped.$ref).toBe(
+        `cid:${internSchemaAsTaggedHashString(document)}`,
+      );
+    });
+
+    it("stamps a reference on a cyclic schema", () => {
+      setContentAddressedSchemasConfig(true);
+      const document: JSONSchema & { properties: Record<string, unknown> } = {
+        type: "object",
+        properties: {},
+      };
+      document.properties.next = document;
+      const value = {
+        entry: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:cyclic-target",
+              path: [],
+              schema: document,
+            },
+          },
+        },
+      };
+      const stored = externalizeLinkSchemasInValue(value);
+      const stamped = linkRefPayload(stored.entry).schema as { $ref: string };
+      expect(stamped.$ref.startsWith("cid:")).toBe(true);
+      expect(resolvedSchema(stamped)).toBeDefined();
+    });
+
     it("returns a value carrying no inline link schema as it is", () => {
       setContentAddressedSchemasConfig(true);
       const value = {

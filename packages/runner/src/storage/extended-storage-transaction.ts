@@ -2659,6 +2659,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * stores the document, and read-side assembly fails closed on whatever
    * predates that validation.
    */
+  #materializeReferencedSchemaDocuments(): void {
+    if (!getContentAddressedSchemasConfig()) return;
+    for (const space of getTransactionWrittenSpaces(this)) {
+      for (const detail of this.getWriteDetails(space)) {
+        this.#stageSchemaDocsForValue(space, detail.address, detail.value);
+      }
+    }
+  }
+
   /**
    * `value` with its inline link schemas stamped as references, which is
    * what a link written into an ordinary document stores
@@ -2678,15 +2687,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       return value;
     }
     return externalizeLinkSchemasInValue(value);
-  }
-
-  #materializeReferencedSchemaDocuments(): void {
-    if (!getContentAddressedSchemasConfig()) return;
-    for (const space of getTransactionWrittenSpaces(this)) {
-      for (const detail of this.getWriteDetails(space)) {
-        this.#stageSchemaDocsForValue(space, detail.address, detail.value);
-      }
-    }
   }
 
   /**
@@ -3596,19 +3596,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
-            write.value = storedLinkSchemaForm(address, write.value);
-            noteSystemWrite(address, write.value);
+            const value = storedLinkSchemaForm(address, write.value);
+            noteSystemWrite(address, value);
             noteWriteIdentity();
             if (!write.delete) {
-              refuseMalformedSchemaMeta(address, write.value);
+              refuseMalformedSchemaMeta(address, value);
               if (getContentAddressedSchemasConfig()) {
-                staged.push({ address, value: write.value });
+                staged.push({ address, value });
               }
             }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
             invalidateReadCaches();
-            yield { address, value: write.value, delete: write.delete };
+            yield { address, value, delete: write.delete };
           }
         })(),
       );

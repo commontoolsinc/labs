@@ -247,7 +247,9 @@ where the pre-sync was no longer the whole cost.
       stream, for an absence record. A reload of the thirty-row room sends
       6.1 MB of watch frames instead of 10 MB.
 - [x] A link schema written into an ordinary document is stored as a
-      reference (`docs/specs/content-addressed-schemas.md`): a nested
+      reference when the reference is the shorter wire form; a trivial
+      schema, one decomposition refuses, and a bare handle stamp stay
+      inline (`docs/specs/content-addressed-schemas.md`). A nested
       instance's argument document had carried one inline closure per
       captured input, 27 KB of a 64 KB operation per message row in the
       first-run commit, which is now 40 KB.

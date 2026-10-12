@@ -51,14 +51,19 @@ export function isPermanentRejection(
  *   reaching commit unprepared — is a fail-closed backstop rather than a
  *   shape the commit path produces, because `commit()` prepares a relevant
  *   transaction itself (`docs/specs/cfc-commit-preparation.md`).
+ * - `MessageTooLargeError` (server-side, wire): the server refused the
+ *   frame before evaluating it, for standing for more array slots and
+ *   record members than it admits from an untrusted sender
+ *   (memory/v2/server.ts, `MAX_UNTRUSTED_MESSAGE_SLOTS`). The same writes
+ *   re-sent stand for the same slots, so a retry is refused identically.
+ *   As with `RowLabelCommitError`, the server serializes the class name
+ *   unchanged and the runner keeps it through normalization
+ *   (storage/v2.ts `toRejectedError`).
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
   "SpeculativeBasisError",
   "CfcCommitRefusalError",
-  // The server refused the frame for standing for more slots than it admits
-  // from an untrusted sender (`MAX_UNTRUSTED_MESSAGE_SLOTS`); the same
-  // writes re-sent stand for the same slots.
   "MessageTooLargeError",
 ]);
 

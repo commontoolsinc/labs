@@ -360,11 +360,19 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
   }) as T;
 }
 
+const wireEncoder = new TextEncoder();
+
 /**
- * The characters a stamped reference takes, `{"$ref":"cid:fid1:<43>"}`: an
- * inline schema no longer than this gains nothing from being replaced.
+ * The bytes `value` takes on the wire, where frames are UTF-8 JSON;
+ * `undefined` for a value JSON cannot serialize, a cyclic one among them.
  */
-const EXTERNAL_SCHEMA_REF_LENGTH = 63;
+function wireByteLength(value: unknown): number | undefined {
+  try {
+    return wireEncoder.encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Rewrites inline link schemas inside `value` to their reference form, the
@@ -374,21 +382,19 @@ const EXTERNAL_SCHEMA_REF_LENGTH = 63;
  * (`inlineExternalSchemaRefsInValue`), and written as it stands into an
  * ordinary document it would store, and send, every closure in full for
  * every link: a nested instance's argument document carries one per captured
- * input. A reference already stamped, a trivial schema, a schema no longer
- * than the reference that would replace it (a bare handle stamp such as
- * `{ asCell: ["stream"] }`, which readers combine structurally), and a
- * schema decomposition refuses ride through unchanged. The value is rebuilt
- * only along the paths that change, so a value carrying nothing to rewrite
- * is returned as it is.
+ * input. A reference already stamped, a trivial schema, a schema
+ * decomposition refuses, and a schema that takes no more wire bytes than the
+ * reference that would replace it (a bare handle stamp such as
+ * `{ asCell: ["stream"] }`, which readers combine structurally) ride through
+ * unchanged. A cyclic schema has no inline wire form, so its reference always
+ * replaces it. The value is rebuilt only along the paths that change, so a
+ * value carrying nothing to rewrite is returned as it is.
  */
 export function externalizeLinkSchemasInValue<T extends FabricValue>(
   value: T,
 ): T {
   return mapLinkSchemas(value, (schema) => {
     if (!isObjectNotArray(schema) || !isNontrivialSchema(schema)) {
-      return schema;
-    }
-    if (JSON.stringify(schema).length <= EXTERNAL_SCHEMA_REF_LENGTH) {
       return schema;
     }
     if (typeof schema.$ref === "string" && isExternalSchemaRef(schema.$ref)) {
@@ -398,11 +404,22 @@ export function externalizeLinkSchemasInValue<T extends FabricValue>(
       schema as JSONSchema,
       KeepAsCell.All,
     );
-    return isObjectNotArray(externalized) &&
-        typeof externalized.$ref === "string" &&
-        isExternalSchemaRef(externalized.$ref)
-      ? externalized as FabricValue
-      : schema;
+    if (
+      !isObjectNotArray(externalized) ||
+      typeof externalized.$ref !== "string" ||
+      !isExternalSchemaRef(externalized.$ref)
+    ) {
+      return schema;
+    }
+    const inlineBytes = wireByteLength(schema);
+    const referenceBytes = wireByteLength(externalized);
+    if (
+      inlineBytes !== undefined && referenceBytes !== undefined &&
+      inlineBytes <= referenceBytes
+    ) {
+      return schema;
+    }
+    return externalized as FabricValue;
   }) as T;
 }
 

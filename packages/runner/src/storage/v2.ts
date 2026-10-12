@@ -10444,6 +10444,12 @@ const toRejectedError = (
   //    retryable by `isTransientCommitRejection`; the name has to survive here
   //    or that classification can never fire. It is raised client-side, so
   //    unlike the names above it is not part of the server's wire contract.
+  //  - `MessageTooLargeError`: the server refused the frame before evaluating
+  //    it, for standing for more slots than it admits from an untrusted
+  //    sender (memory/v2/server.ts, `MAX_UNTRUSTED_MESSAGE_SLOTS`). The same
+  //    writes re-sent stand for the same slots, so the retry allow-list
+  //    classifies the name terminal; flattened here, the commit would be
+  //    re-sent until its budget ran out.
   //
   // The memory server MUST keep emitting the server-side names unchanged
   // (server.ts `transact` catch, and the ACL validation errors it returns
@@ -10451,7 +10457,7 @@ const toRejectedError = (
   if (
     name === "RowLabelCommitError" || name === "ProtocolError" ||
     name === "AuthorizationError" || name === "SessionError" ||
-    name === "InvalidMessageError"
+    name === "InvalidMessageError" || name === "MessageTooLargeError"
   ) {
     const retriable = (error as { retriable?: unknown })?.retriable === true;
     const permanentEvidence =
