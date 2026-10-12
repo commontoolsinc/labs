@@ -329,13 +329,16 @@ intake among them, and forgetting a room archives its entry.
 ## Custom Home Pattern
 
 The home space's default pattern is the home experience itself — by default,
-`/api/patterns/system/home.tsx`. A Home is created once, on its user's first
-open or by the first wish on a client runtime for a target under its root (see
-[Built-in Targets](wish.md#built-in-targets)), and from then on it owns account
+`/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
+first of: its user's first open; the home space's own server, which ensures the
+root once server execution activates the space and its owner resolves; and the
+first wish on a client runtime for a target under its root, unless that wish is
+headless or for `#chatManager`, neither of which creates one (see
+[Built-in Targets](wish.md#built-in-targets)). From then on it owns account
 data: profiles, favorites, navigation, the shared-space catalog and the private
 inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
-which retains that data. Nothing but that first open or that first wish creates
-the root of an identity Home, and nothing replaces or unlinks it: root
+which retains that data. Nothing but those three creates the root of an
+identity Home, and nothing replaces or unlinks it: root
 recreation refuses a Home before stopping, unlinking or compiling anything,
 whether the Home is absent, installed, or pointing at a target that cannot
 currently be loaded, and the low-level link and unlink
@@ -498,8 +501,8 @@ Both the home pattern and the default app pattern follow the same mechanism:
 3. The pattern is compiled, run, linked as `spaceCell.defaultPattern`, and its
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
-   Home, absent or present, which is created on first open, or by the first
-   wish on a client runtime for a target under its root, and updated in place.
+   Home, absent or present, which is created as
+   [Custom Home Pattern](#custom-home-pattern) describes and updated in place.
    A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
    remains untracked by the URL updater and may carry a separate repository
    locator
