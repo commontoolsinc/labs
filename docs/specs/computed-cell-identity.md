@@ -140,6 +140,29 @@ A named instance also records, as its descriptor's `legacyPartialCause`, the
 number, so every other anonymous root keeps the number it would have without
 instance names.
 
+A sub-pattern instance with a positional cause moves to another child's state
+when a cell is added ahead of it, since its child is the one minted from
+whatever number it now takes. A parent's setup refuses
+(`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
+naming both pattern identities, to set up a child at a positional spot over a
+stored child of another pattern identity when the parent shows its positional
+children have moved spots:
+
+- a child of the incoming pattern identity runs at another positional spot of
+  the parent; or
+- another positional spot of the pattern sets up the stored child's pattern
+  identity.
+
+A stored child of a different identity with neither sign is taken for the same
+child under a newer version of its own source, since a child's identity changes
+whenever its own source does, so neither rule blocks an ordinary update of a
+child's source. These two rules judge only positional spots: a spot a result
+key, a node input or `.for()` names does not shift. No rule judges a child that
+is its space's root, which its space's genesis places whatever its cause, or a
+child managed independently in a space of its own, which its parent resumes
+rather than sets up. A spot whose node sets up a space's root is not counted as
+another positional spot either, since its child does not sit there.
+
 A parent set up under a pattern that did not name an instance holds that
 instance's child at the positional spot. The first setup under a pattern that
 names it carries the child over (`planInstanceCarryOver`), taking the first of
@@ -202,36 +225,25 @@ identity, as it does with no instance names; the vintage gate catches it loudly
 where a schema then refuses the stored argument.
 
 A named instance stamps its name on the child it sets up, in the child's
-`instanceName` meta. The parent's setup refuses (`refuseDisplacedChildren`),
-with an error naming both pattern identities, before anything it stages
-commits, so a refused update changes none of the piece's state, and a live
-update the guard refuses leaves the previous pattern running. The piece's
-pattern pointer still names the refused pattern, though, so a fresh start
-sets that pattern up, refuses again, and does not start the piece until the
-pointer names a pattern the guard accepts. A child is refused where it would
-set up:
+`instanceName` meta. The parent's setup also refuses, whatever the child's
+spot, to set up a child:
 
-- over a child stamped with another instance's name, for a named instance or
-  for a positional spot;
+- over a child stamped with another instance's name; or
 - over a child another instance carries, recorded in the parent's
-  `instanceChildren`, for a named instance or for a positional spot, whatever
-  the two pattern identities;
-- at a positional spot, over a stored child of another pattern identity, when
-  a child of the incoming identity runs at another positional spot of the
-  parent;
-- at a positional spot, over a stored child of another pattern identity, when
-  another positional spot of the pattern sets up the stored identity.
+  `instanceChildren`, whatever the two pattern identities.
 
-The last two see a shift between positional children, which carry no instance
-names. A stored child of a different identity with none of those signs is
-taken for the same child under a newer version of its own source, since a
-child's identity changes whenever its own source does, so none of the
-refusals blocks an ordinary update of a child's source. Where a pre-fix
-child's identity changed in the same update, the movement checks have nothing
-to judge by and let the setup through.
+The refusal comes before anything the setup stages commits, so a refused
+update changes none of the piece's state. A live update the guard refuses
+leaves the previous pattern running. The piece's pattern pointer still names
+the refused pattern, though, so a fresh start sets that pattern up, refuses
+again, and does not start the piece until the pointer names a pattern the guard
+accepts, such as the source the piece ran before.
 
 What this leaves open:
 
+- Where a child's own source changed in the same update that moved it, its
+  identity changed with it, so the positional rules have nothing to judge by
+  and let the setup through. A child can then take another's state.
 - Anonymous roots other than named instances stay positional: an instance not
   bound to a `const`, a `.map()` output and the element children under it.
   When such a root moves to a number nothing held, its children are minted

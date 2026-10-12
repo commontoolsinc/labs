@@ -260,7 +260,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { bringUpHomeRootForHandler } from "./home-root.ts";
+import { bringUpHomeRootForRefusedWrite } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -914,17 +914,6 @@ export function firstResolvedOutputRedirect(
 }
 
 /**
- * The partial cause a node's raw output binding names at this level, when it
- * is a single derived internal cell, and `undefined` otherwise.
- */
-function nodeOutputPartialCause(outputs: unknown): JSONValue | undefined {
-  if (!isAliasBinding(outputs)) return undefined;
-  const alias = outputs.$alias;
-  if ((alias.defer ?? 0) !== 0 || alias.path.length !== 0) return undefined;
-  return alias.partialCause;
-}
-
-/**
  * The instance name a sub-pattern node's raw output binding carries, when the
  * node is a named instance, and `undefined` otherwise.
  */
@@ -932,35 +921,9 @@ function instanceNameOfNodeOutputs(outputs: unknown): string | undefined {
   return instanceNameOfPartialCause(nodeOutputPartialCause(outputs));
 }
 
-/**
- * Whether `partialCause` is one the pattern builder numbers by position: a
- * bare `{ $generated: N }`.
- */
-function isPositionalPartialCause(partialCause: unknown): boolean {
-  return isObjectNotArray(partialCause) &&
-    typeof partialCause.$generated === "number" &&
-    Object.keys(partialCause).length === 1;
-}
-
 /** The number in the positional partial cause `partialCause`. */
 function generatedNumber(partialCause: unknown): number {
   return (partialCause as { $generated: number }).$generated;
-}
-
-/** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
-function subPatternNodes(
-  pattern: Pattern,
-): { node: Node; module: Module; partialCause: JSONValue }[] {
-  const found: { node: Node; module: Module; partialCause: JSONValue }[] = [];
-  for (const node of pattern.nodes) {
-    const module = node.module;
-    if (!isModule(module) || module.type !== "pattern") continue;
-    if (!isPattern(module.implementation)) continue;
-    const partialCause = nodeOutputPartialCause(node.outputs);
-    if (partialCause === undefined) continue;
-    found.push({ node, module, partialCause });
-  }
-  return found;
 }
 
 /** The child links a parent's `instanceChildren` meta holds, by name. */
@@ -1061,19 +1024,6 @@ function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
   return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
 }
 
-/** A key naming the document `link` addresses: its space, id and scope. */
-function documentKey(link: NormalizedFullLink): string {
-  return `${link.space}\0${link.id}\0${link.scope}`;
-}
-
-/** Whether two `{ identity, symbol }` pattern references name one pattern. */
-function samePatternRef(
-  a: { identity: string; symbol: string },
-  b: { identity: string; symbol: string },
-): boolean {
-  return a.identity === b.identity && a.symbol === b.symbol;
-}
-
 /**
  * Whether the child `child` of the parent `parent` is managed independently:
  * a child in a space of its own that owns its code and inputs, which it keeps
@@ -1085,6 +1035,56 @@ function resumesIndependently(child: Cell<any>, parent: Cell<any>): boolean {
     getPatternIdentityRef(child) !== undefined &&
     (getPatternSource(child) !== undefined ||
       getPieceSourceRevisions(child).length > 0);
+}
+
+/**
+ * The partial cause a node's raw output binding names at this level, when it
+ * is a single derived internal cell, and `undefined` otherwise.
+ */
+function nodeOutputPartialCause(outputs: unknown): JSONValue | undefined {
+  if (!isAliasBinding(outputs)) return undefined;
+  const alias = outputs.$alias;
+  if ((alias.defer ?? 0) !== 0 || alias.path.length !== 0) return undefined;
+  return alias.partialCause;
+}
+
+/**
+ * Whether `partialCause` is one the pattern builder numbers by position: a
+ * bare `{ $generated: N }`.
+ */
+function isPositionalPartialCause(partialCause: unknown): boolean {
+  return isObjectNotArray(partialCause) &&
+    typeof partialCause.$generated === "number" &&
+    Object.keys(partialCause).length === 1;
+}
+
+/** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
+function subPatternNodes(
+  pattern: Pattern,
+): { module: Module; partialCause: JSONValue }[] {
+  const found: { module: Module; partialCause: JSONValue }[] = [];
+  for (const node of pattern.nodes) {
+    const module = node.module;
+    if (!isModule(module) || module.type !== "pattern") continue;
+    if (!isPattern(module.implementation)) continue;
+    const partialCause = nodeOutputPartialCause(node.outputs);
+    if (partialCause === undefined) continue;
+    found.push({ module, partialCause });
+  }
+  return found;
+}
+
+/** A key naming the document `link` addresses: its space, id and scope. */
+function documentKey(link: NormalizedFullLink): string {
+  return `${link.space}\0${link.id}\0${link.scope}`;
+}
+
+/** Whether two `{ identity, symbol }` pattern references name one pattern. */
+function samePatternRef(
+  a: { identity: string; symbol: string },
+  b: { identity: string; symbol: string },
+): boolean {
+  return a.identity === b.identity && a.symbol === b.symbol;
 }
 
 /**
@@ -11626,6 +11626,33 @@ export class Runner {
     );
   }
 
+  /**
+   * Brings up the user's Home root for a handler whose write beneath the
+   * Home's empty slot was refused with `error`, then throws
+   * {@link RetryImmediately} so the scheduler runs the handler again, and its
+   * write lands under the root. A creation that fails is reported as `error`
+   * itself, with the failure as its cause and the handler's `frame` attached,
+   * as a handler's other failures carry theirs. `undefined` when this runtime
+   * brings up no root for `error` (see `bringUpHomeRootForRefusedWrite()`).
+   */
+  #bringUpHomeRootAndRetry(
+    error: unknown,
+    frame: Frame,
+  ): Promise<never> | undefined {
+    const creation = bringUpHomeRootForRefusedWrite(this.#runtime, error);
+    if (creation === undefined) return undefined;
+    return creation.then(
+      () => {
+        throw new RetryImmediately("Bringing up the user's Home root");
+      },
+      (failure: unknown) => {
+        (error as Error & { frame?: Frame }).cause = failure;
+        (error as Error & { frame?: Frame }).frame = frame;
+        throw error;
+      },
+    );
+  }
+
   #handlerResultPatternHasNavigateTo(
     pattern: Pattern,
   ): boolean {
@@ -12055,7 +12082,12 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun)
+          ? result.then(
+            postRun,
+            (error) =>
+              this.#bringUpHomeRootAndRetry(error, frame) ??
+                Promise.reject(error),
+          )
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -12076,6 +12108,13 @@ export class Runner {
             tx,
             this.#handlingReceiptCell(resultCell, cause, tx),
           ).finally(() => popFrame(frame));
+        }
+        // A write beneath the user's Home before Home has a root is refused;
+        // the root is brought up, and the handler runs again.
+        const retrying = this.#bringUpHomeRootAndRetry(error, frame);
+        if (retrying !== undefined) {
+          popFrameAfterReturn = false;
+          return retrying.finally(() => popFrame(frame));
         }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
@@ -12149,12 +12188,7 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          const materialized = inputsCell.asSchema(module.argumentSchema)
-            .withTx(tx).get();
-          // A handler holding a cell beneath the user's Home before Home has
-          // a root runs only once the root exists, so a write it makes there
-          // lands under the root.
-          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
+          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
         }
         : undefined;
 
@@ -14112,8 +14146,9 @@ export class Runner {
    * positional children have moved spots, which is a child of
    * `childPattern`'s identity running at another positional spot, or another
    * positional spot of `pattern` setting up the identity `storedChild` runs.
-   * A child whose identity differs with no such sign is the same child under
-   * a newer version of its own source.
+   * A spot whose node sets up a space's root is not counted. A child whose
+   * identity differs with no such sign is the same child under a newer
+   * version of its own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -14146,16 +14181,12 @@ export class Runner {
           `"${stamped}" set up`,
       );
     }
-    const storedLink = storedChild.getAsNormalizedFullLink();
+    const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
     const parent = resultCell.withTx(tx);
     for (
       const [name, link] of Object.entries(readInstanceChildren(parent))
     ) {
-      if (
-        name === instanceName || documentKey(link) !== documentKey(storedLink)
-      ) {
-        continue;
-      }
+      if (name === instanceName || documentKey(link) !== storedKey) continue;
       throw new Error(
         `refusing to set up ${describe(incoming)} for ${holder} over ` +
           `the child of ${describe(stored)} that instance "${name}" carries`,
@@ -14163,18 +14194,19 @@ export class Runner {
     }
     if (!positional || samePatternRef(stored, incoming)) return;
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      if (!isPositionalPartialCause(partialCause)) continue;
+      // A space's root child sits at its space's genesis address rather than
+      // at a spot of this parent, so it shows nothing about how the parent's
+      // spots have moved.
+      if (!isPositionalPartialCause(partialCause) || module.targetSpaceRoot) {
+        continue;
+      }
       const other = this.#childAtPartialCause(
         tx,
         resultCell,
         module,
         partialCause,
       );
-      if (
-        documentKey(other.getAsNormalizedFullLink()) === documentKey(storedLink)
-      ) {
-        continue;
-      }
+      if (documentKey(other.getAsNormalizedFullLink()) === storedKey) continue;
       const otherRef = getPatternSetupIdentityRef(other) ??
         getPatternIdentityRef(other);
       const wanted = this.#runtime.patternManager.getArtifactEntryRef(
@@ -14182,18 +14214,18 @@ export class Runner {
       );
       if (otherRef !== undefined && samePatternRef(otherRef, incoming)) {
         throw new Error(
-          `refusing to set up ${describe(incoming)} for ${holder} over the ` +
-            `child of ${describe(stored)}: a child of ${describe(incoming)} ` +
-            "runs at another positional spot of its parent, so the children " +
-            "have moved spots",
+          `refusing to set up ${describe(incoming)} for a positional spot ` +
+            `over the child of ${describe(stored)}: a child of ` +
+            `${describe(incoming)} runs at another positional spot of its ` +
+            "parent, so the children have moved spots",
         );
       }
       if (wanted !== undefined && samePatternRef(wanted, stored)) {
         throw new Error(
-          `refusing to set up ${describe(incoming)} for ${holder} over the ` +
-            `child of ${describe(stored)}: another positional spot of its ` +
-            `parent sets up ${describe(stored)}, so the children have moved ` +
-            "spots",
+          `refusing to set up ${describe(incoming)} for a positional spot ` +
+            `over the child of ${describe(stored)}: another positional spot ` +
+            `of its parent sets up ${describe(stored)}, so the children have ` +
+            "moved spots",
         );
       }
     }

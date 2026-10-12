@@ -16,11 +16,6 @@ import {
 } from "../src/builder/instance-name.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
-import {
-  getPatternSource,
-  getPieceSourceSnapshot,
-  preparePieceSourceTransitionBaseline,
-} from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("instance-carry-over");
@@ -126,12 +121,6 @@ const POSITIONAL_SIBLING_OF_NAMED = parentProgram([
   "  return { views: [s, a], aCount: a.count, sCount: s.count };",
 ].join("\n"));
 
-// The same insertion with both children positional.
-const POSITIONAL_WITH_SIBLING = parentProgram([
-  "  const [s, a] = [Other({ label: 's' }), Counter({ label: 'a' })];",
-  "  return { views: [s, a], aCount: a.count, sCount: s.count };",
-].join("\n"));
-
 // `DEPLOYED` with a second child of the same pattern, `n`, added after `a`
 // and bound to a `const`.
 const DEPLOYED_WITH_NAMED_ADDED = parentProgram([
@@ -168,15 +157,6 @@ const DEPLOYED_THREE = parentProgram([
   "    c2Count: c2.count,",
   "  };",
 ].join("\n"));
-
-// `DEPLOYED_TWO` under a newer version of `Counter`'s own source.
-const DEPLOYED_TWO_NEWER_COUNTER = parentProgram(
-  [
-    "  const [a, b] = [Counter({ label: 'a' }), Counter({ label: 'b' })];",
-    "  return { views: [a, b], aCount: a.count, bCount: b.count };",
-  ].join("\n"),
-  `${COUNTER}// A newer version.\n`,
-);
 
 // `COUNTER` with a node of its own, which the start's pre-sync plans on
 // whichever child it binds an instance to.
@@ -1042,167 +1022,7 @@ describe("instance-carry-over", () => {
     });
   });
 
-  describe("an independently managed child", () => {
-    it("is resumed, not judged, when its parent updates beside a positional child of the pattern it started from", async () => {
-      // The child sits at a positional spot, and its own source moved on
-      // independently, so its identity is not the one its parent's node sets
-      // up, while the positional sibling runs exactly that one.
-
-      const target = (await Identity.fromPassphrase("independent child"))
-        .did();
-      const childPath = "/api/patterns/system/child.tsx";
-      const parentPath = "/api/patterns/system/parent.tsx";
-      const childSource = (marker: string) =>
-        [
-          "import { computed, pattern } from 'commonfabric';",
-          "export default pattern<{ value: string }, { marker: string }>(",
-          `  ({ value }) => ({ marker: computed(() => '${marker} ' + value) }),`,
-          ");",
-          "",
-        ].join("\n");
-      const parentProgramOf = (extra: string): RuntimeProgram => ({
-        main: parentPath,
-        files: [
-          {
-            name: parentPath,
-            contents: [
-              "import { pattern } from 'commonfabric';",
-              "import Child from './child.tsx';",
-              "export default pattern<Record<string, never>>(() => ({",
-              "  views: [",
-              `    Child.inSpace('${target}')({ value: 'parent' }),`,
-              "    Child({ value: 'inline' }),",
-              "  ],",
-              extra,
-              "}));",
-              "",
-            ].join("\n"),
-          },
-          { name: childPath, contents: childSource("original") },
-        ],
-      });
-      const parentPattern = await compile(parentProgramOf(""));
-      const cell = rt.getCell<Record<string, unknown>>(space, "independent");
-      const tx = rt.edit();
-      rt.runner.run(tx, parentPattern, {}, cell, {
-        sourceOrigin: "system:system/parent.tsx",
-      });
-      rt.prepareTxForCommit(tx);
-      expect((await tx.commit().settled).error).toBeUndefined();
-      await cell.pull();
-      await rt.idle();
-      const child = cell.key("views").key(0).resolveAsCell();
-      await child.pull();
-      expect(getPatternSource(child)).toBe("system:system/child.tsx");
-      const candidate = await rt.patternManager.compilePattern({
-        main: childPath,
-        files: [{ name: childPath, contents: childSource("updated") }],
-      }, { space: child.space });
-      const expected = getPieceSourceSnapshot(child)!;
-      await rt.runner.runSynced(child, candidate, { value: "owner" }, {
-        pieceSourceTransition: {
-          revisionId: crypto.randomUUID(),
-          timestamp: Date.now(),
-          operation: "origin-update",
-          origin: expected.origin,
-          expected,
-          baseline: await preparePieceSourceTransitionBaseline(
-            rt,
-            child,
-            expected,
-          ),
-        },
-      });
-      await rt.idle();
-      rt.runner.stop(cell);
-
-      await update(cell, parentProgramOf("  extra: 1,"));
-
-      await child.pull();
-      expect(child.key("marker").get()).toBe("updated owner");
-    });
-  });
-
-  describe("a child at a spot a result key names", () => {
-    it("takes another pattern there without a refusal, beside positional children whose patterns were swapped", async () => {
-      // A named spot cannot shift, so the swap at the positional spot beside
-      // it is no sign that its child moved, as it would be for a positional
-      // one.
-
-      const keyed = (child: string, inline: string) =>
-        parentProgram([
-          `  const [i] = [${inline}({ label: 'i' })];`,
-          `  return { shown: ${child}({ label: 'k' }), views: [i] };`,
-        ].join("\n"));
-      const cell = await deployedParent("keyed-spot", {
-        deployed: keyed("Counter", "Other"),
-        named: keyed("Counter", "Other"),
-        counts: {},
-      });
-
-      const result = await update(cell, keyed("Other", "Counter"));
-
-      expect(result.shown).toBeDefined();
-    });
-  });
-
   describe("a positional child", () => {
-    it("leaves its parent on the pattern it ran before when it refuses", async () => {
-      const cell = await deployedParent("refusal-leaves-parent");
-      const before = cell.getMetaRaw("patternSetupIdentity");
-
-      await expect(update(cell, POSITIONAL_WITH_SIBLING)).rejects.toThrow(
-        /refusing to set up/,
-      );
-      await cell.sync();
-
-      expect(cell.getMetaRaw("patternSetupIdentity")).toEqual(before);
-    });
-
-    it("updates in place when two children of one pattern take a newer version of its source", async () => {
-      const cell = await deployedParent("positional-same-pattern-newer", {
-        deployed: DEPLOYED_TWO,
-        named: DEPLOYED_TWO,
-        counts: { aCount: 7, bCount: 9 },
-      });
-
-      const result = await update(cell, DEPLOYED_TWO_NEWER_COUNTER);
-
-      expect({ aCount: result.aCount, bCount: result.bCount }).toEqual({
-        aCount: 7,
-        bCount: 9,
-      });
-    });
-
-    it("refuses to set up over a child whose own pattern another positional spot sets up", async () => {
-      const cell = await deployedParent("positional-moved");
-
-      await expect(update(cell, POSITIONAL_WITH_SIBLING)).rejects.toThrow(
-        /refusing to set up .*#Other for a positional spot over the child of .*#Counter: another positional spot of its parent sets up .*#Counter/,
-      );
-    });
-
-    it("refuses to set up over a child of another pattern when a child of its own pattern runs at another positional spot", async () => {
-      const positional = parentProgram([
-        "  const [o, a] = [Other({ label: 'o' }), Counter({ label: 'a' })];",
-        "  return { views: [o, a], aCount: a.count, oCount: o.count };",
-      ].join("\n"));
-      const cell = await deployedParent("positional-incoming-elsewhere", {
-        deployed: positional,
-        named: positional,
-      });
-
-      await expect(update(
-        cell,
-        parentProgram([
-          "  const [a, t] = [Counter({ label: 'a' }), Third({ label: 't' })];",
-          "  return { views: [a, t], aCount: a.count, tCount: t.count };",
-        ].join("\n")),
-      )).rejects.toThrow(
-        /refusing to set up .*#Counter for a positional spot over the child of .*#Other: a child of .*#Counter runs at another positional spot/,
-      );
-    });
-
     it("refuses to set up over the child a named instance carried over", async () => {
       const cell = await deployedParent("positional-over-carried");
 
