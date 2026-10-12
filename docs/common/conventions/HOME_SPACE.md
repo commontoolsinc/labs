@@ -282,11 +282,11 @@ A request made in a home space that holds no queue — its home pattern does not
 exist, or is a version without the field — ends `refused`. Where the home
 pattern is a version without the field, `wish({ query: "#agent_queue" })`
 resolves to nothing; where there is no home pattern yet, a headless wish
-resolves to nothing too, and any other resolves through the empty slot. A write
-through that cell is refused with a `SpaceRootMissingError`. When the write is a
-handler's on a client runtime and the refusal escapes the handler, the home
-pattern is created and the handler runs again; a serving runtime creates none.
-[Built-in Targets](wish.md#built-in-targets) describes both.
+resolves to nothing too, and any other resolves through the empty slot. A
+handler holding that cell on a client runtime brings the home pattern up before
+it runs; on a serving runtime, which creates none, a write through it is refused
+with a `SpaceRootMissingError`. [Built-in Targets](wish.md#built-in-targets)
+describes both.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -334,10 +334,9 @@ The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
 first of: its user's first open; the home space's own server, which ensures the
 root once server execution activates the space and its owner resolves; and the
-first write by a handler on a client runtime through a cell a wish handed out
-for a Home target, when the write's refusal escapes the handler (see
-[Built-in Targets](wish.md#built-in-targets)). A read never creates one, a
-wish's or a handler's.
+first handler on a client runtime that holds a cell a wish handed out for a
+Home target, which brings the root up before it runs (see
+[Built-in Targets](wish.md#built-in-targets)). A wish's read never creates one.
 On a serving runtime such a write is refused until the root exists, so under
 server execution a user's first profile can be created only once their Home has
 a root. From then on it owns account
