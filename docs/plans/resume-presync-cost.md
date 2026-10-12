@@ -240,10 +240,32 @@ where the pre-sync was no longer the whole cost.
 - [x] Measured: the thirty-row room's first load from 71 to 30 s to the
       messages and its second load from 42 to 16 s, on the same machine
       within the hour.
+- [x] A handler plan's `$event` slot is read as a stream, the inputs walk
+      skips a position the reader declares a stream, and the owned-cells
+      wave syncs a stream cell whole: three paths had loaded each handler's
+      stream under its event schema, one root carrying that schema per
+      stream, for an absence record. A reload of the thirty-row room sends
+      6.1 MB of watch frames instead of 10 MB.
+- [x] A link schema written into an ordinary document is stored as a
+      reference (`docs/specs/content-addressed-schemas.md`): a nested
+      instance's argument document had carried one inline closure per
+      captured input, 27 KB of a 64 KB operation per message row in the
+      first-run commit, which is now 40 KB.
+- [x] The server's oversized-message refusal is a terminal rejection, so a
+      commit refused for its size is not sent again unchanged.
+- [ ] The first-run commit of a message row is still 40 KB per argument
+      document, 36 KB of it the CFC label map: 85 entries, each a
+      `LinkReference` atom naming its source and its own target in full.
+      These labels are unique to their document, so the content-addressed
+      label form (`docs/specs/content-addressed-cfc-labels.md`) does not
+      shrink them; what would is the atom's shape, which the Contextual
+      Flow Control specification owns.
 - [ ] A load of a materialized room still commits for a fifth of its time,
-      writing a reader's own instance of every session-scoped derivation.
-- [ ] The first-run commit of a hundred-row room is one transaction over
-      the server's slot limit, which the client re-sends unchanged.
+      writing a reader's own instance of every session-scoped derivation
+      in a commit of its own: 429 commits of about 400 bytes on the
+      thirty-row room.
+- [ ] The first-run commit of a hundred-row room is one transaction, and
+      at 24.7 MB it stood for more slots than the server admits.
 - [ ] Each plan's inputs document is still minted per plan; the memo
       removes the repeat hashing and decoding, not the minting.
 
