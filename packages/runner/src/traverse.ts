@@ -5613,9 +5613,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const elementAddress = curDoc.address;
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
-        // will override the doc here.
-        // I could switch based off the traverseCells flag (true for queries),
-        // but I don't want to have that change behavior here.
+        // will override the doc's address here in both modes.
         curDoc = {
           ...curDoc,
           address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
