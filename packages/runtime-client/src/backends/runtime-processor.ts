@@ -224,6 +224,7 @@ import {
   type GetTriggerTraceRequest,
   type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
+  type HomePatternResponse,
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
@@ -2760,13 +2761,18 @@ export class RuntimeProcessor {
   /**
    * Ensure the home space's default pattern is running and return a CellRef to it.
    * This is needed for favorites operations which require the pattern to be active.
-   * Creates the home pattern if it doesn't exist yet.
+   * Creates the home pattern if it doesn't exist yet, unless the request is
+   * `existingOnly`: then a Home whose root records no pattern it runs, as one
+   * still being created does not, is left alone, and the response holds no
+   * cell. Either way, bringing Home up starts the worker's housekeeping over
+   * it, as `#startHomeHousekeeping()` says.
    */
   async handleEnsureHomePatternRunning(
-    _request: EnsureHomePatternRunningRequest,
-  ): Promise<CellResponse> {
+    request: EnsureHomePatternRunningRequest,
+  ): Promise<HomePatternResponse> {
     const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
+    if (request.existingOnly && !(await this.#homeExists())) return {};
 
     // Always the PiecesController path: ensureDefaultPattern() follows the
     // root's origin and carries the cold-start setup repair that heals an aged
@@ -2836,6 +2842,17 @@ export class RuntimeProcessor {
         return undefined;
       },
     );
+  }
+
+  /**
+   * Whether the user's Home exists: its space links a root, and that root
+   * records the pattern it runs. A root another writer is still creating can
+   * be linked before it records its pattern, and starting it then fails, so
+   * it does not count.
+   */
+  async #homeExists(): Promise<boolean> {
+    const root = await this.#homeController().getDefaultPattern(false);
+    return root !== undefined && getPatternIdentityRef(root) !== undefined;
   }
 
   /** A controller over the user's Home space. */

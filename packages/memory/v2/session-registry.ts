@@ -116,6 +116,17 @@ export type SessionState = {
    * or scoped-read identity (those key on `principal`, the envelope).
    * Re-resolved on every open; a resume without the marker drops it. */
   actingPrincipal?: string;
+
+  /**
+   * Set when the opening connection's client advertised `elidedVerdicts`:
+   * its replica promotes a layer the verdict elides to the document its
+   * transaction computed rather than folding it, so the engine may elide a
+   * positional write for this session. Set per open
+   * from the opening connection, and a resume by a client without the
+   * capability is refused, since a replayed verdict may carry an elision only
+   * such a replica handles.
+   */
+  elidedVerdicts?: boolean;
 };
 
 type OpenSessionState = {
@@ -163,6 +174,7 @@ export class SessionRegistry {
     principal?: string,
     actingPrincipal?: string,
     routed = false,
+    elidedVerdicts = false,
   ): OpenSessionState {
     this.#prune();
     const sessionId = session.sessionId ?? crypto.randomUUID();
@@ -170,6 +182,16 @@ export class SessionRegistry {
     const existing = this.#sessions.get(key);
     if (existing?.routedAuthority !== undefined && !routed) {
       throw authorizationError("A routed session requires a routed connection");
+    }
+    // A commit this session had accepted under the waived identity proof
+    // may replay as an elided positional write, which only a replica that
+    // promotes elided layers by their computed document handles; a client
+    // that no longer advertises the capability opens a fresh session instead
+    // of resuming this one.
+    if (existing?.elidedVerdicts === true && !elidedVerdicts) {
+      throw authorizationError(
+        "A session opened with elidedVerdicts requires a client that advertises it",
+      );
     }
     if (
       existing?.principal !== undefined &&
@@ -248,6 +270,7 @@ export class SessionRegistry {
       // open's resolution against the current ACL; an open without the
       // marker carries none (fail-closed toward less authority).
       ...(actingPrincipal !== undefined ? { actingPrincipal } : {}),
+      ...(elidedVerdicts ? { elidedVerdicts: true } : {}),
     });
     return {
       sessionId,
