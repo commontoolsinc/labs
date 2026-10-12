@@ -67,7 +67,11 @@ minted metadata and `cid:` documents. `storedCfcMetadataAppliesToPath` in
 reason: `schema.ts` on a read through an `ifc`-bearing schema
 (`schema-ifc-read`); `cell.ts` on a write through one (`schema-ifc-write`) and
 on a SQLite row label (`sqlite-row-label`); `data-updating.ts` on a link write
-(`link-write`); `schema-ifc.ts` on a link crossing an `ifc`-bearing hop
+whose link schema declares policy, whose handle carries a restriction, or
+whose slot carries stored or arriving policy (`link-write`; a bare pointer is
+recorded as a policy input without forcing relevance, and the flow-label probe
+marks the transaction when the attempt read labeled data); `schema-ifc.ts` on
+a link crossing an `ifc`-bearing hop
 (`schema-ifc-hop`); `cfc/external-ingest.ts` on external ingest; and, inside
 `extended-storage-transaction.ts`, the unprivileged writes to label metadata
 and its siblings, label-metadata and external-content observations, runtime
@@ -188,10 +192,15 @@ templates included, and the render path reads them through
 at the receiving slot the reference's own label as §8.2.3 and §8.12.8 state
 it: the link schema's declarations, the restriction the written handle
 carries at its root, and, where flow labels persist, the creating attempt's
-flow join. Nothing of the source's labels is copied to the slot, and the
-write takes no dependency on the source's envelope. A write floor on the slot
-resolves the source's current evidence through `linkedSourceEvidence`, as
-§8.2.6 requires, and persists none of it. A handle's carried view is still
+flow join, which alone gives a reference with no declared or carried
+restriction its entry. Nothing of the source's labels is copied to the slot,
+and the write takes no dependency on the source's envelope. A write floor on
+the slot, including a floor declared under a wildcard on every element of a
+list, resolves the source's current evidence through `linkedSourceEvidence`,
+as §8.2.6 requires, and persists none of it; in that evidence the source's
+stored integrity stands as stored, and only the link schema's integrity and
+a schema the transaction writes the source under are gated against
+runtime-minted atoms. A handle's carried view is still
 built from the labels of the read that produced it, so its root restriction
 over-approximates the acquisition restriction of §8.2.3 where that read
 reached labeled content; `docs/plans/cfc-independent-reference-labels.md`

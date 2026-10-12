@@ -526,7 +526,7 @@ const ambiguousEnvelopeSchema: JSONSchema = {
         altProfileViewSchema,
       ],
     },
-    candidates: { type: "array", items: profileViewSchema },
+    candidate: profileViewSchema,
   },
 } as JSONSchema;
 
@@ -1956,7 +1956,10 @@ describe("Phase 3 events-down (serving side)", () => {
         ambiguousEnvelopeSchema,
         tx,
       );
-      cell.set({ candidates: [{ name: "Bob" }] });
+      // A labeled value held inline: an element of a list would be minted
+      // as a document of its own, and the envelope would then be stored
+      // there rather than on the document whose schema is the ambiguous one.
+      cell.set({ candidate: { name: "Bob" } });
       tx.prepareCfc();
       expect((await tx.commit().settled).error).toBeUndefined();
     }
@@ -2013,9 +2016,9 @@ describe("Phase 3 events-down (serving side)", () => {
     ).sync();
 
     // The probe replaces the pattern's handler on the serving runtime:
-    // a served handler whose write meets the stored ambiguous envelope,
-    // so its commit-prep records the refusal and the commit is rejected
-    // before storage.
+    // a served handler whose reference write at `/candidate` meets the
+    // stored ambiguous envelope, so its commit-prep crashes in the merge
+    // and the commit is rejected before storage.
     /** Every served run of the probe handler, by event kind — the
      * handler's own report, so a wait names the run rather than a
      * counter turning true. */
@@ -2045,7 +2048,7 @@ describe("Phase 3 events-down (serving side)", () => {
           poisonedDocName,
           ambiguousEnvelopeSchema,
           tx,
-        ).set({ result: resolved, candidates: [] });
+        ).set({ result: resolved, candidate: resolved });
       },
       streamLink,
     );

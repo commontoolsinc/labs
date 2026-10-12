@@ -1,8 +1,10 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "../../src/builder/types.ts";
 import type { CfcCellLinkRefPayload } from "../../src/cfc/link-label-view.ts";
@@ -504,12 +506,33 @@ describe("staged-reference-authorship", () => {
           // leaf, Alice's through the paths to her inline value and to the
           // wrapper itself. A confidential slot persists its own restriction
           // on the node that holds the reference, and nothing of the leaf's.
+          // Where that slot was replaced, the attempt read what stood there,
+          // and the holder's reference to the node carries that observation
+          // as its own restriction (CFC §8.2.3), and nothing else.
           const entries = readStoredCfcMetadata(
             runtime.readTx(),
             holder.getAsNormalizedFullLink(),
           )!.labelMap.entries;
-          expect(entries.filter((entry) => entry.path[0] === "argument"))
-            .toEqual([]);
+          const argumentEntries = entries.filter((entry) =>
+            entry.path[0] === "argument"
+          );
+          if (confidentialSlot && order.startsWith("replaced-")) {
+            expect(argumentEntries.map((entry) => ({
+              path: entry.path,
+              origin: entry.origin,
+              confidentiality: entry.label.confidentiality,
+              integrity: (entry.label.integrity ?? []).map((atom) =>
+                isObjectOrArray(atom) ? atom.type : atom
+              ),
+            }))).toEqual([{
+              path: ["argument"],
+              origin: "link",
+              confidentiality: ["slot-secret"],
+              integrity: [CFC_ATOM_TYPE.LinkReference],
+            }]);
+          } else {
+            expect(argumentEntries).toEqual([]);
+          }
           const reached = (path: readonly string[]) =>
             labelsReached(runtime, holder.getAsNormalizedFullLink(), path);
           for (

@@ -8619,31 +8619,45 @@ const linkedSourceEvidence = (
   const sourceView = pendingSourceView === undefined
     ? storedSourceView
     : mergeCfcLabelViews([storedSourceView, pendingSourceView]);
-  const sourceLabel = joinLabels([
-    sourceMetadata === undefined ? undefined : withoutPrincipalClaims(
+  const storedLabel = sourceMetadata === undefined
+    ? undefined
+    : withoutPrincipalClaims(
       metadataResolver.label(
         sourceMetadata,
         canonicalizeLogicalPath(input.source.path),
       ) ?? {},
-    ),
-    { integrity: storedSource?.principalClaims },
+    );
+  const pendingLabel = joinLabels([
     pendingSourceLabel,
     metadataResolver.cover(pendingSourceView, [], undefined),
   ]);
-  // The source/link-schema integrity is author-influenceable (a link value can
-  // carry a forged link schema or label view). Gate runtime-minted evidence
-  // atoms out of it unless a trusted builtin authored the link write, THEN add
-  // the runtime-minted LinkReference — which is added here, never filtered, and
-  // is the only evidence atom a link write legitimately mints (audit S4 review).
-  const gatedIntegrity = gateRuntimeMintedIntegrity(
-    {
-      integrity: mergeLabelValues(
-        sourceLabel.integrity,
-        linkSchemaLabel.integrity,
-      ),
-    },
-    authoringIdentity,
-  ).integrity;
+  const sourceLabel = joinLabels([
+    storedLabel,
+    { integrity: storedSource?.principalClaims },
+    pendingLabel,
+  ]);
+  // What the source stores is evidence as stored: the commit that persisted
+  // it held its author to the mint, and a floor on the receiving slot asks
+  // whether the linked value carries the endorsement, not who points at it.
+  // The rest is author-influenceable — a link value can carry a forged link
+  // schema or label view, and a schema this transaction writes the source
+  // under is the writer's own — so runtime-minted evidence atoms are gated
+  // out of it unless a trusted builtin authored the link write. The
+  // runtime-minted LinkReference is then added, never filtered: it is the
+  // only evidence atom a link write legitimately mints (audit S4 review).
+  const gatedIntegrity = mergeLabelValues(
+    storedLabel?.integrity,
+    storedSource?.principalClaims,
+    gateRuntimeMintedIntegrity(
+      {
+        integrity: mergeLabelValues(
+          pendingLabel.integrity,
+          linkSchemaLabel.integrity,
+        ),
+      },
+      authoringIdentity,
+    ).integrity,
+  );
   const boundLinkConfidentiality = bindLinkCurrentPrincipalClauses(
     linkSchemaLabel.confidentiality ?? [],
     sourceLabel.confidentiality ?? [],
@@ -10659,9 +10673,13 @@ const attemptedWritePathsUnder = (
  *   carry the per-tx derived integrity).
  *
  * Scope (v1, exact-match membership — D5 upgrades to pattern/concept):
- * wildcard (`*`) floor entries stay read-gate-only; unlike `writeAuthorizedBy`
- * there is NO pattern-setup escape — the floor is a value requirement, so a
- * setup that writes a floored path must itself mint the required integrity
+ * a wildcard (`*`) floor entry — one declared on every element of a list or
+ * every value of a record — is held against the references written at the
+ * positions it covers, each to the linked source's own label, and is
+ * otherwise read-gate-only: a plain value written at such a position is
+ * held to it by the per-element read gate. Unlike `writeAuthorizedBy` there
+ * is NO pattern-setup escape — the floor is a value requirement, so a setup
+ * that writes a floored path must itself mint the required integrity
  * (`addIntegrity`), fail-closed; a pure delete (no written value) is not a
  * floored write — the floor governs values, not absence.
  */
@@ -10701,7 +10719,45 @@ const verifyWriteFloor = function* (
       ? ifc.requiredIntegrity
       : [];
     if (floor.length === 0) continue;
-    if (entry.path.includes("*")) continue;
+    if (entry.path.includes("*")) {
+      // A reference written at a position the wildcard covers places the
+      // linked value there, and the floor is a requirement on that value: a
+      // list of endorsed assertions admits a pointer to an assertion only
+      // when the assertion itself carries the endorsement. The declared
+      // integrity at the entry credits it, gated as a concrete path's would
+      // be; a reference written above or below the covered position is left
+      // to the read gate with the plain values.
+      for (const input of ctx.linkWriteInputs) {
+        const linkPath = canonicalizeLogicalPath(input.target.path);
+        if (
+          linkPath.length !== entry.path.length ||
+          !entry.path.every((segment, index) =>
+            segment === "*" || segment === linkPath[index]
+          )
+        ) {
+          continue;
+        }
+        const derived = yield* ctx.linkLabels.evidence(input);
+        const declared = gateRuntimeMintedIntegrity(
+          { integrity: entry.label.integrity },
+          ctx.identityForPath(linkPath),
+        ).integrity ?? [];
+        if (
+          !cfcIntegritySatisfiesFloor(
+            [...declared, ...(derived.label?.integrity ?? [])],
+            floor,
+            trust,
+          )
+        ) {
+          failures.push(
+            `write floor failed at /${
+              linkPath.join("/")
+            } (requiredIntegrity, §8.12.4.1)`,
+          );
+        }
+      }
+      continue;
+    }
     // Floor applicability is STRUCTURAL — did anything land at/under the floor
     // path, or does a link cover it? It must never hinge solely on the
     // value-conditioned `ifcEntryAppliesToAttemptedWrite`, whose schema/value
@@ -12126,19 +12182,26 @@ export function* prepareBoundaryCommitSteps(
       // Every attempted link is checked; only the final reference contributes
       // labels to the value this transaction stores at the slot.
       if (!currentLinkWriteInputs.has(input)) continue;
-      for (const entry of result.entries) {
-        // The creating attempt's join is part of the reference's own
-        // restriction (CFC §8.2.3): which reference the slot holds was
-        // decided under everything the attempt observed. Its confidentiality
-        // joins the slot entry where flow labels persist; the flow stage
-        // leaves recorded link slots to it.
+      // The creating attempt's join is part of the reference's own
+      // restriction (CFC §8.2.3): which reference the slot holds was decided
+      // under everything the attempt observed. Its confidentiality joins the
+      // slot entry where flow labels persist, and a reference with no
+      // declared or carried restriction of its own gets its entry from the
+      // join alone; the flow stage leaves recorded link slots to this.
+      const joined = flowPersist && flowConfidentiality.length > 0
+        ? { confidentiality: [...flowConfidentiality] }
+        : undefined;
+      const entries: DerivedLink["entries"] =
+        result.entries.length > 0 || joined === undefined ? result.entries : [{
+          path: [],
+          label: { integrity: [linkReferenceIntegrity(input) as CfcAtom] },
+        }];
+      for (const entry of entries) {
         const persisted: LabelMapEntry = {
           path: [...canonicalizeLogicalPath(input.target.path), ...entry.path],
-          label: flowPersist && flowConfidentiality.length > 0
-            ? mergeLabels(entry.label, {
-              confidentiality: [...flowConfidentiality],
-            })
-            : entry.label,
+          label: joined === undefined
+            ? entry.label
+            : mergeLabels(entry.label, joined),
           origin: "link",
         };
         if (input.source.space !== space) crossSpaceEligible?.add(persisted);

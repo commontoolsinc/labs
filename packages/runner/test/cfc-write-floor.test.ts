@@ -969,11 +969,9 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
 
   it("a link whose source is not CFC-relevant still fails the floor", async () => {
     // The write at /out is a link whose source carries no stored metadata and
-    // no schema, so nothing marks the link CFC-relevant and no link-write
-    // policy input is recorded for it. The floor measures the path with no
-    // link contribution at all, crediting only the transaction's flow
-    // integrity, which is empty at the default `cfcFlowLabels` rung, and
-    // refuses there.
+    // no schema. The sink's schema declares the floor, which is what makes
+    // the transaction one the boundary prepares; the link's evidence is the
+    // source's own label, which is nothing, and the floor refuses it.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
     try {

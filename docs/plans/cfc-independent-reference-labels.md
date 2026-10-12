@@ -104,14 +104,35 @@ Implemented. What the later stages depend on it leaving behind:
 - `linkSlotLabel` derives the slot's entry from the link schema, the handle's
   carried root restriction and the acting principal, and nothing the source
   holds; the persist loop joins the creating attempt's flow join onto it where
-  flow labels persist. A reference with no restriction of its own persists no
-  entry. `linkedSourceEvidence` keeps the source-derived label, through the
+  flow labels persist, and a reference with no restriction of its own gets its
+  entry from that join alone, or none where the join is empty.
+  `linkedSourceEvidence` keeps the source-derived label, through the
   references staged into the source, for write floors alone, which the deriver
-  exposes as `evidence` beside `persisted`.
+  exposes as `evidence` beside `persisted`. In that evidence the source's
+  stored integrity stands as stored: the commit that persisted it held its
+  author to the mint, and the floor asks whether the linked value carries the
+  endorsement, not who points at it. The author-influenced parts, the link
+  schema's integrity and a schema the transaction writes the source under,
+  stay gated against runtime-minted atoms.
 - `recordLinkWritePolicyInput` in `data-updating.ts` no longer reads the
-  source's envelope; a link write is recorded when the link schema declares a
-  label, the handle carries a restriction, the slot carries policy, or flow
-  labels persist.
+  source's envelope. Every link write is recorded, so that a floor or claim
+  the slot's schema declares is checked whenever that schema arrives in the
+  transaction; the write marks the transaction relevant only when the link
+  schema declares policy, the handle carries a restriction, or the target
+  carries stored or arriving policy at the slot. A bare pointer written by a
+  transaction nothing else makes relevant, the ordinary list reconcile, is
+  not prepared, which is both the cost the plan is after and what keeps an
+  action still bound to such a transaction from invalidating it with a read
+  after its commit was prepared. A transaction whose attempt read labeled
+  data is marked relevant by the flow-label probe as before.
+- A `requiredIntegrity` floor declared under a wildcard, on every element of
+  a list or every value of a record, is held against the references written
+  at the positions it covers, each to its evidence. Before this plan the
+  refusal of an unendorsed assertion linked into such a list came from the
+  "missing link source metadata" rule, which needed the source's envelope;
+  the floor is the stated contract (§8.12.4.1 over §8.2.6) and needs only the
+  source's evidence. A plain value written at a covered position stays with
+  the per-element read gate, as before.
 - The slot entry carries the creating attempt's join. A link-covered path is
   still skipped by the flow stamp; the join lands at the slot as the link
   entry's confidentiality instead. The wildcard `*` templates a coordinator
@@ -350,7 +371,15 @@ specification does not require.
 - A link write to a document whose envelope the transaction cannot read no
   longer refuses with "missing link source metadata"; it needs the source only
   when an assertion about linked content needs it. The retry disposition
-  around that refusal in `derivePersistedLinkLabel` goes with it.
+  around that refusal in `derivePersistedLinkLabel` goes with it. A list
+  whose elements require an integrity atom refuses an unendorsed element
+  through its floor instead, which reads the element's own evidence.
+- Under flow labels `persist`, a reference written by an attempt that read
+  labeled data carries that join at its slot even when the reference has no
+  declared or carried restriction. A write that replaces a reference at a
+  declared position reads the position it overwrites, so the new reference's
+  entry repeats the position's declared label; the entry labels the
+  reference and leaves with it, the declaration stays.
 - A labeled append to a list another session appended to concurrently retries
   instead of committing a misplaced envelope.
 - A link to a piece document that holds no value yet carries nothing of the
