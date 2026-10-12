@@ -371,6 +371,67 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("ensureHomePatternRunning()", () => {
+    const home: CellRef = {
+      id: "of:fid1:home" as CellRef["id"],
+      space: "did:key:z6Mk-runtime-client-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    /** A client whose worker answers every request with `response`. */
+    function clientAnswering(response: unknown): {
+      client: RuntimeClient;
+      requests: unknown[];
+    } {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve(response);
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+      return { client, requests };
+    }
+
+    it("asks the worker for Home, creating it where missing, and returns its cell", async () => {
+      const { client, requests } = clientAnswering({ cell: home });
+
+      const cell = await client.ensureHomePatternRunning();
+
+      expect(requests).toEqual([{
+        type: RequestType.EnsureHomePatternRunning,
+      }]);
+      expect(cell.ref()).toEqual(home);
+    });
+
+    it("asks for an existing Home only, and returns `undefined` where the worker brought none up", async () => {
+      const { client, requests } = clientAnswering({});
+
+      const cell = await client.ensureHomePatternRunning({
+        existingOnly: true,
+      });
+
+      expect(requests).toEqual([{
+        type: RequestType.EnsureHomePatternRunning,
+        existingOnly: true,
+      }]);
+      expect(cell).toBeUndefined();
+    });
+
+    it("throws where the worker returns no cell for a request that may create Home", async () => {
+      const { client } = clientAnswering({});
+
+      await expect(client.ensureHomePatternRunning()).rejects.toThrow(
+        "Home's root is missing",
+      );
+    });
+  });
+
   describe("piece-addressed requests", () => {
     it("carries a narrower scope on every request naming a piece by id", async () => {
       // The id alone names a different document in every other scope, so a
