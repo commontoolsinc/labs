@@ -390,9 +390,11 @@ export class XAppView extends BaseView {
 
   /**
    * The runtime this view has asked to bring the user's Home up, which it asks
-   * once, after the first piece shown under that runtime has settled.
+   * once, after the first piece shown under that runtime has settled, and the
+   * bring-up itself, from that decision until the worker has answered.
    */
-  #homeBroughtUpIn: RuntimeInternals | undefined = undefined;
+  #homeBringUp: { rt: RuntimeInternals; done: Promise<void> } | undefined =
+    undefined;
 
   /**
    * The revision the slug watch bumps to make the selection run again, which
@@ -406,6 +408,21 @@ export class XAppView extends BaseView {
         return outerThis._slugRevision;
       },
     };
+  }
+
+  /**
+   * The bring-up of the user's Home this view has started under its current
+   * runtime, which resolves, never rejecting, once the worker has answered it;
+   * `undefined` before the first piece under that runtime is on screen. It is
+   * started from the moment the view decides to bring Home up, ahead of the
+   * settle it waits for, so a caller waiting on it from then on waits for the
+   * whole of it.
+   */
+  get homeBringUp(): Promise<void> | undefined {
+    const bringUp = this.#homeBringUp;
+    return bringUp !== undefined && bringUp.rt === this.rt
+      ? bringUp.done
+      : undefined;
   }
 
   #debuggerController = new DebuggerController(this);
@@ -981,12 +998,11 @@ export class XAppView extends BaseView {
     // whatever view it is. A runtime replaced since then has its own first.
     const rt = this.rt;
     if (
-      rt !== undefined && rt !== this.#homeBroughtUpIn &&
+      rt !== undefined && rt !== this.#homeBringUp?.rt &&
       this._patterns.status === TaskStatus.COMPLETE &&
       this._patterns.value?.activePattern !== undefined
     ) {
-      this.#homeBroughtUpIn = rt;
-      void this.#bringUpHome(rt);
+      this.#homeBringUp = { rt, done: this.#bringUpHome(rt) };
     }
   }
 
