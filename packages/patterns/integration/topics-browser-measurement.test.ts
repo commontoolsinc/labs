@@ -32,6 +32,7 @@ import {
   type TopicsBrowserPosture,
 } from "./topics-browser-posture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
+import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
 
 /** The page globals the client-replacement cases read and write. */
 type ReplacementGlobal = typeof globalThis & {
@@ -44,6 +45,129 @@ type ReplacementGlobal = typeof globalThis & {
   /** Telemetry markers the replaced client delivered, and how to stop counting. */
   __cfReplacedClientMarkers?: { count: number; stop: () => void };
 };
+
+/**
+ * DO NOT MERGE. Diagnostics for the zero case: what runs after the board has
+ * settled. Runs in CI (or with `CF_TOPICS_DIAG` set) and prints with a
+ * `TOPICS-DIAG` prefix. Mirrors `measureTopicsReads()`'s window: telemetry and
+ * read accounting on, then a settled view and an idle runtime.
+ */
+async function diagnoseLeftoverWork(page: Page, label: string): Promise<void> {
+  if (
+    Deno.env.get("GITHUB_ACTIONS") !== "true" &&
+    Deno.env.get("CF_TOPICS_DIAG") === undefined
+  ) {
+    return;
+  }
+  const out = (line: string) => console.error(`TOPICS-DIAG ${label}: ${line}`);
+  // deno-lint-ignore no-explicit-any
+  type Any = any;
+  const before = await page.evaluate(async () => {
+    const scope = globalThis as Any;
+    const rt = scope.commonfabric.rt;
+    const t0 = performance.now();
+    const graph = await rt.getGraphSnapshot();
+    const markers: Any[] = [];
+    const listener = (marker: Any) => {
+      markers.push({ t: Math.round(performance.now() - t0), ...marker });
+    };
+    rt.on("telemetry", listener);
+    scope.__cfTopicsDiag = { rt, t0, markers, listener };
+    await rt.setTelemetryEnabled(true);
+    await rt.setReadStatsEnabled(true);
+    return {
+      nodes: graph.nodes,
+      edges: graph.edges.length,
+      tEnabled: Math.round(performance.now() - t0),
+    };
+  });
+  const tSettleStart = Date.now();
+  await settleView(page);
+  const settleMs = Date.now() - tSettleStart;
+  await waitForRuntimeIdle(page);
+  const idleMs = Date.now() - tSettleStart - settleMs;
+  const after = await page.evaluate(async () => {
+    const scope = globalThis as Any;
+    const { rt, t0, markers, listener } = scope.__cfTopicsDiag;
+    delete scope.__cfTopicsDiag;
+    rt.off("telemetry", listener);
+    await rt.setReadStatsEnabled(false);
+    await rt.setTelemetryEnabled(false);
+    const graph = await rt.getGraphSnapshot();
+    return {
+      nodes: graph.nodes,
+      edges: graph.edges.length,
+      tEnd: Math.round(performance.now() - t0),
+      markers: markers.map((m: Any) => {
+        try {
+          return JSON.parse(JSON.stringify(m));
+        } catch {
+          return { type: m.type, unserializable: true };
+        }
+      }),
+    };
+  });
+  const brief = (node: Any) =>
+    JSON.stringify({
+      id: node.id,
+      type: node.type,
+      src: node.src,
+      parentId: node.parentId,
+      pending: node.isPending,
+      dirty: node.isDirty,
+      demanded: node.isDemanded,
+      pattern: node.patternIdentity,
+      reads: node.reads,
+      writes: node.writes,
+      preview: node.preview?.slice(0, 160),
+    });
+  out(
+    `graph ${before.nodes.length}/${before.edges} -> ` +
+      `${after.nodes.length}/${after.edges}; enabled at ${before.tEnabled}ms, ` +
+      `settle ${settleMs}ms, idle ${idleMs}ms, end ${after.tEnd}ms`,
+  );
+  for (const node of before.nodes) {
+    if (node.isPending || (node.isDirty && node.isDemanded)) {
+      out(`pending-before ${brief(node)}`);
+    }
+  }
+  const beforeIds = new Set(before.nodes.map((n: Any) => n.id));
+  const afterIds = new Set(after.nodes.map((n: Any) => n.id));
+  for (const node of after.nodes) {
+    if (!beforeIds.has(node.id)) out(`added ${brief(node)}`);
+  }
+  for (const node of before.nodes) {
+    if (!afterIds.has(node.id)) out(`removed ${brief(node)}`);
+  }
+  const byId = new Map(
+    [...before.nodes, ...after.nodes].map((n: Any) => [n.id, n]),
+  );
+  const counts: Record<string, number> = {};
+  for (const marker of after.markers) {
+    counts[marker.type] = (counts[marker.type] ?? 0) + 1;
+    if (marker.type === "scheduler.run.complete") {
+      if (marker.src !== undefined) {
+        out(`run-with-src t=${marker.t} ${marker.actionId} ${marker.src}`);
+        continue;
+      }
+      out(
+        `run-without-src t=${marker.t} ${
+          JSON.stringify({
+            actionId: marker.actionId,
+            actionInfo: marker.actionInfo,
+            reads: marker.reads,
+            error: marker.error,
+          })
+        } node=${
+          byId.has(marker.actionId) ? brief(byId.get(marker.actionId)) : "none"
+        }`,
+      );
+    } else if (marker.type !== "scheduler.run.complete") {
+      out(`marker t=${marker.t} ${JSON.stringify(marker).slice(0, 600)}`);
+    }
+  }
+  out(`marker counts ${JSON.stringify(counts)}`);
+}
 
 describe("topics-browser-measurement", () => {
   let fixture: TopicBoardFixture;
@@ -71,6 +195,8 @@ describe("topics-browser-measurement", () => {
     await session.load();
     await session.signIn();
     await session.showBoard();
+    await diagnoseLeftoverWork(session.page, "first window after showBoard");
+    await diagnoseLeftoverWork(session.page, "second window after showBoard");
   });
 
   afterAll(async () => {
