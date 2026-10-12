@@ -144,10 +144,11 @@ A sub-pattern instance with a positional cause moves to another child's state
 when a cell is added ahead of it, since its child is the one minted from
 whatever number it now takes. A parent's setup refuses
 (`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
-naming both pattern identities, to set up a child:
+naming whichever of the two pattern identities it knows, to set up a child:
 
 - at a positional spot or a named instance's spot, over a stored child stamped
-  with another instance's name, whatever the two pattern identities;
+  with another instance's name, whatever the two pattern identities, and
+  whether or not the stored child records one;
 - at a positional spot, over a stored child of another pattern identity, when a
   child of the incoming pattern identity runs at another positional spot of the
   parent; or

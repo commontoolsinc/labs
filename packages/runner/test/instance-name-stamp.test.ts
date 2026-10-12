@@ -127,6 +127,35 @@ describe("instance-name-stamp", () => {
       );
     });
 
+    it("refuses to set up an instance over a child stamped with another instance's name that records no pattern identity", async () => {
+      // An in-process child's identity is keyless, and a keyless identity is
+      // never stored on the child.
+
+      const Child = pattern<{ label: string }>(({ label }) => ({ label }));
+      const parent = pattern<Record<string, never>>(() => ({
+        views: [nameInstance(Child({ label: "a" }), "a")],
+      }));
+      const tx = rt.edit();
+      const cell = rt.getCell<{ views: { label: string }[] }>(
+        space,
+        "stamped-keyless",
+        undefined,
+        tx,
+      );
+      const running = rt.run(tx, parent, {}, cell);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await running.pull();
+      await rt.idle();
+      const child = cell.key("views").key(0).resolveAsCell();
+      await child.sync();
+      rt.runner.stop(cell);
+      await stamp(child, "b");
+
+      await expect(rt.runSynced(cell, parent, {})).rejects.toThrow(
+        /refusing to set up .* for instance "a" over a child with no stored pattern identity that instance "b" set up/,
+      );
+    });
+
     it("refuses to set up a positional instance over a child stamped with an instance's name", async () => {
       const parent = await parentPattern();
       const { cell, positional } = await deployedParent(

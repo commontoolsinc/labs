@@ -13400,11 +13400,11 @@ export class Runner {
   }
 
   /**
-   * Throws, naming both pattern identities, when a positional or named
-   * sub-pattern node of `pattern` would set its child up over a child the
-   * parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for each
-   * such node whose child this parent owns: not a child that is its space's
-   * root, nor one managed in a space of its own.
+   * Throws, naming the pattern identities it knows, when a positional or
+   * named sub-pattern node of `pattern` would set its child up over a child
+   * the parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for
+   * each such node whose child this parent owns: not a child that is its
+   * space's root, nor one managed in a space of its own.
    */
   #refuseDisplacedChildren(
     tx: IExtendedStorageTransaction,
@@ -13469,20 +13469,28 @@ export class Runner {
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
       childPattern,
     );
-    if (stored === undefined || incoming === undefined) return;
     const describe = (ref: { identity: string; symbol: string }) =>
       `${ref.identity}#${ref.symbol}`;
+    // The stamp alone decides this refusal, so it holds for a child whose
+    // pattern identity was never stored; the identities only name the two
+    // sides in the message.
     const stamped = getInstanceNameStamp(storedChild);
     if (stamped !== undefined && stamped !== instanceName) {
       const holder = instanceName !== undefined
         ? `instance "${instanceName}"`
         : "a positional spot";
+      const settingUp = incoming !== undefined
+        ? describe(incoming)
+        : "a pattern with no identity";
+      const over = stored !== undefined
+        ? `the child of ${describe(stored)}`
+        : "a child with no stored pattern identity";
       throw new Error(
-        `refusing to set up ${describe(incoming)} for ${holder} ` +
-          `over the child of ${describe(stored)} that instance ` +
-          `"${stamped}" set up`,
+        `refusing to set up ${settingUp} for ${holder} over ${over} that ` +
+          `instance "${stamped}" set up`,
       );
     }
+    if (stored === undefined || incoming === undefined) return;
     if (!positional || samePatternRef(stored, incoming)) return;
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
     for (const { module, partialCause } of subPatternNodes(pattern)) {
