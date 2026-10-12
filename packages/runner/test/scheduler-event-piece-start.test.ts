@@ -214,11 +214,17 @@ describe("scheduler-event-piece-start", () => {
     });
     const waitBegins = onEachWaitBegins(runtimeA);
 
+    const sentAt = performance.now();
     const status = send(runtimeA, link, { offer: "room-1" });
     expect(await waitBegins(status)).toBe(true);
     await createPiece(runtimeB, "created-later");
 
     expect(await status).toBe("done");
+    // The end of the retry window asks once more as well, and would find the
+    // piece too. Ending sooner is what says the commit ended the wait.
+    expect(performance.now() - sentAt).toBeLessThan(
+      runtimeA.commitBackpressure.retryWindowMs,
+    );
     expect(handled).toEqual([{ offer: "room-1" }]);
     expect(errors).toEqual([]);
     expect(verdicts.map(({ started, reason }) => ({ started, reason })))
@@ -238,6 +244,7 @@ describe("scheduler-event-piece-start", () => {
       }));
     const waitBegins = onEachWaitBegins(runtimeA);
 
+    const sentAt = performance.now();
     const status = send(runtimeA, link, "queued");
     expect(await waitBegins(status)).toBe(true);
     runtimeA.scheduler.addEventHandler((_tx, event) => {
@@ -245,6 +252,10 @@ describe("scheduler-event-piece-start", () => {
     }, link);
 
     expect(await status).toBe("done");
+    // As above: the retry window's end would find the handler too.
+    expect(performance.now() - sentAt).toBeLessThan(
+      runtimeA.commitBackpressure.retryWindowMs,
+    );
     expect(handled).toEqual(["queued"]);
     expect(errors).toEqual([]);
   });
