@@ -5448,8 +5448,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // immutable cell to hold the object, except when it is requested as
       // Cell. While this means updates aren't propagated, it seems like the
       // right trade-off for stability of links and the ability to mutate them
-      // without creating loops (see below). A query walk hands no object back
-      // to be written elsewhere, and traverses the element where it is stored.
+      // without creating loops (see below). A traversal with `traverseCells`
+      // set traverses the element where it is stored.
       //
       // This makes
       // ```ts
@@ -5595,11 +5595,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // An eager read gives an inline object or array a `data:` address
         // carrying a snapshot of its value, so that the object the read
         // returns copies the data when written elsewhere; a link to this slot
-        // would name whatever the slot holds next. A query walk does not take
-        // this branch: it traverses the element at its address in the
-        // document that stores it, like any other nested value. That address
-        // is the one a link inside the element naming no document resolves
-        // against, so the walk goes on to the documents such a link reaches.
+        // would name whatever the slot holds next.
+        //
+        // With `traverseCells` set, the traversal is establishing what a
+        // reader depends on, as the query walk does when it selects documents,
+        // and it does not take this branch. It traverses the element at its
+        // address in the document that stores it, like any other nested
+        // value. That address is the one a link inside the element naming no
+        // document resolves against, so the traversal goes on to the
+        // documents such a link reaches.
         //
         // The element link exists to give the snapshot an id for the links
         // inside the element that name no document.
