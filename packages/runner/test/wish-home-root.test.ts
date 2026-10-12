@@ -176,7 +176,7 @@ describe("wish-home-root", () => {
       return surface;
     }
 
-    it("offers the profile create surface over a Home with no root, and creates none", async () => {
+    it("offers the profile create surface for a `#profile` with no profile, and creates no Home root", async () => {
       const { found, stop } = await runWish("#profile", "profile wish");
       try {
         expect(found.get()?.error).toBe("No profile exists yet");
