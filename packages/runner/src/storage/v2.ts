@@ -223,7 +223,8 @@ export type CfcSchemaDocumentSyncer = (
 ) => Promise<Error | undefined>;
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
-// part of the write; that read is dropped from its conflict set.
+// part of the write; that read is dropped from its conflict set unless the
+// transaction also writes the envelope (`#commitReadActivities`).
 const isCfcLabelPath = (path: readonly string[]): boolean =>
   path.length === 1 && path[0] === "cfc";
 
@@ -8011,6 +8012,28 @@ export class SpaceReplica
         mergeableOpPathsByEntity.set(key, [op.path]);
       }
     }
+    // A document whose CFC envelope this transaction writes beside a
+    // mergeable op. The envelope is a whole-member replace whose entries name
+    // positions in the array the transaction read, and which carries forward
+    // the entries it read there; the op, by contrast, is placed by the store
+    // against the live array. Both the envelope and the array it was placed
+    // against are therefore dependencies of such a commit: a concurrent
+    // change to either moves an element away from the entry that describes
+    // it, or drops another writer's entries. Those documents keep every read
+    // the narrowing below would otherwise drop, so the commit conflicts and
+    // the writer re-derives its envelope against the list the store holds.
+    const envelopeWritersWithMergeableOps = new Set<string>();
+    if (mergeableOpPathsByEntity.size > 0) {
+      for (const write of getTransactionWriteAttempts(source) ?? []) {
+        if (write.space !== this.#space || !isCfcLabelPath(write.path)) {
+          continue;
+        }
+        const key = `${write.id}\0${normalizeCellScope(write.scope)}`;
+        if (mergeableOpPathsByEntity.has(key)) {
+          envelopeWritersWithMergeableOps.add(key);
+        }
+      }
+    }
 
     const commitReads: IReadActivity[] = [];
     for (const read of reads) {
@@ -8027,16 +8050,23 @@ export class SpaceReplica
         // Reference-resolution shape reads stay reactive but do not constrain
         // the commit; recursive reads remain value dependencies.
         (isReadExcludedFromConflict(read.meta) &&
-          read.nonRecursive === true) ||
-        // Runtime verifier reads of the CFC label are point-in-time policy
-        // observations, not consumed values.
-        (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path))
+          read.nonRecursive === true)
       ) {
         continue;
       }
 
       const scope = normalizeCellScope(read.scope);
-      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      const key = `${read.id}\0${scope}`;
+      if (envelopeWritersWithMergeableOps.has(key)) {
+        commitReads.push(read);
+        continue;
+      }
+      // Runtime verifier reads of the CFC label are point-in-time policy
+      // observations, not consumed values.
+      if (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path)) {
+        continue;
+      }
+      const opPaths = mergeableOpPathsByEntity.get(key);
       // A read of an op array's length is a genuine dependency: the handler
       // used the element count that a concurrent mergeable op changes.
       const readsMergeableOpArrayLength = opPaths !== undefined &&

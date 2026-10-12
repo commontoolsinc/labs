@@ -204,7 +204,20 @@ specification names as the intended outcome.
 Persisting flow labels makes an append to a labeled collection rewrite that
 collection's `["cfc"]` member alongside the appended element. The drop is what
 lets a transaction resolve a label against a collection another session is
-appending to.
+appending to, when the transaction only reads that label.
+
+A transaction that writes the envelope beside a mergeable op is different. The
+envelope is a whole-member replace: its entries name positions in the array
+the transaction read, and it carries forward the entries the transaction read
+there, while the op is placed by the store against the live array. For such a
+document the envelope read and the reads under the op's path stay commit
+dependencies (`SpaceReplica.#commitReadActivities`, the same method that
+narrows them otherwise). A concurrent change to either conflicts, and the
+writer re-derives its envelope against the list the store holds, so an entry
+never describes an element at a position the store gave to another, and
+another writer's entries are never dropped by a replace computed without them.
+The op itself stays mergeable; what stops merging is a stale envelope. An
+append that persists no labels keeps its zero-read merge.
 
 Handler-initiated label introspection (`inspectConfLabel`) consumes through an
 explicit observation record rather than through the raw read, so its result
