@@ -374,6 +374,10 @@ export interface SchedulerEventQueueState {
   /** Loading heads waiting for a piece that could not be started yet. */
   readonly pieceStartWaits: Set<QueuedEvent>;
 
+  /** Whether piece-start waits have been ended for good, as disposal does;
+   * a wait that would begin after that ends at once instead. */
+  readonly pieceStartWaitsEnded: () => boolean;
+
   /** Reports an error through the scheduler's error channel. */
   readonly handleError: (error: Error, action: unknown) => void;
 }
@@ -522,11 +526,15 @@ function pieceMayStillStart(
  * retry window ending at `deadline`, or the scheduler being disposed.
  */
 function awaitPieceStartWake(
-  state: Pick<SchedulerEventQueueState, "runtime" | "pieceStartWaits">,
+  state: Pick<
+    SchedulerEventQueueState,
+    "runtime" | "pieceStartWaits" | "pieceStartWaitsEnded"
+  >,
   event: QueuedEvent,
   observedDocIds: readonly string[],
   deadline: number,
 ): Promise<PieceStartWake> {
+  if (state.pieceStartWaitsEnded()) return Promise.resolve("disposed");
   const { promise, resolve } = Promise.withResolvers<PieceStartWake>();
   const observed = new Set(observedDocIds);
   let ended = false;
@@ -580,7 +588,11 @@ export function wakePieceStartWaits(
   }
 }
 
-/** Ends every piece-start wait, for a scheduler being disposed. */
+/**
+ * Ends every piece-start wait, for a scheduler being disposed. The caller
+ * also makes `pieceStartWaitsEnded()` report `true`, so that a start attempt
+ * still in flight begins no new wait.
+ */
 export function endPieceStartWaits(
   state: Pick<SchedulerEventQueueState, "pieceStartWaits">,
 ): void {

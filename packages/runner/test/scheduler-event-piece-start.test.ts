@@ -424,6 +424,38 @@ describe("scheduler-event-piece-start", () => {
     expect(errors[0].message).toContain("failed: boom");
   });
 
+  it("settles a send whose piece start is still in flight when its runtime is disposed, without waiting out the retry window", async () => {
+    const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = newRuntime(storage);
+    const disposeErrors: Error[] = [];
+    runtime.scheduler.onError((error) => disposeErrors.push(error));
+    const verdict = Promise.withResolvers<EnsurePieceVerdict>();
+    const attempted = Promise.withResolvers<void>();
+    setLoadPieceForEvent(runtime, () => {
+      attempted.resolve();
+      return verdict.promise;
+    });
+
+    const sentAt = performance.now();
+    const status = send(runtime, streamLink(runtime, "in-flight"), "queued");
+    await attempted.promise;
+    const disposed = runtime.dispose({ closeStorage: false });
+    verdict.resolve({
+      started: false,
+      reason: "no-pattern-meta",
+      rootIsEmpty: true,
+      observedDocIds: ["of:never-written"],
+    });
+    await disposed;
+    await storage.close();
+
+    expect(await status).toBe("error");
+    expect(performance.now() - sentAt).toBeLessThan(
+      runtime.commitBackpressure.retryWindowMs,
+    );
+    expect(disposeErrors).toEqual([]);
+  });
+
   it("settles a waiting send with an error when its runtime is disposed", async () => {
     const storage = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = newRuntime(storage);

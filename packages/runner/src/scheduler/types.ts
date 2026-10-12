@@ -429,8 +429,7 @@ export type QueuedEvent = {
   /**
    * Ends the wait of a loading head whose piece could not be started yet.
    * Present only while that wait is in progress, and called with what ended
-   * it: the event settling, a handler registering for its stream, or the
-   * scheduler being disposed.
+   * it, one of the causes {@link PieceStartWake} lists.
    */
   endPieceStartWait?: (cause: PieceStartWake) => void;
 

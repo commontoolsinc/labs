@@ -508,6 +508,9 @@ export class Scheduler {
    * yet (`queueSchedulerEvent()`). */
   #pieceStartWaits = new Set<QueuedEvent>();
 
+  /** Set once `endPieceStartWaits()` has run; no new wait begins after it. */
+  #pieceStartWaitsEnded = false;
+
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
    * out of the event queue and shapable cell-flip wakes out of the
@@ -1856,6 +1859,7 @@ export class Scheduler {
    * to wait for.
    */
   endPieceStartWaits(): void {
+    this.#pieceStartWaitsEnded = true;
     endPieceStartWaits(this.#eventQueueState);
   }
 
@@ -2603,7 +2607,7 @@ export class Scheduler {
     // `unsubscribe` is optional on the capability, so a manager without one is
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
-    endPieceStartWaits(this.#eventQueueState);
+    this.endPieceStartWaits();
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -3302,6 +3306,7 @@ export class Scheduler {
         this.#lineage.release(originTx, queuedEvent);
       },
       pieceStartWaits: this.#pieceStartWaits,
+      pieceStartWaitsEnded: () => this.#pieceStartWaitsEnded,
       handleError: (error, target) => this.#handleError(error, target),
     };
   }
