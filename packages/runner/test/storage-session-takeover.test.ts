@@ -1,0 +1,256 @@
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import { Identity } from "@commonfabric/identity";
+import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  connect,
+  loopback,
+  type SpaceSession,
+  type Transport,
+} from "@commonfabric/memory/v2/client";
+import { Server } from "@commonfabric/memory/v2/server";
+import { isObjectNotArray } from "@commonfabric/utils/types";
+
+import { Runtime } from "../src/runtime.ts";
+import type { SessionFactory } from "../src/storage/v2.ts";
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testSessionOpenAuthFactory,
+  TestStorageManager,
+} from "./memory-v2-test-utils.ts";
+
+/** Discards an accepted resume's reply before replacing its connection. */
+class LostResumeTransport implements Transport {
+  readonly #server: Server;
+  #active: Transport;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #closing: Promise<void>[] = [];
+  #dropNextResume = false;
+  #dropRequestId: string | undefined;
+  #lostReplies = 0;
+  #staleResumeRefusals = 0;
+
+  constructor(server: Server) {
+    this.#server = server;
+    this.#active = this.#open();
+  }
+
+  get lostReplies(): number {
+    return this.#lostReplies;
+  }
+
+  get staleResumeRefusals(): number {
+    return this.#staleResumeRefusals;
+  }
+
+  async send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload);
+    if (
+      this.#dropNextResume && isObjectNotArray(message) &&
+      message.type === "session.open" &&
+      isObjectNotArray(message.session) &&
+      typeof message.session.sessionToken === "string" &&
+      typeof message.requestId === "string"
+    ) {
+      this.#dropNextResume = false;
+      this.#dropRequestId = message.requestId;
+    }
+    await this.#active.send(payload);
+  }
+
+  async close(): Promise<void> {
+    await this.#active.close();
+    await Promise.all(this.#closing);
+  }
+
+  delivered(): Promise<void> {
+    return this.#active.delivered?.() ?? Promise.resolve();
+  }
+
+  reset(): void {
+    const previous = this.#active;
+    this.#active = this.#open();
+    this.#closing.push(previous.close());
+  }
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  /** Starts a reconnect whose first accepted resume response is discarded. */
+  loseNextResume(): void {
+    this.#dropNextResume = true;
+    this.reconnect();
+  }
+
+  /** Replaces the connection and starts restoring the reader's session. */
+  reconnect(): void {
+    this.reset();
+    this.#closeReceiver(new Error("synthetic connection loss"));
+  }
+
+  #open(): Transport {
+    const connection = loopback(this.#server);
+    connection.setReceiver((payload) => {
+      if (this.#active !== connection) return;
+      const message = decodeMemoryBoundary(payload);
+      if (isObjectNotArray(message) && message.type === "response") {
+        if (
+          message.requestId === this.#dropRequestId &&
+          isObjectNotArray(message.ok) &&
+          typeof message.ok.sessionToken === "string"
+        ) {
+          this.#dropRequestId = undefined;
+          this.#lostReplies++;
+          this.reset();
+          this.#closeReceiver(new Error("synthetic lost resume reply"));
+          return;
+        }
+        if (
+          isObjectNotArray(message.error) &&
+          message.error.name === "SessionRevokedError" &&
+          typeof message.error.message === "string" &&
+          message.error.message.includes("resume token is no longer valid")
+        ) this.#staleResumeRefusals++;
+      }
+      this.#receiver(payload);
+    });
+    return connection;
+  }
+}
+
+describe("storage session takeover", () => {
+  for (
+    const cause of [
+      "server takeover",
+      "lost resume reply",
+      "ordinary reconnect",
+    ]
+  ) {
+    const terminal = cause !== "ordinary reconnect";
+    const description = terminal
+      ? `returns an error for an already loaded document after ${cause}`
+      : "keeps an already loaded document subscribed through an ordinary reconnect";
+    it(description, async () => {
+      const owner = await Identity.fromPassphrase("storage session takeover");
+      const space = owner.did();
+      const document = "of:inbox-offers";
+      const server = new Server({
+        ...TEST_MEMORY_SERVER_AUTH,
+        store: new URL(`memory://session-takeover-${crypto.randomUUID()}`),
+        subscriptionRefreshDelayMs: "manual",
+      });
+      const writer = await connect({ transport: loopback(server) });
+      const writerSession = await writer.mount(
+        space,
+        {},
+        testSessionOpenAuthFactory,
+      );
+      let localSeq = 0;
+      const write = async (offers: string[]) => {
+        await writerSession.transact({
+          localSeq: ++localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: document,
+            value: { value: { offers } },
+          }],
+        });
+      };
+      const transport = new LostResumeTransport(server);
+      const reader = await connect({ transport });
+      let session: SpaceSession | undefined;
+      const factory: SessionFactory = {
+        async create(target, _signer, options) {
+          session = await reader.mount(
+            target,
+            options,
+            testSessionOpenAuthFactory,
+          );
+          return { client: reader, session };
+        },
+      };
+      const manager = TestStorageManager.create({
+        as: owner,
+        memoryHost: new URL("memory://"),
+      }, factory);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: manager,
+      });
+      const inbox = () =>
+        runtime.getCellFromEntityId(space, document).key("offers").asSchema({
+          type: "array",
+          items: { type: "string" },
+        });
+      let replacement: Awaited<ReturnType<typeof connect>> | undefined;
+      try {
+        await write(["first"]);
+        const provider = manager.open(space);
+        expect((await provider.sync(document)).error).toBeUndefined();
+        expect(provider.replica.getDocument(document)?.value)
+          .toEqual({ offers: ["first"] });
+        const heldInbox = inbox();
+        expect(await heldInbox.pull()).toEqual(["first"]);
+        if (session === undefined) throw new Error("reader did not mount");
+
+        if (cause === "server takeover") {
+          replacement = await connect({ transport: loopback(server) });
+          await replacement.mount(space, {
+            sessionId: session.sessionId,
+            sessionToken: session.sessionToken,
+          }, testSessionOpenAuthFactory);
+          await transport.delivered();
+        } else if (cause === "lost resume reply") {
+          transport.loseNextResume();
+          await expect(session.whenRestored()).rejects.toThrow("taken-over");
+          expect(transport.lostReplies).toBe(1);
+          expect(transport.staleResumeRefusals).toBe(1);
+        } else {
+          transport.reconnect();
+          await session.whenRestored();
+        }
+        expect(session.closeError?.name).toBe(
+          terminal ? "SessionRevokedError" : undefined,
+        );
+
+        await write(["first", "second"]);
+        await server.flushSessions([space]);
+        await transport.delivered();
+        const fresh = await writerSession.queryGraph({
+          roots: [{ id: document, selector: { path: [], schema: false } }],
+        });
+        expect(
+          fresh.entities.find((entity) => entity.id === document)?.document,
+        )
+          .toEqual({ value: { offers: ["first", "second"] } });
+        expect(provider.replica.getDocument(document)?.value)
+          .toEqual({ offers: terminal ? ["first"] : ["first", "second"] });
+        const read = await provider.sync(document);
+        if (terminal) {
+          expect(read.error?.message).toContain("taken-over");
+          await expect(heldInbox.pull()).rejects.toThrow("taken-over");
+          await expect(inbox().pull()).rejects.toThrow("taken-over");
+        } else {
+          expect(read.error).toBeUndefined();
+          expect(await heldInbox.pull()).toEqual(["first", "second"]);
+          expect(await inbox().pull()).toEqual(["first", "second"]);
+        }
+      } finally {
+        await runtime.dispose({ closeStorage: false });
+        await manager.close();
+        await reader.close();
+        await replacement?.close();
+        await writer.close();
+        await server.close();
+      }
+    });
+  }
+});

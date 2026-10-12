@@ -1822,6 +1822,10 @@ export class CellImpl<T extends FabricValue>
    * `awaitDurability: true` keeps the read demanded through the runtime-wide
    * commit-aware barrier, including producers installed by pending commits.
    *
+   * Rejects with a terminal connection or takeover error in the backing space,
+   * including when the replica still holds a cached value. Authorization
+   * denials retain their absent-value semantics and per-space access report.
+   *
    * @returns The cell's reactive value after the selected readiness barrier.
    */
   pull(options: { awaitDurability?: boolean } = {}): Promise<Readonly<T>> {
@@ -1924,6 +1928,13 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
+        const sessionError = this.#runtime.storageManager.spaceSessionError?.(
+          this.space,
+        );
+        if (
+          sessionError !== undefined &&
+          sessionError.name !== "AuthorizationError"
+        ) throw sessionError;
         return validateAndTransform(this.#runtime, undefined, this.#viewRef);
       };
       ready().then(resolve, reject);
