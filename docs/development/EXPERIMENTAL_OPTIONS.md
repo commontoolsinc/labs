@@ -440,9 +440,11 @@ flags it adopts from the deployment it runs against.
   run the derive-and-commit model (which is why the flip does not reach
   the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
   the lane-posture item the topics measurement report recorded for the
-  flip decision). A test that runs ON in one process needs a serving loop
-  beside its memory server, or the events its clients append are admitted
-  and never delivered;
+  flip decision). `cf test` also refuses an explicit
+  `EXPERIMENTAL_SERVER_EXECUTION=true`, since it hosts no serving loop and
+  its clients' events would go unserved. A test that runs ON in one process
+  needs a serving loop beside its memory server, or the events its clients
+  append are admitted and never delivered;
   `@commonfabric/runner/executor/serving-memory-server.deno` supplies one,
   in-process (`startServingMemoryServer`) or on a localhost websocket for
   `remoteClient` runtimes (`listenServingMemoryServer`), with its serving
@@ -1861,7 +1863,8 @@ supplies their overrides, not their starting point. Their wiring is
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
 LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
-mapping.
+mapping. `cf test` refuses an environment that turns `serverExecution` on,
+because nothing in it serves the events its clients commit.
 
 ### Browser-side (build-time defines)
 

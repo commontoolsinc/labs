@@ -49,7 +49,6 @@ import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   ACLManager,
   ConsoleMethod,
-  experimentalOptionsFromEnv,
   parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
@@ -117,6 +116,7 @@ import {
   multiUserDescriptorMeta,
   runMultiUserTestPattern,
 } from "./multi-user-test-runner.ts";
+import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
 import { inferProgramRoot } from "./program-root.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
@@ -1116,6 +1116,9 @@ export async function runTestPattern(
   testPath: string,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
+  // Resolved before anything is opened, so a refusal leaves nothing to close.
+  const experimental = patternTestExperimentalOptions(Deno.env.get);
+
   // A denial logs its warning once per kind, and a denial's warning is what
   // fails a file that does not allow for one, so each file starts with every
   // kind unannounced. Otherwise a second file denied the same way would log
@@ -1209,7 +1212,7 @@ export async function runTestPattern(
       new Runtime(runtimePresets.patternTest({
         apiUrl: options.storageHost?.apiUrl ?? new URL(import.meta.url),
         storageManager,
-        experimental: experimentalOptionsFromEnv(Deno.env.get),
+        experimental,
         moduleByteCache: options.moduleByteCache ??
           getDefaultModuleByteCache(),
         // The collector is the runtime's, which makes every compile an
