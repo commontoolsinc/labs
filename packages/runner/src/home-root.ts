@@ -64,10 +64,9 @@ function* cellsIn(
  * state resolves beneath the `defaultPattern` slot of the user's own Home space
  * while that slot is empty, the root is created first, so that a write the
  * handler makes there lands under the root rather than being refused
- * (`SpaceRootMissingError`). This happens whether or not the handler goes on to
- * write: its body is synchronous, and the presync is the only point ahead of it
- * that can wait. A wish hands out such a cell for a Home target while Home has
- * no root. A serving runtime creates no Home root, so there such a write is
+ * (`SpaceRootMissingError`). The presync awaits this before the handler
+ * starts, whether or not the handler goes on to write. A wish hands out such a
+ * cell for a Home target while Home has no root. A serving runtime creates no Home root, so there such a write is
  * refused.
  */
 export async function bringUpHomeRootForHandler(
