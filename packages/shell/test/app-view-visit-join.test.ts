@@ -4,6 +4,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import type { DID } from "@commonfabric/identity";
 
 import { installBrowserGlobals } from "./browser-globals.ts";
@@ -16,9 +17,10 @@ const SECOND_SPACE = "did:key:z6Mk-shell-visit-join-second" as DID;
 /**
  * A runtime that answers the space's root with a piece, and records in `log`
  * each request to idle, each to bring Home up, and each to join a visited
- * room, with its space.
+ * room, with its space. Each join is answered by the next of `answers`, a
+ * thrown error rejecting the request, and by `sent` once they run out.
  */
-function stubRuntime(log: string[]) {
+function stubRuntime(log: string[], answers: (string | Error)[] = []) {
   const client = {
     idle: () => {
       log.push("idle");
@@ -30,7 +32,10 @@ function stubRuntime(log: string[]) {
     },
     joinVisitedRoom: (space: DID) => {
       log.push(`join ${space}`);
-      return Promise.resolve("sent");
+      const answer = answers.shift() ?? "sent";
+      return answer instanceof Error
+        ? Promise.reject(answer)
+        : Promise.resolve(answer);
     },
   };
   return {
@@ -104,6 +109,43 @@ describe("XAppView visit join", () => {
         `join ${FIRST_SPACE}`,
       ]);
     } finally {
+      restore();
+    }
+  });
+
+  it("asks again at the next update after a join fails, and not after one the worker refuses", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    const error = stub(console, "error", () => {});
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const view = new XAppView();
+      view.app = { view: { spaceDid: FIRST_SPACE } } as never;
+      view.space = FIRST_SPACE;
+      view.rt = stubRuntime(log, [
+        new Error("the worker went away"),
+        "recipient-access-refused",
+      ]) as never;
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      await view.visitJoin;
+      view.updated(new Map());
+      await view.visitJoin;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      expect({
+        joins: log.filter((entry) => entry.startsWith("join ")),
+        errors: error.calls.length,
+      }).toEqual({
+        joins: [`join ${FIRST_SPACE}`, `join ${FIRST_SPACE}`],
+        errors: 1,
+      });
+    } finally {
+      error.restore();
       restore();
     }
   });

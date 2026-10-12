@@ -1084,6 +1084,10 @@ export class XAppView extends BaseView {
    * Home, so every space shown is asked about. Joining a room makes it one of
    * the user's chats, and lists a forgotten one again: in this shell, visiting
    * a room is joining it.
+   *
+   * A request the worker answers is done, whatever it decided, a refusal
+   * included. One that fails is forgotten, so that the next update showing
+   * the space asks again.
    */
   async #joinVisitedRoom(rt: RuntimeInternals, space: DID): Promise<void> {
     try {
@@ -1092,9 +1096,10 @@ export class XAppView extends BaseView {
       if (rt.signal.aborted) return;
       await rt.runtime().joinVisitedRoom(space);
     } catch (error) {
-      if (!rt.signal.aborted) {
-        console.error("[AppView] Failed to join the visited room:", error);
-      }
+      if (rt.signal.aborted) return;
+      console.error("[AppView] Failed to join the visited room:", error);
+      const join = this.#visitJoin;
+      if (join?.rt === rt && join.space === space) this.#visitJoin = undefined;
     }
   }
 

@@ -686,9 +686,9 @@ space's genesis commit reserves. A space that passes has its root sent to
 Home's `chatManager.joinRoom`, when Home has that stream, with no `requestId`
 (`joinVisitedRoomOf()` in `packages/piece/src/ops/join-visited-room.ts`).
 
-The manager makes the room one of the user's chats, and adds them to its
-participants; a room their chats list already is left as it is, and nothing is
-recorded for it (see
+The manager makes the room one of the user's chats, and, once the user's
+profile has resolved, adds them to its participants; a room their chats list
+already is left as it is, and nothing is recorded for it (see
 [`ChatManagerOutput`](../specs/fabrichat/ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput)).
 A join restores an archived entry, so visiting a room the user forgot lists it
 again. So a person who opens a joinable group's link, or a room they were

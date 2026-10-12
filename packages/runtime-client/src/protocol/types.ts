@@ -11,6 +11,7 @@ import type {
 } from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import type {
   ApplyOpResolution,
   DeliveryAttention,
@@ -3649,7 +3650,7 @@ export type HomePatternResponse = {
  * space.
  */
 export type JoinVisitedRoomResponse = {
-  decision?: string;
+  decision?: JoinVisitDecision;
 };
 
 /**

@@ -17,6 +17,7 @@ import type {
   PresenceRecord,
 } from "@commonfabric/memory/v2";
 import type { PresenceEvent } from "@commonfabric/memory/v2/client";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
   ActionRunTraceEntry,
@@ -983,7 +984,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * the manager has handled it: `sent`, `no-chat-manager`, or the reason
    * vetting refused the space; `undefined` where the user has no Home.
    */
-  async joinVisitedRoom(space: DID): Promise<string | undefined> {
+  async joinVisitedRoom(space: DID): Promise<JoinVisitDecision | undefined> {
     const response = await this.#conn.request<RequestType.JoinVisitedRoom>({
       type: RequestType.JoinVisitedRoom,
       space,
