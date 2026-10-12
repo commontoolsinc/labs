@@ -31,7 +31,6 @@ import {
 } from "../builder/types.ts";
 import { useCancelGroup } from "../cancel.ts";
 import { type Cell } from "../cell.ts";
-import { ensureSpaceRootPattern } from "../ensure-space-root.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -415,40 +414,6 @@ function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
 }
 
 /**
- * The creation of a Home's root under way in a runtime, by Home space, shared
- * by every wish that waits on it.
- */
-const homeRootCreations = new WeakMap<
-  Runtime,
-  Map<MemorySpace, Promise<void>>
->();
-
-/**
- * Helper for {@link getHomeRootCell}, which brings the root of `home` into
- * being, sharing a creation already under way in `runtime`. Resolves once
- * `home` links a root, whoever created it.
- */
-function createHomeRoot(runtime: Runtime, home: MemorySpace): Promise<void> {
-  let creations = homeRootCreations.get(runtime);
-  if (!creations) {
-    creations = new Map();
-    homeRootCreations.set(runtime, creations);
-  }
-  let creation = creations.get(home);
-  if (!creation) {
-    const settling = creations;
-    creation = ensureSpaceRootPattern(runtime, home, { isHomeSpace: true })
-      .then(() => {})
-      .finally(() => settling.delete(home));
-    creations.set(home, creation);
-    // The wish's view is waiting on the root, so the runtime is not idle
-    // until the creation settles.
-    runtime.scheduler.trackBackgroundTask(creation);
-  }
-  return creation;
-}
-
-/**
  * The root of the wishing user's Home, the cell its space links as
  * `defaultPattern`, when the slot holds anything at all, which is then
  * resolved through as it stands. `undefined` when the slot is empty.
@@ -464,41 +429,21 @@ function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
 }
 
 /**
- * The root of the wishing user's Home, under which every Home target a wish
- * hands out lies, brought into being when the slot is empty.
- *
- * A space that links no root resolves `defaultPattern` to a path inside the
- * space cell itself, and a write through a cell resolved there lands where no
- * root reads it and where the root's creation finds the slot taken. So a Home
- * with nothing in the slot hands out no cell until it has a root. A headless
- * wish creates none, and throws `NoHomeRootError`, so it resolves to nothing.
- * Otherwise, on a client runtime this starts the root's creation and throws
- * `DocumentPending`, and the wish runs again once the creation settles. A
- * serving runtime creates no Home, and throws a `WishError`. A slot holding
- * anything at all is resolved through as it stands ({@link findHomeRootCell}).
+ * The cell under which every Home target a wish hands out lies: the root of
+ * the wishing user's Home when its space links one ({@link findHomeRootCell}),
+ * and otherwise the space cell's empty `defaultPattern` slot itself. A wish
+ * creates no root. A read through the empty slot finds nothing, and a write
+ * through it is refused unless the root exists by then
+ * (`SpaceRootMissingError`); a client runtime brings the root up ahead of a
+ * handler whose state holds such a cell (`bringUpHomeRootForHandler`). A
+ * headless wish hands out nothing over an empty slot, and throws
+ * `NoHomeRootError`, so it resolves to nothing.
  */
 function getHomeRootCell(ctx: WishContext): Cell<any> {
   const found = findHomeRootCell(ctx);
   if (found !== undefined) return found;
   if (ctx.headless) throw new NoHomeRootError();
-  if (ctx.runtime.servingPosture) {
-    throw new WishError(
-      "The home space has no root yet, and a serving runtime does not " +
-        "create one. Opening the home space creates it.",
-    );
-  }
-  const home = getHomeSpaceCell(ctx).space;
-  ctx.readiness.requireSettled(
-    `home-root:${home}`,
-    () => createHomeRoot(ctx.runtime, home),
-  );
-  // The creation resolves only once the slot holds a link, so an empty slot
-  // here means the root went missing again after it was created.
-  const created = findHomeRootCell(ctx);
-  if (created === undefined) {
-    throw new WishError("The home space's root could not be found.");
-  }
-  return created;
+  return (getHomeSpaceCell(ctx) as Cell<any>).key("defaultPattern");
 }
 
 /**
@@ -2868,12 +2813,7 @@ export function wish(
       sidecarUser,
       (): ProfileCreateSidecarSlot => ({}),
     );
-    // TODO(danfuzz): With no Home root yet, this resolves `defaultPattern`
-    // inside the Home space cell itself, so the profile the surface creates is
-    // written inline there instead of under a root. The fix creates the root
-    // at that first write, and fails the write loudly on a serving runtime.
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
