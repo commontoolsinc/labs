@@ -122,11 +122,13 @@ export type ServingMemoryServerOptions =
      * other than `onActivationSettled` and `onSpaceParked` are refused under
      * it; a test that needs one says `false` here.
      *
-     * The environment fills two more of the policy's fields when they are
+     * The environment fills three more of the policy's fields when they are
      * left unset, as a toolshed's bootstrap does: `storeReadThrough` takes
      * `true` when `SERVER_EXECUTION_STORE_READ_THROUGH` is the literal
-     * `true`, and `flushDeadlineMs` takes `SERVER_EXECUTION_FLUSH_DEADLINE_MS`
-     * when that is a positive decimal integer.
+     * `true`, `overlapWaveCommit` takes `true` when
+     * `SERVER_EXECUTION_OVERLAP_COMMIT` is, and `flushDeadlineMs` takes
+     * `SERVER_EXECUTION_FLUSH_DEADLINE_MS` when that is a positive decimal
+     * integer.
      */
     worker?: boolean;
   }
@@ -155,11 +157,12 @@ const runsInWorker = (options: ServingMemoryServerOptions): boolean =>
 /**
  * The loop's policy, with what `policy` leaves unset taken from the
  * environment as the toolshed bootstrap takes it: the store read-through
- * from `SERVER_EXECUTION_STORE_READ_THROUGH`, on for the literal `true`,
+ * from `SERVER_EXECUTION_STORE_READ_THROUGH` and the overlapped wave commit
+ * from `SERVER_EXECUTION_OVERLAP_COMMIT`, each on for the literal `true`,
  * and the flush deadline from `SERVER_EXECUTION_FLUSH_DEADLINE_MS`, a
- * positive decimal integer of milliseconds. A lane sets the first to run every test
- * that leaves it unset under the posture; a benchmark sets the second to
- * measure a cadence.
+ * positive decimal integer of milliseconds. A lane sets the first two to run
+ * every test that leaves them unset under the posture; a benchmark sets the
+ * third to measure a cadence.
  */
 const policyFromEnvironment = (
   policy: SpaceServerPolicy | undefined,
@@ -170,6 +173,12 @@ const policyFromEnvironment = (
     Deno.env.get("SERVER_EXECUTION_STORE_READ_THROUGH") === "true"
   ) {
     resolved = { ...resolved, storeReadThrough: true };
+  }
+  if (
+    resolved?.overlapWaveCommit === undefined &&
+    Deno.env.get("SERVER_EXECUTION_OVERLAP_COMMIT") === "true"
+  ) {
+    resolved = { ...resolved, overlapWaveCommit: true };
   }
   if (resolved?.flushDeadlineMs === undefined) {
     // A positive decimal integer, as the toolshed bootstrap reads it; a

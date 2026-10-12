@@ -1,0 +1,115 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import type { SessionViewInterest } from "@commonfabric/memory/v2";
+import { ViewInterestCache } from "../../src/executor/view-interests.ts";
+
+const space = "did:key:z6MkViewInterestsSpace";
+
+const interest = (
+  sessionId: string,
+  principal: string | undefined,
+  selectionGeneration?: number,
+): SessionViewInterest => ({
+  handle: {
+    sessionId,
+    sessionEpoch: `${sessionId}-session`,
+    viewEpoch: `${sessionId}-view`,
+    viewId: "view",
+    revision: 1,
+  },
+  principal,
+  attached: true,
+  view: { id: "view", revision: 1 } as SessionViewInterest["view"],
+  ...(selectionGeneration === undefined ? {} : { selectionGeneration }),
+});
+
+/** A reader that answers with `list` and counts how often it was asked. */
+const reader = (list: () => SessionViewInterest[]) => {
+  const state = { reads: 0 };
+  return {
+    state,
+    read: () => {
+      state.reads += 1;
+      return Promise.resolve(list());
+    },
+  };
+};
+
+describe("view-interests", () => {
+  it("reads the list once and answers later publishes from what it holds", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(() => [interest("a", "did:key:alice")]);
+
+    const first = await cache.interestsFor(space, undefined, r.read);
+    const second = await cache.interestsFor(space, undefined, r.read);
+
+    expect(first).toEqual([interest("a", "did:key:alice")]);
+    expect(second).toEqual(first);
+    expect(r.state.reads).toBe(1);
+  });
+
+  it("reads the list again after a change is noted, and only then", async () => {
+    const cache = new ViewInterestCache();
+    let list = [interest("a", undefined)];
+    const r = reader(() => list);
+    await cache.interestsFor(space, undefined, r.read);
+
+    list = [interest("a", undefined), interest("b", undefined)];
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(1);
+    cache.noteChanged(space);
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(r.state.reads).toBe(2);
+  });
+
+  it("keeps a change noted for another space out of this one", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(() => []);
+    await cache.interestsFor(space, undefined, r.read);
+
+    cache.noteChanged("did:key:z6MkAnotherSpace");
+    await cache.interestsFor(space, undefined, r.read);
+
+    expect(r.state.reads).toBe(1);
+  });
+
+  it("leaves out the excluded principal's interests without reading again", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(() => [
+      interest("a", "did:key:alice"),
+      interest("b", "did:key:bob"),
+    ]);
+    await cache.interestsFor(space, undefined, r.read);
+
+    const bobOnly = await cache.interestsFor(space, "did:key:alice", r.read);
+
+    expect(bobOnly.map((entry) => entry.handle.sessionId)).toEqual(["b"]);
+    expect(r.state.reads).toBe(1);
+  });
+
+  it("carries an accepted selection's generation on the held interest", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(
+      () => [interest("a", undefined, 3), interest("b", undefined)],
+    );
+    const [a] = await cache.interestsFor(space, undefined, r.read);
+
+    cache.noteSelection(space, a.handle, 4);
+    const held = await cache.interestsFor(space, undefined, r.read);
+
+    expect(held[0].selectionGeneration).toBe(4);
+    expect(held[1].selectionGeneration).toBeUndefined();
+    expect(r.state.reads).toBe(1);
+  });
+
+  it("ignores a selection for a handle the held list does not carry", async () => {
+    const cache = new ViewInterestCache();
+    const r = reader(() => [interest("a", undefined)]);
+    const [a] = await cache.interestsFor(space, undefined, r.read);
+
+    cache.noteSelection(space, { ...a.handle, viewEpoch: "other" }, 9);
+
+    expect((await cache.interestsFor(space, undefined, r.read))[0])
+      .toEqual(interest("a", undefined));
+  });
+});

@@ -42,6 +42,7 @@ import {
 } from "./serving-port-protocol.ts";
 import type { WaveCommitSinkDeps } from "./space-server.ts";
 import type { ServingLoopStats } from "./stats.ts";
+import { ViewInterestCache } from "./view-interests.ts";
 import type {
   ListedServedAclChange,
   WaveCommitRejection,
@@ -281,17 +282,20 @@ class PlaneMemoryServer implements HostMemoryServer {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #sessions: SessionMirror;
   readonly #demandShares: DemandShareCache;
+  readonly #viewInterests: ViewInterestCache;
 
   constructor(
     plane: ServingPlane,
     endpoint: ServingPlaneEndpoint,
     sessions: SessionMirror,
     demandShares: DemandShareCache,
+    viewInterests: ViewInterestCache,
   ) {
     this.#plane = plane;
     this.#endpoint = endpoint;
     this.#sessions = sessions;
     this.#demandShares = demandShares;
+    this.#viewInterests = viewInterests;
   }
 
   setServerExecutionObserver(
@@ -396,16 +400,22 @@ class PlaneMemoryServer implements HostMemoryServer {
     return resolveSpaceOwnerOf(engine, space);
   }
 
-  setViewSelection(
+  async setViewSelection(
     ...[space, handle, selection]: Parameters<
       HostMemoryServer["setViewSelection"]
     >
   ): Promise<boolean> {
-    return this.#endpoint.request("server.setViewSelection", {
+    const installed = await this.#endpoint.request("server.setViewSelection", {
       space,
       handle,
       selection,
     });
+    // The held interest then carries the generation the server holds, so
+    // the next publish builds on it without reading the list again.
+    if (installed) {
+      this.#viewInterests.noteSelection(space, handle, selection.generation);
+    }
+    return installed;
   }
 
   demandForSpace(
@@ -431,10 +441,17 @@ class PlaneMemoryServer implements HostMemoryServer {
     space: string,
     options: { excludePrincipal?: string } = {},
   ): ReturnType<HostMemoryServer["viewInterestsForSpace"]> {
-    return this.#endpoint.request("server.viewInterestsForSpace", {
+    // The list crosses the port once, and again only after the server
+    // reported a change that can move it (`ServingPlane`'s notices).
+    return this.#viewInterests.interestsFor(
       space,
-      excludePrincipal: options.excludePrincipal,
-    });
+      options.excludePrincipal,
+      () =>
+        this.#endpoint.request("server.viewInterestsForSpace", {
+          space,
+          excludePrincipal: undefined,
+        }),
+    );
   }
 }
 
@@ -448,6 +465,7 @@ export class ServingPlane {
   readonly #endpoint: ServingPlaneEndpoint;
   readonly #sessions = new SessionMirror();
   readonly #demandShares = new DemandShareCache();
+  readonly #viewInterests = new ViewInterestCache();
   readonly #engines = new Map<string, Promise<Engine.Engine>>();
   readonly #transports = new Map<
     number,
@@ -466,6 +484,7 @@ export class ServingPlane {
       endpoint,
       this.#sessions,
       this.#demandShares,
+      this.#viewInterests,
     );
     this.#loopback = { createTransport: () => this.#createTransport() };
     endpoint.onNotice("observer.commitAdmitted", ({ notice }) => {
@@ -478,11 +497,18 @@ export class ServingPlane {
       "observer.demandChanged",
       ({ space, reason, principal, sessionId }) => {
         this.#demandShares.noteChanged(space, sessionId);
+        // A session's views arrive with its watch set, which the server
+        // reports as a `watch` change; a tracked set that grew on push
+        // carries no view, so that reason leaves the held list alone.
+        if (reason !== "push-growth") this.#viewInterests.noteChanged(space);
         this.#observer?.demandChanged?.(space, reason, principal, sessionId);
       },
     );
     endpoint.onNotice("observer.sessionChanged", ({ event }) => {
       this.#sessions.apply(event);
+      // An open, a detach or a removal is what attaches a view's session
+      // or takes it out of the list.
+      this.#viewInterests.noteChanged(event.space);
       if (event.kind === "removed") {
         this.#demandShares.forget(event.space, event.sessionId);
       }

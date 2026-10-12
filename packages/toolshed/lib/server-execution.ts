@@ -62,6 +62,7 @@ export type ServerExecutionEnvPolicy = {
   maxOutstandingEffects?: number;
   egressRatePerSecond?: number;
   storeReadThrough?: boolean;
+  overlapWaveCommit?: boolean;
   parkedRuntimeRetentionMs?: number;
 };
 
@@ -80,6 +81,8 @@ export type ServerExecutionEnvPolicy = {
  * - the store read-through (`SpaceServerPolicy.storeReadThrough`,
  *   SERVER_EXECUTION_STORE_READ_THROUGH) defaults OFF; only the literal
  *   `true` turns it on;
+ * - the overlapped wave commit (`SpaceServerPolicy.overlapWaveCommit`,
+ *   SERVER_EXECUTION_OVERLAP_COMMIT) defaults OFF, on the same reading;
  * - how long an idle-parked space's runtime is kept for its next tenure
  *   (`SpaceServerPolicy.parkedRuntimeRetentionMs`,
  *   SERVER_EXECUTION_PARKED_RUNTIME_RETENTION_MS) stays the host's
@@ -182,11 +185,23 @@ export function serverExecutionPolicyFromEnv(
         "the store read-through stays OFF",
     );
   }
+  const overlapRaw = readRaw("SERVER_EXECUTION_OVERLAP_COMMIT");
+  let overlapWaveCommit: boolean | undefined;
+  if (overlapRaw === "true") {
+    overlapWaveCommit = true;
+  } else if (overlapRaw !== undefined && overlapRaw !== "false") {
+    warn(
+      "Server-execution v2: ignoring SERVER_EXECUTION_OVERLAP_COMMIT=" +
+        `${JSON.stringify(overlapRaw)} (expected "true" or "false"); ` +
+        "the overlapped wave commit stays OFF",
+    );
+  }
   return {
     ...(flushDeadlineMs !== undefined ? { flushDeadlineMs } : {}),
     ...(maxOutstandingEffects !== undefined ? { maxOutstandingEffects } : {}),
     ...(egressRatePerSecond !== undefined ? { egressRatePerSecond } : {}),
     ...(storeReadThrough !== undefined ? { storeReadThrough } : {}),
+    ...(overlapWaveCommit !== undefined ? { overlapWaveCommit } : {}),
     ...(parkedRuntimeRetentionMs !== undefined
       ? { parkedRuntimeRetentionMs }
       : {}),
@@ -291,6 +306,13 @@ export function startServerExecutionHost(options: {
       "Server-execution v2: store read-through ON by " +
         "SERVER_EXECUTION_STORE_READ_THROUGH=true (serving runtimes read " +
         "their home space from the engine; default is OFF)",
+    );
+  }
+  if (policy.overlapWaveCommit === true) {
+    console.log(
+      "Server-execution v2: overlapped wave commit ON by " +
+        "SERVER_EXECUTION_OVERLAP_COMMIT=true (a wave's commit is in flight " +
+        "while the next cycle drains and settles; default is OFF)",
     );
   }
   if (serverExecutionWorkerFromEnv(envGet)) {

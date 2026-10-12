@@ -99,7 +99,13 @@ demand set crosses as shares per session, read once and kept on the worker
 (`DemandShareCache`) until the server's `demandChanged` names that session
 again, so a demand pass hands the space server's mirror the objects it compared
 last time and asks the server only for the sessions whose shares are stale or
-not yet cached.
+not yet cached. The view interests cross the same way (`ViewInterestCache`):
+read once per space and held until a `demandChanged` for a watch set, which is
+the message that carries a session's views, or a `sessionChanged`, which is
+what attaches, detaches or removes a viewing session, names the space; a
+selection the worker installs updates the held interest's generation itself.
+A publish over unchanged interests then asks the server nothing, where the
+request alone waited for the server's thread's turn, however empty the list.
 
 **Lifecycle verbs run in the worker, from a descriptor.** A verb reaches the
 host today as closures over a `PiecesController`. The route sends the verb's
@@ -163,6 +169,24 @@ space server notes each landed home commit to the wave open at the time
 exactly at that commit's seq to that head, which the sink re-verifies, in
 place of the conflict. The wave's contributions read the replica with the
 commit's writes applied, so the rebase claims nothing they did not see.
+
+That is also what lets the loop overlap the flight with its next cycle. Under
+`SpaceServerPolicy.overlapWaveCommit` (`SERVER_EXECUTION_OVERLAP_COMMIT`), a
+cycle leaves its commit in flight and ends at its publish. When nothing but
+the loop's own echoes arrived meanwhile, the cycle finishes the commit before
+it ends, so a quiet space runs the cycles it runs with the commit inline;
+otherwise the next cycle drains and settles over it and finishes it inside
+that settle, once the settle first finds the scheduler quiet or after the
+deadline cuts it, and before the cycle computes its own advance: the
+watermark, the derived tail and the open wave's note of the landed commit are
+then all current when the successor decides its commit. An event the finish
+requeues is drained again there, so its re-run joins the runs the rollback
+re-armed in the same wave. A write the sink refused rolls back while the successor's
+settle is still open, which re-runs what read it, and the settle is probed
+again rather than ended. A cycle that ran a lifecycle verb commits inline,
+because the verb's receipt reads the outcome. The port round trip then costs
+the loop only what the next drain and settle do not cover, which
+`executor/wave/commit-wait` reports against `executor/wave/commit`.
 
 A worker that dies takes every serving runtime with it. The main thread's
 bridge treats its exit as a park of every space with the failure-park backoff

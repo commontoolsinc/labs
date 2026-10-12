@@ -140,6 +140,24 @@ describe("serverExecutionPolicyFromEnv", () => {
     expect(warnings[0]).toContain("SERVER_EXECUTION_STORE_READ_THROUGH");
   });
 
+  it("turns the overlapped wave commit on for the literal true only; garbage leaves it off with a warning", () => {
+    const warnings: string[] = [];
+    const policyWith = (value: string) =>
+      serverExecutionPolicyFromEnv(
+        envOf({
+          SERVER_EXECUTION_OVERLAP_COMMIT: value,
+          SERVER_EXECUTION_MAX_OUTSTANDING_EFFECTS: "0",
+        }),
+        (m) => warnings.push(m),
+      );
+    expect(policyWith("true")).toEqual({ overlapWaveCommit: true });
+    expect(policyWith("false")).toEqual({});
+    expect(warnings).toEqual([]);
+    expect(policyWith("on")).toEqual({});
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain("SERVER_EXECUTION_OVERLAP_COMMIT");
+  });
+
   it("threads the parked-runtime retention knob, the literal 0 included; garbage reads as unset with a warning", () => {
     const warnings: string[] = [];
     const cases: [string, number][] = [
