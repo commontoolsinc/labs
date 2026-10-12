@@ -192,7 +192,9 @@ initialization on nobody's behalf. Its serving-loop cases cover a run of the
 loop's own under a principal's snapshot, which labels what it initializes for
 that principal and binds them as owner.
 `packages/runner/test/executor-space-root-ensure.test.ts` covers the root's
-deferred start taking the owner's snapshot from the ensure.
+deferred start taking the owner's snapshot from the ensure, and
+`packages/runner/test/executor-effect-channel.test.ts` a served handler's
+navigation target taking the firing actor's.
 
 `packages/runner/test/cfc-current-principal-confidentiality.test.ts` covers the
 reader binding, under "a document created under a labeled parent": an item
