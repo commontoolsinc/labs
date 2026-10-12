@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
 import type { Cell } from "../src/cell.ts";
-import { bringUpHomeRootForWrites } from "../src/home-root.ts";
+import { bringUpHomeRootForHandler } from "../src/home-root.ts";
 import { Runtime, type RuntimeFetch } from "../src/index.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
@@ -67,9 +67,28 @@ describe("home-root", () => {
     const tx = rt.edit();
 
     await expect(
-      bringUpHomeRootForWrites(
+      bringUpHomeRootForHandler(
         rt,
         { $ctx: { profiles: beneathSlot(rt, home) }, $event: {} },
+        tx,
+      ),
+    ).rejects.toThrow("404");
+    tx.abort();
+
+    expect(fetched.some((url) => url.includes("/system/home.tsx"))).toBe(true);
+  });
+
+  it("starts the Home root's creation for a cell nested in handler state", async () => {
+    const rt = makeRuntime(user, false);
+    const tx = rt.edit();
+
+    await expect(
+      bringUpHomeRootForHandler(
+        rt,
+        {
+          $ctx: { form: { lists: [beneathSlot(rt, home)] } },
+          $event: {},
+        },
         tx,
       ),
     ).rejects.toThrow("404");
@@ -82,7 +101,7 @@ describe("home-root", () => {
     const rt = makeRuntime(user, false);
     const tx = rt.edit();
 
-    await bringUpHomeRootForWrites(
+    await bringUpHomeRootForHandler(
       rt,
       { $ctx: { profiles: beneathSlot(rt, elsewhere) }, $event: {} },
       tx,
@@ -96,7 +115,7 @@ describe("home-root", () => {
     const rt = makeRuntime(service, true);
     const tx = rt.edit();
 
-    await bringUpHomeRootForWrites(
+    await bringUpHomeRootForHandler(
       rt,
       { $ctx: { profiles: beneathSlot(rt, service.did() as MemorySpace) } },
       tx,

@@ -311,9 +311,11 @@ slot is empty, as it is before the home space is first opened, a headless wish
 for one of these resolves to nothing, with no result and no error, and a
 `"~"`-scoped one resolves to whatever else its scope reaches. Any other wish for
 one of these hands out a cell through the empty slot, where a read finds
-nothing. The root is created at the first write under it: when a handler's
-state holds such a cell, a client runtime creates the root before the handler
-runs, so its write lands under the root. A write beneath an empty slot is
+nothing. A handler that holds such a cell anywhere in its bound state brings
+the root up before it runs, on a client runtime, so a write it makes there
+lands under the root. That happens whether or not the handler goes on to write:
+a handler's body is synchronous, and the input load ahead of it is the only
+point that can wait for the root's creation. A write beneath an empty slot is
 refused otherwise, with a `SpaceRootMissingError`, rather than landing in the
 space cell itself: a write outside a handler, a write on a serving runtime,
 which creates no root, and a write whose root's creation failed. A slot that

@@ -1,6 +1,6 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
-import { isCell } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { ensureSpaceRootPattern } from "./ensure-space-root.ts";
 import type { Runtime } from "./runtime.ts";
 import { spaceCellId } from "./space-root-slot.ts";
@@ -19,7 +19,7 @@ const homeRootCreations = new WeakMap<
 >();
 
 /**
- * Helper for {@link bringUpHomeRootForWrites}, which brings the root of `home`
+ * Helper for {@link bringUpHomeRootForHandler}, which brings the root of `home`
  * into being, sharing a creation already under way in `runtime`. Resolves once
  * `home` links a root, whoever created it.
  */
@@ -41,16 +41,36 @@ function createHomeRoot(runtime: Runtime, home: MemorySpace): Promise<void> {
 }
 
 /**
- * Brings the user's Home root into being ahead of a handler that writes
- * beneath it, on a client runtime. `inputs` is the handler's argument, as its
- * input presync materializes it in `tx`. When a cell among the top-level values
- * of its bound state resolves beneath the `defaultPattern` slot of the user's own Home space while
- * that slot is empty, the root is created first, so that the handler's write
- * lands under the root rather than being refused (`SpaceRootMissingError`). A
- * wish hands out such a cell for a Home target while Home has no root. A
- * serving runtime creates no Home root, so there such a write is refused.
+ * Helper for {@link bringUpHomeRootForHandler}, which yields every cell in
+ * `value`, looking inside objects and arrays but not inside a cell.
  */
-export async function bringUpHomeRootForWrites(
+function* cellsIn(
+  value: unknown,
+  seen = new Set<object>(),
+): Generator<Cell<unknown>> {
+  if (isCell(value)) {
+    yield value;
+    return;
+  }
+  if (!isObjectOrArray(value) || seen.has(value)) return;
+  seen.add(value);
+  for (const member of Object.values(value)) yield* cellsIn(member, seen);
+}
+
+/**
+ * Brings the user's Home root into being ahead of a handler that can write
+ * beneath it, on a client runtime. `inputs` is the handler's argument, as its
+ * input presync materializes it in `tx`. When a cell anywhere in its bound
+ * state resolves beneath the `defaultPattern` slot of the user's own Home space
+ * while that slot is empty, the root is created first, so that a write the
+ * handler makes there lands under the root rather than being refused
+ * (`SpaceRootMissingError`). This happens whether or not the handler goes on to
+ * write: its body is synchronous, and the presync is the only point ahead of it
+ * that can wait. A wish hands out such a cell for a Home target while Home has
+ * no root. A serving runtime creates no Home root, so there such a write is
+ * refused.
+ */
+export async function bringUpHomeRootForHandler(
   runtime: Runtime,
   inputs: unknown,
   tx: IExtendedStorageTransaction,
@@ -61,12 +81,10 @@ export async function bringUpHomeRootForWrites(
   const state = isObjectOrArray(inputs) && "$ctx" in inputs
     ? inputs.$ctx
     : undefined;
-  if (!isObjectOrArray(state)) return;
   const home = runtime.userIdentityDID as MemorySpace;
   const homeSpaceCellId = spaceCellId(home);
-  for (const value of Object.values(state)) {
-    if (!isCell(value)) continue;
-    const { space, id, path } = value.withTx(tx).resolveAsCell()
+  for (const cell of cellsIn(state)) {
+    const { space, id, path } = cell.withTx(tx).resolveAsCell()
       .getAsNormalizedFullLink();
     if (
       space !== home || id !== homeSpaceCellId || path.length < 2 ||

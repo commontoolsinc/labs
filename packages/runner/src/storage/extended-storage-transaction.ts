@@ -1466,20 +1466,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // A write beneath a space cell's `defaultPattern` slot while the slot is
     // empty lands inline in the space cell, and a space written that way never
     // gets its root, since the root's creation finds the slot taken. A write
-    // that fills the slot, or the whole value, is noted, so that writes beneath
-    // it later in the same transaction pass. Otherwise the slot is read the
-    // way the meta seam reads: transaction-local, and kept out of the
-    // reactivity log and the conflict set.
+    // to the slot, or to the whole value, keeps `#filledRootSlots` in step
+    // with whether this transaction has left the slot filled, so that writes
+    // beneath a slot filled earlier in the same transaction pass. Otherwise
+    // the slot is read the way the meta seam reads: transaction-local, and
+    // kept out of the reactivity log and the conflict set. The space cell's id
+    // is worked out only for a write that can reach a slot.
     if (
       address.path[0] === "value" &&
-      (address.path.length === 1 || address.path[1] === "defaultPattern") &&
+      (address.path.length === 1
+        ? this.#filledRootSlots.size > 0 ||
+          (value as { defaultPattern?: unknown } | undefined)
+              ?.defaultPattern !== undefined
+        : address.path[1] === "defaultPattern") &&
       address.id === spaceCellId(address.space)
     ) {
       if (address.path.length <= 2) {
-        const filled = address.path.length === 2
+        const filled = options?.delete === true
+          ? undefined
+          : address.path.length === 2
           ? value
           : (value as { defaultPattern?: unknown } | undefined)?.defaultPattern;
-        if (options?.delete !== true && filled !== undefined) {
+        if (filled === undefined) {
+          this.#filledRootSlots.delete(address.id);
+        } else {
           this.#filledRootSlots.add(address.id);
         }
       } else if (!this.#filledRootSlots.has(address.id)) {

@@ -3,21 +3,12 @@ import type { URI } from "./sigil-types.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import { toURI } from "./uri-utils.ts";
 
-/** The ids worked out so far, by space. */
-const ids = new Map<MemorySpace, URI>();
-
 /**
  * The id of the space cell of `space`, the cell `Runtime.getSpaceCell()`
- * returns: the one whose cause is the space's own DID. Kept per space, since a
- * write checks it and deriving it hashes.
+ * returns: the one whose cause is the space's own DID.
  */
 export function spaceCellId(space: MemorySpace): URI {
-  let id = ids.get(space);
-  if (id === undefined) {
-    id = toURI(createRef({}, space));
-    ids.set(space, id);
-  }
-  return id;
+  return toURI(createRef({}, space));
 }
 
 /**

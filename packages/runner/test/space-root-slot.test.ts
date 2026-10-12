@@ -63,6 +63,26 @@ describe("space-root-slot", () => {
     expect(slot().key("profiles").get()).toEqual(["Ada"]);
   });
 
+  it("refuses a write beneath a slot the same transaction filled and then emptied", () => {
+    const tx = runtime.edit();
+    slot().withTx(tx).set({ profiles: [] });
+    slot().withTx(tx).set(undefined);
+    expect(() => slot().key("profiles").withTx(tx).set(["Ada"])).toThrow(
+      SpaceRootMissingError,
+    );
+    tx.abort();
+  });
+
+  it("refuses a write beneath a slot the same transaction filled and then replaced the space cell without", () => {
+    const tx = runtime.edit();
+    slot().withTx(tx).set({ profiles: [] });
+    (runtime.getSpaceCell(space) as Cell<any>).withTx(tx).set({});
+    expect(() => slot().key("profiles").withTx(tx).set(["Ada"])).toThrow(
+      SpaceRootMissingError,
+    );
+    tx.abort();
+  });
+
   it("lets a write beneath a slot that links a root land in the root", async () => {
     const setup = runtime.edit();
     const root = runtime.getCell<Record<string, unknown>>(
