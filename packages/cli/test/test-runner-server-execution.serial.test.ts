@@ -26,6 +26,22 @@ describe(
       expect(outcome?.passed).toBe(2);
     });
 
+    it("serves a multi-user participant's handler that instantiates a pattern in a space of its own", async () => {
+      // As in the single-user case, and the participant reads the child
+      // right after its action, so the read holds only when the action's
+      // settle waited for the served write to arrive.
+      const root = resolve(FIXTURES, "in-space");
+      let outcome: Awaited<ReturnType<typeof runTests>> | undefined;
+      await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
+        outcome = await runTests(
+          resolve(root, "create-in-participant-handler.test.tsx"),
+          { root },
+        );
+      });
+      expect(outcome?.failed).toBe(0);
+      expect(outcome?.passed).toBe(1);
+    });
+
     it("delivers a participant's served write to the participant awaiting its marker", async () => {
       // Alice's write is a handler's, so on this arm the serving loop makes
       // it. Bob reads it once, after Alice's marker, so the assertion holds
