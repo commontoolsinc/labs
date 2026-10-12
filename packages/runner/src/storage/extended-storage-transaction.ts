@@ -125,6 +125,8 @@ import {
 } from "../runtime-secret.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { CooperativeYield } from "../scheduler/cooperative-yield.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import { externalizeLinkSchemasInValue } from "../link-utils.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
   deliverSchemaDocumentClosure,
@@ -2728,6 +2730,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
+   * `value` with its inline link schemas stamped as references, which is
+   * what a link written into an ordinary document stores
+   * (`docs/specs/content-addressed-schemas.md`): the closure each reference
+   * names is staged with the write (`#stageSchemaDocsForValue`), so the
+   * stored form travels with its documents and a same-transaction read
+   * through the link resolves. A `data:` document is never written, and a
+   * `cid:` document's keywords may hold link-shaped data, so neither is
+   * rewritten; with the flag off the value is stored as given.
+   */
+  #storedLinkSchemaForm(
+    address: Pick<IMemorySpaceAddress, "id">,
+    value: FabricValue,
+  ): FabricValue {
+    if (!getContentAddressedSchemasConfig()) return value;
+    if (address.id.startsWith("cid:") || hasDataUriScheme(address.id)) {
+      return value;
+    }
+    return externalizeLinkSchemasInValue(value);
+  }
+
+  /**
    * Refuses a write that would land a `schema` metadata member in the
    * malformed form — a `cid:` reference outside a single root `$ref`, or a
    * value that is not a schema (`MalformedSchemaMetaError`). This runs
@@ -3434,6 +3457,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.#assertWritable("write()");
+    value = this.#storedLinkSchemaForm(address, value);
     this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
@@ -3458,6 +3482,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.#assertWritable("writeOrThrow()");
+    value = this.#storedLinkSchemaForm(address, value);
     this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
@@ -3606,6 +3631,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         address: IMemorySpaceAddress,
         value: FabricValue | undefined,
       ) => this.#refuseMalformedSchemaMeta(address, value);
+      const storedLinkSchemaForm = (
+        address: IMemorySpaceAddress,
+        value: FabricValue,
+      ) => this.#storedLinkSchemaForm(address, value);
       // The read caches go the same way: dropped ahead of the first write the
       // batch yields, and kept when it yields none. A `set()` whose diff
       // finds nothing to write arrives here as an empty batch, and a lift
@@ -3628,18 +3657,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
-            noteSystemWrite(address, write.value);
+            const value = storedLinkSchemaForm(address, write.value);
+            noteSystemWrite(address, value);
             noteWriteIdentity();
             if (!write.delete) {
-              refuseMalformedSchemaMeta(address, write.value);
+              refuseMalformedSchemaMeta(address, value);
               if (getContentAddressedSchemasConfig()) {
-                staged.push({ address, value: write.value });
+                staged.push({ address, value });
               }
             }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
             invalidateReadCaches();
-            yield { address, value: write.value, delete: write.delete };
+            yield { address, value, delete: write.delete };
           }
         })(),
       );
