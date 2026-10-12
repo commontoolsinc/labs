@@ -255,13 +255,20 @@ where the pre-sync was no longer the whole cost.
       first-run commit, which is now 40 KB.
 - [x] The server's oversized-message refusal is a terminal rejection, so a
       commit refused for its size is not sent again unchanged.
-- [ ] The first-run commit of a message row is still 40 KB per argument
-      document, 36 KB of it the CFC label map: 85 entries, each a
-      `LinkReference` atom naming its source and its own target in full.
-      These labels are unique to their document, so the content-addressed
-      label form (`docs/specs/content-addressed-cfc-labels.md`) does not
-      shrink them; what would is the atom's shape, which the Contextual
-      Flow Control specification owns.
+- [x] A message row's argument document carried two label entries per
+      message in the room, 60 of its 85: the row received a link to the
+      whole list at `array`, which its callback never declared, because the
+      list built-ins read an unnamed key of an object schema as declared,
+      and the link write persisted the list's label view under the slot.
+      The built-ins now pass a row only the arguments its schema names and
+      drop a stored slot the schema leaves unused on replay, so the label
+      maps grow with the message count once, not twice.
+- [ ] The remaining label map of a row is its 25 fixed entries, about
+      9 KB, of which the `LinkReference` atoms are the largest share: each
+      spells its source and its target in full, and on an in-place link
+      entry both restate the link stored beside it. Shrinking that is a
+      change to the atom's registered shape, which the Contextual Flow
+      Control specification owns.
 - [ ] A load of a materialized room still commits for a fifth of its time,
       writing a reader's own instance of every session-scoped derivation
       in a commit of its own: 429 commits of about 400 bytes on the

@@ -33,7 +33,11 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
-import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  PiecesController,
+  type ShareIntake,
+} from "@commonfabric/piece/ops";
 import {
   type Cell,
   CompilerStackLoadError,
@@ -4023,6 +4027,38 @@ describe("runtime-processor", () => {
     });
 
     /**
+     * Stands in for the three steps of the housekeeping, recording each
+     * call, so that a case can say none was started even of a step that
+     * fails at once.
+     */
+    function stubHousekeeping() {
+      const steps = [
+        stub(
+          PiecesController.prototype,
+          "adoptLegacySpaces",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "ensurePrivateInbox",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "startShareIntake",
+          () => Promise.resolve(undefined),
+        ),
+      ];
+      return {
+        /** How many times each step was started, in order. */
+        starts: () => steps.map(({ calls }) => calls.length),
+        [Symbol.dispose]() {
+          for (const step of steps) step.restore();
+        },
+      };
+    }
+
+    /**
      * A processor over a real runtime on emulated storage, whose Home pattern
      * is a stand-in holding `rows` as its space list and recording what is
      * sent to its streams. The space creation, the site table, and the
@@ -4034,7 +4070,8 @@ describe("runtime-processor", () => {
      * read the inbox ensure makes of Home waits for `inboxReadable`. The share
      * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
      * each is made, a throw from it being a throw from the subscription. Every
-     * space reads as having that stand-in stored as its root.
+     * space reads as having that stand-in stored as its root, which records a
+     * pattern, until `storeRoot()` stores another.
      */
     async function homeWorker(
       rows: readonly unknown[] | (() => unknown),
@@ -4059,6 +4096,11 @@ describe("runtime-processor", () => {
       const unsubscribed: string[] = [];
       const home = {
         getAsLink: () => cellRefToSigilLink(homeRef),
+        // The pattern Home's root records that it runs.
+        getMetaRaw: (key: string) =>
+          key === "patternIdentity"
+            ? { identity: "home-worker-pattern", symbol: "default" }
+            : undefined,
         key: (name: string) =>
           name === "spaces"
             ? { get: typeof rows === "function" ? rows : () => rows }
@@ -4090,10 +4132,11 @@ describe("runtime-processor", () => {
         "ensureDefaultPattern",
         () => Promise.resolve({ getCell: () => home } as never),
       );
+      let storedRoot: unknown = home;
       const stored = stub(
         PiecesController.prototype,
         "getDefaultPattern",
-        () => Promise.resolve(home as never),
+        () => Promise.resolve(storedRoot as never),
       );
       const processor = buildProcessor({
         identity: signer,
@@ -4135,6 +4178,12 @@ describe("runtime-processor", () => {
         /** The Home fields whose subscriptions the share intake has ended. */
         unsubscribed,
         siteTable,
+        /** Makes `root` the root Home's space links, `undefined` for none. */
+        storeRoot(root: unknown): void {
+          storedRoot = root;
+        },
+        /** How many times Home's root was ensured, which may create it. */
+        rootEnsures: () => ensure.calls.length,
         async [Symbol.asyncDispose]() {
           ensure.restore();
           stored.restore();
@@ -4449,38 +4498,6 @@ describe("runtime-processor", () => {
       // the request has returned, so a case about it waits for the event it
       // is about.
 
-      /**
-       * Stands in for the three steps of the housekeeping, recording each
-       * call, so that a case can say none was started even of a step that
-       * fails at once.
-       */
-      function stubHousekeeping() {
-        const steps = [
-          stub(
-            PiecesController.prototype,
-            "adoptLegacySpaces",
-            () => Promise.resolve(),
-          ),
-          stub(
-            PiecesController.prototype,
-            "ensurePrivateInbox",
-            () => Promise.resolve(),
-          ),
-          stub(
-            PiecesController.prototype,
-            "startShareIntake",
-            () => Promise.resolve(undefined),
-          ),
-        ];
-        return {
-          /** How many times each step was started, in order. */
-          starts: () => steps.map(({ calls }) => calls.length),
-          [Symbol.dispose]() {
-            for (const step of steps) step.restore();
-          },
-        };
-      }
-
       it("adopts Home's legacy rows, has Home ensure the private inbox, and starts the share intake", async () => {
         const ensureSent = Promise.withResolvers<void>();
         await using worker = await homeWorker(
@@ -4618,6 +4635,85 @@ describe("runtime-processor", () => {
 
         expect(root.piece).toBeDefined();
         expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+    });
+
+    describe("ensuring an existing Home only", () => {
+      it("brings up a Home whose root records its pattern, and starts the housekeeping", async () => {
+        const ensureSent = Promise.withResolvers<void>();
+        await using worker = await homeWorker(
+          [],
+          () => ensureSent.resolve(),
+        );
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(response.cell).toBeDefined();
+        await ensureSent.promise;
+        expect(worker.privateInboxSends()).toBe(1);
+      });
+
+      it("creates nothing and starts no housekeeping where Home has no root", async () => {
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(response).toStrictEqual({});
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+
+      it("treats a root that records no pattern yet as no Home", async () => {
+        // A root another writer has linked and not yet finished creating
+        // holds a value and records no pattern, which a start refuses.
+
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+        const root = worker.runtime.getCell<{ name: string }>(
+          worker.homeSpace,
+          "home-root-being-created",
+        );
+        const tx = worker.runtime.edit();
+        root.withTx(tx).set({ name: "Home" });
+        await tx.commit().settled;
+        await root.sync();
+        worker.storeRoot(root);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(root.getRaw()).toEqual({ name: "Home" });
+        expect(response).toStrictEqual({});
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+
+      it("creates Home where it has no root when not asked for an existing Home only", async () => {
+        await using worker = await homeWorker([]);
+        using housekeeping = stubHousekeeping();
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+          });
+
+        expect(response.cell).toBeDefined();
+        expect(worker.rootEnsures()).toBe(1);
+        expect(housekeeping.starts()[0]).toBe(1);
       });
     });
   });
@@ -7787,11 +7883,113 @@ describe("runtime-processor", () => {
                 calls++;
                 return Promise.resolve();
               },
+              isIdleWithPendingCommits: () => true,
             },
           },
         });
         await fake.handleIdle();
         expect(calls).toBe(1);
+      });
+
+      for (
+        const step of [
+          "legacySpacesAdopted",
+          "privateInboxEnsured",
+        ] as const
+      ) {
+        it(`resolves only once the \`${step}\` step of Home's housekeeping has settled`, async () => {
+          // Draining the task queue (all microtasks, then one macrotask) runs
+          // every continuation a handler that skipped the step would take to
+          // reach the commit barrier, so a correct handler has not reached it
+          // by then.
+
+          let calls = 0;
+          const processor = buildProcessor({
+            runtime: {
+              scheduler: {
+                idleWithPendingCommits: () => {
+                  calls++;
+                  return Promise.resolve();
+                },
+                isIdleWithPendingCommits: () => true,
+              },
+            },
+          });
+          const housekeeping = Promise.withResolvers<void>();
+          processor.accessForTestingOnly[step] = housekeeping.promise;
+
+          let done = false;
+          const idling = processor.handleIdle().then(() => {
+            done = true;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          expect({ calls, done }).toEqual({ calls: 0, done: false });
+
+          housekeeping.resolve();
+          await idling;
+          expect(calls).toBe(1);
+        });
+      }
+
+      it("waits again for the share intake when the scheduler work it waited for handed the intake more to take up", async () => {
+        const log: string[] = [];
+        let intakeBusy = true;
+        const intake = {
+          idle: () => {
+            log.push("intake idle");
+            intakeBusy = false;
+            return Promise.resolve();
+          },
+          isIdle: () => !intakeBusy,
+        };
+        const processor = buildProcessor({
+          runtime: {
+            scheduler: {
+              idleWithPendingCommits: () => {
+                // The first commit barrier's work pokes the intake again.
+                if (!log.includes("commits idle")) intakeBusy = true;
+                log.push("commits idle");
+                return Promise.resolve();
+              },
+              isIdleWithPendingCommits: () => true,
+            },
+          },
+        });
+        processor.accessForTestingOnly.shareIntake = Promise.resolve(
+          intake as unknown as ShareIntake,
+        );
+
+        await processor.handleIdle();
+        expect(log).toEqual([
+          "intake idle",
+          "commits idle",
+          "intake idle",
+          "commits idle",
+        ]);
+      });
+
+      it("resolves, reporting the failure, when the share intake's own wait rejects", async () => {
+        const intake = {
+          idle: () => Promise.reject(new Error("the intake failed on purpose")),
+          isIdle: () => true,
+        };
+        const processor = buildProcessor({
+          runtime: {
+            scheduler: {
+              idleWithPendingCommits: () => Promise.resolve(),
+              isIdleWithPendingCommits: () => true,
+            },
+          },
+        });
+        processor.accessForTestingOnly.shareIntake = Promise.resolve(
+          intake as unknown as ShareIntake,
+        );
+        using warn = stub(console, "warn");
+
+        await processor.handleIdle();
+        expect(warn.calls.map((call) => call.args[0])).toEqual([
+          "[RuntimeProcessor] Waiting for the share intake:",
+        ]);
       });
     });
 

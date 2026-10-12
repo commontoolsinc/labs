@@ -146,15 +146,17 @@ the watch (`SessionSync.crossings`, `docs/specs/memory-v2/04-protocol.md`),
 carrying the target and the target-rooted path and schema the read needed.
 The storage manager kicks a load for each from the target space under that
 selector, registered as a pending load and listed while it is in flight
-(`pendingCrossingLoadAddresses`), and the pre-sync awaits those loads by
-document, the ones its identity can resolve, asking again once they settle,
-since a crossing's own frame can report crossings in turn; a target the
-client cannot load, for want of access say, stays absent, and a read of it
-reads that absence as it would have before. The sync itself never waits for
-them: it may hold the one watch refresh in flight, and a crossing's load can
-report a crossing back into its space. Against a server that does not
-advertise `syncCrossingsV1` (`followsCrossings`), the pre-sync falls back to
-reading:
+(`pendingCrossingLoadAddresses`). It is registered as a prefetch: a reader
+parked on the document waits for it to settle, but its failure fails no
+reader's wait, since a reader's own load of the document decides that. The
+pre-sync awaits those loads by document, the ones its identity can resolve,
+asking again once they settle, since a crossing's own frame can report
+crossings in turn; a target the client cannot load, for want of access say,
+stays absent, and a read of it reads that absence as it would have before.
+The sync itself never waits for them: it may hold the one watch refresh in
+flight, and a crossing's load can report a crossing back into its space.
+Against a server that does not advertise `syncCrossingsV1`
+(`followsCrossings`), the pre-sync falls back to reading:
 after a wave's plan syncs land, it reads each plan's inputs under its read
 schema through a read transaction of the plan's own, awaits the loads
 pending after those reads by document (`loadsSettled` over

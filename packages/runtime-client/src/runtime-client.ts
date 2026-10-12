@@ -942,14 +942,33 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Ensure the home space's default pattern is running and return a CellHandle to it.
-   * This starts the pattern if needed and waits for it to be ready.
+   * This starts the pattern if needed and waits for it to be ready, creating
+   * Home where it has no root. Bringing Home up also starts the worker's
+   * once-per-worker housekeeping over Home, as `getSpaceRootPattern()` says,
+   * without waiting for it.
+   *
+   * With `existingOnly` true, Home is brought up only where it already
+   * exists, its root recording the pattern it runs. Where it does not, as
+   * while another writer is still creating it, nothing is created or started,
+   * and this returns `undefined`.
    */
-  async ensureHomePatternRunning(): Promise<CellHandle<unknown>> {
+  ensureHomePatternRunning(): Promise<CellHandle<unknown>>;
+  ensureHomePatternRunning(
+    options: { existingOnly?: boolean },
+  ): Promise<CellHandle<unknown> | undefined>;
+  async ensureHomePatternRunning(
+    options: { existingOnly?: boolean } = {},
+  ): Promise<CellHandle<unknown> | undefined> {
     const response = await this.#conn.request<
       RequestType.EnsureHomePatternRunning
     >({
       type: RequestType.EnsureHomePatternRunning,
+      ...(options.existingOnly ? { existingOnly: true } : {}),
     });
+    if (response.cell === undefined) {
+      if (options.existingOnly) return undefined;
+      throw new Error("Home's root is missing from the worker's response.");
+    }
     return new CellHandle(this, response.cell);
   }
 

@@ -224,6 +224,7 @@ import {
   type GetTriggerTraceRequest,
   type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
+  type HomePatternResponse,
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
@@ -1143,9 +1144,9 @@ export class RuntimeProcessor {
     readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
     readonly health: Promise<boolean>;
     readonly awaitedHealth: boolean;
-    readonly legacySpacesAdopted: Promise<void> | undefined;
-    readonly privateInboxEnsured: Promise<void> | undefined;
-    readonly shareIntake: Promise<ShareIntake | undefined> | undefined;
+    legacySpacesAdopted: Promise<void> | undefined;
+    privateInboxEnsured: Promise<void> | undefined;
+    shareIntake: Promise<ShareIntake | undefined> | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
     // deno-lint-ignore no-this-alias
@@ -1166,11 +1167,20 @@ export class RuntimeProcessor {
       get legacySpacesAdopted() {
         return outerThis.#legacySpacesAdopted;
       },
+      set legacySpacesAdopted(value) {
+        outerThis.#legacySpacesAdopted = value;
+      },
       get privateInboxEnsured() {
         return outerThis.#privateInboxEnsured;
       },
+      set privateInboxEnsured(value) {
+        outerThis.#privateInboxEnsured = value;
+      },
       get shareIntake() {
         return outerThis.#shareIntake;
+      },
+      set shareIntake(value) {
+        outerThis.#shareIntake = value;
       },
       cc: this.#cc,
       spaces: this.#spaces,
@@ -2760,13 +2770,18 @@ export class RuntimeProcessor {
   /**
    * Ensure the home space's default pattern is running and return a CellRef to it.
    * This is needed for favorites operations which require the pattern to be active.
-   * Creates the home pattern if it doesn't exist yet.
+   * Creates the home pattern if it doesn't exist yet, unless the request is
+   * `existingOnly`: then a Home whose root records no pattern it runs, as one
+   * still being created does not, is left alone, and the response holds no
+   * cell. Either way, bringing Home up starts the worker's housekeeping over
+   * it, as `#startHomeHousekeeping()` says.
    */
   async handleEnsureHomePatternRunning(
-    _request: EnsureHomePatternRunningRequest,
-  ): Promise<CellResponse> {
+    request: EnsureHomePatternRunningRequest,
+  ): Promise<HomePatternResponse> {
     const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
+    if (request.existingOnly && !(await this.#homeExists())) return {};
 
     // Always the PiecesController path: ensureDefaultPattern() follows the
     // root's origin and carries the cold-start setup repair that heals an aged
@@ -2838,6 +2853,17 @@ export class RuntimeProcessor {
     );
   }
 
+  /**
+   * Whether the user's Home exists: its space links a root, and that root
+   * records the pattern it runs. A root another writer is still creating can
+   * be linked before it records its pattern, and starting it then fails, so
+   * it does not count.
+   */
+  async #homeExists(): Promise<boolean> {
+    const root = await this.#homeController().getDefaultPattern(false);
+    return root !== undefined && getPatternIdentityRef(root) !== undefined;
+  }
+
   /** A controller over the user's Home space. */
   #homeController(): PiecesController {
     const homeSession: Session = {
@@ -2855,7 +2881,40 @@ export class RuntimeProcessor {
     // the storage manager, covering event handlers, direct cell IPC writes,
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
-    await this.#runtime.scheduler.idleWithPendingCommits();
+    //
+    // It also takes in the housekeeping a bring-up of Home has started, which
+    // goes on loading and sending to Home after the bring-up has answered.
+    // That work issues scheduler work, and scheduler work can hand the share
+    // intake more to take up, so the two are awaited until both hold at once.
+    for (;;) {
+      const intake = await this.#homeHousekeepingIdle();
+      await this.#runtime.scheduler.idleWithPendingCommits();
+      if (
+        (intake === undefined || intake.isIdle()) &&
+        this.#runtime.scheduler.isIdleWithPendingCommits()
+      ) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Helper for `handleIdle()`, which waits for the housekeeping over Home that
+   * `#startHomeHousekeeping()` has started in this worker: the adoption of the
+   * Home space list's name-only entries, the private inbox ensure, the start
+   * of the share intake, and the intake taking up every change it has been
+   * told of. Returns the intake, when one is running. Never rejects: each step
+   * is held as a promise that does not, and a failure of the intake's own wait
+   * is reported rather than passed on.
+   */
+  async #homeHousekeepingIdle(): Promise<ShareIntake | undefined> {
+    await this.#legacySpacesAdopted;
+    await this.#privateInboxEnsured;
+    const intake = await this.#shareIntake;
+    await intake?.idle().catch((error) => {
+      console.warn("[RuntimeProcessor] Waiting for the share intake:", error);
+    });
+    return intake;
   }
 
   async handleListEventAttention(

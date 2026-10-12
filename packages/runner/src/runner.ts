@@ -258,6 +258,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
+import { bringUpHomeRootForHandler } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -1376,6 +1377,9 @@ type SetupValidationOptions = {
   /** See `RunnerRunOptions.capturedArgumentFields`. */
   capturedArgumentFields?: readonly string[];
 
+  /** See `RunnerRunOptions.droppedArgumentFields`. */
+  droppedArgumentFields?: readonly string[];
+
   /** See `RunnerRunOptions.attributeInitialization`. */
   attributeInitialization?: boolean;
 
@@ -1741,6 +1745,12 @@ export type RunnerRunOptions = {
   // piece a binding to an owner-protected cell does not pass for modifying
   // it; a value in the record is not recorded.
   capturedArgumentFields?: readonly string[];
+  // Argument fields a collection builtin leaves out of this run that a stored
+  // argument document may still hold from a run that filled them: a list
+  // callback's `index` and `array` when its schema names neither. A stored
+  // slot by one of these names is dropped from the argument the run writes
+  // instead of carried over, so replaying the piece removes it.
+  droppedArgumentFields?: readonly string[];
   // The source origin a piece brought into being by this run records with its
   // creation revision. A run that finds the piece already there leaves both
   // alone: what a piece records after it exists is decided by a source
@@ -3192,6 +3202,7 @@ export class Runner {
     setupState: SetupStateReuse,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): SetupResult<R> | undefined {
     const key = this.#getDocKey(resultCell);
     if (!this.#cancels.has(key)) return undefined;
@@ -3233,7 +3244,12 @@ export class Runner {
         pattern.argumentSchema,
       );
       const nextArgument = mergeSchemaDefaults(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set(droppedArgumentFields),
+        ),
         defaults,
         pattern.argumentSchema,
       );
@@ -3494,7 +3510,9 @@ export class Runner {
    * one. Where what is staged still fails the schema as a whole, every stored
    * slot the caller does not name is left out. Each slot left out is logged
    * as a warning naming the pattern, the piece, the slot and the mismatch.
-   * Returns the argument staged.
+   * A slot named in `droppedArgumentFields` is left out from the start and
+   * not logged: the caller leaves it out on purpose. Returns the argument
+   * staged.
    *
    * @throws Error carrying `STORED_ARGUMENT_SCHEMA_REFUSAL` when the argument
    *   fails the schema with no stored slot carried over.
@@ -3509,6 +3527,7 @@ export class Runner {
     stored: unknown,
     previousArgumentSchema: JSONSchema | undefined,
     defaults: FabricValue,
+    droppedArgumentFields: ReadonlySet<string>,
   ): T {
     const argumentCell = this.#runtime.getCellFromLink(
       argumentLink,
@@ -3523,7 +3542,12 @@ export class Runner {
     let staged = projection;
     const stage = (leaveOut: ReadonlySet<string>): string | undefined => {
       staged = mergeSchemaDefaults<T>(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument, leaveOut),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set([...droppedArgumentFields, ...leaveOut]),
+        ),
         defaults as Partial<T>,
         pattern.argumentSchema,
       );
@@ -3555,7 +3579,9 @@ export class Runner {
     const carried = foldStoredArgumentSlots(argument, stored) === argument ||
         !isObjectNotArray(argument) || !isObjectNotArray(stored)
       ? []
-      : Object.keys(stored).filter((slot) => !Object.hasOwn(argument, slot));
+      : Object.keys(stored).filter((slot) =>
+        !Object.hasOwn(argument, slot) && !droppedArgumentFields.has(slot)
+      );
     const dropped = storedArgumentSlotIssues(
       argumentCell,
       pattern.argumentSchema,
@@ -3613,6 +3639,7 @@ export class Runner {
     resultCell: Cell<R>,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): void {
     // Every write below fills a store this piece owns — the argument
     // document, each internal document the result projects to, and the result
@@ -3701,7 +3728,12 @@ export class Runner {
       // the piece's own state lives in the rest. What the setup PROJECTS stays
       // the argument this caller supplied.
       suppliedProjection = argument;
-      nextArgument = this.#argumentOverStoredSlots(tx, argumentLink, argument);
+      nextArgument = this.#argumentOverStoredSlots(
+        tx,
+        argumentLink,
+        argument,
+        new Set(droppedArgumentFields),
+      );
     } else {
       const previousArgumentCell = this.#runtime.getCellFromLink(
         argumentLink,
@@ -3794,6 +3826,7 @@ export class Runner {
             previousArgument,
             previousArgumentSchema,
             defaults,
+            new Set(droppedArgumentFields),
           );
         }
         argumentUpdated = true;
@@ -4175,6 +4208,7 @@ export class Runner {
       setupState,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
     if (runningSetup) {
       return runningSetup;
@@ -4198,6 +4232,7 @@ export class Runner {
       resultCell,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
 
     if (validationOptions.validateArgumentLinks !== undefined) {
@@ -7825,6 +7860,7 @@ export class Runner {
       {
         referencedArgumentFields: options.referencedArgumentFields,
         capturedArgumentFields: options.capturedArgumentFields,
+        droppedArgumentFields: options.droppedArgumentFields,
         attributeInitialization: options.attributeInitialization,
         ...(creatingPiece
           ? {
@@ -11966,7 +12002,12 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
+          const materialized = inputsCell.asSchema(module.argumentSchema)
+            .withTx(tx).get();
+          // A handler holding a cell beneath the user's Home before Home has
+          // a root runs only once the root exists, so a write it makes there
+          // lands under the root.
+          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
         }
         : undefined;
 
