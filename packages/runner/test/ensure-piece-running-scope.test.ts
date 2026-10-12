@@ -92,6 +92,7 @@ describe("ensurePieceRunningVerdict()", () => {
           started: false,
           reason: "no-pattern-meta",
           root: { space, id, scope: "space" },
+          rootIsEmpty: false,
           observedDocIds: [id],
         });
         expect(server.demandSetSizesForSpace(space).perSession)

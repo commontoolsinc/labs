@@ -494,16 +494,24 @@ function dropUndeliverableClientEvent(
 }
 
 /**
- * Whether a piece the start in `verdict` did not start may still start once
- * another writer's commit lands: its graph is not installed, or its owning
- * document carries no pattern pointer while being either empty or reached
- * through a `result` backlink. A document holding a value of its own and no
- * pointer is not a piece, and no commit will make it one.
+ * Whether a piece the start in `verdict`, made for `eventLink`, did not start
+ * may still start once another writer's commit lands: its graph is not
+ * installed, or its owning document carries no pattern pointer while being
+ * either empty or reached through a `result` backlink, so that it is another
+ * document than the one the start began from. A document holding a value of
+ * its own and no pointer is not a piece, and no commit will make it one.
  */
-function pieceMayStillStart(verdict: EnsurePieceVerdict): boolean {
+function pieceMayStillStart(
+  verdict: EnsurePieceVerdict,
+  eventLink: NormalizedFullLink,
+): boolean {
   if (verdict.started) return true;
-  return verdict.reason === "no-pattern-meta" &&
-    (verdict.rootIsEmpty === true || verdict.observedDocIds.length > 1);
+  if (verdict.reason !== "no-pattern-meta") return false;
+  if (verdict.rootIsEmpty === true) return true;
+  const root = verdict.root;
+  return root !== undefined &&
+    (root.id !== eventLink.id || root.space !== eventLink.space ||
+      (root.scope ?? "space") !== (eventLink.scope ?? "space"));
 }
 
 /**
@@ -992,7 +1000,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }
           if (
             windowSpent || attempts > EVENT_DEFERRAL_DROP_THRESHOLD ||
-            !pieceMayStillStart(verdict)
+            !pieceMayStillStart(verdict, args.eventLink)
           ) {
             dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
             return;
