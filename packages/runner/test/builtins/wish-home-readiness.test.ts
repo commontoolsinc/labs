@@ -230,7 +230,6 @@ describe("wish-home-readiness", () => {
             parent.withTx(tx).set({});
             inputs.withTx(tx).set({
               query: "#profile",
-              headless: true,
               schema: {
                 type: "object",
                 properties: {

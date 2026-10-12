@@ -19,6 +19,7 @@ import {
   type RuntimeFetch,
 } from "../src/index.ts";
 import { isSigilLink } from "../src/link-types.ts";
+import { SpaceRootMissingError } from "../src/space-root-slot.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import {
@@ -37,7 +38,8 @@ const HOME_PATH = "/api/patterns/system/home.tsx";
 /**
  * The served patterns route, in-process: a Home root owning the lists a wish
  * reaches, and a profile create surface that hands back the `profiles` it is
- * handed. A test may take a route away.
+ * handed, with a handler `add` that appends a name to them. A test may take a
+ * route away.
  */
 let files: Map<string, string>;
 
@@ -57,9 +59,15 @@ function servedFiles(): Map<string, string> {
     [
       "/api/patterns/system/profile-create.tsx",
       [
-        "import { pattern, Writable } from 'commonfabric';",
+        "import { handler, pattern, Writable } from 'commonfabric';",
+        "const add = handler<",
+        "  { name: string },",
+        "  { profiles: Writable<string[]> }",
+        ">((event, { profiles }) => {",
+        "  profiles.push(event.name);",
+        "});",
         "export default pattern<{ profiles: Writable<string[]> }>(",
-        "  ({ profiles }) => ({ profiles }),",
+        "  ({ profiles }) => ({ profiles, add: add({ profiles }) }),",
         ");",
         "",
       ].join("\n"),
@@ -121,12 +129,22 @@ describe("wish-home-root", () => {
       await storageManager.close();
     });
 
-    /** Runs `query` as a wish in a space other than Home, and demands it. */
-    async function runWish(query: string, label: string) {
-      const wishPattern = pattern(() => ({ found: wishFn({ query }) }));
+    /**
+     * Runs `query` as a wish in `space`, by default one other than Home, and
+     * demands it.
+     */
+    async function runWish(
+      query: string,
+      label: string,
+      options: { headless?: boolean; scope?: ("~" | ".")[] } = {},
+      space: MemorySpace = patternSpace,
+    ) {
+      const wishPattern = pattern(() => ({
+        found: wishFn({ query, ...options }),
+      }));
       const tx = runtime.edit();
       const resultCell = runtime.getCell<Record<string, any>>(
-        patternSpace,
+        space,
         label,
         undefined,
         tx,
@@ -146,56 +164,149 @@ describe("wish-home-root", () => {
         | undefined)?.defaultPattern;
     }
 
-    it("creates the Home root before offering the profile create surface, which writes under it", async () => {
+    /** The profile create surface a `#profile` wish offers, started. */
+    async function createSurface(found: Cell<any>): Promise<Cell<any>> {
+      expect(
+        found.key(UI).key("props").key("data-profile-create-ui").get(),
+      ).toBe("wish");
+      const surface = found.key(UI).key("props").key("$cell")
+        .resolveAsCell() as Cell<any>;
+      await surface.pull();
+      await runtime.idle();
+      return surface;
+    }
+
+    it("offers the profile create surface for a `#profile` with no profile, and creates no Home root", async () => {
       const { found, stop } = await runWish("#profile", "profile wish");
       try {
-        expect(isSigilLink(homeSlot())).toBe(true);
-        const root = await resolveSpaceRootPattern(runtime, home);
-        expect(getPatternIdentityRef(root!)).toBeDefined();
-
-        const surface = found.key(UI).key("props").key("$cell")
-          .resolveAsCell() as Cell<any>;
-        await surface.pull();
-        await runtime.idle();
-        const tx = runtime.edit();
-        surface.key("profiles").withTx(tx).push("Ada");
-        expect((await tx.commit().settled).error).toBeUndefined();
-        await runtime.idle();
-
-        expect((root as Cell<any>).key("profiles").get()).toEqual(["Ada"]);
-        expect(isSigilLink(homeSlot())).toBe(true);
+        expect(found.get()?.error).toBe("No profile exists yet");
+        await createSurface(found);
+        expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
       }
     });
 
-    it("creates the Home root before resolving `#favorites`, so a write through the result lands under it", async () => {
+    it("brings up the Home root ahead of the create surface's handler, whose write lands under it", async () => {
+      // In the Home space itself, so that the stand-in surface's handler,
+      // which creates no profile space of its own, writes one space only.
+      const { found, stop } = await runWish(
+        "#profile",
+        "profile write",
+        {},
+        home,
+      );
+      try {
+        const surface = await createSurface(found);
+        expect(homeSlot()).toBeUndefined();
+
+        surface.key("add").send({ name: "Ada" });
+        await runtime.idle();
+
+        expect(isSigilLink(homeSlot())).toBe(true);
+        const root = await resolveSpaceRootPattern(runtime, home);
+        expect(getPatternIdentityRef(root!)).toBeDefined();
+        expect((root as Cell<any>).key("profiles").get()).toEqual(["Ada"]);
+      } finally {
+        stop();
+      }
+    });
+
+    it("refuses a write outside a handler beneath a Home with no root, and leaves the slot empty", async () => {
       const { found, stop } = await runWish("#favorites", "favorites wish");
       try {
         expect(found.get()?.error).toBeUndefined();
-        expect(isSigilLink(homeSlot())).toBe(true);
-        const root = await resolveSpaceRootPattern(runtime, home);
-        expect(getPatternIdentityRef(root!)).toBeDefined();
+        expect(homeSlot()).toBeUndefined();
 
         const tx = runtime.edit();
-        (found.key("result").withTx(tx) as Cell<any>).push("a favorite");
-        expect((await tx.commit().settled).error).toBeUndefined();
+        expect(() =>
+          (found.key("result").withTx(tx) as Cell<any>).push("a favorite")
+        ).toThrow(SpaceRootMissingError);
+        tx.abort();
         await runtime.idle();
 
-        expect((root as Cell<any>).key("favorites").get()).toEqual([
-          "a favorite",
-        ]);
-        expect(isSigilLink(homeSlot())).toBe(true);
+        expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
       }
     });
 
-    it("reports a Home root that could not be created as the wish's error", async () => {
+    it("refuses a handler's write beneath a Home whose root could not be created, and leaves the slot empty", async () => {
       files.delete(HOME_PATH);
-      const { found, stop } = await runWish("#favorites", "unservable home");
+      const errors: unknown[] = [];
+      runtime.scheduler.onError((error) => errors.push(error));
+      const { found, stop } = await runWish(
+        "#profile",
+        "unservable home",
+        {},
+        home,
+      );
       try {
-        expect(String(found.get()?.error)).toContain("404");
+        const surface = await createSurface(found);
+
+        surface.key("add").send({ name: "Ada" });
+        await runtime.idle();
+
+        expect(errors.some((error) => error instanceof SpaceRootMissingError))
+          .toBe(true);
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("offers no create surface for a headless `#profile` with no profile, and creates no Home root", async () => {
+      const { found, stop } = await runWish("#profile", "headless profile", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBe("No profile exists yet");
+        expect(
+          found.key(UI).key("props").key("data-profile-create-ui").get(),
+        ).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("resolves a headless `#agent_queue` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#agent_queue", "headless queue", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("resolves a headless `~`-scoped `#default` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish(
+        "#default",
+        "headless home default",
+        {
+          headless: true,
+          scope: ["~"],
+        },
+      );
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("reports no chat manager for a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#chatManager", "chat manager");
+      try {
+        expect(String(found.get()?.error)).toContain(
+          "The home space holds no chat manager",
+        );
         expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
@@ -203,7 +314,7 @@ describe("wish-home-root", () => {
     });
   });
 
-  it("reports a Home with no root on a serving runtime, and creates none", async () => {
+  it("resolves a headless wish to nothing for a Home with no root on a serving runtime, and creates none", async () => {
     const service = await Identity.fromPassphrase("wish home root service");
     const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     const holder = executionLeaseHolder(service.did());
@@ -269,8 +380,10 @@ describe("wish-home-root", () => {
       // finds it absent.
       await run();
       await run();
-      expect(String((observed.at(-1) as { error?: string })?.error))
-        .toContain("a serving runtime does not create one");
+      expect(observed.at(-1)).toBeDefined();
+      expect((observed.at(-1) as { error?: string }).error).toBeUndefined();
+      expect((observed.at(-1) as { result?: unknown }).result)
+        .toBeUndefined();
       expect(
         (runtime.getCell(home, home).getRaw() as
           | { defaultPattern?: unknown }
