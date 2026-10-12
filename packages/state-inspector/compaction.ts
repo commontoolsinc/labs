@@ -686,46 +686,91 @@ export function verifyCompaction(
           detail =
             `the ACL document is ${left.status} in the result and ${right.status} in the backup`;
         } else {
-          const after = left.document as Record<string, FabricValue>;
           const was = right.document as Record<string, FabricValue>;
-          const keys = new Set([...Object.keys(after), ...Object.keys(was)]);
-          const differing = [...keys].filter((key) =>
-            !sameValue(after[key] ?? null, was[key] ?? null)
+          // Every audit revision this result adds is held to the backup's
+          // document — not only the one the head reads. A run interrupted
+          // after its audit left one behind, and a changed owner in it would
+          // be history a reader of the log believes.
+          const audits = main.all<{ seq: number; data: string | null }>(
+            `SELECT seq, data FROM main.revision
+             WHERE id = ? AND scope_key = 'space' AND branch = '' AND op_index = 0 AND op = 'set'
+               AND seq IN (${newAudits.join(", ") || "NULL"}) ORDER BY seq`,
+            before.id,
           );
-          // The marker is read as data: a member that is not an object
-          // holding `runs`, or that names another run, is a failed check.
-          const record = after.compaction;
-          const marker = typeof record === "object" && record !== null &&
-              Array.isArray((record as CompactionMarker).runs)
-            ? record as CompactionMarker
-            : undefined;
-          const lastRun = marker?.runs[marker.runs.length - 1];
-          const namesLast = typeof lastRun === "object" && lastRun !== null &&
-            lastRun.commitSeq === last;
+          const problems: string[] = [];
+          for (const audit of audits) {
+            let document: Record<string, FabricValue>;
+            try {
+              document = decodeStored(audit.data ?? "") as Record<
+                string,
+                FabricValue
+              >;
+              if (typeof document !== "object" || document === null) {
+                throw new Error("not a document");
+              }
+            } catch (error) {
+              problems.push(
+                `seq ${audit.seq}: does not decode (${message(error)})`,
+              );
+              continue;
+            }
+            const keys = new Set([
+              ...Object.keys(document),
+              ...Object.keys(was),
+            ]);
+            const differing = [...keys].filter((key) =>
+              !sameValue(document[key] ?? null, was[key] ?? null)
+            );
+            if (!differing.every((key) => key === "compaction")) {
+              problems.push(
+                `seq ${audit.seq}: differs from the backup in ${
+                  differing.join(", ")
+                }`,
+              );
+            }
+            if (!isACL(document.value)) {
+              problems.push(`seq ${audit.seq}: value is not an ACL`);
+            }
+            // The marker is read as data: a member that is not an object
+            // holding `runs`, or whose newest run is another commit, fails.
+            const record = document.compaction;
+            const marker = typeof record === "object" && record !== null &&
+                Array.isArray((record as CompactionMarker).runs)
+              ? record as CompactionMarker
+              : undefined;
+            const lastRun = marker?.runs[marker.runs.length - 1];
+            if (
+              marker === undefined || typeof lastRun !== "object" ||
+              lastRun === null || lastRun.commitSeq !== audit.seq
+            ) {
+              problems.push(
+                `seq ${audit.seq}: marker ${
+                  marker === undefined
+                    ? "malformed or missing"
+                    : "names another run"
+                }`,
+              );
+            }
+          }
           const headAtCommit = head !== undefined && head.seq === last &&
             head.op_index === 0 && head.op === "set";
-          const validAcl = isACL(after.value);
           // The newest run this result adds wrote the audit the head reads;
           // an earlier new run wrote one only if it got that far before an
-          // interruption, and none if it did not. Each audit sits at its own
-          // commit by construction of `newAudits`.
+          // interruption, and none if it did not.
           const auditAtLast = newAudits.length > 0 &&
             newAudits[newAudits.length - 1] === last;
-          passed = differing.every((key) => key === "compaction") &&
-            namesLast && headAtCommit && validAcl && auditAtLast;
-          detail = `value ${
-            differing.includes("value") ? "CHANGED" : "unchanged"
-          }${validAcl ? "" : " and NOT an ACL"}; differing members: ${
-            differing.join(", ") || "none"
-          }; marker ${
-            marker === undefined
-              ? "malformed or missing"
-              : namesLast
-              ? `names seq ${last}`
-              : "stale"
-          }; head ${headText}; ${n(newAudits.length)} audit revision(s) for ${
-            n(newSeqs.length)
-          } new run(s)`;
+          passed = problems.length === 0 && headAtCommit && auditAtLast;
+          detail =
+            `${n(newAudits.length)} audit revision(s) for ${
+              n(newSeqs.length)
+            } new run(s)${
+              auditAtLast
+                ? `, the newest at seq ${last}`
+                : ", none at the newest run"
+            }; head ${headText}` +
+            (problems.length === 0
+              ? "; value unchanged and an ACL in each"
+              : `; ${problems.join("; ")}`);
         }
         check("ACL document", passed, detail);
       }

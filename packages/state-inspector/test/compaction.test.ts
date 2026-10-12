@@ -15,6 +15,7 @@ import {
   verifyCompaction,
 } from "../compaction.ts";
 import { openSpace } from "../db.ts";
+import { decodeStored } from "../decode.ts";
 import { reconstructRevision } from "../reconstruct.ts";
 
 const SPACE = "did:key:z6MkTestSpace";
@@ -366,6 +367,40 @@ Deno.test("verifyCompaction passes on a run interrupted after its audit and resu
     assert(
       acl.detail.includes("2 audit revision(s) for 2 new run(s)"),
       acl.detail,
+    );
+  }, { interruptAfterAudit: true });
+});
+
+Deno.test("verifyCompaction holds an interrupted attempt's retained audit to the backup", async () => {
+  await withCompacted(async ({ backup, result, dir }) => {
+    // The first attempt wrote its audit before the interruption; the resumed
+    // run wrote the one the head reads. A changed owner in the retained
+    // earlier audit leaves the head correct and must still fail.
+    const copy = `${dir}/retained-audit.sqlite`;
+    await Deno.copyFile(result, copy);
+    const db = new Database(copy);
+    const first = db.prepare(
+      `SELECT seq FROM "commit" WHERE session_id = 'compaction:interrupted'`,
+    ).get<{ seq: number }>()!.seq;
+    const row = db.prepare(
+      `SELECT data FROM revision WHERE id = ? AND seq = ? AND op_index = 0`,
+    ).get<{ data: string }>(ACL, first)!;
+    const document = decodeStored(row.data) as Record<string, unknown>;
+    db.prepare(
+      `UPDATE revision SET data = ? WHERE id = ? AND seq = ? AND op_index = 0`,
+    ).run(
+      encodeMemoryBoundary(
+        { ...document, value: { "did:key:zInjected": "OWNER" } } as never,
+      ),
+      ACL,
+      first,
+    );
+    db.close();
+    const verification = verifyCompaction({ result: copy, against: backup });
+    assertEquals(
+      failing(verification),
+      ["ACL document"],
+      formatCompactionVerification(verification),
     );
   }, { interruptAfterAudit: true });
 });
