@@ -347,8 +347,8 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
   describe("an event alias that instantiates itself without end", () => {
     // Each `Nest<T[]>` is a new type, so neither the search for a cell nor
     // the expansion of a reference meets one it has read, and both end where
-    // `expandsWithoutEnd()` cuts the recursion. A cell past the cut is not
-    // found, and a reference past it stays as written.
+    // `cutsExpansion()` cuts the recursion. Every cell past the cut is
+    // opaque.
 
     for (
       const [shape, declaration, event] of [
@@ -442,6 +442,29 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
       );
 
       expect(capabilitiesOf(event)).toEqual([["readonly"]]);
+    });
+
+    it("defines every type a recursive cell value past the cut refers to", async () => {
+      // Past the cut, `Inner` is read with its cells opaque, and the value of
+      // its `self` cell as written. Each reading refers to the definition of
+      // its own, so its recursion refers to one the schema holds.
+
+      const { event } = await eventSchema(
+        `interface Inner { c: Writable<number>; self: Writable<Inner> }
+type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { next: Chain<R> }
+  : { inner: Inner };`,
+        chainOf(12),
+        "(e, { c }) => { c.set(e ? 1 : 0); }",
+      );
+      const referenced = [
+        ...JSON.stringify(event).matchAll(/"#\/\$defs\/([^"]+)"/g),
+      ].map(([, name]) => name);
+
+      expect(new Set(referenced)).toEqual(new Set(["Inner:opaque", "Inner"]));
+      expect(Object.keys(event.$defs as object).sort()).toEqual(
+        ["Inner", "Inner:opaque"],
+      );
     });
 
     for (const deepFirst of [true, false]) {

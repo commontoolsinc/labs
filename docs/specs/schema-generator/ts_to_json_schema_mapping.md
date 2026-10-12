@@ -407,9 +407,12 @@ types.
 Every type with a usable name is hoisted into `$defs` and referenced by
 `{ "$ref": "#/$defs/<Name>" }` at non-root occurrences
 (`src/schema-generator.ts`). A reading under the `definesDocument` hint inside
-a schema that views other documents is hoisted as `<Name>:document` (§13), so
-it never shares a definition with the view's reading of the same type. No
-TypeScript name holds a `:`, so no type's name can take it. The emitted container key is `$defs` —
+a schema that views other documents is hoisted as `<Name>:document`, and one
+under the `cellsOpaque` hint as `<Name>:opaque` (§13), so neither shares a
+definition with another reading of the same type. The variant is part of the
+reading's cycle identity too, so a recursion met inside such a reading refers
+to the definition that reading stores. No TypeScript name holds a `:`, so no
+type's name can take it. The emitted container key is `$defs` —
 never `definitions` (0 of 73 expected fixtures contain a `definitions` key; 29
 contain `$defs`, as of this writing); only the *internal* context field is
 still named `definitions` (`interface.ts`), and the README's `definitions`
@@ -573,7 +576,7 @@ value, and the remainder is reported as the `schema-type:unread` warning, or,
 in a CFC alias chain, as the `cfc-schema:recursion-limit` error. That bound
 compares the arguments bindings write, and two recursions it does not end are
 cut by the instantiations the reading is within instead
-(`expandsWithoutEnd()`, `src/typescript/expanding-recursion.ts`): a reading
+(`cutsExpansion()`, `src/typescript/expanding-recursion.ts`): a reading
 under no bindings, as `Nest<T>` read at a type parameter nothing binds is; and
 an alias that recurses through the tuple or array it writes,
 `type Tup<T> = [T, Tup<T[]>?]`, which is read under bindings by its
@@ -586,6 +589,17 @@ innermost reading then accepts any value and is reported as the
 instantiations are the older, is never cut, and an array or tuple no alias
 writes is not counted. A finite chain that recurses through one declaration
 more than the cut allows is cut too; the remainder is reported, never refused.
+
+A recursion that branches, through more than one of its members, reaches
+either bound along every path, which is exponentially many readings. So every
+reading made inside a recursion of its own declaration spends one budget the
+whole schema shares, `MAX_EXPANDING_READINGS` (1000) readings: under bindings,
+a reading of a shape already being read; under none, or of a deferred
+reference, one instantiated inside another of its declaration
+(`exhaustsBudget()`). Once the budget is spent, each further such reading is
+cut as the bounds cut one, and reported the same way. A nesting written out
+spends none of it.
+
 The writer-policy reading (`writer-policy.ts`) writes nothing out and can
 refuse a schema on its answer, so it is bounded by depth and by count instead.
 
@@ -1896,8 +1910,8 @@ or a printed generation root is formatted (`formatChildType` and
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
 - **`cellsOpaque`** marks the remainder of a recursion the contract overlay of
-  a handler's event cuts (`overlayContractCapabilities()`), whose cells no use
-  the callback makes reaches. Every cell the node's reading reaches, outside
+  a handler's event or state cuts (`overlayContractCapabilities()`), whose
+  cells no use the callback makes reaches. Every cell the node's reading reaches, outside
   the value of another cell, is `opaque`, whatever capability its wrapper
   writes; a stream or a SQLite handle keeps its brand
   (`isCellCapabilityKind`), and the cells inside a cell's value are read as

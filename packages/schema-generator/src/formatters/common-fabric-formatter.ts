@@ -1730,9 +1730,9 @@ export class CommonFabricFormatter implements TypeFormatter {
         const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
-          context,
+          childContext,
         );
-        childContext = { ...context, arrayItemsOverride: itemsOverride };
+        childContext = { ...childContext, arrayItemsOverride: itemsOverride };
       }
     }
 
@@ -2304,9 +2304,9 @@ export class CommonFabricFormatter implements TypeFormatter {
         const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
-          context,
+          childContext,
         );
-        childContext = { ...context, arrayItemsOverride: itemsOverride };
+        childContext = { ...childContext, arrayItemsOverride: itemsOverride };
       }
     }
 
@@ -2385,10 +2385,7 @@ export class CommonFabricFormatter implements TypeFormatter {
       ? undefined
       : resolvedElementWrapperKind;
     return elementWrapperKind
-      ? this.#applyWrapperSemantics(
-        base,
-        this.#cellKind(elementWrapperKind, context),
-      )
+      ? this.#applyWrapperSemantics(base, elementWrapperKind)
       : base;
   }
 

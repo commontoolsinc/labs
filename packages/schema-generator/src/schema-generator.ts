@@ -49,7 +49,8 @@ import {
 } from "./typescript/type-node.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
 import {
-  expandsWithoutEnd,
+  cutsExpansion,
+  exhaustsBudget,
   isDeferredReference,
 } from "./typescript/expanding-recursion.ts";
 import { getCellWrapperInfo } from "./typescript/cell-brand.ts";
@@ -1329,6 +1330,7 @@ export class SchemaGenerator {
       // Stack state
       definitionStack: new Set(),
       expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
 
       // Optional context
@@ -2249,16 +2251,28 @@ export class SchemaGenerator {
   }
 
   /**
-   * The name a reading of a type named `name` is stored under in
-   * `$defs`. A reading that defines a document inside a schema that views
-   * others (`GenerationContext.documentWithinView`) stores its own, since the
-   * view's reading of the same type leaves out a writer it cannot read. Its
-   * name holds a `:`, which no TypeScript name does, so no type's name can
-   * take it.
+   * The name a reading of a type named `name` is stored under in `$defs`: the
+   * name with the reading's variant (`#readingVariant()`), whose `:` no
+   * TypeScript name holds, so no type's name can take it.
    */
   #definitionKey(name: string, context: GenerationContext): string {
-    const key = context.documentWithinView ? `${name}:document` : name;
-    return context.cellsOpaque ? `${key}:opaque` : key;
+    return `${name}${this.#readingVariant(context)}`;
+  }
+
+  /**
+   * What sets a reading apart from other readings of the same type, as a
+   * suffix of the names it stores definitions under (`#definitionKey()`) and
+   * of its cycle identity (`#formatType()`), or `""`: a reading that defines a
+   * document inside a schema that views others
+   * (`GenerationContext.documentWithinView`), since the view's reading of the
+   * same type leaves out a writer it cannot read; and a reading whose cells
+   * are opaque (`GenerationContext.cellsOpaque`). Neither variant's reading is
+   * the other's, so one met inside the other is no cycle of it.
+   */
+  #readingVariant(context: GenerationContext): string {
+    return `${context.documentWithinView ? ":document" : ""}${
+      context.cellsOpaque ? ":opaque" : ""
+    }`;
   }
 
   /**
@@ -2666,13 +2680,15 @@ export class SchemaGenerator {
     // found at the wrapper's value instead, where it can be. A type read under
     // type parameter bindings is that type together with them, as its
     // definition's name is (`#bindingKey()`), so the same declared type read
-    // under other bindings inside it is no cycle.
+    // under other bindings inside it is no cycle, and so is a reading of
+    // another variant (`#readingVariant()`).
     const bound = context.boundTypeParameters;
     const bindingKey = this.#bindingKey(context);
     const bindingType = this.#bindingType(type, context);
+    const variant = this.#readingVariant(context);
     const stackKey = bindingKey === undefined
-      ? type
-      : `${this.#bindingId(bindingType)}|${bindingKey}`;
+      ? variant === "" ? type : `${variant}|${this.#bindingId(type)}`
+      : `${variant}${this.#bindingId(bindingType)}|${bindingKey}`;
     // `never`, `null` and `undefined` hold no type, and `unknown` and `any`
     // hold any, so none is met inside itself, and none is a cycle's entry. A
     // wrapper the checker reduces to one, as it reduces `PerUser<never>`
@@ -2738,26 +2754,40 @@ export class SchemaGenerator {
 
     // Where the shape does not end a recursion that instantiates its
     // declaration without end, the types the reading is within do
-    // (`expandsWithoutEnd()`), and cut it as the shape cuts one. A reading
+    // (`cutsExpansion()`), and cut it as the shape cuts one. A reading
     // under no bindings has no shape, as `Nest<T>` read at a type parameter no
     // binding names has none. An alias that recurses through the tuple or
     // array it writes, `type Tup<T> = [T, Tup<T[]>?]`, is read under bindings
     // by its instantiation, whose arguments differ at each level, so its shape
-    // never repeats (`isDeferredReference()`).
+    // never repeats (`isDeferredReference()`). A reading inside its own shape
+    // spends the budget an expanding one spends (`exhaustsBudget()`): a
+    // declaration that recurses through more than one of its members reaches
+    // the shape's bound along every path, which is exponentially many
+    // readings.
     const expands = tracksCycle &&
       (bound === undefined || isDeferredReference(type));
+    const withinOwnShape = shapeKey !== undefined && shapeKey !== `${shape}|0`;
     if (
-      expands &&
-      expandsWithoutEnd(type, context.expandingPath, context.typeChecker)
+      expands
+        ? cutsExpansion(
+          type,
+          context.expandingPath,
+          context.expansionBudget,
+          context.typeChecker,
+        )
+        : tracksCycle && withinOwnShape &&
+          exhaustsBudget(context.expansionBudget)
     ) {
       const unread = context.uninterpretedTypeNodes;
       // `IgnoreErrors` prints any type, as `readAliasChain()` prints one.
       const node = context.typeNode ??
-        context.typeChecker.typeToTypeNode(
-          type,
-          undefined,
-          ts.NodeBuilderFlags.IgnoreErrors,
-        );
+        (expands
+          ? context.typeChecker.typeToTypeNode(
+            type,
+            undefined,
+            ts.NodeBuilderFlags.IgnoreErrors,
+          )
+          : bound?.declaredNode);
       if (unread && node && !unread.includes(node)) unread.push(node);
       return {};
     }
@@ -2978,6 +3008,7 @@ export class SchemaGenerator {
       emittedRefs: new Set(),
       definitionStack: new Set(),
       expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
     });
   }

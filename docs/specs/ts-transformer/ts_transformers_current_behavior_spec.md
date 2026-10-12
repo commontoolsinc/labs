@@ -463,8 +463,9 @@ type ends that expansion at the cycle with the node kept as authored — the
 accepted residual, since a literal cannot spell its own recursion. A recursion
 that instantiates its declaration without end, as `Nest<T[]>` inside
 `Nest<T>` does, never meets its own type again. The schema generator's
-`expandsWithoutEnd()` (`src/typescript/expanding-recursion.ts`) cuts it at
-`MAX_OVERLAY_NESTING`: the search for a cell-like position takes the remainder
+`cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
+`MAX_OVERLAY_NESTING`, or once the overlay has spent its budget of readings
+made inside such a recursion, which bounds one that branches: the search for a cell-like position takes the remainder
 past the cut to hold one, and the expansion stops there unless a use the body
 makes reaches below. The remainder is printed from its instantiation and marked
 `SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a

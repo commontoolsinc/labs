@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { SchemaGenerationDiagnostic } from "../../src/interface.ts";
 import { SchemaGenerator } from "../../src/schema-generator.ts";
+import { MAX_EXPANDING_READINGS } from "../../src/typescript/expanding-recursion.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 describe("Schema: Recursion variants", () => {
@@ -152,6 +153,59 @@ describe("Schema: Recursion variants", () => {
     expect(values.length).toBeGreaterThan(1);
     expect(values).toEqual(expectedValues);
     expect(innermost).toEqual({ type: "array", items: {} });
+    expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
+      .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
+  });
+
+  it("reads a recursion without end through three of an alias's members, under bindings, to a budget of readings in all, and reports the rest unread", async () => {
+    // Each member reaches the nesting bound of its own shape along every
+    // path, which is exponentially many readings. Every reading inside its
+    // own shape spends one budget the whole schema shares instead.
+
+    const code = `
+      type Nest<T> = { v: T; a?: Nest<T[]>; b?: Nest<[T]>; c?: Nest<{ x: T }> };
+      interface Root { n: Nest<string> }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = new SchemaGenerator().generateSchema(type, checker, undefined, {
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    let levels = 0;
+    const count = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(count);
+      if (!node || typeof node !== "object") return;
+      const properties = (node as { properties?: Record<string, unknown> })
+        .properties;
+      if (properties?.v) levels++;
+      Object.values(node).forEach(count);
+    };
+    count(s);
+
+    expect(levels).toBeGreaterThan(MAX_EXPANDING_READINGS);
+    expect(levels).toBeLessThan(2 * MAX_EXPANDING_READINGS);
+    expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
+      .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
+  });
+
+  it("ends a recursion without end through two tuples an alias writes, at a type parameter no binding names, within the budget of readings, and reports the rest unread", async () => {
+    // Read under no bindings, each branch reaches the declaration nesting
+    // bound along every path, two to the power of the bound in all, unless
+    // the budget ends them first.
+
+    const code = `
+      type Tup<T> = [T, Tup<T[]>?, Tup<[T]>?];
+      interface Root<T> { n: Tup<T> }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = new SchemaGenerator().generateSchema(type, checker, undefined, {
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+
+    expect(JSON.stringify(s).length).toBeLessThan(
+      100 * MAX_EXPANDING_READINGS,
+    );
     expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
       .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
   });

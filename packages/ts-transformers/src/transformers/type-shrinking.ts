@@ -7,7 +7,10 @@ import {
   resolvesToCommonFabricSymbol,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-brand";
-import { expandsWithoutEnd } from "@commonfabric/schema-generator/expanding-recursion";
+import {
+  cutsExpansion,
+  type ExpansionBudget,
+} from "@commonfabric/schema-generator/expanding-recursion";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
@@ -2835,7 +2838,7 @@ function addPrefixKeys(
 /**
  * How many instantiations of one declaration, each newer than the one it is
  * read within, the contract overlay reads one inside another before it takes
- * the recursion for one without end (`expandsWithoutEnd()`). The cut bounds
+ * the recursion for one without end (`cutsExpansion()`). The cut bounds
  * the overlay's work and decides no capability: past it, a cell no use
  * reaches is opaque, as reading on would make it, and a use that reaches
  * past it carries the expansion along its path.
@@ -2845,14 +2848,15 @@ const MAX_OVERLAY_NESTING = 8;
 /** Whether any data position in `type`'s subtree may be cell-like — the test
  * for whether a named reference must be expanded to overlay capabilities
  * inside it. Cycles end the search. A recursion that instantiates its
- * declaration without end is cut where `expandsWithoutEnd()` finds it, read
- * inside `path`, and may hold a cell past the cut, so the search takes it to;
- * the expansion that follows ends at the same cut. */
+ * declaration without end is cut where `cutsExpansion()` finds it, read
+ * inside `path` and spending `budget`, and may hold a cell past the cut, so
+ * the search takes it to; the expansion that follows ends at the same cut. */
 function typeSubtreeContainsCellLike(
   type: ts.Type,
   checker: ts.TypeChecker,
   visited: Set<ts.Type>,
-  path: ts.Type[] = [],
+  path: ts.Type[],
+  budget: ExpansionBudget,
 ): boolean {
   if (visited.has(type)) return false;
   visited.add(type);
@@ -2865,12 +2869,14 @@ function typeSubtreeContainsCellLike(
     return kind !== "stream" && kind !== "sqlite";
   }
   const within = (inner: ts.Type) =>
-    typeSubtreeContainsCellLike(inner, checker, visited, path);
+    typeSubtreeContainsCellLike(inner, checker, visited, path, budget);
   if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
     return (type as ts.UnionOrIntersectionType).types.some(within);
   }
   if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  if (expandsWithoutEnd(type, path, checker, MAX_OVERLAY_NESTING)) return true;
+  if (cutsExpansion(type, path, budget, checker, MAX_OVERLAY_NESTING)) {
+    return true;
+  }
   path.push(type);
   try {
     if (isArrayShapeType(type, checker)) {
@@ -2960,7 +2966,7 @@ function contractCapabilityAt(
  * that expansion at the cycle with the node kept as authored — the accepted
  * residual, since a literal cannot spell its own recursion. A recursion that
  * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
- * does, never meets itself. Its expansion is cut where `expandsWithoutEnd()`
+ * does, never meets itself. Its expansion is cut where `cutsExpansion()`
  * finds it (`MAX_OVERLAY_NESTING`), unless a use the body makes reaches below,
  * and the remainder is read as its instantiation with every cell in it opaque
  * (`SchemaHint.cellsOpaque`): no use reaches those cells, so opaque is the
@@ -2979,6 +2985,8 @@ export function overlayContractCapabilities(
   const observation = contractObservationFrom(summary);
   const visiting = new Set<ts.Type>();
   const expansions: ts.Type[] = [];
+  // Shared by the expansion and every search for a cell it makes.
+  const budget: ExpansionBudget = { readingsInside: 0 };
   const expanding = new Set<ts.TypeNode>();
 
   /** Whether a use the body makes reaches `path` or a position below it. */
@@ -3137,9 +3145,10 @@ export function overlayContractCapabilities(
       if (!resolvedType) return current;
       if (visiting.has(resolvedType)) return current;
       if (
-        expandsWithoutEnd(
+        cutsExpansion(
           resolvedType,
           expansions,
+          budget,
           checker,
           MAX_OVERLAY_NESTING,
         ) && !usedWithin(path)
@@ -3147,7 +3156,13 @@ export function overlayContractCapabilities(
         return opaqueRemainder(current, resolvedType);
       }
       if (
-        !typeSubtreeContainsCellLike(resolvedType, checker, new Set())
+        !typeSubtreeContainsCellLike(
+          resolvedType,
+          checker,
+          new Set(),
+          [],
+          budget,
+        )
       ) {
         return current;
       }

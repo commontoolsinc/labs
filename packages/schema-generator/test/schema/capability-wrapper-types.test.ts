@@ -479,6 +479,8 @@ describe("Schema: Capability wrapper types", () => {
           s: Stream<number>;
           nested: Writable<{ d: Writable<number> }>;
           list: Writable<number>[];
+          cells: Writable<Writable<number>[]>;
+          mixed: Writable<Writable<number>[] | { d: Writable<number> }>;
         }
         interface X {
           hinted: Inner;
@@ -492,10 +494,22 @@ describe("Schema: Capability wrapper types", () => {
       ).find((candidate) => candidate.name === "X");
       if (!symbol) throw new Error("Interface X not found");
       const type = checker.getDeclaredTypeOfSymbol(symbol);
-      const schemaHints = new WeakMap<ts.Node, { cellsOpaque?: true }>();
+      const schemaHints = new WeakMap<
+        ts.Node,
+        { cellsOpaque?: true; items?: unknown }
+      >();
       schemaHints.set(findInterfaceMemberTypeNode(sourceFile, "X", "hinted"), {
         cellsOpaque: true,
       });
+      // An identity-only read of a cell's array leaves its items unread; the
+      // cells it holds are inside the cell's value, as is every other cell
+      // that value reaches.
+      for (const member of ["cells", "mixed"]) {
+        schemaHints.set(
+          findInterfaceMemberTypeNode(sourceFile, "Inner", member),
+          { items: false },
+        );
+      }
 
       const result = asObjectSchema(
         new SchemaGenerator().generateSchema(
@@ -524,8 +538,70 @@ describe("Schema: Capability wrapper types", () => {
       expect(hinted.nested.asCell).toEqual(["opaque"]);
       expect(hinted.nested.properties.d.asCell).toEqual(["cell"]);
       expect(hinted.list.items.asCell).toEqual(["opaque"]);
+      expect(hinted.cells.asCell).toEqual(["opaque"]);
+      expect(hinted.cells.items.asCell).toEqual(["cell"]);
+      expect(hinted.mixed.asCell).toEqual(["opaque"]);
+      expect(
+        (hinted.mixed.anyOf as Record<string, any>[]).map((member) =>
+          member.items?.asCell ?? member.properties?.d.asCell
+        ),
+      ).toEqual([["cell"], ["cell"]]);
       expect(plain.a.asCell).toEqual(["cell"]);
       expect(plain.r.asCell).toEqual(["readonly"]);
     });
+
+    for (
+      const [shape, code, member] of [
+        [
+          "a recursive type a cell inside the member holds",
+          `interface Inner { c: Writable<number>; self: Writable<Inner> }
+           interface X { hinted: Inner }`,
+          ["X", "hinted"],
+        ],
+        [
+          "the ordinary type the member refers back to",
+          `interface X { c: Writable<number>; hinted: X }`,
+          ["X", "hinted"],
+        ],
+      ] as const
+    ) {
+      it(`builds the definition of ${shape}, apart from the member's own`, async () => {
+        // A reading whose cells are opaque is not the ordinary reading of the
+        // same type, so neither is taken for the other's cycle.
+
+        const { checker, sourceFile } = await createTestProgram(code);
+        const symbol = checker.getSymbolsInScope(
+          sourceFile,
+          ts.SymbolFlags.Interface,
+        ).find((candidate) => candidate.name === "X");
+        if (!symbol) throw new Error("Interface X not found");
+        const schemaHints = new WeakMap<ts.Node, { cellsOpaque?: true }>();
+        schemaHints.set(
+          findInterfaceMemberTypeNode(sourceFile, member[0], member[1]),
+          { cellsOpaque: true },
+        );
+
+        const result = asObjectSchema(
+          new SchemaGenerator().generateSchema(
+            checker.getDeclaredTypeOfSymbol(symbol),
+            checker,
+            undefined,
+            undefined,
+            schemaHints,
+          ),
+        );
+        const text = JSON.stringify(result);
+        const references = [...text.matchAll(/"#\/\$defs\/([^"]+)"/g)].map((
+          match,
+        ) => match[1]!);
+        const definitions = Object.keys(
+          (result.$defs ?? {}) as Record<string, unknown>,
+        );
+
+        expect(references.length).toBeGreaterThan(0);
+        expect(references.filter((name) => !definitions.includes(name)))
+          .toEqual([]);
+      });
+    }
   });
 });

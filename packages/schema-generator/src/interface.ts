@@ -5,6 +5,7 @@ import type {
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import { type Mutable } from "@commonfabric/utils/types";
+import type { ExpansionBudget } from "./typescript/expanding-recursion.ts";
 
 /**
  * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
@@ -65,8 +66,9 @@ export interface SchemaHint {
    * Whether every cell the reading of the node reaches, outside the value of
    * another cell, is opaque, whatever capability its wrapper writes; a stream
    * or a SQLite handle keeps its brand. The contract overlay of a handler's
-   * event marks so the remainder past a recursion it cuts, whose cells no use
-   * the callback makes reaches (`overlayContractCapabilities()`).
+   * event or state (`overlayContractCapabilities()`) marks the remainder past
+   * a recursion it cuts with it, since no use the callback makes reaches the
+   * cells there.
    */
   readonly cellsOpaque?: true;
 }
@@ -198,10 +200,16 @@ export interface GenerationContext {
   definitionStack: Set<string | ts.Type>;
 
   /**
-   * The types the current reading is read within, outermost first, where it
-   * reads under no type parameter bindings (`expandsWithoutEnd()`).
+   * The types the current reading is read within, outermost first, where its
+   * nesting bound does not end a recursion (`cutsExpansion()`).
    */
   expandingPath: ts.Type[];
+
+  /**
+   * The readings this generation has made inside a recursion of their own
+   * declaration, across every path (`exhaustsBudget()`).
+   */
+  expansionBudget: ExpansionBudget;
 
   /** Currently building these named types */
   inProgressNames: Set<string>;
