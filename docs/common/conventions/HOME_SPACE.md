@@ -282,9 +282,9 @@ A request made in a home space that holds no queue — its home pattern does not
 exist, or is a version without the field — ends `refused`. Where the home
 pattern is a version without the field, `wish({ query: "#agent_queue" })`
 resolves to nothing; where there is no home pattern yet, a headless wish
-resolves to nothing too, and any other creates one on a client runtime and is
-refused on a serving one, as [Built-in Targets](wish.md#built-in-targets)
-describes.
+resolves to nothing too, and any other resolves through the empty slot, where a
+handler's write on a client runtime creates the home pattern first, as
+[Built-in Targets](wish.md#built-in-targets) describes.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -332,9 +332,12 @@ The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
 first of: its user's first open; the home space's own server, which ensures the
 root once server execution activates the space and its owner resolves; and the
-first wish on a client runtime for a target under its root, unless that wish is
-headless or for `#chatManager`, neither of which creates one (see
-[Built-in Targets](wish.md#built-in-targets)). From then on it owns account
+first handler on a client runtime to write under its root, through a cell a
+wish handed out for a Home target (see
+[Built-in Targets](wish.md#built-in-targets)). A wish's read never creates one.
+On a serving runtime such a write is refused until the root exists, so under
+server execution a user's first profile can be created only once their Home has
+a root. From then on it owns account
 data: profiles, favorites, navigation, the shared-space catalog and the private
 inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
 which retains that data. Nothing but those three creates the root of an
