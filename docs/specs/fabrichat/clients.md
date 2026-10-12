@@ -31,7 +31,11 @@ a room to anyone its space doesn't admit.
   the root's `addPiece`, which shows it as a panel.
 - **The people a client offers** when starting a conversation from a social
   space are that space's participants, as claims, until it offers a member set
-  (see [social spaces](README.md#social-spaces)).
+  (see [social spaces](README.md#social-spaces)). When starting a group from
+  the person's chats, they are the manager's `people`, the profiles of those
+  the person shares a room with, by the principal each attests. A client names
+  each person picked there by profile, in `createGroup`'s `profiles`, so the
+  manager offers them the room.
 - **A notice** says the person has been admitted to a room. Its claim of who
   sent it is unauthenticated. Before sending `accept` for a direct room, a
   client MUST read the principal the room's `about.record` is labeled
@@ -131,7 +135,13 @@ A client that draws natively sends `addMember` through
 `[VIEWS]`, beside `canAdd`, which says whether the reader may add anyone, false
 in a direct room, and `addRequests`, where each add's outcome is recorded under
 its `requestId` (see
-[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string-)).
+[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string--profile-cellchatprofile)).
+An add that is done carries `delivery` once it is known how the person added
+was told of the room, and until then it is still being delivered: every add
+that is done gets one. Where it is `access-only`, nobody told them, and the
+client asks the adder to send them the room's link. A client offers people to add from its
+user's manager's `people`, and names a person picked there by their profile as
+well as their address, so the manager offers the room through that profile.
 To leave the people already in the room out of its add control, it reads the
 room's `participantPrincipals`, the principals the room's `participantEntries`
 hold. It is a best-effort set to leave out, not an access list: someone who

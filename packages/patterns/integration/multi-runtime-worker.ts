@@ -33,6 +33,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
+import type { JSONSchema } from "@commonfabric/api";
 import type { Cell, MemorySpace } from "@commonfabric/runner";
 import {
   cellRuntime,
@@ -878,6 +879,24 @@ const handlers: Record<
   },
 
   /**
+   * Read the value of the cell reached from the piece result by `path`,
+   * through `schema` alone. The walk starts from the result's raw link, with
+   * no result schema, and nothing above `path` is pulled, so neither shapes
+   * what `schema` reads; links are converted as `read` converts them.
+   */
+  async readAs({ path, schema, piece }) {
+    const { schema: _resultSchema, ...link } = (await resultAt(piece))
+      .getAsNormalizedFullLink();
+    let cell = controller().runtime.getCellFromLink(link);
+    for (const segment of path as (string | number)[]) {
+      cell = cell.key(segment as never);
+    }
+    cell = cell.asSchema(schema as JSONSchema);
+    await cell.pull();
+    return convertCellsToLinks(cell.get(), { doNotConvertCellResults: true });
+  },
+
+  /**
    * Read the RAW stored value of the cell reached from the piece result by
    * `path` (links resolved to the target cell, NO result-schema shaping) —
    * for state the declared schema does not carry, e.g. a query result's
@@ -1129,6 +1148,27 @@ const handlers: Record<
       ) decisions.push(decision);
     }
     return { decisions };
+  },
+
+  /**
+   * Links the root of this session's home space to the result of the piece at
+   * `piece`, or of the session's own piece when absent, so that the piece
+   * stands in for the identity's Home: a home target such as `#chatManager`
+   * resolves to its fields.
+   */
+  async linkHomeRoot({ piece }) {
+    const runtime = controller().runtime;
+    const target = await resultAt(piece);
+    const { error } = await runtime.editWithRetry((tx) => {
+      runtime.getHomeSpaceCell(tx).withTx(tx).key("defaultPattern").set(
+        target as never,
+      );
+    });
+    if (error) {
+      throw new Error(`linkHomeRoot failed: ${error.message}`);
+    }
+    await idle();
+    return {};
   },
 
   /**

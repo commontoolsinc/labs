@@ -102,6 +102,44 @@ Read(entity, path):
   3. Otherwise read from confirmed state
 ```
 
+A pending write is read as the ops of its commit replayed over the
+confirmed state beneath it, which is how the server folds them on accept.
+One op is the exception until the verdict. A `splice` is positional: the
+diff emits it against the array the transaction read, and replayed over an
+array a frame has since changed it says something its writer never wrote —
+where another writer appended the same tail, the tail reads twice, a list
+the store never holds. Where the commit carries a
+recursive read covering the array, the client reads a pending `splice` as
+the array its transaction computed, which the pending write carries, in the
+splice's place over the confirmed state's version of everything else. The
+read is what makes that sound: a write that moves the array makes the read
+stale, so the server refuses the commit, or elides it where the array
+already holds the result, and a commit built over the shown array is
+refused with it — no reader of the shown array is ever accepted against a
+different stored one. A `splice` the commit read nothing for is read as
+its ops replayed, because the server applies it where it stands whatever
+the array holds, and the server judges a reader's view by replaying the
+layers it names (§3.6.1): a reader shown the computed array would be
+accepted having observed a list the store never holds. The verdict is the
+server's as ever: a refusal drops the write, and an accept folds the ops as
+they stand, since that is how the store applied them. Mergeable ops are not
+positional and are never substituted: an `append` means "add to whatever is
+there", and a concurrent write must read through it.
+
+A pending write whose read a delivered value has already proved stale is
+still read as that write until its verdict, computed array included. The
+client's view changes only where the client holds one coherent prefix of the
+space's history: a refusal's drop waits for the catch-up marker, which rides
+the fan-out frame covering the verdict, and that frame carries the whole
+watch set at one seq (04-protocol.md §4.11.2), so what a re-run then reads
+is the single-snapshot view §3.3.4 requires. A single delivered document is
+not such a point: one that arrives alone, through a read of a document the
+session does not watch, is at head while the rest of the replica is not, and
+a view that switched on its arrival would have a re-run commit over a state
+no point in history held. Nothing built over the stale write can be accepted
+meanwhile, since the read that makes the write refusable dooms a commit that
+named it.
+
 ### 3.3.4 Single-Snapshot Rule
 
 A commit's read set MUST describe one coherent client view: confirmed bases
@@ -366,11 +404,33 @@ patches it is judged as one write of the final value:
 - replayed on the document as the commit's read of that document saw it, the
   sequence yields the stored document;
 - replayed on the stored document, the sequence leaves it unchanged. This
-  condition is for the writer's replica, which re-folds the operations over
+  condition is for a writer's replica that re-folds the operations over
   whatever confirmed base it holds when the accept arrives: a sequence
   idempotent on the durable value lands on that value from any base between
   the read and the head, where a positional splice replayed over a base
-  already carrying its elements would duplicate them.
+  already carrying its elements would duplicate them. A session whose client
+  advertised `elidedVerdicts` (04-protocol.md §4.1) promotes an elided layer
+  to the document its transaction computed instead of re-folding it, and the
+  server holds that session's commits to the first condition alone: a splice
+  that reaches the stored list from the view that produced it is an identity
+  for such a session.
+
+An accept reports the operations it elided on the verdict
+(`elidedOpIndexes`, 04-protocol.md §4.3.1). Where the commit read the
+document, the proof's first condition established that the stored document
+is the one the layer's transaction computed from its own view, which the
+pending layer carries, and a replica that advertised `elidedVerdicts`
+promotes a layer every operation of which was elided to that document, at
+the commit's seq, whatever ops the layer holds and whatever frames the
+replica has integrated meanwhile: replaying the ops is exact only over the
+base they were diffed from, and a frame delivered since may be an
+intermediate state the proof was not made against. Where the commit did not
+read the document, the proof was made against the stored document and shows
+only that the ops leave it unchanged, so the replica promotes by replaying
+them, as it does any accept. A frame already integrated at or after the
+commit's seq is newer and stands. A session opened with the capability is
+resumed only by a client that advertises it: a replayed verdict may carry
+an elision only such a replica handles.
 
 The reader's view of a document is reconstructed from the commit's own read
 of it, on the commit's branch: for a pending read, the document at the read's
@@ -500,7 +560,16 @@ by the read's shape:
   completeness attestation, not an extension of what a client may omit:
   the sanctioned omission remains a processed rejection (§3.5), and a
   client has nothing to gain from omitting a live layer — the scan
-  converts exactly that bug into a retryable conflict.
+  converts exactly that bug into a retryable conflict. A named layer the
+  server accepted as an identity commit (§3.6.1) wrote nothing, so the
+  exclusion has no revision of it to skip, while the foreign write its
+  proof matched lies inside the interval. Where the layer's operations on
+  the document begin with a `set`, or the read of the document the proof
+  reconstructed the layer's view from (§3.6.1) sat on the reader's declared
+  `basisSeq` through no own layer the reader does not name, the reader's
+  view through the layer is the document the proof was made against, which is the stored document at the layer's seq, and the
+  scan starts at that seq instead. The server looks for such a layer only
+  once the declared basis has found a conflict.
 - **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
   element's resolution seq. Writes landing between the reader's confirmed
   basis and that seq are not scanned — the pending-read basis over-advance

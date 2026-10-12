@@ -18,11 +18,16 @@ interface ChatRoomOutput {
   /** The room's participants, plus any author it doesn't list. */
   participants: Cell<ChatProfile>[];
 
+  /** Those who joined the room itself, in the order they joined. */
+  roster: Cell<ChatProfile>[];
+
   /** Each participant's profile, with the principal it attests. */
-  participantEntries: { profile: Cell<ChatProfile>; principal?: string }[];
+  participantEntries: PerSession<
+    { profile: Cell<ChatProfile>; principal?: string }[]
+  >;
 
   /** The principals `participantEntries` holds, once each. */
-  participantPrincipals: string[];
+  participantPrincipals: PerSession<string[]>;
 
   /** Adds a profile to those who joined the room, once. */
   addParticipant: Stream<{ profile: Cell<ChatProfile> }>;
@@ -62,8 +67,15 @@ interface ChatRoomOutput {
     emoji: string;
   }>;
 
-  /** Admits someone to the room's space, from a trusted gesture. */
-  addMember: Stream<{ requestId: string; target: { value: string } }>;
+  /**
+   * Admits someone to the room's space, from a trusted gesture, and has the
+   * reader's manager tell them of the room.
+   */
+  addMember: Stream<{
+    requestId: string;
+    target?: { value: string };
+    profile?: Cell<ChatProfile>;
+  }>;
 
   /** Whether this reader can add someone to the room's space. */
   canAdd: boolean;
@@ -71,7 +83,11 @@ interface ChatRoomOutput {
   /** The outcome of each of this reader's adds, by its `requestId`. */
   addRequests: Record<
     string,
-    | { status: "done" }
+    | {
+      status: "done";
+      delivery?: "offered" | "noticed" | "access-only";
+      deliveryRefusal?: string;
+    }
     | { status: "refused"; reason: string; code?: "direct-room" }
   >;
   [UI]: VNode;
@@ -100,7 +116,7 @@ When the manager creates a space for a conversation, the creator and each
 other member hold OWNER. Its access list MUST NOT contain the `"*"`
 wildcard, so a room is not open to principals its space hasn't admitted,
 except for a group room its creator makes joinable by its link (see
-[`createGroup`](ChatManagerOutput.md#creategrouprequestid-string-members-string-title-string-joinablebylink-boolean)):
+[`createGroup`](ChatManagerOutput.md#creategrouprequestid-string-members-string-profiles-cellchatprofile-title-string-joinablebylink-boolean)):
 that one grants `"*"` WRITE, and its address is all that keeps it private. A
 direct room is never joinable by its link. A room in
 an existing space takes the space's access list as it is, and adds nothing to
@@ -117,7 +133,7 @@ which needs no event, but can't open other windows, send, or react.
 A room keeps no membership of its own. Who is in its space, and with what
 access, is the space's business: its access list changes through the space's
 own tools, such as the CLI's `cf acl`, and, for a group room in a space of its
-own, through the room's [`addMember`](#addmemberrequestid-string-target--value-string-), from
+own, through the room's [`addMember`](#addmemberrequestid-string-target--value-string--profile-cellchatprofile), from
 which any OWNER admits someone else as OWNER. Its root lists its
 participants' profiles, claims each member contributes by joining the space: a
 room in a space of its own is that root, and keeps them itself, each added
@@ -157,6 +173,15 @@ space.
 - **`participants`** are links to profiles, compared with `equals()`: the
   profiles its space's root lists, as [membership](#membership) says, plus any
   author none of them is, each once. They are not proof of access.
+- **`roster`** holds the profiles of those who joined the room itself, each
+  added once through
+  [`addParticipant`](#addparticipantprofile-cellchatprofile), in the order they
+  were added: for a room in a space of its own, its space's participants. It
+  lists no author it doesn't hold, so it is read from what the room stores
+  alone, without reading the room's messages, which is how a chat manager reads
+  who is in each of its user's rooms (see
+  [`ChatIndexEntry`](ChatIndexEntry.md#fields)). Like `participants`, it is a
+  claim, not proof of access.
 - **`participantEntries`** pairs each of `participants` with the principal it
   stands for: one entry per participant, in the order of `participants`,
   holding its `profile` and, as `principal`, the principal its profile's
@@ -187,7 +212,11 @@ space.
   false in a direct room, whose space keeps its two members, and in a space's
   own chat. A client offers its own add control only where it holds.
 - **`addRequests`** holds the outcome of each of the reader's
-  [`addMember`](#addmemberrequestid-string-target--value-string-) requests, by its `requestId`.
+  [`addMember`](#addmemberrequestid-string-target--value-string--profile-cellchatprofile)
+  requests, by its `requestId`, and for each add that is done, how the person
+  added was told of the room, once that is decided. It reads the verdicts from
+  the reader's own manager, so it is the reader's alone, like the outcomes it
+  holds.
 - **`recentActivity`** is a log of what the room recorded recently: each message
   sent, edited, deleted, or obliterated, and each reaction added or removed, as
   a [`ChatRoomActivity`](ChatRoomActivity.md), in `seq` order. A client follows
@@ -210,9 +239,10 @@ client:
 
 - **`PerSpace`**: one instance for the whole room, the same for everyone the
   room's space admits. That is nearly everything: `about`, the messages,
-  `recentActivity` and `recentActivityExpiredThrough`, `participants`, and the
-  streams. These are the room: a link to the room names them, and passing the
-  link around, to another component or another person, passes the room.
+  `recentActivity` and `recentActivityExpiredThrough`, `participants` and
+  `roster`, and the streams. These are the room: a link to the room names them,
+  and passing the link around, to another component or another person, passes
+  the room.
 - **`PerSession`**: one instance per memory session in the room's space. That is
   `messages.windows`, the windows a session has opened onto the messages (see
   [`ChatMessageList`](ChatMessageList.md#scope)), and `participantEntries` and
@@ -228,10 +258,10 @@ client:
   instance and no write.
 
 Some values are derived when they're read, and stored nowhere, so reading them
-needs no instance of anything: `participants`, and in `messages`, everything but
-`windows`. A session's windows come into being with its first `openWindow`, so a
-READ member, who can't write, never has any, and can still read
-`messages.latest`.
+needs no instance of anything: `participants` and `roster`, and in `messages`,
+everything but `windows`. A session's windows come into being with its first
+`openWindow`, so a READ member, who can't write, never has any, and can still
+read `messages.latest`.
 
 ## Streams
 
@@ -540,34 +570,69 @@ Removes the sender's reaction to a message.
 A client never toggles: it sends whichever of the two the person asked for, so a
 repeated or delayed event can't undo what the person meant.
 
-### `addMember(requestId: string, target: { value: string })`
+### `addMember(requestId: string, target?: { value: string }, profile?: Cell<ChatProfile>)`
 
 - `requestId: string` — Chosen by the sender, and unique among its adds. The
   outcome is recorded under it in `addRequests`, and sending the same event
   again with it changes nothing. The rendered add control's click carries none,
   and is given one of its own.
-- `target.value: string` — The chat address of the person to admit: a
+- `target.value?: string` — The chat address of the person to admit: a
   principal's DID, as the room's add control holds it.
+- `profile?: Cell<ChatProfile>` — The person's profile, whose
+  `represents-principal` label names them, as the reader's manager lists it in
+  its `people`. Given with `target.value`, the two must name the same person;
+  given alone, the label names whom to admit.
 
-Admits someone to a room's space. Unlike the streams in the table, it takes a
-gesture of its own, and it is in `[VIEWS]` with them.
+Admits someone to a room's space, and has the reader's chat manager
+([`ChatManagerOutput`](ChatManagerOutput.md)) tell them of the room. Unlike the
+streams in the table, it takes a gesture of its own, and it is in `[VIEWS]`
+with them.
 
 - **Admitted:** as a trusted gesture on `ChatAddMemberSurface`, from the room's
-  rendered add control or from a client's own control through the sanctioned
-  issuing path (see [`clients.md`](clients.md#the-sanctioned-issuing-path)),
-  from an OWNER of the room's space, for a group room in a space of its own.
+  rendered add control, which takes an address or a pick from the people the
+  reader's manager lists who aren't in the room yet, or from a client's own
+  control through the sanctioned issuing path (see
+  [`clients.md`](clients.md#the-sanctioned-issuing-path)), from an OWNER of the
+  room's space, for a group room in a space of its own.
 - **Effect:** grants the principal OWNER on the room's space, so they too may
   add others. Granting someone the OWNER they already hold changes nothing.
+  Then, for a reader with a manager, the room sends the manager's
+  [`offerRoom`](ChatManagerOutput.md#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile),
+  naming the person and the `profile` when the add has one, under a
+  `requestId` composed of the room's space and the add's own. The manager
+  offers them the room through their profile's share inbox, or, given only
+  their address, through the profiles its `people` lists for them, and
+  otherwise produces a notice for them. An add with no manager to send to,
+  because the reader has none or theirs hasn't resolved yet, tells the person
+  nothing more.
 - **Refused:** a direct room, whose space keeps its two members; an address
-  that is not a principal's DID, a sender without OWNER, a room that shares an
-  existing space, and anything the space's access list refuses. The rendering
-  tells the session what came of its add, and shows a direct room no add
+  that is not a principal's DID, a `profile` that attests no principal or
+  names someone other than `target.value`, a sender without OWNER, a room that
+  shares an existing space, and anything the space's access list refuses. The
+  rendering tells the session what came of its add, and how the person was
+  told of the room once that is decided, and shows a direct room no add
   control.
 - **Outcome:** recorded in `addRequests`: `done`, or `refused` with a `reason`
   for a person to read. A direct room's refusal also carries the `code`
   `direct-room`, which stays the same whatever the `reason` says; the others
   carry none. An add the stream doesn't admit, as one without the gesture,
   records nothing.
+- **Delivery:** a `done` add carries `delivery`, how the person was told of
+  the room: `offered`, sent to at least one share inbox, which says nothing of
+  whether it arrived; `noticed`, a notice in the manager's `outgoingNotices`
+  for a client to deliver; or `access-only`, told nothing, so that the adder
+  has to send them the room's link. An add with no manager to send to records
+  `access-only` at once: the reader has no manager, theirs hasn't resolved yet,
+  or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
+  once a manager resolves, since nothing runs then to send it. Otherwise
+  `delivery` is the manager's verdict, which `addRequests` reads from the
+  manager's `requests` once it is recorded, and is absent until then. A
+  manager that refuses to tell anyone of the room, as it does for a room its
+  catalog doesn't list, makes it `access-only`, with the manager's `reason` as
+  `deliveryRefusal`. The manager records a verdict for every `offerRoom` it
+  receives, so every add that is done gets a `delivery` eventually, either at
+  once or when the verdict lands, and an absent one always means the verdict
+  is still coming.
 
 ### `addParticipant(profile: Cell<ChatProfile>)`
 

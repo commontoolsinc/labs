@@ -3,6 +3,7 @@
 import {
   FabricInstance,
   type FabricValue,
+  isKeyableObjectNotArray,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
@@ -10,6 +11,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
 import { type Cell, isCell } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import {
   type CellLink,
@@ -302,6 +304,55 @@ export function storedArgumentValidationIssue(
   defaults: FabricValue,
   tx: IExtendedStorageTransaction,
 ): string | undefined {
+  return storedArgumentJudge(argumentCell, argumentSchema, defaults, tx)(
+    argumentSchema,
+    (argument) => argument,
+  );
+}
+
+/**
+ * Returns the mismatch of each of `slots`, top-level slots of a stored
+ * argument, against the schema `argumentSchema` gives that slot, keyed by
+ * slot. A slot that matches has no entry, and so does a slot the schema does
+ * not describe where it admits slots it does not name. Each slot is judged
+ * under the defaults, absence rules and deferral of unreadable links that
+ * `storedArgumentValidationIssue()` applies to the whole argument.
+ */
+export function storedArgumentSlotIssues(
+  argumentCell: Cell<unknown>,
+  argumentSchema: JSONSchema,
+  defaults: FabricValue,
+  tx: IExtendedStorageTransaction,
+  slots: Iterable<string>,
+): Map<string, string> {
+  const judge = storedArgumentJudge(argumentCell, argumentSchema, defaults, tx);
+  const issues = new Map<string, string>();
+  for (const slot of slots) {
+    const issue = judge(
+      ContextualFlowControl.schemaAtPath(argumentSchema, [slot]),
+      (argument) =>
+        isKeyableObjectNotArray(argument) ? argument[slot] : undefined,
+    );
+    if (issue !== undefined) issues.set(slot, issue);
+  }
+  return issues;
+}
+
+/**
+ * Helper for `storedArgumentValidationIssue()` and
+ * `storedArgumentSlotIssues()`, which materializes the stored argument once
+ * and returns a function judging the part `select` picks out of it against
+ * `schema`, resolving references against `argumentSchema`.
+ */
+function storedArgumentJudge(
+  argumentCell: Cell<unknown>,
+  argumentSchema: JSONSchema,
+  defaults: FabricValue,
+  tx: IExtendedStorageTransaction,
+): (
+  schema: JSONSchema,
+  select: (argument: unknown) => unknown,
+) => string | undefined {
   const argumentLink = argumentCell.getAsNormalizedFullLink();
   const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
     .get();
@@ -328,13 +379,15 @@ export function storedArgumentValidationIssue(
     // rejecting at a result write, while the caller can still see it.
     optionalUndefinedIsAbsent: true,
   };
-  let validationFailure = validateSchemaValue(
-    argumentSchema,
-    validationArgument,
-    argumentSchema,
-    validationOptions,
-  );
-  if (validationFailure !== undefined) {
+  let overlaid: { value: unknown } | undefined;
+  return (schema, select) => {
+    const validationFailure = validateSchemaValue(
+      schema,
+      select(validationArgument),
+      argumentSchema,
+      validationOptions,
+    );
+    if (validationFailure === undefined) return undefined;
     // Judge only what this context can actually read. The materialization
     // above resolves the staged doc's whole link graph through this
     // transaction, and a link chain that dead-ends at a doc the local
@@ -348,19 +401,21 @@ export function storedArgumentValidationIssue(
     // alike: a caller vouches for the value it stages, but which link
     // targets happen to be replicated HERE was never part of that value.
     // The overlay only ever turns `undefined` into an accepted opaque, so
-    // running it on failure alone changes no verdict — it spares the
+    // building it on a failure alone changes no verdict — it spares the
     // happy path a second walk of the stored graph.
-    validationFailure = validateSchemaValue(
-      argumentSchema,
-      overlayUnreadableLinkPlaceholders(
+    overlaid ??= {
+      value: overlayUnreadableLinkPlaceholders(
         tx,
         argumentLink,
         argumentCell.withTx(tx).getRaw({ meta: ignoreReadForScheduling }),
         validationArgument,
       ),
+    };
+    return validateSchemaValue(
+      schema,
+      select(overlaid.value),
       argumentSchema,
       validationOptions,
     );
-  }
-  return validationFailure;
+  };
 }

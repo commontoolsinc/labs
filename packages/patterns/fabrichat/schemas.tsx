@@ -403,10 +403,12 @@ export const reactionTalliesOf = (
  * and the link's schema is part of every manager handler's declared reads.
  *
  * So the link carries what the room's space shares with every member and
- * costs little to read: what the room says about itself, and how many
- * messages it holds and when the newest was sent, which the room derives from
- * its messages alone. It leaves out the rest of the room's data face. A
- * room's `canSend` is decided per reader, from their own profile, and its
+ * costs little to read: what the room says about itself, how many messages it
+ * holds and when the newest was sent, which the room derives from its
+ * messages alone, and its roster, which the room stores. It leaves out the
+ * rest of the room's data face. Its `participants` lists every author beside
+ * those the roster holds, so deriving it reads every message. A room's
+ * `canSend` is decided per reader, from their own profile, and its
  * `messages.windows` are each session's own, so both reach documents of a
  * member's own, as the room's rendering does. Its `messages.latest` is
  * shared, but holds up to `maxWindowCount` messages and their reactions, which
@@ -427,6 +429,12 @@ export interface ChatRoomLink {
     /** The newest message's `sentAt`; absent while there are none. */
     newestAt?: FabricEpochNsec;
   };
+
+  /**
+   * The profiles of those who joined the room, in the order they joined, as a
+   * manager reads them: each a link, whose profile is read only through it.
+   */
+  roster?: ManagerProfileCell[];
 }
 
 /** One room in a user's chat manager. */
@@ -461,8 +469,11 @@ export type ChatRequestOutcome =
     /** The request finished. */
     status: "done";
 
-    /** The entry it produced; absent for `forget`. */
+    /** The entry it produced; absent for `forget` and `offerRoom`. */
     entry?: ChatIndexEntry;
+
+    /** How `offerRoom` told the member of the room; absent for the others. */
+    delivery?: ChatOfferDelivery;
   }
   | {
     /** The request was refused. */
@@ -482,14 +493,43 @@ export type ChatRequestOutcome =
  * A refusal a client can act on, which stays the same whatever its `reason`
  * says. `space-own-chat`: `accept` named a social space's own chat, which a
  * user's chats don't list, since the catalog lists rooms by their own spaces.
+ * `shared-inbox`: `createGroup` named profiles of two people that point at
+ * the same share inbox, so an offer meant for one would reach the other.
  */
-export type ChatRefusalCode = "space-own-chat";
+export type ChatRefusalCode = "space-own-chat" | "shared-inbox";
+
+/**
+ * How a manager told a member of a room it offered them: `offered`, sent to
+ * at least one share inbox a profile of theirs points at, which says nothing
+ * of whether it arrived; `noticed`, queued as a notice for a client to
+ * deliver, since no profile of theirs it knows points at an inbox.
+ */
+export type ChatOfferDelivery = "offered" | "noticed";
+
+/**
+ * How an added member was told of the room: as their adder's manager told
+ * them, or `access-only`, not told at all, because the adder had no manager to
+ * tell them when they added them, or theirs refused to.
+ */
+export type AddMemberDelivery = ChatOfferDelivery | "access-only";
 
 /** The outcome of an add to a room's space, by its `requestId`. */
 export type AddMemberOutcome =
   | {
     /** The person was admitted, or held the access already. */
     status: "done";
+
+    /**
+     * How they were told of the room; absent until the adder's manager has
+     * decided.
+     */
+    delivery?: AddMemberDelivery;
+
+    /**
+     * Why the adder's manager refused to tell them of the room, where it did,
+     * which makes `delivery` `access-only`.
+     */
+    deliveryRefusal?: string;
   }
   | {
     /** The add was refused, and nothing was granted. */
@@ -511,6 +551,16 @@ export type AddMemberOutcome =
  * its two members.
  */
 export type AddMemberRefusalCode = "direct-room";
+
+/**
+ * The `requestId` under which an add to the room in `space` asks the adder's
+ * manager to offer the room, given the add's own `requestId`, which the offer
+ * carries as its `id`. It names the room as well as the add, so adds to two
+ * rooms under one `requestId` neither share an outcome in the manager nor
+ * replace each other's offer in a share inbox.
+ */
+export const addMemberOfferId = (space: string, requestId: string): string =>
+  JSON.stringify(["addMember", space, requestId]);
 
 /**
  * The `kind` of a room's own space, as the space declares it, and as an offer

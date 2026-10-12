@@ -84,6 +84,8 @@ import {
 import { bodyText, FabriChatMessageRow } from "./message-row.tsx";
 import {
   type AboutRecord,
+  type AddMemberDelivery,
+  addMemberOfferId,
   type AddMemberOutcome,
   type AddMemberRefusalCode,
   CHAT_ADD_MEMBER_ACTION,
@@ -95,6 +97,7 @@ import {
   CHAT_START_SURFACE,
   type ChatDisplay,
   type ChatProfile,
+  type ChatRequestOutcome,
   type ChatRoomAbout,
   type ChatRoomActivity,
   type ChatRoomKind,
@@ -281,7 +284,10 @@ const askToList = handler<unknown, {
  * Whether `catalog` keeps the room in `space` as one of its user's chats; a
  * catalog that doesn't read as one keeps none.
  */
-const listsRoomIn = (catalog: unknown, space: string | undefined): boolean => {
+export const listsRoomIn = (
+  catalog: unknown,
+  space: string | undefined,
+): boolean => {
   if (!isSharedSpaceCatalog(catalog) || space === undefined) return false;
   const entry = catalog.entries[space];
   return entry?.kind === CHAT_ROOM_OFFER_KIND && entry.state === "saved";
@@ -351,7 +357,10 @@ export const AddToChats = pattern<AddToChatsInput, AddToChatsOutput>(
   },
 );
 
-/** What adding a member asks of a room: the control's text. */
+/**
+ * What adding a member asks of a room: the person to admit, by their chat
+ * address, by their profile, or by both.
+ */
 export interface AddMemberEvent {
   /**
    * Chosen by the sender, and unique among its adds. The outcome is recorded
@@ -360,14 +369,114 @@ export interface AddMemberEvent {
    */
   readonly requestId?: string;
 
+  /**
+   * The new member's profile, whose `represents-principal` label names them,
+   * through whose share inbox the viewer's manager offers them the room.
+   */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  readonly profile?: Cell<ChatProfile>;
+
   /** The control, holding the new member's chat address. */
   readonly target?: { readonly value?: string };
+}
+
+/**
+ * What a room asks of its viewer's manager when the viewer adds someone: the
+ * event of the manager's `offerRoom`.
+ */
+export interface OfferRoomRequest {
+  /**
+   * Keys the request among the manager's, as `addMemberOfferId()` composes it
+   * from the room's space and the add's own `requestId`.
+   */
+  requestId: string;
+
+  /** The room. */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  room: Cell<ChatRoomLink>;
+
+  /** The new member's DID. */
+  member: string;
+
+  /** The new member's profile, when the add named one. */
+  // `Cell<…>` is written out rather than reached through an alias, as for
+  // `room`.
+  profile?: Cell<ChatProfile>;
+}
+
+/** The part of the viewer's manager a room tells a member it admits through. */
+export interface RoomManager {
+  /** Offers the room to a member, and records how it told them. */
+  offerRoom: Stream<OfferRoomRequest>;
+
+  /** The outcome of each of the manager's requests, by its `requestId`. */
+  requests: Record<string, ChatRequestOutcome>;
+
+  /**
+   * The people the viewer's rooms list, other than the viewer: by principal,
+   * the profiles attesting it.
+   */
+  people: PerSession<Record<string, ProfileCell[]>>;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
 export type AddRequestsCell = Writable<
   Record<string, AddMemberOutcome> | Default<Record<PropertyKey, never>>
 >;
+
+/**
+ * `outcomes`, where each add that is done with no `delivery` of its own takes
+ * the one the viewer's manager decided for it, which `requests` records under
+ * `addMemberOfferId()`: its `delivery`, or, where the manager refused to tell
+ * the member, `access-only`, with the manager's reason as
+ * `deliveryRefusal`. An add whose verdict hasn't landed keeps none.
+ */
+export const withDeliveries = (
+  outcomes: Readonly<Record<string, AddMemberOutcome>>,
+  space: string | undefined,
+  requests: Readonly<Record<string, ChatRequestOutcome>> | undefined,
+): Record<string, AddMemberOutcome> =>
+  Object.fromEntries(
+    Object.entries(outcomes).map(([id, outcome]) => {
+      if (
+        outcome?.status !== "done" || outcome.delivery !== undefined ||
+        space === undefined
+      ) {
+        return [id, outcome];
+      }
+      const verdict = requests?.[addMemberOfferId(space, id)];
+      if (verdict?.status === "refused") {
+        return [id, {
+          ...outcome,
+          delivery: "access-only",
+          deliveryRefusal: verdict.reason,
+        }];
+      }
+      const delivery = verdict?.status === "done"
+        ? verdict.delivery
+        : undefined;
+      return [id, delivery === undefined ? outcome : { ...outcome, delivery }];
+    }),
+  );
+
+/** What the session's latest add came to, which the control shows. */
+interface LatestAdd {
+  /** The add's `requestId`. */
+  requestId: string;
+
+  /** Whom it admitted, when it did. */
+  member?: string;
+
+  /** How they were told of the room, where the add itself decided it. */
+  delivery?: AddMemberDelivery;
+
+  /** Why it was refused, when it was. */
+  refusal?: string;
+}
 
 /** What adding a member is bound to. */
 interface AddMemberState {
@@ -384,28 +493,70 @@ interface AddMemberState {
   requests?: AddRequestsCell;
 
   /** What the session's latest add came to, which the control shows. */
-  outcome: Writable<string>;
+  latest: Writable<LatestAdd | undefined>;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent for a core used
+   * on its own, which can't name itself to a manager.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * Whether the room can ask the viewer's manager to tell someone of it: the
+   * viewer has a manager that has resolved, with an `offerRoom`, and the room
+   * has `self` to name itself by.
+   */
+  canOffer: boolean;
+
+  /** The viewer's manager's `offerRoom`, when `canOffer` holds. */
+  offerRoom?: Stream<OfferRoomRequest>;
+
+  /**
+   * A rendered picker's person, by their profile, which an event's own
+   * outranks.
+   */
+  picked?: Cell<ChatProfile>;
 }
 
 /**
- * Admits the person whose chat address the control holds to the room's space,
- * with OWNER, so that they too may add others, from a trusted gesture on
- * `ChatAddMemberSurface`. Only an OWNER of the space may admit someone, only
- * to a group room, and the session is shown what came of it.
+ * Admits a person to the room's space, with OWNER, so that they too may add
+ * others, from a trusted gesture on `ChatAddMemberSurface`, and has the
+ * viewer's manager tell them of the room. Only an OWNER of the space may admit
+ * someone, only to a group room, and the session is shown what came of it.
+ *
+ * The person is named by chat address, or by a profile whose label names them,
+ * or by both, which then have to agree. The viewer's manager offers them the
+ * room through the profile's share inbox, or, given only their address,
+ * through the profiles its people list for them, and decides how they were
+ * told. An add with no manager to send to, because the viewer has none or
+ * theirs hasn't resolved, admits them and tells them nothing, and records so
+ * at once.
  */
 const commitAddMember = handler<AddMemberEvent, AddMemberState>(
-  (event, { room, ownSpace, kind, requests, outcome }) => {
+  (
+    event,
+    {
+      room,
+      ownSpace,
+      kind,
+      requests,
+      latest,
+      self,
+      canOffer,
+      offerRoom,
+      picked,
+    },
+  ) => {
     const requestId = event?.requestId ?? eventKey();
     if (requests?.key(requestId).get() !== undefined) return;
-    const record = (result: AddMemberOutcome, shown: string): void => {
-      requests?.key(requestId).set(result);
-      outcome.set(shown);
-    };
-    const refuse = (reason: string, code?: AddMemberRefusalCode): void =>
-      record(
-        { status: "refused", reason, ...(code === undefined ? {} : { code }) },
+    const refuse = (reason: string, code?: AddMemberRefusalCode): void => {
+      requests?.key(requestId).set({
+        status: "refused",
         reason,
-      );
+        ...(code === undefined ? {} : { code }),
+      });
+      latest.set({ requestId, refusal: reason });
+    };
     // A space's own chat shares its space, whose members are its own
     // business, whatever a rendering shows.
     if (!ownSpace) {
@@ -418,9 +569,24 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       refuse("A direct chat keeps its two members.", "direct-room");
       return;
     }
-    const member = event?.target?.value?.trim() ?? "";
+    // A profile names the person its `represents-principal` label attests, so
+    // one attesting no one names no one.
+    const profile = event?.profile ?? picked;
+    const attested = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    if (profile !== undefined && !isPrincipalDID(attested)) {
+      refuse("That profile doesn't say whose it is.");
+      return;
+    }
+    const typed = event?.target?.value?.trim() ?? "";
+    const member = typed === "" ? attested ?? "" : typed;
     if (!isPrincipalDID(member)) {
       refuse("That isn't a chat address.");
+      return;
+    }
+    if (attested !== undefined && attested !== member) {
+      refuse("That profile isn't theirs.");
       return;
     }
     try {
@@ -435,7 +601,25 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       );
       return;
     }
-    record({ status: "done" }, `Added ${member}. Send them this chat's link.`);
+    // The manager decides how the member was told, in an event of its own,
+    // and records it, which the room's `addRequests` then reads.
+    const space = spaceOf(room);
+    if (
+      canOffer && offerRoom !== undefined && self !== undefined &&
+      space !== undefined
+    ) {
+      offerRoom.send({
+        requestId: addMemberOfferId(space, requestId),
+        room: self,
+        member,
+        ...(profile === undefined ? {} : { profile }),
+      });
+      requests?.key(requestId).set({ status: "done" });
+      latest.set({ requestId, member });
+      return;
+    }
+    requests?.key(requestId).set({ status: "done", delivery: "access-only" });
+    latest.set({ requestId, member, delivery: "access-only" });
   },
 );
 
@@ -458,6 +642,21 @@ export interface AddMemberInput {
 
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   requests?: AddRequestsCell;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent for a core used
+   * on its own, which can't name itself to a manager.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * The viewer's manager; absent while the viewer has none, or theirs hasn't
+   * resolved.
+   */
+  manager?: RoomManager;
+
+  /** The principals of those already in the room, whom the picker leaves out. */
+  present: PerSession<string[]>;
 }
 
 /** What the control adding a member to a room provides. */
@@ -468,8 +667,14 @@ export interface AddMemberOutput {
    */
   [UI]: VNode;
 
-  /** Admits the person the event's control names, from a trusted gesture. */
+  /** Admits the person the event names, from a trusted gesture. */
   add: Stream<AddMemberEvent>;
+
+  /**
+   * The outcome of each of the viewer's adds, with how the person was told of
+   * the room once that is decided.
+   */
+  outcomes: Record<string, AddMemberOutcome>;
 
   /**
    * Whether the viewer can add someone: an OWNER of a group room in a space of
@@ -480,12 +685,39 @@ export interface AddMemberOutput {
 
 /**
  * Offers an OWNER of a group room's space a way to admit someone else to it,
- * by their chat address.
+ * by their chat address, or by picking them from the people the viewer's
+ * manager lists who aren't in the room yet.
  */
 export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
-  ({ room, myProfile, ownSpace, kind, requests }) => {
-    const outcome = new Writable.perSession<string>("");
-    const add = commitAddMember({ room, ownSpace, kind, requests, outcome });
+  (
+    {
+      room,
+      myProfile,
+      ownSpace,
+      kind,
+      requests,
+      self,
+      manager,
+      present,
+    },
+  ) => {
+    const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
+    // Read as values: a handler bound to a manager that isn't there is bound
+    // to a stream that still reads as present, whose sends are dropped.
+    const canOffer = computed(() =>
+      manager?.offerRoom !== undefined && self !== undefined
+    );
+    const bindings = {
+      room,
+      ownSpace,
+      kind,
+      requests,
+      latest,
+      self,
+      canOffer,
+      offerRoom: manager?.offerRoom,
+    };
+    const add = commitAddMember(bindings);
     const canAdd = computed(() =>
       ownSpace && kind !== "direct" && spaceAccess(room) === "OWNER"
     );
@@ -495,8 +727,43 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
     const addDisplay = computed((): ChatDisplay =>
       canAdd && myProfile?.get() !== undefined ? "flex" : "none"
     );
+    const outcomes = computed((): Record<string, AddMemberOutcome> =>
+      withDeliveries(requests?.get() ?? {}, spaceOf(room), manager?.requests)
+    );
+    // What the session's latest add came to: how the person was told of the
+    // room, once that is decided, and what to do where they weren't.
+    const shown = computed((): string => {
+      const add = latest.get();
+      if (add === undefined) return "";
+      if (add.refusal !== undefined) return add.refusal;
+      const recorded = outcomes[add.requestId];
+      const done = recorded?.status === "done" ? recorded : undefined;
+      const delivery = done?.delivery ?? add.delivery;
+      return delivery === undefined
+        ? `Added ${add.member}.`
+        : delivery === "offered"
+        ? `Added ${add.member}, and offered them this chat.`
+        : delivery === "noticed"
+        ? `Added ${add.member}. Your chats remind you to send them this chat's link.`
+        : done?.deliveryRefusal !== undefined
+        ? `Added ${add.member}, who couldn't be told of this chat: ${done.deliveryRefusal} Send them its link.`
+        : `Added ${add.member}. Send them this chat's link.`;
+    });
     const outcomeDisplay = computed((): ChatDisplay =>
-      (outcome.get() ?? "") === "" ? "none" : "block"
+      shown === "" ? "none" : "block"
+    );
+    // Each person the manager lists who isn't in the room, by the first
+    // profile attesting them, per session, as the manager's people are.
+    const candidates = computed((): PerSession<ProfileCell[]> =>
+      Object.entries(manager?.people ?? {}).flatMap(
+        ([principal, profiles]): ProfileCell[] =>
+          present.includes(principal) || profiles[0] === undefined
+            ? []
+            : [profiles[0]],
+      )
+    );
+    const candidatesDisplay = computed((): ChatDisplay =>
+      candidates.length === 0 ? "none" : "block"
     );
 
     return {
@@ -520,15 +787,45 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
             />
           </div>
           <div
+            id="fabrichat-add-member-people"
+            hidden
+            style={{ display: candidatesDisplay }}
+          >
+            <cf-vstack gap="1">
+              <cf-text variant="caption">
+                Or add people from your chats:
+              </cf-text>
+              {candidates.map((profile) => (
+                <cf-hstack
+                  gap="2"
+                  align="center"
+                  data-ui-pattern={CHAT_ADD_MEMBER_SURFACE}
+                  data-ui-event-integrity={CHAT_ADD_MEMBER_SURFACE}
+                >
+                  <cf-profile-badge variant="chip" $profile={profile} />
+                  <cf-button
+                    data-ui-action={CHAT_ADD_MEMBER_ACTION}
+                    size="sm"
+                    variant="ghost"
+                    onClick={commitAddMember({ ...bindings, picked: profile })}
+                  >
+                    Add
+                  </cf-button>
+                </cf-hstack>
+              ))}
+            </cf-vstack>
+          </div>
+          <div
             id="fabrichat-add-member-outcome"
             hidden
             style={{ display: outcomeDisplay }}
           >
-            <cf-text variant="caption">{outcome}</cf-text>
+            <cf-text variant="caption">{shown}</cf-text>
           </div>
         </cf-vstack>
       ),
       add,
+      outcomes,
       canAdd,
     };
   },
@@ -584,18 +881,27 @@ export interface ChatRoomView {
   participants: ProfileCell[];
 
   /**
+   * Those who joined the room itself, each added once through
+   * `addParticipant`, in the order they were added. Unlike `participants`, it
+   * lists no author it doesn't hold, and no participant of another space, so
+   * it is read from the roster alone. Like `participants`, it is a claim, not
+   * proof of access.
+   */
+  roster: ProfileCell[];
+
+  /**
    * One entry for each of `participants`, in their order: the profile, and the
    * principal its `represents-principal` label attests, absent where it
    * attests none or the label can't be read where the list is derived. Like
    * `participants`, it is not proof of access.
    */
-  participantEntries: ParticipantEntry[];
+  participantEntries: PerSession<ParticipantEntry[]>;
 
   /**
    * The principals `participantEntries` holds, each once, in the order of
    * `participants`.
    */
-  participantPrincipals: string[];
+  participantPrincipals: PerSession<string[]>;
 
   /**
    * Adds a profile to those who joined the room, once. Any participant may add
@@ -631,8 +937,9 @@ export interface ChatRoomView {
   /**
    * Admits someone to the room's space, with OWNER, from a trusted gesture on
    * the rendering's `ChatAddMemberSurface`, or from a client's own control
-   * through the sanctioned issuing path. Only an OWNER of a group room in a
-   * space of its own may admit someone.
+   * through the sanctioned issuing path, and has the viewer's manager tell
+   * them of the room. Only an OWNER of a group room in a space of its own may
+   * admit someone.
    */
   addMember: Stream<AddMemberEvent>;
 
@@ -642,7 +949,10 @@ export interface ChatRoomView {
    */
   canAdd: boolean;
 
-  /** The outcome of each of this reader's adds, by its `requestId`. */
+  /**
+   * The outcome of each of this reader's adds, by its `requestId`, with how
+   * the member was told of the room once that is decided.
+   */
   addRequests: Record<string, AddMemberOutcome>;
 }
 
@@ -701,6 +1011,18 @@ export interface FabriChatRoomCoreInput {
 
   /** The viewer's manager's `openDirect`, when `startsDirect` holds. */
   startDirect?: Stream<StartDirectEvent>;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent, the room can't
+   * name itself to a manager, and an add tells the person added nothing.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * The viewer's manager, which tells someone they add of the room; absent
+   * while the viewer has none, or theirs hasn't resolved.
+   */
+  manager?: RoomManager;
 }
 
 /**
@@ -737,6 +1059,8 @@ export const FabriChatRoomCore = pattern<
     addRequests,
     startsDirect,
     startDirect,
+    self,
+    manager,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
@@ -801,10 +1125,10 @@ export const FabriChatRoomCore = pattern<
     ownSpace,
     kind,
     requests: addRequests,
+    self,
+    manager,
+    present: participantPrincipals,
   });
-  const addOutcomes = computed((): Record<string, AddMemberOutcome> =>
-    addRequests?.get() ?? {}
-  );
   const cannotSend = computed(() => !canSend);
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
@@ -890,6 +1214,7 @@ export const FabriChatRoomCore = pattern<
     recentActivity: activity,
     recentActivityExpiredThrough: expiredThrough,
     participants,
+    roster: joined,
     participantEntries,
     participantPrincipals,
     addParticipant: join,
@@ -898,7 +1223,7 @@ export const FabriChatRoomCore = pattern<
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
-    addRequests: addOutcomes,
+    addRequests: addMember.outcomes,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1103,12 +1428,14 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       Record<string, AddMemberOutcome>
     >({});
     // The viewer's manager, which starts a direct chat with a participant,
-    // and lists this room when asked to.
-    const managerWish = wish<{
-      openDirect: Stream<StartDirectEvent>;
-      accept: Stream<AcceptRoomEvent>;
-      sharedSpaceCatalog: SharedSpaceCatalogStorage;
-    }>({ query: "#chatManager" });
+    // lists this room when asked to, and tells someone the viewer adds of it.
+    const managerWish = wish<
+      RoomManager & {
+        openDirect: Stream<StartDirectEvent>;
+        accept: Stream<AcceptRoomEvent>;
+        sharedSpaceCatalog: SharedSpaceCatalogStorage;
+      }
+    >({ query: "#chatManager" });
     const startsDirect = computed(() => managerWish.result !== undefined);
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
@@ -1129,6 +1456,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         addRequests,
         startsDirect,
         startDirect: managerWish.result?.openDirect,
+        self,
+        manager: managerWish.result,
       },
     );
 
@@ -1139,6 +1468,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       recentActivity: room.recentActivity,
       recentActivityExpiredThrough: room.recentActivityExpiredThrough,
       participants: room.participants,
+      roster: room.roster,
       participantEntries: room.participantEntries,
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,

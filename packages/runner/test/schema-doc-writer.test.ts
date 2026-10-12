@@ -69,10 +69,7 @@ describe("schema-doc-writer", () => {
       path: [],
       schema,
     };
-    return createSigilLinkFromParsedLink(link, {
-      baseSpace: space,
-      includeSchema: true,
-    });
+    return createSigilLinkFromParsedLink(link, { includeSchema: true });
   };
 
   const payloadSchema = (sigil: unknown) =>

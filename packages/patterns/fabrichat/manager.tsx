@@ -23,10 +23,17 @@
  * user to them when it creates or accepts a room.
  *
  * A new room is offered to each other member whose profile the request names,
- * through the share inbox the profile points at, in the envelope a share inbox
- * takes, and each member it is offered to is added to the room's participants.
- * A notice is queued for each other member offered nothing: one the request
- * names only by principal, or whose profile points at no inbox.
+ * through each share inbox their profiles point at, once per inbox, in the
+ * envelope a share inbox takes, and each member it is offered to is added to
+ * the room's participants. A notice is queued for each other member offered
+ * nothing: one the request names only by principal, or whose profiles point at
+ * no inbox. A member someone adds to a room later, from the room, is offered
+ * it the same way, through `offerRoom`.
+ *
+ * The people the user's rooms list, each by the principal their profile
+ * attests, are what the manager's rendering offers to name a new group's
+ * members by, so that each is offered the group, and what a member added by
+ * principal alone is offered a room through.
  */
 import {
   type Cell,
@@ -35,6 +42,7 @@ import {
   debugStr,
   type Default,
   type DID,
+  equals,
   eventKey,
   getPatternEnvironment,
   handler,
@@ -54,6 +62,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  OFFER_ID_MAX_LENGTH,
   OFFER_TITLE_MAX_LENGTH,
   type OfferEvent,
   type PrivateInboxOutput,
@@ -67,7 +76,7 @@ import {
   type SharedSpaceCatalogStorage,
   type SharedSpaceEntry,
 } from "../system/shared-space-catalog.ts";
-import FabriChatRoom from "./room.tsx";
+import FabriChatRoom, { listsRoomIn } from "./room.tsx";
 import {
   type AboutRecord,
   CHAT_ROOM_OFFER_KIND,
@@ -77,6 +86,7 @@ import {
   type ChatIndexEntry,
   type ChatManagerNotice,
   type ChatManagerProfile,
+  type ChatOfferDelivery,
   type ChatProfile,
   type ChatRequestOutcome,
   type ChatRoomKind,
@@ -118,6 +128,7 @@ export type NoticesCell = Writable<ChatManagerNotice[] | Default<[]>>;
 export type ManagerAct =
   | "openDirect"
   | "createGroup"
+  | "offerRoom"
   | "accept"
   | "forget"
   | "delivered";
@@ -146,9 +157,13 @@ export interface ManagerStreamEvent {
   /** The DID of a direct room's other member. */
   counterpart?: string;
 
+  /** The DID of a member added to a room, whom `offerRoom` offers it to. */
+  member?: string;
+
   /**
    * A direct room's other member's profile, through whose share inbox a new
-   * room is offered to them.
+   * room is offered to them, or the profile of a member added to a room,
+   * through whose share inbox `offerRoom` offers it.
    */
   // `Cell<…>` is written out rather than reached through an alias: the
   // event's schema marks a reference position only where the wrapper is
@@ -157,6 +172,16 @@ export interface ManagerStreamEvent {
 
   /** The DIDs of a new group room's other members. */
   members?: string[];
+
+  /**
+   * The profiles of more of a new group room's other members, each naming its
+   * member with its `represents-principal` label, through whose share inbox
+   * the room is offered to them.
+   */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  profiles?: Cell<ChatManagerProfile>[];
 
   /** A new group room's title. */
   title?: string;
@@ -167,7 +192,7 @@ export interface ManagerStreamEvent {
    */
   joinableByLink?: boolean;
 
-  /** A room to accept or forget. */
+  /** A room to offer, accept, or forget. */
   room?: Cell<ChatRoomLink>;
 
   /**
@@ -208,6 +233,12 @@ export interface GroupDraft {
   /** The other members' DIDs, one per line or separated by spaces. */
   members: string;
 
+  /**
+   * The profiles of more of the other members, picked from the people the
+   * user's rooms list; absent for none.
+   */
+  picked?: Cell<ChatManagerProfile>[];
+
   /** Whether the room admits anyone who has its link. */
   joinableByLink: boolean;
 }
@@ -216,6 +247,7 @@ export interface GroupDraft {
 const EMPTY_DRAFT = {
   title: "",
   members: "",
+  picked: [],
   joinableByLink: false,
 } satisfies GroupDraft;
 
@@ -245,6 +277,13 @@ export interface ManagerActState {
   /** Adds this user's profile to a room's participants. */
   joinRooms: Stream<JoinRoomsEvent>;
 
+  /**
+   * The people this user's rooms list, through whose profiles `offerRoom`
+   * offers a room to a member it names by principal alone; absent for every
+   * other act.
+   */
+  people?: PerSession<Record<string, readonly ManagerProfileCell[]>>;
+
   /** The session's group draft, which a rendered create reads. */
   draft: Writable<GroupDraft>;
 
@@ -270,6 +309,18 @@ export interface ManagerActState {
 /** The DIDs in `text`, separated by spaces, commas, or lines. */
 const principalsIn = (text: string): string[] =>
   text.split(/[\s,]+/).filter((part) => part !== "");
+
+/**
+ * A member a request names by profile, with the principal the profile's
+ * `represents-principal` label attests; absent when it attests none.
+ */
+interface NamedMember {
+  /** The member's profile. */
+  profile: Cell<ChatManagerProfile>;
+
+  /** The principal the profile attests. */
+  recipient?: string;
+}
 
 /** `members`, without duplicates, `self`, or anything but a DID. */
 const otherMembers = (
@@ -382,13 +433,16 @@ const noticeFor = (
   recipient,
 });
 
-/** A member a new room is offered to. */
+/** A member a room is offered to. */
 export interface OfferedMember {
   /** The member's DID. */
   recipient: string;
 
-  /** The member's profile, through whose share inbox the room is offered. */
-  profile: Cell<ChatManagerProfile>;
+  /**
+   * The member's profiles, through whose share inboxes the room is offered,
+   * each inbox once.
+   */
+  profiles: Cell<ChatManagerProfile>[];
 }
 
 /** What offering a new room asks: the room, and whom to offer it to. */
@@ -418,13 +472,95 @@ interface OfferRoomsState {
   joinRooms: Stream<JoinRoomsEvent>;
 }
 
+/** The share inbox `profile` points at; absent when it points at none. */
+const inboxPointerOf = (
+  profile: Cell<ChatManagerProfile> | undefined,
+): Cell<ShareInboxPiece> | undefined =>
+  // The pointer is read through its parent: a link-typed field read on its
+  // own is a cell whether or not anything is stored there.
+  profile?.key("inbox").get()?.piece;
+
+/** A share inbox, and the first of a member's profiles pointing at it. */
+interface ProfileInboxEntry {
+  /** The inbox, as the profile points at it. */
+  pointer: Cell<ShareInboxPiece>;
+
+  /** The profile. */
+  profile: Cell<ChatManagerProfile>;
+}
+
 /**
- * Offers a room to each of the event's `members`, through the share inbox
- * their profile points at, in the envelope a share inbox takes, and adds to
- * the room's participants each member it offers the room to. A member whose
- * profile points at no inbox is offered nothing, and a notice for them is
- * queued instead. The offer names the room's space and the host serving it,
- * this pattern's own, and the principal sending it as its sender.
+ * The share inboxes `profiles` point at, each once, in the order of the first
+ * profile pointing at each, with that profile. A profile pointing at no inbox
+ * is left out.
+ */
+const distinctInboxes = (
+  profiles: readonly Cell<ChatManagerProfile>[],
+): ProfileInboxEntry[] =>
+  profiles.reduce<ProfileInboxEntry[]>((found, profile) => {
+    const pointer = inboxPointerOf(profile);
+    return pointer === undefined ||
+        found.some((known) => equals(known.pointer, pointer))
+      ? found
+      : [...found, { pointer, profile }];
+  }, []);
+
+/** An offer of a room, which its `id` keys. */
+type RoomOffer = OfferEvent & { id: string };
+
+/**
+ * The offer of the room in `space` that a share inbox takes, keyed by `id`,
+ * from `from`, naming the host serving the room, this pattern's own.
+ */
+const offerEnvelope = (
+  id: string,
+  space: DID,
+  title: string,
+  from: string,
+): RoomOffer => {
+  const origin = hostOrigin();
+  return {
+    kind: CHAT_ROOM_OFFER_KIND,
+    id,
+    space,
+    host: origin,
+    ownerOrigin: origin,
+    title: title.slice(0, OFFER_TITLE_MAX_LENGTH),
+    from,
+    sharedAt: Date.now(),
+  };
+};
+
+/**
+ * Helper for `offerRooms` and `offerRoom`, which offers `room` to `member`,
+ * sending `offer` to each distinct share inbox their profiles point at, and
+ * adds to the room's participants the first profile it offered the room
+ * through, so that the member is listed once however many inboxes they have.
+ * A member whose profiles point at no inbox is offered nothing, and a notice
+ * for them, keyed by the offer's `id`, is queued instead. Returns which of the
+ * two it did.
+ */
+const offerToMember = (
+  offer: RoomOffer,
+  room: Cell<ChatRoomLink>,
+  { recipient, profiles }: OfferedMember,
+  { outgoingNotices, joinRooms }: OfferRoomsState,
+): ChatOfferDelivery => {
+  const inboxes = distinctInboxes(profiles ?? []);
+  if (inboxes.length === 0) {
+    outgoingNotices.push(noticeFor(recipient, offer.id, room));
+    return "noticed";
+  }
+  for (const { pointer } of inboxes) {
+    inboxOf(pointer.resolveAsCell()).key("receive").send(offer);
+  }
+  joinRooms.send({ room, profile: inboxes[0].profile });
+  return "offered";
+};
+
+/**
+ * Offers a room to each of the event's `members`, as `offerToMember()` does,
+ * naming the principal sending it as its sender.
  *
  * It runs as an event of its own, queued by the one that creates the room, so
  * that it reads the room's space once the room's creation has committed, and
@@ -432,31 +568,13 @@ interface OfferRoomsState {
  * not known, nothing is sent.
  */
 const offerRooms = handler<OfferRoomEvent, OfferRoomsState>(
-  (event, { outgoingNotices, joinRooms }) => {
+  (event, state) => {
     const space = spaceOf(event?.room);
     const from = currentPrincipal();
     if (!isWellFormedDID(space) || from === undefined) return;
-    const origin = hostOrigin();
-    const offer: OfferEvent = {
-      kind: CHAT_ROOM_OFFER_KIND,
-      id: event.id,
-      space,
-      host: origin,
-      ownerOrigin: origin,
-      title: (event.title ?? "").slice(0, OFFER_TITLE_MAX_LENGTH),
-      from,
-      sharedAt: Date.now(),
-    };
-    for (const { recipient, profile } of event.members ?? []) {
-      // The pointer is read through its parent: a link-typed field read on
-      // its own is a cell whether or not anything is stored there.
-      const pointer = profile?.key("inbox").get()?.piece;
-      if (pointer === undefined) {
-        outgoingNotices.push(noticeFor(recipient, event.id, event.room));
-        continue;
-      }
-      inboxOf(pointer.resolveAsCell()).key("receive").send(offer);
-      joinRooms.send({ room: event.room, profile });
+    const offer = offerEnvelope(event.id, space, event.title ?? "", from);
+    for (const member of event.members ?? []) {
+      offerToMember(offer, event.room, member, state);
     }
   },
 );
@@ -615,9 +733,10 @@ const createRoom = (
 
 /**
  * Performs one manager act: finding or creating a direct room, creating a
- * group room, accepting a room, forgetting one, or reporting a notice
- * delivered. Each act's outcome is recorded under its `requestId`, and a
- * request already decided changes nothing. A start that creates a room commits
+ * group room, offering a room to a member added to it, accepting a room,
+ * forgetting one, or reporting a notice delivered. Each act's outcome is
+ * recorded under its `requestId`, and a request already decided changes
+ * nothing. A start that creates a room commits
  * only from `commitStart` under a reviewed `ChatStart`; without one, its run
  * is refused whole, and it records no outcome.
  */
@@ -739,7 +858,7 @@ const performManagerAct = (
       counterpart,
       offerTo: profile === undefined ? [] : [{
         recipient: counterpart,
-        profile,
+        profiles: [profile],
       }],
     });
     direct.key(counterpart).set(entry);
@@ -778,12 +897,72 @@ const performManagerAct = (
       );
       return;
     }
-    const members = otherMembers(listed, self ?? "");
+    // A member named by profile, the event's or else the draft's, is the
+    // principal the profile attests, so a profile attesting none names no
+    // one, and is refused rather than left out.
+    const named = (event?.profiles ?? draft?.picked ?? []).map((
+      profile,
+    ): NamedMember => ({
+      profile,
+      recipient: principalOf(profile, "represents-principal"),
+    }));
+    if (named.some(({ recipient }) => !isPrincipalDID(recipient))) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "A member's profile attests no principal.",
+      });
+      return;
+    }
+    // An offer goes to an inbox, so profiles of two people pointing at one
+    // inbox would hand each the other's offer. No setup makes them, so the
+    // request is refused whole, before anything is created.
+    const inboxes = named.map(({ recipient, profile }) => ({
+      recipient,
+      pointer: inboxPointerOf(profile),
+    }));
+    if (
+      inboxes.some((one, index) =>
+        one.pointer !== undefined &&
+        inboxes.slice(index + 1).some((other) =>
+          other.recipient !== one.recipient &&
+          other.pointer !== undefined && equals(other.pointer, one.pointer)
+        )
+      )
+    ) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "Two members' profiles point at the same inbox.",
+        code: "shared-inbox",
+      });
+      return;
+    }
+    // Each other member named by profile is offered the room through every
+    // profile naming them, each inbox once, and added to its participants
+    // once.
+    const offerTo = named.reduce<OfferedMember[]>(
+      (found, { recipient, profile }) => {
+        if (!isPrincipalDID(recipient) || recipient === self) return found;
+        const known = found.find((each) => each.recipient === recipient);
+        return known === undefined
+          ? [...found, { recipient, profiles: [profile] }]
+          : found.map((each) =>
+            each === known
+              ? { recipient, profiles: [...each.profiles, profile] }
+              : each
+          );
+      },
+      [],
+    );
+    const members = otherMembers(
+      [...listed, ...offerTo.map(({ recipient }) => recipient)],
+      self ?? "",
+    );
     const joinableByLink = event?.joinableByLink ??
       draft?.joinableByLink ?? false;
     const entry = createRoom(state, requestId, "group", members, {
       title,
       joinableByLink,
+      offerTo,
     });
     if (state.fromDraft === true) state.draft.set(EMPTY_DRAFT);
     recordOutcome(state, requestId, { status: "done", entry });
@@ -796,6 +975,116 @@ const performManagerAct = (
       status: "refused",
       reason: "The request names no room.",
     });
+    return;
+  }
+
+  if (act === "offerRoom") {
+    // The manager tells someone only of a room of its user's own, which its
+    // user may add people to: one its catalog lists, in a space its user
+    // holds OWNER on.
+    const space = spaceOf(room);
+    if (!isWellFormedDID(space) || !listsRoomIn(catalog.get(), space)) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The room isn't among this user's chats.",
+      });
+      return;
+    }
+    // An access list the run doesn't hold yet, as a served run may not for a
+    // room created moments before, says nothing of this user's level, so
+    // only a level it states refuses.
+    const access = spaceAccess(room);
+    if (access !== undefined && access !== "OWNER") {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "This user can't add people to the room.",
+      });
+      return;
+    }
+    // People are added only to a group room, which its creator's record
+    // says it is; a link to anything else in the room's space, such as one
+    // of its messages, has no such record.
+    if (aboutRecordOf(room).key("kind").get() !== "group") {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The request names no group room.",
+      });
+      return;
+    }
+    // The request's id is the offer's, which a share inbox cuts to a bounded
+    // length, so a longer one could be taken for another's.
+    if (requestId.length > OFFER_ID_MAX_LENGTH) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The request's id is too long to key an offer by.",
+      });
+      return;
+    }
+    // A member named by profile is the principal the profile attests, so a
+    // profile attesting none names no one.
+    const named = event?.profile;
+    const attested = named === undefined
+      ? undefined
+      : principalOf(named, "represents-principal");
+    if (named !== undefined && !isPrincipalDID(attested)) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "A member's profile attests no principal.",
+      });
+      return;
+    }
+    const member = event?.member ?? attested;
+    if (!isPrincipalDID(member)) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The member is not a principal.",
+      });
+      return;
+    }
+    if (attested !== undefined && attested !== member) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The profile is not the member's.",
+      });
+      return;
+    }
+    const from = currentPrincipal();
+    if (from === undefined) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "Offering a room needs a signed-in user.",
+      });
+      return;
+    }
+    if (member === from) {
+      recordOutcome(state, requestId, {
+        status: "refused",
+        reason: "The member is this user.",
+      });
+      return;
+    }
+    // A member named by principal alone is offered the room through the
+    // profiles `people` lists for them, so a person this user shares no room
+    // with is offered nothing.
+    // TODO(danfuzz): A served run can't read the session's instance of
+    // `people`, and finds none listed, so under server execution such a
+    // member gets a notice. Offer through `people` there too, once a served
+    // handler can read a per-session instance of its user's.
+    const profiles = named === undefined
+      ? [...(state.people?.[member] ?? [])]
+      : [named];
+    const delivery = offerToMember(
+      offerEnvelope(
+        requestId,
+        space,
+        room.key("about").get()?.title ?? "",
+        from,
+      ),
+      room,
+      { recipient: member, profiles },
+      state,
+    );
+    recordOutcome(state, requestId, { status: "done", delivery });
     return;
   }
 
@@ -942,14 +1231,66 @@ export const commitStart = handler<ManagerStreamEvent, ManagerActState>(
 );
 
 /**
- * Performs one of the manager's other acts: accepting a room, forgetting one,
- * or reporting a notice delivered. None of them needs a gesture, since each
- * changes only this user's own manager, except that accepting a room also
- * adds this user to its participants, when their profile has resolved, which
- * anyone in its space may do.
+ * Performs one of the manager's other acts: offering a room to a member added
+ * to it, accepting a room, forgetting one, or reporting a notice delivered.
+ * None of them needs a gesture. Each changes only this user's own manager,
+ * except that accepting a room also adds this user to its participants, when
+ * their profile has resolved, which anyone in its space may do; and that
+ * offering one tells someone of a room this user may add people to, which the
+ * add that admitted them was the gesture for.
  */
 export const commitManager = handler<ManagerStreamEvent, ManagerActState>(
   (event, state) => performManagerAct(event, state),
+);
+
+/** What picking a group's member asks: the member's profile. */
+export interface PickMemberEvent {
+  /** The profile to pick, or to stop picking. */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  profile?: Cell<ChatManagerProfile>;
+}
+
+/** What `pickMember` is bound to. */
+interface PickMemberState {
+  /** The session's group draft. */
+  draft: Writable<GroupDraft>;
+
+  /** A rendered control's profile, which an event's own outranks. */
+  profile?: Cell<ChatManagerProfile>;
+}
+
+/**
+ * Whether two profiles name the same person: they are the same cell, or their
+ * `represents-principal` labels attest the same principal.
+ */
+const samePerson = (
+  a: Cell<ChatManagerProfile>,
+  b: Cell<ChatManagerProfile>,
+): boolean => {
+  if (equals(a, b)) return true;
+  const principal = principalOf(a, "represents-principal");
+  return principal !== undefined &&
+    principal === principalOf(b, "represents-principal");
+};
+
+/**
+ * Adds a profile to the members the session's group draft has picked, or,
+ * when the draft has picked that person already, by this profile or another
+ * of theirs, removes every profile of theirs it holds.
+ */
+const pickMember = handler<PickMemberEvent, PickMemberState>(
+  (event, { draft, profile: bound }) => {
+    const profile = event?.profile ?? bound;
+    if (profile === undefined) return;
+    const picked = draft.key("picked").get() ?? [];
+    draft.key("picked").set(
+      picked.some((known) => samePerson(known, profile))
+        ? picked.filter((known) => !samePerson(known, profile))
+        : [...picked, profile],
+    );
+  },
 );
 
 /** What a manager stores. Every field has a default. */
@@ -982,7 +1323,7 @@ export interface FabriChatManagerOutput {
   [UI]: VNode;
 
   /** Every room this user belongs to and hasn't forgotten, newest first. */
-  rooms: ChatIndexEntry[];
+  rooms: PerSession<ChatIndexEntry[]>;
 
   /**
    * The user's shared-space catalog, as stored, from which `rooms` is drawn. A
@@ -1000,11 +1341,24 @@ export interface FabriChatManagerOutput {
   /** Notices this user's requests have produced that no one has delivered. */
   outgoingNotices: ChatManagerNotice[];
 
+  /**
+   * The people this user's rooms list, other than this user: by the principal
+   * each one's profile attests, the profiles attesting it, each once, in the
+   * order the rooms, newest first, list them.
+   */
+  people: PerSession<Record<string, ManagerProfileCell[]>>;
+
   /** Finds or creates the direct room with a person. */
   openDirect: Stream<ManagerStreamEvent>;
 
   /** Creates a group room. */
   createGroup: Stream<ManagerStreamEvent>;
+
+  /**
+   * Offers someone added to a room the room, where this user may add people
+   * to it, and records how they were told of it.
+   */
+  offerRoom: Stream<ManagerStreamEvent>;
 
   /** Records a room this user has been admitted to. */
   accept: Stream<ManagerStreamEvent>;
@@ -1034,6 +1388,15 @@ interface ShownEntry {
   revision?: string;
 
   /** How the entry is labeled. */
+  label: string;
+}
+
+/** A person the manager's rendering offers to name a new group's member by. */
+interface ShownPerson {
+  /** The profile a group is offered through, the first attesting them. */
+  profile: ManagerProfileCell;
+
+  /** What the control picking them says, which shows whether they are. */
   label: string;
 }
 
@@ -1086,12 +1449,27 @@ export interface FabriChatManagerCoreInput
 }
 
 /**
+ * What a manager's core offers: `ChatManagerOutput`, and the streams its own
+ * group form sends to, which work on the session's group draft.
+ */
+export interface FabriChatManagerCoreOutput extends FabriChatManagerOutput {
+  /** Picks a member for the draft's group, or stops picking them. */
+  pickMember: Stream<PickMemberEvent>;
+
+  /**
+   * Creates the draft's group, from a reviewed `ChatStart`, and empties the
+   * draft. An event's own title and members outrank the draft's.
+   */
+  createDraftedGroup: Stream<ManagerStreamEvent>;
+}
+
+/**
  * A person's rooms, those they belong to, and the way to start new ones,
  * given the person's profile.
  */
 export const FabriChatManagerCore = pattern<
   FabriChatManagerCoreInput,
-  FabriChatManagerOutput
+  FabriChatManagerCoreOutput
 >(
   ({ myProfile, sharedSpaceCatalog, direct, requests, outgoingNotices }) => {
     const draft = new Writable.perSession<GroupDraft>(EMPTY_DRAFT);
@@ -1144,6 +1522,31 @@ export const FabriChatManagerCore = pattern<
           : 0
       );
     });
+    // The people the listed rooms' rosters hold, by the principal each
+    // profile's own label attests, read beside the rooms that list them, and
+    // per session, as `newestFirst` is: a profile attests no one to a reader
+    // its space refuses. A profile attesting no principal, or a DID no
+    // principal can have, names no one to offer a room to, and this user's
+    // own are left out.
+    const people = computed(
+      (): PerSession<Record<string, ManagerProfileCell[]>> => {
+        const self = principalOf(myProfile, "represents-principal");
+        return newestFirst.reduce<Record<string, ManagerProfileCell[]>>(
+          (found, entry) =>
+            (entry.room.key("roster").get() ?? []).reduce((known, profile) => {
+              const principal = principalOf(profile, "represents-principal");
+              if (!isPrincipalDID(principal) || principal === self) {
+                return known;
+              }
+              const profiles = known[principal] ?? [];
+              return profiles.some((each) => equals(each, profile))
+                ? known
+                : { ...known, [principal]: [...profiles, profile] };
+            }, found),
+          {},
+        );
+      },
+    );
     const joining = joinRooms({});
     const records = {
       myProfile,
@@ -1175,6 +1578,25 @@ export const FabriChatManagerCore = pattern<
     const refusalDisplay = computed((): ChatDisplay =>
       startRefusal.get() === "" ? "none" : "block"
     );
+    // Each person once, by the first profile attesting them, and whether the
+    // session's draft has picked them, by any profile of theirs, per session,
+    // as `people` is.
+    const shownPeople = computed((): PerSession<ShownPerson[]> => {
+      const picked = draft.get()?.picked ?? [];
+      return Object.values(people).flatMap((profiles): ShownPerson[] => {
+        const profile = profiles[0];
+        if (profile === undefined) return [];
+        return [{
+          profile,
+          label: picked.some((known) => samePerson(known, profile))
+            ? "Added"
+            : "Add",
+        }];
+      });
+    });
+    const peopleDisplay = computed((): ChatDisplay =>
+      shownPeople.length === 0 ? "none" : "block"
+    );
     const noticeList = computed(
       () => [...((outgoingNotices.get() ?? []) as ChatManagerNotice[])],
     );
@@ -1187,9 +1609,15 @@ export const FabriChatManagerCore = pattern<
     const addressDisplay = computed(
       (): ChatDisplay => (myAddress === "" ? "none" : "block"),
     );
+    const createDraftedGroup = commitStart({
+      act: "createGroup",
+      ...records,
+      fromDraft: true,
+    });
     const streams = {
       openDirect: commitStart({ act: "openDirect", ...records }),
       createGroup: commitStart({ act: "createGroup", ...records }),
+      offerRoom: commitManager({ act: "offerRoom", ...records, people }),
       accept: commitManager({ act: "accept", ...records }),
       forget: commitManager({ act: "forget", ...records }),
       delivered: commitManager({ act: "delivered", ...records }),
@@ -1200,6 +1628,7 @@ export const FabriChatManagerCore = pattern<
       direct,
       requests,
       outgoingNotices: noticeList,
+      people,
       ...streams,
     };
 
@@ -1261,17 +1690,39 @@ export const FabriChatManagerCore = pattern<
                 $value={draft.key("members")}
                 placeholder="Members' chat addresses, one per line"
               />
+              <div
+                id="fabrichat-group-people"
+                hidden
+                style={{ display: peopleDisplay }}
+              >
+                <cf-vstack gap="1">
+                  <cf-text variant="caption">
+                    Or add people from your chats:
+                  </cf-text>
+                  {shownPeople.map((person) => (
+                    <cf-hstack gap="2" align="center">
+                      <cf-profile-badge
+                        variant="chip"
+                        $profile={person.profile}
+                      />
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        onClick={pickMember({ draft, profile: person.profile })}
+                      >
+                        {person.label}
+                      </cf-button>
+                    </cf-hstack>
+                  ))}
+                </cf-vstack>
+              </div>
               <cf-checkbox $checked={draft.key("joinableByLink")}>
                 Anyone with its link can join
               </cf-checkbox>
               <cf-button
                 data-ui-action={CHAT_START_ACTION}
                 disabled={cannotStart}
-                onClick={commitStart({
-                  act: "createGroup",
-                  ...records,
-                  fromDraft: true,
-                })}
+                onClick={createDraftedGroup}
               >
                 Create group
               </cf-button>
@@ -1309,6 +1760,8 @@ export const FabriChatManagerCore = pattern<
       ),
       [VIEWS]: { chats: view },
       ...view,
+      pickMember: pickMember({ draft }),
+      createDraftedGroup,
     };
   },
 );
@@ -1340,8 +1793,10 @@ const FabriChatManager = pattern<
     direct: core.direct,
     requests: core.requests,
     outgoingNotices: core.outgoingNotices,
+    people: core.people,
     openDirect: core.openDirect,
     createGroup: core.createGroup,
+    offerRoom: core.offerRoom,
     accept: core.accept,
     forget: core.forget,
     delivered: core.delivered,

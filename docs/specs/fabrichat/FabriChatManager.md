@@ -33,14 +33,24 @@ and its `since` and `revision` are its entry's. A direct room's `counterpart` is
 the one `direct` holds the room under, for a room `direct` holds, or else the
 room's creator, as its `about.record` is labeled; a room whose label can't be
 read is listed with no counterpart. A room appears in `rooms` once its root
-resolves and its `about` reads. `direct` holds one entry per counterpart,
-including forgotten rooms, for the direct rooms this manager created or
-accepted, and `openDirect` finds a direct room there and nowhere else. A room
-another manager created and offered the user is there too, once the user's host
-has registered the offer, since the host's share intake then has the manager
-accept it on the user's behalf (see [first contact](#first-contact)). `rooms`
-can also hold a second direct room with the same counterpart, after crossing
-creations.
+resolves and its `about` reads. `people` is drawn from `rooms` in the same
+session: each listed room's `roster`, read through the room's link, with each
+profile keyed by the principal its own `represents-principal` label attests
+(`principalOf()`). No handler reads it. `direct` holds one entry per
+counterpart, including forgotten rooms, for the direct rooms this manager
+created or accepted, and `openDirect` finds a direct room there and nowhere
+else. A room another manager created and offered the user is there too, once the
+user's host has registered the offer, since the host's share intake then has the
+manager accept it on the user's behalf (see [first contact](#first-contact)).
+`rooms` can also hold a second direct room with the same counterpart, after
+crossing creations.
+
+`direct`'s entries, and the entry a `done` outcome in `requests` carries, hold a
+room as `FabriChatRoom.inSpace(…)` returned it at creation, or as `accept` was
+sent it, while `rooms` holds it as its space's root, as that `wish` finds it:
+the two links differ, and resolve to the same room, so a reader compares room
+links by their space, or with `equals()`, which compares what they resolve to,
+and never as the links themselves.
 
 The handlers write the catalog. Creating a room, or accepting one a manager
 created, registers the room's space (`registerSharedSpaceIn()`), forgetting a
@@ -74,8 +84,9 @@ create a space for the conversation, with the room as its root, in four steps:
 2. Grant each other member OWNER on the room's space, by principal, so any
    member may add others.
 3. Offer the room to each other member whose profile the request names,
-   through the share inbox the profile points at, and add to the room's
-   participants each member it is offered to. Add a notice to
+   through each distinct share inbox their profiles point at, once per inbox,
+   and add to the room's participants each member it is offered to, once, by
+   the first profile it is offered through. Add a notice to
    `outgoingNotices`, for a client to deliver, for each other member offered
    nothing: one the request names only by principal, or one whose profile
    points at no inbox.
@@ -91,6 +102,21 @@ creating another room. A pending `openDirect` is also recorded under its
 `counterpart`, which is how a second `openDirect` for the same person finds it
 and resumes it. Step 1 writes the room's `about` from this user's handler, which
 is what labels it `authored-by` this user.
+
+The manager's rendering composes a group in a draft of the session's own: a
+title, members typed as chat addresses, and members picked from `people`, one
+control per person, which picks the first profile `people` lists for them,
+from the newest room whose roster holds one. Creating the
+group names the picked profiles as `createGroup`'s `profiles`, so each picked
+person is offered the room, and empties the draft.
+
+Someone a user adds to a room later is told of it through `offerRoom`, which
+the room's `addMember` sends once it has granted them access. It runs as an
+event of its own, after the add has committed, and offers the room through the
+same steps as step 3: through the profile the add named, or, for an add naming
+only an address, through the profiles `people` lists for that person, as the
+session sending it reads `people`. It records `offered` or `noticed` under the
+request's id, which the room reads back as the add's `delivery`.
 
 ## Prerequisites
 
@@ -116,7 +142,8 @@ Home creates ([the private inbox](../../features/private-inbox.md)) or another
 share inbox the profile points at, and both take the same offer envelope. Any
 principal may write to the inbox's space, and its offers are labeled readable by
 the owner alone, a label that binds only an honest runtime. When a request names
-a member's profile, as `openDirect` does with its `profile`, step 3 offers the
+a member's profile, as `openDirect` does with its `profile` and `createGroup`
+with its `profiles`, step 3 offers the
 room there, in that envelope, from an event of its own that follows the room's
 creation, since the offer names the room's space (see
 [`ChatManagerOutput`](ChatManagerOutput.md#offers)). The same event reads the
