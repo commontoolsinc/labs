@@ -3289,7 +3289,9 @@ export class Scheduler {
       this.#eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
+      eventHandlers: this.#eventHandlers,
       eventQueue: this.#eventQueue,
+      trackBackgroundTask: (work) => this.trackBackgroundTask(work),
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),

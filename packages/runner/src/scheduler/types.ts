@@ -414,6 +414,15 @@ export type QueuedEvent = {
   handlerLoadPending?: boolean;
 
   /**
+   * The FIFO slot is held while the piece the handler belongs to, or a piece
+   * that instantiated it, changes pattern (`Runner.pendingPatternChangeFor`).
+   * The head parks the queue as it does for a loading handler; once the
+   * change settles, the event takes the handler registered for its stream and
+   * the flag clears.
+   */
+  patternChangePending?: boolean;
+
+  /**
    * The FIFO slot is held while the stale-basis retry that requeued this
    * event waits for the state it will re-run against (the conflict's
    * catch-up and the pull of the document it names). The head parks the

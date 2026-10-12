@@ -2079,6 +2079,14 @@ export class Runner {
   #pendingWatcherPatternLoads = new Set<Promise<unknown>>();
 
   /**
+   * Per piece root id, the change of pattern a running piece is making: from
+   * the moment its watcher sees the pointer move until the piece runs the
+   * incoming pattern or keeps the one it runs. Recorded only off a serving
+   * runtime. See `pendingPatternChangeFor()`.
+   */
+  #pendingPatternChanges = new Map<string, Promise<void>>();
+
+  /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
    * its basis to the serving side's own first-hydration materialization (see
    * `#catchUpAndStartOnStaleRead()`). _Never_ awaited by `dispose()`, for
@@ -4752,6 +4760,7 @@ export class Runner {
     const registrations: Map<string, PieceRegistration> =
       options.variantRegistration?.registrations ?? this.#cancels;
     const pieceKey = this.#getDocKey(resultCell);
+    const pieceRootId = resultCell.getAsNormalizedFullLink().id;
     const key = options.variantRegistration?.selection.key ??
       this.#getDocKey(resultCell);
     // Before the registration below is set, so that a listener reads the
@@ -5207,6 +5216,24 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
+      // Records `work`, which settles once this piece runs the pattern its
+      // pointer moved to or keeps the one it runs, as the piece's pending
+      // change. A newer change replaces it. A serving runtime records none:
+      // its swap waits for the wave its setup seals into, and a wave commits
+      // only once the scheduler is idle, so an event held on the swap would
+      // hold that wave to its deadline.
+      const trackPatternChange = (work: Promise<unknown> | undefined) => {
+        if (work === undefined || this.#runtime.sealDestinationInstalled) {
+          return;
+        }
+        const change = work.then(() => {}, () => {});
+        this.#pendingPatternChanges.set(pieceRootId, change);
+        change.finally(() => {
+          if (this.#pendingPatternChanges.get(pieceRootId) === change) {
+            this.#pendingPatternChanges.delete(pieceRootId);
+          }
+        });
+      };
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -5216,7 +5243,7 @@ export class Runner {
       const swapToPattern = (
         loaded: Pattern | NodeFactory<unknown, unknown>,
         newRef: { identity: string; symbol: string },
-      ) => {
+      ): Promise<void> | undefined => {
         const pattern = this.#resolveToPattern(loaded as Pattern);
         const swap = {};
         latestSwap = swap;
@@ -5272,46 +5299,16 @@ export class Runner {
           }
           this.#evictResultPatternMemos(`${pieceLink.space}/${pieceLink.id}`);
         };
-        if (!this.#runtime.sealDestinationInstalled) {
-          // The OFF arm (and ON-arm client speculation): setup commits to
-          // the store and the swap proceeds synchronously.
-          try {
-            this.#applySetupState(
-              setupTx,
-              pattern,
-              newRef,
-              {
-                sameStoredSetup: false,
-                restageStoredArgument: true,
-                storedSetupMatches: false,
-              },
-              undefined,
-              resultCell,
-            );
-            this.#runtime.prepareTxForCommit(setupTx);
-            setupTx.commit();
-          } catch (error) {
-            logger.error(
-              "pattern-swap-setup-error",
-              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-              error,
-            );
-            keepRunningPattern();
-            return;
-          }
-          finishSwap();
-          return;
-        }
-        // ON-arm serving: the setup seals into the wave, and the wave
-        // can still WITHDRAW it at the commit step (a conflict drop, a
-        // lease-lost abort) after `commit().settled` resolved — so the running
-        // graph is replaced only once the setup is DURABLY accepted
-        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
-        // running against withdrawn setup would read internal cells that
-        // setup never materialized, while old-graph-plus-new-pointer is a
-        // coherent not-yet-swapped state a later pointer write (or
-        // reactivation) repairs.
-        void (async () => {
+        // The running graph is replaced only once the setup it reads is
+        // accepted. A commit can be refused, and a serving wave can still
+        // WITHDRAW one at the commit step (a conflict drop, a lease-lost
+        // abort) after `commit().settled` resolved (waveSettlementOf). Either
+        // way the OLD graph stays: v2 running against setup that never landed
+        // would read internal cells nothing materialized, while
+        // old-graph-plus-new-pointer is a coherent not-yet-swapped state a
+        // later pointer write (or reactivation) repairs. Events for the piece
+        // wait for the outcome (`pendingPatternChangeFor`).
+        const setupWork = (async () => {
           try {
             this.#applySetupState(
               setupTx,
@@ -5330,7 +5327,7 @@ export class Runner {
             if (committed.error !== undefined) {
               logger.error(
                 "pattern-swap-setup-error",
-                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at commit`,
                 committed.error,
               );
               keepRunningPattern();
@@ -5366,7 +5363,18 @@ export class Runner {
           if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
           if (currentPatternKey !== patternIdentityKey(newRef)) return;
           finishSwap();
-        })();
+        })().catch((error) => {
+          logger.error(
+            "pattern-swap-setup-error",
+            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+            error,
+          );
+        });
+        this.#pendingWatcherPatternLoads.add(setupWork);
+        setupWork.finally(() =>
+          this.#pendingWatcherPatternLoads.delete(setupWork)
+        );
+        return setupWork;
       };
       // The session-swap half of the watcher (see `#sessionPatternSwaps`):
       // exactly the sinkMeta arm's semantics, driven directly with a live
@@ -5380,7 +5388,7 @@ export class Runner {
         const newKey = patternIdentityKey(newRef);
         if (newKey === currentPatternKey) return; // No change
         currentPatternKey = newKey;
-        swapToPattern(pattern, newRef);
+        trackPatternChange(swapToPattern(pattern, newRef));
       };
       this.#sessionPatternSwaps.set(pieceKey, sessionSwapHandler);
       addCancel(() => {
@@ -5393,7 +5401,7 @@ export class Runner {
       const followPointer = (
         newRef: { identity: string; symbol: string },
         newKey: string,
-      ): void => {
+      ): Promise<void> | undefined => {
         // In-memory fast path: the module is usually live this session.
         const live = this.#runtime.patternManager.artifactFromIdentitySync(
           newRef.identity,
@@ -5416,8 +5424,7 @@ export class Runner {
               resultCell,
             )
           ) {
-            swapToPattern(live, newRef);
-            return;
+            return swapToPattern(live, newRef);
           }
           const named = this.#prepareCellsForRunningPattern(
             resultCell,
@@ -5439,7 +5446,7 @@ export class Runner {
               ) {
                 return;
               }
-              swapToPattern(live, newRef);
+              return swapToPattern(live, newRef);
             })
             .catch((err) => {
               logger.error(
@@ -5450,7 +5457,7 @@ export class Runner {
             });
           this.#pendingWatcherPatternLoads.add(named);
           named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
-          return;
+          return named;
         }
         // Async load for a pattern change after initial start. Errors are
         // logged here since there's no caller to propagate to. The whole
@@ -5623,7 +5630,7 @@ export class Runner {
                 ) {
                   return;
                 }
-                swapToPattern(loaded, newRef);
+                return swapToPattern(loaded, newRef);
               },
             );
           })
@@ -5641,6 +5648,7 @@ export class Runner {
         watcherLoad.finally(() =>
           this.#pendingWatcherPatternLoads.delete(watcherLoad)
         );
+        return watcherLoad;
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5658,7 +5666,7 @@ export class Runner {
           // a runtime that does not hold it reads it before swapping.
           const owed = this.#readInheritedAuthority(resultCell, newRef);
           if (owed === undefined) {
-            followPointer(newRef, newKey);
+            trackPatternChange(followPointer(newRef, newKey));
             return;
           }
           const followed = owed.then(() => {
@@ -5668,12 +5676,13 @@ export class Runner {
             ) {
               return;
             }
-            followPointer(newRef, newKey);
+            return followPointer(newRef, newKey);
           });
           this.#pendingWatcherPatternLoads.add(followed);
           followed.finally(() =>
             this.#pendingWatcherPatternLoads.delete(followed)
           );
+          trackPatternChange(followed);
         }),
       );
     };
@@ -9924,6 +9933,32 @@ export class Runner {
     return this.#cancels.get(this.#getDocKey(resultCell))
       ?.graphIsInstalled() ===
       true;
+  }
+
+  /**
+   * The change of pattern that a piece among `pieceRootIds`, or a piece that
+   * instantiated one of them, is making, or `undefined` when none is. It
+   * settles once that piece runs the pattern its pointer moved to, or keeps
+   * the one it runs because that pattern's setup did not land. Until then the
+   * handlers registered for those pieces may be about to be replaced, so the
+   * scheduler holds an event for them on it.
+   *
+   * @param pieceRootIds - The raw result-cell ids of the pieces a handler
+   *   belongs to, as its `schedulerObservationIdentity` names them.
+   */
+  pendingPatternChangeFor(
+    pieceRootIds: readonly string[],
+  ): Promise<void> | undefined {
+    if (this.#pendingPatternChanges.size === 0) return undefined;
+    const changes = new Set<Promise<void>>();
+    for (const id of pieceRootIds) {
+      for (const root of this.#demandRootChains.get(id) ?? [id]) {
+        const change = this.#pendingPatternChanges.get(root);
+        if (change !== undefined) changes.add(change);
+      }
+    }
+    if (changes.size === 0) return undefined;
+    return Promise.all(changes).then(() => {});
   }
 
   /**

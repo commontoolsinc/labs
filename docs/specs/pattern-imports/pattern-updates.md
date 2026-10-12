@@ -372,7 +372,10 @@ before its first start. This lets an obsolete pattern that cannot load be
 replaced before bootstrap without reading unsynchronized owned cells as their
 schema defaults. If the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
-the **same result cell**.
+the **same result cell**, once the setup it stages for the new pattern has
+committed. A refused setup leaves the old pattern running under the moved
+pointer. Until the piece settles on one of the two, an event for its streams on
+a client runtime waits, and then runs the handler of the pattern it settled on.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
