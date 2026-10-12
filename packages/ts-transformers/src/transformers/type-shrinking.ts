@@ -1,7 +1,10 @@
 import ts from "typescript";
 import type { SchemaScope } from "@commonfabric/api";
 import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
-import { cfcCarrierProperty } from "@commonfabric/schema-generator/cfc-carrier";
+import {
+  cfcCarrierProperty,
+  isCfcCarrierMember,
+} from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
   resolvesToCommonFabricSymbol,
@@ -380,27 +383,38 @@ function typeIncludesUndefined(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
-  if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
-    return true;
-  }
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const union = type as ts.UnionType;
     return union.types.some((member) => typeIncludesUndefined(member, checker));
   }
-  // `PerUser<T | undefined>` holds `undefined` beside its brand, and while
-  // `T` is a type parameter the brand is the deferred `ScopeTag`, so that
-  // member is `undefined` intersected with it, which is `undefined` once the
-  // tag resolves.
-  if (type.isIntersection()) {
-    return type.types.some((member) =>
-      (member.flags & ts.TypeFlags.Undefined) !== 0
-    ) &&
+  const nullish = nullishMemberOf(type, checker);
+  return nullish !== undefined &&
+    (nullish.flags & ts.TypeFlags.Undefined) !== 0;
+}
+
+/**
+ * The `null`, `undefined` or `void` that `type` is: the type itself, or the
+ * one member of an intersection whose other members are carriers alone. While
+ * `T` is a type parameter, `PerUser<Confidential<T | undefined, L>>` holds its
+ * `undefined` beside the deferred `ScopeTag` and `CfcTag`, and it is that
+ * `undefined` once the tags resolve. `undefined` for any other type.
+ */
+function nullishMemberOf(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const nullish = ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+    ts.TypeFlags.Void;
+  if ((type.flags & nullish) !== 0) return type;
+  if (!type.isIntersection()) return undefined;
+  const values = type.types.filter((member) => (member.flags & nullish) !== 0);
+  return values.length === 1 &&
       type.types.every((member) =>
-        (member.flags & ts.TypeFlags.Undefined) !== 0 ||
-        isScopeBrandMember(member, checker)
-      );
-  }
-  return false;
+        values.includes(member) || isScopeBrandMember(member, checker) ||
+        isCfcCarrierMember(member)
+      )
+    ? values[0]
+    : undefined;
 }
 
 function isNullishType(type: ts.Type): boolean {
@@ -1181,13 +1195,11 @@ function shrinkTypeToNode(
       const nullishMembers: ts.TypeNode[] = [];
       if (type.isUnion()) {
         for (const constituent of type.types) {
-          if (
-            constituent.flags &
-            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
-          ) {
+          const nullish = nullishMemberOf(constituent, checker);
+          if (nullish) {
             nullishMembers.push(
               typeToTypeNodeWithRegistry(
-                constituent,
+                nullish,
                 { checker, factory, sourceFile, state },
                 typeRegistry,
                 TYPE_NODE_FLAGS,

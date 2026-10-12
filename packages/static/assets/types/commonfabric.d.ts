@@ -1088,7 +1088,8 @@ export declare const SCOPE_BRAND: unique symbol;
  * a conditional the checker defers, so `Scoped<T, Scope>` around a bare type
  * parameter is one intersection; around `T | null` it is a union, as around
  * any other union. The conditional checks `[T]`, and both its branches are the
- * same type, so a value of the payload's type is assignable to the deferred
+ * same type, so where `T`'s constraint excludes `null` and `undefined`
+ * (`T extends {}`), a value of the payload's type is assignable to the deferred
  * tag, and to `Scoped<T, Scope>`, as it is once `T` is known.
  */
 type ScopeTag<T, Scope extends SchemaScope> = [T] extends [unknown]

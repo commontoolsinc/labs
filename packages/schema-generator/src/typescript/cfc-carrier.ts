@@ -28,6 +28,36 @@ export const cfcCarrierProperty = (
 };
 
 /**
+ * Whether `member`, a member of an intersection, is a CFC carrier: the
+ * `__ct_cfc__` member alone (`cfcCarrierProperty()`), or, while the payload is
+ * a type parameter, the `CfcTag` conditional the checker defers it as, which
+ * holds no part of the value. The deferred tag is recognized by its alias and
+ * by the carrier member its branch writes.
+ */
+export const isCfcCarrierMember = (member: ts.Type): boolean => {
+  if (cfcCarrierProperty(member)) return true;
+  if ((member.flags & ts.TypeFlags.Conditional) === 0) return false;
+  const declaration = member.aliasSymbol?.declarations?.find(
+    ts.isTypeAliasDeclaration,
+  );
+  return declaration?.name.text === "CfcTag" &&
+    ts.isConditionalTypeNode(declaration.type) &&
+    writesCarrierMember(declaration.type.trueType);
+};
+
+/** Whether `node` writes the `__ct_cfc__` member, alone or in a union. */
+const writesCarrierMember = (node: ts.TypeNode): boolean =>
+  ts.isParenthesizedTypeNode(node)
+    ? writesCarrierMember(node.type)
+    : ts.isUnionTypeNode(node)
+    ? node.types.some(writesCarrierMember)
+    : ts.isTypeLiteralNode(node) &&
+      node.members.some((member) =>
+        ts.isPropertySignature(member) && ts.isIdentifier(member.name) &&
+        member.name.text === CFC_CARRIER_PROPERTY
+      );
+
+/**
  * The type of the value `member` holds, given `type`, its type: `type` less
  * the `undefined` that an optional member's `?` adds.
  */

@@ -68,9 +68,12 @@ a conditional the checker defers, so `Cfc<T, Meta>` around a bare type
 parameter is one intersection, whose members are read through it; around
 `T | null` it is a union, as around any other union. The conditional checks
 `[T]`, and both its branches are the same type, so a value of the payload's
-type is assignable to `Cfc<T, Meta>` while `T` is a type parameter, as it is
-once `T` is known: `function label<T>(value: T): Confidential<T, L>` may
-return `value`. Every member's stamp records the whole payload `T`.
+type is assignable to `Cfc<T, Meta>` while `T` is a type parameter whose
+constraint excludes `null` and `undefined`, as it is once `T` is known:
+`function label<T extends {}>(value: T): Confidential<T, L>` may return
+`value`. An unconstrained `T` may be `null` or `undefined`, which the stamp is
+not assignable from, so the same function with `<T>` does not type-check.
+Every member's stamp records the whole payload `T`.
 
 ### Path-Bearing Helpers
 
