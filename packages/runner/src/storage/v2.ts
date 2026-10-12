@@ -9443,7 +9443,9 @@ export class SpaceReplica
       return;
     }
     // A failure of either arm, thrown or returned, must not escape: the drop
-    // that follows is what settles the refused commit.
+    // that follows is what settles the refused commit. One document's
+    // failing read costs that document alone; the others read are
+    // integrated.
     let failure: unknown;
     try {
       const read = this.#storeReadThrough();
@@ -9458,8 +9460,12 @@ export class SpaceReplica
             address.scopeKey,
           );
           if (!isScopeKey(instance)) continue;
-          const upsert = read({ id: address.id, scopeKey: instance });
-          if (upsert !== undefined) upserts.push(upsert);
+          try {
+            const upsert = read({ id: address.id, scopeKey: instance });
+            if (upsert !== undefined) upserts.push(upsert);
+          } catch (error) {
+            failure ??= error;
+          }
         }
         if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
       }

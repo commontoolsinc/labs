@@ -1639,6 +1639,57 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("reads the other documents a cascade-dropped C3 created when the store read-through throws for one of them", async () => {
+      const harness = await createHarness();
+      const store = new Map<URI, { seq: number; doc: EntityDocument }>();
+      let throwingFor: URI | undefined;
+      harness.storageManager.installStoreReadThrough(
+        space,
+        ({ id, scopeKey }) => {
+          if (id === throwingFor) throw new Error("row unreadable");
+          const entry = store.get(id);
+          return {
+            branch: "",
+            id,
+            scope: "space",
+            scopeKey,
+            ...(entry === undefined
+              ? { seq: 0, deleted: true as const }
+              : { seq: entry.seq, doc: entry.doc }),
+          };
+        },
+      );
+      try {
+        await seedAccepted(harness, DOCS.A, valueFor("base-a"));
+
+        const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+        harness.model.setOutcome(c2.localSeq, { kind: "rejectConflict" });
+        const c3 = beginBatch(
+          harness,
+          [
+            { op: "set", id: DOCS.C, value: valueFor("c3-c") },
+            { op: "set", id: DOCS.D, value: valueFor("c3-d") },
+          ],
+          sourceFromReads([{ id: DOCS.A }]),
+        );
+        harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+        expectVisible(harness, { C: valueFor("c3-c"), D: valueFor("c3-d") });
+        store.set(DOCS.D, { seq: 7, doc: { value: valueFor("foreign-d") } });
+        throwingFor = DOCS.C;
+
+        await expectConflict(c2.promise);
+        await expectConflict(c3.promise, "pending dependency");
+        expectVisible(harness, {
+          A: valueFor("base-a"),
+          C: undefined,
+          D: valueFor("foreign-d"),
+        });
+      } finally {
+        throwingFor = undefined;
+        await harness.close();
+      }
+    });
+
     it("fails a C3 that depends on a C2 whose conflict is on unrelated data in the same atomic commit", async () => {
       const harness = await createHarness();
       try {
