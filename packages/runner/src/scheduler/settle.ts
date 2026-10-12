@@ -519,16 +519,16 @@ async function runPullSettleOrder(
 ): Promise<number> {
   let actionsRun = 0;
   for (const fn of order) {
-    // The serving posture's cooperative macrotask yield (server-execution
-    // v2 stage C tuning T3, cooperative-yield.ts): between runs, once the
-    // slice is spent, let the wave's flush-deadline timer, the lease
-    // renew, and the push flush fire. `yieldBetweenRuns` is installed
-    // only on a serving runtime; everywhere else this is one undefined
-    // check and the loop keeps its exact microtask shape (no `await`).
-    if (state.yieldBetweenRuns !== undefined) {
-      const turn = state.yieldBetweenRuns();
-      if (turn !== undefined) await turn;
-    }
+    // The cooperative macrotask yield (cooperative-yield.ts): between
+    // runs, once the slice of continuous work is spent, let the socket's
+    // frames be read and due timers fire — a watch response an action
+    // waits for, a serving runtime's flush deadline and lease renew, the
+    // push flush. The order of the iteration is fixed before the loop
+    // starts and nothing here reorders it: a yield lets the pass's
+    // environment move, not its plan. A spent slice is the only reason
+    // to await; otherwise the loop keeps its microtask shape.
+    const turn = state.yieldBetweenRuns();
+    if (turn !== undefined) await turn;
     actionsRun += await runPullSettleAction(
       state,
       fn,

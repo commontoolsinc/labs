@@ -4278,16 +4278,19 @@ supply; OW29/OW32/OW34 closed):
     `overlayLateEchoDrops`, `overlayArrivalSweeps`).
   - **T3 — the honest deadline and the mid-wave renew** (attribution
     §2b/§3: deadline late by 2.5–8.3 s; renew gaps to 10 s vs a 15-s TTL;
-    t2's `lease-lost` on all spaces at once). A SERVING runtime's
-    scheduler yields one macrotask between settle-loop ACTIONS once its
-    16-ms slice of continuous work is spent — not inside the per-demander
-    fan-out loop, where a yield let a run's own async seal refusal land
-    mid-pass and double a served emission (the LT6 early-emit arm caught
-    it; the retry lands on the queued pass by contract)
+    t2's `lease-lost` on all spaces at once). The scheduler yields one
+    macrotask between settle-loop ACTIONS once its 16-ms slice of
+    continuous work is spent — not inside the per-demander fan-out loop,
+    where a yield let a run's own async seal refusal land mid-pass and
+    double a served emission (the LT6 early-emit arm caught it; the retry
+    lands on the queued pass by contract)
     (`scheduler/cooperative-yield.ts` — `setTimeout(0)`,
     the one primitive that lets due timers fire in deadline order;
-    MessageChannel and setImmediate measured to starve them); the OFF arm
-    and clients construct no yielder (posture-gated at construction).
+    MessageChannel and setImmediate measured to starve them). Every
+    runtime's scheduler yields this way; a client's yields let the watch
+    responses its actions wait for be read mid-pass
+    (`scheduler-settle-yield.test.ts`), and only a serving runtime's
+    reach an observer.
     The SpaceServer installs `Runtime.servingYieldObserver` at
     activation and renews the lease from it once the tenure has gone
     TTL/3 without a renewal (`leaseTtlMs` policy knob for tests). Pinned:
@@ -4296,7 +4299,7 @@ supply; OW29/OW32/OW34 closed):
     (mutation: yield removed → 1 239 ms, red); (ii) a 45-step, 1.8-s
     walk outliving a 900-ms TTL twice over commits under a live lease
     with the timer inert (mutation: renew-on-yield removed → the commit
-    is refused, red); (iii) posture gate; unit. Live (I1, instrumented
+    is refused, red); (iii) observer gate; unit. Live (I1, instrumented
     scratch build): deadline lateness on exhausted cycles p50 **25 ms**,
     p90 152, max 399 ms (was p50 125 / p90 443 / max 1 155 on the note
     run, and seconds on chat event waves); renew gaps p50 **5 020 ms**,
@@ -4339,9 +4342,10 @@ supply; OW29/OW32/OW34 closed):
   - OFF witness: T1 is arm-independent by design (verdicts pinned);
     T2 lives in the flag-ON client overlay (constructed only under the
     flag on non-serving runtimes) and the replica seam fires only with an
-    observer installed; T3 is gated on `runtime.servingPosture` at
-    construction (the yielder does not exist elsewhere) and the drain
-    guard sits inside the serving loop. Whole-suite witness in the PR.
+    observer installed; T3's yield runs on every posture while its
+    observer, the lease renew, is installed by the SpaceServer alone, and
+    the drain guard sits inside the serving loop. Whole-suite witness in
+    the PR.
 
 - **Stage C coordination delta (2026-08-18) — the coordination state is
   carried ON-BRANCH (owner directive 2026-08-18: files, not agent

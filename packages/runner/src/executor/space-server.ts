@@ -1706,8 +1706,8 @@ export class SpaceServer implements TransactionSealDestination {
     // The MID-WAVE renew (stage C tuning T3, serving-loop.md §2): the
     // renew timer above rides the macrotask queue a long settle used to
     // starve (the attribution's t2: renew gaps to 10 s against the 15-s
-    // TTL, then `lease-lost` on every active space at once). The serving
-    // scheduler now yields a macrotask between runs (cooperative-yield.ts)
+    // TTL, then `lease-lost` on every active space at once). The
+    // scheduler yields a macrotask between runs (cooperative-yield.ts)
     // — which already lets the timer fire — and reports every such yield
     // here, where a renew is issued directly once the wave has run TTL/3
     // without one: a belt that does not depend on the timer queue being

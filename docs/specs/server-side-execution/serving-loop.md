@@ -586,17 +586,20 @@ because the whole input batch commits once at the batch's derived
 closure. With it, a consequence is visible within roughly
 2·T_flush + push even while the wave behind it keeps deriving.
 **The deadline is HONEST only if the settle yields (stage C tuning T3,
-2026-08-18):** the scheduler's settle loop ran a whole wave's actions
-on one microtask chain, so the deadline timer could fire only after the
-last one — the stage-C attribution measured chat event waves late by
-2.5–8.3 s with `wavesBudgetExhausted` a symptom, not a bound. A SERVING
-runtime's scheduler now yields one macrotask between ACTIONS in the
-settle loop whenever its slice of continuous work (16 ms) is spent
-(`scheduler/cooperative-yield.ts`; the OFF arm and clients construct no
-yielder and keep their exact microtask shape), so the deadline fires
-within one action + a slice of its time (measured live: lateness p50
-25 ms, p90 152 ms, max 399 ms — one action's instance runs and its
-resubscribe still run to their end; the WORK is the design half's).
+2026-08-18):** a settle loop that ran a whole wave's actions on one
+microtask chain would let the deadline timer fire only after the last
+one — the stage-C attribution measured chat event waves late by
+2.5–8.3 s with `wavesBudgetExhausted` a symptom, not a bound. The
+scheduler yields one macrotask between ACTIONS in the settle loop
+whenever its slice of continuous work (16 ms) is spent
+(`scheduler/cooperative-yield.ts`), on every runtime: a serving runtime
+gets an honest deadline from it, and a client reads the watch responses
+its own actions wait for while the pass is still running instead of
+after it. Only a serving runtime installs the yield's observer (the
+lease renew below). So the deadline fires within one action + a slice
+of its time (measured live: lateness p50 25 ms, p90 152 ms, max 399 ms
+— one action's instance runs and its resubscribe still run to their
+end; the WORK is the design half's).
 NOT inside the per-demander fan-out loop (considered and rejected): a
 macrotask there let a run's own asynchronous seal refusal land mid-pass,
 and the loop re-ran the dirtied instance in the same pass while the

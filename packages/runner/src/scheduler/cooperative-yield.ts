@@ -1,39 +1,34 @@
-// The serving scheduler's cooperative macrotask yield (server-execution v2
-// stage C tuning, T3; serving-loop.md §2/§3).
+// The scheduler's cooperative macrotask yield.
 //
 // Why: the settle loop (`settle.ts`) runs every action of a pass on one
-// microtask chain — no macrotask boundary from the first run to the
-// last. On a serving runtime that is the wave's whole settle: the
-// stage-C attribution
-// measured chat event waves of 2.6–3.6 s in which the 100-ms flush
-// deadline fired 2.5–8.3 s LATE (`wavesBudgetExhausted` was a symptom,
-// not a bound), the lease-renew `setInterval` starved for up to 10 s
-// against a 15-s TTL (t2: `wave-commit-rejected` then `lease-lost` on
-// every active space within 10 ms — the process's renew timers missing
-// together), and the memory server's 5-ms push flush waited too. The
-// timers all ride the macrotask queue the loop never yields to.
+// microtask chain, with no macrotask boundary from the first run to the
+// last. Everything that rides the macrotask queue waits for the pass to
+// end: the socket's frames, so a watch response the pass's own actions
+// wait for is read only after the pass; a serving runtime's flush
+// deadline and lease renew, whose timers can fall due seconds late
+// behind a long wave; the memory server's push flush. The resume
+// pre-sync's waves (`runner.ts`) and cooperative CFC preparation
+// (`extended-storage-transaction.ts`) hold one of these for the same
+// reason: each issues work in a loop that would otherwise send for
+// seconds while the answers to its first frames waited unread.
 //
-// What: a time-sliced yield. `maybeYield()` is called between runs;
-// when the current slice of continuous scheduler work has run longer
-// than `sliceMs` it awaits one macrotask turn (`setTimeout(0)` — the one
+// What: a time-sliced yield. `maybeYield()` is called between units of
+// work; when the current slice of continuous work has run longer than
+// `sliceMs` it awaits one macrotask turn (`setTimeout(0)`, the one
 // primitive that lets DUE timers fire in deadline order before it
 // resumes; measured on Deno: a MessageChannel turn or `setImmediate`
 // let 0–2 of 8 due timers fire across a 360-ms loop, `setTimeout(0)`
 // all 8 within a few ms of their deadlines) and reports the slice to the
-// installed observer FIRST, synchronously — the mid-wave lease renew
-// rides that hook, so it never depends on the timer queue being
-// serviced. Between yields nothing changes: the OFF arm and client
-// runtimes never construct one of these (the scheduler creates it only
-// under `runtime.servingPosture`), so their settle loops keep the exact
-// microtask shape they had.
+// installed observer FIRST, synchronously. The serving loop's mid-wave
+// lease renew rides that hook, so it never depends on the timer queue
+// being serviced.
 //
-// Bound, stated honestly: the deadline becomes honest to within ONE
-// action plus a slice — an action's per-demander instance runs (a
+// Bound, stated honestly: a timer or a frame is attended to within ONE
+// unit of work plus a slice. An action's per-demander instance runs (a
 // 250-ms demand walk × its demanders) and its union-log resubscribe
-// still run to their end; nothing here shortens the WORK (that is the
-// design half of stage C, the per-demander walk). The yield is NOT
-// placed inside the fan-out loop (see run.ts's note): a macrotask there
-// let a run's own async seal refusal re-enter the pass.
+// still run to their end; nothing here shortens the WORK. The yield is
+// NOT placed inside the fan-out loop (see run.ts's note): a macrotask
+// there let a run's own async seal refusal re-enter the pass.
 
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -42,13 +37,12 @@ const logger = getLogger("cooperative-yield", {
   level: "warn",
 });
 
-/** One frame's worth of continuous scheduler work per macrotask turn on a
- * serving runtime. Sized against the yield's own cost (~2 ms per
- * `setTimeout(0)` on Deno) and the deadline's granularity (T_flush 100
- * ms): ≤ ~12 % overhead on pure-CPU runs, far less on the 20–250-ms
- * demand walks the attribution measured, and a deadline honest to
- * within one run + this slice. */
-export const DEFAULT_SERVING_YIELD_SLICE_MS = 16;
+/** One frame's worth of continuous work per macrotask turn. Sized against
+ * the yield's own cost (~2 ms per `setTimeout(0)` on Deno) and the serving
+ * loop's deadline granularity (T_flush 100 ms): ≤ ~12 % overhead on
+ * pure-CPU runs, far less on the 20–250-ms demand walks the serving loop
+ * was measured on, and a deadline honest to within one run + this slice. */
+export const DEFAULT_YIELD_SLICE_MS = 16;
 
 export class CooperativeYield {
   readonly #sliceMs: number;
@@ -59,7 +53,7 @@ export class CooperativeYield {
    * synchronously at every yield, BEFORE the macrotask turn. */
   onYield: (() => void) | undefined;
 
-  constructor(sliceMs: number = DEFAULT_SERVING_YIELD_SLICE_MS) {
+  constructor(sliceMs: number = DEFAULT_YIELD_SLICE_MS) {
     this.#sliceMs = sliceMs;
   }
 

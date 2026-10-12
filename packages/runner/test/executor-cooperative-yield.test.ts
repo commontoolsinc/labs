@@ -22,9 +22,9 @@
 //   lease row's expiry moved during the wave. Mutation (the observer's
 //   renew removed, or the yield removed) → the lease lapses at 900 ms and
 //   the wave's commit is refused at admission → RED.
-// - (iii) POSTURE GATE: a runtime without `servingPosture` constructs no
-//   yielder — the OFF arm and flag-ON clients keep their settle loops'
-//   exact microtask shape.
+// - (iii) OBSERVER GATE: every runtime's scheduler holds a yielder, and
+//   only a serving runtime's reports to the lease renew; a client's
+//   yields the same way and renews nothing.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -226,8 +226,7 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     expect(host.stats().wavesBudgetExhausted)
       .toBeGreaterThan(before.wavesBudgetExhausted);
     // The scheduler yielded (the mechanism, not just the effect).
-    expect(servingRuntime!.scheduler.servingYield).toBeDefined();
-    expect(servingRuntime!.scheduler.servingYield!.yieldCount)
+    expect(servingRuntime!.scheduler.cooperativeYield.yieldCount)
       .toBeGreaterThan(0);
     expect(host.stats().lease.lost).toBe(0);
   });
@@ -268,13 +267,14 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
     // The row was renewed while the wave ran (no timer could have).
     expect(leaseExpiry(engine)).toBeGreaterThan(expiryAtStart);
     expect(liveExecutionLeaseHolder(engine, space)).toBe(spaceServer.holder);
-    expect(servingRuntime!.scheduler.servingYield!.yieldCount)
+    expect(servingRuntime!.scheduler.cooperativeYield.yieldCount)
       .toBeGreaterThan(0);
   });
 
-  it("(iii) posture gate: a runtime without servingPosture constructs no yielder — the OFF arm and flag-ON clients keep their settle loop's exact microtask shape", async () => {
+  it("(iii) observer gate: a runtime without servingPosture holds a yielder whose yields reach no lease renew — the OFF arm and flag-ON clients yield between actions and renew nothing", async () => {
     openClient();
-    expect(clientRuntime.scheduler.servingYield).toBeUndefined();
+    expect(clientRuntime.scheduler.cooperativeYield).toBeDefined();
+    expect(clientRuntime.servingYieldObserver).toBeUndefined();
     const flagOnClientManager = EmulatedStorageManager.connectTo(server, {
       as: aliceSigner,
     });
@@ -284,7 +284,11 @@ describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
       experimental: { serverExecution: true },
     });
     try {
-      expect(flagOnClient.scheduler.servingYield).toBeUndefined();
+      expect(flagOnClient.scheduler.cooperativeYield).toBeDefined();
+      expect(flagOnClient.servingYieldObserver).toBeUndefined();
+      // A yield on a client calls through to no observer.
+      await flagOnClient.scheduler.cooperativeYield.yieldNow();
+      expect(flagOnClient.scheduler.cooperativeYield.yieldCount).toBe(1);
     } finally {
       await flagOnClient.dispose();
       await flagOnClientManager.close();

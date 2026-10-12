@@ -195,6 +195,7 @@ describe("event preflight convergence demand", () => {
         nodes.setStatus(action, "clean");
         return Promise.resolve();
       },
+      yieldBetweenRuns: () => undefined,
     } satisfies SchedulerSettleLoopState;
 
     const result = await runPullSchedulerSettleLoop(state, new Set([action]));
@@ -313,6 +314,7 @@ describe("event preflight convergence demand", () => {
         nodes.setStatus(action === actionA ? actionB : actionA, "invalid");
         return Promise.resolve();
       },
+      yieldBetweenRuns: () => undefined,
     } satisfies SchedulerSettleLoopState;
 
     const result = await runPullSchedulerSettleLoop(
