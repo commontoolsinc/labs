@@ -6690,7 +6690,7 @@ export class SpaceReplica
           operations,
           source,
           outcome.rejection,
-          identity,
+          { identity },
         );
       }
       const v = outcome.verdict;
@@ -6729,7 +6729,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
-          identity,
+          { identity },
         );
       }
       // Locally-committed verdicts confirm IMMEDIATELY — never parked
@@ -7436,6 +7436,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
       }
@@ -7456,6 +7457,7 @@ export class SpaceReplica
             operations,
             source,
             rejection,
+            { pushed: true },
           );
         }
       }
@@ -7530,6 +7532,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
         if (inFlight === undefined) {
@@ -7593,6 +7596,7 @@ export class SpaceReplica
             operations,
             source,
             outcome.rejection,
+            { pushed: true },
           );
         }
         const settledRace = this.#settleAccept(
@@ -7684,6 +7688,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
+          { pushed: true },
         );
       }
     } finally {
@@ -7802,15 +7807,25 @@ export class SpaceReplica
    * Finalizes a rejection, the shared tail for both real conflicts and
    * pre-empted commits: waits for the caught-up read-repair, drops the
    * optimistic pending write, and emits the revert notification reflecting
-   * repaired confirmed state.
+   * repaired confirmed state. For a commit that was pushed to the store, the
+   * store's copies of the documents it created are loaded beside that wait,
+   * so the revert reveals them; a sealed commit's withdrawal re-derives its
+   * documents instead, and loads nothing.
    */
   async #finalizeRejection(
     localSeq: number,
     operations: NativeCommitOperation[],
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
-    identity?: ScopeKeyIdentity,
+    options: {
+      /** The identity the commit's operations were applied under. */
+      identity?: ScopeKeyIdentity;
+
+      /** Whether the commit was pushed to the store rather than sealed. */
+      pushed?: boolean;
+    } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const { identity, pushed = false } = options;
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -7842,7 +7857,7 @@ export class SpaceReplica
         : undefined;
       await Promise.all([
         this.#waitForConflictReadRepair(rejection),
-        this.#loadAbsentTouched(rejection, touched),
+        pushed ? this.#loadAbsentTouched(rejection, touched) : undefined,
       ]);
       if (isRefusedDerivedWrite(rejection, source)) {
         this.#foldRefusedWrite(localSeq, touched, identity);
@@ -9329,13 +9344,13 @@ export class SpaceReplica
 
   /**
    * Helper for `#finalizeRejection()`, which loads the store's copy of each
-   * document the refused commit touched that this replica holds no confirmed
-   * revision of, so that dropping the commit's layer reveals that copy
-   * rather than an absence. The read repair a conflict names reaches the
-   * documents the session watches, and a document the commit itself created
-   * is watched by nothing: the store may hold it all the same, written by
-   * another session, and a refusal for a pending dependency names no
-   * document at all. The load also stands a watch for each document, so a
+   * document a refused pushed commit touched that this replica holds no
+   * confirmed revision of, so that dropping the commit's layer reveals that
+   * copy rather than an absence. The read repair a conflict names reaches
+   * the documents the session watches, and a document the commit itself
+   * created is watched by nothing: the store may hold it all the same,
+   * written by another session, and a refusal for a pending dependency names
+   * no document at all. The load also stands a watch for each document, so a
    * later write of it reaches this replica. A document the store holds
    * nothing for stays absent. A failed load is logged and leaves the drop to
    * proceed: the retry's commit decides what the absence was worth.
