@@ -184,3 +184,29 @@ export class EventHandlerNotRunError extends Error {
     this.elapsedMs = options.elapsedMs;
   }
 }
+
+/**
+ * Terminal failure raised when a client event is dropped before dispatch
+ * because no handler could be found for its stream: the piece owning the
+ * stream did not start, started without a pattern graph, or started and
+ * registered nothing for the stream. Surfaced through the scheduler error
+ * channel, so a send made from inside a handler, which has no commit callback
+ * to settle, is still an error somebody sees.
+ */
+export class EventDroppedError extends Error {
+  readonly streamId: string;
+  readonly reason: string;
+  readonly attempts: number;
+
+  constructor(
+    options: { streamId: string; reason: string; attempts: number },
+  ) {
+    super(
+      `${options.reason} (piece-start attempts: ${options.attempts})`,
+    );
+    this.name = "EventDroppedError";
+    this.streamId = options.streamId;
+    this.reason = options.reason;
+    this.attempts = options.attempts;
+  }
+}

@@ -31,6 +31,7 @@ import type {
   IExtendedStorageTransaction,
   IPreconditionFailedError,
   IStorageManager,
+  IStorageNotification,
   MemorySpace,
 } from "../storage/interface.ts";
 import {
@@ -52,6 +53,7 @@ import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
   computeBackoffDelayMs,
+  EventDroppedError,
   EventHandlerNotRunError,
   HANDLER_NOT_RUN_BACKOFF_LIMIT,
 } from "./backpressure.ts";
@@ -59,7 +61,10 @@ import type {
   SchedulerActionInfo,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
-import { MAX_EVENT_BACKLOG_PER_STREAM } from "./constants.ts";
+import {
+  EVENT_DEFERRAL_DROP_THRESHOLD,
+  MAX_EVENT_BACKLOG_PER_STREAM,
+} from "./constants.ts";
 import { createEventPreflightTraceContext } from "./diagnostics.ts";
 import { mintEventId } from "./event-identity.ts";
 import { planEventInvalidDependencyScheduling } from "./execution.ts";
@@ -83,6 +88,7 @@ import {
   type EventHandler,
   type EventPreflightTraceContext,
   LT1_LATE_SEAL_REFUSED,
+  type PieceStartWake,
   type QueuedEvent,
   type ReactivityLog,
   type ServedEventFailureOutcome,
@@ -364,6 +370,12 @@ export interface SchedulerEventQueueState {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
+
+  /** Loading heads waiting for a piece that could not be started yet. */
+  readonly pieceStartWaits: Set<QueuedEvent>;
+
+  /** Reports an error through the scheduler's error channel. */
+  readonly handleError: (error: Error, action: unknown) => void;
 }
 
 /**
@@ -452,12 +464,121 @@ export function dropQueuedEvent(
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
+  event.endPieceStartWait?.("settled");
   if (event.originTx !== undefined) {
     state.releaseLineageEvent?.(event.originTx, event);
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
   notifyEventDropped(state, event, reason, servedKind, options);
+}
+
+/**
+ * Drops a client event whose stream has no handler, as `dropQueuedEvent()`
+ * does, and reports the drop as an `EventDroppedError` through the scheduler
+ * error channel. A send made from inside a handler carries no commit callback,
+ * so without the report its drop would reach nobody but the log.
+ */
+function dropUndeliverableClientEvent(
+  state: SchedulerEventQueueState,
+  event: QueuedEvent,
+  reason: string,
+  attempts: number,
+): void {
+  if (event.finalOutcomeNotified) return;
+  dropQueuedEvent(state, event, reason);
+  state.handleError(
+    new EventDroppedError({ streamId: event.eventLink.id, reason, attempts }),
+    event.handler,
+  );
+}
+
+/**
+ * Whether a piece the start in `verdict` did not start may still start once
+ * another writer's commit lands: its graph is not installed, or its owning
+ * document carries no pattern pointer while being either empty or reached
+ * through a `result` backlink. A document holding a value of its own and no
+ * pointer is not a piece, and no commit will make it one.
+ */
+function pieceMayStillStart(verdict: EnsurePieceVerdict): boolean {
+  if (verdict.started) return true;
+  return verdict.reason === "no-pattern-meta" &&
+    (verdict.rootIsEmpty === true || verdict.observedDocIds.length > 1);
+}
+
+/**
+ * Waits, for a loading head whose piece could not be started, until a new
+ * start attempt could find something different, and returns what ended the
+ * wait: a storage notification changing one of `observedDocIds`, a handler
+ * registering for the head's stream, the head settling by another path, the
+ * retry window ending at `deadline`, or the scheduler being disposed.
+ */
+function awaitPieceStartWake(
+  state: Pick<SchedulerEventQueueState, "runtime" | "pieceStartWaits">,
+  event: QueuedEvent,
+  observedDocIds: readonly string[],
+  deadline: number,
+): Promise<PieceStartWake> {
+  const { promise, resolve } = Promise.withResolvers<PieceStartWake>();
+  const observed = new Set(observedDocIds);
+  let ended = false;
+  const subscription: IStorageNotification = {
+    next: (notification) => {
+      if (ended) return { done: true };
+      if (notification.type === "reset") {
+        end("documents-changed");
+        return { done: true };
+      }
+      for (const change of notification.changes) {
+        if (observed.has(change.address.id)) {
+          end("documents-changed");
+          return { done: true };
+        }
+      }
+      return undefined;
+    },
+  };
+  const end = (cause: PieceStartWake): void => {
+    if (ended) return;
+    ended = true;
+    clearTimeout(windowTimer);
+    state.runtime.storageManager.unsubscribe?.(subscription);
+    state.pieceStartWaits.delete(event);
+    delete event.endPieceStartWait;
+    resolve(cause);
+  };
+  const windowTimer = setTimeout(
+    () => end("window-spent"),
+    Math.max(0, deadline - performance.now()),
+  );
+  event.endPieceStartWait = end;
+  state.pieceStartWaits.add(event);
+  state.runtime.storageManager.subscribe(subscription);
+  return promise;
+}
+
+/**
+ * Ends the piece-start wait of every loading head for `ref`'s stream, so that
+ * it finds the handler just registered there.
+ */
+export function wakePieceStartWaits(
+  state: Pick<SchedulerEventQueueState, "pieceStartWaits">,
+  ref: NormalizedFullLink,
+): void {
+  for (const event of [...state.pieceStartWaits]) {
+    if (areNormalizedLinksSame(event.eventLink, ref)) {
+      event.endPieceStartWait?.("handler-registered");
+    }
+  }
+}
+
+/** Ends every piece-start wait, for a scheduler being disposed. */
+export function endPieceStartWaits(
+  state: Pick<SchedulerEventQueueState, "pieceStartWaits">,
+): void {
+  for (const event of [...state.pieceStartWaits]) {
+    event.endPieceStartWait?.("disposed");
+  }
 }
 
 /**
@@ -780,67 +901,84 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     }
     state.queueExecution();
 
+    // A client event (no served carriage) whose piece cannot be started yet
+    // has no durable entry for a later pass to re-deliver, so the head waits
+    // for something that could change the answer — a commit touching a
+    // document the start read, or a handler registering for the stream —
+    // and asks again. The wait holds the queue's head, so it is bounded:
+    // `EVENT_DEFERRAL_DROP_THRESHOLD` re-attempts, within the retry window
+    // the commit backpressure policy gives a client re-delivery. Past either,
+    // the event drops with an `EventDroppedError`. The window runs from the
+    // first attempt that found the piece unstartable.
     const startTask = (async () => {
+      let attempts = 0;
+      let deadline: number | undefined;
+      let windowSpent = false;
       try {
-        const verdict = await (state.loadPieceForEvent ??
-          ensurePieceRunningVerdict)(
-            state.runtime,
+        while (true) {
+          attempts++;
+          const verdict = await (state.loadPieceForEvent ??
+            ensurePieceRunningVerdict)(
+              state.runtime,
+              args.eventLink,
+            );
+          // The origin may have failed while the piece was loading.
+          if (
+            queuedEvent.finalOutcomeNotified ||
+            !state.eventQueue.includes(queuedEvent)
+          ) return;
+
+          const loadedHandler = findEventHandler(
+            state.eventHandlers,
             args.eventLink,
           );
-        // The origin may have failed while the piece was loading.
-        if (
-          queuedEvent.finalOutcomeNotified ||
-          !state.eventQueue.includes(queuedEvent)
-        ) return;
-
-        const loadedHandler = findEventHandler(
-          state.eventHandlers,
-          args.eventLink,
-        );
-        if (loadedHandler) {
-          queuedEvent.handler = loadedHandler;
-          queuedEvent.action = (tx) => loadedHandler(tx, args.event);
-          delete queuedEvent.handlerLoadPending;
-        } else if (
-          verdict.started && verdict.graphIsInstalled?.() !== false
-        ) {
-          // The piece is running with its pattern graph installed and
-          // registered NOTHING for this stream — events.md §5's drop
-          // predicate ("no runnable handler"). A verdict carrying no
-          // graph probe reads as installed: only a start walk mints
-          // one, and its absence says nothing about the piece.
-          dropQueuedEvent(
-            state,
-            queuedEvent,
-            `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`,
-          );
-        } else {
-          // Either the piece could not be STARTED, or it has no
-          // pattern graph installed: a refused instantiation commit
-          // retires the graph the start walk installed, and the runner
-          // then either re-instantiates once from a caught-up view or
-          // retires the registration with it. The walk ran before any
-          // of that, so `started` reports a piece that has nothing
-          // registered for any of its streams. Neither shape is the
-          // drop predicate — the handler is missing because the commit
-          // was raced, not because there is none, and events.md §5
-          // calls for a requeue there. For a served (drained) event
-          // that is a deferral: the durable entry stays pending and a
-          // later wave re-drains it, under the serving loop's bounded
-          // deferral budget — a condition that outlasts the budget
-          // hardens into §5's drop notice rather than wedging the
-          // stream. Client-side the distinction is moot (no durable
-          // entry to re-drain) and the drop keeps its existing shape.
+          if (loadedHandler) {
+            queuedEvent.handler = loadedHandler;
+            queuedEvent.action = (tx) => loadedHandler(tx, args.event);
+            delete queuedEvent.handlerLoadPending;
+            return;
+          }
+          if (verdict.started && verdict.graphIsInstalled?.() !== false) {
+            // The piece is running with its pattern graph installed and
+            // registered NOTHING for this stream — events.md §5's drop
+            // predicate ("no runnable handler"). A verdict carrying no
+            // graph probe reads as installed: only a start walk mints
+            // one, and its absence says nothing about the piece.
+            const reason = `Event dropped: no handler registered for ` +
+              `${args.eventLink.id} after starting its piece`;
+            if (queuedEvent.served !== undefined) {
+              dropQueuedEvent(state, queuedEvent, reason);
+            } else {
+              dropUndeliverableClientEvent(
+                state,
+                queuedEvent,
+                reason,
+                attempts,
+              );
+            }
+            return;
+          }
+          // Either the piece could not be STARTED, or it has no pattern
+          // graph installed: a refused instantiation commit retires the
+          // graph the start walk installed, and the runner then either
+          // re-instantiates once from a caught-up view or retires the
+          // registration with it. The walk ran before any of that, so
+          // `started` reports a piece that has nothing registered for any
+          // of its streams. Neither shape is the drop predicate — the
+          // handler is missing because the commit was raced, not because
+          // there is none, and events.md §5 calls for a requeue there. For
+          // a served (drained) event that is a deferral: the durable entry
+          // stays pending and a later wave re-drains it, under the serving
+          // loop's bounded deferral budget — a condition that outlasts the
+          // budget hardens into §5's drop notice rather than wedging the
+          // stream. A client event waits as described above.
           const pieceState = verdict.started
             ? "has no pattern graph installed"
             : "could not be started";
-          dropQueuedEvent(
-            state,
-            queuedEvent,
-            `Event dropped: no handler registered for ${args.eventLink.id} and its piece ${pieceState}`,
-            queuedEvent.served !== undefined ? "deferred" : "dropped",
-          );
+          const reason = `Event dropped: no handler registered for ` +
+            `${args.eventLink.id} and its piece ${pieceState}`;
           if (queuedEvent.served !== undefined) {
+            dropQueuedEvent(state, queuedEvent, reason, "deferred");
             // A deferral carries the drain's arrival-order barrier
             // (events.md §2; review-6459 F1's sibling arm), exactly as
             // the handler-not-run withdrawal and the facade's load-park
@@ -850,7 +988,35 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
               queuedEvent,
               `whose piece ${pieceState}`,
             );
+            return;
           }
+          if (
+            windowSpent || attempts > EVENT_DEFERRAL_DROP_THRESHOLD ||
+            !pieceMayStillStart(verdict)
+          ) {
+            dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
+            return;
+          }
+          deadline ??= performance.now() +
+            state.runtime.commitBackpressure.retryWindowMs;
+          const wake = await awaitPieceStartWake(
+            state,
+            queuedEvent,
+            verdict.observedDocIds,
+            deadline,
+          );
+          if (wake === "settled") return;
+          if (wake === "disposed") {
+            dropQueuedEvent(
+              state,
+              queuedEvent,
+              `${reason}, and the scheduler was disposed while it waited`,
+            );
+            return;
+          }
+          // A spent window still asks once more, so a piece that started
+          // while nothing announced it is found rather than reported.
+          if (wake === "window-spent") windowSpent = true;
         }
       } catch (error) {
         // Unlike the arms above, this one is reachable with the event
@@ -859,15 +1025,16 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // never crosses it. A settled head holds no barrier — its
         // disposition was someone else's (e.g. a lineage drop mid-load).
         const alreadySettled = queuedEvent.finalOutcomeNotified === true;
-        dropQueuedEvent(
-          state,
-          queuedEvent,
-          `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
+        const reason = `Event dropped: starting the piece for ` +
+          `${args.eventLink.id} failed: ${
             error instanceof Error ? error.message : String(error)
-          }`,
-          queuedEvent.served !== undefined ? "deferred" : "dropped",
-        );
-        if (!alreadySettled && queuedEvent.served !== undefined) {
+          }`;
+        if (queuedEvent.served === undefined) {
+          dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
+          return;
+        }
+        dropQueuedEvent(state, queuedEvent, reason, "deferred");
+        if (!alreadySettled) {
           // Same deferral disposition as the arm above — same barrier.
           deferLaterSameSpaceServedEvents(
             state,
@@ -887,12 +1054,19 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     // Second pass after a piece start that still registered no handler for
     // this stream (e.g. the piece "started" but its nodes failed to
     // instantiate). Trying again won't change this, so settle the event now.
-    notifyEventDropped(
-      state,
-      args,
-      `Event dropped: no handler registered for ${args.eventLink.id} ` +
-        `after starting its piece`,
-    );
+    const reason = `Event dropped: no handler registered for ` +
+      `${args.eventLink.id} after starting its piece`;
+    notifyEventDropped(state, args, reason);
+    if (args.served === undefined) {
+      state.handleError(
+        new EventDroppedError({
+          streamId: args.eventLink.id,
+          reason,
+          attempts: 1,
+        }),
+        undefined,
+      );
+    }
   }
 }
 

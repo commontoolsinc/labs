@@ -101,6 +101,7 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  endPieceStartWaits,
   eventHandlerImplementations,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
@@ -108,6 +109,7 @@ import {
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
   selectEventImplementation,
+  wakePieceStartWaits,
 } from "./events.ts";
 import {
   buildPullInitialSeeds,
@@ -501,6 +503,10 @@ export class Scheduler {
 
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
+
+  /** Loading event-queue heads waiting for a piece that could not be started
+   * yet (`queueSchedulerEvent()`). */
+  #pieceStartWaits = new Set<QueuedEvent>();
 
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
@@ -1831,13 +1837,26 @@ export class Scheduler {
       event: any,
     ) => void,
   ): Cancel {
-    return addSchedulerEventHandler({
+    const cancel = addSchedulerEventHandler({
       eventHandlers: this.#eventHandlers,
     }, {
       handler,
       ref,
       populateDependencies,
     });
+    wakePieceStartWaits(this.#eventQueueState, ref);
+    return cancel;
+  }
+
+  /**
+   * Ends the wait of every queued event whose piece could not be started
+   * yet, settling each with an error. A runtime being disposed calls this
+   * before it waits for the scheduler to go idle: such a wait is held open
+   * by another participant's commit, which a closing runtime has no reason
+   * to wait for.
+   */
+  endPieceStartWaits(): void {
+    endPieceStartWaits(this.#eventQueueState);
   }
 
   onConsole(fn: ConsoleHandler): void {
@@ -2584,6 +2603,7 @@ export class Scheduler {
     // `unsubscribe` is optional on the capability, so a manager without one is
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
+    endPieceStartWaits(this.#eventQueueState);
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -3281,6 +3301,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
+      pieceStartWaits: this.#pieceStartWaits,
+      handleError: (error, target) => this.#handleError(error, target),
     };
   }
 

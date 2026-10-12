@@ -730,6 +730,28 @@ loop's duty).
   test reads whether the piece has a graph installed, not what its
   start reported.
 
+  A CLIENT event — one with no served carriage, so no durable entry
+  for a later pass to re-drain — whose piece cannot be started yet
+  waits instead, holding its slot at the head of the event queue as
+  the piece load it follows does. A send can reach a piece before the
+  commit that creates it does: another participant's runtime has
+  written the link the send follows and not yet the piece itself. The
+  start is asked again when something could change its answer: a
+  commit touching a document the start read, or a handler registering
+  for the stream, which is how a piece standing between graphs
+  returns. The head holds every later event in that runtime's queue,
+  whatever stream it targets, so the wait is bounded twice: at the
+  serving drain's deferral threshold in re-attempts, and at the retry
+  window the commit backpressure policy gives a client re-delivery,
+  which ends a wait nothing re-arms. A piece the start will never
+  find — a document holding a value of its own and no pattern
+  pointer, a start that throws, a chain that cycles, a pattern that
+  cannot be loaded — does not wait. Every client drop on this path
+  reaches the scheduler error channel as an `EventDroppedError` as
+  well as settling the commit callback, since a send made from inside
+  a handler has no callback to settle. A runtime being disposed ends
+  every such wait, settling the event as dropped.
+
   **Where the notice lives, and when it retires (T7).** The
   dropped-event notice — `{ status: "dropped", reason }` naming the
   eventId — is a FIELD ON THE STREAM DOC'S OWN ENTRY for that event,

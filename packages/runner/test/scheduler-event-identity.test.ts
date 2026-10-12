@@ -212,6 +212,8 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
     }, {
       eventLink,
       event: { value: 1 },
@@ -295,6 +297,8 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
     }, {
       eventLink,
       event: "payload",
@@ -330,6 +334,8 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
     };
 
     queueSchedulerEvent(state, {
@@ -398,6 +404,8 @@ describe("scheduler event identity", () => {
         queueExecution: () => {},
         recordLineageEvent: () => {},
         releaseLineageEvent: () => {},
+        pieceStartWaits: new Set<QueuedEvent>(),
+        handleError: () => {},
       };
       queueSchedulerEvent(state, {
         eventLink,

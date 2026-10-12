@@ -2478,6 +2478,10 @@ export class Runtime {
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
     this.#viewReplication?.dispose();
+    // Before either drain below, each of which waits for the scheduler to go
+    // idle: a queued event waiting for its piece to become startable waits on
+    // another participant's commit, not on work of this runtime's own.
+    this.scheduler.endPieceStartWaits();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
