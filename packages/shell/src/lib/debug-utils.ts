@@ -37,17 +37,25 @@ import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
  * call so the helper tracks runtime replacement; with no runtime the idle step
  * is skipped. `getPending`, when given, names work the shell has started that
  * the view is not settled without, such as the bring-up of the user's Home,
- * and each pass waits for it ahead of the worker's idle.
+ * and each pass waits for it ahead of the worker's idle. It answers with the
+ * same promise for as long as the same work is pending. Work it comes to name
+ * after a pass read it, while the worker was idling, is waited for by a
+ * settle of its own.
  */
 export function createViewSettled(
   getRt: () => RuntimeClient | undefined,
   getPending?: () => Promise<void> | undefined,
 ): () => Promise<void> {
-  return () =>
-    viewSettled(async () => {
-      await getPending?.();
-      await getRt()?.idle();
-    });
+  return async () => {
+    let awaited: Promise<void> | undefined;
+    do {
+      await viewSettled(async () => {
+        awaited = getPending?.();
+        await awaited;
+        await getRt()?.idle();
+      });
+    } while (getPending?.() !== awaited);
+  };
 }
 
 /** The commonfabric console globals exposed for the active runtime. */

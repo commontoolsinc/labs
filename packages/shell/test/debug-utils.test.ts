@@ -216,6 +216,28 @@ describe("createViewSettled", () => {
     await settling;
     expect(idleCalls).toBeGreaterThan(0);
   });
+
+  it("settles again for work `getPending` comes to name while the runtime idles", async () => {
+    // The work is registered by the first idle, after that pass read
+    // `getPending`, as the view's `updated()` can register the bring-up of
+    // Home while the worker idles. A pass in which nothing churns ends the
+    // settle, so only another settle reads the work and idles after it.
+
+    const log: string[] = [];
+    let pending: Promise<void> | undefined;
+    const rt = {
+      idle: () => {
+        log.push("idle");
+        pending ??= Promise.resolve().then(() => {
+          log.push("pending settled");
+        });
+        return Promise.resolve();
+      },
+    };
+
+    await createViewSettled(() => asRuntime(rt), () => pending)();
+    expect(log).toEqual(["idle", "pending settled", "idle"]);
+  });
 });
 
 describe("runtime debug globals", () => {
@@ -329,15 +351,23 @@ describe("runtime debug globals", () => {
       },
     } as unknown as RuntimeClient;
     const global: Globals = {};
+    const pending = Promise.withResolvers<void>();
     exposeCommonfabricGlobals(
       global,
       runtime,
       () => runtime,
       () => undefined,
-      () => Promise.resolve().then(() => void log.push("pending settled")),
+      () => pending.promise,
     );
 
-    await global.commonfabric!.viewSettled!();
+    // Draining the task queue (all microtasks, then one macrotask) runs every
+    // continuation a settle that skipped the pending work would take to reach
+    // the runtime's idle, so a correct settle has not reached it by then.
+    const settling = global.commonfabric!.viewSettled!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    log.push("pending settled");
+    pending.resolve();
+    await settling;
     expect(log.slice(0, 2)).toEqual(["pending settled", "idle"]);
   });
 
