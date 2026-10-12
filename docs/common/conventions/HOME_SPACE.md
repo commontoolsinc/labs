@@ -323,7 +323,7 @@ intake among them, and forgetting a room archives its entry.
 
 The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. A Home is created once, on its user's first
-open or by the first wish for a target under its root (see
+open or by the first wish on a client runtime for a target under its root (see
 [Built-in Targets](wish.md#built-in-targets)), and from then on it owns account
 data: profiles, favorites, navigation, the shared-space catalog and the private
 inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
@@ -492,9 +492,10 @@ Both the home pattern and the default app pattern follow the same mechanism:
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
    Home, absent or present, which is created on first open, or by the first
-   wish for a target under its root, and updated in place. A URL-based
-   pattern stamps `patternSource`; a custom `RuntimeProgram` remains untracked
-   by the URL updater and may carry a separate repository locator
+   wish on a client runtime for a target under its root, and updated in place.
+   A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
+   remains untracked by the URL updater and may carry a separate repository
+   locator
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is
    admitted only when its stored `{ identity, symbol }` exactly matches the
