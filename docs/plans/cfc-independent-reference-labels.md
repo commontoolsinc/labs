@@ -74,19 +74,24 @@ once copied away from their origin, are what stage 1 removes.
 
 ## What a link slot persists after this plan
 
-One entry at the slot, and nothing beneath it:
+At most two entries at the slot, both of the pointer class, and nothing
+beneath it:
 
-- `origin: "link"`, `observes: "followRef"`, replaced when the pointer at the
-  slot is rewritten and cleared when an ancestor overwrite removes the pointer
-  (§8.12.8, as `linkEntrySuperseded` already does).
-- Confidentiality: the join of the creating attempt's flow join (its reads, PC
-  and triggers), the link schema's declared confidentiality, and the
-  acquisition restriction the written handle carries (the root of its
-  `cfcLabelView`, which is what `referenceRestrictionsOf` in
-  `cfc/label-view-state.ts` already extracts for a dereference).
-- Integrity: the link schema's integrity after `gateRuntimeMintedIntegrity`,
-  and the writer's own value stamp where the flow stage mints one. No
-  `LinkReference`.
+- The link entry, `origin: "link"`, holding what the reference declares and
+  carries: the link schema's declared confidentiality, the acquisition
+  restriction the written handle carries (the root of its `cfcLabelView`,
+  which is what `referenceRestrictionsOf` in `cfc/label-view-state.ts`
+  already extracts for a dereference), and the link schema's integrity after
+  `gateRuntimeMintedIntegrity`. No `LinkReference`. A reference with nothing
+  of its own persists no link entry. It is replaced when the pointer at the
+  slot is rewritten and cleared when an ancestor overwrite removes the
+  pointer (§8.12.8, as `linkEntrySuperseded` already does).
+- The join stamp, `origin: "structure"`, `observes: "followRef"`, holding the
+  creating attempt's flow join (its reads, PC and triggers) where flow labels
+  persist. It is a flow stamp: derived, so label metadata introspection may
+  observe it, and cleared with the flow stamps when the slot is rewritten. A
+  slot of a container the transaction stamps as a whole has no stamp of its
+  own; the container's `*` template carries the same join to every slot.
 
 A dereference composes the slot's restriction with the target's own labels.
 That is already how `cfcLabelViewForDereference` builds a label view and how
@@ -141,10 +146,11 @@ Implemented. What the later stages depend on it leaving behind:
   the floor is the stated contract (§8.12.4.1 over §8.2.6) and needs only the
   source's evidence. A plain value written at a covered position stays with
   the per-element read gate, as before.
-- The slot entry carries the creating attempt's join. A link-covered path is
-  still skipped by the flow stamp; the join lands at the slot as the link
-  entry's confidentiality instead. The wildcard `*` templates a coordinator
-  mints at a pure-link container already carry the join to its children, so
+- The slot carries the creating attempt's join on a pointer-class stamp of
+  its own, beside the link entry. A link-covered path is still skipped by the
+  flow stage's derived stamp; the link loop mints the slot stamp instead. The
+  wildcard `*` templates a coordinator mints at a pure-link container carry
+  the join to its children, so such a slot gets no stamp of its own and
   coordinator slots change little; a single link written by a handler newly
   carries the handler's join on pointer reads, which is the §8.2.3 precision
   the contract asks for.
