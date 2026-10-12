@@ -9607,17 +9607,20 @@ export class SpaceReplica
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
       // An accept that elided every operation on this document wrote
       // nothing: the store already held what the layer would have written.
-      // Where a frame has moved the document past the layer's base, that
-      // frame carries the value and covers the layer, which is dropped
-      // rather than promoted — a promotion would fold its ops over a base
-      // they were not diffed from, a splice a second time, and would give
-      // the document a confirmed seq the store never gave it. Where no frame
-      // has, the confirmed value is the one the layer read, and the
-      // promotion below replays the ops over exactly that base, which is
-      // the value the store holds.
+      // A promotion replays the layer's ops over the confirmed value, which
+      // is exact where that value is the base the ops were diffed from, or
+      // where the layer is a `set`, whose value is the stored document
+      // whatever it replays over. A patch layer over a document a frame has
+      // moved past its base is the other case: replaying it would fold its
+      // ops a second time, a splice included, and give the document a
+      // confirmed seq the store never gave it, so the layer is dropped and
+      // the frame's value, the store's as integrated, stands.
       if (
         applied.elidedOpIndexes !== undefined &&
         record.confirmed.seq > record.pending[firstPendingIndex]!.baseSeq &&
+        pendingIndexes.every((index) =>
+          record.pending[index]!.op === "patch"
+        ) &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
         )

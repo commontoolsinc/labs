@@ -5673,6 +5673,77 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("promotes an elided set when no frame has moved the document", async () => {
+      // A set's value is the stored document over any base, so an elided set
+      // promotes as any accept does, and its value stands in the view until a
+      // frame carries it.
+      const harness = await createHarness();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        const set = beginSet(harness, DOCS.A, { items: ["a", "b", "c"] });
+        harness.model.setOutcome(set.localSeq, {
+          kind: "accept",
+          elideOps: true,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "c"] },
+            }],
+          },
+        });
+        await expectResultOk(set.promise);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+      } finally {
+        await harness.close();
+      }
+    });
+
+    it("promotes an elided set over a frame that moved the document", async () => {
+      // The frame the replica holds may trail the stored document the set
+      // was proved equal to; the set's own value is that document, so the
+      // promotion lands on it rather than on the frame.
+      const harness = await createHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        await watch(harness);
+        const set = beginSet(harness, DOCS.A, { items: ["a", "b", "c"] });
+        harness.model.setOutcome(set.localSeq, {
+          kind: "accept",
+          elideOps: true,
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "c"] },
+            }],
+          },
+        });
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { items: ["a", "b", "x"] },
+          }],
+        });
+        await clock.settle();
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        responseGate.resolve();
+        await expectResultOk(set.promise);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
     it("keeps the splice's list over a frame that changed another field", async () => {
       const harness = await createHarness();
       const responseGate = Promise.withResolvers<void>();
