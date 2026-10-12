@@ -64,6 +64,7 @@ interface ChatManagerOutput {
     room: Cell<ChatRoomOutput>;
     counterpart?: string;
   }>;
+  joinRoom: Stream<{ requestId?: string; room: Cell<ChatRoomOutput> }>;
   forget: Stream<{
     requestId: string;
     room: Cell<ChatRoomOutput>;
@@ -154,7 +155,8 @@ room's members by principal or by profile itself.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
   stored. A room reads it to tell whether the viewer's chats list it, without
-  this manager's own facts having been computed.
+  this manager's own facts having been computed, before it sends
+  [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput).
 - **`direct`** holds, for each counterpart principal, the entry of the direct
   room this user shares with them. It has at most one entry per counterpart. It
   keeps a direct room's entry even after the room is forgotten, so the
@@ -210,8 +212,8 @@ These rules hold for every stream:
   can offer it to the people the request names by profile, and add them to its
   participants, and `offerRoom`, which can offer a room to the member it names
   and add them to its participants.
-  `openDirect`, `createGroup` and `accept` also add this user to the room's
-  participants, which anyone the room's space admits may do.
+  `openDirect`, `createGroup`, `accept` and `joinRoom` also add this user to
+  the room's participants, which anyone the room's space admits may do.
 
 | Stream | Reviewed surface | Effect |
 | --- | --- | --- |
@@ -219,6 +221,7 @@ These rules hold for every stream:
 | [`createGroup`](#creategrouprequestid-string-members-string-profiles-cellchatprofile-title-string-joinablebylink-boolean) | `ChatStartSurface` | a new group room |
 | [`offerRoom`](#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile) | none | a room this user added someone to, offered to them |
 | [`accept`](#acceptrequestid-string-room-cellchatroomoutput-counterpart-string-keeparchived-boolean) | none | an entry for a room this user has been admitted to |
+| [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput) | none | a room this user has joined, made one of their chats |
 | [`forget`](#forgetrequestid-string-room-cellchatroomoutput-revision-string) | none | the entry removed from `rooms`; the room itself is untouched |
 | [`delivered`](#deliveredrequestid-string-id-string) | none | the notice removed from `outgoingNotices` |
 
@@ -387,6 +390,36 @@ it has no `about.record`, and the catalog lists rooms by their own spaces, so
 `accept` refuses one, with the code `space-own-chat`: its space is the social
 space it belongs to. Listing a space's own chat among a user's chats is a
 possible later direction, which this contract doesn't promise.
+
+### `joinRoom(requestId?: string, room: Cell<ChatRoomOutput>)`
+
+- `requestId?: string` — Chosen by the sender, and unique among its requests.
+  The outcome is recorded under it in `requests`. Unlike any other stream's, it
+  may be absent: a caller that only says the user has joined a room sends none,
+  and the manager records the outcome under an id of its own, or, for a room
+  this user's chats list already, records nothing.
+- `room: Cell<ChatRoomOutput>` — A link to the room this user has joined.
+
+Makes a room this user has joined one of their chats. The caller says what
+happened, that the user entered the room, and the manager decides what that
+takes. Which act counts as joining a room is the caller's to decide: a room
+counts its viewer writing in it (see
+[`ChatRoomOutput`](ChatRoomOutput.md#streams)), and a host MAY count the user
+opening the room's page.
+
+- **Admitted:** without a reviewed gesture, as for `accept`.
+- **Effect:** for a room this user's chats list already, nothing. Otherwise
+  what `accept` does with no `counterpart` and without `keepArchived`: records
+  an entry in `rooms`, putting a forgotten room back, and adds this user's
+  profile to the room's participants once it has resolved. One case differs: a
+  direct room this user created, which `accept` refuses, is listed again, and
+  its entry in `direct` stays as it is. Sending it again changes nothing, so a
+  caller MAY send it each time the user enters the room, without first reading
+  whether their chats list it.
+- **Outcome:** `done` with the entry, or `refused` for the reasons `accept`
+  gives, other than that this user created a direct room. Without a
+  `requestId`, a join of a room this user's chats list already records no
+  outcome.
 
 ### `forget(requestId: string, room: Cell<ChatRoomOutput>, revision: string)`
 

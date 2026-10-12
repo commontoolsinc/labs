@@ -27,11 +27,17 @@ import {
   getEntityId,
   handler,
   spaceAccess,
+  spaceOf,
+  type Stream,
   type TrustedActionWrite,
   Writable,
   type WriteAuthorizedBy,
   type WritePolicyAnyOf,
 } from "commonfabric";
+import {
+  isSharedSpaceCatalog,
+  type SharedSpaceCatalogStorage,
+} from "../system/shared-space-catalog.ts";
 import {
   chooseRecordedTime,
   isInMain,
@@ -54,6 +60,7 @@ import {
   CHAT_OBLITERATE_SURFACE,
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
@@ -64,6 +71,7 @@ import {
   type ChatReaction,
   type ChatRoomActivity,
   type ChatRoomKind,
+  type ChatRoomLink,
   type ChatRoomPolicy,
   CLOCK_TICK_NSEC,
   durationNsec,
@@ -678,6 +686,25 @@ export type ComposerCell = Writable<
 /** The acts on a message, each performed by a handler of its own. */
 type MessageAct = "send" | "edit" | "delete" | "obliterate";
 
+/** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
+export interface JoinRoomRequest {
+  /** The room the viewer has joined. */
+  room: Cell<ChatRoomLink>;
+}
+
+/**
+ * Whether `catalog` keeps the room in `space` as one of its user's chats; a
+ * catalog that doesn't read as one keeps none.
+ */
+export const listsRoomIn = (
+  catalog: unknown,
+  space: string | undefined,
+): boolean => {
+  if (!isSharedSpaceCatalog(catalog) || space === undefined) return false;
+  const entry = catalog.entries[space];
+  return entry?.kind === CHAT_ROOM_OFFER_KIND && entry.state === "saved";
+};
+
 /**
  * The room's records, and a rendered control's bindings, as every handler
  * that changes the room is bound to them.
@@ -733,7 +760,36 @@ export interface RoomActState {
 
   /** Whether this binding closes `pickerOpen`, which only a picker binds. */
   closesPicker?: boolean;
+
+  /**
+   * Whether the viewer's manager can take the viewer into the room: the
+   * viewer has a manager, and the room is its space's own, which it can name
+   * itself to the manager by. Absent, it can't.
+   */
+  canJoin?: boolean;
+
+  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
+  joinRoom?: Stream<JoinRoomRequest>;
+
+  /** The shared-space catalog the viewer's manager lists its rooms from. */
+  catalog?: SharedSpaceCatalogStorage;
+
+  /** The room itself, as the viewer's manager links it. */
+  self?: Cell<ChatRoomLink>;
 }
+
+/**
+ * Tells the viewer's manager the viewer has joined the room, when its catalog
+ * doesn't keep the room as one of their chats already. Writing in a room is
+ * joining it, so a room the viewer reached by its link becomes one of their
+ * chats, and one they forgot becomes one again.
+ */
+const joinForViewer = (state: RoomActState): void => {
+  const { canJoin, joinRoom, catalog, self } = state;
+  if (canJoin !== true || joinRoom === undefined || self === undefined) return;
+  if (listsRoomIn(catalog, spaceOf(self))) return;
+  joinRoom.send({ room: self });
+};
 
 /**
  * Performs one message act: send, edit, delete, or obliterate. Each act is
@@ -831,6 +887,7 @@ const performMessageAct = (
     if (state.replyFrom === "replyTo" && composing?.replyTo !== undefined) {
       composer.key("replyTo").set(undefined);
     }
+    joinForViewer(state);
     return;
   }
 
@@ -971,6 +1028,7 @@ const performReactionAct = (
     mine.set({ reactorProfile: profile, emoji, sentAt } as SentReaction);
     list.addUnique(mine);
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
+    joinForViewer(state);
   }
   if (op === "remove" && present) {
     const loggedAt = claimTime(usedTimes, clock);
