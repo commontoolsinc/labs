@@ -139,6 +139,63 @@ A named instance also records, as its descriptor's `legacyPartialCause`, the
 number, so every other anonymous root keeps the number it would have without
 instance names.
 
+A sub-pattern instance with a positional cause moves to another child's state
+when a cell is added ahead of it, since its child is the one minted from
+whatever number it now takes. A parent's setup refuses
+(`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
+naming both pattern identities, to set up a child at a positional spot over a
+stored child of another pattern identity when the parent shows its positional
+children have moved spots:
+
+- a child of the incoming pattern identity runs at another positional spot of
+  the parent; or
+- another positional spot of the pattern sets up the stored child's pattern
+  identity.
+
+A stored child of a different identity with neither sign is taken for the same
+child under a newer version of its own source, since a child's identity changes
+whenever its own source does, so neither rule blocks an ordinary update of a
+child's source. Only positional spots are judged: a spot a result key, a node
+input or `.for()` names does not shift. Nor is a child that is its space's
+root, which its space's genesis places whatever its cause, or a child managed
+independently in a space of its own, which its parent resumes rather than sets
+up. A spot whose node sets up a space's root is not counted as another
+positional spot either, since its child does not sit there.
+
+Only a parent its updater has pointed at a new pattern is judged: its stored
+`patternIdentity` already names the incoming pattern, while its setup marker,
+`patternSetupIdentity`, names another pattern or none. An updater moves the
+pointer before the setup it asks for, and a live update follows the pointer's
+move. A parent that runs whichever pattern a computation returns, such as a
+`computed` choosing among sub-pattern instances, is set up with a pattern its
+pointer does not yet name, and an unrelated pattern there is no sign that its
+children moved. The guard reads a child only at a positional spot the parent's
+stored manifest of internal cells records, since no child can be set up at any
+other, so a fresh parent's setup reads no child at all.
+
+The refusal comes before anything the setup stages commits, so a refused
+update changes none of the piece's state. A live update the guard refuses
+leaves the previous pattern running. The piece's pattern pointer still names
+the refused pattern, though, so a fresh start sets that pattern up, refuses
+again, and does not start the piece until the pointer names a pattern the guard
+accepts, such as the source the piece ran before.
+
+What this leaves open:
+
+- Where a child's own source changed in the same update that moved it, its
+  identity changed with it, so the rules have nothing to judge by and let the
+  setup through. A child can then take another's state.
+- When a positional root moves to a number nothing held, its children are
+  minted afresh and the old ones are orphaned with no refusal, since nothing
+  sets up over them.
+- A parent set up as part of an update of an enclosing pattern, rather than
+  pointed at its new pattern by an updater, is not judged, so its own
+  positional children can move onto each other's state.
+- A root its updater points at an unrelated pattern is judged as though it ran
+  a newer version of its own, so it can be refused where the new pattern sets
+  up a stored child's pattern at another positional spot. Pointing it back at
+  the pattern it ran before lets it start again.
+
 ### Transaction provenance
 
 The runner already distinguishes recompute transactions from event-handler
