@@ -560,7 +560,16 @@ by the read's shape:
   completeness attestation, not an extension of what a client may omit:
   the sanctioned omission remains a processed rejection (§3.5), and a
   client has nothing to gain from omitting a live layer — the scan
-  converts exactly that bug into a retryable conflict.
+  converts exactly that bug into a retryable conflict. A named layer the
+  server accepted as an identity commit (§3.6.1) wrote nothing, so the
+  exclusion has no revision of it to skip, while the foreign write its
+  proof matched lies inside the interval. Where the layer's operations on
+  the document begin with a `set`, or its own read of the document sat on
+  the reader's declared `basisSeq` through no own layer the reader does not
+  name, the reader's view through the layer is the document the proof was
+  made against, which is the stored document at the layer's seq, and the
+  scan starts at that seq instead. The server looks for such a layer only
+  once the declared basis has found a conflict.
 - **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
   element's resolution seq. Writes landing between the reader's confirmed
   basis and that seq are not scanned — the pending-read basis over-advance
