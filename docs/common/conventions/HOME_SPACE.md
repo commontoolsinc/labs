@@ -333,7 +333,7 @@ The home space's default pattern is the home experience itself — by default,
 first of: its user's first open; the home space's own server, which ensures the
 root once server execution activates the space and its owner resolves; and the
 first wish on a client runtime for a target under its root, unless that wish is
-headless or for `#chatManager`, neither of which creates one (see
+headless, for `#chatManager`, or for `#profile`, none of which creates one (see
 [Built-in Targets](wish.md#built-in-targets)). From then on it owns account
 data: profiles, favorites, navigation, the shared-space catalog and the private
 inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
