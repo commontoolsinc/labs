@@ -74,7 +74,9 @@ export async function bringUpHomeRootForWrites(
     ) {
       continue;
     }
-    const slot = runtime.getHomeSpaceCell(tx).key("defaultPattern").getRaw();
+    const slot = runtime.getSpaceCell(home, undefined, tx).key(
+      "defaultPattern",
+    ).getRaw();
     if (slot === undefined) await createHomeRoot(runtime, home);
     return;
   }
