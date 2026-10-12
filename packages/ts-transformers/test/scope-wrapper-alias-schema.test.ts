@@ -535,6 +535,46 @@ export default make<Secret>();`,
       });
     });
 
+    describe("a generic wrapper around a labelled payload beside `null` or `undefined`", () => {
+      // The nullish member sits beside both deferred tags, `ScopeTag` and
+      // `CfcTag`, while the payload is a type parameter.
+
+      const captureOf = async (nullish: "null" | "undefined") => {
+        const module = await transformed(
+          `import { computed, pattern, type Confidential, type PerUser } from "commonfabric";
+interface Secret { a: string }
+function make<T extends { a: string }>() {
+  return pattern<{ secret: PerUser<Confidential<T | ${nullish}, ["owner"]>> }>(({ secret }) => ({
+    out: computed(() => secret?.a),
+  }));
+}
+export default make<Secret>();`,
+        );
+        return callSchemas(module, "lift")[0]!;
+      };
+
+      it("captures `undefined` beside the payload as an optional property", async () => {
+        const capture = await captureOf("undefined");
+
+        expect(capture.required ?? []).not.toContain("secret");
+        expect((capture.properties as Record<string, unknown>).secret)
+          .toMatchObject({
+            anyOf: expect.arrayContaining([{ type: "undefined" }]),
+            scope: "user",
+          });
+      });
+
+      it("captures `null` beside the payload", async () => {
+        const capture = await captureOf("null");
+
+        expect((capture.properties as Record<string, unknown>).secret)
+          .toMatchObject({
+            anyOf: expect.arrayContaining([{ type: "null" }]),
+            scope: "user",
+          });
+      });
+    });
+
     it("keeps the scope of a capture of a generic wrapper read through a generic interface's property", async () => {
       // A property of a generic interface, read through its expression, is
       // `PerUser<T>` to the checker, with no written reference to it.
