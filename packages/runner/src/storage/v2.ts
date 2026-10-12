@@ -9656,6 +9656,12 @@ export class SpaceReplica
       // stored document alone, which shows only that its ops leave that
       // document unchanged; its `value` is not the stored document, and the
       // layer promotes below by replaying its ops, as any accept does.
+      //
+      // A `patch` layer's `value` is its transaction's working root, mutable
+      // where the transaction thawed it, so the confirmed document is a frozen
+      // copy of it: a transaction loads the confirmed document by identity,
+      // and one that writes over a mutable root changes it in place, leaving
+      // no difference from what it loaded to commit.
       const elidedHere = applied.elidedOpIndexes !== undefined &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
@@ -9665,7 +9671,7 @@ export class SpaceReplica
         if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
           record.confirmed = confirmedVersion(
             applied.seq,
-            computed.value,
+            cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
         }
