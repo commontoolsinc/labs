@@ -311,14 +311,15 @@ slot is empty, as it is before the home space is first opened, a headless wish
 for one of these resolves to nothing, with no result and no error, and a
 `"~"`-scoped one resolves to whatever else its scope reaches. Any other wish for
 one of these hands out a cell through the empty slot, where a read finds
-nothing. The first write beneath it creates the root. On a client runtime, a
-handler's write there is refused, the root is created, and the handler runs
-again, so the write lands under the root. A handler that only reads beneath the
-empty slot creates nothing. A write beneath an empty slot is refused otherwise,
-with a `SpaceRootMissingError`, rather than landing in the space cell itself: a
-write outside a handler, a write on a serving runtime, which creates no root,
-and a write whose root's creation failed. A slot that
-already holds something is resolved through as it stands. The other `#profile*`
+nothing. A write beneath the empty slot is refused with a
+`SpaceRootMissingError` rather than landing in the space cell itself. When the
+write is a handler's on a client runtime, and the refusal escapes the handler,
+the root is created and the handler runs again, so the write lands under the
+root. None of these creates one, and each leaves the slot empty: a handler that
+only reads beneath the empty slot, a handler that catches the refusal itself, a
+write outside a handler, and any write on a serving runtime. A root whose
+creation fails leaves the handler's refusal standing, with the failure as its
+cause. A slot that already holds something is resolved through as it stands. The other `#profile*`
 targets only read the profile roster through the slot as it stands, so for
 them an empty slot reads as no profiles. `#chatManager` only reads the home
 pattern too, and reports an error, naming the remedies, when there is no home

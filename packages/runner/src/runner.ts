@@ -11440,10 +11440,14 @@ export class Runner {
    * Home's empty slot was refused with `error`, then throws
    * {@link RetryImmediately} so the scheduler runs the handler again, and its
    * write lands under the root. A creation that fails is reported as `error`
-   * itself, with the failure as its cause. `undefined` when this runtime brings
-   * up no root for `error` (see `bringUpHomeRootForRefusedWrite()`).
+   * itself, with the failure as its cause and the handler's `frame` attached,
+   * as a handler's other failures carry theirs. `undefined` when this runtime
+   * brings up no root for `error` (see `bringUpHomeRootForRefusedWrite()`).
    */
-  #bringUpHomeRootAndRetry(error: unknown): Promise<never> | undefined {
+  #bringUpHomeRootAndRetry(
+    error: unknown,
+    frame: Frame,
+  ): Promise<never> | undefined {
     const creation = bringUpHomeRootForRefusedWrite(this.#runtime, error);
     if (creation === undefined) return undefined;
     return creation.then(
@@ -11451,7 +11455,8 @@ export class Runner {
         throw new RetryImmediately("Bringing up the user's Home root");
       },
       (failure: unknown) => {
-        (error as Error).cause = failure;
+        (error as Error & { frame?: Frame }).cause = failure;
+        (error as Error & { frame?: Frame }).frame = frame;
         throw error;
       },
     );
@@ -11889,7 +11894,8 @@ export class Runner {
           ? result.then(
             postRun,
             (error) =>
-              this.#bringUpHomeRootAndRetry(error) ?? Promise.reject(error),
+              this.#bringUpHomeRootAndRetry(error, frame) ??
+                Promise.reject(error),
           )
           : postRun(result);
         if (postRunResult instanceof Promise) {
@@ -11914,7 +11920,7 @@ export class Runner {
         }
         // A write beneath the user's Home before Home has a root is refused;
         // the root is brought up, and the handler runs again.
-        const retrying = this.#bringUpHomeRootAndRetry(error);
+        const retrying = this.#bringUpHomeRootAndRetry(error, frame);
         if (retrying !== undefined) {
           popFrameAfterReturn = false;
           return retrying.finally(() => popFrame(frame));

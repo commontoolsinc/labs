@@ -282,8 +282,12 @@ describe("wish-home-root", () => {
         surface.key("add").send({ name: "Ada" });
         await runtime.idle();
 
-        expect(errors.some((error) => error instanceof SpaceRootMissingError))
-          .toBe(true);
+        const refusal = errors.find((error) =>
+          error instanceof SpaceRootMissingError
+        ) as (SpaceRootMissingError & { frame?: unknown }) | undefined;
+        expect(refusal).toBeDefined();
+        expect(String(refusal!.cause)).toContain("404");
+        expect(refusal!.frame).toBeDefined();
         expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
