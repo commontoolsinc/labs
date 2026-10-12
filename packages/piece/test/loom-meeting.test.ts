@@ -145,6 +145,43 @@ describe("loom meeting", () => {
     );
   });
 
+  it("leaves the association unchanged when a request's reply cell is the association", async () => {
+    const compiled = await runtime.patternManager.compilePattern(program, {
+      space: pieces.getSpace(),
+    });
+    root = await pieces.runPersistent(compiled, {}, "loom meeting alias");
+    const key = "a".repeat(64);
+    const bind = await root.asSchema(
+      {
+        type: "object",
+        properties: { bindMeeting: { asCell: ["stream"] } },
+        required: ["bindMeeting"],
+      } as const,
+    ).key("bindMeeting").pull();
+    const meeting = pieces.getArgument(root).key("meeting").asSchema(undefined);
+    const cases: [string, unknown, string][] = [
+      ["empty", {}, key],
+      ["bound, invalid key", { key }, "bad"],
+      ["bound, conflicting key", {
+        key,
+        future: { preserved: true },
+      }, "b".repeat(64)],
+      ["malformed", { future: { preserved: true } }, key],
+    ];
+    for (const [name, value, requested] of cases) {
+      const { error } = await runtime.editWithRetry((tx) => {
+        meeting.withTx(tx).set(value);
+      });
+      expect(error).toBeUndefined();
+      await sendAndSettle(
+        bind,
+        { key: requested, reply: meeting },
+        `meeting-alias-${name}`,
+      );
+      expect(meeting.getRaw()).toEqual(value);
+    }
+  });
+
   for (const mode of ["controller", "cold setup"] as const) {
     it(`binds a populated pre-meeting root after ${mode} and preserves panel writes`, async () => {
       const space = pieces.getSpace();

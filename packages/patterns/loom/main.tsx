@@ -257,7 +257,9 @@ const ensureChatRoom = handler<void, { chatRoom: ChatRoomCell }>(
  * Binds an empty Loom to one meeting key and confirms a same-key replay.
  * A different key or unrecognized stored value leaves the association intact.
  * The read participates in the handler transaction, so competing bindings
- * retry against the association that committed first.
+ * retry against the association that committed first. A request whose reply
+ * cell is the association itself changes nothing and gets no response, since
+ * any response would replace the association.
  */
 const bindMeeting = handler<
   BindMeetingRequest,
@@ -268,6 +270,7 @@ const bindMeeting = handler<
     >;
   }
 >(({ key, reply }, { meeting, storedFields }) => {
+  if (reply?.equals(meeting)) return;
   if (
     typeof key !== "string" || key.length !== 64 || !/^[0-9a-f]{64}$/.test(key)
   ) {

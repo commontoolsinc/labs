@@ -274,8 +274,10 @@ the first committed key. If supplied, the per-event reply cell receives
 request key receives `{status: "invalid-key"}`. Unrecognized stored state,
 including extra fields without a key or a malformed stored key, receives
 `{status: "invalid-state"}` and stays intact. Extra metadata alongside a valid
-key stays intact on replay or conflict. A caller omitting `reply` confirms
-success by observing the matching `meeting.key` in the root's output.
+key stays intact on replay or conflict. A request whose `reply` is the
+association cell itself changes nothing and receives no response, since any
+response written there would replace the association. A caller omitting `reply`
+confirms success by observing the matching `meeting.key` in the root's output.
 
 The association is meaningful shared state, independent of panels, chat, and
 each viewer's overlay. Source updates preserve it through its `PerSpace` input.
