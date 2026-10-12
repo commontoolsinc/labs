@@ -1,7 +1,8 @@
 # `compact-space` — shrinking one space's history after a write storm
 
-**Status:** stages 1–3 landed (the bounded base search, the basis guard,
-the dry run); stage 4, the write path, in review; stages 5–8 open. Design
+**Status:** stages 1–4 landed (the bounded base search, the basis guard,
+the dry run, the write path with its verification); stage 5, documentation,
+in review; stage 6, the rehearsal, under way; stages 7–8 open. Design
 written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
@@ -990,8 +991,8 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 through 3 have landed, and stage 4
-onward is open. Two engine changes came first, and both have landed: the
+Each stage is a pull request. Stages 1 through 4 have landed, stage 5 is in
+review, and stage 6 onward is open. Two engine changes came first, and both have landed: the
 base search, because it preserves history, helps the uncompacted store from
 the deploy that carries it, and is the measurement the compaction decision
 was made against; and the basis guard, because no store may be compacted
@@ -1024,7 +1025,7 @@ until the engine can tell compacted history from absence.
    `(seq, op_index)` that considers only snapshots below that seq, tested on
    a multi-operation commit with and without a snapshot at it. Run on the
    2026-10-09 snapshot; its numbers are in the cost section above.
-4. **The write path** — in review. The compaction commit with its per-run
+4. **The write path** — done ([labs#8722](https://github.com/commonfabric/labs/pull/8722)). The compaction commit with its per-run
    identity and its ACL-document marker, materialize, truncate, hollow
    (commit 1, the `op_*`-referenced commits and every compaction commit
    exempt), `VACUUM INTO`, `--verify --against`. Tests: every head reads back identical
@@ -1043,12 +1044,13 @@ until the engine can tell compacted history from absence.
    a store with a second branch is refused; a run interrupted after the first
    instance resumes to the same result as an uninterrupted one, with two
    compaction commits.
-5. **Documentation and the spec amendment.** The `cf space compact` section
-   of `packages/cli/README.md` (the command-docs gate requires it), the
-   §7 paragraph in `02-storage.md`, the state inspector learning the
-   `compaction` member and the compaction commit, and a runbook section in
-   `staging-space-copy.md` or a sibling document carrying the Estuary recipe
-   of §4 once it has been run.
+5. **Documentation and the spec amendment** — in review. The `cf space
+   compact` section of `packages/cli/README.md` (the command-docs gate
+   requires it; landed with stage 4), the §7.1 paragraph in `02-storage.md`,
+   the state inspector learning the `compaction` member (the ACL document's
+   classification carries it) and the compaction commit and the hollowed
+   payloads (`cf inspect commits` names them), and a runbook document
+   carrying the Estuary recipe of §4 as the rehearsal ran it.
 6. **Rehearsal on a clone of the current Topics file**, with the same
    timings as stage 1 taken after compaction.
 7. **The production run**, by the operator, from the rehearsed flag set, with
