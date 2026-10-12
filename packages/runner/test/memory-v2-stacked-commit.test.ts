@@ -5687,6 +5687,62 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("promotes an elided patch of a document it did not read by replaying it, keeping the frame's fields", async () => {
+      // With no read of the document, the proof was made against the stored
+      // document and shows only that the patch leaves it unchanged; the
+      // saved root is not what the store holds, so the frame's fields stand
+      // and the patch replays over them.
+      const harness = await createHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { n: 1, extra: "old" });
+        await watch(harness);
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          elideOps: true,
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { n: 2, extra: "new" },
+            }],
+          },
+        });
+        const patch = harness.replica.commitNative(
+          {
+            operations: [{
+              op: "patch",
+              id: DOCS.A,
+              type: DOCUMENT_MIME,
+              patches: [{ op: "replace", path: "/value/n", value: 2 }],
+              value: { value: { n: 2, extra: "old" } },
+            }],
+          },
+          undefined,
+          { resolveAt: "verdict" },
+        );
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { n: 2, extra: "new" },
+          }],
+        });
+        await clock.settle();
+        expectVisible(harness, { A: { n: 2, extra: "new" } });
+
+        responseGate.resolve();
+        await expectResultOk(patch);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { n: 2, extra: "new" } });
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
     it("promotes an elided splice over the base it read when no frame has moved the list", async () => {
       // Elided or not, the store holds the list the splice computed, and
       // with no frame delivered since the layer was laid the promotion is

@@ -402,18 +402,21 @@ patches it is judged as one write of the final value:
   for such a session.
 
 An accept reports the operations it elided on the verdict
-(`elidedOpIndexes`, 04-protocol.md §4.3.1). The proof's first condition
-established that the stored document is the one the layer's transaction
-computed from its own view, which the pending layer carries. A replica that
-advertised `elidedVerdicts` therefore promotes a layer every operation of
-which was elided to that document, at the commit's seq, whatever ops the
-layer holds and whatever frames the replica has integrated meanwhile:
-replaying the ops is exact only over the base they were diffed from, and a
-frame delivered since may be an intermediate state the proof was not made
-against. A frame already integrated at or after the commit's seq is newer
-and stands. A session opened with the capability is resumed only by a client
-that advertises it: a replayed verdict may carry an elision only such a
-replica handles.
+(`elidedOpIndexes`, 04-protocol.md §4.3.1). Where the commit read the
+document, the proof's first condition established that the stored document
+is the one the layer's transaction computed from its own view, which the
+pending layer carries, and a replica that advertised `elidedVerdicts`
+promotes a layer every operation of which was elided to that document, at
+the commit's seq, whatever ops the layer holds and whatever frames the
+replica has integrated meanwhile: replaying the ops is exact only over the
+base they were diffed from, and a frame delivered since may be an
+intermediate state the proof was not made against. Where the commit did not
+read the document, the proof was made against the stored document and shows
+only that the ops leave it unchanged, so the replica promotes by replaying
+them, as it does any accept. A frame already integrated at or after the
+commit's seq is newer and stands. A session opened with the capability is
+resumed only by a client that advertises it: a replayed verdict may carry
+an elision only such a replica handles.
 
 The reader's view of a document is reconstructed from the commit's own read
 of it, on the commit's branch: for a pending read, the document at the read's

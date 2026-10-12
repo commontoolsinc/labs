@@ -1495,8 +1495,9 @@ export type AppliedCommit = {
    * advanced no head, and marked nothing dirty. The commit itself still
    * records and advances the space log, and a replica that advertised
    * `elidedVerdicts` promotes a pending layer every operation of which is
-   * listed here to the document its transaction computed, which the
-   * identity proof established is the stored one.
+   * listed here to the document its transaction computed where the commit
+   * read the document, which is when the identity proof established that
+   * document is the stored one.
    */
   elidedOpIndexes?: number[];
 
