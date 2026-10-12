@@ -27,7 +27,8 @@ const someoneElse = (await Identity.fromPassphrase("someone else")).did();
 // A Home pattern reduced to the fields the host reads and the stream it sends,
 // whose handler records what it is sent: the inbox to adopt, the deciding
 // profile, and the refusal, its reason and inbox. `defaultProfile` is a slot
-// holding the default under `profile`, as Home's is.
+// holding the default under `profile`, as Home's is. The handler throws while
+// `failEnsure` is set.
 const program: RuntimeProgram = {
   main: "/home.tsx",
   files: [{
@@ -52,8 +53,10 @@ const ensurePrivateInbox = handler<
     adopted: Writable<Pointer>;
     decidedBy: Writable<Named>;
     refused: Writable<Refused>;
+    failEnsure: Writable<boolean>;
   }
->((event, { ensured, adopted, decidedBy, refused }) => {
+>((event, { ensured, adopted, decidedBy, refused, failEnsure }) => {
+  if (failEnsure.get()) throw new Error("Home fails the ensure");
   ensured.set(ensured.get() + 1);
   adopted.set(event?.adopt === undefined ? {} : { piece: event.adopt });
   decidedBy.set(event?.from === undefined ? {} : { piece: event.from });
@@ -75,6 +78,7 @@ export default pattern(() => {
   const adopted = new Writable<Pointer>({}).for("adopted");
   const decidedBy = new Writable<Named>({}).for("decidedBy");
   const refused = new Writable<Refused>({}).for("refused");
+  const failEnsure = new Writable(false).for("failEnsure");
   return {
     privateInbox,
     profiles,
@@ -84,11 +88,13 @@ export default pattern(() => {
     adopted,
     decidedBy,
     refused,
+    failEnsure,
     ensurePrivateInbox: ensurePrivateInbox({
       ensured,
       adopted,
       decidedBy,
       refused,
+      failEnsure,
     }),
   };
 });`,
@@ -324,6 +330,25 @@ describe("ensurePrivateInboxOf()", () => {
     expect(result).toEqual({ outcome: "none-advertised" });
     expect(await adopted()).toBeUndefined();
     expect(await home.key("ensured" as never).pull()).toBe(1);
+  });
+
+  it("resolves once Home's handler has run on the event", async () => {
+    await listProfiles([await profilePointingAt(undefined)]);
+
+    await ensurePrivateInboxOf(runtime, home, identity.did());
+
+    expect(home.key("ensured" as never).get()).toBe(1);
+  });
+
+  it("rejects when Home's handling of the event fails", async () => {
+    await listProfiles([await profilePointingAt(undefined)]);
+    await runtime.editWithRetry((tx) =>
+      home.withTx(tx).key("failEnsure" as never).set(true as never)
+    );
+
+    await expect(ensurePrivateInboxOf(runtime, home, identity.did())).rejects
+      .toThrow("Home fails the ensure");
+    expect(await home.key("ensured" as never).pull()).toBe(0);
   });
 
   describe("which profile decides", () => {

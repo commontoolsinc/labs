@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/api";
+import type { CellScope, FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
@@ -1895,6 +1895,59 @@ const writeIsRuntimeInitialization = (
 };
 
 /**
+ * The write-policy inputs that can bear on `target`'s document, by the
+ * documents an input names: its target, and for a structural-provenance
+ * claim its sources too. The index is built once per transaction for the
+ * inputs recorded so far and rebuilt when more are recorded, so a check at
+ * one of a commit's many written paths reads the inputs about that document
+ * rather than every input the transaction holds.
+ */
+const writePolicyInputsForDocument = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+): readonly WritePolicyInput[] => {
+  const inputs = tx.getCfcState().writePolicyInputs;
+  let indexed = writePolicyInputIndexes.get(tx);
+  if (indexed === undefined || indexed.length !== inputs.length) {
+    const byDocument = new Map<string, WritePolicyInput[]>();
+    const add = (
+      address: { space: MemorySpace; id: string; scope?: CellScope },
+      input: WritePolicyInput,
+    ) => {
+      const key = documentKeyOf(address);
+      const list = byDocument.get(key);
+      if (list === undefined) byDocument.set(key, [input]);
+      else if (list[list.length - 1] !== input) list.push(input);
+    };
+    for (const input of inputs) {
+      if ("target" in input && input.target !== undefined) {
+        add(input.target, input);
+      }
+      if (input.kind === "structural-provenance") {
+        for (const source of input.sources) add(source, input);
+      }
+    }
+    indexed = { length: inputs.length, byDocument };
+    writePolicyInputIndexes.set(tx, indexed);
+  }
+  return indexed.byDocument.get(documentKeyOf(target)) ?? [];
+};
+
+const writePolicyInputIndexes = new WeakMap<
+  IExtendedStorageTransaction,
+  { length: number; byDocument: Map<string, WritePolicyInput[]> }
+>();
+
+const documentKeyOf = (
+  address: { space: MemorySpace; id: string; scope?: CellScope },
+): string =>
+  `${address.space}\0${address.id}\0${normalizeCellScope(address.scope)}`;
+
+/**
  * Whether `path` lies at or under a capture or binding the runtime staged in
  * this transaction, with the slot still holding it. Staging writes nothing
  * the referenced value holds, so the integrity the receiving slot's schema
@@ -1912,7 +1965,7 @@ const pathHoldsStagedReference = (
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
   const scope = normalizeCellScope(target.scope);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "initialization" &&
     (input.mode === "capture" || input.mode === "binding") &&
     tx.isRuntimeWritePolicyInput(input) &&
@@ -2016,7 +2069,7 @@ const pathHoldsUnattributedInitialization = (
     address.space === target.space && address.id === target.id &&
     normalizeCellScope(address.scope) === normalizeCellScope(target.scope) &&
     concretePathHasPrefix(logicalPath, canonicalizeLogicalPath(address.path));
-  const inputs = tx.getCfcState().writePolicyInputs;
+  const inputs = writePolicyInputsForDocument(tx, target);
   if (
     !tx.getCfcState().attributedInitialization &&
     inputs.some((input) => {

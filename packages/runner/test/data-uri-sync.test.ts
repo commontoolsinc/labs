@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { hashStringOf } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -590,6 +591,44 @@ describe("data URI sync", () => {
     }
   });
 
+  it("does not sync the document a declared-stream link names", async () => {
+    // A stream's document holds no value a read uses, so a link the reader's
+    // schema declares a stream names nothing to load; a handle at the same
+    // link is loaded as any other.
+    const linkedCell = runtime.getCell(space, "stream-target", undefined, tx);
+    linkedCell.set({ name: "Ada" });
+    const linkedId = linkedCell.getAsNormalizedFullLink().id;
+    const dataCell = runtime.getImmutableCell(
+      space,
+      { send: linkedCell.getAsLink() },
+      undefined,
+      tx,
+    );
+    const provider = storageManager.open(space);
+    const originalSync = provider.sync.bind(provider);
+    const synced: string[] = [];
+    provider.sync = (id: any, selector?: any, scope?: any) => {
+      synced.push(id);
+      return originalSync(id, selector, scope);
+    };
+    const event = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const;
+
+    await dataCell.asSchema({
+      type: "object",
+      properties: { send: { ...event, asCell: ["stream"] } },
+    }).sync();
+    expect(synced).not.toContain(linkedId);
+
+    await dataCell.asSchema({
+      type: "object",
+      properties: { send: { ...event, asCell: ["cell"] } },
+    }).sync();
+    expect(synced).toContain(linkedId);
+  });
+
   it("syncs a linked cell under the reader's schema, not the link's", async () => {
     const linkedCell = runtime.getCell(
       space,
@@ -670,5 +709,10 @@ describe("data URI sync memo key", () => {
   it("gives one identity one key", () => {
     expect(dataURISyncKey({ ...identity, path: ["a", "b"] }))
       .toBe(dataURISyncKey({ ...identity, path: ["a", "b"] }));
+  });
+
+  it("gives the same key for an id and for its hash handed in", () => {
+    expect(dataURISyncKey({ ...identity, idHash: hashStringOf(identity.id) }))
+      .toBe(dataURISyncKey(identity));
   });
 });
