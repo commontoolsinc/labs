@@ -47,6 +47,7 @@ import {
   type ClaimedAgentRun,
 } from "../src/agent-runner.ts";
 import { createTransactionCommitReceipt } from "../../runner/src/storage/commit-receipt.ts";
+import type { IStorageNotification } from "../../runner/src/storage/interface.ts";
 
 const CLOUD = "https://cloud.example";
 const LOCAL = "https://local.example";
@@ -258,19 +259,36 @@ describe("agent runner", () => {
 
   it("moves a record from `queued` through `claimed` and `running` to `completed`", async () => {
     const result = await submit();
+    // The runner writes the record through `runtime`, which reports each write
+    // as a commit holding the record as it stood before and after, so every
+    // state the record passes through is reported, back-to-back writes
+    // included.
     const runtime = connect(CLOUD);
+    const { id } = recordOf(result, runtime).getAsNormalizedFullLink();
     const states: string[] = [];
-    const stop = recordOf(result, runtime).sink((value) => {
-      if (value?.state && states.at(-1) !== value.state) {
-        states.push(value.state);
-      }
-    });
+    const commits: IStorageNotification = {
+      next(notification) {
+        if (notification.type !== "commit") return { done: false };
+        const change = [...notification.changes].find((change) =>
+          change.address.id === id
+        );
+        for (const side of change ? [change.before, change.after] : []) {
+          const state = (side as { value?: { state?: string } } | undefined)
+            ?.value?.state;
+          if (state !== undefined && states.at(-1) !== state) {
+            states.push(state);
+          }
+        }
+        return { done: false };
+      },
+    };
+    runtime.storageManager.subscribe(commits);
     await startRunner(completing(() => runtime), {
       runtimeForHost: () => Promise.resolve(runtime),
     });
 
     const record = await waitForState(result, "completed");
-    stop();
+    runtime.storageManager.unsubscribe?.(commits);
 
     expect(states).toEqual(["queued", "claimed", "running", "completed"]);
     expect(record.outcome).toBe("completed");
