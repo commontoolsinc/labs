@@ -184,10 +184,21 @@ function rt(): Runtime {
   return runtime;
 }
 
+/**
+ * Settles the runtime and its storage, until a round finds nothing to do.
+ *
+ * On the server-execution arm each round also waits for every event this
+ * runtime fired to reach its terminal consequence, and for that consequence
+ * to arrive back here, since the handlers are the serving loop's and their
+ * writes reach this replica only then. An event a served handler fires on
+ * its own account is no event of this runtime's, and is not waited for. On
+ * the other arm the runtime has no overlay, and there is nothing to wait for.
+ */
 async function settle(maxIterations = 20): Promise<void> {
   for (let i = 0; i < maxIterations; i++) {
     const start = performance.now();
     await rt().idle();
+    await rt().speculationOverlay?.waitForIntentQuiescence();
     await storageManager!.synced();
     if (performance.now() - start < SETTLE_FAST_MS) return;
   }
@@ -348,7 +359,8 @@ const handlers: Record<
         }, not off, observe, or persist`,
       );
     }
-    // Resolved before anything is opened, so a refusal leaves nothing to close.
+    // The orchestrator resolves the same environment the same way, and hosts
+    // the serving loop this runtime's arm needs.
     const experimental = patternTestExperimentalOptions(Deno.env.get);
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(

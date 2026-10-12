@@ -74,6 +74,7 @@ import {
   type CfcFlowLabelsMode,
   resetCfcDenialAnnouncements,
 } from "@commonfabric/runner/cfc";
+import type { ServingMemoryServer } from "@commonfabric/runner/executor/serving-memory-server.deno";
 import {
   type CDFPoint,
   clearTimingMeasures,
@@ -1118,6 +1119,15 @@ export async function runTestPattern(
 ): Promise<TestRunResult> {
   // Resolved before anything is opened, so a refusal leaves nothing to close.
   const experimental = patternTestExperimentalOptions(Deno.env.get);
+  if (experimental.serverExecution && options.storageHost !== undefined) {
+    throw new Error(
+      `\`cf test\` refuses a caller-supplied \`storageHost\` on the ` +
+        `server-execution arm: the store is the caller's, so the runner has ` +
+        `no memory server to host a serving loop beside, and the events its ` +
+        `runtime commits would go unserved. See "The ON topology in one ` +
+        `process" in \`docs/development/TESTING.md\`.`,
+    );
+  }
 
   // A denial logs its warning once per kind, and a denial's warning is what
   // fails a file that does not allow for one, so each file starts with every
@@ -1172,22 +1182,9 @@ export async function runTestPattern(
       options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
   );
   const space = identity.did();
-  // A caller-supplied store is FILE-BACKED, which the default emulation is not:
-  // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
-  // snapshot. See `TestRunnerOptions.storageHost`.
-  const storageManager = options.storageHost?.storageManager ??
-    await withPhase(
-      ["runTestPattern", "storageManager"],
-      async () => {
-        // The Deno storage cache opens SQLite as it loads, which a
-        // caller-supplied storage host makes unnecessary.
-        // deno-lint-ignore cf-imports/no-inline-module-import
-        const { StorageManager } = await import(
-          "@commonfabric/runner/storage/cache.deno"
-        );
-        return StorageManager.emulate({ as: identity });
-      },
-    );
+  const apiUrl = options.storageHost?.apiUrl ?? new URL(import.meta.url);
+  const moduleByteCache = options.moduleByteCache ??
+    getDefaultModuleByteCache();
 
   // Track navigation events for assertions and verbose output
   const navigations: NavigationEvent[] = [];
@@ -1204,17 +1201,53 @@ export async function runTestPattern(
   let fetchMockEntries: FetchMockEntry[] | undefined;
   const mockFetch = makeMockFetch(() => fetchMockEntries, realFetch);
 
+  // On the server-execution arm the memory server has a serving loop beside
+  // it, whose runtimes run the handlers this test's events fire. They fetch
+  // through the same mock, so a served handler sees the test's `fetchMocks`.
+  let serving: ServingMemoryServer | undefined;
+  // A caller-supplied store is FILE-BACKED, which the default emulation is not:
+  // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
+  // snapshot. See `TestRunnerOptions.storageHost`.
+  const storageManager = options.storageHost?.storageManager ??
+    await withPhase(
+      ["runTestPattern", "storageManager"],
+      async () => {
+        // The Deno storage cache opens SQLite as it loads, which a
+        // caller-supplied storage host makes unnecessary.
+        // deno-lint-ignore cf-imports/no-inline-module-import
+        const { EmulatedStorageManager, StorageManager } = await import(
+          "@commonfabric/runner/storage/cache.deno"
+        );
+        if (!experimental.serverExecution) {
+          return StorageManager.emulate({ as: identity });
+        }
+        // Loaded with the storage cache, for the same reason.
+        // deno-lint-ignore cf-imports/no-inline-module-import
+        const { startServingMemoryServer } = await import(
+          "@commonfabric/runner/executor/serving-memory-server.deno"
+        );
+        serving = await startServingMemoryServer({
+          apiUrl,
+          experimental,
+          fetch: mockFetch,
+          moduleByteCache,
+        });
+        return EmulatedStorageManager.connectTo(serving.server, {
+          as: identity,
+        });
+      },
+    );
+
   const runtime = await withPhase(
     ["runTestPattern", "runtime"],
     () =>
       // `runtimePresets.patternTest` carries the shared first-party posture
       // (CT-1814). Params below are this harness's declared deltas.
       new Runtime(runtimePresets.patternTest({
-        apiUrl: options.storageHost?.apiUrl ?? new URL(import.meta.url),
+        apiUrl,
         storageManager,
         experimental,
-        moduleByteCache: options.moduleByteCache ??
-          getDefaultModuleByteCache(),
+        moduleByteCache,
         // The collector is the runtime's, which makes every compile an
         // instrumented one and names the instrumented variant wherever the
         // runtime reads or writes a compiled closure. Replicating a pattern
@@ -1252,6 +1285,16 @@ export async function runTestPattern(
   console.log(
     `  CFC posture: enforcement=${runtime.cfcEnforcementMode} flowLabels=${runtime.cfcFlowLabels}`,
   );
+  // On the server-execution arm a handler's writes are the serving loop's,
+  // and neither `runtime.idle()` nor `storageManager.synced()` waits for them
+  // to arrive. This does: every event this runtime has fired has reached its
+  // terminal consequence, and that consequence has arrived back here. A
+  // served handler's own events are no event of this runtime's, so it says
+  // nothing about them. On the other arm the runtime has no overlay, and
+  // there is nothing to wait for.
+  const servedConsequences = async (): Promise<void> => {
+    await runtime.speculationOverlay?.waitForIntentQuiescence();
+  };
   if (!options.noIdempotencyCheck) runtime.enableIdempotencyCheck();
   else if (options.verbose) {
     console.log("  Idempotency verification disabled for this measurement.");
@@ -1568,6 +1611,7 @@ export async function runTestPattern(
     ], async () => {
       // Wait for initial setup to complete
       await runtime.idle();
+      await servedConsequences();
       // Also wait for all in-flight storage subscriptions to settle.
       // replica.poll() fires without await during mount(), so subscription
       // updates can arrive after idle() resolves, scheduling more work.
@@ -1667,6 +1711,17 @@ export async function runTestPattern(
                 stepLabel,
                 "settle",
                 `iter-${settle}`,
+                "servedConsequences",
+              ],
+              servedConsequences,
+            );
+            await withPhase(
+              [
+                "runTestPattern",
+                "step",
+                stepLabel,
+                "settle",
+                `iter-${settle}`,
                 "synced",
               ],
               () => storageManager.synced(),
@@ -1700,7 +1755,10 @@ export async function runTestPattern(
     const settleFully = async (stepIndex: number): Promise<void> => {
       await withPhase(
         ["runTestPattern", "step", `settle_${stepIndex}`, "settled"],
-        () => runtime.settled(),
+        async () => {
+          await runtime.settled();
+          await servedConsequences();
+        },
       ).catch((error) => {
         settlementFailed = true;
         throw error;
@@ -2343,7 +2401,9 @@ export async function runTestPattern(
       () =>
         runtime.dispose({ closeStorage: options.storageHost === undefined }),
     );
-    await teardown.catch((error) => {
+    // The serving loop closes after the runtime, whose storage manager was
+    // connected to the memory server beside it and does not own that server.
+    await teardown.finally(() => serving?.close()).catch((error) => {
       console.error(
         `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
       );

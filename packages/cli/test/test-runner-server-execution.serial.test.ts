@@ -1,49 +1,67 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join } from "@std/path";
+import { resolve } from "@std/path";
+import { Identity } from "@commonfabric/identity";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { withEnv } from "./utils.ts";
-import { runMultiUserTestPattern } from "../lib/multi-user-test-runner.ts";
-import { runTestPattern } from "../lib/test-runner.ts";
+import { runTestPattern, runTests } from "../lib/test-runner.ts";
 
-const REFUSAL =
-  "`cf test` refuses `EXPERIMENTAL_SERVER_EXECUTION=true`: it hosts no serving loop";
+const FIXTURES = resolve(import.meta.dirname!, "fixtures");
 
 describe(
   "cf test with server execution on",
   { sanitizeOps: false, sanitizeResources: false },
   () => {
-    // Each case names a test file that does not exist. The refusal comes
-    // before the file is read, so a runner that did not refuse fails on the
-    // missing file instead, with a message other than the refusal.
+    it("serves a single-user handler that instantiates a pattern in a space of its own", async () => {
+      // The child's space is created by the handler, so the served run is the
+      // only one that lands it; a speculative run's echo is withdrawn.
+      const root = resolve(FIXTURES, "in-space");
+      let outcome: Awaited<ReturnType<typeof runTests>> | undefined;
+      await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
+        outcome = await runTests(resolve(root, "create-in-handler.test.tsx"), {
+          root,
+        });
+      });
+      expect(outcome?.failed).toBe(0);
+      expect(outcome?.passed).toBe(2);
+    });
 
-    it("rejects a single-user run with the refusal", async () => {
-      const dir = await Deno.makeTempDir({ prefix: "cf-test-on-single-" });
+    it("delivers a participant's served write to the participant awaiting its marker", async () => {
+      // Alice's write is a handler's, so on this arm the serving loop makes
+      // it. Bob reads it once, after Alice's marker, so the assertion holds
+      // only when the loop served it before the marker was announced.
+      const root = resolve(FIXTURES, "multi-user-markers");
+      let outcome: Awaited<ReturnType<typeof runTests>> | undefined;
+      await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
+        outcome = await runTests(resolve(root, "marker-barrier.test.tsx"), {
+          root,
+        });
+      });
+      expect(outcome?.failed).toBe(0);
+      expect(outcome?.passed).toBe(1);
+      expect(outcome?.results[0].results[0].name).toBe("bob/assertion_1");
+    });
+
+    it("rejects a run against a caller-supplied storage host", async () => {
+      // The refusal comes before the file is read, so a runner that did not
+      // refuse fails on the missing file instead, with another message.
+      const dir = await Deno.makeTempDir({ prefix: "cf-test-on-host-" });
+      const identity = await Identity.fromPassphrase("cf-test-on-host");
+      const storageManager = StorageManager.emulate({ as: identity });
       try {
         await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
           await expect(
-            runTestPattern(join(dir, "never-read.test.tsx"), { root: dir }),
-          ).rejects.toThrow(REFUSAL);
-        });
-      } finally {
-        await Deno.remove(dir, { recursive: true });
-      }
-    });
-
-    it("returns the refusal as the error of a multi-user run", async () => {
-      const dir = await Deno.makeTempDir({ prefix: "cf-test-on-multi-" });
-      try {
-        let result:
-          | Awaited<ReturnType<typeof runMultiUserTestPattern>>
-          | undefined;
-        await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
-          result = await runMultiUserTestPattern(
-            join(dir, "never-read.test.tsx"),
-            { participants: [{ name: "alice", user: "alice" }] },
-            { root: dir },
+            runTestPattern(resolve(dir, "never-read.test.tsx"), {
+              root: dir,
+              storageHost: { identity, storageManager },
+            }),
+          ).rejects.toThrow(
+            "`cf test` refuses a caller-supplied `storageHost` on the " +
+              "server-execution arm",
           );
         });
-        expect(result?.error).toContain(REFUSAL);
       } finally {
+        await storageManager.close();
         await Deno.remove(dir, { recursive: true });
       }
     });

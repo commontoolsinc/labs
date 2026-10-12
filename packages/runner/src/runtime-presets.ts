@@ -483,7 +483,7 @@ interface CoreParams {
  */
 export function withServerExecutionDefault(
   experimental: ExperimentalOptions,
-): ExperimentalOptions {
+): ExperimentalOptions & { serverExecution: boolean } {
   return {
     ...experimental,
     serverExecution: experimental.serverExecution ??
