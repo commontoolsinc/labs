@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-29. Each flag's section carries the date its status
+**Last reviewed:** 2026-10-12. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -1748,9 +1748,9 @@ the per-epic implementation notes).
   with the next cycle.
 - **Purpose.** A serving cycle leaves its wave's commit in flight to the sink
   and ends at its publish; with input waiting, the next cycle drains and
-  settles over it and finishes it inside its settle, once that settle first
-  finds the scheduler quiet or after the deadline cuts the settle, and before
-  it computes its own advance, and with nothing waiting but the loop's own
+  settles over it and finishes it inside its settle, after the settle's first
+  completed step or after the deadline cuts the settle, and before it
+  computes its own advance, and with nothing waiting but the loop's own
   echoes the cycle finishes it before it ends, so a quiet space runs as it
   does with the commit inline. Under the worker the commit is a port round trip the main thread
   answers between its flush passes, so a cycle that waited on it idled for
@@ -1769,6 +1769,17 @@ the per-epic implementation notes).
 - **Current default and planned end state.** Off by default. The end state is
   on under the worker, where the measurement decides it, then the knob and the
   inline arm go.
+- **Status on 2026-10-12.** Implemented, off by default. Every executor suite
+  passes with the overlap forced on, which is how the drain's in-flight guard
+  came to record the wave a drained copy sealed into. Measured on the lunch poll's 25-vote burst with five rendering clients, worker
+  and store read-through, in
+  [the served-vote record](../history/development/performance/2026-10-11-served-vote-per-viewer-runs.md):
+  the cycle falls from 215 ms to 143 ms with the commit's round trip hidden
+  under the next drain and settle, the loop serves 38 waves a burst instead of
+  28, and the burst stays at about 5 s, bounded by the main thread's
+  per-session fan-out; the 30-topic seed does not move. On the main-thread
+  arm, with nothing to hide, the overlap lengthens the burst from 6.5 s to
+  7.8 s. It stays off until the fan-out floor moves.
 - **Path to removal.** Measure the vote burst and the seed under the worker
   with the overlap on, flip the default where it pays, then delete the knob.
 

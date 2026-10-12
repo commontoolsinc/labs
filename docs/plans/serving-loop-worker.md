@@ -86,7 +86,8 @@ which is what keeps the read-row admission's holder matching intact.
 
 **The server's observer crosses as events, its queries as requests.** The main
 thread installs the `ServerExecutionObserver` and forwards `commitAdmitted`,
-`sessionOpened`, `demandChanged` and `sessionChanged` to the worker. The last is
+`sessionOpened`, `demandChanged`, `viewsChanged` and `sessionChanged` to the
+worker. The last is
 the session registry's own lifecycle, an open, a detach with its expiry, or a
 removal, replayed in full when the observer is installed; the worker keeps a
 mirror from it and answers the three questions the loop asks without waiting,
@@ -100,10 +101,10 @@ demand set crosses as shares per session, read once and kept on the worker
 again, so a demand pass hands the space server's mirror the objects it compared
 last time and asks the server only for the sessions whose shares are stale or
 not yet cached. The view interests cross the same way (`ViewInterestCache`):
-read once per space and held until a `demandChanged` for a watch set, which is
-the message that carries a session's views, or a `sessionChanged`, which is
-what attaches, detaches or removes a viewing session, names the space; a
-selection the worker installs updates the held interest's generation itself.
+read once per space and held until the server's `viewsChanged`, sent for a
+watch set that carried views, or its `sessionChanged`, which is what attaches,
+detaches or removes a viewing session, names the space; a selection the
+worker installs updates the held interest's generation itself.
 A publish over unchanged interests then asks the server nothing, where the
 request alone waited for the server's thread's turn, however empty the list.
 
@@ -176,8 +177,8 @@ cycle leaves its commit in flight and ends at its publish. When nothing but
 the loop's own echoes arrived meanwhile, the cycle finishes the commit before
 it ends, so a quiet space runs the cycles it runs with the commit inline;
 otherwise the next cycle drains and settles over it and finishes it inside
-that settle, once the settle first finds the scheduler quiet or after the
-deadline cuts it, and before the cycle computes its own advance: the
+that settle, after the settle's first completed step or after the deadline
+cuts it, and before the cycle computes its own advance: the
 watermark, the derived tail and the open wave's note of the landed commit are
 then all current when the successor decides its commit. An event the finish
 requeues is drained again there, so its re-run joins the runs the rollback

@@ -307,6 +307,118 @@ The levers this leaves, in the order of what they cost here:
   overlapped commit and a pushed view-interest change would let them run at
   once.
 
+## The two port levers, built and measured
+
+The publish, first, since the record above names it without saying what it
+is. After a wave commits, the loop publishes the space's view plan: it asks
+the memory server which views the space's sessions have registered, and for
+each registered view it selects the reads a rendering of that view makes under
+the viewing identity and installs them as the session's delivery roots. A
+session registers a view only under the view-scoped replication flag, which
+is off here, and this harness's reconciler registers none in any case, so the
+list the publish asks for is empty on every cycle and the publish does nothing
+with it. The request is made regardless: the publisher runs on every cycle, and
+the flag decides what it finds, not whether it asks. On the main thread the
+ask is a method call and costs nothing. In the worker it is a port request,
+answered in no measurable time once the main thread takes it, and the main
+thread takes it when its current task ends, which during the burst is a flush
+pass of about 100 ms that the commit before the publish itself started. That
+is the 74 ms average: a median of 1.9 ms when the main thread is idle, 110 ms
+at the 90th percentile when it is not.
+
+The first change keeps the list on the worker (`ViewInterestCache`, beside
+the demand shares), read once per space and held until the server reports a
+change that can move it: a watch set that carried views, which the server now
+reports as `viewsChanged` beside the demand change the message raises, or a
+session's lifecycle, which attaches, detaches or removes a viewing session. A
+selection the worker installs updates the held interest's generation itself.
+A publish over unchanged interests then asks the server nothing.
+
+The second change overlaps the wave commit with the next cycle, under
+`SpaceServerPolicy.overlapWaveCommit` (`SERVER_EXECUTION_OVERLAP_COMMIT`). A
+cycle starts its commit, publishes, and ends; the next cycle drains and
+settles over the flight and finishes the commit inside its settle, after the
+settle's first completed step or after the deadline cuts it, and before the
+cycle computes its own advance, so the watermark, the derived
+tail and the open wave's note of the landed commit are current when the
+successor decides its commit. A write the sink refused rolls back while the
+successor's settle is still open and re-runs what read it, and the settle is
+probed again. When nothing but the loop's own echoes arrived during the
+committing cycle, that cycle finishes its commit before it ends, so a quiet
+space runs the cycles it runs with the commit inline. An event the finish
+requeues is drained again inside the same settle, so its re-run joins the
+runs its rollback re-armed in one wave, as it does after an inline commit. A
+cycle that ran a lifecycle verb commits inline, since the verb's receipt reads
+the outcome.
+
+Running every executor suite with the overlap forced on found one defect the
+overlap exposed and the inline order had hidden. The drain's in-flight guard,
+which stops a pending event from being queued twice, was released by a wave
+outcome naming the event's id. With a commit in flight, a wave can finish
+after a later drain queued the event's next copy, and a wave can name an event
+through a sibling contribution, an intent a handler issues, that carries no
+mark; either way the release freed a copy the outcome had not spoken for, and
+the next drain queued a second one. The sibling-survival pin in
+`executor-events-down.test.ts` landed a handler's non-idempotent effect twice
+under the overlap. The guard now records the wave the copy's own marking
+transaction sealed into, and only that wave's outcome releases it; a copy
+still queued is released by no outcome. The other differences the forced run
+showed were tests reading the inline order itself: a park expected before the
+refused cycle's edge, and a counter sampled between a commit and the
+quiescence advance that chases it, which the quiet finish put back in the
+inline place.
+
+With both changes, the burst with every client rendering the poll and the
+30-topic seed, each on the worker with the store read-through, read as
+follows; the burst is the benchmark's mean over three iterations with its
+range, and the box varied by about a third between iterations of one run.
+
+| measurement | overlap off | overlap on |
+| --- | --- | --- |
+| vote burst, worker, 100 ms deadline, two runs each | 5.2 s (4.4 to 6.0), 5.0 s (4.1 to 5.7) | 5.5 s (4.6 to 6.4), 5.2 s (4.4 to 6.5) |
+| vote burst, worker, 300 ms deadline | 4.4 s (3.5 to 5.6) | 5.3 s (3.8 to 7.7) |
+| vote burst, main thread, 100 ms deadline | 6.5 s (above) | 7.8 s (6.2 to 10.4) |
+| 30-topic seed, worker | 34.5 s | 34.2 s |
+
+The serving side of one burst under the worker, from the benchmark's own
+summary of the loop's rows:
+
+| arm | waves | cycle | settle | commit | publish |
+| --- | --- | --- | --- | --- | --- |
+| before either change (above) | 14 | 16 at 294 ms | 82 ms | 74 ms | 74 ms |
+| interests held, overlap off | 28 | 30 at 215 ms | 97 ms | 68 ms | 0.1 ms |
+| interests held, overlap on | 38 | 40 at 143 ms | 103 ms | 61 ms | 0.2 ms |
+| interests held, 300 ms deadline, overlap off | 11 | 12 at 315 ms | 246 ms | 69 ms | 0.1 ms |
+| interests held, 300 ms deadline, overlap on | 14 | 16 at 261 ms | 247 ms | 72 ms | 0.1 ms |
+
+The two levers did what they were built to do and the burst did not move.
+The publish is gone from the cycle. Under the overlap the cycle is its drain
+and its settle, 143 ms against 294, with the commit's 61 ms round trip hidden
+under them and its residual wait too small to reach the summary's rows; the
+worker now serves a wave about every 115 to 143 ms instead of every 294. What
+that bought is more waves, 38 to a burst instead of 14, each a smaller batch
+of votes, and a burst of the same length: the main thread's fan-out, the
+per-session walk and encode of the view-bearing documents that the record
+above puts near 3 s on an idle box and that reads nearer 5 s on this one, is
+the floor the loop was already sitting on, and a loop that reaches it faster
+waits at it. The 300 ms deadline makes the point from the other side: it
+brings the waves back to 11 and 14, and the burst reads 4.4 s and 5.3 s,
+inside the range the 100 ms runs span, so neither the number of commits nor
+the loop's cadence is what the burst is paying for. The
+main-thread arm says the same again: with an in-process sink there is no
+round trip to hide, the overlap only shortens cycles and multiplies waves,
+and the burst lengthens from 6.5 s to 7.8 s. The switch stays off by default,
+and is a worker-arm lever when the fan-out floor moves. The seed, which is
+client-paced and reads nothing per topic under server execution, moved from
+42 s to 34 s with the interests held, since its small waves each paid the
+publish round trip, and not at all with the overlap on.
+
+What the burst is paying for is therefore the first lever the list above
+names, the memory server's per-session walk and encode of the view-bearing
+documents, now with no serving-loop wait in front of it. That is where the
+next change goes;
+[the fan-out plan](../../../plans/served-vote-fan-out.md) carries it.
+
 ## What this says about the three questions the previous record left
 
 - **What the runs are.** Above: fan-out across sessions of a graph whose root
@@ -336,8 +448,10 @@ main thread; the difference between runs is the box.
 ## How the numbers were taken
 
 The burst: `lunch-poll-vote-burst.bench.ts` at five voters and five options,
-with `EXPERIMENTAL_SERVER_EXECUTION`, `SERVER_EXECUTION_WORKER` and
-`SERVER_EXECUTION_STORE_READ_THROUGH` set per arm, under the measured window
+with `EXPERIMENTAL_SERVER_EXECUTION`, `SERVER_EXECUTION_WORKER`,
+`SERVER_EXECUTION_STORE_READ_THROUGH` and, for the two levers' table,
+`SERVER_EXECUTION_OVERLAP_COMMIT` and `SERVER_EXECUTION_FLUSH_DEADLINE_MS`
+set per arm, under the measured window
 this change gives it; the data-only tables with the harness's default root
 watch and no view, the rendered-view table with `renderView` on every voter,
 `renderPoll` on the fixture and no root watch. The spans: a throwaway probe hosting the same harness in

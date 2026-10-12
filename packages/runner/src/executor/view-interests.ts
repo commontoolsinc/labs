@@ -2,7 +2,7 @@
  * The view interests of a space's sessions as a serving plane keeps them
  * between publishes. The server's list is read once and handed to every later
  * publish until the server reports a change that can move it: a session's
- * watch set, which is the message that carries its views, or a session's
+ * view set, which a watch set that carries views sets, or a session's
  * lifecycle, which is what attaches, detaches and removes one. A publish over
  * unchanged interests then costs the server nothing, where a request for the
  * list would wait for the server's thread's turn however empty the list.
@@ -54,9 +54,17 @@ export class ViewInterestCache {
     let interests = this.#interests.get(space);
     if (interests === undefined || this.#stale.has(space)) {
       // A change the server reports while the read is in flight is one the
-      // list read may or may not carry, so it stays noted for the next read.
+      // list read may or may not carry, so it stays noted for the next read;
+      // a read that fails leaves the space noted, so the next publish reads
+      // again rather than publishing over a list the server has moved on
+      // from.
       this.#stale.delete(space);
-      interests = await read();
+      try {
+        interests = await read();
+      } catch (error) {
+        this.#stale.add(space);
+        throw error;
+      }
       this.#interests.set(space, interests);
     }
     return excludePrincipal === undefined ? [...interests] : interests.filter((

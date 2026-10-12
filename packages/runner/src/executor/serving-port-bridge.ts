@@ -161,6 +161,8 @@ export class ServingPortBridge {
           principal,
           sessionId,
         }),
+      viewsChanged: (space, sessionId) =>
+        this.#endpoint.notify("observer.viewsChanged", { space, sessionId }),
       sessionChanged: (event) => {
         if (replaying && event.kind === "opened") replayed.add(event.space);
         this.#endpoint.notify("observer.sessionChanged", { event });

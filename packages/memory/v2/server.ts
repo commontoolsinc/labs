@@ -997,6 +997,16 @@ export type ServerExecutionObserver = {
   ) => void;
 
   /**
+   * A session's VIEW SET was set: a `session.watch.set` carried views,
+   * which is the one message that registers, revises or withdraws them.
+   * Fires beside the `demandChanged` the same message raises, and only
+   * then: a watch set without views leaves the session's views as they
+   * are, and a mirror of `viewInterestsForSpace` can hold its list across
+   * every such message.
+   */
+  viewsChanged?: (space: string, sessionId: string) => void;
+
+  /**
    * A session opened, resumed, detached or removed on this server, as
    * {@link SessionLifecycleEvent} describes it. Installing an observer that
    * has this replays every session the server then holds, so a host that
@@ -6808,6 +6818,9 @@ export class Server {
         session.principal,
         session.id,
       );
+      if (message.views !== undefined) {
+        this.#notifyViewsChanged(message.space, session.id);
+      }
       return {
         type: "response",
         requestId: message.requestId,
@@ -8987,6 +9000,19 @@ export class Server {
     } catch (error) {
       console.warn(
         "memory v2: server-execution observer threw on sessionOpened",
+        error,
+      );
+    }
+  }
+
+  #notifyViewsChanged(space: string, sessionId: string): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.viewsChanged === undefined) return;
+    try {
+      observer.viewsChanged(space, sessionId);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on viewsChanged",
         error,
       );
     }

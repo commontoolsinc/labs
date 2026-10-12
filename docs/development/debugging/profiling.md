@@ -700,9 +700,13 @@ the other thread's turn and in transit. A wave commit under the worker is the
 `sink.commitWave` request, and its `executor/wave/commit` phase is that round
 trip plus the sink's bookkeeping around it. With the commit overlapped with
 the next cycle (`SERVER_EXECUTION_OVERLAP_COMMIT`), `executor/wave/commit`
-still names the whole round trip, and `executor/wave/commit-wait` is the part
-of it the next cycle's drain and settle did not cover, which is what the
-overlap left the loop to pay.
+still names the whole round trip, and `executor/wave/commit-wait` is what was
+left of it when the loop finished the commit: the remainder after the next
+cycle's drain and settle ran over it, or, when nothing but the loop's own
+echoes arrived and the committing cycle finished it itself, the whole of it.
+The two cases are told apart by `executor/wave/commit-wait` against
+`executor/wave/commit`: a wait near the round trip is a quiet cycle, a wait
+well under it is the overlap at work.
 
 `memory/frame/queue` against `memory/frame/handle` splits an inbound frame's
 time into waiting behind the frames already in flight on its connection and

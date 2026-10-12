@@ -172,6 +172,24 @@ describe("view interests", () => {
       .toHaveLength(1);
   });
 
+  it("reports a views change for a watch set that carries views, and none for one that does not", async () => {
+    const changes: Array<{ space: string; sessionId: string }> = [];
+    server.setServerExecutionObserver({
+      viewsChanged: (changedSpace, changedSession) => {
+        changes.push({ space: changedSpace, sessionId: changedSession });
+      },
+    });
+
+    await set([watch("of:ordinary")]);
+    expect(changes).toEqual([]);
+    await set([watch("of:ordinary")], [view()]);
+    expect(changes).toEqual([{ space, sessionId }]);
+    await set([watch("of:support")]);
+    expect(changes).toHaveLength(1);
+    await set([], []);
+    expect(changes).toHaveLength(2);
+  });
+
   it("refuses view interests when server execution is disabled", async () => {
     setServerExecutionConfig(false);
     const result = await server.watchSet({

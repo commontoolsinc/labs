@@ -102,6 +102,22 @@ describe("view-interests", () => {
     expect(r.state.reads).toBe(1);
   });
 
+  it("reads again after a read that failed, and keeps the list it held until then", async () => {
+    const cache = new ViewInterestCache();
+    let list = [interest("a", undefined)];
+    const r = reader(() => list);
+    await cache.interestsFor(space, undefined, r.read);
+
+    list = [interest("a", undefined), interest("b", undefined)];
+    cache.noteChanged(space);
+    const failing = () => Promise.reject(new Error("port closed"));
+    await expect(cache.interestsFor(space, undefined, failing)).rejects
+      .toThrow("port closed");
+
+    expect(await cache.interestsFor(space, undefined, r.read)).toHaveLength(2);
+    expect(r.state.reads).toBe(2);
+  });
+
   it("ignores a selection for a handle the held list does not carry", async () => {
     const cache = new ViewInterestCache();
     const r = reader(() => [interest("a", undefined)]);

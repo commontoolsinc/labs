@@ -497,17 +497,18 @@ export class ServingPlane {
       "observer.demandChanged",
       ({ space, reason, principal, sessionId }) => {
         this.#demandShares.noteChanged(space, sessionId);
-        // A session's views arrive with its watch set, which the server
-        // reports as a `watch` change; a tracked set that grew on push
-        // carries no view, so that reason leaves the held list alone.
-        if (reason !== "push-growth") this.#viewInterests.noteChanged(space);
         this.#observer?.demandChanged?.(space, reason, principal, sessionId);
       },
     );
+    // The two things that move a space's view interests: a watch set that
+    // carried views, and a session's lifecycle, which attaches a view's
+    // session or takes it out of the list.
+    endpoint.onNotice("observer.viewsChanged", ({ space, sessionId }) => {
+      this.#viewInterests.noteChanged(space);
+      this.#observer?.viewsChanged?.(space, sessionId);
+    });
     endpoint.onNotice("observer.sessionChanged", ({ event }) => {
       this.#sessions.apply(event);
-      // An open, a detach or a removal is what attaches a view's session
-      // or takes it out of the list.
       this.#viewInterests.noteChanged(event.space);
       if (event.kind === "removed") {
         this.#demandShares.forget(event.space, event.sessionId);

@@ -251,6 +251,7 @@ export type BridgeNotices = {
     principal: string | undefined;
     sessionId: string | undefined;
   };
+  "observer.viewsChanged": { space: string; sessionId: string };
   "observer.sessionChanged": { event: SessionLifecycleEvent };
   "loopback.frame": { transport: number; frame: string };
 };

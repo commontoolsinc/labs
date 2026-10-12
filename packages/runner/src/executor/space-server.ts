@@ -1218,10 +1218,10 @@ export class SpaceServer implements TransactionSealDestination {
    * `SpaceServerPolicy.overlapWaveCommit` and no cycle has finished yet.
    * The cycle that started it finishes it before it ends when nothing but
    * the loop's own echoes arrived meanwhile; otherwise the next cycle
-   * finishes it inside its settle, once that settle first finds the
-   * scheduler quiet, or after the deadline cuts the settle, and in either
-   * case before the cycle computes its own advance, so a wave's post-commit
-   * bookkeeping always precedes its successor's commit decision.
+   * finishes it inside its settle, after the settle's first completed step,
+   * or after the deadline cuts the settle, and in either case before the
+   * cycle computes its own advance, so a wave's post-commit bookkeeping
+   * always precedes its successor's commit decision.
    */
   #commitInFlight: CommitInFlight | undefined;
 
@@ -6750,10 +6750,23 @@ export class SpaceServer implements TransactionSealDestination {
   async #finishCommitInFlight(runtime: Runtime): Promise<void> {
     const pending = this.#commitInFlight;
     if (pending === undefined) return;
-    this.#commitInFlight = undefined;
     const waitStart = performance.now();
-    const outcome = await pending.outcome;
+    // The handle stays registered through the wait: a park that runs
+    // meanwhile takes the commit over (`#parkResources`), and this finish
+    // then stands down to it rather than running the wave's bookkeeping
+    // against a runtime the park is disposing.
+    let outcome: WaveCommitOutcome;
+    try {
+      outcome = await pending.outcome;
+    } catch (error) {
+      if (this.#commitInFlight !== pending) return;
+      this.#commitInFlight = undefined;
+      throw error;
+    }
     timing.time(waitStart, "executor", "wave", "commit-wait");
+    if (this.#commitInFlight !== pending) return;
+    this.#commitInFlight = undefined;
+    if (!this.#active || this.#runtime !== runtime) return;
     await this.#finishWave(
       runtime,
       pending.closing,
@@ -6761,6 +6774,55 @@ export class SpaceServer implements TransactionSealDestination {
       pending.finish,
       false,
     );
+  }
+
+  /**
+   * Reports each foreign provisioning batch a wave durably committed as a
+   * warm-marked authored admission, whatever the wave's outcome: §2b never
+   * rolls a landed foreign commit back, and the host activates a parked,
+   * sessionless target on the notice so the staged setup derives
+   * (serving-loop.md §1's third activation trigger). A sink that reports
+   * its commits itself has reported them.
+   */
+  #reportForeignCommits(outcome: WaveCommitOutcome): void {
+    for (const foreign of outcome.foreignCommits) {
+      this.#options.stats.warmRequests += 1;
+      if (this.#sink?.reportsCommits === true) continue;
+      this.#options.server.noteExecutorCommit({
+        space: foreign.space,
+        seq: foreign.seq,
+        class: "authored",
+        sessionId: this.#holder,
+        writes: foreign.writes,
+        warm: true,
+      });
+    }
+  }
+
+  /**
+   * Reports the wave's home commit at `seq` to the memory server: it
+   * entered the store on the co-hosted engine plane, not through any
+   * session, and the notice is what makes push fire (M4, derived commits
+   * reach subscribers) and the feed carry it (the loop skips its own echo
+   * by class and holder). A sink that reports its commits itself has
+   * reported it.
+   */
+  #reportHomeCommit(seq: number): void {
+    if (this.#sink?.reportsCommits === true) return;
+    const records = Engine.selectCommitsSince(this.#options.engine, {
+      fromSeq: seq - 1,
+      limit: 1,
+    });
+    const record = records.find((entry) => entry.seq === seq);
+    if (record === undefined) return;
+    this.#options.server.noteExecutorCommit({
+      space: this.#options.space,
+      seq: record.seq,
+      class: "derived",
+      holder: this.#holder,
+      sessionId: record.sessionId,
+      writes: record.writes as AdmittedCommitNotice["writes"],
+    });
   }
 
   /**
@@ -6813,19 +6875,7 @@ export class SpaceServer implements TransactionSealDestination {
     // Reported on EVERY outcome shape: a wave that aborted AFTER some
     // foreign batches landed still staged that setup durably (§2b never
     // rolls a landed foreign commit back).
-    for (const foreign of outcome.foreignCommits) {
-      this.#options.stats.warmRequests += 1;
-      // A sink that reports its commits itself has reported this one.
-      if (this.#sink?.reportsCommits === true) continue;
-      this.#options.server.noteExecutorCommit({
-        space: foreign.space,
-        seq: foreign.seq,
-        class: "authored",
-        sessionId: this.#holder,
-        writes: foreign.writes,
-        warm: true,
-      });
-    }
+    this.#reportForeignCommits(outcome);
     const settledStart = performance.now();
     await closing.settled();
     timing.time(settledStart, "executor", "wave", "settled");
@@ -7029,26 +7079,7 @@ export class SpaceServer implements TransactionSealDestination {
           ]);
         }
       }
-      // The wave commit entered the store on the co-hosted engine plane,
-      // not through any session: report it so push fires (M4 — derived
-      // commits reach subscribers) and the feed carries it (the loop
-      // skips its own echo by class + holder).
-      const records = Engine.selectCommitsSince(this.#options.engine, {
-        fromSeq: outcome.seq - 1,
-        limit: 1,
-      });
-      const record = records.find((entry) => entry.seq === outcome.seq);
-      // A sink that reports its commits itself has reported this one.
-      if (record !== undefined && this.#sink?.reportsCommits !== true) {
-        this.#options.server.noteExecutorCommit({
-          space: this.#options.space,
-          seq: record.seq,
-          class: "derived",
-          holder: this.#holder,
-          sessionId: record.sessionId,
-          writes: record.writes as AdmittedCommitNotice["writes"],
-        });
-      }
+      this.#reportHomeCommit(outcome.seq);
     }
 
     if (publish && outcome.aborted === undefined) {
@@ -7114,21 +7145,46 @@ export class SpaceServer implements TransactionSealDestination {
    * counted (§7 `parkDisposeTimeouts`), its eventual completion or
    * failure logged when it lands; the park completes regardless (lease
    * released, `#parked` resolved, recovery unblocked). */
-  async #disposeRuntimeTimeboxed(reason: string): Promise<void> {
+  async #disposeRuntimeTimeboxed(
+    reason: string,
+    inFlight: CommitInFlight | undefined,
+  ): Promise<void> {
     this.#viewPlanPublisher.dispose();
     const dispose = this.#disposeRuntime;
-    if (dispose === undefined) return;
+    if (dispose === undefined && inFlight === undefined) return;
+    // A commit the park took over settles ahead of the dispose, under the
+    // same deadline: park never waits on a sink without bound, and a stalled
+    // commit is abandoned with the dispose, its late outcome logged.
+    const settleInFlight = async () => {
+      if (inFlight === undefined) return;
+      let outcome: WaveCommitOutcome;
+      try {
+        outcome = await inFlight.outcome;
+      } catch {
+        return;
+      }
+      this.#reportForeignCommits(outcome);
+      if (outcome.seq !== undefined) this.#reportHomeCommit(outcome.seq);
+      await inFlight.closing.settled();
+    };
+    const pending = (async () => {
+      await settleInFlight();
+      await dispose?.();
+    })();
     // A dispose that fails in time rejects here, for the caller's
     // park-dispose-failed arm to log.
-    await awaitDisposeTimeboxed(dispose(), {
+    await awaitDisposeTimeboxed(pending, {
       policy: this.#options.policy,
       stats: this.#options.stats,
       space: this.#options.space,
       overrun: (timeoutMs) =>
         `space ${this.#options.space}: runtime dispose overran ` +
-        `${timeoutMs}ms during park (${reason}); abandoning the ` +
-        "factory handle and completing the park — loop stopped, " +
-        "wave abandoned, seal chain drained; lease releases and " +
+        `${timeoutMs}ms during park (${reason})` +
+        (inFlight === undefined
+          ? ""
+          : ", a wave commit in flight ahead of it") +
+        "; abandoning the factory handle and completing the park — loop " +
+        "stopped, wave abandoned, seal chain drained; lease releases and " +
         "whenParked resolves now (park liveness)",
     });
   }
@@ -7240,18 +7296,16 @@ export class SpaceServer implements TransactionSealDestination {
     // re-activation re-resolves; the map must not outlive engines the
     // server may close meanwhile).
     this.#foreignEngines.clear();
-    // A commit in flight lands or fails on its own. What the park owes it
-    // is to let its seals settle before the runtime they sit in is
-    // disposed; its bookkeeping goes with the tenure, as a wave's does when
-    // the loop dies mid-commit, and the next tenure recomputes on demand.
+    // A commit in flight lands or fails on its own, and the park takes it
+    // over from the cycle that started it: the store holds whatever it
+    // committed whatever the tenure does next, so its commits are reported
+    // as a finished wave's are, and its seals settle before the runtime
+    // they sit in is disposed, under the dispose deadline
+    // (`#disposeRuntimeTimeboxed`). Its other bookkeeping goes with the
+    // tenure, as a wave's does when the loop dies mid-commit, and the next
+    // tenure recomputes on demand.
     const inFlight = this.#commitInFlight;
     this.#commitInFlight = undefined;
-    if (inFlight !== undefined) {
-      await inFlight.outcome.then(
-        () => inFlight.closing.settled(),
-        () => undefined,
-      );
-    }
     const wave = this.#currentWave;
     this.#currentWave = undefined;
     await this.#sealChain;
@@ -7312,10 +7366,10 @@ export class SpaceServer implements TransactionSealDestination {
     // disposed rather than offered on.
     if (
       !(offerRuntime && detached && wave === undefined && effectsSettled &&
-        this.#offerRuntime())
+        inFlight === undefined && this.#offerRuntime())
     ) {
       try {
-        await this.#disposeRuntimeTimeboxed(reason);
+        await this.#disposeRuntimeTimeboxed(reason, inFlight);
       } catch (error) {
         logger.warn("park-dispose-failed", () => [
           "runtime dispose during park failed",
