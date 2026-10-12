@@ -33,7 +33,11 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
-import { PieceController, PiecesController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  PiecesController,
+  type ShareIntake,
+} from "@commonfabric/piece/ops";
 import {
   type Cell,
   CompilerStackLoadError,
@@ -7879,11 +7883,113 @@ describe("runtime-processor", () => {
                 calls++;
                 return Promise.resolve();
               },
+              isIdleWithPendingCommits: () => true,
             },
           },
         });
         await fake.handleIdle();
         expect(calls).toBe(1);
+      });
+
+      for (
+        const step of [
+          "legacySpacesAdopted",
+          "privateInboxEnsured",
+        ] as const
+      ) {
+        it(`resolves only once the \`${step}\` step of Home's housekeeping has settled`, async () => {
+          // Draining the task queue (all microtasks, then one macrotask) runs
+          // every continuation a handler that skipped the step would take to
+          // reach the commit barrier, so a correct handler has not reached it
+          // by then.
+
+          let calls = 0;
+          const processor = buildProcessor({
+            runtime: {
+              scheduler: {
+                idleWithPendingCommits: () => {
+                  calls++;
+                  return Promise.resolve();
+                },
+                isIdleWithPendingCommits: () => true,
+              },
+            },
+          });
+          const housekeeping = Promise.withResolvers<void>();
+          processor.accessForTestingOnly[step] = housekeeping.promise;
+
+          let done = false;
+          const idling = processor.handleIdle().then(() => {
+            done = true;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          expect({ calls, done }).toEqual({ calls: 0, done: false });
+
+          housekeeping.resolve();
+          await idling;
+          expect(calls).toBe(1);
+        });
+      }
+
+      it("waits again for the share intake when the scheduler work it waited for handed the intake more to take up", async () => {
+        const log: string[] = [];
+        let intakeBusy = true;
+        const intake = {
+          idle: () => {
+            log.push("intake idle");
+            intakeBusy = false;
+            return Promise.resolve();
+          },
+          isIdle: () => !intakeBusy,
+        };
+        const processor = buildProcessor({
+          runtime: {
+            scheduler: {
+              idleWithPendingCommits: () => {
+                // The first commit barrier's work pokes the intake again.
+                if (!log.includes("commits idle")) intakeBusy = true;
+                log.push("commits idle");
+                return Promise.resolve();
+              },
+              isIdleWithPendingCommits: () => true,
+            },
+          },
+        });
+        processor.accessForTestingOnly.shareIntake = Promise.resolve(
+          intake as unknown as ShareIntake,
+        );
+
+        await processor.handleIdle();
+        expect(log).toEqual([
+          "intake idle",
+          "commits idle",
+          "intake idle",
+          "commits idle",
+        ]);
+      });
+
+      it("resolves, reporting the failure, when the share intake's own wait rejects", async () => {
+        const intake = {
+          idle: () => Promise.reject(new Error("the intake failed on purpose")),
+          isIdle: () => true,
+        };
+        const processor = buildProcessor({
+          runtime: {
+            scheduler: {
+              idleWithPendingCommits: () => Promise.resolve(),
+              isIdleWithPendingCommits: () => true,
+            },
+          },
+        });
+        processor.accessForTestingOnly.shareIntake = Promise.resolve(
+          intake as unknown as ShareIntake,
+        );
+        using warn = stub(console, "warn");
+
+        await processor.handleIdle();
+        expect(warn.calls.map((call) => call.args[0])).toEqual([
+          "[RuntimeProcessor] Waiting for the share intake:",
+        ]);
       });
     });
 
