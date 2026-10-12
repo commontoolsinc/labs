@@ -40,10 +40,11 @@ bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
 the `data:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
-and nothing writes a `data:` document, so a link inside one carries its
-schema inline (`packages/runner/src/link-utils.ts`). What costs is that
-recomposition built a fresh object graph per call, so the interned-schema
-cache never hit and every call deep-froze and hashed the same closure again.
+and no write has stored the links a plan binds, so a link inside the inputs
+cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
+costs is that recomposition built a fresh object graph per call, so the
+interned-schema cache never hit and every call deep-froze and hashed the
+same closure again.
 
 **The cross-space pass materializes to discover.** `#syncCrossSpaceReads`
 does a full schema-validated `get()` of every plan's inputs, in every round,
@@ -89,7 +90,7 @@ stage 0 is what every later stage reports against.
 
 Exit: a number per stage that a pull request can quote.
 
-### Stage 1. A `data:` document's inline schemas come from a memo
+### Stage 1. An immutable cell's inline schemas come from a memo
 
 - [x] `inlineExternalSchemaRefsInValue()` keeps the inline form each
       reference recomposed to, by reference, for the registry epoch
@@ -98,10 +99,9 @@ Exit: a number per stage that a pull request can quote.
       hashed the same few schemas again; a reference names one content, so
       the form it recomposed to once is the form it has.
 - [x] Tests: the inline form is the same object on a second call for the
-      same reference (`packages/runner/test/link-utils.test.ts`); a `data:`
-      cell carries each link's schema inline and a read through it resolves
-      the linked value (`packages/runner/test/runtime.test.ts`,
-      `packages/runner/test/data-uri-inlining.test.ts`).
+      same reference (`packages/runner/test/link-utils.test.ts`); an
+      immutable cell carries each link's schema inline and a read through it
+      resolves the linked value (`packages/runner/test/runtime.test.ts`).
 
 Exit: a schema is recomposed once per reference per registry epoch.
 

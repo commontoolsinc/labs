@@ -41,7 +41,6 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
-  inlineExternalSchemaRefsInValue,
   isCellLink,
   KeepAsCell,
   parseLink,
@@ -65,6 +64,13 @@ import type { URI } from "./sigil-types.ts";
  * with relative links resolved against `base`. That rewriting is what makes
  * the result self-contained: the ids it embeds don't depend on where it was
  * minted, so the URI denotes the same value wherever it later gets read.
+ *
+ * A link's schema is encoded as given. Where that is a content-addressed
+ * reference, a read resolves it in the space carried by the address that
+ * names the returned URI, so a caller minting from a value read out of a
+ * stored document addresses the result in that document's space, which
+ * holds the schema documents the reference names. Nothing here checks that
+ * the space a caller goes on to use holds them.
  *
  * The standard encoding canonicalizes plain-object key order (UTF-8 byte
  * order, per `3-json-encoding.md` section 10), so two runtimes holding the
@@ -148,14 +154,8 @@ export function dataUriFromValueWithResolvedLinks(
     }
   }
 
-  // Links serialized into a `data:` document carry their schemas inline
-  // (see inlineExternalSchemaRefsInValue): the document is its id, so a
-  // content-addressed reference inside it has no carrying write to install
-  // its closure.
   return dataUriFromValue(
-    inlineExternalSchemaRefsInValue(
-      traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-    ),
+    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   );
 }
 
