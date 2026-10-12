@@ -2299,10 +2299,7 @@ export async function runTestPattern(
 
     const errorMessages = [
       ...runtimeErrors.map((e) => String(e)),
-      ...servedRuntimeErrors(
-        servedErrors,
-        runtimeErrors.map((e) => e.message),
-      ),
+      ...servedRuntimeErrors(servedErrors, runtimeErrors),
       ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
     ];
     return {
@@ -2361,10 +2358,7 @@ export async function runTestPattern(
 
     const errorMessages = [
       ...runtimeErrors.map((e) => String(e)),
-      ...servedRuntimeErrors(
-        servedErrors,
-        runtimeErrors.map((e) => e.message),
-      ),
+      ...servedRuntimeErrors(servedErrors, runtimeErrors),
       ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
     ];
     return {

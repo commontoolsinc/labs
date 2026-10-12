@@ -60,6 +60,21 @@ describe(
       expect(outcome?.results[0].results[0].name).toBe("bob/assertion_1");
     });
 
+    it("reports a handler's throw once when both of its runs hit it", async () => {
+      // The speculative run's error and the served run's `errored` outcome
+      // name the same event, which is what pairs them.
+      const root = resolve(FIXTURES, "served-errors");
+      let outcome: Awaited<ReturnType<typeof runTests>> | undefined;
+      await withEnv("EXPERIMENTAL_SERVER_EXECUTION", "true", async () => {
+        outcome = await runTests(resolve(root, "throwing-action.test.tsx"), {
+          root,
+        });
+      });
+      expect(outcome?.results[0].runtimeErrors).toStrictEqual([
+        "Error: the handler threw",
+      ]);
+    });
+
     it("closes its serving loop when the runtime cannot be built", async () => {
       // A live serving host holds the process's server-execution flag on, so
       // the flag reads as on after the run exactly when the loop is left

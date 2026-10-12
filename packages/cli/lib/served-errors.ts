@@ -14,41 +14,58 @@ import type { Runtime } from "@commonfabric/runner";
 /** Prefix that marks a runtime error as a served run's. */
 export const SERVED_ERROR_PREFIX = "[served] ";
 
+/** An error as `servedRuntimeErrors()` pairs it: its event and its text. */
+export interface EventError {
+  /** The event whose handling threw, if the error is a handler's. */
+  readonly eventId?: string;
+
+  /** The error's message. */
+  readonly message: string;
+}
+
 /**
  * Records the error of every `errored` outcome `runtime` hears, for as long
  * as `runtime` lives, and returns the list they are recorded in. On the arm
  * without server execution the runtime has no outcomes, and the list stays
  * empty.
  */
-export function collectServedErrors(runtime: Runtime): string[] {
-  const errors: string[] = [];
+export function collectServedErrors(runtime: Runtime): EventError[] {
+  const errors: EventError[] = [];
   runtime.subscribeEventIntentOutcomes((outcome) => {
-    if (outcome.kind === "errored") errors.push(outcome.reason);
+    if (outcome.kind === "errored") {
+      errors.push({ eventId: outcome.eventId, message: outcome.reason });
+    }
   });
   return errors;
 }
 
 /**
- * Returns the runtime errors to report for `served` errors beside the errors
- * the test's runtime recorded, whose messages are `local`, each marked with
- * {@link SERVED_ERROR_PREFIX}. A served error whose text is a local error's
- * message is the speculative run's throw over again and is left out, one
- * local error answering for one served error, so each throw is reported once
- * whichever run saw it.
+ * Returns the runtime errors to report for `served` errors beside the `local`
+ * ones the test's runtime recorded, each marked with
+ * {@link SERVED_ERROR_PREFIX}. A served error is left out when a local error
+ * of the same event has the same text, since that is the event's speculative
+ * run having thrown it too; one local error answers for one served error, so
+ * each throw is reported once whichever run saw it. A local error of another
+ * event, or of none, answers for nothing here, whatever its text.
  */
 export function servedRuntimeErrors(
-  served: readonly string[],
-  local: readonly string[],
+  served: readonly EventError[],
+  local: readonly EventError[],
 ): string[] {
   const unmatched = new Map<string, number>();
-  for (const error of local) {
-    unmatched.set(error, (unmatched.get(error) ?? 0) + 1);
+  const keyOf = (eventId: string, message: string) =>
+    JSON.stringify([eventId, message]);
+  for (const { eventId, message } of local) {
+    if (eventId === undefined) continue;
+    const key = keyOf(eventId, message);
+    unmatched.set(key, (unmatched.get(key) ?? 0) + 1);
   }
   const result: string[] = [];
-  for (const error of served) {
-    const count = unmatched.get(error) ?? 0;
-    if (count > 0) unmatched.set(error, count - 1);
-    else result.push(`${SERVED_ERROR_PREFIX}${error}`);
+  for (const { eventId, message } of served) {
+    const key = eventId === undefined ? undefined : keyOf(eventId, message);
+    const count = key === undefined ? 0 : unmatched.get(key) ?? 0;
+    if (key !== undefined && count > 0) unmatched.set(key, count - 1);
+    else result.push(`${SERVED_ERROR_PREFIX}${message}`);
   }
   return result;
 }

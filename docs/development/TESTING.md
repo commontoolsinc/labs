@@ -600,10 +600,11 @@ On the ON arm, most of the checks `cf test` makes of a run observe the test's
 own runtime and not the serving one: the idempotency check, read budgets,
 pattern coverage, and a pattern's `console` calls. Runtime errors are the
 exception for the events the test's runtime fired: a served run that throws
-reaches it as an `errored` outcome of the event, which fails the file as a
-runtime error marked `[served]`, unless its text is the message of an error
-the test's runtime already recorded, the speculative run having thrown it
-too. Logger warnings and errors are counted per process, so a single-user
+reaches it as an `errored` outcome of the event, which the runner records as
+a runtime error marked `[served]`, under the same policy as any other —
+`allowRuntimeErrors` tolerates it, and `expectRuntimeErrors` counts it. It is
+left out when the same event's speculative run recorded an error with the
+same text, so a throw both runs hit is counted once. Logger warnings and errors are counted per process, so a single-user
 run, whose serving loop shares its process, counts the serving loop's as
 well. A served handler runs under the serving runtime's CFC posture rather
 than the test's.

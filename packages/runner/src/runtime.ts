@@ -279,6 +279,13 @@ export type ErrorWithContext = Error & {
   space: MemorySpace;
   patternId: string;
   spellId: string | undefined;
+
+  /**
+   * The event whose handling failed, when the error is an event handler's.
+   * On the server-execution arm the same id names the event's intent
+   * outcome.
+   */
+  eventId?: string;
 };
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
