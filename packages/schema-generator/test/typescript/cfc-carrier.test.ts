@@ -11,9 +11,17 @@ const DECLARATIONS = `
     ? { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>
     : { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>;
   type OtherTag<T> = [T] extends [unknown] ? { readonly other?: T } : never;
+  namespace Authored {
+    // An author's alias of the tag's name whose branch carries a payload
+    // field beside the carrier member.
+    export type CfcTag<T> = [T] extends [unknown]
+      ? { readonly __ct_cfc__?: unknown; readonly payload: T }
+      : { readonly __ct_cfc__?: unknown; readonly payload: T };
+  }
   interface Probes<T> {
     deferred: CfcTag<T, { confidentiality: ["x"] }>;
     other: OtherTag<T>;
+    authored: Authored.CfcTag<T>;
     carrier: { readonly __ct_cfc__?: { readonly meta?: ["x"] } };
     beside: { readonly __ct_cfc__?: unknown; readonly name: string };
   }
@@ -47,6 +55,12 @@ describe("cfc-carrier", () => {
 
       expect(isCfcCarrierMember(types.get("other")!)).toBe(false);
       expect(isCfcCarrierMember(types.get("beside")!)).toBe(false);
+    });
+
+    it("returns `false` for an alias of the tag's name whose branch holds a payload field", async () => {
+      expect(isCfcCarrierMember((await probes()).get("authored")!)).toBe(
+        false,
+      );
     });
   });
 });

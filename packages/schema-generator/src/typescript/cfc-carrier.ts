@@ -30,9 +30,12 @@ export const cfcCarrierProperty = (
 /**
  * Whether `member`, a member of an intersection, is a CFC carrier: the
  * `__ct_cfc__` member alone (`cfcCarrierProperty()`), or, while the payload is
- * a type parameter, the `CfcTag` conditional the checker defers it as, which
- * holds no part of the value. The deferred tag is recognized by its alias and
- * by the carrier member its branch writes.
+ * a type parameter, the `CfcTag` conditional the checker defers it as. The
+ * deferred tag holds the carrier member and the payload's own `null` and
+ * `undefined`, which a caller reads apart from it, and no other part of the
+ * value. It is recognized by its alias and by both its branches holding
+ * exactly that: the carrier member alone, beside
+ * `Extract<T, null | undefined>`.
  */
 export const isCfcCarrierMember = (member: ts.Type): boolean => {
   if (cfcCarrierProperty(member)) return true;
@@ -42,20 +45,49 @@ export const isCfcCarrierMember = (member: ts.Type): boolean => {
   );
   return declaration?.name.text === "CfcTag" &&
     ts.isConditionalTypeNode(declaration.type) &&
-    writesCarrierMember(declaration.type.trueType);
+    isCarrierBranch(declaration.type.trueType) &&
+    isCarrierBranch(declaration.type.falseType);
 };
 
-/** Whether `node` writes the `__ct_cfc__` member, alone or in a union. */
-const writesCarrierMember = (node: ts.TypeNode): boolean =>
+/**
+ * Whether `node`, a branch of a `CfcTag`, holds the carrier member alone and
+ * the payload's nullish members, and nothing else.
+ */
+const isCarrierBranch = (node: ts.TypeNode): boolean => {
+  const arms = unionArms(node);
+  return arms.some(isCarrierLiteral) &&
+    arms.every((arm) => isCarrierLiteral(arm) || isNullishExtract(arm));
+};
+
+/** The arms of the union `node` writes, inside any parentheses. */
+const unionArms = (node: ts.TypeNode): readonly ts.TypeNode[] =>
   ts.isParenthesizedTypeNode(node)
-    ? writesCarrierMember(node.type)
+    ? unionArms(node.type)
     : ts.isUnionTypeNode(node)
-    ? node.types.some(writesCarrierMember)
-    : ts.isTypeLiteralNode(node) &&
-      node.members.some((member) =>
-        ts.isPropertySignature(member) && ts.isIdentifier(member.name) &&
-        member.name.text === CFC_CARRIER_PROPERTY
-      );
+    ? node.types.flatMap(unionArms)
+    : [node];
+
+/** Whether `node` is a type literal writing the `__ct_cfc__` member alone. */
+const isCarrierLiteral = (node: ts.TypeNode): boolean =>
+  ts.isTypeLiteralNode(node) && node.members.length === 1 &&
+  ts.isPropertySignature(node.members[0]!) &&
+  ts.isIdentifier(node.members[0]!.name) &&
+  node.members[0]!.name.text === CFC_CARRIER_PROPERTY;
+
+/** Whether `node` is `Extract<…, null | undefined>`. */
+const isNullishExtract = (node: ts.TypeNode): boolean => {
+  if (
+    !ts.isTypeReferenceNode(node) || !ts.isIdentifier(node.typeName) ||
+    node.typeName.text !== "Extract" || node.typeArguments?.length !== 2
+  ) {
+    return false;
+  }
+  return unionArms(node.typeArguments[1]!).every((arm) =>
+    arm.kind === ts.SyntaxKind.UndefinedKeyword ||
+    (ts.isLiteralTypeNode(arm) &&
+      arm.literal.kind === ts.SyntaxKind.NullKeyword)
+  );
+};
 
 /**
  * The type of the value `member` holds, given `type`, its type: `type` less
