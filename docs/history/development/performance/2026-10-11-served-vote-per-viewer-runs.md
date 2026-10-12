@@ -228,9 +228,15 @@ sessions is 3.1 s of the same thread (walks and encodes, overlapping in part),
 cheaper per walk than on the OFF arm because the served sessions receive the
 view plan the loop publishes rather than re-walking what five clients wrote.
 Under the worker, that fan-out is on the other thread, and what the loop pays
-for it is the port: a cycle is 294 ms, of which the settle is 82 ms, the wave
-commit 74 ms and the publish 74 ms, each a round trip to a main thread busy
-with the fan-out.
+for it is the port. A cycle is 294 ms. The settle, 82 ms, is local: under the
+read-through the serving runtime reads the store over its own connection and
+the feed's drain is its barrier, so nothing in it crosses the port. The wave
+commit, 74 ms against 10 ms on the main thread, does cross it: the batch is
+encoded, the main thread decodes it, applies it to the engine and reports it
+to the server before answering, so the commit both waits behind the fan-out
+and runs on the thread doing it. The publish, 74 ms against under a
+millisecond, is a round trip for the sessions' view interests and one more
+per view whose selection changed.
 
 The levers this leaves, in the order of what they cost here:
 
@@ -243,7 +249,8 @@ The levers this leaves, in the order of what they cost here:
   own code on the served arm;
 - the client arm's duplicate derived writes, five clients committing the
   same documents and four of them refused;
-- the serving loop's port round trips under the worker, half of a cycle.
+- the serving loop's port round trips under the worker, the commit and the
+  publish, half of a cycle.
 
 ## What this says about the three questions the previous record left
 
