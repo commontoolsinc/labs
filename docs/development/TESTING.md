@@ -598,11 +598,15 @@ beside.
 
 On the ON arm, most of the checks `cf test` makes of a run observe the test's
 own runtime and not the serving one: the idempotency check, read budgets,
-pattern coverage, runtime errors, and a pattern's `console` calls. Logger
-warnings and errors are counted per process instead, so a single-user run,
-whose serving loop shares its process, counts the serving loop's as well. A
-served handler runs under the serving runtime's CFC posture rather than the
-test's.
+pattern coverage, and a pattern's `console` calls. Runtime errors are the
+exception for the events the test's runtime fired: a served run that throws
+reaches it as an `errored` outcome of the event, which fails the file as a
+runtime error marked `[served]`, unless its text is the message of an error
+the test's runtime already recorded, the speculative run having thrown it
+too. Logger warnings and errors are counted per process, so a single-user
+run, whose serving loop shares its process, counts the serving loop's as
+well. A served handler runs under the serving runtime's CFC posture rather
+than the test's.
 
 `@commonfabric/runner/executor/serving-memory-server.deno` supplies the pair:
 a memory server over a fresh non-persistent store, with an `ExecutorHost`
