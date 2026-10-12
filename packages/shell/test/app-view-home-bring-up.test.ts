@@ -77,6 +77,61 @@ describe("XAppView Home bring-up", () => {
     }
   });
 
+  it("returns from `homeBringUp` a bring-up started at the decision, which resolves once the worker has answered", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const runtime = stubRuntime(log, "rt");
+      const asked = Promise.withResolvers<void>();
+      const answer = Promise.withResolvers<Record<string, never>>();
+      runtime.rt.runtime().ensureHomePatternRunning = (options) => {
+        log.push(`rt ensure${options?.existingOnly ? " existing" : ""}`);
+        asked.resolve();
+        return answer.promise;
+      };
+      const view = new XAppView();
+      view.app = {
+        view: { spaceDid: "did:key:z6Mk-shell-home-bring-up-wait" as DID },
+      } as never;
+      view.space = "did:key:z6Mk-shell-home-bring-up-wait" as DID;
+      view.rt = runtime.rt as never;
+
+      view.updated(new Map());
+      expect(view.homeBringUp).toBeUndefined();
+
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      const bringUp = view.homeBringUp;
+      // Held from the decision, before the settle it waits for has begun.
+      expect(log).toEqual([]);
+      expect(bringUp).toBeInstanceOf(Promise);
+
+      // Once the worker is asked, draining the task queue (all microtasks, then
+      // one macrotask) runs every continuation a bring-up that did not wait
+      // for the answer would take to resolve.
+      let done = false;
+      const settling = bringUp!.then(() => {
+        done = true;
+      });
+      await asked.promise;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect({ log, done }).toEqual({
+        log: ["rt idle", "rt ensure existing"],
+        done: false,
+      });
+
+      answer.resolve({});
+      await settling;
+      expect(done).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
   it("asks each runtime to bring Home up once", async () => {
     const restore = installBrowserGlobals(PAGE_HREF);
     try {

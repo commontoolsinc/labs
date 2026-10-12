@@ -445,6 +445,23 @@ describe("share-intake", () => {
     });
   });
 
+  describe("isIdle()", () => {
+    it("returns `false` while the intake takes up the offers it started with, and `true` once `idle()` has resolved", async () => {
+      // The intake's first subscription publishes as it is made, so the scan
+      // of the inbox, and the registration it sends, are under way by the time
+      // the constructor returns.
+
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      await deliver([offerOf(space, "waiting")]);
+      const started = start();
+      expect(started.isIdle()).toBe(false);
+
+      await started.idle();
+      expect(started.isIdle()).toBe(true);
+      expect(registeredIds(await registeredNow())).toEqual(["waiting"]);
+    });
+  });
+
   describe("an offer that passes vetting", () => {
     it("is registered with its sender, `id`, `kind`, `host` and `title`", async () => {
       const space = await offeredSpace({ [sender]: "WRITE" });

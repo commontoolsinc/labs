@@ -188,6 +188,34 @@ describe("createViewSettled", () => {
     await settled();
     expect(idleCalls).toBeGreaterThan(0);
   });
+
+  it("idles the runtime only once the work `getPending` names has settled", async () => {
+    // Draining the task queue (all microtasks, then one macrotask) runs every
+    // continuation a settle that skipped the pending work would take to reach
+    // the runtime's idle, so a correct settle has not reached it by then.
+
+    let idleCalls = 0;
+    const rt = {
+      idle: () => {
+        idleCalls += 1;
+        return Promise.resolve();
+      },
+    };
+    const pending = Promise.withResolvers<void>();
+    let done = false;
+    const settling = createViewSettled(
+      () => asRuntime(rt),
+      () => pending.promise,
+    )().then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect({ idleCalls, done }).toEqual({ idleCalls: 0, done: false });
+
+    pending.resolve();
+    await settling;
+    expect(idleCalls).toBeGreaterThan(0);
+  });
 });
 
 describe("runtime debug globals", () => {
@@ -290,6 +318,27 @@ describe("runtime debug globals", () => {
       "[debug] read argument cell refused:",
       refusal,
     ]);
+  });
+
+  it("exposeCommonfabricGlobals installs a `viewSettled` that waits for the work `getPending` names", async () => {
+    const log: string[] = [];
+    const runtime = {
+      idle: () => {
+        log.push("idle");
+        return Promise.resolve();
+      },
+    } as unknown as RuntimeClient;
+    const global: Globals = {};
+    exposeCommonfabricGlobals(
+      global,
+      runtime,
+      () => runtime,
+      () => undefined,
+      () => Promise.resolve().then(() => void log.push("pending settled")),
+    );
+
+    await global.commonfabric!.viewSettled!();
+    expect(log.slice(0, 2)).toEqual(["pending settled", "idle"]);
   });
 
   it("clearRuntimeDebugGlobals clears runtime-bound helpers", () => {
