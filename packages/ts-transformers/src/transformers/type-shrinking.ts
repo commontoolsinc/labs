@@ -7,6 +7,7 @@ import {
   resolvesToCommonFabricSymbol,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-brand";
+import { expandsWithoutEnd } from "@commonfabric/schema-generator/expanding-recursion";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
@@ -2833,12 +2834,15 @@ function addPrefixKeys(
 
 /** Whether any data position in `type`'s subtree is cell-like — the test for
  * whether a named reference must be expanded to overlay capabilities inside
- * it. Cycles end the search: a cell beyond a self-reference is not found,
- * which the caller documents as the accepted residual. */
+ * it. Cycles end the search, and so does a recursion that instantiates its
+ * declaration without end (`expandsWithoutEnd()`), read inside `path`: a cell
+ * beyond a self-reference, or past that cut, is not found, which the caller
+ * documents as the accepted residual. */
 function typeSubtreeContainsCellLike(
   type: ts.Type,
   checker: ts.TypeChecker,
   visited: Set<ts.Type>,
+  path: ts.Type[] = [],
 ): boolean {
   if (visited.has(type)) return false;
   visited.add(type);
@@ -2850,29 +2854,29 @@ function typeSubtreeContainsCellLike(
     const kind = getCellKind(type, checker);
     return kind !== "stream" && kind !== "sqlite";
   }
+  const within = (inner: ts.Type) =>
+    typeSubtreeContainsCellLike(inner, checker, visited, path);
   if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
-    return (type as ts.UnionOrIntersectionType).types.some((member) =>
-      typeSubtreeContainsCellLike(member, checker, visited)
-    );
+    return (type as ts.UnionOrIntersectionType).types.some(within);
   }
   if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  if (isArrayShapeType(type, checker)) {
-    const element = getArrayElementType(type, checker);
-    return !!element && typeSubtreeContainsCellLike(element, checker, visited);
-  }
-  for (const property of checker.getPropertiesOfType(type)) {
-    if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
-    const declaration = property.valueDeclaration ?? property.declarations?.[0];
-    if (!declaration) continue;
-    const propertyType = checker.getTypeOfSymbolAtLocation(
-      property,
-      declaration,
-    );
-    if (typeSubtreeContainsCellLike(propertyType, checker, visited)) {
-      return true;
+  if (expandsWithoutEnd(type, path, checker)) return false;
+  path.push(type);
+  try {
+    if (isArrayShapeType(type, checker)) {
+      const element = getArrayElementType(type, checker);
+      return !!element && within(element);
     }
+    return checker.getPropertiesOfType(type).some((property) => {
+      if ((property.flags & ts.SymbolFlags.Method) !== 0) return false;
+      const declaration = property.valueDeclaration ??
+        property.declarations?.[0];
+      return !!declaration &&
+        within(checker.getTypeOfSymbolAtLocation(property, declaration));
+    });
+  } finally {
+    path.pop();
   }
-  return false;
 }
 
 /** The observation record the contract overlay consults, built once per
@@ -2944,7 +2948,10 @@ function contractCapabilityAt(
  * untouched, keeping its `$defs` identity and its prose. One expands only
  * when a capability inside it must change, and a self-referential type ends
  * that expansion at the cycle with the node kept as authored — the accepted
- * residual, since a literal cannot spell its own recursion.
+ * residual, since a literal cannot spell its own recursion. A recursion that
+ * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
+ * does, never meets itself, and ends the same way where `expandsWithoutEnd()`
+ * cuts it.
  */
 export function overlayContractCapabilities(
   node: ts.TypeNode,
@@ -2958,6 +2965,7 @@ export function overlayContractCapabilities(
 ): ts.TypeNode {
   const observation = contractObservationFrom(summary);
   const visiting = new Set<ts.Type>();
+  const expansions: ts.Type[] = [];
   const expanding = new Set<ts.TypeNode>();
 
   const walk = (
@@ -3089,12 +3097,14 @@ export function overlayContractCapabilities(
         getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
       if (!resolvedType) return current;
       if (visiting.has(resolvedType)) return current;
+      if (expandsWithoutEnd(resolvedType, expansions, checker)) return current;
       if (
         !typeSubtreeContainsCellLike(resolvedType, checker, new Set())
       ) {
         return current;
       }
       visiting.add(resolvedType);
+      expansions.push(resolvedType);
       try {
         const members: ts.TypeElement[] = [];
         for (const property of checker.getPropertiesOfType(resolvedType)) {
@@ -3126,6 +3136,7 @@ export function overlayContractCapabilities(
         return factory.createTypeLiteralNode(members);
       } finally {
         visiting.delete(resolvedType);
+        expansions.pop();
       }
     }
 

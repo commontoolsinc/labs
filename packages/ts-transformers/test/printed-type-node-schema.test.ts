@@ -833,7 +833,7 @@ export default pattern<{ ref: Ref }>(({ ref }) => ({ ${before}ref, refs: [ref] }
     // progress, and the nesting bound ends the reading: the innermost level
     // accepts any value and is reported as not fully read. A plain alias holds
     // no policy that the unread remainder could discard, so the report is a
-    // warning.
+    // warning; a CFC alias's remainder could, and the report is an error.
 
     const declaration =
       "type Nest<T> = { v: T; ref: unknown; inner?: Nest<T[]> };";
@@ -926,6 +926,100 @@ export default pattern<{ a: Nest<string> }>(({ a }) => ({ a }));`,
         expectReadToBound((root.properties as Record<string, Schema>).a!);
       }
       expectUnreadWarning(diagnostics);
+    });
+
+    for (const member of ["inner?: Nest<T[]>", "children: Nest<T[]>[]"]) {
+      it(`reports the CFC form, as \`${member}\`, printed from an inferred type, as an error`, async () => {
+        const diagnostics: TransformationDiagnostic[] = [];
+        await transformFiles({
+          "/main.tsx": `/// <cts-enable />
+import { Confidential, pattern } from "commonfabric";
+type Nest<T> = Confidential<{ v: T; ${member} }, ["secret"]>;
+function nest(): Nest<string> { return { v: "" } as Nest<string>; }
+export default pattern(() => ({ nested: nest() }));`,
+        }, {
+          types: COMMONFABRIC_TYPES,
+          typeCheck: true,
+          pipelineDiagnostics: diagnostics,
+        });
+
+        expect(
+          diagnostics.filter((diagnostic) =>
+            diagnostic.type === "schema-type:unread" ||
+            diagnostic.type === "cfc-schema:recursion-limit"
+          ).map(({ type, severity }) => ({ type, severity })),
+        ).toEqual([{ type: "cfc-schema:recursion-limit", severity: "error" }]);
+      });
+    }
+
+    for (
+      const [form, source] of [
+        [
+          "printed from an inferred type",
+          `function tup(): Tup<string> { return [""]; }
+export default pattern(() => ({ a: tup() }));`,
+        ],
+        [
+          "annotated",
+          "export default pattern<{ a: Tup<string> }>(({ a }) => ({ a }));",
+        ],
+      ] as const
+    ) {
+      it(`reports a tuple alias that instantiates itself without end, ${form}, as unread`, async () => {
+        // `Tup<T[]>` is read by its instantiation, whose arguments differ at
+        // each level, so the nesting bound under bindings never finds it
+        // repeated; the cut by the instantiations it is read within ends it.
+
+        const diagnostics: TransformationDiagnostic[] = [];
+        const files = await transformFiles({
+          "/main.tsx": `/// <cts-enable />
+import { pattern } from "commonfabric";
+type Tup<T> = [T, Tup<T[]>?];
+${source}`,
+        }, {
+          types: COMMONFABRIC_TYPES,
+          typeCheck: true,
+          pipelineDiagnostics: diagnostics,
+        });
+        const { output } = patternSchemas(parseModule(files["/main.tsx"]!));
+
+        expect(((output.properties as Record<string, Schema>).a!).type)
+          .toBe("array");
+        expectUnreadWarning(diagnostics);
+      });
+    }
+  });
+
+  describe("a finite chain of one declaration that shrinks toward its end", () => {
+    it("reads every level of an annotated binding, more than the recursion cut allows", async () => {
+      // Each level is a newer instantiation of `Chain`, as in a recursion
+      // without end, but the chain ends after twelve levels. Read under
+      // bindings, a declaration is left to the nesting bound, which reads it
+      // to its end.
+
+      const ones = Array.from({ length: 12 }, () => "1").join(", ");
+      const diagnostics: TransformationDiagnostic[] = [];
+      const files = await transformFiles({
+        "/main.tsx": `/// <cts-enable />
+import { pattern } from "commonfabric";
+interface Chain<N extends unknown[]> {
+  value: string;
+  next?: N extends [unknown, ...infer R] ? Chain<R> : { end: number };
+}
+export default pattern<{ a: Chain<[${ones}]> }>(({ a }) => ({ a }));`,
+      }, {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      });
+      const { input } = patternSchemas(parseModule(files["/main.tsx"]!));
+
+      expect(JSON.stringify(input)).toContain('"end"');
+      expect(
+        diagnostics.filter((diagnostic) =>
+          diagnostic.type === "schema-type:unread"
+        ),
+      ).toEqual([]);
     });
   });
 

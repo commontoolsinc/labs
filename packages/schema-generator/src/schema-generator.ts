@@ -48,6 +48,10 @@ import {
   unwrapTypeParentheses,
 } from "./typescript/type-node.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
+import {
+  expandsWithoutEnd,
+  isDeferredReference,
+} from "./typescript/expanding-recursion.ts";
 import { getCellWrapperInfo } from "./typescript/cell-brand.ts";
 import {
   bindWrittenArgument,
@@ -1324,6 +1328,7 @@ export class SchemaGenerator {
 
       // Stack state
       definitionStack: new Set(),
+      expandingPath: [],
       inProgressNames: new Set(),
 
       // Optional context
@@ -2724,11 +2729,43 @@ export class SchemaGenerator {
         : { "$ref": `#/$defs/${syntheticKey}`, scope: aliasScope };
     }
 
+    // Where the shape does not end a recursion that instantiates its
+    // declaration without end, the types the reading is within do
+    // (`expandsWithoutEnd()`), and cut it as the shape cuts one. A reading
+    // under no bindings has no shape, as `Nest<T>` read at a type parameter no
+    // binding names has none. An alias that recurses through the tuple or
+    // array it writes, `type Tup<T> = [T, Tup<T[]>?]`, is read under bindings
+    // by its instantiation, whose arguments differ at each level, so its shape
+    // never repeats (`isDeferredReference()`).
+    const expands = tracksCycle &&
+      (bound === undefined || isDeferredReference(type));
+    if (
+      expands &&
+      expandsWithoutEnd(type, context.expandingPath, context.typeChecker)
+    ) {
+      const unread = context.uninterpretedTypeNodes;
+      // `IgnoreErrors` prints any type, as `readAliasChain()` prints one.
+      const node = context.typeNode ??
+        context.typeChecker.typeToTypeNode(
+          type,
+          undefined,
+          ts.NodeBuilderFlags.IgnoreErrors,
+        );
+      if (unread && node && !unread.includes(node)) unread.push(node);
+      return {};
+    }
+
     // Push current type onto the stack
     if (tracksCycle) context.definitionStack.add(stackKey);
     const pushedShape = tracksCycle ? shapeKey : undefined;
     if (pushedShape !== undefined) context.definitionStack.add(pushedShape);
+    let pushedExpanding = expands;
+    if (pushedExpanding) context.expandingPath.push(type);
     const pop = () => {
+      if (pushedExpanding) {
+        context.expandingPath.pop();
+        pushedExpanding = false;
+      }
       if (tracksCycle) context.definitionStack.delete(stackKey);
       if (pushedShape !== undefined) {
         context.definitionStack.delete(pushedShape);
@@ -2933,6 +2970,7 @@ export class SchemaGenerator {
       definitions: {},
       emittedRefs: new Set(),
       definitionStack: new Set(),
+      expandingPath: [],
       inProgressNames: new Set(),
     });
   }

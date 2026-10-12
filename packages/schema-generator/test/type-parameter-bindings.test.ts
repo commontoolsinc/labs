@@ -21,6 +21,7 @@ async function memberOf(code: string) {
     definitions: {},
     emittedRefs: new Set(),
     definitionStack: new Set(),
+    expandingPath: [],
     inProgressNames: new Set(),
     boundTypeParameters: {
       declaredNode: reference,

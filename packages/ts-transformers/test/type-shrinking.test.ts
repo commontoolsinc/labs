@@ -8,6 +8,7 @@ import {
   CrossStageState,
   TransformationContext,
 } from "../src/core/mod.ts";
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import {
   applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
@@ -20,7 +21,9 @@ import {
   printTypeNode,
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
-import { collect, parseModule } from "./transformed-ast.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callSchemas, collect, parseModule } from "./transformed-ast.ts";
+import { transformFiles } from "./utils.ts";
 
 //
 // Structural inspection of printed type nodes.
@@ -249,6 +252,173 @@ describe("overlayContractCapabilities()", () => {
     );
 
     expect(result).toBe(alias.type);
+  });
+
+  /**
+   * The event schema of the one handler, with `event` for its event type, in
+   * a module declaring `declaration`, whose callback is `callback`; and the
+   * diagnostics compiling it reports, type-checked first where `typeCheck`
+   * is set.
+   */
+  async function eventSchema(
+    declaration: string,
+    event: string,
+    callback: string,
+    typeCheck = true,
+  ): Promise<{
+    event: Record<string, unknown>;
+    reported: { type: string; severity: string }[];
+  }> {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const files = await transformFiles({
+      "/main.tsx": `/// <cts-enable />
+import { handler, pattern, Writable } from "commonfabric";
+${declaration}
+const h = handler<${event}, { c: Writable<number> }>(${callback});
+export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
+    }, {
+      types: COMMONFABRIC_TYPES,
+      typeCheck,
+      pipelineDiagnostics: diagnostics,
+    });
+    const [schema] = callSchemas(parseModule(files["/main.tsx"]!), "handler");
+    return {
+      event: schema!,
+      reported: diagnostics.map(({ type, severity }) => ({ type, severity })),
+    };
+  }
+
+  it("reports nothing unread for an event holding arrays of objects nested nine deep", async () => {
+    // Compiled with no type check first, as `cf` deploys a pattern unless
+    // asked to check it, the checker instantiates the arrays as the reading
+    // meets them, each after the one enclosing it, and they nest deeper than
+    // a recursion is cut at. An array no alias writes is not counted: only a
+    // declaration, or an alias's own tuple or array, recurses without end.
+
+    const keys = ["r", "s", "t", "u", "w", "x", "y", "z", "q"];
+    const deep = `${keys.map((key) => `{ ${key}: `).join("")}string${
+      " }[]".repeat(keys.length)
+    }`;
+    const { event, reported } = await eventSchema(
+      `type Ev = { c: Writable<number>; d: { r: ${deep} } };`,
+      "Ev",
+      "(e, { c }) => { c.set(e.c.get()); }",
+      false,
+    );
+
+    expect(event.type).toBe("object");
+    expect(reported).toEqual([]);
+  });
+
+  it("overlays the capability the callback earns on a cell a generic event alias holds under arrays of objects nested nine deep", async () => {
+    // Compiled with no type check first, the nested arrays are each
+    // instantiated after the one enclosing it, but the search for a cell does
+    // not count an array no alias writes, so it finds the cell nine arrays
+    // in, and the reference expands to overlay it.
+
+    const deep = `${"{ a: ".repeat(9)}Writable<number>${" }[]".repeat(9)}`;
+    const { event } = await eventSchema(
+      `type Box<T> = { v: T; d: ${deep} };`,
+      "Box<string>",
+      "(e, { c }) => { c.set(e.v.length); }",
+      false,
+    );
+    let level = (event.properties as Record<string, Record<string, unknown>>)
+      .d!;
+    for (let depth = 0; depth < 9; depth++) {
+      const items = level.items as Record<string, unknown>;
+      level = (items.properties as Record<string, Record<string, unknown>>).a!;
+    }
+
+    expect(level.asCell).toEqual(["opaque"]);
+  });
+
+  describe("an event alias that instantiates itself without end", () => {
+    // Each `Nest<T[]>` is a new type, so neither the search for a cell nor
+    // the expansion of a reference meets one it has read, and both end where
+    // `expandsWithoutEnd()` cuts the recursion. A cell past the cut is not
+    // found, and a reference past it stays as written.
+
+    for (
+      const [shape, declaration, event] of [
+        [
+          "an object",
+          "type Nest<T> = { v: T; inner?: Nest<T[]> };",
+          "Nest<string>",
+        ],
+        ["a tuple", "type Tup<T> = [T, Tup<T[]>?];", "Tup<string>"],
+      ] as const
+    ) {
+      it(`reports what an event alias of ${shape} holding no cell leaves unread past the cut`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          "(e, { c }) => { c.set(e ? 1 : 0); }",
+        );
+
+        expect(schema).toBeDefined();
+        expect(reported.length).toBeGreaterThan(0);
+        for (const diagnostic of reported) {
+          expect(diagnostic).toEqual({
+            type: "schema-type:unread",
+            severity: "warning",
+          });
+        }
+      });
+    }
+
+    it("overlays the capability the callback earns on a cell the event holds, and opaque on the same cell a level in", async () => {
+      const { event, reported } = await eventSchema(
+        "type Nest<T> = { c: Writable<number>; v: T; children: Nest<T[]>[] };",
+        "Nest<string>",
+        "(e, { c }) => { c.set(e.c.get()); }",
+      );
+      const properties = event.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const child = (properties.children!.items as Record<string, unknown>)
+        .properties as Record<string, Record<string, unknown>>;
+
+      expect(properties.c!.asCell).toEqual(["readonly"]);
+      expect(child.c!.asCell).toEqual(["opaque"]);
+      for (const diagnostic of reported) {
+        expect(diagnostic).toEqual({
+          type: "schema-type:unread",
+          severity: "warning",
+        });
+      }
+    });
+
+    it("keeps the capability written for a cell past the cut of a finite chain that shrinks toward it", async () => {
+      // A known limit of the cut. The chain ends after twelve levels, but
+      // each level is a newer instantiation of one declaration, so the
+      // expansion stops at the cut as it would for a recursion without end,
+      // and the cell at the chain's end keeps the capability written for it
+      // where reading the chain in full would give the callback's `opaque`.
+
+      const ones = Array.from({ length: 12 }, () => "1").join(", ");
+      const { event, reported } = await eventSchema(
+        `interface Chain<N extends unknown[]> {
+  value: string;
+  next?: N extends [unknown, ...infer R] ? Chain<R> : { c: Writable<number> };
+}`,
+        `Chain<[${ones}]>`,
+        "(e, { c }) => { c.set(e.value.length); }",
+      );
+      const capabilities: unknown[] = [];
+      const collect = (schema: unknown): void => {
+        if (Array.isArray(schema)) return schema.forEach(collect);
+        if (typeof schema !== "object" || schema === null) return;
+        const { asCell, ...rest } = schema as Record<string, unknown>;
+        if (asCell !== undefined) capabilities.push(asCell);
+        Object.values(rest).forEach(collect);
+      };
+      collect(event);
+
+      expect(capabilities).toEqual([["cell"]]);
+      expect(reported).toEqual([]);
+    });
   });
 });
 

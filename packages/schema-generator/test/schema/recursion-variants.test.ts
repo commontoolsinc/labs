@@ -112,4 +112,75 @@ describe("Schema: Recursion variants", () => {
     expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
       .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
   });
+
+  it("reads an alias that instantiates itself without end at a type parameter no binding names to the declaration nesting bound, and reports the rest unread", async () => {
+    // Read under no bindings, the recursion has no shape to bound it, and the
+    // declarations it is inside do instead.
+
+    const code = `
+      type Nest<T> = { v: T; children: Nest<T[]>[] };
+      interface Root<T> { a: Nest<T> }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = asObjectSchema(
+      new SchemaGenerator().generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+    const values: unknown[] = [];
+    let innermost: unknown;
+    let level: Record<string, unknown> | undefined =
+      (s.properties as Record<string, Record<string, unknown>>).a;
+    while (level) {
+      const properties = level.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      values.push(properties.v);
+      innermost = properties.children;
+      const items = properties.children!.items as Record<string, unknown>;
+      level = items.properties ? items : undefined;
+    }
+    let expected: unknown = {};
+    const expectedValues = values.map(() => {
+      const value = expected;
+      expected = { type: "array", items: value };
+      return value;
+    });
+
+    expect(values.length).toBeGreaterThan(1);
+    expect(values).toEqual(expectedValues);
+    expect(innermost).toEqual({ type: "array", items: {} });
+    expect(diagnostics.map(({ severity, type }) => ({ severity, type })))
+      .toEqual([{ severity: "warning", type: "schema-type:unread" }]);
+  });
+
+  it("reads every level of a nesting of one declaration written out nine deep, at a type parameter no binding names", async () => {
+    // A nesting written out is instantiated from the inside out, so its
+    // deeper levels are the older, and the cut by the instantiations a
+    // reading is within does not count them.
+
+    const written = `${"Pair<".repeat(9)}T${">".repeat(9)}`;
+    const code = `
+      type Pair<T> = { v: T };
+      interface Root<T> { a: ${written} }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "Root");
+    const diagnostics: SchemaGenerationDiagnostic[] = [];
+    const s = asObjectSchema(
+      new SchemaGenerator().generateSchema(type, checker, undefined, {
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      }),
+    );
+    let depth = 0;
+    let level = (s.properties as Record<string, Record<string, unknown>>).a;
+    while (level?.properties) {
+      level = (level.properties as Record<string, Record<string, unknown>>).v;
+      depth++;
+    }
+
+    expect(depth).toBe(9);
+    expect(diagnostics).toEqual([]);
+  });
 });

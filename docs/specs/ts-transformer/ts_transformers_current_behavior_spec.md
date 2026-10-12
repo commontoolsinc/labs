@@ -460,7 +460,15 @@ recursive event type — stays the reference it is. A named reference whose
 subtree holds no cell-like position passes through untouched; one
 expands only when a capability inside it must change, and a self-referential
 type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. Observed
+accepted residual, since a literal cannot spell its own recursion. A recursion
+that instantiates its declaration without end, as `Nest<T[]>` inside
+`Nest<T>` does, never meets its own type again; the search for a cell-like
+position and the expansion both end where the schema generator's
+`expandsWithoutEnd()` (`src/typescript/expanding-recursion.ts`) cuts it, with
+the node past the cut kept as authored, the same residual. A finite chain that
+shrinks toward its end through one declaration past that cut ends there too,
+so a cell at its end keeps the capability written for it (pinned in
+`test/type-shrinking.test.ts`). Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored

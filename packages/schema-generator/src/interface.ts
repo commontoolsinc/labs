@@ -189,6 +189,12 @@ export interface GenerationContext {
   /** Current recursion path for cycle detection */
   definitionStack: Set<string | ts.Type>;
 
+  /**
+   * The types the current reading is read within, outermost first, where it
+   * reads under no type parameter bindings (`expandsWithoutEnd()`).
+   */
+  expandingPath: ts.Type[];
+
   /** Currently building these named types */
   inProgressNames: Set<string>;
 

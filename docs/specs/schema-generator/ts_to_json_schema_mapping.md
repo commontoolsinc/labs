@@ -570,7 +570,25 @@ A recursion that instantiates its type without end, as `Nest<T[]>` inside
 `Nest<T>` does, meets no reading in progress, since each instantiation is a
 new type. The nesting bound (§11) ends it: the innermost reading accepts any
 value, and the remainder is reported as the `schema-type:unread` warning, or,
-in a CFC alias chain, as the `cfc-schema:recursion-limit` error.
+in a CFC alias chain, as the `cfc-schema:recursion-limit` error. That bound
+compares the arguments bindings write, and two recursions it does not end are
+cut by the instantiations the reading is within instead
+(`expandsWithoutEnd()`, `src/typescript/expanding-recursion.ts`): a reading
+under no bindings, as `Nest<T>` read at a type parameter nothing binds is; and
+an alias that recurses through the tuple or array it writes,
+`type Tup<T> = [T, Tup<T[]>?]`, which is read under bindings by its
+instantiation, whose arguments differ at each level. The cut comes where one
+declaration, or one such deferred reference, is instantiated
+`MAX_EXPANDING_NESTING` (8) deep inside itself, each instantiation newer than
+the one it is read within, as the checker's `isDeeplyNestedType` counts. The
+innermost reading then accepts any value and is reported as the
+`schema-type:unread` warning. A nesting written out, whose inner
+instantiations are the older, is never cut, and an array or tuple no alias
+writes is not counted. A finite chain that shrinks toward its end through one
+declaration more than eight times is cut too, which is the cut's known limit;
+the remainder is reported, never refused. The writer-policy reading
+(`writer-policy.ts`) writes nothing out and can refuse a schema on its answer,
+so it is bounded by depth and by count instead.
 
 ## 6. Wrapper Types And The `asCell` Vocabulary
 
