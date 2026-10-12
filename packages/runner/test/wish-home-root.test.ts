@@ -152,27 +152,13 @@ describe("wish-home-root", () => {
         | undefined)?.defaultPattern;
     }
 
-    it("creates the Home root before offering the profile create surface, which writes under it", async () => {
+    it("offers the profile create surface for a `#profile` with no profile, and creates no Home root", async () => {
       const { found, stop } = await runWish("#profile", "profile wish");
       try {
-        expect(isSigilLink(homeSlot())).toBe(true);
-        const root = await resolveSpaceRootPattern(runtime, home);
-        expect(getPatternIdentityRef(root!)).toBeDefined();
-
         expect(
           found.key(UI).key("props").key("data-profile-create-ui").get(),
         ).toBe("wish");
-        const surface = found.key(UI).key("props").key("$cell")
-          .resolveAsCell() as Cell<any>;
-        await surface.pull();
-        await runtime.idle();
-        const tx = runtime.edit();
-        surface.key("profiles").withTx(tx).push("Ada");
-        expect((await tx.commit().settled).error).toBeUndefined();
-        await runtime.idle();
-
-        expect((root as Cell<any>).key("profiles").get()).toEqual(["Ada"]);
-        expect(isSigilLink(homeSlot())).toBe(true);
+        expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
       }

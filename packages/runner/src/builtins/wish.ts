@@ -1118,13 +1118,7 @@ function resolveHomeSpaceTarget(
       const { ordered } = getProfileCandidateCells(ctx);
       if (ordered.length === 0) {
         // No profile yet — throw so the #profile error path falls back to the
-        // create surface (see profileCreateUI). That surface writes under the
-        // Home root, which it is handed from the error path, so the root is
-        // brought into being here, where waiting on it is possible. A headless
-        // wish offers no create surface, and so brings up no root.
-        if (isProfilePersonaTarget(parsed) && !ctx.headless) {
-          getHomeRootCell(ctx);
-        }
+        // create surface (see profileCreateUI).
         throw new NoProfileError();
       }
       // Expose the ordered roster as `candidates`: every profile that loaded,
@@ -2874,7 +2868,12 @@ export function wish(
       sidecarUser,
       (): ProfileCreateSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeRootCell(ctx);
+    // TODO(danfuzz): With no Home root yet, this resolves `defaultPattern`
+    // inside the Home space cell itself, so the profile the surface creates is
+    // written inline there instead of under a root. The fix creates the root
+    // at that first write, and fails the write loudly on a serving runtime.
+    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
+      .resolveAsCell();
     slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
