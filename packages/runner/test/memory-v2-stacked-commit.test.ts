@@ -1545,6 +1545,57 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("reads a document a cascade-dropped C3 created from an installed store read-through, where the store gained it after the write", async () => {
+      // A replica reading its space from the store directly holds a record
+      // for the document from the write on, and a store pull of a held
+      // record is answered from the replica; the drop reads the store all
+      // the same, since the store gained the document after the write.
+      const harness = await createHarness();
+      const store = new Map<URI, { seq: number; doc: EntityDocument }>();
+      const reads: URI[] = [];
+      harness.storageManager.installStoreReadThrough(
+        space,
+        ({ id, scopeKey }) => {
+          reads.push(id);
+          const entry = store.get(id);
+          return {
+            branch: "",
+            id,
+            scope: "space",
+            scopeKey,
+            ...(entry === undefined
+              ? { seq: 0, deleted: true as const }
+              : { seq: entry.seq, doc: entry.doc }),
+          };
+        },
+      );
+      try {
+        await seedAccepted(harness, DOCS.A, valueFor("base-a"));
+
+        const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+        harness.model.setOutcome(c2.localSeq, { kind: "rejectConflict" });
+        const c3 = beginSet(
+          harness,
+          DOCS.C,
+          valueFor("c3"),
+          sourceFromReads([{ id: DOCS.A }]),
+        );
+        harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+        expectVisible(harness, { C: valueFor("c3") });
+        store.set(DOCS.C, { seq: 7, doc: { value: valueFor("foreign") } });
+
+        await expectConflict(c2.promise);
+        await expectConflict(c3.promise, "pending dependency");
+        expect(reads.filter((id) => id === DOCS.C)).toHaveLength(2);
+        expectVisible(harness, {
+          A: valueFor("base-a"),
+          C: valueFor("foreign"),
+        });
+      } finally {
+        await harness.close();
+      }
+    });
+
     it("fails a C3 that depends on a C2 whose conflict is on unrelated data in the same atomic commit", async () => {
       const harness = await createHarness();
       try {

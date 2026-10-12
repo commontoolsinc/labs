@@ -9354,6 +9354,12 @@ export class SpaceReplica
    * later write of it reaches this replica. A document the store holds
    * nothing for stays absent. A failed load is logged and leaves the drop to
    * proceed: the retry's commit decides what the absence was worth.
+   *
+   * With a store read-through installed, the documents are read from the
+   * store here rather than through `pull()`: the commit's own pending layer
+   * gives each a record already, and the ordinary store pull leaves a held
+   * record to the feed's refresh, which covers only commits admitted after
+   * the record appeared.
    */
   async #loadAbsentTouched(
     rejection: StorageTransactionRejected,
@@ -9380,6 +9386,22 @@ export class SpaceReplica
       }, undefined]);
     }
     if (entries.length === 0) {
+      return;
+    }
+    const read = this.#storeReadThrough();
+    if (read !== undefined) {
+      const upserts: SessionSyncUpsert[] = [];
+      for (const [address] of entries) {
+        const instance = this.instanceKey(
+          address.scope,
+          undefined,
+          address.scopeKey,
+        );
+        if (!isScopeKey(instance)) continue;
+        const upsert = read({ id: address.id, scopeKey: instance });
+        if (upsert !== undefined) upserts.push(upsert);
+      }
+      if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
       return;
     }
     let failure: unknown;
