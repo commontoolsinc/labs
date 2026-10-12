@@ -1144,9 +1144,9 @@ export class RuntimeProcessor {
     readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
     readonly health: Promise<boolean>;
     readonly awaitedHealth: boolean;
-    readonly legacySpacesAdopted: Promise<void> | undefined;
-    readonly privateInboxEnsured: Promise<void> | undefined;
-    readonly shareIntake: Promise<ShareIntake | undefined> | undefined;
+    legacySpacesAdopted: Promise<void> | undefined;
+    privateInboxEnsured: Promise<void> | undefined;
+    shareIntake: Promise<ShareIntake | undefined> | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
     // deno-lint-ignore no-this-alias
@@ -1167,11 +1167,20 @@ export class RuntimeProcessor {
       get legacySpacesAdopted() {
         return outerThis.#legacySpacesAdopted;
       },
+      set legacySpacesAdopted(value) {
+        outerThis.#legacySpacesAdopted = value;
+      },
       get privateInboxEnsured() {
         return outerThis.#privateInboxEnsured;
       },
+      set privateInboxEnsured(value) {
+        outerThis.#privateInboxEnsured = value;
+      },
       get shareIntake() {
         return outerThis.#shareIntake;
+      },
+      set shareIntake(value) {
+        outerThis.#shareIntake = value;
       },
       cc: this.#cc,
       spaces: this.#spaces,
@@ -2872,7 +2881,40 @@ export class RuntimeProcessor {
     // the storage manager, covering event handlers, direct cell IPC writes,
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
-    await this.#runtime.scheduler.idleWithPendingCommits();
+    //
+    // It also takes in the housekeeping a bring-up of Home has started, which
+    // goes on loading and sending to Home after the bring-up has answered.
+    // That work issues scheduler work, and scheduler work can hand the share
+    // intake more to take up, so the two are awaited until both hold at once.
+    for (;;) {
+      const intake = await this.#homeHousekeepingIdle();
+      await this.#runtime.scheduler.idleWithPendingCommits();
+      if (
+        (intake === undefined || intake.isIdle()) &&
+        this.#runtime.scheduler.isIdleWithPendingCommits()
+      ) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Helper for `handleIdle()`, which waits for the housekeeping over Home that
+   * `#startHomeHousekeeping()` has started in this worker: the adoption of the
+   * Home space list's name-only entries, the private inbox ensure, the start
+   * of the share intake, and the intake taking up every change it has been
+   * told of. Returns the intake, when one is running. Never rejects: each step
+   * is held as a promise that does not, and a failure of the intake's own wait
+   * is reported rather than passed on.
+   */
+  async #homeHousekeepingIdle(): Promise<ShareIntake | undefined> {
+    await this.#legacySpacesAdopted;
+    await this.#privateInboxEnsured;
+    const intake = await this.#shareIntake;
+    await intake?.idle().catch((error) => {
+      console.warn("[RuntimeProcessor] Waiting for the share intake:", error);
+    });
+    return intake;
   }
 
   async handleListEventAttention(

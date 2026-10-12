@@ -260,6 +260,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
+import { bringUpHomeRootForHandler } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -12148,7 +12149,12 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
+          const materialized = inputsCell.asSchema(module.argumentSchema)
+            .withTx(tx).get();
+          // A handler holding a cell beneath the user's Home before Home has
+          // a root runs only once the root exists, so a write it makes there
+          // lands under the root.
+          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
         }
         : undefined;
 

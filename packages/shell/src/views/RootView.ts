@@ -50,6 +50,7 @@ import {
   getThemePreference,
   type ThemePreference,
 } from "../lib/theme-preference.ts";
+import type { XAppView } from "./AppView.ts";
 import {
   BaseView,
   type Command,
@@ -338,6 +339,7 @@ export class XRootView extends BaseView implements ShellApp {
           this.runtime,
           () => this.runtime,
           () => this.space as DID,
+          () => this.#appView?.homeBringUp,
         );
 
         return rt;
@@ -746,6 +748,11 @@ export class XRootView extends BaseView implements ShellApp {
       console.log(`[app] ${time}s ${description}`, next);
     }
     return this.updateComplete.then((_) => undefined);
+  }
+
+  /** The app view this element renders, once it has rendered one. */
+  get #appView(): XAppView | null {
+    return this.renderRoot?.querySelector<XAppView>("x-app-view") ?? null;
   }
 
   getRuntimeSpaceDID(): DID | undefined {

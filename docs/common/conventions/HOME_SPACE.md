@@ -281,9 +281,12 @@ starts. A queue with no entries shows "No agent runs yet."
 A request made in a home space that holds no queue — its home pattern does not
 exist, or is a version without the field — ends `refused`. Where the home
 pattern is a version without the field, `wish({ query: "#agent_queue" })`
-resolves to nothing; where there is no home pattern yet, the wish creates one
-on a client runtime and is refused on a serving one, as
-[Built-in Targets](wish.md#built-in-targets) describes.
+resolves to nothing; where there is no home pattern yet, a headless wish
+resolves to nothing too, and any other resolves through the empty slot. A
+handler holding that cell on a client runtime brings the home pattern up before
+it runs; on a serving runtime, which creates none, a write through it is refused
+with a `SpaceRootMissingError`. [Built-in Targets](wish.md#built-in-targets)
+describes both.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -314,7 +317,9 @@ holds none until the home space is next opened, since nothing updates a piece
 nobody opens, and the wish does not open it; a custom home pattern
 ([Custom Home Pattern](#custom-home-pattern)) holds one only if it says so.
 Until then `wish({ query: "#chatManager" })` reports an error naming both
-remedies, rather than resolving to nothing.
+remedies, rather than resolving to nothing. A home space with no home pattern
+yet holds no chat manager either, and the wish reports the same error there
+without creating the home pattern.
 
 Home hands the manager its shared-space catalog ([Shared-space
 catalog](../../features/shared-space-catalog.md)), and the manager registers
@@ -326,13 +331,19 @@ intake among them, and forgetting a room archives its entry.
 ## Custom Home Pattern
 
 The home space's default pattern is the home experience itself — by default,
-`/api/patterns/system/home.tsx`. A Home is created once, on its user's first
-open or by the first wish on a client runtime for a target under its root (see
-[Built-in Targets](wish.md#built-in-targets)), and from then on it owns account
+`/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
+first of: its user's first open; the home space's own server, which ensures the
+root once server execution activates the space and its owner resolves; and the
+first handler on a client runtime that holds a cell a wish handed out for a
+Home target, which brings the root up before it runs (see
+[Built-in Targets](wish.md#built-in-targets)). A wish's read never creates one.
+On a serving runtime such a write is refused until the root exists, so under
+server execution a user's first profile can be created only once their Home has
+a root. From then on it owns account
 data: profiles, favorites, navigation, the shared-space catalog and the private
 inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
-which retains that data. Nothing but that first open or that first wish creates
-the root of an identity Home, and nothing replaces or unlinks it: root
+which retains that data. Nothing but those three creates the root of an
+identity Home, and nothing replaces or unlinks it: root
 recreation refuses a Home before stopping, unlinking or compiling anything,
 whether the Home is absent, installed, or pointing at a target that cannot
 currently be loaded, and the low-level link and unlink
@@ -495,8 +506,8 @@ Both the home pattern and the default app pattern follow the same mechanism:
 3. The pattern is compiled, run, linked as `spaceCell.defaultPattern`, and its
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
-   Home, absent or present, which is created on first open, or by the first
-   wish on a client runtime for a target under its root, and updated in place.
+   Home, absent or present, which is created as
+   [Custom Home Pattern](#custom-home-pattern) describes and updated in place.
    A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
    remains untracked by the URL updater and may carry a separate repository
    locator
