@@ -269,8 +269,9 @@ and the two take turns.
 That is the shape an overlapped commit would change. The wave machinery
 already lets a wave open while its predecessor's commit is in flight: the
 serving runtime's own optimistic layer holds the predecessor's writes, the
-successor takes its basis with them applied, and `noteOwnWaveCommit` rebases
-the successor's writes to the landed commit rather than conflicting. What the
+successor opens on the basis before that commit but reads a replica with them
+applied, and `noteOwnWaveCommit` rebases the successor's writes to the landed
+commit rather than conflicting. What the
 cycle does not yet do is start the next drain and settle before the commit's
 answer arrives, and not await the publish at all. Assuming the commit lands,
 which within one space it does here on every wave of every run, the worker's

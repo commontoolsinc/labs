@@ -315,13 +315,6 @@ const errorOf = (fault: PortFault): Error => {
 };
 
 /**
- * One end of the port: sends requests and notices of the `Out` maps and
- * answers those of the `In` maps. A request handler is called as its message
- * arrives, before the next message is read, so two requests posted in order
- * start in that order; its answer is posted when it settles. A notice handler
- * that throws, or an answer that cannot be posted, is reported to `onFault`.
- */
-/**
  * The port's timing rows, under the serving loop's `executor` statistics:
  * `executor/port/request/<method>` on the side that asked, the whole round
  * trip, and `executor/port/handle/<method>` on the side that answered, the
@@ -330,6 +323,13 @@ const errorOf = (fault: PortFault): Error => {
  */
 const timing = getLogger("executor", { enabled: false });
 
+/**
+ * One end of the port: sends requests and notices of the `Out` maps and
+ * answers those of the `In` maps. A request handler is called as its message
+ * arrives, before the next message is read, so two requests posted in order
+ * start in that order; its answer is posted when it settles. A notice handler
+ * that throws, or an answer that cannot be posted, is reported to `onFault`.
+ */
 export class PortEndpoint<
   OutRequests extends RequestMap,
   OutNotices extends NoticeMap,
