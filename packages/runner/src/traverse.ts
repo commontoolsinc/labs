@@ -5596,7 +5596,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc
+        // Replace doc with a DataCellURI style doc. It keeps this document's
+        // space, which is where a link inside the element resolves the
+        // references in its schema.
         // Need to read recursively here
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         // An eager read continues over the value the snapshot encodes, not
