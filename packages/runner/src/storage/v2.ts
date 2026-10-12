@@ -3215,6 +3215,9 @@ export class StorageManager implements IStorageManager {
     seen.add(value);
 
     if (isPrimitiveCellLink(value)) {
+      // A position the reader declares a stream names a document that holds
+      // no value a read uses, whatever the link's own schema says of it.
+      if (ContextualFlowControl.declaresStream(schema)) return;
       const link = parseLinkPrimitive(value, base);
       if (link.id === undefined) return;
       this.#syncLinkTarget(

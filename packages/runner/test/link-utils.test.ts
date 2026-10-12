@@ -818,7 +818,10 @@ describe("link-utils", () => {
       setContentAddressedSchemasConfig(true);
       const document: JSONSchema = {
         type: "object",
-        properties: { name: { type: "string" } },
+        properties: {
+          name: { type: "string", description: "The person's name." },
+          age: { type: "number", description: "The person's age in years." },
+        },
       };
       const link = (schema: JSONSchema) => ({
         "/": {
@@ -844,6 +847,22 @@ describe("link-utils", () => {
       expect(stored.plain).toBe(value.plain);
       // A second pass finds nothing to rewrite.
       expect(externalizeLinkSchemasInValue(stored)).toBe(stored);
+    });
+
+    it("leaves a handle stamp no longer than a reference inline", () => {
+      setContentAddressedSchemasConfig(true);
+      const value = {
+        entry: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:stamped-target",
+              path: [],
+              schema: { asCell: ["stream"] },
+            },
+          },
+        },
+      };
+      expect(externalizeLinkSchemasInValue(value)).toBe(value);
     });
 
     it("returns a value carrying no inline link schema as it is", () => {
