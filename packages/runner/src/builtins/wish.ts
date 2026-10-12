@@ -31,6 +31,7 @@ import {
 } from "../builder/types.ts";
 import { useCancelGroup } from "../cancel.ts";
 import { type Cell } from "../cell.ts";
+import { ensureSpaceRootPattern } from "../ensure-space-root.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
   createSigilLinkFromParsedLink,
@@ -394,6 +395,80 @@ function buildResolutionPath(
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   ctx.usedHomeSpace = true;
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
+}
+
+/**
+ * The creation of a Home's root under way in a runtime, by Home space, shared
+ * by every wish that waits on it.
+ */
+const homeRootCreations = new WeakMap<
+  Runtime,
+  Map<MemorySpace, Promise<void>>
+>();
+
+/**
+ * Helper for {@link getHomeRootCell}, which brings the root of `home` into
+ * being, sharing a creation already under way in `runtime`. Resolves once
+ * `home` links a root, whoever created it.
+ */
+function createHomeRoot(runtime: Runtime, home: MemorySpace): Promise<void> {
+  let creations = homeRootCreations.get(runtime);
+  if (!creations) {
+    creations = new Map();
+    homeRootCreations.set(runtime, creations);
+  }
+  let creation = creations.get(home);
+  if (!creation) {
+    const settling = creations;
+    creation = ensureSpaceRootPattern(runtime, home, { isHomeSpace: true })
+      .then(() => {})
+      .finally(() => settling.delete(home));
+    creations.set(home, creation);
+    // The wish's view is waiting on the root, so the runtime is not idle
+    // until the creation settles.
+    runtime.scheduler.trackBackgroundTask(creation);
+  }
+  return creation;
+}
+
+/**
+ * The root of the wishing user's Home, the cell its space links as
+ * `defaultPattern`, under which every Home target a wish hands out lies.
+ *
+ * A space that links no root resolves `defaultPattern` to a path inside the
+ * space cell itself, and a write through a cell resolved there lands where no
+ * root reads it and where the root's creation finds the slot taken. So a Home
+ * with nothing in the slot gets its root first: on a client runtime this
+ * starts the root's creation and throws `DocumentPending`, and the wish runs
+ * again once the creation settles. A serving runtime creates no Home, and
+ * throws a `WishError`. A slot holding anything at all is resolved through as
+ * it stands.
+ */
+function getHomeRootCell(ctx: WishContext): Cell<any> {
+  const homeSpaceCell = getHomeSpaceCell(ctx) as Cell<any>;
+  ctx.readiness.requireDocument(homeSpaceCell, ctx.tx);
+  const slot = homeSpaceCell.key("defaultPattern");
+  if (slot.getRaw() === undefined) {
+    if (ctx.runtime.servingPosture) {
+      throw new WishError(
+        "The home space has no root yet, and a serving runtime does not " +
+          "create one. Opening the home space creates it.",
+      );
+    }
+    const home = homeSpaceCell.space;
+    ctx.readiness.requireSettled(
+      `home-root:${home}`,
+      () => createHomeRoot(ctx.runtime, home),
+    );
+    // The creation resolves only once the slot holds a link, so an empty slot
+    // here means the root went missing again after it was created.
+    if (slot.getRaw() === undefined) {
+      throw new WishError("The home space's root could not be found.");
+    }
+  }
+  const root = slot.resolveAsCell();
+  ctx.readiness.requireDocument(root, ctx.tx);
+  return root;
 }
 
 /**
@@ -863,21 +938,20 @@ function searchByHashtag(
 }
 
 /**
- * Throws a `WishError` naming the remedies when the home pattern in
- * `homeSpaceCell` holds nothing at `field`, which it names to the user as
- * `what`. The system home pattern gains a field its current source adds only
+ * Throws a `WishError` naming the remedies when the home pattern `homeRoot`
+ * holds nothing at `field`, which it names to the user as `what`. The system home pattern gains a field its current source adds only
  * when the home space is next opened, since nothing updates a piece nobody
  * opens, so a home set up before the field existed lacks it until then. A
  * custom home pattern follows no source of the system's, and holds the field
  * only if it says so. The wish does not open the home itself.
  */
 function requireHomeField(
-  homeSpaceCell: Cell<unknown>,
+  homeRoot: Cell<unknown>,
   field: string,
   what: string,
   ctx: WishContext,
 ): void {
-  const held = resolvePath(homeSpaceCell, ["defaultPattern", field], ctx);
+  const held = resolvePath(homeRoot, [field], ctx);
   if (held.getRaw() === undefined) {
     throw new WishError(
       `The home space holds no ${what}. If its home pattern is the system ` +
@@ -901,15 +975,11 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-
       // No path = return favorites list
       if (parsed.path.length === 0) {
-        return [{
-          cell: homeSpaceCell,
-          pathPrefix: ["defaultPattern", "favorites"],
-        }];
+        return [{ cell: getHomeRootCell(ctx), pathPrefix: ["favorites"] }];
       }
+      const homeSpaceCell = getHomeSpaceCell(ctx);
 
       // Path provided = search by tag (legacy behavior)
       const searchTerm = parsed.path[0].toLowerCase();
@@ -949,10 +1019,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #journal");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "journal"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["journal"] }];
     }
 
     case "#learned": {
@@ -960,10 +1027,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #learned");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["learned"] }];
     }
 
     case "#agent_queue": {
@@ -976,10 +1040,7 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #agent_queue",
         );
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "agentQueue"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["agentQueue"] }];
     }
 
     case "#chatManager": {
@@ -992,12 +1053,9 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #chatManager",
         );
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-      requireHomeField(homeSpaceCell, "chatManager", "chat manager", ctx);
-      return [{
-        cell: homeSpaceCell,
-        pathPrefix: ["defaultPattern", "chatManager"],
-      }];
+      const homeRoot = getHomeRootCell(ctx);
+      requireHomeField(homeRoot, "chatManager", "chat manager", ctx);
+      return [{ cell: homeRoot, pathPrefix: ["chatManager"] }];
     }
 
     case "#learnedSummary": {
@@ -1011,8 +1069,8 @@ function resolveHomeSpaceTarget(
         );
       }
       return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned", "summary"],
+        cell: getHomeRootCell(ctx),
+        pathPrefix: ["learned", "summary"],
       }];
     }
 
@@ -1024,7 +1082,10 @@ function resolveHomeSpaceTarget(
       const { ordered } = getProfileCandidateCells(ctx);
       if (ordered.length === 0) {
         // No profile yet — throw so the #profile error path falls back to the
-        // create surface (see profileCreateUI).
+        // create surface (see profileCreateUI). That surface writes under the
+        // Home root, which it is handed from the error path, so the root is
+        // brought into being here, where waiting on it is possible.
+        if (isProfilePersonaTarget(parsed)) getHomeRootCell(ctx);
         throw new NoProfileError();
       }
       // Expose the ordered roster as `candidates`: every profile that loaded,
@@ -1477,10 +1538,15 @@ function resolveSpaceTarget(
     results.push(resolutionFor(getSpaceCell(ctx)));
   }
 
-  // "~" → include home space
+  // "~" → include home space, through its root for a target under the root
   if (ctx.scope?.includes("~") && homeSpaceUserDID(ctx) !== undefined) {
-    const homeSpaceCell = getHomeSpaceCell(ctx);
-    results.push(resolutionFor(homeSpaceCell));
+    const resolution = resolutionFor(getHomeSpaceCell(ctx));
+    const [first, ...rest] = resolution.pathPrefix ?? [];
+    results.push(
+      first === "defaultPattern"
+        ? { cell: getHomeRootCell(ctx), pathPrefix: rest }
+        : resolution,
+    );
   }
 
   // Arbitrary DIDs → include each space
@@ -2760,8 +2826,7 @@ export function wish(
       sidecarUser,
       (): ProfileCreateSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
@@ -2934,8 +2999,7 @@ export function wish(
       sidecarUser,
       (): ProfilePickerSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     // A home with the slot hands it over for "Set default" and its earlier
     // default as `legacyDefaultProfile`. A home without hands over no slot and
     // `offersSetDefault: false`, since a write through a cell whose root holds
