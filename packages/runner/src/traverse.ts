@@ -60,6 +60,7 @@ import {
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import { schemaTypesAreDisjoint } from "./schema-type-disjointness.ts";
 import type {
   CellScope,
   JSONObject,
@@ -3562,29 +3563,6 @@ export function combineSchemaForLink(
   );
 }
 
-function schemaTypesAreDisjoint(
-  parentType: JSONSchemaObj["type"],
-  linkType: JSONSchemaObj["type"],
-): boolean {
-  if (parentType === undefined || linkType === undefined) return false;
-
-  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
-  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
-    return false;
-  }
-
-  return !parentTypes.some((parent) =>
-    linkTypes.some((link) =>
-      parent === link ||
-      (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number") ||
-      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
-      (link === "object" && isFabricPrimitiveSchemaType(parent))
-    )
-  );
-}
-
 export function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: JSONSchemaTypes,
@@ -5596,7 +5574,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc
+        // Replace doc with a DataCellURI style doc. It keeps this document's
+        // space, which is where a link inside the element resolves the
+        // references in its schema.
         // Need to read recursively here
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const elementAddress = curDoc.address;
