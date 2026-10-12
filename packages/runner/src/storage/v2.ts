@@ -75,7 +75,7 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { validatePresencePublication } from "@commonfabric/memory/v2/presence";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
-import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import { BoundedKeyMap, LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { maxOf, minOf } from "@commonfabric/utils/math";
 import {
@@ -297,6 +297,8 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
+/** The URI bytes the data-URI memo may hold, which bounds what it retains. */
+const DATA_URI_MEMO_MAX_WEIGHT = 64 * 1024 * 1024;
 // Backstop for the inline conflict read-repair wait. In the connected path the
 // caught-up sync arrives within a refresh cycle; this only fires if the sync is
 // permanently undelivered on a still-open, never-reconnecting session, so the
@@ -366,6 +368,8 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
  */
 export function dataURISyncKey(identity: {
   id: string;
+  /** The hash of `id`, where the caller holds it, so the id is hashed once. */
+  idHash?: string;
   schema: JSONSchema | undefined;
   path: readonly string[];
   space: MemorySpace;
@@ -373,7 +377,7 @@ export function dataURISyncKey(identity: {
   scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
-    identity.id,
+    identity.idHash ?? hashStringOf(identity.id),
     identity.schema ? hashStringOf(identity.schema) : "",
     [...identity.path],
     identity.space,
@@ -1402,6 +1406,20 @@ export class StorageManager implements IStorageManager {
   #dataURISyncs = new BoundedKeyMap<string, Promise<void>>(
     DATA_URI_SYNC_CACHE_MAX,
   );
+
+  /**
+   * What a data URI is worth knowing per sync, by the URI: the hash of the id
+   * and the value it decodes to. A plan's inputs document is synced under
+   * each schema its node reads through and again on every pre-sync wave, and
+   * hashing and decoding tens of kilobytes of URI on each would cost more than
+   * the sync. The budget is by URI length, since the entry keeps the URI
+   * alive as its key.
+   */
+  #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
+    capacity: DATA_URI_SYNC_CACHE_MAX,
+    weigh: (id) => id.length * 2 + 128,
+    maxWeight: DATA_URI_MEMO_MAX_WEIGHT,
+  });
 
   /**
    * In-flight commits, registered synchronously by the transaction layer at
@@ -3081,8 +3099,10 @@ export class StorageManager implements IStorageManager {
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
+    const memo = this.#dataUri(id);
     const cacheKey = dataURISyncKey({
       id,
+      idHash: memo.idHash,
       schema,
       path: cell.path.map(String),
       space,
@@ -3095,6 +3115,7 @@ export class StorageManager implements IStorageManager {
         cell,
         space,
         id,
+        memo.value,
         schema,
         scope,
         identity,
@@ -3105,15 +3126,26 @@ export class StorageManager implements IStorageManager {
     return cell;
   }
 
+  /** The memo entry for the data URI `id`, decoded and hashed on first use. */
+  #dataUri(id: string): { idHash: string; value: unknown } {
+    let entry = this.#dataUriMemo.get(id);
+    if (entry === undefined) {
+      entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
+      this.#dataUriMemo.put(id, entry);
+    }
+    return entry;
+  }
+
   async #syncDataURILinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
+    decoded: unknown,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<void> {
-    let value: unknown = valueFromDataUri(id);
+    let value: unknown = decoded;
     for (const segment of [...cell.path.map(String)]) {
       if (!isObjectOrArray(value)) {
         return;
@@ -3252,11 +3284,16 @@ export class StorageManager implements IStorageManager {
       !hasDataUriScheme(link.id) && link.overwrite !== "redirect" &&
       isUnknownCellSchema(schema)
     ) return;
+    // A link that declares a stream names a document that holds no value: a
+    // send to it is an event the store appends, and nothing reads the
+    // document through the link. Syncing it under the stream's event schema
+    // delivers nothing and costs a root carrying that schema per stream.
+    if (ContextualFlowControl.declaresStream(schema)) return;
     const scope = normalizeCellScope(link.scope as CellScope | undefined);
     if (hasDataUriScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
-      let target: unknown = valueFromDataUri(link.id);
+      let target: unknown = this.#dataUri(link.id).value;
       for (let i = 0; i < segments.length; i++) {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);

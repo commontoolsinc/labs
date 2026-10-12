@@ -4,7 +4,10 @@ import {
   nonRecursiveReadMayOverlapWrite,
 } from "../reactive-dependencies.ts";
 import { normalizeCellScope } from "../scope.ts";
-import type { IMemorySpaceAddress } from "../storage/interface.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "../storage/interface.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import type { Action, ReactivityLog } from "./types.ts";
 
@@ -68,9 +71,34 @@ export function topologicalSort(
     inDegree.set(action, 0);
   }
 
-  // Build the graph based on read/write dependencies.
-  // In pull mode we maintain this incrementally in `dependents`, so we can
-  // avoid rebuilding the graph from scratch on every settle iteration.
+  // Build the graph based on read/write dependencies. Every reader in the
+  // work set is indexed by the document it reads once, so a writer's edges
+  // cost the readers of the documents it writes rather than the whole set.
+  const readers = indexReaders(actions, dependencies, nodes);
+  const addEdgesForWrites = (
+    actionA: Action,
+    writes: readonly IMemorySpaceAddress[],
+    declaredOnly: boolean,
+  ): void => {
+    const graphA = graph.get(actionA)!;
+    for (const write of writes) {
+      for (const reader of readers.get(documentKey(write)) ?? []) {
+        const actionB = reader.action;
+        if (actionA === actionB || graphA.has(actionB)) continue;
+        if (declaredOnly && !reader.declared) continue;
+        const overlaps = reader.shallow
+          ? nonRecursiveReadMayOverlapWrite(reader.path, write.path)
+          : arraysOverlap(write.path, reader.path);
+        if (!overlaps) continue;
+        graphA.add(actionB);
+        inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
+      }
+    }
+  };
+  // In pull mode the data edges are maintained incrementally in
+  // `dependents`, so the graph is not rebuilt from the read logs on every
+  // settle iteration; a reader that has never run contributes the reads it
+  // declares instead.
   if (dependents) {
     for (const actionA of actions) {
       const graphA = graph.get(actionA)!;
@@ -82,54 +110,22 @@ export function topologicalSort(
         inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
       }
     }
-    addDeclaredReadOrderingEdges({
-      actions,
-      graph,
-      inDegree,
-      mightWrite,
-      nodes,
-    });
+    if (nodes) {
+      for (const actionA of actions) {
+        addEdgesForWrites(actionA, mightWrite.get(actionA) ?? [], true);
+      }
+    }
   } else {
     for (const actionA of actions) {
-      const log = dependencies.get(actionA);
-      if (!log) continue;
-      const writes = mightWrite.get(actionA) ?? [];
-      const graphA = graph.get(actionA)!;
-      for (const write of writes) {
-        for (const actionB of actions) {
-          if (actionA !== actionB && !graphA.has(actionB)) {
-            const logB = getOrderingReadLog(actionB, dependencies, nodes);
-            if (!logB) continue;
-            if (
-              logB.reads.some(
-                (addr) =>
-                  addressesShareEntity(addr, write) &&
-                  arraysOverlap(write.path, addr.path),
-              ) ||
-              logB.shallowReads.some(
-                (addr) =>
-                  addressesShareEntity(addr, write) &&
-                  nonRecursiveReadMayOverlapWrite(addr.path, write.path),
-              )
-            ) {
-              graphA.add(actionB);
-              inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
-            }
-          }
-        }
-      }
+      if (!dependencies.get(actionA)) continue;
+      addEdgesForWrites(actionA, mightWrite.get(actionA) ?? [], false);
     }
   }
 
   if (getAdditionalWrites) {
-    addAdditionalWriteEdges({
-      actions,
-      dependencies,
-      graph,
-      inDegree,
-      nodes,
-      getAdditionalWrites,
-    });
+    for (const actionA of actions) {
+      addEdgesForWrites(actionA, getAdditionalWrites(actionA) ?? [], false);
+    }
   }
 
   // Add parent-child edges only when no opposing data dependency exists.
@@ -234,88 +230,55 @@ function insertReadyAction(
   queue.splice(low, 0, action);
 }
 
-function addAdditionalWriteEdges(state: {
-  readonly actions: Set<Action>;
-  readonly dependencies: WeakMap<Action, ReactivityLog>;
-  readonly graph: Map<Action, Set<Action>>;
-  readonly inDegree: Map<Action, number>;
-  readonly nodes?: Pick<NodeRegistry, "get">;
-  readonly getAdditionalWrites: (
-    action: Action,
-  ) => readonly IMemorySpaceAddress[] | undefined;
-}): void {
-  for (const actionA of state.actions) {
-    const writes = state.getAdditionalWrites(actionA) ?? [];
-    if (writes.length === 0) continue;
+/** One read an action in the work set orders against writes to its document. */
+type IndexedRead = {
+  readonly action: Action;
+  readonly path: readonly MemoryAddressPathComponent[];
+  /** A shallow read, which a write below the read's own children misses. */
+  readonly shallow: boolean;
+  /** A read declared by an action that has never run. */
+  readonly declared: boolean;
+};
 
-    const graphA = state.graph.get(actionA)!;
-    for (const actionB of state.actions) {
-      if (actionA === actionB || graphA.has(actionB)) continue;
-      const logB = getOrderingReadLog(
-        actionB,
-        state.dependencies,
-        state.nodes,
-      );
-      if (!logB) continue;
-      if (
-        logB.reads.some(
-          (addr) =>
-            writes.some((write) =>
-              addressesShareEntity(addr, write) &&
-              arraysOverlap(write.path, addr.path)
-            ),
-        ) ||
-        logB.shallowReads.some(
-          (addr) =>
-            writes.some((write) =>
-              addressesShareEntity(addr, write) &&
-              nonRecursiveReadMayOverlapWrite(addr.path, write.path)
-            ),
-        )
-      ) {
-        graphA.add(actionB);
-        state.inDegree.set(actionB, (state.inDegree.get(actionB) || 0) + 1);
-      }
-    }
-  }
+/** The key two addresses share when they name the same document. */
+function documentKey(address: IMemorySpaceAddress): string {
+  return `${address.space}\0${address.id}\0${
+    normalizeCellScope(address.scope)
+  }`;
 }
 
-function addDeclaredReadOrderingEdges(state: {
-  readonly actions: Set<Action>;
-  readonly graph: Map<Action, Set<Action>>;
-  readonly inDegree: Map<Action, number>;
-  readonly mightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
-  readonly nodes?: Pick<NodeRegistry, "get">;
-}): void {
-  if (!state.nodes) return;
-
-  for (const actionA of state.actions) {
-    const writes = state.mightWrite.get(actionA) ?? [];
-    if (writes.length === 0) continue;
-
-    const graphA = state.graph.get(actionA)!;
-    for (const actionB of state.actions) {
-      if (actionA === actionB || graphA.has(actionB)) continue;
-      const recordB = state.nodes.get(actionB);
-      if (
-        recordB?.status !== "never-ran" ||
-        recordB.declaredReads.length === 0
-      ) {
-        continue;
-      }
-      if (
-        recordB.declaredReads.some((read) =>
-          writes.some((write) =>
-            addressesShareEntity(read, write) &&
-            arraysOverlap(write.path, read.path)
-          )
-        )
-      ) {
-        graphA.add(actionB);
-        state.inDegree.set(actionB, (state.inDegree.get(actionB) || 0) + 1);
-      }
+/**
+ * The reads every action in the work set orders against, grouped by the
+ * document read: what `getOrderingReadLog` answers for each action, laid out
+ * so that a writer finds the readers of a document without visiting the
+ * actions that read something else.
+ */
+function indexReaders(
+  actions: ReadonlySet<Action>,
+  dependencies: WeakMap<Action, ReactivityLog>,
+  nodes?: Pick<NodeRegistry, "get">,
+): Map<string, IndexedRead[]> {
+  const readers = new Map<string, IndexedRead[]>();
+  const add = (read: IndexedRead, address: IMemorySpaceAddress) => {
+    const key = documentKey(address);
+    const list = readers.get(key);
+    if (list === undefined) readers.set(key, [read]);
+    else list.push(read);
+  };
+  for (const action of actions) {
+    const log = getOrderingReadLog(action, dependencies, nodes);
+    if (!log) continue;
+    const record = nodes?.get(action);
+    const declared = record?.status === "never-ran" &&
+      record.declaredReads.length > 0;
+    for (const address of log.reads) {
+      add({ action, path: address.path, shallow: false, declared }, address);
+    }
+    for (const address of log.shallowReads) {
+      add({ action, path: address.path, shallow: true, declared }, address);
     }
   }
+  return readers;
 }
 
 function getOrderingReadLog(
@@ -364,13 +327,4 @@ function makeTieBreakComparator(
     if (oa !== ob) return oa - ob;
     return (fallbackIndex.get(a) ?? 0) - (fallbackIndex.get(b) ?? 0);
   };
-}
-
-function addressesShareEntity(
-  a: IMemorySpaceAddress,
-  b: IMemorySpaceAddress,
-): boolean {
-  return a.space === b.space &&
-    a.id === b.id &&
-    normalizeCellScope(a.scope) === normalizeCellScope(b.scope);
 }
