@@ -2,6 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { HarnessTranscriptEvent } from "@commonfabric/cf-harness/contracts/transcript";
+import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { Identity } from "@commonfabric/identity";
+import type { ACL } from "@commonfabric/memory/acl";
+import { join } from "@std/path";
 
 import type {
   HarnessJobOptions,
@@ -30,6 +34,25 @@ const ASK: LocalJobProfile = {
   maxModelTurns: 24,
   taskRole: "direct-command",
   retry: "never",
+};
+
+/** The space a fabric profile names. */
+const SPACE = "did:key:z6MkgUiiZvP3qYQqr1NWyS2uCpny8dejAvyuBZh2PAVACs97";
+
+/** A profile granting fabric tools, a pattern index and subagents. */
+const CARRY: LocalJobProfile = {
+  tools: ["run_pattern", "search_patterns", "delegate_task"],
+  maxModelTurns: 24,
+  taskRole: "direct-command",
+  retry: "never",
+  fabric: {
+    host: "https://toolshed.example",
+    space: SPACE,
+    identityKeyPath: "/instance/identity.key",
+  },
+  patternIndexUrl: "https://index.example",
+  patternIndexPublish: false,
+  subagentProfiles: ["default", "pattern-author"],
 };
 
 /** A job's request. */
@@ -74,6 +97,11 @@ const laneWith = (
     profiles?: Map<string, LocalJobProfile>;
     maxConcurrent?: number;
     report?: (message: string) => void;
+    readSpaceAcl?: (
+      host: string,
+      space: string,
+      identityKeyPath: string,
+    ) => Promise<ACL | null>;
   } = {},
 ) => {
   const store = LocalJobStore.open(":memory:");
@@ -85,6 +113,9 @@ const laneWith = (
     maxConcurrent: options.maxConcurrent ?? 2,
     workRoot: "/work/local",
     ...(options.report !== undefined ? { report: options.report } : {}),
+    ...(options.readSpaceAcl !== undefined
+      ? { readSpaceAcl: options.readSpaceAcl }
+      : {}),
     runJob: (spec, jobOptions) =>
       new Promise<HarnessJobResult>((resolve, reject) => {
         const run = {
@@ -178,6 +209,45 @@ describe("local-jobs/lane", () => {
       ).toEqual(["delegate_task"]);
       expect(localJobSpecOf({ request: REQUEST } as LocalJob, ASK, {}))
         .not.toHaveProperty("subagentProfiles");
+    });
+
+    it("gives a fabric profile's job its session at the ceiling it is handed, its pattern index, and its subagent profiles", () => {
+      const ceiling = [{ type: CFC_ATOM_TYPE.User, subject: SPACE }];
+      const spec = localJobSpecOf(
+        { request: REQUEST } as LocalJob,
+        CARRY,
+        {},
+        ceiling,
+      );
+
+      expect(spec).toMatchObject({
+        tools: CARRY.tools,
+        subagentProfiles: ["default", "pattern-author"],
+        fabric: {
+          host: "https://toolshed.example",
+          space: SPACE,
+          identityKeyPath: "/instance/identity.key",
+          maxConfidentiality: ceiling,
+          inputs: {},
+        },
+        patternIndexUrl: "https://index.example",
+        patternIndexPublish: false,
+      });
+      expect(
+        localJobSpecOf(
+          { request: REQUEST } as LocalJob,
+          { ...CARRY, browserHost: true },
+          {},
+          ceiling,
+        ).subagentProfiles,
+      ).toEqual(["default", "pattern-author", "browser"]);
+      expect(localJobSpecOf({ request: REQUEST } as LocalJob, ASK, {}))
+        .not.toHaveProperty("patternIndexUrl");
+    });
+
+    it("refuses a fabric profile's job it is handed no ceiling for", () => {
+      expect(() => localJobSpecOf({ request: REQUEST } as LocalJob, CARRY, {}))
+        .toThrow("read ceiling");
     });
 
     it("sends no system prompt for a request with neither instructions nor context", () => {
@@ -932,6 +1002,107 @@ describe("local-jobs/lane", () => {
         errorCode: PROFILE_UNAVAILABLE,
       });
       expect(runs).toHaveLength(0);
+    });
+
+    describe("fabric session", () => {
+      /** Writes a fresh identity key, returning its path and DID. */
+      const identityKey = async () => {
+        const dir = await Deno.makeTempDir({ prefix: "local-job-lane-" });
+        const path = join(dir, "identity.key");
+        const pkcs8 = await Identity.generatePkcs8();
+        await Deno.writeFile(path, pkcs8);
+        const did = (await Identity.fromPkcs8(pkcs8)).did();
+        return { dir, path, did };
+      };
+
+      it("opens its own space at the identity's personal ceiling, reading no ACL", async () => {
+        const key = await identityKey();
+        const reads: string[] = [];
+        const { lane, nextRun, enqueue } = laneWith({
+          profiles: new Map([["carry", {
+            ...CARRY,
+            fabric: {
+              ...CARRY.fabric!,
+              space: key.did,
+              identityKeyPath: key.path,
+            },
+          }]]),
+          readSpaceAcl: (_host, space) => {
+            reads.push(space);
+            return Promise.resolve(null);
+          },
+        });
+        lane.start();
+        enqueue("a", REQUEST, "carry");
+        const run = await nextRun(0);
+
+        expect(run.spec.fabric).toEqual({
+          host: "https://toolshed.example",
+          space: key.did,
+          identityKeyPath: key.path,
+          maxConfidentiality: [{ type: CFC_ATOM_TYPE.User, subject: key.did }],
+          inputs: {},
+        });
+        expect(run.spec.subagentProfiles).toEqual([
+          "default",
+          "pattern-author",
+        ]);
+        expect(reads).toEqual([]);
+        run.settle({ outcome: "cancelled" });
+        await Deno.remove(key.dir, { recursive: true });
+      });
+
+      it("reads another space at that space's ceiling only while its ACL admits the identity", async () => {
+        const key = await identityKey();
+        const profiles = new Map([["carry", {
+          ...CARRY,
+          fabric: { ...CARRY.fabric!, identityKeyPath: key.path },
+        }]]);
+        const personal = { type: CFC_ATOM_TYPE.User, subject: key.did };
+        const space = { type: CFC_ATOM_TYPE.Space, id: SPACE };
+
+        const member = laneWith({
+          profiles,
+          readSpaceAcl: (_host, _space, identityKeyPath) =>
+            Promise.resolve(
+              identityKeyPath === key.path
+                ? { [SPACE]: "OWNER", [key.did]: "READ" }
+                : null,
+            ),
+        });
+        member.lane.start();
+        member.enqueue("a", REQUEST, "carry");
+        const admitted = await member.nextRun(0);
+        expect(admitted.spec.fabric?.maxConfidentiality).toEqual([
+          personal,
+          space,
+        ]);
+
+        const outsider = laneWith({ profiles });
+        outsider.lane.start();
+        outsider.enqueue("a", REQUEST, "carry");
+        expect((await outsider.nextRun(0)).spec.fabric?.maxConfidentiality)
+          .toEqual([personal]);
+
+        admitted.settle({ outcome: "cancelled" });
+        await Deno.remove(key.dir, { recursive: true });
+      });
+
+      it("ends a job whose identity key cannot be read `failed` without running it", async () => {
+        const reports: string[] = [];
+        const { store, lane, runs, enqueue } = laneWith({
+          profiles: new Map([["carry", CARRY]]),
+          report: (line) => reports.push(line),
+        });
+        lane.start();
+        const id = enqueue("a", REQUEST, "carry");
+
+        expect(await reached(store, id, "failed")).toMatchObject({
+          errorCode: "PROVIDER_FAILURE",
+        });
+        expect(runs).toEqual([]);
+        expect(reports.join("\n")).toContain(`local job ${id} failed`);
+      });
     });
 
     describe("browser host", () => {

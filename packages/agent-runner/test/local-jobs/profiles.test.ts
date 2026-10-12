@@ -18,6 +18,36 @@ const ASK = {
   model: "gpt-5.4",
 };
 
+/** A profile granting fabric tools, a pattern index and subagents. */
+const CARRY = {
+  tools: [
+    "run_pattern",
+    "assign_slug",
+    "resolve_piece",
+    "search_patterns",
+    "record_feedback",
+    "research",
+    "delegate_task",
+  ],
+  maxModelTurns: 24,
+  taskRole: "direct-command",
+  retry: "never",
+  fabric: {
+    host: "https://toolshed.example",
+    space: "did:key:z6MkgUiiZvP3qYQqr1NWyS2uCpny8dejAvyuBZh2PAVACs97",
+    identityKeyPath: "/instance/identity.key",
+  },
+  patternIndexUrl: "https://us-central1-pattern-index.cloudfunctions.net",
+  patternIndexPublish: false,
+  subagentProfiles: ["default", "pattern-author"],
+};
+
+/** CARRY without the fields named. */
+const carryWithout = (...keys: string[]) =>
+  Object.fromEntries(
+    Object.entries(CARRY).filter(([key]) => !keys.includes(key)),
+  );
+
 /** Helper for tests, which reads `value` as the profile file. */
 const read = (value: unknown) =>
   readLocalJobProfiles(
@@ -54,6 +84,30 @@ describe("local-jobs/profiles", () => {
       });
       expect(profiles.get("ask")?.browserHost).toBe(true);
       expect(profiles.get("read")).toEqual(ASK);
+    });
+
+    it("reads a fabric session, a pattern index and subagent profiles", async () => {
+      expect((await read({ carry: CARRY })).get("carry")).toEqual(CARRY);
+    });
+
+    it("publishes to the pattern index unless the file says not to", async () => {
+      expect(
+        (await read({ carry: carryWithout("patternIndexPublish") })).get(
+          "carry",
+        ),
+      ).toEqual({ ...CARRY, patternIndexPublish: true });
+    });
+
+    it("reads a fabric session with no pattern index or subagents", async () => {
+      const profile = {
+        ...carryWithout(
+          "patternIndexUrl",
+          "patternIndexPublish",
+          "subagentProfiles",
+        ),
+        tools: ["run_pattern", "resolve_piece"],
+      };
+      expect((await read({ carry: profile })).get("carry")).toEqual(profile);
     });
 
     it("accepts the CLI research alias", async () => {
@@ -109,6 +163,105 @@ describe("local-jobs/profiles", () => {
         { ...ASK, browserHost: "yes" },
         "`browserHost`",
       ],
+      ["a fabric that is not an object", { ...CARRY, fabric: "x" }, "`fabric`"],
+      [
+        "a fabric host that is not a URL",
+        { ...CARRY, fabric: { ...CARRY.fabric, host: "toolshed" } },
+        "`fabric.host`",
+      ],
+      [
+        "a fabric with no space",
+        { ...CARRY, fabric: { ...CARRY.fabric, space: undefined } },
+        "`fabric.space`",
+      ],
+      [
+        "a relative identity key",
+        { ...CARRY, fabric: { ...CARRY.fabric, identityKeyPath: "id.key" } },
+        "`fabric.identityKeyPath`",
+      ],
+      [
+        "a pattern index that is not a URL",
+        { ...CARRY, patternIndexUrl: "index" },
+        "`patternIndexUrl`",
+      ],
+      [
+        "a publish flag that is not true or false",
+        { ...CARRY, patternIndexPublish: "no" },
+        "`patternIndexPublish`",
+      ],
+      [
+        "a publish flag with no pattern index",
+        {
+          ...carryWithout("patternIndexUrl", "subagentProfiles"),
+          tools: ["run_pattern"],
+        },
+        "`patternIndexPublish` needs `patternIndexUrl`",
+      ],
+      [
+        "a pattern index with no fabric",
+        { ...carryWithout("fabric", "subagentProfiles"), tools: [] },
+        "`patternIndexUrl` needs `fabric`",
+      ],
+      ...["run_pattern", "assign_slug", "resolve_piece", "acquire_skill"].map(
+        (tool) =>
+          [
+            `\`${tool}\` with no fabric`,
+            { ...ASK, tools: [tool] },
+            `\`tools\` names \`${tool}\`, which needs \`fabric\``,
+          ] as [string, unknown, string],
+      ),
+      ...["search_patterns", "record_feedback"].map(
+        (tool) =>
+          [
+            `\`${tool}\` with no pattern index`,
+            {
+              ...carryWithout(
+                "patternIndexUrl",
+                "patternIndexPublish",
+                "subagentProfiles",
+              ),
+              tools: [tool],
+            },
+            `\`tools\` names \`${tool}\`, which needs \`patternIndexUrl\``,
+          ] as [string, unknown, string],
+      ),
+      [
+        "subagent profiles that are not a list",
+        { ...CARRY, subagentProfiles: "default" },
+        "`subagentProfiles`",
+      ],
+      [
+        "an unknown subagent profile",
+        { ...CARRY, subagentProfiles: ["author"] },
+        "`subagentProfiles`",
+      ],
+      [
+        "the browser subagent profile",
+        { ...CARRY, subagentProfiles: ["browser"] },
+        "`subagentProfiles` may not name `browser`",
+      ],
+      [
+        "subagent profiles with no delegate tool",
+        {
+          ...CARRY,
+          tools: CARRY.tools.filter((tool) => tool !== "delegate_task"),
+        },
+        "`subagentProfiles` needs `delegate_task`",
+      ],
+      ...[["fabric"], ["patternIndexUrl", "patternIndexPublish"]].map(
+        (missing) =>
+          [
+            `\`pattern-author\` with no ${missing[0]}`,
+            {
+              ...carryWithout(...missing),
+              tools: ["delegate_task"],
+              ...(missing[0] === "fabric"
+                ? { patternIndexUrl: undefined, patternIndexPublish: undefined }
+                : {}),
+            },
+            "`subagentProfiles` names `pattern-author`, which needs `fabric` and `patternIndexUrl`",
+          ] as [string, unknown, string],
+      ),
     ];
     for (const [what, profile, field] of broken) {
       it(`throws naming the profile and field for ${what}`, async () => {
@@ -155,6 +308,19 @@ describe("local-jobs/profiles", () => {
       expect(narrowLocalJobProfile(profile, { browserHost: {} })).toEqual({
         refusal: "The profile does not admit a browser host.",
       });
+    });
+
+    it("grants no subagent profile to a request narrowed away from the delegate tool", async () => {
+      const carry = (await read({ carry: CARRY })).get("carry")!;
+      const narrowed = narrowLocalJobProfile(carry, { tools: ["run_pattern"] });
+      expect(narrowed).toEqual({
+        profile: {
+          ...carryWithout("subagentProfiles"),
+          tools: ["run_pattern"],
+        },
+      });
+      expect(narrowLocalJobProfile(carry, { tools: ["delegate_task"] }))
+        .toEqual({ profile: { ...carry, tools: ["delegate_task"] } });
     });
 
     it("refuses more turns than the profile's cap", () => {

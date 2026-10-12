@@ -366,6 +366,65 @@ describe("runHarnessJob()", () => {
         (seen.loopOptions?.inputCells ?? []).map((cell) => cell.name),
       ).toEqual(["book"]);
     });
+
+    /** A fabric part with no input cells, as a local job's is. */
+    const localFabric = () => ({
+      host: "https://toolshed.example",
+      space: SPACE,
+      identityKeyPath: join(runRoot, "unused.key"),
+      maxConfidentiality: [
+        { type: "https://cfc.test/atom/user", subject: "me" },
+      ] as never,
+      inputs: {},
+    });
+
+    it("configures the spec's pattern index, publishing unless the spec says not to", async () => {
+      for (
+        const [publish, expected] of [
+          [undefined, { baseUrl: "https://index.example" }],
+          [true, { baseUrl: "https://index.example" }],
+          [false, { baseUrl: "https://index.example", publish: false }],
+        ] as const
+      ) {
+        const { seen } = await runScripted(
+          plainSpec({
+            tools: ["run_pattern", "search_patterns", "delegate_task"],
+            subagentProfiles: ["default", "pattern-author"],
+            fabric: localFabric(),
+            patternIndexUrl: "https://index.example",
+            ...(publish !== undefined ? { patternIndexPublish: publish } : {}),
+          }),
+          answering("Titan"),
+        );
+
+        expect(seen.loopOptions?.engine?.config.patternIndex).toEqual(
+          expected,
+        );
+        expect(seen.loopOptions?.fabricSession).toMatchObject({
+          apiUrl: "https://toolshed.example",
+          space: SPACE,
+        });
+        expect(seen.loopOptions?.allowedSubagentProfiles).toEqual([
+          "default",
+          "pattern-author",
+        ]);
+        expect(seen.loopOptions?.allowedToolIds).toEqual([
+          "run_pattern",
+          "search_patterns",
+          "delegate_task",
+          "submit_result",
+        ]);
+      }
+    });
+
+    it("configures no pattern index for a spec that names none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ tools: ["run_pattern"], fabric: localFabric() }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
+    });
   });
 
   describe("how a job ends", () => {

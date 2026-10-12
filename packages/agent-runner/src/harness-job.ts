@@ -114,6 +114,19 @@ export interface HarnessJobSpec {
 
   /** The job's fabric session and input cells; absent for a job with none. */
   fabric?: HarnessJobFabric;
+
+  /**
+   * The pattern index `search_patterns`, `record_feedback` and a
+   * `pattern-author` child search. The harness signs its requests with the
+   * fabric identity, so a spec naming one has a fabric part.
+   */
+  patternIndexUrl?: string;
+
+  /**
+   * Whether the job contributes what it authors to the pattern index; the
+   * harness publishes unless this is `false`.
+   */
+  patternIndexPublish?: boolean;
 }
 
 /** What a job runs with besides its spec. */
@@ -186,7 +199,7 @@ const reportOf = (result: HarnessPromptLoopResult): AgentRunReport => {
 /**
  * Helper for the job, which builds the harness's arguments from the spec.
  * The `--fabric-*` and `--input-cell` arguments appear exactly when the spec
- * has a fabric part.
+ * has a fabric part, and `--pattern-index-url` when it names an index.
  */
 const argvOf = (
   spec: HarnessJobSpec,
@@ -221,6 +234,10 @@ const argvOf = (
       JSON.stringify(spec.fabric.maxConfidentiality),
     ]
     : []),
+  ...(spec.patternIndexUrl !== undefined
+    ? ["--pattern-index-url", spec.patternIndexUrl]
+    : []),
+  ...(spec.patternIndexPublish === false ? ["--no-pattern-index-publish"] : []),
   ...(spec.loomRetrievalConfigPath !== undefined
     ? ["--loom-retrieval-config", spec.loomRetrievalConfigPath]
     : []),
