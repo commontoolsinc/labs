@@ -1498,7 +1498,8 @@ export class StorageManager implements IStorageManager {
    * resolve against this manager's own session identity. Refcounted: concurrent
    * `syncCell()` calls for the same document share one entry. Waiters resolve
    * when the count returns to zero — whether the load produced a value or found
-   * the document absent.
+   * the document absent. A prefetch's failure (see `#registerPendingLoad()`)
+   * is kept apart from `failure`, which is what the waiters see.
    */
   #pendingLoads = new Map<string, {
     count: number;
@@ -1510,6 +1511,7 @@ export class StorageManager implements IStorageManager {
       scopeKey?: ScopeKey;
     };
     failure: unknown;
+    prefetchFailure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
 
@@ -2643,6 +2645,12 @@ export class StorageManager implements IStorageManager {
    * such reads registers nothing, and its release does nothing: the read
    * returns no data however long it is waited for, so it is not a load in
    * flight, and nothing parks on it.
+   *
+   * With `prefetch`, the load is one no reader asked for. A waiter still
+   * waits for it to settle, since its landing is what a cold read is waiting
+   * on, but its failure reaches no waiter: a reader's own load of the
+   * document decides whether that reader's wait fails. The failure still
+   * keeps the key's settling from being reported as a recovery.
    */
   #registerPendingLoad(
     address: {
@@ -2655,6 +2663,7 @@ export class StorageManager implements IStorageManager {
        * cross-matches — is then per THAT instance. */
       scopeKey?: ScopeKey;
     },
+    { prefetch = false }: { prefetch?: boolean } = {},
   ): (failure?: unknown) => void {
     if (this.refusesReadByConstruction(address)) return () => {};
     const key = entityKey(address, this.scopeKeyIdentity());
@@ -2665,17 +2674,19 @@ export class StorageManager implements IStorageManager {
         generation: this.#nextPendingLoadGeneration++,
         address,
         failure: undefined,
+        prefetchFailure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
     return (failure?: unknown) => {
-      entry.failure ??= failure;
+      if (prefetch) entry.prefetchFailure ??= failure;
+      else entry.failure ??= failure;
       entry.count--;
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
-      if (entry.failure === undefined) {
+      if (entry.failure === undefined && entry.prefetchFailure === undefined) {
         this.#loadRecoveryObserver?.({
           failedEpoch: this.#loadFailureEpoch(key),
           recoveryEpoch: this.#loadEpoch(entry.generation),
@@ -2898,7 +2909,9 @@ export class StorageManager implements IStorageManager {
    * a crossing back, and a kick already in flight or landed ends that chain.
    * A load that fails hands its kick back, so a frame carrying the crossing
    * again kicks it again; the target stays absent and the frame that
-   * carried the crossing is unaffected.
+   * carried the crossing is unaffected. No reader asked for the load, so it
+   * is registered as a prefetch: its failure fails no reader's wait on the
+   * document, an event parked on it among them.
    */
   #loadCrossings(crossings: readonly SyncCrossing[]): void {
     for (const crossing of crossings) {
@@ -2917,7 +2930,9 @@ export class StorageManager implements IStorageManager {
       if (this.#crossingKicks.has(key)) continue;
       this.#crossingKicks.add(key);
       const address = { space, scope, id };
-      const releaseLoad = this.#registerPendingLoad(address);
+      const releaseLoad = this.#registerPendingLoad(address, {
+        prefetch: true,
+      });
       // One ledger entry per target, however many selectors load it: the
       // entry stays while any of them is in flight.
       const ledgerKey = entityKey(address, this.scopeKeyIdentity());

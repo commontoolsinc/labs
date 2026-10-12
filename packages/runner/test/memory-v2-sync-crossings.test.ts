@@ -3,10 +3,14 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
+import type { RuntimeProgram } from "../src/harness/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IStorageProvider,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
@@ -23,6 +27,33 @@ const topSchema = {
   type: "object",
   properties: { next: leafSchema },
 } as const;
+
+// A piece whose handler binds the far document as a value: the runner
+// resolves the argument before the body runs, and withdraws the dispatch
+// while a document it reaches is still loading.
+const RECORDER_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+      "type Target = { next: { name: string } };",
+      "const record = handler<",
+      "  { tag: string },",
+      "  { target: Target; log: Writable<string[]> }",
+      ">((event, { target, log }) => {",
+      "  log.push(`${event.tag}:${target.next.name}`);",
+      "});",
+      "export default pattern<",
+      "  { target: Target },",
+      "  { log: string[]; record: Stream<{ tag: string }> }",
+      ">(({ target }) => {",
+      "  const log = Writable.of<string[]>([]);",
+      "  return { log, record: record({ target, log }) };",
+      "});",
+    ].join("\n"),
+  }],
+};
 
 describe("memory-v2-sync-crossings", () => {
   let server: MemoryV2Server.Server;
@@ -111,6 +142,91 @@ describe("memory-v2-sync-crossings", () => {
     expect(managerB.pendingCrossingLoadAddresses?.()).toEqual([]);
     expect(localOnB(leaf, farSpace)).toBe(true);
     expect(top2.get()).toEqual({ next: { name: "Ada" } });
+  });
+
+  it("runs a handler parked on a document whose crossing load failed, once the handler's own load lands", async () => {
+    // The crossing load is a prefetch no reader asked for, so its failure
+    // fails no reader's wait: the parked event wakes when the document's
+    // loads settle and runs on what its own load brought. Were the failure
+    // to reach the event's wait, the scheduler would drop the event before
+    // its handler ran. A runtime that finds the link by reading never kicks
+    // a crossing load at all, and runs the handler the same way.
+    const { leaf, top } = await writeCrossing("failed crossing");
+    const leafKey = entityKey(
+      leaf.getAsNormalizedFullLink(),
+      managerB.scopeKeyIdentity(),
+    );
+
+    // Every load of the far document is held until the event has parked:
+    // then the crossing's load fails and the others go through.
+    const provider = managerB.open(farSpace);
+    const realSync = provider.sync.bind(provider);
+    let crossingLoad = true;
+    let crossingLoads = 0;
+    const { promise: released, resolve: release } = Promise.withResolvers<
+      void
+    >();
+    provider.sync = (async (...args: Parameters<IStorageProvider["sync"]>) => {
+      const [uri] = args;
+      if (uri !== leaf.getAsNormalizedFullLink().id) return realSync(...args);
+      const failing = crossingLoad;
+      if (failing) crossingLoads++;
+      await released;
+      return failing
+        ? { error: new Error("crossing load refused") }
+        : realSync(...args);
+    }) as IStorageProvider["sync"];
+
+    const top2 = rt2.getCellFromLink<{ next?: { name?: string } }>({
+      ...top.getAsNormalizedFullLink(),
+      schema: topSchema,
+    });
+    await top2.sync();
+    crossingLoad = false;
+    expect(crossingLoads).toBe(1);
+    expect(managerB.pendingCrossingLoadAddresses?.()).toEqual([
+      {
+        space: farSpace,
+        scope: "space",
+        id: leaf.getAsNormalizedFullLink().id,
+      },
+    ]);
+
+    // The event parks on the far document's loads: the scheduler's park
+    // waits on them through `loadsSettled()`.
+    const realLoadsSettled = managerB.loadsSettled.bind(managerB);
+    const { promise: parked, resolve: park } = Promise.withResolvers<void>();
+    managerB.loadsSettled = (keys) => {
+      if (keys.includes(leafKey)) park();
+      return realLoadsSettled(keys);
+    };
+
+    const compiled = await rt2.patternManager.compilePattern(
+      RECORDER_PROGRAM,
+      { space },
+    );
+    const tx = rt2.edit();
+    const recorder = rt2.getCell<{ log: string[] }>(
+      space,
+      "failed crossing recorder",
+      compiled.resultSchema,
+      tx,
+    );
+    rt2.run(tx, compiled, { target: top }, recorder);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    const { promise: handled, resolve: handle } = Promise.withResolvers<
+      void
+    >();
+    rt2.scheduler.queueEvent(
+      recorder.key("record").resolveAsCell().getAsNormalizedFullLink(),
+      { tag: "first" },
+      true,
+      () => handle(),
+    );
+    await parked;
+    release();
+    await handled;
+    expect(await recorder.key("log").pull()).toEqual(["first:Ada"]);
   });
 
   it("leaves a link the schema does not follow unloaded", async () => {
