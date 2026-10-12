@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { SchemaPathSelector } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -7,7 +8,6 @@ import { declareStreamSchema } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import type { SchemaPathSelector } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("stream cell sync");
 const space = signer.did();
