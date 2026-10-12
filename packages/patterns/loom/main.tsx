@@ -276,10 +276,13 @@ const bindMeeting = handler<
   }
   // The untyped field projection retains a malformed `key` that the typed
   // view would omit, so malformed state cannot look like an empty record.
+  // Only a plain record can: a Fabric special object, such as a temporal
+  // value, is an object with no enumerable keys of its own.
   const current = storedFields.get();
-  if (
-    typeof current !== "object" || current === null || Array.isArray(current)
-  ) {
+  const prototype = typeof current === "object" && current !== null
+    ? Object.getPrototypeOf(current)
+    : undefined;
+  if (prototype !== Object.prototype && prototype !== null) {
     reply?.set({ status: "invalid-state" });
     return;
   }

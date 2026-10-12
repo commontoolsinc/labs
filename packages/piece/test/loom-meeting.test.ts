@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
+import { FabricEpochDay } from "@commonfabric/data-model/fabric-primitives";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
@@ -94,7 +95,7 @@ describe("loom meeting", () => {
       key: `${key}\n`,
     }, {
       future: true,
-    }];
+    }, new FabricEpochDay(123n)];
     for (const [index, value] of malformed.entries()) {
       const { error } = await runtime.editWithRetry((tx) => {
         meeting.withTx(tx).set(value);
