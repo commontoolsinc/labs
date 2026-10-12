@@ -59,8 +59,14 @@ first of them in a worker starts the ensure: to ensure Home is running
 (`ensureHomePatternRunning()`), to create a space (`createSpace()`), or for the
 root pattern of the identity's own Home space to run (`getSpaceRootPattern()`,
 unless the request passes `start: false`). The shell asks for the last of these
-when it shows Home, so showing Home is enough to start the ensure. None of these
-waits for it. A request for another space's root starts no ensure, nor does a
+when it shows Home. Whatever it shows, it also asks its worker to ensure Home is
+running, once per runtime, as soon as the first piece shown under that runtime
+is on screen and the view has settled: the worker is idle, and what it rendered
+has reached the page. So any page of the shell that shows a piece starts the
+ensure, and Home's start, which for a new account creates Home, stays off the
+path to that first piece. A page whose view fails to load a piece starts none.
+None of these waits for the ensure. A request for another space's root starts
+no ensure, nor does a
 read of Home's root with `start: false`, which reads what the root exported
 without running it. The `cf` CLI brings Home up through `PiecesController`
 directly and never starts one.
@@ -534,7 +540,10 @@ shared-space catalog, which
 `RuntimeProcessor` starts it beside the ensure, the first time a runtime
 worker brings up Home. Home opens without waiting for it; a failure to start
 it is logged, and the worker's next bring-up of Home starts it again. It runs
-until the processor is disposed. A Home pattern without a `registerSharedSpace`
+until the processor is disposed. The shell brings Home up on any page that
+shows a piece, once that page has settled, as "Creating or adopting it" says,
+so an offer is taken up while any such page of the user's is open, and not only
+while Home is. A Home pattern without a `registerSharedSpace`
 stream is left alone.
 
 It subscribes to Home's `privateInbox` and `retainedPrivateInboxes`, and to
