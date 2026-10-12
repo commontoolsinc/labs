@@ -781,6 +781,13 @@ The client provider fires three notification types:
   notification.
 - A rejected local commit produces a later `revert` notification before the
   promise resolves with the conflict.
+- Before that `revert`, the client holds the store's copy of each document
+  the rejected commit touched that it holds no confirmed revision of — a
+  document the commit created, which another session may have written —
+  loading it where the conflict's read repair (04-protocol.md section 4.11.2)
+  does not deliver it, as it does not for a document no watch reaches or for
+  a commit refused for a pending dependency. The `revert` then reveals that
+  copy rather than an absence.
 - `integrate` notifications MUST be suppressed for entity paths still shadowed
   by newer local pending state.
 - If multiple pending commits overlap the same entity/path, visible

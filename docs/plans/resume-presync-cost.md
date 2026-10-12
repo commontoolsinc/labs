@@ -213,6 +213,73 @@ Exit: a load's watch responses are read as they arrive.
       documents carrying schemas inline, and stays silent; the comment at
       `packages/runner/src/link-utils.ts` that did is gone with stage 1.
 
+### Stage 6. The first run and the render
+
+Measured on rooms of thirty and of a hundred and twenty message rows seeded
+on a local toolshed
+([`../history/development/performance/2026-10-11-fabrichat-room-load-local.md`](../history/development/performance/2026-10-11-fabrichat-room-load-local.md)),
+where the pre-sync was no longer the whole cost.
+
+- [x] The scheduler's topological sort indexes the work set's readers by
+      the document they read, so a writer's ordering edges cost the readers
+      of what it writes rather than the whole set
+      (`packages/runner/src/scheduler/topology.ts`).
+- [x] CFC commit preparation indexes a transaction's write-policy inputs by
+      the document they name, once per transaction, so the two checks a
+      written path makes read the inputs about its document
+      (`packages/runner/src/cfc/prepare.ts`).
+- [x] The storage manager keeps each data URI's hash and decoded value in a
+      weight-bounded memo, and does not sync a link that declares a stream:
+      its document holds no value a read uses, and the sync had sent one
+      root carrying the stream's event schema per stream to receive an
+      absence record (`packages/runner/src/storage/v2.ts`).
+- [x] An inline array element's snapshot id is kept by the value's identity
+      and the link it was read through, so resolving the element as a cell
+      encodes it once per document version rather than once per resolve
+      (`packages/runner/src/cell.ts`).
+- [x] Measured: the thirty-row room's first load from 71 to 30 s to the
+      messages and its second load from 42 to 16 s, on the same machine
+      within the hour.
+- [x] A handler plan's `$event` slot is read as a stream, the inputs walk
+      skips a position the reader declares a stream, and the owned-cells
+      wave syncs a stream cell whole: three paths had loaded each handler's
+      stream under its event schema, one root carrying that schema per
+      stream, for an absence record. A reload of the thirty-row room sends
+      6.1 MB of watch frames instead of 10 MB.
+- [x] A link schema written into an ordinary document is stored as a
+      reference when the reference is the shorter wire form; a trivial
+      schema, one decomposition refuses, and a bare handle stamp stay
+      inline (`docs/specs/content-addressed-schemas.md`). A nested
+      instance's argument document had carried one inline closure per
+      captured input, 27 KB of a 64 KB operation per message row in the
+      first-run commit, which is now 40 KB.
+- [x] The server's oversized-message refusal is a terminal rejection, so a
+      commit refused for its size is not sent again unchanged.
+- [x] A message row's argument document carried two label entries per
+      message in the room, 60 of its 85: the row received a link to the
+      whole list at `array`, which its callback never declared, because the
+      list built-ins read an unnamed key of an object schema as declared,
+      and the link write persisted the list's label view under the slot.
+      The built-ins now pass a row only the arguments its schema names and
+      drop a stored slot the schema leaves unused on replay, so the label
+      maps grow with the message count once, not twice.
+- [ ] The remaining label map of a row is its 25 fixed entries, about
+      9 KB, of which the `LinkReference` atoms are the largest share: each
+      spells its source and its target in full, and on an in-place link
+      entry both restate the link stored beside it. Shrinking that is a
+      change to the atom's registered shape, which the Contextual Flow
+      Control specification owns.
+- [ ] A load of a materialized room still commits for a fifth of its time,
+      writing a reader's own instance of every session-scoped derivation
+      in a commit of its own: 429 commits of about 400 bytes on the
+      thirty-row room.
+- [ ] The first-run commit of a hundred-row room is one transaction, and
+      at 24.7 MB it stood for more slots than the server admits.
+- [ ] Each plan's inputs document is still minted per plan; the memo
+      removes the repeat hashing and decoding, not the minting.
+
+Exit: a room of a hundred rows opens in the browser.
+
 ## Out of scope, noted
 
 The 3.2 MB watch frame is mostly two 5 KB selectors repeated 296 times. A
@@ -220,3 +287,7 @@ selector table per frame — each distinct selector once, roots naming it by
 hash, as the frame log already records them — would cut the bytes out by an
 order of magnitude. It is a protocol change under
 `docs/specs/memory-v2/04-protocol.md` and a separate plan.
+
+The compiled program is 1.7 MB per cold worker and evaluates in 0.9 s, with
+no cache in the browser; shrinking the compiled output and caching compiled
+closures in the browser are each their own work.

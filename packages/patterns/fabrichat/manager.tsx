@@ -9,8 +9,9 @@
  * space. The manager registers there each room it creates, and each room a
  * manager created that it accepts, and the host that vets an offer of a room
  * registers that room there, and then has the manager accept it on the user's
- * behalf, leaving an entry archived since archived. Forgetting a room archives
- * its entry.
+ * behalf, leaving an entry archived since archived. A room the user joins, as
+ * by writing in it, the manager lists, and lists again once forgotten.
+ * Forgetting a room archives its entry.
  *
  * It creates each room with `inSpace()` as the root of a space of its own,
  * which declares itself a `fabrichat-room`. The space grants the room's
@@ -20,7 +21,7 @@
  * someone from the room's own rendering, and the manager never changes it.
  *
  * The room keeps its space's participants itself, and the manager adds its
- * user to them when it creates or accepts a room.
+ * user to them when it creates, accepts, or joins a room.
  *
  * A new room is offered to each other member whose profile the request names,
  * through each share inbox their profiles point at, once per inbox, in the
@@ -76,7 +77,8 @@ import {
   type SharedSpaceCatalogStorage,
   type SharedSpaceEntry,
 } from "../system/shared-space-catalog.ts";
-import FabriChatRoom, { listsRoomIn } from "./room.tsx";
+import { listsRoomIn } from "./room-records.tsx";
+import FabriChatRoom from "./room.tsx";
 import {
   type AboutRecord,
   CHAT_ROOM_OFFER_KIND,
@@ -130,6 +132,7 @@ export type ManagerAct =
   | "createGroup"
   | "offerRoom"
   | "accept"
+  | "joinRoom"
   | "forget"
   | "delivered";
 
@@ -192,7 +195,7 @@ export interface ManagerStreamEvent {
    */
   joinableByLink?: boolean;
 
-  /** A room to offer, accept, or forget. */
+  /** A room to offer, accept, join, or forget. */
   room?: Cell<ChatRoomLink>;
 
   /**
@@ -978,6 +981,17 @@ const performManagerAct = (
     return;
   }
 
+  // A room this user's chats list already is one they have joined, so
+  // joining it again changes nothing, and a join that names no request
+  // records nothing either: a caller may send one each time the person
+  // enters the room.
+  if (
+    act === "joinRoom" && event?.requestId === undefined &&
+    listsRoomIn(catalog.get(), spaceOf(room))
+  ) {
+    return;
+  }
+
   if (act === "offerRoom") {
     // The manager tells someone only of a room of its user's own, which its
     // user may add people to: one its catalog lists, in a space its user
@@ -1137,9 +1151,9 @@ const performManagerAct = (
     return;
   }
 
-  // `accept`. The kind comes from the record the room's creator wrote,
-  // which reads without the room running, as its own view needs; a space's
-  // own chat has none, and its view says what it is.
+  // `accept` and `joinRoom`. The kind comes from the record the room's
+  // creator wrote, which reads without the room running, as its own view
+  // needs; a space's own chat has none, and its view says what it is.
   const record = aboutRecordOf(room);
   const kind = record.key("kind").get() ?? room.key("about").get()?.kind;
   const space = spaceOf(room);
@@ -1169,11 +1183,14 @@ const performManagerAct = (
   }
   // A direct room's counterpart is its creator, as its `about` is labeled,
   // whatever the event claims. A room this user created is found again with
-  // `openDirect`, and its label names no one else.
+  // `openDirect`, and its label names no one else; joining it lists it
+  // again, leaving `direct`, which holds it under its counterpart, as it is.
   const creator = kind === "direct"
     ? principalOf(record, "authored-by")
     : undefined;
-  const refusal = kind !== "direct"
+  const ownDirect = act === "joinRoom" && creator !== undefined &&
+    creator === currentPrincipal();
+  const refusal = kind !== "direct" || ownDirect
     ? undefined
     : creator === undefined
     ? "The room's creator can't be verified."
@@ -1189,20 +1206,21 @@ const performManagerAct = (
     });
     return;
   }
-  const counterpart = creator;
+  const counterpart = ownDirect ? undefined : creator;
   const entry: ChatIndexEntry = {
     room,
     kind,
-    ...(kind === "direct" ? { counterpart } : {}),
+    ...(counterpart === undefined ? {} : { counterpart }),
     since: epochNsecFromMsec(Date.now()),
   };
   // Registers the room, or restores an archived entry at the revision just
-  // read, as `listRoom` says: accepting the room is the choice to have it
-  // listed. An acceptance made on the person's behalf, which `keepArchived`
-  // marks, is no such choice, and leaves an archived entry as it is.
+  // read, as `listRoom` says: accepting the room, or joining it, is the
+  // choice to have it listed. An acceptance made on the person's behalf,
+  // which `keepArchived` marks, is no such choice, and leaves an archived
+  // entry as it is; a join is always the person's own.
   listRoom(catalog, space, {
     title: kind === "group" ? room.key("about").get()?.title : undefined,
-    restore: event?.keepArchived !== true,
+    restore: act === "joinRoom" || event?.keepArchived !== true,
   });
   // A user whose profile hasn't resolved is listed without joining the
   // room's participants, which `joinRooms` leaves as they are: an acceptance
@@ -1232,12 +1250,12 @@ export const commitStart = handler<ManagerStreamEvent, ManagerActState>(
 
 /**
  * Performs one of the manager's other acts: offering a room to a member added
- * to it, accepting a room, forgetting one, or reporting a notice delivered.
- * None of them needs a gesture. Each changes only this user's own manager,
- * except that accepting a room also adds this user to its participants, when
- * their profile has resolved, which anyone in its space may do; and that
- * offering one tells someone of a room this user may add people to, which the
- * add that admitted them was the gesture for.
+ * to it, accepting a room, joining one, forgetting one, or reporting a notice
+ * delivered. None of them needs a gesture. Each changes only this user's own
+ * manager, except that accepting or joining a room also adds this user to its
+ * participants, when their profile has resolved, which anyone in its space may
+ * do; and that offering one tells someone of a room this user may add people
+ * to, which the add that admitted them was the gesture for.
  */
 export const commitManager = handler<ManagerStreamEvent, ManagerActState>(
   (event, state) => performManagerAct(event, state),
@@ -1362,6 +1380,13 @@ export interface FabriChatManagerOutput {
 
   /** Records a room this user has been admitted to. */
   accept: Stream<ManagerStreamEvent>;
+
+  /**
+   * Makes a room this user has entered one of their chats: lists it, or
+   * lists it again once forgotten, and adds them to its participants. A room
+   * their chats list already is left as it is.
+   */
+  joinRoom: Stream<ManagerStreamEvent>;
 
   /** Removes a room from this user's list. */
   forget: Stream<ManagerStreamEvent>;
@@ -1619,6 +1644,7 @@ export const FabriChatManagerCore = pattern<
       createGroup: commitStart({ act: "createGroup", ...records }),
       offerRoom: commitManager({ act: "offerRoom", ...records, people }),
       accept: commitManager({ act: "accept", ...records }),
+      joinRoom: commitManager({ act: "joinRoom", ...records }),
       forget: commitManager({ act: "forget", ...records }),
       delivered: commitManager({ act: "delivered", ...records }),
     };
@@ -1798,6 +1824,7 @@ const FabriChatManager = pattern<
     createGroup: core.createGroup,
     offerRoom: core.offerRoom,
     accept: core.accept,
+    joinRoom: core.joinRoom,
     forget: core.forget,
     delivered: core.delivered,
   };

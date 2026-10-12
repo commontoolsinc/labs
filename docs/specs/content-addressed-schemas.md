@@ -558,6 +558,14 @@ documents available alongside their declarations:
   with a reference created the obligation, so it discharges it: the
   decomposed closure is written into the space that will hold the
   reference, in the same transaction as the reference itself. A
+  transaction stamps the reference itself on an inline link schema it
+  writes into an ordinary document — a value copied out of a `data:`
+  document carries its link schemas inline, and would otherwise store and
+  send every closure in full. Three kinds of inline schema stay as written:
+  a trivial one, one that decomposition refuses, and one that takes no more
+  wire bytes than the reference that would replace it, a bare handle stamp
+  such as `{ asCell: ["stream"] }` among them; a `data:` document is never
+  written, and a `cid:` document is not link-scanned. A
   transaction commits against one space's session, so the closure reaches
   whichever server handles that space by construction. An event append is
   committed outside any transaction, and carries the closure behind its

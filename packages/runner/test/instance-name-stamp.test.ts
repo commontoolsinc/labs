@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
-import { nameInstance } from "../src/builder/instance-name.ts";
+import {
+  instancePartialCause,
+  nameInstance,
+} from "../src/builder/instance-name.ts";
 import { pattern } from "../src/builder/pattern.ts";
 import type { Pattern, PatternFactory } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
+import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -47,9 +51,12 @@ describe("instance-name-stamp", () => {
 
   /**
    * A parent holding the instance `a` of the compiled `Counter`, named, and a
-   * positional instance of it after `a`.
+   * positional instance of it after `a`, and with `withC` a third instance,
+   * `c`, named, after both.
    */
-  const parentPattern = async (): Promise<Pattern> => {
+  const parentPattern = async (
+    { withC = false }: { withC?: boolean } = {},
+  ): Promise<Pattern> => {
     const Counter = await rt.patternManager.compilePattern({
       main: "/counter.tsx",
       files: [{ name: "/counter.tsx", contents: COUNTER }],
@@ -58,8 +65,33 @@ describe("instance-name-stamp", () => {
     return pattern<Record<string, never>>(() => {
       const a = nameInstance(Counter({ label: "a" }), "a");
       const p = Counter({ label: "p" });
-      return { views: [a, p] };
+      const views = [a, p];
+      if (withC) views.push(nameInstance(Counter({ label: "c" }), "c"));
+      return { views };
     });
+  };
+
+  /** The id of the child the parent at `cell` runs for the instance `name`. */
+  const namedChild = (cell: Cell<unknown>, name: string): string => {
+    const spot = getDerivedInternalCellLink(cell, {
+      partialCause: instancePartialCause(name),
+    });
+    return rt.getCell(space, {
+      resultFor: { space: spot.space, id: spot.id, path: [] },
+    }).getAsNormalizedFullLink().id;
+  };
+
+  /** Records, until disposed, each child document the guard reads, by id. */
+  const guardReads = (): { ids: string[]; [Symbol.dispose](): void } => {
+    const ids: string[] = [];
+    const access = rt.runner.accessForTestingOnly;
+    access.displacedChildReadRecorder = (child) => ids.push(child);
+    return {
+      ids,
+      [Symbol.dispose]: () => {
+        access.displacedChildReadRecorder = undefined;
+      },
+    };
   };
 
   /**
@@ -102,6 +134,26 @@ describe("instance-name-stamp", () => {
     expect((await tx.commit().settled).error).toBeUndefined();
   };
 
+  /**
+   * Sets the parent at `cell` up again with the in-process `parent`, the way
+   * an updater does: its pattern pointer is moved to `parent`'s keyless
+   * identity first, and the setup goes through the root repair call the
+   * updater makes.
+   */
+  const update = async (cell: Cell<unknown>, parent: Pattern) => {
+    const ref = rt.patternManager.ensureKeylessPatternIdentity(parent);
+    const tx = rt.edit();
+    cell.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: ref.identity,
+      symbol: ref.symbol,
+    }, rawMetaWriteAuthorization);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await rt.runSynced(cell.withTx(), parent, {}, {
+      expectedPatternIdentity: ref,
+    });
+    await rt.idle();
+  };
+
   describe("a named instance's child", () => {
     it("carries its instance's name as its `instanceName` meta, where a positional instance's child carries none", async () => {
       const { named, positional } = await deployedParent(
@@ -122,7 +174,7 @@ describe("instance-name-stamp", () => {
       const { cell, named } = await deployedParent("stamped-other", parent);
       await stamp(named, "b");
 
-      await expect(rt.runSynced(cell, parent, {})).rejects.toThrow(
+      await expect(update(cell, parent)).rejects.toThrow(
         /refusing to set up .*#default for instance "a" over the child of .*#default that instance "b" set up/,
       );
     });
@@ -151,7 +203,7 @@ describe("instance-name-stamp", () => {
       rt.runner.stop(cell);
       await stamp(child, "b");
 
-      await expect(rt.runSynced(cell, parent, {})).rejects.toThrow(
+      await expect(update(cell, parent)).rejects.toThrow(
         /refusing to set up .* for instance "a" over a child with no stored pattern identity that instance "b" set up/,
       );
     });
@@ -164,7 +216,7 @@ describe("instance-name-stamp", () => {
       );
       await stamp(positional, "a");
 
-      await expect(rt.runSynced(cell, parent, {})).rejects.toThrow(
+      await expect(update(cell, parent)).rejects.toThrow(
         /refusing to set up .*#default for a positional spot over the child of .*#default that instance "a" set up/,
       );
     });
@@ -179,7 +231,7 @@ describe("instance-name-stamp", () => {
         result: cell.getRaw(),
       };
 
-      await expect(rt.runSynced(cell, parent, {})).rejects.toThrow(
+      await expect(update(cell, parent)).rejects.toThrow(
         /refusing to set up/,
       );
       await cell.sync();
@@ -198,11 +250,62 @@ describe("instance-name-stamp", () => {
       const { cell, named } = await deployedParent("stamped-own", parent);
       await stamp(named, "a");
 
-      await rt.runSynced(cell, parent, {});
+      await update(cell, parent);
       await rt.idle();
       await named.sync();
 
       expect(named.key("count").get()).toBe(7);
+    });
+  });
+
+  describe("what the guard reads", () => {
+    it("reads no child in a fresh parent's setup, nor in a start that no updater asked for, and reads the named child in an update", async () => {
+      const parent = await parentPattern();
+      let fresh: string[];
+      let cell: Cell<unknown>;
+      let named: Cell<unknown>;
+      {
+        using reads = guardReads();
+        ({ cell, named } = await deployedParent("reads-fresh", parent));
+        fresh = [...reads.ids];
+      }
+      let restart: string[];
+      {
+        using reads = guardReads();
+        await rt.runSynced(cell, parent, {});
+        await rt.idle();
+        rt.runner.stop(cell);
+        restart = [...reads.ids];
+      }
+
+      using reads = guardReads();
+      await update(cell, parent);
+
+      expect({
+        fresh,
+        restart,
+        updateReadsNamed: reads.ids.includes(
+          named.getAsNormalizedFullLink().id,
+        ),
+      }).toStrictEqual({ fresh: [], restart: [], updateReadsNamed: true });
+    });
+
+    it("reads no child of an instance the parent's stored manifest does not record", async () => {
+      // `c` is added in the update, so no child of it has been set up, while
+      // `a`'s child is read as usual.
+
+      const { cell } = await deployedParent(
+        "reads-unrecorded-instance",
+        await parentPattern(),
+      );
+
+      using reads = guardReads();
+      await update(cell, await parentPattern({ withC: true }));
+
+      expect({
+        a: reads.ids.includes(namedChild(cell, "a")),
+        c: reads.ids.includes(namedChild(cell, "c")),
+      }).toStrictEqual({ a: true, c: false });
     });
   });
 });

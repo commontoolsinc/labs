@@ -3,9 +3,9 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 
-import { bringUpHomeRootForRefusedWrite } from "../src/home-root.ts";
+import type { Cell } from "../src/cell.ts";
+import { bringUpHomeRootForHandler } from "../src/home-root.ts";
 import { Runtime, type RuntimeFetch } from "../src/index.ts";
-import { SpaceRootMissingError } from "../src/space-root-slot.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 
@@ -56,52 +56,72 @@ describe("home-root", () => {
     storageManager = undefined;
   });
 
-  it("starts the Home root's creation for a write refused beneath the user's own Home", async () => {
+  /** A cell beneath the empty `defaultPattern` slot of `space`'s space cell. */
+  function beneathSlot(rt: Runtime, space: MemorySpace): Cell<unknown> {
+    return (rt.getSpaceCell(space) as Cell<any>).key("defaultPattern")
+      .key("profiles");
+  }
+
+  it("starts the Home root's creation for handler state beneath Home's empty slot", async () => {
     const rt = makeRuntime(user, false);
+    const tx = rt.edit();
 
-    const creation = bringUpHomeRootForRefusedWrite(
-      rt,
-      new SpaceRootMissingError(home),
-    );
+    await expect(
+      bringUpHomeRootForHandler(
+        rt,
+        { $ctx: { profiles: beneathSlot(rt, home) }, $event: {} },
+        tx,
+      ),
+    ).rejects.toThrow("404");
+    tx.abort();
 
-    expect(creation).toBeDefined();
-    await expect(creation!).rejects.toThrow("404");
     expect(fetched.some((url) => url.includes("/system/home.tsx"))).toBe(true);
   });
 
-  it("returns `undefined` for a write refused beneath another space", () => {
+  it("starts the Home root's creation for a cell nested in handler state", async () => {
     const rt = makeRuntime(user, false);
+    const tx = rt.edit();
 
-    const creation = bringUpHomeRootForRefusedWrite(
+    await expect(
+      bringUpHomeRootForHandler(
+        rt,
+        {
+          $ctx: { form: { lists: [beneathSlot(rt, home)] } },
+          $event: {},
+        },
+        tx,
+      ),
+    ).rejects.toThrow("404");
+    tx.abort();
+
+    expect(fetched.some((url) => url.includes("/system/home.tsx"))).toBe(true);
+  });
+
+  it("fetches nothing for handler state that reaches no Home slot", async () => {
+    const rt = makeRuntime(user, false);
+    const tx = rt.edit();
+
+    await bringUpHomeRootForHandler(
       rt,
-      new SpaceRootMissingError(elsewhere),
+      { $ctx: { profiles: beneathSlot(rt, elsewhere) }, $event: {} },
+      tx,
     );
-    creation?.catch(() => {});
+    tx.abort();
 
-    expect(creation).toBeUndefined();
     expect(fetched).toEqual([]);
   });
 
-  it("returns `undefined` for an error other than a refused write", () => {
-    const rt = makeRuntime(user, false);
-
-    const creation = bringUpHomeRootForRefusedWrite(rt, new Error(home));
-    creation?.catch(() => {});
-
-    expect(creation).toBeUndefined();
-    expect(fetched).toEqual([]);
-  });
-
-  it("returns `undefined` on a serving runtime, which creates no Home root", () => {
+  it("fetches nothing on a serving runtime, which creates no Home root", async () => {
     const rt = makeRuntime(service, true);
+    const tx = rt.edit();
 
-    const creation = bringUpHomeRootForRefusedWrite(
+    await bringUpHomeRootForHandler(
       rt,
-      new SpaceRootMissingError(service.did() as MemorySpace),
+      { $ctx: { profiles: beneathSlot(rt, service.did() as MemorySpace) } },
+      tx,
     );
-    creation?.catch(() => {});
+    tx.abort();
 
-    expect(creation).toBeUndefined();
     expect(fetched).toEqual([]);
   });
 });

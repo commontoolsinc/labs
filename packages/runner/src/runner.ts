@@ -259,7 +259,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { bringUpHomeRootForRefusedWrite } from "./home-root.ts";
+import { bringUpHomeRootForHandler } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -443,27 +443,25 @@ type StartAttempt = {
 };
 
 /**
- * `schema` with a handler's `$event` slot removed: what a handler node's
- * bound inputs are synced under at start, where the slot holds the stream
- * link rather than an event.
+ * `schema` with a handler's `$event` slot declared as a stream: what a
+ * handler node's bound inputs are synced under at start, where the slot
+ * holds the stream link rather than an event. Declared so, the slot's
+ * document is not loaded under the event schema the link carries; the
+ * stream is named whole beside the plan (`#cellsNodePlanReads`).
  */
-function schemaWithoutEventSlot(
+function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
-  const { $event: _event, ...properties } = schema.properties as Record<
-    string,
-    JSONSchema
-  >;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
   return {
     ...schema,
-    properties,
+    properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
   };
 }
@@ -947,6 +945,53 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
   return isObjectNotArray(partialCause) &&
     typeof partialCause.$generated === "number" &&
     Object.keys(partialCause).length === 1;
+}
+
+/**
+ * The manifest of derived internal cells `cell` holds, as setup recorded it.
+ */
+function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
+  const stored = convertibleJsFromFabricValue(
+    cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+  );
+  return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
+}
+
+/**
+ * The numbers of the positional spots, `{ $generated: N }`, that a parent's
+ * stored `manifest` records: the spots at which a child of the parent can
+ * already be set up.
+ */
+function recordedPositionalSpots(
+  manifest: readonly InternalCellDescriptor[],
+): Set<number> {
+  const spots = new Set<number>();
+  for (const entry of manifest) {
+    if (isPositionalPartialCause(entry.partialCause)) {
+      spots.add(positionalNumber(entry.partialCause));
+    }
+  }
+  return spots;
+}
+
+/**
+ * The names of the named instances whose spots a parent's stored `manifest`
+ * records: the instances whose child can already be set up.
+ */
+function recordedInstanceNames(
+  manifest: readonly InternalCellDescriptor[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const entry of manifest) {
+    const name = instanceNameOfPartialCause(entry.partialCause);
+    if (name !== undefined) names.add(name);
+  }
+  return names;
+}
+
+/** The number in the positional partial cause `partialCause`. */
+function positionalNumber(partialCause: unknown): number {
+  return (partialCause as { $generated: number }).$generated;
 }
 
 /** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
@@ -1446,6 +1491,9 @@ type SetupValidationOptions = {
   /** See `RunnerRunOptions.capturedArgumentFields`. */
   capturedArgumentFields?: readonly string[];
 
+  /** See `RunnerRunOptions.droppedArgumentFields`. */
+  droppedArgumentFields?: readonly string[];
+
   /** See `RunnerRunOptions.attributeInitialization`. */
   attributeInitialization?: boolean;
 
@@ -1814,6 +1862,12 @@ export type RunnerRunOptions = {
   // piece a binding to an owner-protected cell does not pass for modifying
   // it; a value in the record is not recorded.
   capturedArgumentFields?: readonly string[];
+  // Argument fields a collection builtin leaves out of this run that a stored
+  // argument document may still hold from a run that filled them: a list
+  // callback's `index` and `array` when its schema names neither. A stored
+  // slot by one of these names is dropped from the argument the run writes
+  // instead of carried over, so replaying the piece removes it.
+  droppedArgumentFields?: readonly string[];
   // The source origin a piece brought into being by this run records with its
   // creation revision. A run that finds the piece already there leaves both
   // alone: what a piece records after it exists is decided by a source
@@ -2366,6 +2420,13 @@ export class Runner {
     | undefined;
 
   /**
+   * Observer of every child document the displaced-child guard reads, by
+   * document id, for a test of which children a setup reads. Unset outside
+   * tests.
+   */
+  #displacedChildReadRecorder: ((child: string) => void) | undefined;
+
+  /**
    * The macrotask yield the resume pre-sync takes between the syncs of a
    * wave. Issuing a sync sends its watch frame, and the walk that prepares
    * each is synchronous work, so a wave of hundreds would otherwise send
@@ -2541,6 +2602,7 @@ export class Runner {
     presyncPlanRecorder:
       | ((piece: string, node: Node, site: "node" | "owned") => void)
       | undefined;
+    displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
       cells: readonly Cell<any>[],
@@ -2655,6 +2717,12 @@ export class Runner {
       },
       set presyncPlanRecorder(value) {
         outerThis.#presyncPlanRecorder = value;
+      },
+      get displacedChildReadRecorder() {
+        return outerThis.#displacedChildReadRecorder;
+      },
+      set displacedChildReadRecorder(value) {
+        outerThis.#displacedChildReadRecorder = value;
       },
       get resumeYield() {
         return outerThis.#resumeYield;
@@ -3265,6 +3333,7 @@ export class Runner {
     setupState: SetupStateReuse,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): SetupResult<R> | undefined {
     const key = this.#getDocKey(resultCell);
     if (!this.#cancels.has(key)) return undefined;
@@ -3306,7 +3375,12 @@ export class Runner {
         pattern.argumentSchema,
       );
       const nextArgument = mergeSchemaDefaults(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set(droppedArgumentFields),
+        ),
         defaults,
         pattern.argumentSchema,
       );
@@ -3567,7 +3641,9 @@ export class Runner {
    * one. Where what is staged still fails the schema as a whole, every stored
    * slot the caller does not name is left out. Each slot left out is logged
    * as a warning naming the pattern, the piece, the slot and the mismatch.
-   * Returns the argument staged.
+   * A slot named in `droppedArgumentFields` is left out from the start and
+   * not logged: the caller leaves it out on purpose. Returns the argument
+   * staged.
    *
    * @throws Error carrying `STORED_ARGUMENT_SCHEMA_REFUSAL` when the argument
    *   fails the schema with no stored slot carried over.
@@ -3582,6 +3658,7 @@ export class Runner {
     stored: unknown,
     previousArgumentSchema: JSONSchema | undefined,
     defaults: FabricValue,
+    droppedArgumentFields: ReadonlySet<string>,
   ): T {
     const argumentCell = this.#runtime.getCellFromLink(
       argumentLink,
@@ -3596,7 +3673,12 @@ export class Runner {
     let staged = projection;
     const stage = (leaveOut: ReadonlySet<string>): string | undefined => {
       staged = mergeSchemaDefaults<T>(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument, leaveOut),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set([...droppedArgumentFields, ...leaveOut]),
+        ),
         defaults as Partial<T>,
         pattern.argumentSchema,
       );
@@ -3628,7 +3710,9 @@ export class Runner {
     const carried = foldStoredArgumentSlots(argument, stored) === argument ||
         !isObjectNotArray(argument) || !isObjectNotArray(stored)
       ? []
-      : Object.keys(stored).filter((slot) => !Object.hasOwn(argument, slot));
+      : Object.keys(stored).filter((slot) =>
+        !Object.hasOwn(argument, slot) && !droppedArgumentFields.has(slot)
+      );
     const dropped = storedArgumentSlotIssues(
       argumentCell,
       pattern.argumentSchema,
@@ -3686,6 +3770,7 @@ export class Runner {
     resultCell: Cell<R>,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): void {
     // Every write below fills a store this piece owns — the argument
     // document, each internal document the result projects to, and the result
@@ -3777,7 +3862,12 @@ export class Runner {
       // the piece's own state lives in the rest. What the setup PROJECTS stays
       // the argument this caller supplied.
       suppliedProjection = argument;
-      nextArgument = this.#argumentOverStoredSlots(tx, argumentLink, argument);
+      nextArgument = this.#argumentOverStoredSlots(
+        tx,
+        argumentLink,
+        argument,
+        new Set(droppedArgumentFields),
+      );
     } else {
       const previousArgumentCell = this.#runtime.getCellFromLink(
         argumentLink,
@@ -3870,6 +3960,7 @@ export class Runner {
             previousArgument,
             previousArgumentSchema,
             defaults,
+            new Set(droppedArgumentFields),
           );
         }
         argumentUpdated = true;
@@ -4251,6 +4342,7 @@ export class Runner {
       setupState,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
     if (runningSetup) {
       return runningSetup;
@@ -4274,6 +4366,7 @@ export class Runner {
       resultCell,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
 
     if (validationOptions.validateArgumentLinks !== undefined) {
@@ -6638,11 +6731,22 @@ export class Runner {
     return tx;
   }
 
-  /** Load one family document under the identity captured before awaiting. */
+  /**
+   * Load one family document under the identity captured before awaiting.
+   * A cell declared a stream is loaded whole: its document holds no value
+   * a read uses, so a selector carrying the event schema would ask the
+   * store to walk a shape that is never there, and the gate's probe of the
+   * document reads its record, which the whole document brings.
+   */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
+    if (ContextualFlowControl.declaresStream(cell.schema)) {
+      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
+        Cell<T>
+      >;
+    }
     return syncCellForIdentity(cell, identity);
   }
 
@@ -7890,6 +7994,7 @@ export class Runner {
       {
         referencedArgumentFields: options.referencedArgumentFields,
         capturedArgumentFields: options.capturedArgumentFields,
+        droppedArgumentFields: options.droppedArgumentFields,
         attributeInitialization: options.attributeInitialization,
         ...(creatingPiece
           ? {
@@ -9178,7 +9283,7 @@ export class Runner {
   #planReadSchema(plan: NodePlan): JSONSchema | undefined {
     switch (plan.kind) {
       case "javascript":
-        return schemaWithoutEventSlot(plan.module.argumentSchema);
+        return schemaWithEventSlotAsStream(plan.module.argumentSchema);
       case "raw":
         return plan.module.argumentSchema;
       case "passthrough":
@@ -9479,7 +9584,7 @@ export class Runner {
       case "javascript": {
         const cells = [
           plan.inputsCell.asSchema(
-            schemaWithoutEventSlot(plan.module.argumentSchema),
+            schemaWithEventSlotAsStream(plan.module.argumentSchema),
           ),
         ];
         // A handler node's `$event` slot names its stream's document through
@@ -11508,33 +11613,6 @@ export class Runner {
     );
   }
 
-  /**
-   * Brings up the user's Home root for a handler whose write beneath the
-   * Home's empty slot was refused with `error`, then throws
-   * {@link RetryImmediately} so the scheduler runs the handler again, and its
-   * write lands under the root. A creation that fails is reported as `error`
-   * itself, with the failure as its cause and the handler's `frame` attached,
-   * as a handler's other failures carry theirs. `undefined` when this runtime
-   * brings up no root for `error` (see `bringUpHomeRootForRefusedWrite()`).
-   */
-  #bringUpHomeRootAndRetry(
-    error: unknown,
-    frame: Frame,
-  ): Promise<never> | undefined {
-    const creation = bringUpHomeRootForRefusedWrite(this.#runtime, error);
-    if (creation === undefined) return undefined;
-    return creation.then(
-      () => {
-        throw new RetryImmediately("Bringing up the user's Home root");
-      },
-      (failure: unknown) => {
-        (error as Error & { frame?: Frame }).cause = failure;
-        (error as Error & { frame?: Frame }).frame = frame;
-        throw error;
-      },
-    );
-  }
-
   #handlerResultPatternHasNavigateTo(
     pattern: Pattern,
   ): boolean {
@@ -11964,12 +12042,7 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(
-            postRun,
-            (error) =>
-              this.#bringUpHomeRootAndRetry(error, frame) ??
-                Promise.reject(error),
-          )
+          ? result.then(postRun)
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -11990,13 +12063,6 @@ export class Runner {
             tx,
             this.#handlingReceiptCell(resultCell, cause, tx),
           ).finally(() => popFrame(frame));
-        }
-        // A write beneath the user's Home before Home has a root is refused;
-        // the root is brought up, and the handler runs again.
-        const retrying = this.#bringUpHomeRootAndRetry(error, frame);
-        if (retrying !== undefined) {
-          popFrameAfterReturn = false;
-          return retrying.finally(() => popFrame(frame));
         }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
@@ -12070,7 +12136,12 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
+          const materialized = inputsCell.asSchema(module.argumentSchema)
+            .withTx(tx).get();
+          // A handler holding a cell beneath the user's Home before Home has
+          // a root runs only once the root exists, so a write it makes there
+          // lands under the root.
+          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
         }
         : undefined;
 
@@ -13405,22 +13476,46 @@ export class Runner {
    * the parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for
    * each such node whose child this parent owns: not a child that is its
    * space's root, nor one managed in a space of its own.
+   *
+   * Only a parent its updater has pointed at `pattern` is judged: its stored
+   * `patternIdentity` already names `pattern`, while its setup marker names
+   * another pattern or none. A parent that runs whichever pattern a
+   * computation returns is set up with a pattern its pointer does not yet
+   * name, and an unrelated pattern there is no sign that children moved. So a
+   * parent set up as part of an update of an enclosing pattern is not judged
+   * either, and a root an updater points at an unrelated pattern is judged as
+   * though it ran a newer version of its own. Only spots the parent's stored
+   * manifest records are read, since no child can be set up at any other.
    */
   #refuseDisplacedChildren(
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     resultCell: Cell<any>,
   ): void {
+    const parent = resultCell.withTx(tx);
+    const incoming = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    const pointer = getPatternIdentityRef(parent);
+    const marker = getPatternSetupIdentityRef(parent);
+    if (
+      incoming === undefined || pointer === undefined ||
+      !samePatternRef(pointer, incoming) ||
+      (marker !== undefined && samePatternRef(marker, incoming))
+    ) {
+      return;
+    }
+    const manifest = storedManifestOf(parent);
+    const recorded = recordedPositionalSpots(manifest);
+    const recordedInstances = recordedInstanceNames(manifest);
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      // Only a named instance stamps the child it sets up, and a spot that a
-      // result key, a node input or `.for()` names holds no such child, nor
-      // shifts with its siblings.
-      if (
-        !isPositionalPartialCause(partialCause) &&
-        instanceNameOfPartialCause(partialCause) === undefined
-      ) {
-        continue;
-      }
+      // Only a spot the stored manifest records can hold a child already, and
+      // only a positional or named one can hold another's: a spot a result
+      // key, a node input or `.for()` names does not shift with its siblings,
+      // and no instance stamps the child there.
+      const instanceName = instanceNameOfPartialCause(partialCause);
+      const judged = isPositionalPartialCause(partialCause)
+        ? recorded.has(positionalNumber(partialCause))
+        : instanceName !== undefined && recordedInstances.has(instanceName);
+      if (!judged) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
@@ -13438,6 +13533,7 @@ export class Runner {
         module.implementation as Pattern,
         child,
         partialCause,
+        recorded,
       );
     }
   }
@@ -13448,11 +13544,14 @@ export class Runner {
    * holds a different child the parent `resultCell` keeps elsewhere: a child
    * stamped with another instance's name, or, where `partialCause` is
    * positional, a sign that the parent's positional children have moved
-   * spots, which is a child of `childPattern`'s identity running at another
-   * positional spot, or another positional spot of `pattern` setting up the
-   * identity `storedChild` runs. A spot whose node sets up a space's root is not counted. A child
-   * whose identity differs with no such sign is the same child under a newer
-   * version of its own source.
+   * spots, which is `storedChild` running another pattern identity while
+   * either a child of `childPattern`'s identity runs at another positional
+   * spot, or another positional spot of `pattern` sets up the identity
+   * `storedChild` runs. A child is looked for only at the positional spots in
+   * `recorded`, the ones the parent's stored manifest records, and no spot
+   * whose node sets up a space's root is counted. A child whose identity
+   * differs with no such sign is the same child under a newer version of its
+   * own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -13461,7 +13560,11 @@ export class Runner {
     childPattern: Pattern,
     storedChild: Cell<any>,
     partialCause: JSONValue,
+    recorded: ReadonlySet<number>,
   ): void {
+    this.#displacedChildReadRecorder?.(
+      storedChild.getAsNormalizedFullLink().id,
+    );
     const instanceName = instanceNameOfPartialCause(partialCause);
     const positional = isPositionalPartialCause(partialCause);
     const stored = getPatternSetupIdentityRef(storedChild) ??
@@ -13507,8 +13610,14 @@ export class Runner {
         partialCause,
       );
       if (documentKey(other.getAsNormalizedFullLink()) === storedKey) continue;
-      const otherRef = getPatternSetupIdentityRef(other) ??
-        getPatternIdentityRef(other);
+      // A child is set up only at a spot the stored manifest records, so the
+      // child at any other spot is not read.
+      let otherRef: { identity: string; symbol: string } | undefined;
+      if (recorded.has(positionalNumber(partialCause))) {
+        this.#displacedChildReadRecorder?.(other.getAsNormalizedFullLink().id);
+        otherRef = getPatternSetupIdentityRef(other) ??
+          getPatternIdentityRef(other);
+      }
       const wanted = this.#runtime.patternManager.getArtifactEntryRef(
         module.implementation as Pattern,
       );
