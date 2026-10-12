@@ -1328,9 +1328,9 @@ export type MemoryProtocolFlags = {
    * (03-commit-model.md §3.6.1) for that session's commits: a write that
    * reaches the stored document from the reader's view is an identity even
    * where replaying it on the stored document would change it, as a
-   * positional `splice` does. This build does not advertise it (see
-   * `getMemoryProtocolFlags()`). Absent parses to false, and the server then
-   * holds that session's commits to both conditions.
+   * positional `splice` does. Build-inherent, so a peer of this version
+   * always advertises it. Absent (an older client) parses to false, and the
+   * server then holds that session's commits to both conditions.
    */
   elidedVerdicts?: boolean;
 
@@ -2597,14 +2597,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // the notice. A routed connection records no refusal, so it is told
   // nothing whatever both peers advertise.
   admissionNotice: true,
-  // Not advertised, though this build's replica promotes an elided layer to
-  // the document its transaction computed and its server honors a client
-  // that advertises the capability. An own commit refused for a pending
-  // dependency, rather than for its own stale reads, gets no read repair, so
-  // the documents it created revert to absent and nothing loads the store's
-  // copies of them. With the waiver on, a two-user session lands a list
-  // element's setup in such a commit, and the element never renders.
-  elidedVerdicts: false,
+  // Build-inherent: this build's replica promotes an elided layer to the
+  // document its transaction computed rather than folding its ops, so the
+  // server may elide a positional write for it.
+  elidedVerdicts: true,
   // Build-inherent: this build's server records the diagnostics a client
   // reports about its session.
   sessionReportV1: true,
@@ -2868,8 +2864,8 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: a server then sends that
     // client no `session/admissible`.
     admissionNotice: admissionNotice === true,
-    // Absent parses to false: the server then holds that session's commits
-    // to both conditions of the identity proof.
+    // Absent (an older client) parses to false: the server then holds that
+    // session's commits to both conditions of the identity proof.
     elidedVerdicts: elidedVerdicts === true,
     // Absent (an older server) parses to false: a client then sends no
     // `session.report`.

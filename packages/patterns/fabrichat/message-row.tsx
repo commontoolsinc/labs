@@ -5,6 +5,7 @@
  */
 import {
   action,
+  type Cell,
   computed,
   equals,
   pattern,
@@ -20,6 +21,7 @@ import {
   threadRootOf,
   type ViewItem,
 } from "./logic.ts";
+import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
@@ -36,6 +38,7 @@ import {
   FABRICHAT_POLICY,
   isDeleted,
   isOwnerOf,
+  type JoinRoomRequest,
   type MessageCell,
   messageEntries,
   type MessageRecord,
@@ -59,6 +62,7 @@ import {
   type ChatReaction,
   type ChatReactionTally,
   type ChatRoomKind,
+  type ChatRoomLink,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -147,6 +151,18 @@ export interface FabriChatMessageRowInput {
 
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
+
+  /** Whether the viewer's manager can take the viewer into the room. */
+  canJoin?: boolean;
+
+  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
+  joinRoom?: Stream<JoinRoomRequest>;
+
+  /** The shared-space catalog the viewer's manager lists its rooms from. */
+  catalog?: SharedSpaceCatalogStorage;
+
+  /** The room itself, as the viewer's manager links it. */
+  self?: Cell<ChatRoomLink>;
 }
 
 /** What a message row provides: its rendering, and its controls' streams. */
@@ -202,6 +218,10 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    canJoin,
+    joinRoom,
+    catalog,
+    self,
   } = input;
   const records = {
     kind,
@@ -212,6 +232,10 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    canJoin,
+    joinRoom,
+    catalog,
+    self,
   };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
@@ -469,6 +493,10 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        canJoin,
+                        joinRoom,
+                        catalog,
+                        self,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -497,6 +525,10 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        canJoin,
+                        joinRoom,
+                        catalog,
+                        self,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -553,6 +585,10 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
+                    canJoin,
+                    joinRoom,
+                    catalog,
+                    self,
                     message,
                     emoji,
                     pickerOpen,

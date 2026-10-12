@@ -6744,7 +6744,7 @@ export class SpaceReplica
           operations,
           source,
           outcome.rejection,
-          identity,
+          { identity },
         );
       }
       const v = outcome.verdict;
@@ -6783,7 +6783,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
-          identity,
+          { identity },
         );
       }
       // Locally-committed verdicts confirm IMMEDIATELY — never parked
@@ -7490,6 +7490,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
       }
@@ -7510,6 +7511,7 @@ export class SpaceReplica
             operations,
             source,
             rejection,
+            { pushed: true },
           );
         }
       }
@@ -7584,6 +7586,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
         if (inFlight === undefined) {
@@ -7647,6 +7650,7 @@ export class SpaceReplica
             operations,
             source,
             outcome.rejection,
+            { pushed: true },
           );
         }
         const settledRace = this.#settleAccept(
@@ -7738,6 +7742,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
+          { pushed: true },
         );
       }
     } finally {
@@ -7856,15 +7861,25 @@ export class SpaceReplica
    * Finalizes a rejection, the shared tail for both real conflicts and
    * pre-empted commits: waits for the caught-up read-repair, drops the
    * optimistic pending write, and emits the revert notification reflecting
-   * repaired confirmed state.
+   * repaired confirmed state. For a commit that was pushed to the store, the
+   * store's copies of the documents it created are loaded beside that wait,
+   * so the revert reveals them; a sealed commit's withdrawal re-derives its
+   * documents instead, and loads nothing.
    */
   async #finalizeRejection(
     localSeq: number,
     operations: NativeCommitOperation[],
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
-    identity?: ScopeKeyIdentity,
+    options: {
+      /** The identity the commit's operations were applied under. */
+      identity?: ScopeKeyIdentity;
+
+      /** Whether the commit was pushed to the store rather than sealed. */
+      pushed?: boolean;
+    } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const { identity, pushed = false } = options;
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -7894,7 +7909,10 @@ export class SpaceReplica
           this.#scopeKeyIdentity(),
         )
         : undefined;
-      await this.#waitForConflictReadRepair(rejection);
+      await Promise.all([
+        this.#waitForConflictReadRepair(rejection),
+        pushed ? this.#loadAbsentTouched(rejection, touched) : undefined,
+      ]);
       if (isRefusedDerivedWrite(rejection, source)) {
         this.#foldRefusedWrite(localSeq, touched, identity);
       }
@@ -9375,6 +9393,83 @@ export class SpaceReplica
       if (timer !== undefined) {
         clearTimeout(timer);
       }
+    }
+  }
+
+  /**
+   * Helper for `#finalizeRejection()`, which loads the store's copy of each
+   * document a refused pushed commit touched that this replica holds no
+   * confirmed revision of, so that dropping the commit's layer reveals that
+   * copy rather than an absence. The read repair a conflict names reaches
+   * the documents the session watches, and a document the commit itself
+   * created is watched by nothing: the store may hold it all the same,
+   * written by another session, and a refusal for a pending dependency names
+   * no document at all. The load also stands a watch for each document, so a
+   * later write of it reaches this replica. A document the store holds
+   * nothing for stays absent. A failed load is logged and leaves the drop to
+   * proceed: the retry's commit decides what the absence was worth.
+   *
+   * With a store read-through installed, the documents are read from the
+   * store here rather than through `pull()`: the commit's own pending layer
+   * gives each a record already, and the ordinary store pull leaves a held
+   * record to the feed's refresh, which covers only commits admitted after
+   * the record appeared.
+   */
+  async #loadAbsentTouched(
+    rejection: StorageTransactionRejected,
+    touched: readonly LocalDocAddress[],
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const entries: [WatchAddress, undefined][] = [];
+    const keys = new Set<string>();
+    for (const address of touched) {
+      const key = this.#docKeyOf(address);
+      if (keys.has(key) || (this.#docs.get(key)?.confirmed.seq ?? 0) > 0) {
+        continue;
+      }
+      keys.add(key);
+      entries.push([{
+        id: address.id,
+        type: DOCUMENT_MIME,
+        scope: address.scope,
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
+      }, undefined]);
+    }
+    if (entries.length === 0) {
+      return;
+    }
+    const read = this.#storeReadThrough();
+    if (read !== undefined) {
+      const upserts: SessionSyncUpsert[] = [];
+      for (const [address] of entries) {
+        const instance = this.instanceKey(
+          address.scope,
+          undefined,
+          address.scopeKey,
+        );
+        if (!isScopeKey(instance)) continue;
+        const upsert = read({ id: address.id, scopeKey: instance });
+        if (upsert !== undefined) upserts.push(upsert);
+      }
+      if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
+      return;
+    }
+    let failure: unknown;
+    try {
+      failure = (await this.pull(entries)).error;
+    } catch (error) {
+      failure = error;
+    }
+    if (failure !== undefined) {
+      logger.warn("conflict-read-repair-load", () => [
+        "the store's copies of the documents a refused commit created " +
+        "could not be loaded; the drop reverts them to absent",
+        failure,
+      ]);
     }
   }
 

@@ -201,6 +201,9 @@ const localSeqTop = (read: { localSeq: number | number[] }): number =>
 class ScriptedServerModel {
   connectionCount = 0;
   transactLocalSeqs: number[] = [];
+
+  /** The root of every watch the client has registered, in wire order. */
+  watchedRoots: string[] = [];
   readonly confirmed = new Map<URI, DocState>();
   readonly applied = new Map<number, AppliedRecord>();
   readonly rejected = new Map<number, RejectedRecord>();
@@ -483,6 +486,11 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
         // volunteers document state — catch-up only arrives when a test
         // explicitly delivers it via pushSync, so tests control the wire
         // order of verdicts vs updates.
+        for (const watch of message.watches ?? []) {
+          for (const root of watch.query?.roots ?? []) {
+            this.model.watchedRoots.push(root.id);
+          }
+        }
         this.respond({
           type: "response",
           requestId: message.requestId!,
@@ -1503,6 +1511,85 @@ describe("memory-v2-stacked-commit", () => {
         expectVisible(harness, {
           A: valueFor("base-a"),
           B: valueFor("base-b"),
+        });
+      } finally {
+        await harness.close();
+      }
+    });
+
+    it("asks the store for a document a cascade-dropped C3 created, and shows it absent until the store answers", async () => {
+      // The store may hold the document, written by another session, and no
+      // watch of this replica's reaches it: the drop asks for it, and the
+      // scripted store, which volunteers nothing, leaves it absent.
+      const harness = await createHarness();
+      try {
+        await seedAccepted(harness, DOCS.A, valueFor("base-a"));
+
+        const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+        harness.model.setOutcome(c2.localSeq, { kind: "rejectConflict" });
+        const c3 = beginSet(
+          harness,
+          DOCS.C,
+          valueFor("c3"),
+          sourceFromReads([{ id: DOCS.A }]),
+        );
+        harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+
+        await expectConflict(c2.promise);
+        await expectConflict(c3.promise, "pending dependency");
+        expect(harness.model.watchedRoots).toContain(DOCS.C);
+        expect(harness.model.watchedRoots).not.toContain(DOCS.B);
+        expectVisible(harness, { A: valueFor("base-a"), C: undefined });
+      } finally {
+        await harness.close();
+      }
+    });
+
+    it("reads a document a cascade-dropped C3 created from an installed store read-through, where the store gained it after the write", async () => {
+      // A replica reading its space from the store directly holds a record
+      // for the document from the write on, and a store pull of a held
+      // record is answered from the replica; the drop reads the store all
+      // the same, since the store gained the document after the write.
+      const harness = await createHarness();
+      const store = new Map<URI, { seq: number; doc: EntityDocument }>();
+      const reads: URI[] = [];
+      harness.storageManager.installStoreReadThrough(
+        space,
+        ({ id, scopeKey }) => {
+          reads.push(id);
+          const entry = store.get(id);
+          return {
+            branch: "",
+            id,
+            scope: "space",
+            scopeKey,
+            ...(entry === undefined
+              ? { seq: 0, deleted: true as const }
+              : { seq: entry.seq, doc: entry.doc }),
+          };
+        },
+      );
+      try {
+        await seedAccepted(harness, DOCS.A, valueFor("base-a"));
+
+        const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+        harness.model.setOutcome(c2.localSeq, { kind: "rejectConflict" });
+        const c3 = beginSet(
+          harness,
+          DOCS.C,
+          valueFor("c3"),
+          sourceFromReads([{ id: DOCS.A }]),
+        );
+        harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+        expectVisible(harness, { C: valueFor("c3") });
+        store.set(DOCS.C, { seq: 7, doc: { value: valueFor("foreign") } });
+
+        await expectConflict(c2.promise);
+        await expectConflict(c3.promise, "pending dependency");
+        expect(reads.filter((id) => id === DOCS.C)).toHaveLength(2);
+        expectVisible(harness, {
+          A: valueFor("base-a"),
+          C: valueFor("foreign"),
         });
       } finally {
         await harness.close();

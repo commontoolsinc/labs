@@ -45,10 +45,7 @@ import {
   type ParticipantRosterCell,
   rosterProfiles,
 } from "../loom/participants.tsx";
-import {
-  isSharedSpaceCatalog,
-  type SharedSpaceCatalogStorage,
-} from "../system/shared-space-catalog.ts";
+import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import { isInMain, type ShownIn } from "./logic.ts";
 import {
   type ActivityCell,
@@ -66,6 +63,8 @@ import {
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
+  type JoinRoomRequest,
+  listsRoomIn,
   type MessageCell,
   messageEntries,
   type MessageEntry,
@@ -90,7 +89,6 @@ import {
   type AddMemberRefusalCode,
   CHAT_ADD_MEMBER_ACTION,
   CHAT_ADD_MEMBER_SURFACE,
-  CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
@@ -280,19 +278,6 @@ const askToList = handler<unknown, {
   accept?.send({ room });
 });
 
-/**
- * Whether `catalog` keeps the room in `space` as one of its user's chats; a
- * catalog that doesn't read as one keeps none.
- */
-export const listsRoomIn = (
-  catalog: unknown,
-  space: string | undefined,
-): boolean => {
-  if (!isSharedSpaceCatalog(catalog) || space === undefined) return false;
-  const entry = catalog.entries[space];
-  return entry?.kind === CHAT_ROOM_OFFER_KIND && entry.state === "saved";
-};
-
 /** What the control adding a room to the viewer's chats needs. */
 export interface AddToChatsInput {
   /** The room. */
@@ -408,7 +393,10 @@ export interface OfferRoomRequest {
   profile?: Cell<ChatProfile>;
 }
 
-/** The part of the viewer's manager a room tells a member it admits through. */
+/**
+ * The part of the viewer's manager a room reaches: what it tells a member it
+ * admits through, and what it tells of the viewer joining it.
+ */
 export interface RoomManager {
   /** Offers the room to a member, and records how it told them. */
   offerRoom: Stream<OfferRoomRequest>;
@@ -421,6 +409,12 @@ export interface RoomManager {
    * the profiles attesting it.
    */
   people: PerSession<Record<string, ProfileCell[]>>;
+
+  /** Makes a room the viewer has joined one of their chats. */
+  joinRoom?: Stream<JoinRoomRequest>;
+
+  /** The shared-space catalog the manager lists the viewer's rooms from. */
+  sharedSpaceCatalog?: SharedSpaceCatalogStorage;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
@@ -1064,6 +1058,14 @@ export const FabriChatRoomCore = pattern<
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
+  // A room the manager created has `about`, and is its space's root; a
+  // space's own chat, sharing its space, has none.
+  const ownSpace = computed(() => about?.get() !== undefined);
+  // Read as a value, as `canOffer` is: a handler bound to a manager that
+  // isn't there is bound to a stream that still reads as present.
+  const canJoin = computed(() =>
+    ownSpace && manager?.joinRoom !== undefined && self !== undefined
+  );
   const records = {
     kind,
     composer,
@@ -1073,6 +1075,10 @@ export const FabriChatRoomCore = pattern<
     usedTimes,
     activity,
     counters,
+    canJoin,
+    joinRoom: manager?.joinRoom,
+    catalog: manager?.sharedSpaceCatalog,
+    self,
   };
   const alsoToMain = new Writable.perSession(false);
   const windows = new Writable.perSession<WindowsValue>();
@@ -1093,9 +1099,6 @@ export const FabriChatRoomCore = pattern<
   const newestAt = computed(() =>
     sortedEntries[sortedEntries.length - 1]?.record.sentAt
   );
-  // A room the manager created has `about`, and is its space's root; a
-  // space's own chat, sharing its space, has none.
-  const ownSpace = computed(() => about?.get() !== undefined);
   // The space's participants as its root lists them, for a room that isn't
   // that root. A root room's `#default` is the room itself, so it reads only
   // its own; a space whose root isn't there yet lists none.
@@ -1278,6 +1281,10 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              canJoin={canJoin}
+              joinRoom={manager?.joinRoom}
+              catalog={manager?.sharedSpaceCatalog}
+              self={self}
             />
           ))}
           {isEmpty
@@ -1339,6 +1346,10 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              canJoin={canJoin}
+              joinRoom={manager?.joinRoom}
+              catalog={manager?.sharedSpaceCatalog}
+              self={self}
             />
           ))}
           <cf-checkbox $checked={alsoToMain}>
