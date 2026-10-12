@@ -38,6 +38,7 @@ import {
   type PresenceRemoveMessage,
   type PresenceUpsertMessage,
   type ResponseMessage,
+  type ServerMessage,
   SESSION_REPORT_TEXT_MAX,
   type SessionAdmissibleMessage,
   type SessionEffectMessage,
@@ -70,7 +71,6 @@ import {
   PresenceError,
   validatePresencePublication,
 } from "./presence.ts";
-import type { Server } from "./server.ts";
 import { parseSessionReport } from "./session-reports.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
@@ -4273,8 +4273,8 @@ export class WatchView {
 
 export const connect = Client.connect;
 
-// Loopback delivers server frames on EVENT LOOP turns, one frame per
-// turn, like a socket: no response or push ever arrives inside the sender's
+// A queued-frame transport delivers server frames on EVENT LOOP turns, one
+// frame per turn, like a socket: no response or push ever arrives inside the sender's
 // own await cascade, so code that accidentally depends on "nothing arrives
 // until I yield" fails here the way it would against a deployment. One
 // frame per macrotask also guarantees a frame's full microtask cascade
@@ -4284,8 +4284,8 @@ export const connect = Client.connect;
 // from receive() entry, and a send that merely enqueued would let fan-out
 // read heads that predate a write already handed to the transport. Frames
 // staged at close() are dropped — nothing arrives after the socket is
-// gone. Remaining fidelity gap: setCloseReceiver is a no-op, so a
-// server-initiated disconnect is invisible over loopback.
+// gone. Remaining fidelity gap over loopback: nothing there calls `lose()`,
+// so a server-initiated disconnect is invisible over it.
 //
 // The pump takes that turn through armTurn, so a queued frame always has an
 // armed zero-delay timer for `clock.settle()` to see without the delivery
@@ -4293,8 +4293,23 @@ export const connect = Client.connect;
 // Node's MessageChannel replaces the web one as soon as anything in the
 // process loads node compatibility, and its ports deliver inside a microtask
 // cascade rather than on a turn of their own.
-export const loopback = (server: Server): Transport => {
+/**
+ * A transport over a connection whose server frames are handed to it one at
+ * a time ({@link QueuedFrameTransport.deliver}), as this module's comment
+ * above describes: each frame reaches the receiver on a turn of its own,
+ * frames staged at `close()` are dropped, and `delivered()` waits for the
+ * frames held at the call. `loopback()` builds one over an in-process
+ * connection; the serving worker's plane builds one over its port.
+ */
+export const queuedFrameTransport = (
+  connection: {
+    /** Hands one client frame to the server; settles once it has taken it. */
+    receive(payload: string): Promise<void>;
+    close(): void;
+  },
+): QueuedFrameTransport => {
   let receiver = (_payload: string) => {};
+  let closeReceiver: ((error?: Error) => void) | undefined;
   let closed = false;
   const queue: string[] = [];
   let turn: ArmedTurn | null = null;
@@ -4326,36 +4341,80 @@ export const loopback = (server: Server): Transport => {
   const schedule = () => {
     turn ??= armTurn(drainOne);
   };
-  const connection = server.connect((message) => {
-    if (closed) return;
-    queue.push(encodeMemoryBoundary(message));
-    queued++;
-    schedule();
-  });
+  const end = () => {
+    closed = true;
+    turn?.cancel();
+    turn = null;
+    queue.length = 0;
+    releaseWaiters();
+  };
   return {
     async send(payload: string) {
+      if (closed) throw connectionError("memory transport closed");
       await connection.receive(payload);
     },
     close() {
-      closed = true;
-      turn?.cancel();
-      turn = null;
-      queue.length = 0;
-      releaseWaiters();
+      end();
       connection.close();
       return Promise.resolve();
     },
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver() {},
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
     delivered() {
       if (closed || handedOver >= queued) return Promise.resolve();
       const { promise, resolve } = Promise.withResolvers<void>();
       deliveryWaiters.push({ target: queued, resolve });
       return promise;
     },
+    deliver(frame) {
+      if (closed) return;
+      queue.push(frame);
+      queued++;
+      schedule();
+    },
+    lose(error) {
+      if (closed) return;
+      end();
+      closeReceiver?.(error);
+    },
   };
+};
+
+/** What {@link queuedFrameTransport} returns. */
+export type QueuedFrameTransport = Transport & {
+  /** Hands one server frame over, to reach the receiver on a turn of its own. */
+  deliver(frame: string): void;
+
+  /**
+   * Reports the connection lost to the close receiver, dropping the frames
+   * held: what a transport over a port does when the port closes under it.
+   */
+  lose(error: Error): void;
+};
+
+export const loopback = (
+  server: {
+    connect(send: (message: ServerMessage) => void): {
+      receive(payload: string): Promise<void>;
+      close(): void;
+    };
+  },
+): Transport => {
+  // The transport exists before the connection, so a frame the server
+  // sends as it connects is queued rather than lost.
+  const built: { connection?: ReturnType<typeof server.connect> } = {};
+  const transport = queuedFrameTransport({
+    receive: (payload) => built.connection!.receive(payload),
+    close: () => built.connection?.close(),
+  });
+  built.connection = server.connect((message) => {
+    transport.deliver(encodeMemoryBoundary(message));
+  });
+  return transport;
 };
 
 /**

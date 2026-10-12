@@ -3,11 +3,13 @@
  *
  * Ten voters each cast a vote on each of ten lunch options, every one of the
  * hundred fired before any of them settles, and the measurement runs until
- * every one of the ten clients has the whole result. That is the quantity a
- * person actually waits on at lunchtime, and it is the one no other benchmark
- * in the repository can see: every other bench file drives a single runtime
- * against its own private storage server, where a second writer does not exist
- * and a write conflict is unreachable by construction.
+ * every one of the ten clients holds the whole result in its own vote list,
+ * read at its runtime's quiescence with its rendered view demanded: the moment
+ * each client's view is settled, whichever arm served it. That is the quantity a person actually waits on at
+ * lunchtime, and it is the one no other benchmark in the repository can see:
+ * every other bench file drives a single runtime against its own private
+ * storage server, where a second writer does not exist and a write conflict is
+ * unreachable by construction.
  *
  * What it is sensitive to. A vote is a keyed write — `castVote` addresses one
  * vote by `(voter profile entity, option)` and adds it with `addUnique`, so a
@@ -20,17 +22,16 @@
  * in how long it takes and how much is thrown away getting there.
  *
  * Reading the series. One number per iteration: hundred votes dispatched, then
- * settled. On an Apple M5 Max the keyed write settles a burst in about 400ms
- * having thrown nothing away, and the same burst over a whole-list write took
- * 7 to 15 seconds and cost 430 rejected commits and 558 rolled-back writes —
- * and dropped two votes for the length of one burst on the way.
+ * every client's list current. The keyed write throws nothing away, and the
+ * same burst over a whole-list write cost 430 rejected commits and 558
+ * rolled-back writes and dropped two votes for the length of one burst on the
+ * way, at a time an order of magnitude longer.
  * `packages/patterns/integration/lunch-poll-keyed-votes.test.ts` is the
  * assertion half of the same property, requiring that a burst roll back no
  * write at all rather than timing one.
  *
- * Sample count is the weak point, and it is inherent. An iteration takes about
- * 450ms on an Apple M5 Max and 2.6 seconds on a four-core CI host, so a run
- * collects eleven or twelve samples either way. The 75th percentile the
+ * Sample count is the weak point, and it is inherent. An iteration takes
+ * seconds on a four-core CI host, so a run collects about a dozen samples. The 75th percentile the
  * dashboard trend reads discards only the slowest quarter of those, so a runner
  * that stalls twice moves this line without any code changing. Read it for the
  * shape of a move across several windows, not for one window against the last.
@@ -58,15 +59,18 @@
  * `diagnostics.log`.
  *
  * The harness hosts its own storage server, with a serving loop attached when
- * server execution is enabled. Both modes use ordinary worker clients without
- * renderer mounts, so the view-scoped web-client flag does not activate
- * selective replication here.
+ * server execution is enabled. Both modes use ordinary worker clients with no
+ * browser, each holding the worker reconciler's demand over the view as a
+ * mounted tab does, so the clients derive what they would show; the
+ * reconciler registers no view with the session, so the view-scoped
+ * web-client flag does not activate selective replication here.
  * The poll uses the `lunch-poll-keyed-votes` fixture's identity seam because
  * these clients do not render the `#profile` create surface.
  */
 
 import { expect } from "@std/expect";
 import { join } from "@std/path";
+import { rowKeyOf } from "@commonfabric/integration/row-key";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
@@ -103,7 +107,17 @@ const TITLES = Array.from({ length: OPTIONS }, (_, i) => `Place ${i + 1}`);
 const harness = await MultiRuntimeHarness.create({
   programPath: PROGRAM_PATH,
   rootPath: ROOT_PATH,
-  sessions: NAMES.map((_, index) => ({ label: `voter-${index + 1}` })),
+  // Each voter holds a rendered view and nothing else, as a browser tab does:
+  // the clients derive the tallies and cards they would show, the burst's end
+  // is the moment that view is current rather than the moment the vote list
+  // is, and no client re-reads the whole result on every change, which the
+  // harness's default root watch would make it do.
+  watchPaths: [],
+  input: { renderPoll: true },
+  sessions: NAMES.map((_, index) => ({
+    label: `voter-${index + 1}`,
+    renderView: true,
+  })),
 });
 const voters = harness.sessions;
 
@@ -126,42 +140,90 @@ expect(await voters[0].read(["userCount"])).toBe(VOTERS);
 
 const votes = voters.length * options.length;
 
-/** Fire every vote before any of them settles, then settle all of them. */
+// Every voter's view shows the poll, and mounted without error: a view that
+// failed to mount derives nothing, and the burst over it would read as a
+// fast one.
+for (const voter of voters) {
+  expect(await voter.client().call("viewText", {}), voter.label).toContain(
+    TITLES[0],
+  );
+  expect(await voter.renderErrors(), voter.label).toEqual([]);
+}
+
+/** The vote each voter casts for each option in `round`. */
+function colorOf(index: number, position: number, round: number): string {
+  return COLORS[(index + position + round) % COLORS.length];
+}
+
+/**
+ * The vote list every session holds once `round`'s votes are in, as the map
+ * `waitForRows` compares: each (voter, option) row at the vote it cast this
+ * round, and no other rows, the voter named by the display name each claimed,
+ * which this file keeps distinct. Keyed by voter rather than counted by
+ * option, so a list missing one vote and holding a stale one never matches.
+ */
+function rowsOf(round: number): Record<string, string> {
+  const expected: Record<string, string> = {};
+  NAMES.forEach((name, index) => {
+    options.forEach((option, position) => {
+      expected[rowKeyOf([name, option])] = colorOf(index, position, round);
+    });
+  });
+  return expected;
+}
+
+/**
+ * Fire every vote before any of them settles, then wait until every
+ * session's own vote list holds exactly the round's rows at quiescence: the
+ * moment each client's view is settled, on the OFF arm through the others'
+ * pushed votes and its own derivations, on the ON arm through the served
+ * consequences and their delivery. That is the burst's measured end.
+ */
 async function burst(round: number): Promise<void> {
   await Promise.all(
     voters.flatMap((voter, index) =>
       options.map((option, position) =>
         voter.send(
           "castVote",
-          {
-            optionId: option,
-            voteType: COLORS[(index + position + round) % COLORS.length],
-          },
+          { optionId: option, voteType: colorOf(index, position, round) },
           undefined,
           { idle: false },
         )
       )
     ),
   );
-  // A measured burst ends only after its served consequences arrive. The
-  // harness's budgeted settle can return while those consequences are pending.
-  await Promise.all(voters.map(async (voter) => {
-    await voter.idle();
-    await voter.awaitEventConsequences();
-  }));
+  const expected = rowsOf(round);
+  await Promise.all(
+    voters.map((voter) =>
+      voter.waitForRows(
+        ["votes"],
+        [["voter", "name"], ["optionId"]],
+        ["voteType"],
+        expected,
+      )
+    ),
+  );
+}
+
+/** What a burst leaves pending outside its measured end, before a check. */
+async function afterBurst(): Promise<void> {
+  await Promise.all(voters.map((voter) => voter.awaitEventConsequences()));
   await harness.settle();
 }
 
-/** Validate each replica's vote distribution outside the measured interval. */
+/**
+ * Validate each replica's vote distribution, and that its view reconciled
+ * without error, outside the measured interval.
+ */
 async function verifyBurst(round: number): Promise<void> {
   const expected = options.map((_, position) =>
     COLORS.map((color) =>
-      voters.filter((_, index) =>
-        COLORS[(index + position + round) % COLORS.length] === color
-      ).length
+      voters.filter((_, index) => colorOf(index, position, round) === color)
+        .length
     )
   );
   await Promise.all(voters.map(async (voter) => {
+    expect(await voter.renderErrors(), voter.label).toEqual([]);
     const result = await voter.read(["votes"]) as {
       optionId: string;
       voteType: string;
@@ -211,8 +273,10 @@ async function reverts(sessions: readonly MultiRuntimeSession[]) {
 // Warm-up: every session materializes the vote list and its own keyed vote
 // entities, so no measured iteration pays a first-write cost.
 await burst(0);
+await afterBurst();
 await verifyBurst(0);
 await burst(1);
+await afterBurst();
 await verifyBurst(1);
 
 // Contention accounting, over one burst that no measurement covers. What a
@@ -220,6 +284,7 @@ await verifyBurst(1);
 // beside the wall-clock the benchmark reports.
 const before = await reverts(voters);
 await burst(2);
+await afterBurst();
 await verifyBurst(2);
 const after = await reverts(voters);
 console.error(
@@ -230,12 +295,98 @@ console.error(
     `${after.counting}/${voters.length} sessions`,
 );
 
+/**
+ * The serving loop's side of one burst: how many waves it took and what a
+ * wave's phases cost, from the loop's own counters and timing rows, read
+ * before and after the burst. The rows are the loop's realm's, so under the
+ * worker they are the loop's alone, while on this thread the scheduler rows
+ * count the voters' runs as well. Nothing on the OFF arm, which serves
+ * nothing.
+ */
+async function loopCost(run: () => Promise<void>): Promise<string> {
+  const rows = [
+    "executor/wave/cycle",
+    "executor/wave/settle",
+    "executor/wave/commit",
+    "executor/wave/demand-pass",
+    "executor/wave/publish",
+    "scheduler/execute/event/handlerAction",
+    "scheduler/execute/settle",
+    "storage.v2:watchRefresh/watchAddSync",
+  ];
+  const snapshot = async () => {
+    const stats = harness.servingStats();
+    const timing = (await harness.servingDiagnostics()).timingStats as Record<
+      string,
+      Record<string, { count: number; totalTime: number }>
+    >;
+    const row = (name: string) => {
+      const [group, key] = name.includes(":")
+        ? name.split(":")
+        : [name.split("/")[0], name];
+      return timing[group]?.[key] ?? { count: 0, totalTime: 0 };
+    };
+    const all: Record<string, { count: number; totalTime: number }> = {};
+    for (const [group, keys] of Object.entries(timing)) {
+      for (const [key, value] of Object.entries(keys)) {
+        all[`${group}:${key}`] = value;
+      }
+    }
+    return {
+      waves: stats?.waves ?? 0,
+      exhausted: stats?.wavesBudgetExhausted ?? 0,
+      lag: stats?.watermarkLag ?? 0,
+      rows: Object.fromEntries(rows.map((name) => [name, row(name)])),
+      all,
+    };
+  };
+  const before = await snapshot();
+  await run();
+  const after = await snapshot();
+  if (harness.servingStats() === undefined) return "no serving loop";
+  const phases = rows.map((name) => {
+    const count = after.rows[name].count - before.rows[name].count;
+    const total = after.rows[name].totalTime - before.rows[name].totalTime;
+    return `${name.replace("executor/wave/", "")} ${count} x ${
+      count === 0 ? 0 : (total / count).toFixed(1)
+    } ms`;
+  });
+  // The twelve rows that grew the most over the burst, whatever they are,
+  // so a cost the list above does not name still shows.
+  const grown = Object.entries(after.all).map(([name, row]) => {
+    const earlier = before.all[name] ?? { count: 0, totalTime: 0 };
+    return {
+      name,
+      count: row.count - earlier.count,
+      total: row.totalTime - earlier.totalTime,
+    };
+  }).filter((row) => row.count > 0).sort((a, b) => b.total - a.total)
+    .slice(0, 12).map((row) =>
+      `${row.name} ${row.count} x ${(row.total / row.count).toFixed(1)} ms`
+    );
+  return `${after.waves - before.waves} waves (${
+    after.exhausted - before.exhausted
+  } at the deadline), watermark ${after.lag} behind at the end and ${before.lag} behind before the burst; ${
+    phases.join(", ")
+  }; top rows: ${grown.join(", ")}`;
+}
+
+console.error(
+  `[lunch-poll vote burst] one burst on the serving side: ${await loopCost(
+    async () => {
+      await burst(3);
+      await afterBurst();
+      await verifyBurst(3);
+    },
+  )}`,
+);
+
 // `Deno.bench` has no hook for "the file's benchmarks are done", so the ten
 // workers are released at process exit instead, where the listener runs
 // synchronously and `terminate()` is the form that fits.
 globalThis.addEventListener("unload", () => harness.terminate());
 
-let round = 3;
+let round = 4;
 
 Deno.bench({
   name: `vote burst ${voters.length}x${options.length}`,
@@ -245,6 +396,7 @@ Deno.bench({
     b.start();
     await burst(current);
     b.end();
+    await afterBurst();
     await verifyBurst(current);
   },
 });

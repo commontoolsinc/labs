@@ -196,7 +196,11 @@ import {
   trackedIdsFromEntries,
 } from "./server-sync.ts";
 import { authorizationError } from "./session-open-auth.ts";
-import { SessionRegistry, type SessionState } from "./session-registry.ts";
+import {
+  type SessionLifecycleEvent,
+  SessionRegistry,
+  type SessionState,
+} from "./session-registry.ts";
 import { isSpaceKind } from "./space-kind.ts";
 import {
   columnOriginUnavailableReason,
@@ -222,7 +226,10 @@ import {
   viewWatches,
 } from "./view-interest.ts";
 
-export { SessionRegistry } from "./session-registry.ts";
+export {
+  type SessionLifecycleEvent,
+  SessionRegistry,
+} from "./session-registry.ts";
 
 /**
  * A space DID pinned tightly enough to name a store. `isDID`
@@ -662,6 +669,43 @@ type AclState =
   | { kind: "invalid" }
   | { kind: "valid"; acl: Record<string, Capability | undefined> };
 
+/** The access list `engine` stores for `space`, classified. */
+const readAclState = (engine: Engine.Engine, space: string): AclState => {
+  const state = Engine.readState(engine, { id: aclDocId(space) });
+  if (state === null) return { kind: "missing" };
+  // A retracted ACL is not equivalent to a never-created ACL: treating the
+  // tombstone as public would turn deletion into an authorization bypass.
+  if (state.document === null) return { kind: "invalid" };
+  const acl = state.document.value;
+  if (!isACL(acl)) return { kind: "invalid" };
+  const byPrincipal = acl as Record<string, Capability | undefined>;
+  if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
+  return { kind: "valid", acl: byPrincipal };
+};
+
+/**
+ * The owner of `space` as the access list `engine` stores resolves it: the
+ * space itself when its list names it `OWNER`, else the first other concrete
+ * `OWNER` in sorted order, and `undefined` for a space whose list is missing
+ * or invalid. {@link Server.resolveSpaceOwner} answers with this, and a
+ * serving loop holding its own connection to the store reads it directly.
+ */
+export const resolveSpaceOwnerOf = (
+  engine: Engine.Engine,
+  space: string,
+): string | undefined => {
+  const state = readAclState(engine, space);
+  if (state.kind !== "valid") return undefined;
+  if (state.acl[space] === "OWNER") return space;
+  const owners = Object.entries(state.acl)
+    .filter(([principal, capability]) =>
+      principal !== ANYONE_USER && capability === "OWNER"
+    )
+    .map(([principal]) => principal)
+    .sort();
+  return owners[0];
+};
+
 const commitTouchesAclDoc = (
   operations: readonly Operation[],
   space: string,
@@ -942,12 +986,34 @@ export type ServerExecutionObserver = {
    * the serving runtime's OWN loopback session — the service principal's
    * tracked-set growth is the serving graph's own reads, not client
    * demand, and must neither wake the loop nor count in `pushGrowthWakes`
-   * (W1 review MINOR-4). */
+   * (W1 review MINOR-4). `sessionId` names the changed session where the
+   * change is one session's, so a mirror of the demand set can re-read
+   * that session's share alone. */
   demandChanged?: (
     space: string,
     reason?: DemandChangeReason,
     principal?: string,
+    sessionId?: string,
   ) => void;
+
+  /**
+   * A session's VIEW SET was set: a `session.watch.set` carried views,
+   * which is the one message that registers, revises or withdraws them.
+   * Fires beside the `demandChanged` the same message raises, and only
+   * then: a watch set without views leaves the session's views as they
+   * are, and a mirror of `viewInterestsForSpace` can hold its list across
+   * every such message.
+   */
+  viewsChanged?: (space: string, sessionId: string) => void;
+
+  /**
+   * A session opened, resumed, detached or removed on this server, as
+   * {@link SessionLifecycleEvent} describes it. Installing an observer that
+   * has this replays every session the server then holds, so a host that
+   * mirrors the sessions starts from the whole set. For an open, it fires
+   * before `sessionOpened` does.
+   */
+  sessionChanged?: (event: SessionLifecycleEvent) => void;
 };
 
 /** (d′): why `demandChanged` fired — `watch` (the pre-existing
@@ -2634,6 +2700,7 @@ export class Server {
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
+    this.#sessions.setObserver((event) => this.#notifySessionChanged(event));
     this.#store = options.store;
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
@@ -2876,16 +2943,7 @@ export class Server {
     engine: Engine.Engine,
     space: string,
   ): string | undefined {
-    const state = this.#aclState(engine, space);
-    if (state.kind !== "valid") return undefined;
-    if (state.acl[space] === "OWNER") return space;
-    const owners = Object.entries(state.acl)
-      .filter(([principal, capability]) =>
-        principal !== ANYONE_USER && capability === "OWNER"
-      )
-      .map(([principal]) => principal)
-      .sort();
-    return owners[0];
+    return resolveSpaceOwnerOf(engine, space);
   }
 
   /**
@@ -2916,16 +2974,7 @@ export class Server {
   }
 
   #aclState(engine: Engine.Engine, space: string): AclState {
-    const state = Engine.readState(engine, { id: aclDocId(space) });
-    if (state === null) return { kind: "missing" };
-    // A retracted ACL is not equivalent to a never-created ACL: treating the
-    // tombstone as public would turn deletion into an authorization bypass.
-    if (state.document === null) return { kind: "invalid" };
-    const acl = state.document.value;
-    if (!isACL(acl)) return { kind: "invalid" };
-    const byPrincipal = acl as Record<string, Capability | undefined>;
-    if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
-    return { kind: "valid", acl: byPrincipal };
+    return readAclState(engine, space);
   }
 
   #resolveCapability(
@@ -6775,7 +6824,15 @@ export class Server {
       if (message.views !== undefined || views.length > 0) {
         this.#attachViewPlans(session, sync);
       }
-      this.#notifyDemandChanged(message.space, "watch", session.principal);
+      this.#notifyDemandChanged(
+        message.space,
+        "watch",
+        session.principal,
+        session.id,
+      );
+      if (message.views !== undefined) {
+        this.#notifyViewsChanged(message.space, session.id);
+      }
       return {
         type: "response",
         requestId: message.requestId,
@@ -7191,7 +7248,12 @@ export class Server {
       }
       this.#touchDemand(session);
       session.lastSyncedSeq = serverSeq;
-      this.#notifyDemandChanged(message.space, "watch", session.principal);
+      this.#notifyDemandChanged(
+        message.space,
+        "watch",
+        session.principal,
+        session.id,
+      );
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -8168,6 +8230,7 @@ export class Server {
                       space,
                       "push-growth",
                       session.principal,
+                      session.id,
                     );
                   }
                 } finally {
@@ -8389,6 +8452,7 @@ export class Server {
                 space,
                 "push-growth",
                 session.principal,
+                session.id,
               );
             }
           };
@@ -8784,6 +8848,38 @@ export class Server {
     return demand;
   }
 
+  /**
+   * The shares of the sessions `sessionIds` name among `space`'s sessions, as
+   * `demandForSpace()` builds them, the sessions of `excludePrincipal` and
+   * the ids the registry no longer holds left out: what a mirror of the
+   * demand set reads for the sessions whose demand it was told changed.
+   */
+  demandForSessions(
+    space: string,
+    sessionIds: readonly string[],
+    options: { excludePrincipal?: string } = {},
+  ): SessionDemand[] {
+    const demand: SessionDemand[] = [];
+    for (const sessionId of sessionIds) {
+      const session = this.#sessions.peek(space, sessionId);
+      if (
+        session === undefined ||
+        (options.excludePrincipal !== undefined &&
+          session.principal === options.excludePrincipal)
+      ) {
+        continue;
+      }
+      let share = this.#sessionDemand.get(session);
+      if (share === undefined) {
+        share = this.#buildSessionDemand(session);
+        this.#sessionDemand.set(session, share);
+        this.#sessionDemandBuilds += 1;
+      }
+      demand.push(share);
+    }
+    return demand;
+  }
+
   /** (d′) DIAGNOSTIC: per-session `trackedIds.size` for a
    * space's client sessions, plus the union size (design §2.6 — the
    * demand-set size and its drift are measured, not assumed). */
@@ -8840,6 +8936,11 @@ export class Server {
     observer: ServerExecutionObserver | undefined,
   ): void {
     this.#serverExecutionObserver = observer;
+    if (observer?.sessionChanged !== undefined) {
+      for (const event of this.#sessions.snapshot()) {
+        this.#notifySessionChanged(event);
+      }
+    }
   }
 
   /**
@@ -8890,6 +8991,19 @@ export class Server {
     }
   }
 
+  #notifySessionChanged(event: SessionLifecycleEvent): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.sessionChanged === undefined) return;
+    try {
+      observer.sessionChanged(event);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on sessionChanged",
+        error,
+      );
+    }
+  }
+
   #notifySessionOpened(space: string): void {
     const observer = this.#serverExecutionObserver;
     if (observer?.sessionOpened === undefined) return;
@@ -8903,15 +9017,29 @@ export class Server {
     }
   }
 
+  #notifyViewsChanged(space: string, sessionId: string): void {
+    const observer = this.#serverExecutionObserver;
+    if (observer?.viewsChanged === undefined) return;
+    try {
+      observer.viewsChanged(space, sessionId);
+    } catch (error) {
+      console.warn(
+        "memory v2: server-execution observer threw on viewsChanged",
+        error,
+      );
+    }
+  }
+
   #notifyDemandChanged(
     space: string,
     reason: DemandChangeReason = "watch",
     principal?: string,
+    sessionId?: string,
   ): void {
     const observer = this.#serverExecutionObserver;
     if (observer?.demandChanged === undefined) return;
     try {
-      observer.demandChanged(space, reason, principal);
+      observer.demandChanged(space, reason, principal, sessionId);
     } catch (error) {
       console.warn(
         "memory v2: server-execution observer threw on demandChanged",

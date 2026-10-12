@@ -131,6 +131,11 @@ export const stats = createRoute({
         // serving-loop.md §7) — present only while an ExecutorHost runs
         // in this process (the ON arm).
         servingLoop: z.any().optional(),
+        // The serving loop's realm's own logger counts and timing
+        // statistics — present only while the loop runs in a worker of
+        // this process, whose loggers `logCounts` and `timingStats` above
+        // do not reach.
+        servingLoopRealm: z.any().optional(),
       }),
       "Logger counts and timing statistics",
     ),

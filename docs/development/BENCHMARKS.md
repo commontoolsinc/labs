@@ -760,17 +760,26 @@ the harness no `apiUrl`, so it hosts an in-process storage server whether or
 not `API_URL` is set, matching the resolved posture: a plain one when server
 execution resolves OFF, and one with a serving loop attached when it resolves
 ON, by `EXPERIMENTAL_SERVER_EXECUTION=true` or by the first-party default.
-Both modes use ordinary worker
-clients, without a browser or renderer mounts. The view-scoped web-client flag
-therefore does not activate selective replication in this benchmark. Use the
-browser Topics benchmarks to measure that mode, and hold server execution
+Both modes use ordinary worker clients with no browser, each holding the
+worker reconciler's demand over the piece's view for the run, as a mounted tab
+does (`renderView` on the session, with the fixture showing the poll's own
+view under its `renderPoll` input), so a client derives the tallies and cards
+it would show and the measured end is the moment that view is current. The
+reconciler alone registers no view with the session, so the view-scoped
+web-client flag does not activate selective replication in this benchmark. Use
+the browser Topics benchmarks to measure that mode, and hold server execution
 constant when comparing replication flags.
 
-Each burst waits for every writer's event consequences to arrive before the
-replica barriers. The harness's budgeted `settle()` alone can return with pending
-consequences, so it cannot define a successful measurement. Outside the timed
-interval, every replica must contain the expected vote count and color
-distribution for every option; a mismatch fails the run.
+A burst's measured interval ends when every client's own vote list, read at
+that runtime's quiescence and woken by the list's own changes, holds exactly
+the round's rows: each voter's vote on each option at the value cast this
+round, and no other row. That is the moment each client's view is settled,
+whichever arm served it, and a list still holding a stale row never matches,
+however its counts come out. The voters' idle and the harness's budgeted
+`settle()` can each return before the other voters' pushed votes have reached
+a client, so neither defines the interval; the burst waits for both outside it,
+and then every replica must contain the expected vote count and color
+distribution for every option, or the run fails.
 
 Four things follow from that shape:
 

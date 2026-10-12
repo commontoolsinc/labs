@@ -166,7 +166,11 @@ describe("serving-memory-server", () => {
       expect(serving.close()).toBe(first);
       await first;
       await serving[Symbol.asyncDispose]();
-      expect(serving.host.stats().activeSpaces).toBe(0);
+      // The in-process host reports its counters after it closes; a worker
+      // is gone with its counters.
+      expect(serving.host.stats()?.activeSpaces).toBe(
+        serving.host.host === undefined ? undefined : 0,
+      );
     });
   });
 
