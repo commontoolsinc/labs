@@ -13232,8 +13232,9 @@ export class Runner {
    * positional children have moved spots: `storedChild` runs another pattern
    * identity, and either a child of `childPattern`'s identity runs at another
    * positional spot, or another positional spot of `pattern` sets up the
-   * identity `storedChild` runs. A child whose identity differs with no such
-   * sign is the same child under a newer version of its own source.
+   * identity `storedChild` runs. A spot whose node sets up a space's root is
+   * not counted. A child whose identity differs with no such sign is the same
+   * child under a newer version of its own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -13257,7 +13258,12 @@ export class Runner {
       `${ref.identity}#${ref.symbol}`;
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      if (!isPositionalPartialCause(partialCause)) continue;
+      // A space's root child sits at its space's genesis address rather than
+      // at a spot of this parent, so it shows nothing about how the parent's
+      // spots have moved.
+      if (!isPositionalPartialCause(partialCause) || module.targetSpaceRoot) {
+        continue;
+      }
       const other = this.#childAtPartialCause(
         tx,
         resultCell,
