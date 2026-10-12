@@ -1359,6 +1359,17 @@ export type ApplyCommitOptions = {
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
 
+  /**
+   * The committing session's client advertised `elidedVerdicts`: its replica
+   * promotes a layer the verdict elides to the document its transaction
+   * computed rather than folding the layer's ops over its confirmed base,
+   * so the identity proof holds the commit to its first condition alone: a
+   * write that reaches the stored document from the reader's view is an
+   * identity even where replaying it on the stored document would change
+   * it, as a positional `splice` does. Absent, both conditions apply.
+   */
+  elidedVerdicts?: boolean;
+
   /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
    *  determined by the ADMISSION PATH that processed the commit — the
    *  session-facing transact path is `authored` (the default here, since
@@ -1478,9 +1489,15 @@ export type AppliedCommit = {
   replayed?: true;
 
   /**
-   * Operation indexes whose `cid:` set matched the stored content exactly
-   * and applied as a no-op: no revision, no head advance, no dirty mark.
-   * The commit itself still records and advances the space log.
+   * Operation indexes that applied as a no-op: a `cid:` set that matched
+   * the stored content exactly, or every operation of an identity commit
+   * (03-commit-model.md §3.6.1). An elided operation produced no revision,
+   * advanced no head, and marked nothing dirty. The commit itself still
+   * records and advances the space log, and a replica that advertised
+   * `elidedVerdicts` promotes a pending layer every operation of which is
+   * listed here to the document its transaction computed where the commit
+   * read the document, which is when the identity proof established that
+   * document is the stored one.
    */
   elidedOpIndexes?: number[];
 
@@ -5219,6 +5236,7 @@ const applyCommitTransaction = (
     delegated,
     systemEventActor,
     allowEmptyOperations,
+    elidedVerdicts = false,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class posture gate (protocol.md §1): off the flag NOTHING
@@ -6065,12 +6083,14 @@ const applyCommitTransaction = (
   // operations on it in order: replayed on the document as the commit's
   // read of it saw it, the sequence yields the stored document, and
   // replayed on the stored document it leaves that unchanged. The second
-  // condition is for the writer's own replica, which re-folds the
-  // operations over whatever confirmed base it holds when the accept
-  // arrives: a sequence idempotent on the durable value lands on that value
-  // from any base between the read and the head, where a positional splice
-  // replayed over a base already carrying its elements would duplicate
-  // them.
+  // condition is for a writer's replica that re-folds the operations over
+  // whatever confirmed base it holds when the accept arrives: a sequence
+  // idempotent on the durable value lands on that value from any base
+  // between the read and the head, where a positional splice replayed over
+  // a base already carrying its elements would duplicate them. A replica
+  // that promotes an elided layer to the document its transaction computed
+  // (`elidedVerdicts`) needs no such guarantee, and its commits are held to
+  // the first condition alone.
   type DocumentOps = Array<
     Extract<typeof commit.operations[number], { op: "set" | "patch" }>
   >;
@@ -6234,12 +6254,14 @@ const applyCommitTransaction = (
         const basis = basisOf(first, stored, at, scopeKey);
         if (!basis.known) return false;
         const fromBasis = replay(basis.document, operations);
-        const onStored = replay(stored, operations);
-        if (
-          !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
-          !valueEqual(onStored as FabricValue, stored as FabricValue)
-        ) {
+        if (!valueEqual(fromBasis as FabricValue, stored as FabricValue)) {
           return false;
+        }
+        if (!elidedVerdicts) {
+          const onStored = replay(stored, operations);
+          if (!valueEqual(onStored as FabricValue, stored as FabricValue)) {
+            return false;
+          }
         }
       } catch {
         return false;

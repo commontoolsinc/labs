@@ -404,11 +404,33 @@ patches it is judged as one write of the final value:
 - replayed on the document as the commit's read of that document saw it, the
   sequence yields the stored document;
 - replayed on the stored document, the sequence leaves it unchanged. This
-  condition is for the writer's replica, which re-folds the operations over
+  condition is for a writer's replica that re-folds the operations over
   whatever confirmed base it holds when the accept arrives: a sequence
   idempotent on the durable value lands on that value from any base between
   the read and the head, where a positional splice replayed over a base
-  already carrying its elements would duplicate them.
+  already carrying its elements would duplicate them. A session whose client
+  advertised `elidedVerdicts` (04-protocol.md §4.1) promotes an elided layer
+  to the document its transaction computed instead of re-folding it, and the
+  server holds that session's commits to the first condition alone: a splice
+  that reaches the stored list from the view that produced it is an identity
+  for such a session.
+
+An accept reports the operations it elided on the verdict
+(`elidedOpIndexes`, 04-protocol.md §4.3.1). Where the commit read the
+document, the proof's first condition established that the stored document
+is the one the layer's transaction computed from its own view, which the
+pending layer carries, and a replica that advertised `elidedVerdicts`
+promotes a layer every operation of which was elided to that document, at
+the commit's seq, whatever ops the layer holds and whatever frames the
+replica has integrated meanwhile: replaying the ops is exact only over the
+base they were diffed from, and a frame delivered since may be an
+intermediate state the proof was not made against. Where the commit did not
+read the document, the proof was made against the stored document and shows
+only that the ops leave it unchanged, so the replica promotes by replaying
+them, as it does any accept. A frame already integrated at or after the
+commit's seq is newer and stands. A session opened with the capability is
+resumed only by a client that advertises it: a replayed verdict may carry
+an elision only such a replica handles.
 
 The reader's view of a document is reconstructed from the commit's own read
 of it, on the commit's branch: for a pending read, the document at the read's
