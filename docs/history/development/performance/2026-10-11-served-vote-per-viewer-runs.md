@@ -235,8 +235,12 @@ commit, 74 ms against 10 ms on the main thread, does cross it: the batch is
 encoded, the main thread decodes it, applies it to the engine and reports it
 to the server before answering, so the commit both waits behind the fan-out
 and runs on the thread doing it. The publish, 74 ms against under a
-millisecond, is a round trip for the sessions' view interests and one more
-per view whose selection changed.
+millisecond, is the view-plan publish: it asks the server for the views the
+sessions have registered and, for each whose selection changed, sends the
+plan back. In this harness no session registers a view (the reconciler alone
+does not, and the view-scoped replication flag is off), so the publish is a
+single request answered with an empty list, and its 74 ms is the wait for the
+main thread's turn and nothing else.
 
 The levers this leaves, in the order of what they cost here:
 
