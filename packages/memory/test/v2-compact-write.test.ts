@@ -23,7 +23,7 @@ import {
   selectCommitsSince,
 } from "../v2/engine.ts";
 import { readGenesisRoot, readSpaceKind } from "../v2/genesis-root.ts";
-import { ProtocolError } from "../v2.ts";
+import { encodeMemoryBoundary, ProtocolError } from "../v2.ts";
 import { isACL } from "../acl.ts";
 import {
   type CompactionProgress,
@@ -940,6 +940,62 @@ describe("compactStore", () => {
           selection: { prefixes: ["computed:"] },
         }),
       ).rejects.toThrow("legacy table(s) scheduler_observation");
+    });
+
+    it("stops when the store changed between the plan and the write", async () => {
+      // The plan is published after the read-only connection closes and
+      // before the engine opens; a writer slipping in there is what the
+      // guards below are for. Each case tampers from the `planned` hook.
+      const tamper = (sql: string) =>
+        compactStore({
+          store,
+          out,
+          selection: { prefixes: ["computed:"] },
+          onProgress: (progress) => {
+            if (progress.phase !== "planned") return;
+            const db = new Database(store);
+            db.exec(sql);
+            db.close();
+          },
+        });
+      // Each case starts from its own store: `build` opens the path it is
+      // given, and a store a refused run left behind is not the fixture.
+      const fresh = async (fn: (e: Engine) => void) => {
+        for (const path of [store, backup, out]) {
+          await Deno.remove(path).catch(() => {});
+        }
+        await build(fn);
+      };
+      // A commit appended: the next seq is no longer the plan's.
+      await fresh(standard);
+      await expect(tamper(
+        `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+         SELECT seq + 1, 'late', 1, original, resolution FROM "commit" WHERE seq = (SELECT MAX(seq) FROM "commit")`,
+      )).rejects.toThrow("the store changed since it was planned");
+      // The planned patch boundary gone: the engine's reconstruction is the
+      // first to notice. The same boundary rewritten as a set: the run's own
+      // guard is.
+      await fresh(standard);
+      await expect(tamper(
+        `DELETE FROM revision WHERE id = '${A}' AND seq = (SELECT seq FROM head WHERE id = '${A}')`,
+      )).rejects.toThrow("no revision of");
+      await fresh(standard);
+      await expect(tamper(
+        `UPDATE revision SET op = 'set', data = '${
+          encodeMemoryBoundary({ value: { n: 15 } } as never)
+        }' WHERE id = '${A}' AND seq = (SELECT seq FROM head WHERE id = '${A}')`,
+      )).rejects.toThrow("the planned patch boundary");
+      // A planned set boundary rewritten as a patch.
+      await fresh((e) => {
+        standard(e);
+        applyCommit(e, {
+          sessionId: "s:a",
+          commit: ops(60, [setOp(A, { n: 99 })]),
+        });
+      });
+      await expect(tamper(
+        `UPDATE revision SET op = 'patch', data = '[]' WHERE id = '${A}' AND seq = (SELECT seq FROM head WHERE id = '${A}')`,
+      )).rejects.toThrow("the planned set boundary");
     });
 
     it("names a column declared differently from the engine's", async () => {
