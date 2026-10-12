@@ -170,6 +170,11 @@ describe("local-jobs/profiles", () => {
         "`fabric.host`",
       ],
       [
+        "a fabric host that is not a string",
+        { ...CARRY, fabric: { ...CARRY.fabric, host: 7 } },
+        "`fabric.host`",
+      ],
+      [
         "a fabric with no space",
         { ...CARRY, fabric: { ...CARRY.fabric, space: undefined } },
         "`fabric.space`",

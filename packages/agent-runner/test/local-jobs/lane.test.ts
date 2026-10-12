@@ -1078,11 +1078,16 @@ describe("local-jobs/lane", () => {
           space,
         ]);
 
-        const outsider = laneWith({ profiles });
+        const reports: string[] = [];
+        const outsider = laneWith({
+          profiles,
+          report: (line) => reports.push(line),
+        });
         outsider.lane.start();
         outsider.enqueue("a", REQUEST, "carry");
         expect((await outsider.nextRun(0)).spec.fabric?.maxConfidentiality)
           .toEqual([personal]);
+        expect(reports).toEqual([]);
 
         admitted.settle({ outcome: "cancelled" });
         await Deno.remove(key.dir, { recursive: true });
