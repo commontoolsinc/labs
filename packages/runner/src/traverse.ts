@@ -75,7 +75,7 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
@@ -5599,6 +5599,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // Replace doc with a DataCellURI style doc
         // Need to read recursively here
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        // An eager read continues over the value the snapshot encodes, not
+        // over the stored element. A link inside the element that names no
+        // document takes its id from the address it is read under. Read
+        // under the `data:` address the stored link would name the snapshot;
+        // the snapshot's value holds it as a full link to the document
+        // storing the element. A query walk continues over the stored
+        // element, whose links carry the schemas its selectors are keyed by.
+        const snapshot = dataUriSnapshotWithResolvedLinks(
+          curDoc.value,
+          elementLink,
+        );
         const elementAddress = curDoc.address;
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
@@ -5607,11 +5618,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // but I don't want to have that change behavior here.
         curDoc = {
           ...curDoc,
-          address: {
-            ...curDoc.address,
-            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
-            path: ["value"],
-          },
+          address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
+          value: this.traverseCells ? curDoc.value : snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;

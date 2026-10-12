@@ -4,9 +4,10 @@
  * for the cell/link machinery: everything that can be expressed against
  * `data-model` alone lives in the codec (in that package); this module
  * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
- * which rewrites relative links against a base before encoding, and
- * {@link findAndInlineDataUriLinks}, which dissolves `data:` URI links
- * back into the values they carry.
+ * which rewrites relative links against a base before encoding (and whose
+ * companion {@link dataUriSnapshotWithResolvedLinks} also returns the value
+ * it encoded), and {@link findAndInlineDataUriLinks}, which dissolves `data:`
+ * URI links back into the values they carry.
  *
  * The payload encodes the cell's VALUE, and the codec's decode entry
  * points return that value. The document view that the address grammar
@@ -81,6 +82,31 @@ export function dataUriFromValueWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
+  return dataUriSnapshotWithResolvedLinks(data, base).id;
+}
+
+/**
+ * Like {@link dataUriFromValueWithResolvedLinks}, except that it also returns
+ * the value the URI encodes: `data` with its links rewritten.
+ *
+ * A reader that goes on to walk a value under the `data:` address walks this
+ * one. A link in `data` that names no document takes its id from the address
+ * it is read under, which under the `data:` address is the snapshot itself;
+ * the same link in the returned value names the document of `base`.
+ *
+ * The returned value shares every container of `data` that holds no link, so
+ * it is to be read and not written.
+ *
+ * @param data The value to encode. Must be acyclic.
+ * @param base Optional base link; relative links within `data` are resolved
+ *   against it.
+ * @returns The `data:` URI as `id`, and the value it encodes as `value`.
+ * @throws If `data` contains a reference cycle.
+ */
+export function dataUriSnapshotWithResolvedLinks(
+  data: FabricValue,
+  base?: Cell | NormalizedLink,
+): { id: URI; value: FabricValue } {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
   function traverseAndAddBaseIdToRelativeLinks(
@@ -152,11 +178,10 @@ export function dataUriFromValueWithResolvedLinks(
   // (see inlineExternalSchemaRefsInValue): the document is its id, so a
   // content-addressed reference inside it has no carrying write to install
   // its closure.
-  return dataUriFromValue(
-    inlineExternalSchemaRefsInValue(
-      traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-    ),
+  const value = inlineExternalSchemaRefsInValue(
+    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
   );
+  return { id: dataUriFromValue(value), value };
 }
 
 /**
