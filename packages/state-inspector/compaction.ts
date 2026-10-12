@@ -705,12 +705,14 @@ export function verifyCompaction(
           const headAtCommit = head !== undefined && head.seq === last &&
             head.op_index === 0 && head.op === "set";
           const validAcl = isACL(after.value);
-          // Exactly one audit revision for the runs this result adds, at the
-          // newest of them: a run interrupted before its audit writes none,
-          // and the run that resumed it writes the one.
-          const oneAudit = newAudits.length === 1 && newAudits[0] === last;
+          // The newest run this result adds wrote the audit the head reads;
+          // an earlier new run wrote one only if it got that far before an
+          // interruption, and none if it did not. Each audit sits at its own
+          // commit by construction of `newAudits`.
+          const auditAtLast = newAudits.length > 0 &&
+            newAudits[newAudits.length - 1] === last;
           passed = differing.every((key) => key === "compaction") &&
-            namesLast && headAtCommit && validAcl && oneAudit;
+            namesLast && headAtCommit && validAcl && auditAtLast;
           detail = `value ${
             differing.includes("value") ? "CHANGED" : "unchanged"
           }${validAcl ? "" : " and NOT an ACL"}; differing members: ${
@@ -767,17 +769,22 @@ export function verifyCompaction(
         tableDiffs.push(`${table} missing from the result`);
         continue;
       }
-      // Each value is compared as `quote()` renders it: its storage class
-      // and its exact bytes, so a column's declared collation (NOCASE, say)
-      // cannot make two different stored values group as one, and a text
-      // '1' is not an integer 1.
+      // Each value is compared under BINARY collation beside its storage
+      // class: the collation compares a text's full bytes (a declared NOCASE
+      // cannot merge two cases, an embedded NUL ends nothing), and the class
+      // keeps an integer 1 apart from a real 1.0 and a text '1', which the
+      // value comparison alone would not. Nothing is rendered or cast, so
+      // nothing is lost on the way.
       const columns = main.all<{ name: string }>(
         `SELECT name FROM pragma_table_info(?)`,
         table,
       ).map((column) => `"${column.name.replace(/"/g, '""')}"`)
         // The branch head advances to the compaction commit by design.
         .filter((column) => !(table === "branch" && column === '"head_seq"'))
-        .map((column) => `quote(${column})`);
+        .flatMap((column) => [
+          `typeof(${column})`,
+          `${column} COLLATE BINARY`,
+        ]);
       const list = columns.join(", ");
       const quoted = `"${table.replace(/"/g, '""')}"`;
       const grouped = (schema: string) =>

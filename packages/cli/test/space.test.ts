@@ -302,16 +302,30 @@ describe("cf space compact", () => {
       expect(text(dangling.stderr)).toContain("exists");
       expect(await Deno.lstat(`${liveDir}/new.sqlite`).catch(() => undefined))
         .toBeUndefined();
-      // A result named by a bare file name lands in the working directory.
+      // A result named by a bare file name lands in the working directory,
+      // and a store named by one is found there, its default result beside it.
       const bare = `cf-space-compact-test-${crypto.randomUUID()}.sqlite`;
-      const relative = await cf(
+      const relativeOut = await cf(
         `space compact ${work} --documents computed: --out ${bare}`,
       );
+      const bareStore = `cf-space-compact-test-${crypto.randomUUID()}.sqlite`;
+      await Deno.copyFile(backup, `${cliDir}/${bareStore}`);
+      const relativeStore = await cf(
+        `space compact ${bareStore} --documents computed:`,
+      );
       try {
-        expect(relative.code).toBe(0);
+        expect(relativeOut.code).toBe(0);
         expect((await Deno.stat(`${cliDir}/${bare}`)).size).toBeGreaterThan(0);
+        expect(relativeStore.code).toBe(0);
+        expect(
+          (await Deno.stat(`${cliDir}/${bareStore}.compacted.sqlite`)).size,
+        ).toBeGreaterThan(0);
       } finally {
-        await Deno.remove(`${cliDir}/${bare}`).catch(() => {});
+        for (
+          const leftover of [bare, bareStore, `${bareStore}.compacted.sqlite`]
+        ) {
+          await Deno.remove(`${cliDir}/${leftover}`).catch(() => {});
+        }
       }
     } finally {
       await Deno.remove(root, { recursive: true });

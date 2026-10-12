@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { toFileUrl } from "@std/path";
+import { relative, toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 
 import {
@@ -647,6 +647,16 @@ describe("compactStore", () => {
       sessionId: run.sessionId,
     });
     expect(feed[0].writes.map((w) => w.id).sort()).toEqual([A, ACL].sort());
+  });
+
+  it("takes the store and the result as paths relative to the working directory", async () => {
+    await build(standard);
+    const run = await compactStore({
+      store: relative(Deno.cwd(), store),
+      selection: { prefixes: ["computed:"] },
+    });
+    expect(run.out).toBe(`${store}.compacted.sqlite`);
+    expect((await Deno.stat(run.out)).size).toBeGreaterThan(0);
   });
 
   it("writes no ACL revision when the store has no ACL document", async () => {

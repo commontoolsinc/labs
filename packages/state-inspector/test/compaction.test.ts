@@ -88,7 +88,8 @@ async function buildStore(
   engine.database.exec(
     `INSERT INTO blob_store (hash, data, content_type, size) VALUES ('h1', X'0102', 'application/octet-stream', 2);
      CREATE TABLE "pattern notes" (k TEXT, v TEXT COLLATE NOCASE);
-     INSERT INTO "pattern notes" VALUES ('a', '1'), ('a', '1'), ('b', 'ImportantCase');`,
+     INSERT INTO "pattern notes" VALUES ('a', '1'), ('a', '1'), ('b', 'ImportantCase'),
+       ('c', 'keep' || char(0) || 'before'), ('d', 1), ('e', 1.0);`,
   );
   applyCommit(engine, {
     sessionId: "s:a",
@@ -120,6 +121,9 @@ async function withCompacted(
     twice?: boolean;
     /** Interrupt the first run after one instance and resume it. */
     interrupt?: boolean;
+    /** Interrupt the first run after its ACL audit, before VACUUM INTO, and
+     * resume it: two runs, two audits. */
+    interruptAfterAudit?: boolean;
     /** Between the two runs of `twice`, tombstone the ACL document. */
     tombstoneBetween?: boolean;
   } = {},
@@ -140,15 +144,18 @@ async function withCompacted(
         ? {}
         : { cut: { keepLast: options.keepLast } }),
     };
-    if (options.interrupt) {
+    if (options.interrupt || options.interruptAfterAudit) {
       const stop = new Error("stop");
+      const at: (progress: { phase: string; completed?: number }) => boolean =
+        options.interruptAfterAudit
+          ? (progress) => progress.phase === "vacuum"
+          : (progress) =>
+            progress.phase === "instance" && progress.completed === 1;
       await compactStore({
         ...first,
         runId: "interrupted",
         onProgress: (progress) => {
-          if (progress.phase === "instance" && progress.completed === 1) {
-            throw stop;
-          }
+          if (at(progress)) throw stop;
         },
       }).catch((error) => {
         if (error !== stop) throw error;
@@ -344,6 +351,25 @@ Deno.test("verifyCompaction passes on a run interrupted after one instance and r
   }, { interrupt: true });
 });
 
+Deno.test("verifyCompaction passes on a run interrupted after its audit and resumed", async () => {
+  await withCompacted(({ backup, result }) => {
+    const verification = verifyCompaction({ result, against: backup });
+    assertEquals(
+      failing(verification),
+      [],
+      formatCompactionVerification(verification),
+    );
+    assertEquals(verification.compactionCommits.length, 2);
+    const acl = verification.checks.find((check) =>
+      check.name === "ACL document"
+    )!;
+    assert(
+      acl.detail.includes("2 audit revision(s) for 2 new run(s)"),
+      acl.detail,
+    );
+  }, { interruptAfterAudit: true });
+});
+
 Deno.test("verifyCompaction passes on a second run after the ACL document was tombstoned", async () => {
   await withCompacted(({ backup, result }) => {
     const verification = verifyCompaction({ result, against: backup });
@@ -460,9 +486,19 @@ Deno.test("verifyCompaction names what a tampered result lost", async () => {
       "deleted rows lie below a boundary and above no surviving row",
     );
     // A case change in a NOCASE column: the declared collation must not
-    // hide it.
+    // hide it. A change after an embedded NUL: nothing may render the text
+    // short. An integer turned real of the same magnitude: the storage class
+    // is part of the value.
     await tampered(
       `UPDATE "pattern notes" SET v = 'importantcase' WHERE k = 'b'`,
+      "tables outside the history are untouched",
+    );
+    await tampered(
+      `UPDATE "pattern notes" SET v = 'keep' || char(0) || 'AFTER' WHERE k = 'c'`,
+      "tables outside the history are untouched",
+    );
+    await tampered(
+      `UPDATE "pattern notes" SET v = 1.0 WHERE k = 'd'`,
       "tables outside the history are untouched",
     );
     // The ACL document's marker replaced by null: a failed check, not a

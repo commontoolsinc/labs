@@ -11,7 +11,7 @@
 // it materializes at a boundary is the engine's own reconstruction.
 
 import { Database } from "@db/sqlite";
-import { toFileUrl } from "@std/path";
+import { resolve, toFileUrl } from "@std/path";
 import { hashStringOf } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 
@@ -984,8 +984,13 @@ export const compactStore = async (
   options: CompactionRunOptions,
 ): Promise<CompactionRun> => {
   const started = performance.now();
-  const store = options.store;
-  const out = options.out ?? `${store}.compacted.sqlite`;
+  // Resolved against the working directory: the engine opens a file URL,
+  // which a relative path cannot become, and the result sits beside the
+  // store wherever the store is.
+  const store = resolve(options.store);
+  const out = options.out === undefined
+    ? `${store}.compacted.sqlite`
+    : resolve(options.out);
   const runId = options.runId ?? new Date().toISOString();
   const sessionId = `${COMPACTION_SESSION_PREFIX}${runId}`;
 
