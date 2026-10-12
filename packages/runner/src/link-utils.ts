@@ -360,6 +360,69 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
   }) as T;
 }
 
+const wireEncoder = new TextEncoder();
+
+/**
+ * The bytes `value` takes on the wire, where frames are UTF-8 JSON;
+ * `undefined` for a value JSON cannot serialize, a cyclic one among them.
+ */
+function wireByteLength(value: unknown): number | undefined {
+  try {
+    return wireEncoder.encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Rewrites inline link schemas inside `value` to their reference form, the
+ * form a link created by `createSigilLinkFromParsedLink()` carries with the
+ * flag on, registering each closure in the realm registry as that does. A
+ * value copied out of a `data:` document carries its link schemas inline
+ * (`inlineExternalSchemaRefsInValue`), and written as it stands into an
+ * ordinary document it would store, and send, every closure in full for
+ * every link: a nested instance's argument document carries one per captured
+ * input. A reference already stamped, a trivial schema, a schema
+ * decomposition refuses, and a schema that takes no more wire bytes than the
+ * reference that would replace it (a bare handle stamp such as
+ * `{ asCell: ["stream"] }`, which readers combine structurally) ride through
+ * unchanged. A cyclic schema has no inline wire form, so its reference always
+ * replaces it. The value is rebuilt only along the paths that change, so a
+ * value carrying nothing to rewrite is returned as it is.
+ */
+export function externalizeLinkSchemasInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
+    if (!isObjectNotArray(schema) || !isNontrivialSchema(schema)) {
+      return schema;
+    }
+    if (typeof schema.$ref === "string" && isExternalSchemaRef(schema.$ref)) {
+      return schema;
+    }
+    const externalized = externalizeLinkSchema(
+      schema as JSONSchema,
+      KeepAsCell.All,
+    );
+    if (
+      !isObjectNotArray(externalized) ||
+      typeof externalized.$ref !== "string" ||
+      !isExternalSchemaRef(externalized.$ref)
+    ) {
+      return schema;
+    }
+    const inlineBytes = wireByteLength(schema);
+    const referenceBytes = wireByteLength(externalized);
+    if (
+      inlineBytes !== undefined && referenceBytes !== undefined &&
+      inlineBytes <= referenceBytes
+    ) {
+      return schema;
+    }
+    return externalized as FabricValue;
+  }) as T;
+}
+
 /**
  * Creates a sigil link, optionally a write redirect, with shared logic
  */
@@ -367,7 +430,6 @@ export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
   options: {
     base?: Cell<any> | NormalizedFullLink;
-    baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
     // Which asCell entries to preserve in the included schema. When omitted,
@@ -399,9 +461,7 @@ export function createSigilLinkFromParsedLink(
     }
   } else {
     reference.id = link.id;
-
-    // Handle baseSpace option - only include space if different from baseSpace
-    if (link.space !== options.baseSpace) reference.space = link.space;
+    if (link.space) reference.space = link.space;
     if (link.scope) reference.scope = link.scope;
   }
 

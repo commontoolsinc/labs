@@ -128,6 +128,17 @@ class NoProfileError extends WishError {
   }
 }
 
+/**
+ * A headless wish for a Home target while Home has no root. A headless wish
+ * brings up no root, so it resolves to nothing: no result and no error.
+ */
+class NoHomeRootError extends Error {
+  constructor() {
+    super("The home space has no root.");
+    this.name = "NoHomeRootError";
+  }
+}
+
 //
 // Interval #now constants and helpers
 //
@@ -291,6 +302,12 @@ type WishContext = {
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | "profile" | string)[];
 
+  /**
+   * Whether the wish is headless, in which case it offers none of its own
+   * surfaces: no picker, no suggestions, and no profile creation.
+   */
+  headless?: boolean;
+
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
 
@@ -394,6 +411,39 @@ function buildResolutionPath(
 function getHomeSpaceCell(ctx: WishContext): Cell<unknown> {
   ctx.usedHomeSpace = true;
   return ctx.runtime.getHomeSpaceCell(ctx.tx);
+}
+
+/**
+ * The root of the wishing user's Home, the cell its space links as
+ * `defaultPattern`, when the slot holds anything at all, which is then
+ * resolved through as it stands. `undefined` when the slot is empty.
+ */
+function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
+  const homeSpaceCell = getHomeSpaceCell(ctx) as Cell<any>;
+  ctx.readiness.requireDocument(homeSpaceCell, ctx.tx);
+  const slot = homeSpaceCell.key("defaultPattern");
+  if (slot.getRaw() === undefined) return undefined;
+  const root = slot.resolveAsCell();
+  ctx.readiness.requireDocument(root, ctx.tx);
+  return root;
+}
+
+/**
+ * The cell under which every Home target a wish hands out lies: the root of
+ * the wishing user's Home when its space links one ({@link findHomeRootCell}),
+ * and otherwise the space cell's empty `defaultPattern` slot itself. A wish
+ * creates no root. A read through the empty slot finds nothing, and a write
+ * through it is refused unless the root exists by then
+ * (`SpaceRootMissingError`); a client runtime brings the root up ahead of a
+ * handler whose state holds such a cell (`bringUpHomeRootForHandler`). A
+ * headless wish hands out nothing over an empty slot, and throws
+ * `NoHomeRootError`, so it resolves to nothing.
+ */
+function getHomeRootCell(ctx: WishContext): Cell<any> {
+  const found = findHomeRootCell(ctx);
+  if (found !== undefined) return found;
+  if (ctx.headless) throw new NoHomeRootError();
+  return (getHomeSpaceCell(ctx) as Cell<any>).key("defaultPattern");
 }
 
 /**
@@ -863,22 +913,25 @@ function searchByHashtag(
 }
 
 /**
- * Throws a `WishError` naming the remedies when the home pattern in
- * `homeSpaceCell` holds nothing at `field`, which it names to the user as
- * `what`. The system home pattern gains a field its current source adds only
- * when the home space is next opened, since nothing updates a piece nobody
- * opens, so a home set up before the field existed lacks it until then. A
- * custom home pattern follows no source of the system's, and holds the field
- * only if it says so. The wish does not open the home itself.
+ * Throws a `WishError` naming the remedies when the home pattern `homeRoot`
+ * holds nothing at `field`, which it names to the user as `what`, or when there
+ * is no home pattern at all (`homeRoot` is `undefined`). The system home
+ * pattern gains a field its current source adds only when the home space is
+ * next opened, since nothing updates a piece nobody opens, so a home set up
+ * before the field existed lacks it until then. A custom home pattern follows
+ * no source of the system's, and holds the field only if it says so. The wish
+ * neither creates a home root nor opens an existing one to bring it up to date.
  */
 function requireHomeField(
-  homeSpaceCell: Cell<unknown>,
+  homeRoot: Cell<unknown> | undefined,
   field: string,
   what: string,
   ctx: WishContext,
-): void {
-  const held = resolvePath(homeSpaceCell, ["defaultPattern", field], ctx);
-  if (held.getRaw() === undefined) {
+): asserts homeRoot is Cell<unknown> {
+  if (
+    homeRoot === undefined ||
+    resolvePath(homeRoot, [field], ctx).getRaw() === undefined
+  ) {
     throw new WishError(
       `The home space holds no ${what}. If its home pattern is the system ` +
         `one, set up before it had one, open the home space once, which ` +
@@ -901,15 +954,11 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #favorites");
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-
       // No path = return favorites list
       if (parsed.path.length === 0) {
-        return [{
-          cell: homeSpaceCell,
-          pathPrefix: ["defaultPattern", "favorites"],
-        }];
+        return [{ cell: getHomeRootCell(ctx), pathPrefix: ["favorites"] }];
       }
+      const homeSpaceCell = getHomeSpaceCell(ctx);
 
       // Path provided = search by tag (legacy behavior)
       const searchTerm = parsed.path[0].toLowerCase();
@@ -949,10 +998,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #journal");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "journal"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["journal"] }];
     }
 
     case "#learned": {
@@ -960,10 +1006,7 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #learned");
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["learned"] }];
     }
 
     case "#agent_queue": {
@@ -976,10 +1019,7 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #agent_queue",
         );
       }
-      return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "agentQueue"],
-      }];
+      return [{ cell: getHomeRootCell(ctx), pathPrefix: ["agentQueue"] }];
     }
 
     case "#chatManager": {
@@ -992,12 +1032,11 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #chatManager",
         );
       }
-      const homeSpaceCell = getHomeSpaceCell(ctx);
-      requireHomeField(homeSpaceCell, "chatManager", "chat manager", ctx);
-      return [{
-        cell: homeSpaceCell,
-        pathPrefix: ["defaultPattern", "chatManager"],
-      }];
+      // The chat manager is read, never created, so a Home with no root is
+      // one with no chat manager, and no root is brought up for it.
+      const homeRoot = findHomeRootCell(ctx);
+      requireHomeField(homeRoot, "chatManager", "chat manager", ctx);
+      return [{ cell: homeRoot, pathPrefix: ["chatManager"] }];
     }
 
     case "#learnedSummary": {
@@ -1011,8 +1050,8 @@ function resolveHomeSpaceTarget(
         );
       }
       return [{
-        cell: getHomeSpaceCell(ctx),
-        pathPrefix: ["defaultPattern", "learned", "summary"],
+        cell: getHomeRootCell(ctx),
+        pathPrefix: ["learned", "summary"],
       }];
     }
 
@@ -1477,10 +1516,23 @@ function resolveSpaceTarget(
     results.push(resolutionFor(getSpaceCell(ctx)));
   }
 
-  // "~" → include home space
+  // "~" → include home space, through its root for a target under the root.
+  // A headless wish leaves out a Home with no root, and resolves to nothing
+  // only when nothing else resolves.
+  let homeRootAbsent = false;
   if (ctx.scope?.includes("~") && homeSpaceUserDID(ctx) !== undefined) {
-    const homeSpaceCell = getHomeSpaceCell(ctx);
-    results.push(resolutionFor(homeSpaceCell));
+    const resolution = resolutionFor(getHomeSpaceCell(ctx));
+    const [first, ...rest] = resolution.pathPrefix ?? [];
+    if (first !== "defaultPattern") {
+      results.push(resolution);
+    } else {
+      try {
+        results.push({ cell: getHomeRootCell(ctx), pathPrefix: rest });
+      } catch (error) {
+        if (!(error instanceof NoHomeRootError)) throw error;
+        homeRootAbsent = true;
+      }
+    }
   }
 
   // Arbitrary DIDs → include each space
@@ -1490,6 +1542,7 @@ function resolveSpaceTarget(
   }
 
   if (results.length === 0) {
+    if (homeRootAbsent) throw new NoHomeRootError();
     console.warn(
       `[wish] Target "${parsed.key}" cannot resolve with scope: [${
         ctx.scope?.join(", ")
@@ -2760,8 +2813,7 @@ export function wish(
       sidecarUser,
       (): ProfileCreateSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     slot.input = {
       profiles: createSigilLinkFromParsedLink(
         homeDefaultPattern.key("profiles").getAsNormalizedFullLink(),
@@ -2934,8 +2986,7 @@ export function wish(
       sidecarUser,
       (): ProfilePickerSidecarSlot => ({}),
     );
-    const homeDefaultPattern = getHomeSpaceCell(ctx).key("defaultPattern")
-      .resolveAsCell();
+    const homeDefaultPattern = getHomeRootCell(ctx);
     // A home with the slot hands it over for "Set default" and its earlier
     // default as `legacyDefaultProfile`. A home without hands over no slot and
     // `offersSetDefault: false`, since a write through a cell whose root holds
@@ -3130,6 +3181,7 @@ export function wish(
             tx,
             parentCell,
             scope,
+            headless: headless === true,
             nowCell,
             nowCause: cause,
           };
@@ -3390,9 +3442,27 @@ export function wish(
             }
           } catch (e) {
             if (e instanceof DocumentPending) return;
+            if (e instanceof NoHomeRootError) {
+              measureWishPhase(
+                "send-no-home-root",
+                queryKey,
+                () =>
+                  sendWishState(
+                    tx,
+                    {
+                      result: undefined,
+                      candidates: [],
+                      [UI]: undefined,
+                    } satisfies WishState<any>,
+                    wishOutputScope(schema, inputScope, true),
+                    schema,
+                  ),
+              );
+              return;
+            }
             const errorMsg = e instanceof WishError ? e.message : String(e);
             const ui = e instanceof NoProfileError && parsed &&
-                isProfilePersonaTarget(parsed)
+                isProfilePersonaTarget(parsed) && !headless
               ? profileCreateUI(ctx)
               : errorUI(errorMsg);
             measureWishPhase(

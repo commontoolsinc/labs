@@ -45,6 +45,7 @@ import {
   type TrustedProfileMru,
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
+import { refusalReasonText } from "./private-inbox-refusal-text.ts";
 import type { BackwardsCompatibleProfile } from "./profile-home.tsx";
 import {
   ensurePrivateInbox,
@@ -52,7 +53,12 @@ import {
   pointProfilesAtPrivateInbox,
   type PrivateInboxHolder,
   type PrivateInboxRefusalHolder,
+  type PrivateInboxReplacementHolder,
+  replaceRefusedPrivateInbox,
+  repointProfilesFromReplacedInbox,
   type RetainedPrivateInboxes,
+  TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE,
+  TRUSTED_REPLACE_REFUSED_INBOX_ACTION,
 } from "./private-inbox.tsx";
 
 // Types from favorites-manager.tsx
@@ -146,6 +152,11 @@ export type HomeOutput = {
   privateInboxRefusal: Writable<
     PrivateInboxRefusalHolder | Default<Record<PropertyKey, never>>
   >;
+  // The last refusal the owner had Home replace, under `replacement`: the
+  // refused inbox, the refusal's code and time, and when the owner acted. Only
+  // `replaceRefusedPrivateInbox` writes it, from the button on Home's refusal
+  // notice. No `replacement` before the first.
+  privateInboxReplacement: Writable<PrivateInboxReplacementHolder>;
   sharedSpaceCatalog: SharedSpaceCatalog;
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
@@ -172,6 +183,11 @@ export type HomeOutput = {
   // again at that worker's next bring-up if the ensure failed, so Home adopts
   // again only then.
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
+  // For the owner, from the button on Home's refusal notice: replaces the
+  // refused inbox with the one Home holds, or with one it creates when it holds
+  // none, and points the profiles that point at the refused inbox at Home's.
+  // Refused unless the renderer marks the event as a click on that button.
+  replaceRefusedPrivateInbox: Stream<void>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;
     tags?: string[];
@@ -315,32 +331,6 @@ const renameSpaceHandler = handler<
   spaces.addUnique(entry);
 });
 
-/**
- * What the host's refusal code `reason` says about the refused inbox, as a
- * sentence for the person whose inbox it is, or `undefined` for a code it does
- * not know. The codes are `InboxAdoptionRefusal`'s, from
- * `packages/piece/src/ops/private-inbox.ts`.
- */
-function refusalReasonText(reason: string): string | undefined {
-  switch (reason) {
-    case "inbox-home-space":
-      return "It is in your Home space, where nobody else may deliver.";
-    case "inbox-profile-space":
-      return "It is in the profile's own space, where nobody else may deliver.";
-    case "inbox-access-refused":
-      return "Home was refused access to it.";
-    case "inbox-adoption-acl-mismatch":
-      return "Its space does not make you its owner, or does not let others " +
-        "deliver to it.";
-    case "inbox-offers-invalid":
-      return "It holds no list of offers.";
-    case "inbox-receive-missing":
-      return "It has no way to receive offers.";
-    default:
-      return undefined;
-  }
-}
-
 const homeArgumentSchema = toSchema<Record<string, never>>();
 const homeResultSchema = __cf_data(
   withAgentQueueRunLinkSchema(toSchema<HomeOutput>()),
@@ -396,19 +386,44 @@ const Home = pattern(
     // deciding profile points at.
     const privateInboxRefusal = new Writable<PrivateInboxRefusalHolder>({})
       .for("privateInboxRefusal");
+    // The last refusal the owner had Home replace, which only the notice's
+    // button writes.
+    const privateInboxReplacement = new Writable<PrivateInboxReplacementHolder>(
+      {},
+    ).for("privateInboxReplacement");
     // The refusal notice reads the refusal's code and time, and never its
     // `inbox`: the stored link carries the label the refused inbox's owner
     // gives its offers. The notice renders after everything else, for the
     // reason the chats panel does, and the screen's header slot shows it
-    // above the tabs.
+    // above the tabs. Only its text is computed: its markup, button included,
+    // is static, and `refused` decides whether it shows.
     const refusalReason = privateInboxRefusal.key("refusal").key("reason");
     const refusedAt = privateInboxRefusal.key("refusal").key("refusedAt");
+    const refused = computed(() => typeof refusedAt.get() === "number");
+    const refusalNoticeText = computed(() => {
+      const stored = refusalReason.get();
+      const reason = typeof stored === "string" ? stored : "";
+      const at = refusedAt.get();
+      return {
+        explanation: refusalReasonText(reason) ?? "",
+        code: reason || "none given",
+        // The sandbox formats a date given no zone in UTC and one given a
+        // zone in that zone, while a date's local getters read the host's
+        // zone, so the zone is given here and named in the text.
+        noticed: typeof at === "number"
+          ? new Date(at).toLocaleString("en-US", {
+            timeZone: "UTC",
+            timeZoneName: "short",
+          })
+          : "",
+      };
+    });
     // Untrusted-write regression surface: this stream is exported so tests can
     // verify that sending it from outside the trusted create surface does NOT
     // create a profile. The actual create UI lives in the profile picker below.
     const createProfileStream = submitProfileCreation({
       profiles: profiles as any,
-      seedName: seedProfileName({ profiles: profiles as any, privateInbox }),
+      seedName: seedProfileName({ privateInbox }),
     });
     // The home Profile tab IS the profile picker: it lists profiles natively,
     // sets the default, stamps MRU on selection, and creates more inline.
@@ -436,6 +451,16 @@ const Home = pattern(
       profiles: profiles as any,
       pointProfiles: pointProfilesAtPrivateInbox({
         privateInbox,
+        profiles: profiles as any,
+      }),
+    });
+    const replaceRefusedInboxStream = replaceRefusedPrivateInbox({
+      privateInbox,
+      privateInboxRefusal,
+      privateInboxReplacement,
+      repointProfiles: repointProfilesFromReplacedInbox({
+        privateInbox,
+        privateInboxReplacement,
         profiles: profiles as any,
       }),
     });
@@ -566,22 +591,13 @@ const Home = pattern(
           </cf-tabs>
 
           <div slot="header">
-            {computed(() => {
-              const at = refusedAt.get();
-              if (typeof at !== "number") return null;
-              const stored = refusalReason.get();
-              const reason = typeof stored === "string" ? stored : "";
-              const explanation = refusalReasonText(reason) ?? "";
-              const code = reason || "none given";
-              // The sandbox formats a date given no zone in UTC and one given
-              // a zone in that zone, while a date's local getters read the
-              // host's zone, so the zone is given here and named in the text.
-              const noticed = new Date(at).toLocaleString("en-US", {
-                timeZone: "UTC",
-                timeZoneName: "short",
-              });
-              return (
-                <div id="home-private-inbox-refusal">
+            {refused
+              ? (
+                <div
+                  id="home-private-inbox-refusal"
+                  data-ui-pattern={TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE}
+                  data-ui-event-integrity={TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE}
+                >
                   <cf-alert status="warning">
                     <h4 slot="title">Shares may not reach you</h4>
                     <cf-vstack slot="description" gap="1">
@@ -589,16 +605,35 @@ const Home = pattern(
                         One of your profiles points others at an inbox Home
                         can't use, so what they share with you may not arrive.
                         {" "}
-                        {explanation}
+                        {refusalNoticeText.explanation}
                       </span>
                       <span style={{ fontSize: "12px", color: "#666" }}>
-                        Reason: <code>{code}</code>. First noticed {noticed}.
+                        Reason:{" "}
+                        <code>{refusalNoticeText.code}</code>. First noticed
+                        {" "}
+                        {refusalNoticeText.noticed}.
                       </span>
+                      <span style={{ fontSize: "12px", color: "#666" }}>
+                        Using a new inbox points the profiles that point at the
+                        refused one at Home's own inbox instead. A loom daemon
+                        running as an identity other than yours then stops
+                        receiving loom shares.
+                      </span>
+                      <div>
+                        <cf-button
+                          id="home-private-inbox-replace"
+                          size="sm"
+                          data-ui-action={TRUSTED_REPLACE_REFUSED_INBOX_ACTION}
+                          onClick={replaceRefusedInboxStream}
+                        >
+                          Use a new inbox
+                        </cf-button>
+                      </div>
                     </cf-vstack>
                   </cf-alert>
                 </div>
-              );
-            })}
+              )
+              : null}
           </div>
         </cf-screen>
       ) as VNode,
@@ -617,6 +652,7 @@ const Home = pattern(
       privateInbox,
       retainedPrivateInboxes,
       privateInboxRefusal,
+      privateInboxReplacement,
 
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
 
@@ -633,6 +669,7 @@ const Home = pattern(
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
       ensurePrivateInbox: ensurePrivateInboxStream,
+      replaceRefusedPrivateInbox: replaceRefusedInboxStream,
     };
   },
   homeArgumentSchema,

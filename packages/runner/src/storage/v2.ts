@@ -75,7 +75,7 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import { validatePresencePublication } from "@commonfabric/memory/v2/presence";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
-import { BoundedKeyMap } from "@commonfabric/utils/cache";
+import { BoundedKeyMap, LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import { maxOf, minOf } from "@commonfabric/utils/math";
 import {
@@ -297,6 +297,19 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
+/** The weight the data-URI memo may hold, which bounds what it retains. */
+const DATA_URI_MEMO_MAX_WEIGHT = 64 * 1024 * 1024;
+/** The heaviest entry the memo keeps: one sixteenth of its budget. */
+const DATA_URI_MEMO_MAX_ENTRY_WEIGHT = DATA_URI_MEMO_MAX_WEIGHT / 16;
+
+/**
+ * What a data-URI memo entry weighs: the URI's own characters, and the value
+ * it decodes to taken as four times the payload's bytes, the factor a
+ * decoded object graph's property tables and strings run to over its JSON.
+ */
+function dataUriMemoWeight(id: string): number {
+  return id.length * 2 + id.length * 4 + 128;
+}
 // Backstop for the inline conflict read-repair wait. In the connected path the
 // caught-up sync arrives within a refresh cycle; this only fires if the sync is
 // permanently undelivered on a still-open, never-reconnecting session, so the
@@ -366,6 +379,8 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
  */
 export function dataURISyncKey(identity: {
   id: string;
+  /** The hash of `id`, where the caller holds it, so the id is hashed once. */
+  idHash?: string;
   schema: JSONSchema | undefined;
   path: readonly string[];
   space: MemorySpace;
@@ -373,7 +388,7 @@ export function dataURISyncKey(identity: {
   scopeKeyIdentity?: ScopeKeyIdentity;
 }): string {
   return hashStringOf([
-    identity.id,
+    identity.idHash ?? hashStringOf(identity.id),
     identity.schema ? hashStringOf(identity.schema) : "",
     [...identity.path],
     identity.space,
@@ -567,6 +582,16 @@ type PendingVersion =
      * writer read.
      */
     baseSeq: number;
+
+    /**
+     * Set when the commit carried a read of this document, so that the
+     * server's identity proof, should it elide the commit, was made against
+     * the view this layer's `value` was computed from (03-commit-model.md
+     * §3.6.1), and that value is the stored document. A layer the commit read
+     * nothing for is proved against the stored document alone, and its
+     * `value` says nothing about what the store holds beyond its own ops.
+     */
+    read?: true;
   }
   & (
     | {
@@ -713,7 +738,13 @@ const pendingVersion = (
     }
     | { op: "delete" },
   baseSeq: number,
-): PendingVersion => ({ localSeq, baseSeq, ...operation });
+  read: boolean,
+): PendingVersion => ({
+  localSeq,
+  baseSeq,
+  ...(read ? { read: true } : {}),
+  ...operation,
+});
 
 /**
  * The paths of `operation`'s splices that a recursive read among `reads`
@@ -1404,6 +1435,21 @@ export class StorageManager implements IStorageManager {
   );
 
   /**
+   * What a data URI is worth knowing per sync, by the URI: the hash of the id
+   * and the value it decodes to. A plan's inputs document is synced under
+   * each schema its node reads through and again on every pre-sync wave, and
+   * hashing and decoding tens of kilobytes of URI on each would cost more than
+   * the sync. An entry weighs its URI, which it keeps alive as its key, and
+   * the value decoded from it, taken as the payload's bytes several times
+   * over; a URI too large for a share of the budget is not kept at all.
+   */
+  #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
+    capacity: DATA_URI_SYNC_CACHE_MAX,
+    weigh: (id) => dataUriMemoWeight(id),
+    maxWeight: DATA_URI_MEMO_MAX_WEIGHT,
+  });
+
+  /**
    * In-flight commits, registered synchronously by the transaction layer at
    * `commit()` entry (see `IStorageManager.trackPendingCommit()`). This is the
    * write-durability barrier: distinct from `#crossSpacePromises`, which also
@@ -1482,7 +1528,8 @@ export class StorageManager implements IStorageManager {
    * resolve against this manager's own session identity. Refcounted: concurrent
    * `syncCell()` calls for the same document share one entry. Waiters resolve
    * when the count returns to zero — whether the load produced a value or found
-   * the document absent.
+   * the document absent. A prefetch's failure (see `#registerPendingLoad()`)
+   * is kept apart from `failure`, which is what the waiters see.
    */
   #pendingLoads = new Map<string, {
     count: number;
@@ -1494,6 +1541,7 @@ export class StorageManager implements IStorageManager {
       scopeKey?: ScopeKey;
     };
     failure: unknown;
+    prefetchFailure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
 
@@ -2627,6 +2675,12 @@ export class StorageManager implements IStorageManager {
    * such reads registers nothing, and its release does nothing: the read
    * returns no data however long it is waited for, so it is not a load in
    * flight, and nothing parks on it.
+   *
+   * With `prefetch`, the load is one no reader asked for. A waiter still
+   * waits for it to settle, since its landing is what a cold read is waiting
+   * on, but its failure reaches no waiter: a reader's own load of the
+   * document decides whether that reader's wait fails. The failure still
+   * keeps the key's settling from being reported as a recovery.
    */
   #registerPendingLoad(
     address: {
@@ -2639,6 +2693,7 @@ export class StorageManager implements IStorageManager {
        * cross-matches — is then per THAT instance. */
       scopeKey?: ScopeKey;
     },
+    { prefetch = false }: { prefetch?: boolean } = {},
   ): (failure?: unknown) => void {
     if (this.refusesReadByConstruction(address)) return () => {};
     const key = entityKey(address, this.scopeKeyIdentity());
@@ -2649,17 +2704,19 @@ export class StorageManager implements IStorageManager {
         generation: this.#nextPendingLoadGeneration++,
         address,
         failure: undefined,
+        prefetchFailure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
     return (failure?: unknown) => {
-      entry.failure ??= failure;
+      if (prefetch) entry.prefetchFailure ??= failure;
+      else entry.failure ??= failure;
       entry.count--;
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
-      if (entry.failure === undefined) {
+      if (entry.failure === undefined && entry.prefetchFailure === undefined) {
         this.#loadRecoveryObserver?.({
           failedEpoch: this.#loadFailureEpoch(key),
           recoveryEpoch: this.#loadEpoch(entry.generation),
@@ -2882,7 +2939,9 @@ export class StorageManager implements IStorageManager {
    * a crossing back, and a kick already in flight or landed ends that chain.
    * A load that fails hands its kick back, so a frame carrying the crossing
    * again kicks it again; the target stays absent and the frame that
-   * carried the crossing is unaffected.
+   * carried the crossing is unaffected. No reader asked for the load, so it
+   * is registered as a prefetch: its failure fails no reader's wait on the
+   * document, an event parked on it among them.
    */
   #loadCrossings(crossings: readonly SyncCrossing[]): void {
     for (const crossing of crossings) {
@@ -2901,7 +2960,9 @@ export class StorageManager implements IStorageManager {
       if (this.#crossingKicks.has(key)) continue;
       this.#crossingKicks.add(key);
       const address = { space, scope, id };
-      const releaseLoad = this.#registerPendingLoad(address);
+      const releaseLoad = this.#registerPendingLoad(address, {
+        prefetch: true,
+      });
       // One ledger entry per target, however many selectors load it: the
       // entry stays while any of them is in flight.
       const ledgerKey = entityKey(address, this.scopeKeyIdentity());
@@ -3081,8 +3142,10 @@ export class StorageManager implements IStorageManager {
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
+    const memo = this.#dataUri(id);
     const cacheKey = dataURISyncKey({
       id,
+      idHash: memo.idHash,
       schema,
       path: cell.path.map(String),
       space,
@@ -3095,6 +3158,7 @@ export class StorageManager implements IStorageManager {
         cell,
         space,
         id,
+        memo.value,
         schema,
         scope,
         identity,
@@ -3105,15 +3169,28 @@ export class StorageManager implements IStorageManager {
     return cell;
   }
 
+  /** The memo entry for the data URI `id`, decoded and hashed on first use. */
+  #dataUri(id: string): { idHash: string; value: unknown } {
+    let entry = this.#dataUriMemo.get(id);
+    if (entry === undefined) {
+      entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
+      if (dataUriMemoWeight(id) <= DATA_URI_MEMO_MAX_ENTRY_WEIGHT) {
+        this.#dataUriMemo.put(id, entry);
+      }
+    }
+    return entry;
+  }
+
   async #syncDataURILinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
+    decoded: unknown,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<void> {
-    let value: unknown = valueFromDataUri(id);
+    let value: unknown = decoded;
     for (const segment of [...cell.path.map(String)]) {
       if (!isObjectOrArray(value)) {
         return;
@@ -3169,6 +3246,9 @@ export class StorageManager implements IStorageManager {
     seen.add(value);
 
     if (isPrimitiveCellLink(value)) {
+      // A position the reader declares a stream names a document that holds
+      // no value a read uses, whatever the link's own schema says of it.
+      if (ContextualFlowControl.declaresStream(schema)) return;
       const link = parseLinkPrimitive(value, base);
       if (link.id === undefined) return;
       this.#syncLinkTarget(
@@ -3252,11 +3332,16 @@ export class StorageManager implements IStorageManager {
       !hasDataUriScheme(link.id) && link.overwrite !== "redirect" &&
       isUnknownCellSchema(schema)
     ) return;
+    // A link that declares a stream names a document that holds no value: a
+    // send to it is an event the store appends, and nothing reads the
+    // document through the link. Syncing it under the stream's event schema
+    // delivers nothing and costs a root carrying that schema per stream.
+    if (ContextualFlowControl.declaresStream(schema)) return;
     const scope = normalizeCellScope(link.scope as CellScope | undefined);
     if (hasDataUriScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
-      let target: unknown = valueFromDataUri(link.id);
+      let target: unknown = this.#dataUri(link.id).value;
       for (let i = 0; i < segments.length; i++) {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);
@@ -6659,7 +6744,7 @@ export class SpaceReplica
           operations,
           source,
           outcome.rejection,
-          identity,
+          { identity },
         );
       }
       const v = outcome.verdict;
@@ -6698,7 +6783,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
-          identity,
+          { identity },
         );
       }
       // Locally-committed verdicts confirm IMMEDIATELY — never parked
@@ -7405,6 +7490,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
       }
@@ -7425,6 +7511,7 @@ export class SpaceReplica
             operations,
             source,
             rejection,
+            { pushed: true },
           );
         }
       }
@@ -7499,6 +7586,7 @@ export class SpaceReplica
             operations,
             source,
             sealed,
+            { pushed: true },
           );
         }
         if (inFlight === undefined) {
@@ -7562,6 +7650,7 @@ export class SpaceReplica
             operations,
             source,
             outcome.rejection,
+            { pushed: true },
           );
         }
         const settledRace = this.#settleAccept(
@@ -7653,6 +7742,7 @@ export class SpaceReplica
           operations,
           source,
           rejection,
+          { pushed: true },
         );
       }
     } finally {
@@ -7771,15 +7861,25 @@ export class SpaceReplica
    * Finalizes a rejection, the shared tail for both real conflicts and
    * pre-empted commits: waits for the caught-up read-repair, drops the
    * optimistic pending write, and emits the revert notification reflecting
-   * repaired confirmed state.
+   * repaired confirmed state. For a commit that was pushed to the store, the
+   * store's copies of the documents it created are loaded beside that wait,
+   * so the revert reveals them; a sealed commit's withdrawal re-derives its
+   * documents instead, and loads nothing.
    */
   async #finalizeRejection(
     localSeq: number,
     operations: NativeCommitOperation[],
     source: IStorageTransaction | undefined,
     rejection: StorageTransactionRejected,
-    identity?: ScopeKeyIdentity,
+    options: {
+      /** The identity the commit's operations were applied under. */
+      identity?: ScopeKeyIdentity;
+
+      /** Whether the commit was pushed to the store rather than sealed. */
+      pushed?: boolean;
+    } = {},
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const { identity, pushed = false } = options;
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -7809,7 +7909,10 @@ export class SpaceReplica
           this.#scopeKeyIdentity(),
         )
         : undefined;
-      await this.#waitForConflictReadRepair(rejection);
+      await Promise.all([
+        this.#waitForConflictReadRepair(rejection),
+        pushed ? this.#loadAbsentTouched(rejection, touched) : undefined,
+      ]);
       if (isRefusedDerivedWrite(rejection, source)) {
         this.#foldRefusedWrite(localSeq, touched, identity);
       }
@@ -9294,6 +9397,83 @@ export class SpaceReplica
   }
 
   /**
+   * Helper for `#finalizeRejection()`, which loads the store's copy of each
+   * document a refused pushed commit touched that this replica holds no
+   * confirmed revision of, so that dropping the commit's layer reveals that
+   * copy rather than an absence. The read repair a conflict names reaches
+   * the documents the session watches, and a document the commit itself
+   * created is watched by nothing: the store may hold it all the same,
+   * written by another session, and a refusal for a pending dependency names
+   * no document at all. The load also stands a watch for each document, so a
+   * later write of it reaches this replica. A document the store holds
+   * nothing for stays absent. A failed load is logged and leaves the drop to
+   * proceed: the retry's commit decides what the absence was worth.
+   *
+   * With a store read-through installed, the documents are read from the
+   * store here rather than through `pull()`: the commit's own pending layer
+   * gives each a record already, and the ordinary store pull leaves a held
+   * record to the feed's refresh, which covers only commits admitted after
+   * the record appeared.
+   */
+  async #loadAbsentTouched(
+    rejection: StorageTransactionRejected,
+    touched: readonly LocalDocAddress[],
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const entries: [WatchAddress, undefined][] = [];
+    const keys = new Set<string>();
+    for (const address of touched) {
+      const key = this.#docKeyOf(address);
+      if (keys.has(key) || (this.#docs.get(key)?.confirmed.seq ?? 0) > 0) {
+        continue;
+      }
+      keys.add(key);
+      entries.push([{
+        id: address.id,
+        type: DOCUMENT_MIME,
+        scope: address.scope,
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
+      }, undefined]);
+    }
+    if (entries.length === 0) {
+      return;
+    }
+    const read = this.#storeReadThrough();
+    if (read !== undefined) {
+      const upserts: SessionSyncUpsert[] = [];
+      for (const [address] of entries) {
+        const instance = this.instanceKey(
+          address.scope,
+          undefined,
+          address.scopeKey,
+        );
+        if (!isScopeKey(instance)) continue;
+        const upsert = read({ id: address.id, scopeKey: instance });
+        if (upsert !== undefined) upserts.push(upsert);
+      }
+      if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
+      return;
+    }
+    let failure: unknown;
+    try {
+      failure = (await this.pull(entries)).error;
+    } catch (error) {
+      failure = error;
+    }
+    if (failure !== undefined) {
+      logger.warn("conflict-read-repair-load", () => [
+        "the store's copies of the documents a refused commit created " +
+        "could not be loaded; the drop reverts them to absent",
+        failure,
+      ]);
+    }
+  }
+
+  /**
    * What this replica holds, stated for a reconnect (the wire
    * `SessionHolding`; 04-protocol.md §4.1.2): every watched document at
    * the seq of the last frame this replica ABSORBED for it, a tombstone
@@ -9357,6 +9537,11 @@ export class SpaceReplica
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
     const intended = intendedSplicePaths(operation, reads);
+    const normalizedScope = normalizeCellScope(scope);
+    const read = [...reads.confirmed, ...reads.pending].some((candidate) =>
+      candidate.id === id &&
+      normalizeCellScope(candidate.scope) === normalizedScope
+    );
     record.pending.push(
       pendingVersion(
         localSeq,
@@ -9375,6 +9560,7 @@ export class SpaceReplica
           ? { ...pending, intended }
           : pending,
         record.confirmed.seq,
+        read,
       ),
     );
   }
@@ -9587,7 +9773,12 @@ export class SpaceReplica
         this.#scopeKeyIdentity(),
       )
       : undefined;
-    for (const { id, scope, scopeKey } of keys.values()) {
+    // Each operation's document, in the wire commit's order: an elision
+    // report names operations by that index.
+    const operationKeys = this.#touchedOf(operations, identity).map((
+      address,
+    ) => this.#docKeyOf(address));
+    for (const [key, { id, scope, scopeKey }] of keys.entries()) {
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -9600,6 +9791,45 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // An accept that elided every operation on this document wrote
+      // nothing. Where the commit read the document, that is because the
+      // store already held the document this layer's transaction computed:
+      // the identity proof was made against the view the layer's `value`
+      // was computed from (03-commit-model.md §3.6.1). So the layer
+      // promotes to that document rather than by replaying its ops over
+      // whatever confirmed value the frames have delivered so far — a replay
+      // is exact only over the base the ops were diffed from, and a splice
+      // over any other base lands its elements a second time. The document a
+      // frame has delivered at or after the commit's seq is newer still, and
+      // stands. A layer the commit read nothing for was proved against the
+      // stored document alone, which shows only that its ops leave that
+      // document unchanged; its `value` is not the stored document, and the
+      // layer promotes below by replaying its ops, as any accept does.
+      //
+      // A `patch` layer's `value` is its transaction's working root, mutable
+      // where the transaction thawed it, so the confirmed document is a frozen
+      // copy of it: a transaction loads the confirmed document by identity,
+      // and one that writes over a mutable root changes it in place, leaving
+      // no difference from what it loaded to commit.
+      const elidedHere = applied.elidedOpIndexes !== undefined &&
+        operationKeys.every((operationKey, index) =>
+          operationKey !== key || applied.elidedOpIndexes!.includes(index)
+        );
+      const computed = record.pending[lastPendingIndex]!;
+      if (elidedHere && computed.read === true) {
+        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+          record.confirmed = confirmedVersion(
+            applied.seq,
+            cloneIfNecessary(computed.value) as EntityDocument,
+            coverClass,
+          );
+        }
+        record.pending = record.pending.filter((entry) =>
+          entry.localSeq !== localSeq
+        );
+        record.materialized = undefined;
+        continue;
+      }
       // The verdict is in: a splice shown as the array its writer computed
       // (`displayedPatches`) promotes as the store applied it, which over a
       // moved array is a different value, so the layers are marked accepted
@@ -10390,6 +10620,12 @@ const toRejectedError = (
   //    retryable by `isTransientCommitRejection`; the name has to survive here
   //    or that classification can never fire. It is raised client-side, so
   //    unlike the names above it is not part of the server's wire contract.
+  //  - `MessageTooLargeError`: the server refused the frame before evaluating
+  //    it, for standing for more slots than it admits from an untrusted
+  //    sender (memory/v2/server.ts, `MAX_UNTRUSTED_MESSAGE_SLOTS`). The same
+  //    writes re-sent stand for the same slots, so the retry allow-list
+  //    classifies the name terminal; flattened here, the commit would be
+  //    re-sent until its budget ran out.
   //
   // The memory server MUST keep emitting the server-side names unchanged
   // (server.ts `transact` catch, and the ACL validation errors it returns
@@ -10397,7 +10633,7 @@ const toRejectedError = (
   if (
     name === "RowLabelCommitError" || name === "ProtocolError" ||
     name === "AuthorizationError" || name === "SessionError" ||
-    name === "InvalidMessageError"
+    name === "InvalidMessageError" || name === "MessageTooLargeError"
   ) {
     const retriable = (error as { retriable?: unknown })?.retriable === true;
     const permanentEvidence =

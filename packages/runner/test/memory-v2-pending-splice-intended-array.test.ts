@@ -109,7 +109,10 @@ describe("memory-v2-pending-splice-intended-array", () => {
     return { list, seen, cancel };
   };
 
-  it("shows the list as it is while the other session's identical tail lands first", async () => {
+  it("shows the list as it is while the other session's identical tail lands first, and the store accepts the splice as an identity", async () => {
+    // The splice reaches the stored list from the view that produced it, so
+    // the server accepts it as an identity and writes nothing; the layer is
+    // dropped without a promotion.
     const doc = "intended-identical";
     const a = connect();
     const b = connect();
@@ -127,7 +130,7 @@ describe("memory-v2-pending-splice-intended-array", () => {
     expect(list.get()).toEqual(["e1", "e2", "e3"]);
 
     release.resolve();
-    expect(errorNameOf(await bVerdict)).toBe("ConflictError");
+    expect((await bVerdict).error).toBeUndefined();
     await flush();
     await b.runtime.idle();
     cancel();
@@ -135,7 +138,7 @@ describe("memory-v2-pending-splice-intended-array", () => {
     expect(list.get()).toEqual(["e1", "e2", "e3"]);
     expect(seen.filter((value) => Array.isArray(value) && value.length > 3))
       .toEqual([]);
-    expect(verdicts).toEqual(["ok", "ok", "ConflictError"]);
+    expect(verdicts).toEqual(["ok", "ok", "ok"]);
   });
 
   it("shows the list it computed, then the store's, when the other session's tail differs", async () => {
@@ -221,6 +224,93 @@ describe("memory-v2-pending-splice-intended-array", () => {
 
     expect(list.get()).toEqual(["e1", "e2", "e3", "x"]);
     expect(count.get()).toBe(4);
+  });
+
+  // A read that does not cover the array's values does not justify showing
+  // the computed array in a splice's place: the store applies the splice
+  // where it stands over a peer's in-place change the read never saw, and a
+  // reader of the layer must observe what the store will hold.
+  const persistedJoinAfterPeerReplaces = async (
+    doc: string,
+    readBeforeWriting: (
+      list: ReturnType<Runtime["getCell"]>,
+      tx: ReturnType<Runtime["edit"]>,
+    ) => void,
+  ) => {
+    const a = connect();
+    const b = connect();
+    await seed(a, doc, ["e1", "e2"]);
+    const { list, cancel } = await watched(b, doc);
+    const joined = b.runtime.getCell<string>(space, `${doc}-joined`, {
+      type: "string",
+    });
+    await joined.sync();
+    await flush();
+
+    heldIds.add(list.getAsNormalizedFullLink().id);
+    const writer = b.runtime.edit();
+    readBeforeWriting(list, writer);
+    const address = toMemorySpaceAddress(list.getAsNormalizedFullLink());
+    writer.writeOrThrow({ ...address, path: ["value", "2"] }, "e3");
+    const writerVerdict = writer.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+    await held.promise;
+
+    heldIds.clear();
+    const replace = a.runtime.edit();
+    a.runtime.getCell(space, doc, listSchema, replace).key(1).set("x");
+    expect(
+      (await replace.commit({ holdSyncedUntilCovered: false }).verdict).error,
+    )
+      .toBeUndefined();
+    await flush();
+    expect(list.get()).toEqual(["e1", "x", "e3"]);
+
+    const dependent = b.runtime.edit();
+    const observed = b.runtime.getCell<string[]>(
+      space,
+      doc,
+      listSchema,
+      dependent,
+    )
+      .get();
+    joined.withTx(dependent).set(observed.join("|"));
+    const dependentVerdict = dependent.commit({ holdSyncedUntilCovered: false })
+      .verdict;
+
+    release.resolve();
+    expect((await writerVerdict).error).toBeUndefined();
+    expect((await dependentVerdict).error).toBeUndefined();
+    await flush();
+    await b.storage.synced();
+    cancel();
+
+    expect(list.get()).toEqual(["e1", "x", "e3"]);
+    return joined.get();
+  };
+
+  it("keeps a peer's in-place change under a splice whose commit read one element, and a reader of it persists what the store holds", async () => {
+    // A read of element 0 sits below the array, so it covers neither the
+    // array nor element 1, which the peer replaced.
+    const joined = await persistedJoinAfterPeerReplaces(
+      "intended-element-read",
+      (list, tx) => {
+        expect(list.withTx(tx).key(0).get()).toBe("e1");
+      },
+    );
+    expect(joined).toBe("e1|x|e3");
+  });
+
+  it("keeps a peer's in-place change under a splice whose commit read the array's shape alone, and a reader of it persists what the store holds", async () => {
+    // A shape-only read of the array sees its length and not its values, and
+    // the peer's replacement changed no shape.
+    const joined = await persistedJoinAfterPeerReplaces(
+      "intended-shape-read",
+      (list, tx) => {
+        expect(list.withTx(tx).getRaw({ nonRecursive: true })).toHaveLength(2);
+      },
+    );
+    expect(joined).toBe("e1|x|e3");
   });
 
   it("shows a stacked pair as the second computed it, then the store's list", async () => {

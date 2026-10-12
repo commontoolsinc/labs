@@ -2142,8 +2142,10 @@ export class PiecesController<T = unknown> {
    * The refusal every root-replacing operation on an identity Home shares.
    *
    * A Home is created once, on its user's first open
-   * ({@link ensureDefaultPattern}), and changes only by an in-place source
-   * update, which retains the account data its root owns: profiles,
+   * ({@link ensureDefaultPattern}), by the Home space's own server under
+   * server execution, or ahead of a client handler that holds a cell a wish
+   * handed out beneath its empty root slot, and changes only by an in-place
+   * source update, which retains the account data its root owns: profiles,
    * favorites, navigation, the shared-space catalog and the inbox pointer.
    * There is no path that drops or replaces that root, absent or present,
    * loadable or not. A Home that will not load is repaired in place; a
@@ -2350,13 +2352,13 @@ export class PiecesController<T = unknown> {
    * nothing. A Home pattern without that stream is left as it is. This
    * controller must be over the identity's Home space.
    *
-   * Resolves once the event is sent, which is before Home's handler runs, so
-   * it rejects only when Home cannot be brought up, when reading Home's or its
-   * profiles' pointers or loading the inbox documents they name fails, when a
-   * profile ordered ahead of the deciding one cannot be read, or when vetting
-   * or the send itself throws; a failure inside the handler is not reported
-   * here. Once `signal` aborts, or the runtime begins disposal, it sends
-   * nothing.
+   * Resolves once Home's handler has run on the event and its run has
+   * committed, on the server that runs it under server execution. It rejects
+   * when Home cannot be brought up, when reading Home's or its profiles'
+   * pointers or loading the inbox documents they name fails, when a profile
+   * ordered ahead of the deciding one cannot be read, when vetting or the send
+   * itself throws, or when Home's handling of the event fails. Once `signal`
+   * aborts, or the runtime begins disposal, it sends nothing.
    */
   async ensurePrivateInbox(signal?: AbortSignal): Promise<void> {
     this.#assertHomeSpace("ensure a private inbox");

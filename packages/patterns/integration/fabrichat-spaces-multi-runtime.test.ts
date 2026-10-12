@@ -186,7 +186,9 @@ describe("fabrichat spaces across runtimes", () => {
 
     // A member admitted at creation holds OWNER, so their own add, from the
     // room's control, admits the stranger, and the room records it as done
-    // where the member's own views read it.
+    // where the member's own views read it. No session here has a chat
+    // manager to tell the stranger of the room, so the add reads as access
+    // alone.
     await member.send(
       "addMember",
       { ...adding, requestId: "add-stranger" },
@@ -200,7 +202,7 @@ describe("fabrichat spaces across runtimes", () => {
       await member.read(["$VIEWS", "room", "addRequests", "add-stranger"], {
         piece: room,
       }),
-    ).toEqual({ status: "done" });
+    ).toEqual({ status: "done", delivery: "access-only" });
   });
 
   it("refuses an add to a direct room, even from its counterpart's own control", async () => {

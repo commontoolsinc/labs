@@ -120,7 +120,11 @@ inside the commit's transaction: per document, the commit's ordered `set`
 and `patch` operations replayed on the view the reader saw yield the stored
 document, and replayed on the stored document leave it unchanged, where a
 pending read's view is its declared confirmed basis with exactly the own
-layers it names replayed on it; a client claim would not do. The
+layers it names replayed on it; a client claim would not do. The second
+condition is waived for a session whose client advertised `elidedVerdicts`,
+since its replica promotes an elided layer to the document its transaction
+computed rather than folding it, and the first condition alone is what this
+invariant needs. The
 differential harness's reference model applies the idempotence half alone,
 so it admits a superset of what the engine admits. The TLA+ model's `IdentityMode = "elide"`
 (`PendingStacks_Identity.cfg`, `PendingStacks_ChannelIdentity.cfg`) certifies
@@ -132,7 +136,11 @@ foreign write that carried the same value, so the writer sets differ where
 the content does not (`PendingStacks_IdentityWriterForm.cfg` is the witness,
 on the writer-set form restricted to commits that wrote). `ElidedUnchanged`
 pins the exemption's premise: every path an elided commit would have written
-already held its value at its resolution point.
+already held its value at its resolution point. A later own commit whose
+pending read names such a layer is scanned from the layer's seq where its view
+through the layer is the one the identity was proved against
+(`03-commit-model.md` §3.6.3): the document at that seq is the reader's view,
+so the writes at or below it are already in what the reader saw.
 
 ### INV-2 — Overlap over-approximation only
 

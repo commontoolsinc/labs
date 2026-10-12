@@ -5,18 +5,25 @@
  * `refusingHome`, `curedHome` and `creatingHome`, are Homes whose profiles
  * already point at inboxes when the host first ensures their own, and a fifth,
  * `readoptingHome`, is one whose default profile is pointed elsewhere after it
- * holds an inbox. `olderHome` stands in for a Home of the vintage whose ensure
- * takes no refusal, and `unreadableHome` for one whose profile keeps its
- * pointer per user. Fixture for `private-inbox-multi-runtime.test.ts`.
+ * holds an inbox, and a sixth, `replacingHome`, is one whose owner replaces the
+ * inbox it was refused. A seventh, `ownSpaceHome`, records a refusal of the
+ * private inbox, the one in Home's own `private-inbox` space, and its owner
+ * replaces it, and an eighth, `unreadableRefusedHome`, is refused an inbox
+ * whose space stops letting the owner read it, which its owner replaces.
+ * `olderHome` stands in for a Home of the vintage whose ensure takes no
+ * refusal, and `unreadableHome` for one whose profile keeps its pointer per
+ * user. Fixture for `private-inbox-multi-runtime.test.ts`.
  */
 
 import {
   type Cell,
   currentPrincipal,
   Default,
+  type DID,
   handler,
   NAME,
   pattern,
+  revokeSpaceAccess,
   type Stream,
   UI,
   type VNode,
@@ -39,6 +46,9 @@ import PrivateInbox, {
   type PrivateInboxOutput,
   type PrivateInboxPiece,
   type PrivateInboxRefusalHolder,
+  type PrivateInboxReplacementHolder,
+  replaceRefusedPrivateInbox,
+  repointProfilesFromReplacedInbox,
   type RetainedPrivateInboxes,
 } from "../../../system/private-inbox.tsx";
 
@@ -190,6 +200,62 @@ const pointProfileAt = handler<
   });
 });
 
+/** The principal an inbox's space is to let read it. */
+export interface ReaderRequest {
+  /** The principal's DID. */
+  reader: DID;
+}
+
+/**
+ * Creates an inbox in a space of its own that grants `reader` `READ` and no
+ * one else anything, and keeps it in `inbox`. The principal sending the event
+ * owns the space.
+ */
+const createReadableByInbox = handler<
+  ReaderRequest,
+  { inbox: Writable<PrivateInboxHolder> }
+>((event, { inbox }) => {
+  inbox.set({
+    piece: inboxLinkOf(
+      PrivateInbox.inSpace(undefined, { grants: { [event.reader]: "READ" } })({
+        offers: [],
+      }),
+    ),
+  });
+});
+
+/** Revokes `reader`'s access to the space of the inbox `inbox` holds. */
+const revokeReader = handler<
+  ReaderRequest,
+  { inbox: Writable<PrivateInboxHolder> }
+>((event, { inbox }) => {
+  const piece = inbox.get().piece?.resolveAsCell();
+  if (piece === undefined) return;
+  revokeSpaceAccess(piece, event.reader);
+});
+
+/**
+ * Records in `refusal` the host's refusal of the inbox `inbox` holds, as Home's
+ * ensure records one, for a Home holding none.
+ */
+const recordRefusalOf = handler<
+  void,
+  {
+    inbox: Writable<PrivateInboxHolder>;
+    refusal: Writable<PrivateInboxRefusalHolder>;
+  }
+>((_event, { inbox, refusal }) => {
+  const refused = inbox.get().piece?.resolveAsCell();
+  if (refused === undefined) return;
+  refusal.set({
+    refusal: {
+      reason: "inbox-offers-invalid",
+      inbox: refused,
+      refusedAt: Date.now(),
+    },
+  });
+});
+
 /** Empties `profiles`. */
 const dropProfiles = handler<
   void,
@@ -221,6 +287,7 @@ export interface HomeStandInOutput {
   privateInbox: PrivateInboxHolder;
   retainedPrivateInboxes: RetainedPrivateInboxes;
   privateInboxRefusal: PrivateInboxRefusalHolder;
+  privateInboxReplacement: PrivateInboxReplacementHolder;
   profiles: ProfileHomeOutput[];
   defaultProfile: DefaultProfileSlot;
 
@@ -229,6 +296,9 @@ export interface HomeStandInOutput {
 
   /** Gives the Home a private inbox, as Home's own stream does. */
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
+
+  /** Replaces the inbox the Home was refused, as Home's own stream does. */
+  replaceRefusedPrivateInbox: Stream<void>;
 
   /** Creates one of the Home's profiles. */
   createProfile: Stream<void>;
@@ -250,6 +320,9 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
       .for("retainedPrivateInboxes");
     const privateInboxRefusal = new Writable<PrivateInboxRefusalHolder>({})
       .for("privateInboxRefusal");
+    const privateInboxReplacement = new Writable<
+      PrivateInboxReplacementHolder
+    >({}).for("privateInboxReplacement");
     const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
     const defaultProfile = new Writable<DefaultProfileSlot>({}).for(
       "defaultProfileSlot",
@@ -259,6 +332,7 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
       privateInbox,
       retainedPrivateInboxes,
       privateInboxRefusal,
+      privateInboxReplacement,
       profiles,
       defaultProfile,
       setDefaultProfile: setDefaultProfile({ profiles, defaultProfile }),
@@ -270,6 +344,17 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
         profiles: profiles as any,
         pointProfiles: pointProfilesAtPrivateInbox({
           privateInbox,
+          // deno-lint-ignore no-explicit-any
+          profiles: profiles as any,
+        }),
+      }),
+      replaceRefusedPrivateInbox: replaceRefusedPrivateInbox({
+        privateInbox,
+        privateInboxRefusal,
+        privateInboxReplacement,
+        repointProfiles: repointProfilesFromReplacedInbox({
+          privateInbox,
+          privateInboxReplacement,
           // deno-lint-ignore no-explicit-any
           profiles: profiles as any,
         }),
@@ -421,11 +506,15 @@ export interface MainOutput {
   strangerInbox: PrivateInboxHolder;
   readoptLoomInbox: PrivateInboxHolder;
   cureInbox: PrivateInboxHolder;
+  unreadableInbox: PrivateInboxHolder;
   adoptingHome: HomeStandInOutput;
   refusingHome: HomeStandInOutput;
   curedHome: HomeStandInOutput;
   creatingHome: HomeStandInOutput;
   readoptingHome: HomeStandInOutput;
+  replacingHome: HomeStandInOutput;
+  ownSpaceHome: HomeStandInOutput;
+  unreadableRefusedHome: HomeStandInOutput;
   olderHome: OlderHomeStandInOutput;
   copiedOffers: CopiedOffer[];
   retainedPrivateInboxes: RetainedPrivateInboxes;
@@ -478,6 +567,45 @@ export interface MainOutput {
 
   /** Points one of `refusingHome`'s profiles at the stranger's inbox. */
   pointRefusingProfileAtStranger: Stream<PointElsewhereRequest>;
+
+  /** Creates one of `replacingHome`'s profiles. */
+  createReplacingProfile: Stream<void>;
+
+  /** Points one of `replacingHome`'s profiles at the stranger's inbox. */
+  pointReplacingProfileAtStranger: Stream<PointElsewhereRequest>;
+
+  /** Replaces the inbox `replacingHome` was refused. */
+  replaceReplacingInbox: Stream<void>;
+
+  /** Creates one of `ownSpaceHome`'s profiles. */
+  createOwnSpaceProfile: Stream<void>;
+
+  /** Points one of `ownSpaceHome`'s profiles at the private inbox. */
+  pointOwnSpaceProfileAtPrivateInbox: Stream<PointElsewhereRequest>;
+
+  /** Records in `ownSpaceHome` a refusal of the private inbox. */
+  refuseOwnSpaceInbox: Stream<void>;
+
+  /** Replaces the inbox `ownSpaceHome` was refused. */
+  replaceOwnSpaceInbox: Stream<void>;
+
+  /**
+   * Creates an inbox in a space of its own that grants the event's `reader`
+   * `READ`, kept in `unreadableInbox`; the sender owns the space.
+   */
+  createUnreadableInbox: Stream<ReaderRequest>;
+
+  /** Revokes the event's `reader`'s access to `unreadableInbox`'s space. */
+  revokeUnreadableInbox: Stream<ReaderRequest>;
+
+  /** Creates one of `unreadableRefusedHome`'s profiles. */
+  createUnreadableRefusedProfile: Stream<void>;
+
+  /** Points one of `unreadableRefusedHome`'s profiles at `unreadableInbox`. */
+  pointUnreadableRefusedProfile: Stream<PointElsewhereRequest>;
+
+  /** Replaces the inbox `unreadableRefusedHome` was refused. */
+  replaceUnreadableRefusedInbox: Stream<void>;
 
   /** Creates an inbox as `createLoomInbox` does, kept in `cureInbox`. */
   createCureInbox: Stream<void>;
@@ -569,6 +697,9 @@ export default pattern<MainInput, MainOutput>((
     "readoptLoomInbox",
   );
   const cureInbox = new Writable<PrivateInboxHolder>({}).for("cureInbox");
+  const unreadableInbox = new Writable<PrivateInboxHolder>({}).for(
+    "unreadableInbox",
+  );
   const retainedPrivateInboxes = new Writable<RetainedPrivateInboxes>([]).for(
     "retainedPrivateInboxes",
   );
@@ -581,6 +712,11 @@ export default pattern<MainInput, MainOutput>((
   const creatingHome = HomeStandIn({ label: "Creating Home" });
   const olderHome = OlderHomeStandIn({});
   const readoptingHome = HomeStandIn({ label: "Home adopting again" });
+  const replacingHome = HomeStandIn({ label: "Replacing Home" });
+  const ownSpaceHome = HomeStandIn({ label: "Home refused its own inbox" });
+  const unreadableRefusedHome = HomeStandIn({
+    label: "Home refused an inbox it cannot read",
+  });
   const unreadableHome = HomeStandIn({
     label: "Home of an unreadable profile",
   });
@@ -594,11 +730,15 @@ export default pattern<MainInput, MainOutput>((
     strangerInbox,
     readoptLoomInbox,
     cureInbox,
+    unreadableInbox,
     adoptingHome,
     refusingHome,
     curedHome,
     creatingHome,
     readoptingHome,
+    replacingHome,
+    ownSpaceHome,
+    unreadableRefusedHome,
     olderHome,
     copiedOffers,
     retainedPrivateInboxes,
@@ -636,6 +776,31 @@ export default pattern<MainInput, MainOutput>((
       profiles: refusingHome.profiles,
       inbox: strangerInbox,
     }),
+    createReplacingProfile: replacingHome.createProfile,
+    pointReplacingProfileAtStranger: pointProfileAt({
+      profiles: replacingHome.profiles,
+      inbox: strangerInbox,
+    }),
+    replaceReplacingInbox: replacingHome.replaceRefusedPrivateInbox,
+    createOwnSpaceProfile: ownSpaceHome.createProfile,
+    pointOwnSpaceProfileAtPrivateInbox: pointProfileAt({
+      profiles: ownSpaceHome.profiles,
+      inbox: privateInbox,
+    }),
+    refuseOwnSpaceInbox: recordRefusalOf({
+      inbox: privateInbox,
+      refusal: ownSpaceHome.privateInboxRefusal,
+    }),
+    replaceOwnSpaceInbox: ownSpaceHome.replaceRefusedPrivateInbox,
+    createUnreadableInbox: createReadableByInbox({ inbox: unreadableInbox }),
+    revokeUnreadableInbox: revokeReader({ inbox: unreadableInbox }),
+    createUnreadableRefusedProfile: unreadableRefusedHome.createProfile,
+    pointUnreadableRefusedProfile: pointProfileAt({
+      profiles: unreadableRefusedHome.profiles,
+      inbox: unreadableInbox,
+    }),
+    replaceUnreadableRefusedInbox:
+      unreadableRefusedHome.replaceRefusedPrivateInbox,
     createCureInbox: createSharedInbox({ inbox: cureInbox }),
     createCuredProfile: curedHome.createProfile,
     pointCuredProfileAtStranger: pointProfileAt({

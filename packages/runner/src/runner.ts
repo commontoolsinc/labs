@@ -16,6 +16,7 @@ import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import {
   requireLocalReadCondition,
@@ -24,7 +25,10 @@ import {
   validateLocalReadBasis,
 } from "./storage/local-read-policy.ts";
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
-import { storedArgumentValidationIssue } from "./stored-argument-validation.ts";
+import {
+  storedArgumentSlotIssues,
+  storedArgumentValidationIssue,
+} from "./stored-argument-validation.ts";
 import { viewNodeId } from "./view-replication.ts";
 
 export {
@@ -254,6 +258,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
+import { bringUpHomeRootForHandler } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -437,27 +442,25 @@ type StartAttempt = {
 };
 
 /**
- * `schema` with a handler's `$event` slot removed: what a handler node's
- * bound inputs are synced under at start, where the slot holds the stream
- * link rather than an event.
+ * `schema` with a handler's `$event` slot declared as a stream: what a
+ * handler node's bound inputs are synced under at start, where the slot
+ * holds the stream link rather than an event. Declared so, the slot's
+ * document is not loaded under the event schema the link carries; the
+ * stream is named whole beside the plan (`#cellsNodePlanReads`).
  */
-function schemaWithoutEventSlot(
+function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
-  const { $event: _event, ...properties } = schema.properties as Record<
-    string,
-    JSONSchema
-  >;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
   return {
     ...schema,
-    properties,
+    properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
   };
 }
@@ -899,6 +902,19 @@ export function firstResolvedOutputRedirect(
     }
   }
   return undefined;
+}
+
+/**
+ * Whether the child `child` of the parent `parent` is managed independently:
+ * a child in a space of its own that owns its code and inputs, which it keeps
+ * after its owner detaches it. Its parent resumes it rather than setting it
+ * up.
+ */
+function resumesIndependently(child: Cell<any>, parent: Cell<any>): boolean {
+  return child.space !== parent.space &&
+    getPatternIdentityRef(child) !== undefined &&
+    (getPatternSource(child) !== undefined ||
+      getPieceSourceRevisions(child).length > 0);
 }
 
 /**
@@ -1361,6 +1377,9 @@ type SetupValidationOptions = {
   /** See `RunnerRunOptions.capturedArgumentFields`. */
   capturedArgumentFields?: readonly string[];
 
+  /** See `RunnerRunOptions.droppedArgumentFields`. */
+  droppedArgumentFields?: readonly string[];
+
   /** See `RunnerRunOptions.attributeInitialization`. */
   attributeInitialization?: boolean;
 
@@ -1726,6 +1745,12 @@ export type RunnerRunOptions = {
   // piece a binding to an owner-protected cell does not pass for modifying
   // it; a value in the record is not recorded.
   capturedArgumentFields?: readonly string[];
+  // Argument fields a collection builtin leaves out of this run that a stored
+  // argument document may still hold from a run that filled them: a list
+  // callback's `index` and `array` when its schema names neither. A stored
+  // slot by one of these names is dropped from the argument the run writes
+  // instead of carried over, so replaying the piece removes it.
+  droppedArgumentFields?: readonly string[];
   // The source origin a piece brought into being by this run records with its
   // creation revision. A run that finds the piece already there leaves both
   // alone: what a piece records after it exists is decided by a source
@@ -3177,6 +3202,7 @@ export class Runner {
     setupState: SetupStateReuse,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): SetupResult<R> | undefined {
     const key = this.#getDocKey(resultCell);
     if (!this.#cancels.has(key)) return undefined;
@@ -3218,7 +3244,12 @@ export class Runner {
         pattern.argumentSchema,
       );
       const nextArgument = mergeSchemaDefaults(
-        this.#argumentOverStoredSlots(tx, argumentLink, argument),
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set(droppedArgumentFields),
+        ),
         defaults,
         pattern.argumentSchema,
       );
@@ -3448,20 +3479,151 @@ export class Runner {
 
   /**
    * The argument to write for a piece whose argument document already exists,
-   * built from `argument` over the slots that document holds. The stored read
-   * goes through `tx`, so the write it shapes sits in the same conflict set.
+   * built from `argument` over the slots that document holds, less the slots
+   * named in `leaveOut`. The stored read goes through `tx`, so the write it
+   * shapes sits in the same conflict set.
    */
   #argumentOverStoredSlots<T>(
     tx: IExtendedStorageTransaction,
     argumentLink: NormalizedFullLink,
     argument: T,
+    leaveOut: ReadonlySet<string> = new Set(),
   ): T {
     if (argument === undefined) return argument;
-    const stored = this.#runtime
+    const raw = this.#runtime
       .getCellFromLink(argumentLink, undefined, tx)
       .getRaw({ meta: ignoreReadForScheduling });
+    const stored = leaveOut.size > 0 && isObjectNotArray(raw)
+      ? Object.fromEntries(
+        Object.entries(raw).filter(([slot]) => !leaveOut.has(slot)),
+      )
+      : raw;
     recordReplayedArgumentSlots(tx, argumentLink, argument, stored);
     return foldStoredArgumentSlots(argument, stored);
+  }
+
+  /**
+   * Helper for `#applySetupState()`, which stages `argument`, supplied for a
+   * piece whose pattern changed, over the slots its stored argument `stored`
+   * holds, and validates what it staged. A stored slot the new argument
+   * schema refuses is left out, so that its default fills it where it has
+   * one. Where what is staged still fails the schema as a whole, every stored
+   * slot the caller does not name is left out. Each slot left out is logged
+   * as a warning naming the pattern, the piece, the slot and the mismatch.
+   * A slot named in `droppedArgumentFields` is left out from the start and
+   * not logged: the caller leaves it out on purpose. Returns the argument
+   * staged.
+   *
+   * @throws Error carrying `STORED_ARGUMENT_SCHEMA_REFUSAL` when the argument
+   *   fails the schema with no stored slot carried over.
+   */
+  #restageOverStoredSlots<T>(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    pattern: Pattern,
+    entryRef: { identity: string; symbol: string } | undefined,
+    resultCell: Cell<unknown>,
+    argument: T,
+    stored: unknown,
+    previousArgumentSchema: JSONSchema | undefined,
+    defaults: FabricValue,
+    droppedArgumentFields: ReadonlySet<string>,
+  ): T {
+    const argumentCell = this.#runtime.getCellFromLink(
+      argumentLink,
+      undefined,
+      tx,
+    );
+    const projection = mergeSchemaDefaults<T>(
+      argument,
+      defaults as Partial<T>,
+      pattern.argumentSchema,
+    );
+    let staged = projection;
+    const stage = (leaveOut: ReadonlySet<string>): string | undefined => {
+      staged = mergeSchemaDefaults<T>(
+        this.#argumentOverStoredSlots(
+          tx,
+          argumentLink,
+          argument,
+          new Set([...droppedArgumentFields, ...leaveOut]),
+        ),
+        defaults as Partial<T>,
+        pattern.argumentSchema,
+      );
+      if (this.#runtime.patternManager.getArtifactEntryRef(pattern)) {
+        recordNewProtectedDefaults(
+          tx,
+          argumentLink,
+          previousArgumentSchema,
+          pattern.argumentSchema,
+          defaults,
+          staged,
+        );
+      }
+      this.#updateArgument(
+        tx,
+        argumentLink,
+        staged,
+        pattern.argumentSchema,
+        projection,
+      );
+      return storedArgumentValidationIssue(
+        argumentCell,
+        pattern.argumentSchema,
+        defaults,
+        tx,
+      );
+    };
+
+    const carried = foldStoredArgumentSlots(argument, stored) === argument ||
+        !isObjectNotArray(argument) || !isObjectNotArray(stored)
+      ? []
+      : Object.keys(stored).filter((slot) =>
+        !Object.hasOwn(argument, slot) && !droppedArgumentFields.has(slot)
+      );
+    const dropped = storedArgumentSlotIssues(
+      argumentCell,
+      pattern.argumentSchema,
+      defaults,
+      tx,
+      carried,
+    );
+    const issue = stage(new Set(dropped.keys()));
+    if (issue !== undefined && dropped.size < carried.length) {
+      // Each slot passed on its own, so the mismatch spans slots, as a union
+      // at the argument's root does once the caller's slots pick a branch.
+      for (const slot of carried) {
+        if (!dropped.has(slot)) {
+          dropped.set(slot, `the argument as a whole refuses it: ${issue}`);
+        }
+      }
+      stage(new Set(carried));
+    }
+
+    const source = getPatternSourcePath(pattern) ??
+      describePatternOrModule(pattern);
+    const identity = entryRef === undefined
+      ? "keyless"
+      : `${entryRef.identity}#${entryRef.symbol}`;
+    if (issue !== undefined) {
+      this.#validateArgument(
+        tx,
+        argumentLink,
+        pattern.argumentSchema,
+        defaults,
+      );
+    }
+    for (const [slot, reason] of dropped) {
+      logger.warn("setup-stored-slot-dropped", () => [
+        `Setting up ${backtickQuote(source)} (${identity}) on piece ` +
+        `${backtickQuote(resultCell.getAsNormalizedFullLink().id)} ` +
+        `dropped its stored ${backtickQuote(slot)}, which the pattern's ` +
+        `argument schema refuses: ${reason}. The slot takes its default, if ` +
+        "it has one.",
+      ]);
+    }
+    return staged;
   }
 
   /**
@@ -3477,6 +3639,7 @@ export class Runner {
     resultCell: Cell<R>,
     referencedArgumentFields: readonly string[] = [],
     capturedArgumentFields: readonly string[] = [],
+    droppedArgumentFields: readonly string[] = [],
   ): void {
     // Every write below fills a store this piece owns — the argument
     // document, each internal document the result projects to, and the result
@@ -3565,7 +3728,12 @@ export class Runner {
       // the piece's own state lives in the rest. What the setup PROJECTS stays
       // the argument this caller supplied.
       suppliedProjection = argument;
-      nextArgument = this.#argumentOverStoredSlots(tx, argumentLink, argument);
+      nextArgument = this.#argumentOverStoredSlots(
+        tx,
+        argumentLink,
+        argument,
+        new Set(droppedArgumentFields),
+      );
     } else {
       const previousArgumentCell = this.#runtime.getCellFromLink(
         argumentLink,
@@ -3604,42 +3772,63 @@ export class Runner {
         // bytes; instantiation reads the argument reactively once it loads.
         nextArgument = undefined;
       } else {
-        nextArgument = mergeSchemaDefaults<T>(
-          argument === undefined ? previousArgument : argument,
-          defaults as Partial<T>,
-          pattern.argumentSchema,
-        );
+        if (argument === undefined) {
+          nextArgument = mergeSchemaDefaults<T>(
+            previousArgument,
+            defaults as Partial<T>,
+            pattern.argumentSchema,
+          );
 
-        if (this.#runtime.patternManager.getArtifactEntryRef(pattern)) {
-          recordNewProtectedDefaults(
+          if (this.#runtime.patternManager.getArtifactEntryRef(pattern)) {
+            recordNewProtectedDefaults(
+              tx,
+              argumentLink,
+              previousArgumentSchema,
+              pattern.argumentSchema,
+              defaults,
+              nextArgument,
+            );
+          }
+
+          // Stage the exact Fabric-layer representation before validating
+          // it. The untyped materialization inside resolves ordinary sigil
+          // links through this same transaction without dropping fields that
+          // fail the candidate schema. A thrown validation error aborts the
+          // transaction, so neither this write nor the schema retarget can
+          // become durable on failure. A slot whose staged link chain cannot
+          // be read RIGHT NOW validates as opaque rather than as its
+          // unreadable materialization, because which link targets this
+          // replica holds is a fact about the moment, not about the value
+          // staged. (`previousArgument` is defined here — the skip branch
+          // above owns the both-undefined case — so the merge yields a
+          // value.)
+          this.#updateAndValidateArgument(
             tx,
             argumentLink,
-            previousArgumentSchema,
+            nextArgument,
             pattern.argumentSchema,
             defaults,
-            nextArgument,
+          );
+        } else {
+          // A supplied argument is written over the slots the document
+          // already holds, as on the same-pattern branch above: a nested
+          // piece whose code changed is set up again with the argument its
+          // parent's expression carries, and its own state lives in the slots
+          // that expression leaves out. A stored slot that no longer fits is
+          // left out rather than stopping the parent setting the piece up.
+          nextArgument = this.#restageOverStoredSlots(
+            tx,
+            argumentLink,
+            pattern,
+            entryRef,
+            resultCell,
+            argument,
+            previousArgument,
+            previousArgumentSchema,
+            defaults,
+            new Set(droppedArgumentFields),
           );
         }
-
-        // Stage the exact Fabric-layer representation before validating it.
-        // The untyped materialization inside resolves ordinary sigil links
-        // through this same transaction without dropping fields that fail the
-        // candidate schema. A thrown validation error aborts the transaction,
-        // so neither this write nor the schema retarget can become durable on
-        // failure. A slot whose staged link chain cannot be read RIGHT NOW
-        // validates as opaque rather than as its unreadable materialization —
-        // supplied and re-staged arguments alike, because which link targets
-        // this replica holds is a fact about the moment, not about the value
-        // the caller staged. (At least one of `argument`/`previousArgument`
-        // is defined here — the skip branch above owns the both-undefined
-        // case — so the merge yields a value.)
-        this.#updateAndValidateArgument(
-          tx,
-          argumentLink,
-          nextArgument,
-          pattern.argumentSchema,
-          defaults,
-        );
         argumentUpdated = true;
       }
     }
@@ -4019,6 +4208,7 @@ export class Runner {
       setupState,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
     if (runningSetup) {
       return runningSetup;
@@ -4042,6 +4232,7 @@ export class Runner {
       resultCell,
       validationOptions.referencedArgumentFields,
       validationOptions.capturedArgumentFields,
+      validationOptions.droppedArgumentFields,
     );
 
     if (validationOptions.validateArgumentLinks !== undefined) {
@@ -6406,11 +6597,22 @@ export class Runner {
     return tx;
   }
 
-  /** Load one family document under the identity captured before awaiting. */
+  /**
+   * Load one family document under the identity captured before awaiting.
+   * A cell declared a stream is loaded whole: its document holds no value
+   * a read uses, so a selector carrying the event schema would ask the
+   * store to walk a shape that is never there, and the gate's probe of the
+   * document reads its record, which the whole document brings.
+   */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
+    if (ContextualFlowControl.declaresStream(cell.schema)) {
+      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
+        Cell<T>
+      >;
+    }
     return syncCellForIdentity(cell, identity);
   }
 
@@ -7658,6 +7860,7 @@ export class Runner {
       {
         referencedArgumentFields: options.referencedArgumentFields,
         capturedArgumentFields: options.capturedArgumentFields,
+        droppedArgumentFields: options.droppedArgumentFields,
         attributeInitialization: options.attributeInitialization,
         ...(creatingPiece
           ? {
@@ -8946,7 +9149,7 @@ export class Runner {
   #planReadSchema(plan: NodePlan): JSONSchema | undefined {
     switch (plan.kind) {
       case "javascript":
-        return schemaWithoutEventSlot(plan.module.argumentSchema);
+        return schemaWithEventSlotAsStream(plan.module.argumentSchema);
       case "raw":
         return plan.module.argumentSchema;
       case "passthrough":
@@ -9247,7 +9450,7 @@ export class Runner {
       case "javascript": {
         const cells = [
           plan.inputsCell.asSchema(
-            schemaWithoutEventSlot(plan.module.argumentSchema),
+            schemaWithEventSlotAsStream(plan.module.argumentSchema),
           ),
         ];
         // A handler node's `$event` slot names its stream's document through
@@ -11799,7 +12002,12 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
+          const materialized = inputsCell.asSchema(module.argumentSchema)
+            .withTx(tx).get();
+          // A handler holding a cell beneath the user's Home before Home has
+          // a root runs only once the root exists, so a write it makes there
+          // lands under the root.
+          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
         }
         : undefined;
 
@@ -13053,6 +13261,31 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
+    return {
+      ...io,
+      childResultCell: this.#mintChildResultCell(
+        tx,
+        module,
+        child,
+        outputRedirect,
+        resultCell,
+      ),
+      sendToBindings: true,
+    };
+  }
+
+  /**
+   * The result cell a sub-pattern node with module `module` and child `child`
+   * runs under, minted from `spot`, the resolved output spot it writes
+   * through.
+   */
+  #mintChildResultCell(
+    tx: IExtendedStorageTransaction,
+    module: Module,
+    child: Pattern,
+    spot: NormalizedFullLink,
+    resultCell: Cell<any>,
+  ): Cell<any> {
     const resultScope = patternDefaultScope(child) ?? module.defaultScope;
     const targetSpace = module.targetSpace ?? resultCell.space;
     let childResultCell = this.#runtime.getCell(
@@ -13061,9 +13294,9 @@ export class Runner {
       // reservation fixed before this output existed.
       module.targetSpaceRoot ? inSpaceRootCause(targetSpace) : {
         resultFor: {
-          space: outputRedirect.space,
-          id: outputRedirect.id,
-          path: [...outputRedirect.path],
+          space: spot.space,
+          id: spot.id,
+          path: [...spot.path],
         },
       },
       child.resultSchema,
@@ -13078,7 +13311,7 @@ export class Runner {
         tx,
       );
     }
-    return { ...io, childResultCell, sendToBindings: true };
+    return childResultCell;
   }
 
   #instantiatePatternNode(
@@ -13114,10 +13347,10 @@ export class Runner {
       // An independently managed child owns its code and inputs, including
       // after an owner detaches it. History keeps that fact after the origin
       // is cleared; ordinary untracked nested children still bind inputs.
-      const resumeExisting = crossSpace &&
-        getPatternIdentityRef(storedChild) !== undefined &&
-        (getPatternSource(storedChild) !== undefined ||
-          getPieceSourceRevisions(storedChild).length > 0);
+      const resumeExisting = resumesIndependently(
+        storedChild,
+        parentResultCell,
+      );
       if (crossSpace && !resumeExisting) {
         // Cross-space child pattern: run it inline in a multi-space transaction
         // (child space committed first) rather than re-instantiating it in a

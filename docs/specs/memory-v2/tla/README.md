@@ -183,7 +183,16 @@ or missed contributor directly.
   the statement that the observed set is the durable one. The dial is what
   separates the two forms: `"intended"` hides for every own layer and fails,
   `"intendedRead"` hides only for a layer whose commit read the path, which
-  a foreign write to the path gets refused or elided, and holds.
+  a foreign write to the path gets refused or elided, and holds. A rule
+  that showed confirmed state for a layer as soon as a delivered value
+  proved its read stale would be a further setting here. Its soundness
+  condition is not in this model's reach: `Integrate` delivers one log
+  entry to a replica whose other documents are current, whereas the
+  implementation also reads a single document through to head with the
+  rest of the replica behind it, and a view switched on that arrival
+  re-runs over a state no point in history held (`03-commit-model.md`
+  §3.3.3). Modeling it means a delivery that advances one document past
+  the replica's integrated prefix.
 - **Appends-only values.** The value of a path is the set of accepted writes
   to it. This makes observations mergeable (a reader through a stack observes
   base + every contributing layer, exactly the mergeable-collection-writes
@@ -204,7 +213,11 @@ or missed contributor directly.
   write. What the alphabet does not model is a commit's ordered sequence
   of operations on one document: a commit here is one write of one value
   per path, which is the engine's per-document rule with the sequence
-  collapsed to its final effect. The replay of an arbitrary sequence, and
+  collapsed to its final effect. Nor does it model a positional op, so the
+  proof's second condition, idempotence on the stored document, is the
+  same membership test as the first here; the shipped rule waives it for a
+  session whose replica drops elided layers (`elidedVerdicts`), which the
+  model already matches. The replay of an arbitrary sequence, and
   what a patch can do to a document beyond adding a value, is the engine
   unit tests' and the differential harness's to check.
 - **Verdict delivery is a mode.** `atomic` fuses the server's verdict with
