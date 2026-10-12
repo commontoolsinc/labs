@@ -33,6 +33,7 @@ import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
   type ComposerState,
+  type JoinRoomRequest,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -136,6 +137,24 @@ function roomLinkOf(room: unknown): unknown {
   return room;
 }
 
+/** What `countJoins` is bound to. */
+interface CountJoinsState {
+  /** How many joins the room has sent. */
+  joins: Writable<number>;
+
+  /** The manager's `joinRoom`, which each join is handed on to. */
+  joinRoom: Stream<ManagerStreamEvent>;
+}
+
+/** Counts a join the room sends, and hands it on to the manager. */
+const countJoins = handler<JoinRoomRequest, CountJoinsState>((
+  event,
+  { joins, joinRoom },
+) => {
+  joins.set(joins.get() + 1);
+  joinRoom.send(event);
+});
+
 /** What a viewer of the room needs. */
 interface ViewerInput {
   setup: Setup;
@@ -170,6 +189,9 @@ interface ViewerOutput {
   /** How many requests the viewer's manager has recorded. */
   requestCount: number;
 
+  /** How many joins the room has sent the viewer's manager. */
+  joinCount: number;
+
   /** The state of the room's entry in the viewer's catalog. */
   entryState?: string;
 }
@@ -194,6 +216,8 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     outgoingNotices: Writable.of<ChatManagerNotice[]>([]),
   } as ManagerArg);
   const self = roomLinkOf(input[SELF]);
+  const joins = Writable.of<number>(0);
+  const counted = countJoins({ joins, joinRoom: manager.joinRoom });
   const room = FabriChatRoomCore({
     myProfile: profile,
     about: { kind: "group" as const, title: "Team" },
@@ -209,7 +233,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
       offerRoom: manager.offerRoom,
       requests: manager.requests,
       people: manager.people,
-      joinRoom: manager.joinRoom,
+      joinRoom: counted,
       sharedSpaceCatalog: manager.sharedSpaceCatalog,
     } as RoomManager,
   } as RoomArg);
@@ -226,7 +250,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     activity: setup.activity,
     counters: setup.counters,
     canJoin: true,
-    joinRoom: manager.joinRoom,
+    joinRoom: counted,
     catalog: manager.sharedSpaceCatalog,
     self,
   } as RowArg);
@@ -244,6 +268,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
       ).length
     ),
     requestCount: computed(() => Object.keys(requests.get() ?? {}).length),
+    joinCount: computed(() => joins.get()),
     entryState: computed(() =>
       readSharedSpaceCatalog(catalog).entries[spaceOf(self) ?? ""]?.state
     ),
@@ -277,6 +302,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
           setup.messages.get().length === 1 &&
           (setup.messages.key(0).get()?.reactions?.get() ?? []).length === 1 &&
           viewer.requestCount === 0 &&
+          viewer.joinCount === 0 &&
           viewer.entryState === "saved"
         ),
       },
@@ -320,7 +346,9 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       },
       {
         assertion: assert(() =>
-          setup.messages.get().length === 3 && viewer.requestCount === 1
+          setup.messages.get().length === 3 &&
+          viewer.requestCount === 1 &&
+          viewer.joinCount === 1
         ),
       },
       // A reaction lists a room he forgot again.
