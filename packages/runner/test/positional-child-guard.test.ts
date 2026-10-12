@@ -226,6 +226,10 @@ describe("positional-child-guard", () => {
     });
 
     it("refuses to set up over a child of another pattern when a child of its own pattern runs at another positional spot", async () => {
+      // `o` is deleted and a second `Counter` added after `a`, so no spot sets
+      // up the `Other` that `a`'s new spot holds, and only `a`'s own pattern
+      // running at the spot it left shows the move.
+
       const cell = await deployedParent("positional-incoming-elsewhere", {
         deployed: parentProgram([
           "  const [o, a] = [Other({ label: 'o' }), Counter({ label: 'a' })];",
@@ -236,8 +240,8 @@ describe("positional-child-guard", () => {
       await expect(update(
         cell,
         parentProgram([
-          "  const [a, t] = [Counter({ label: 'a' }), Third({ label: 't' })];",
-          "  return { views: [a, t], aCount: a.count, tCount: t.count };",
+          "  const [a, b] = [Counter({ label: 'a' }), Counter({ label: 'b' })];",
+          "  return { views: [a, b], aCount: a.count, bCount: b.count };",
         ].join("\n")),
       )).rejects.toThrow(
         /refusing to set up .*#Counter for a positional spot over the child of .*#Other: a child of .*#Counter runs at another positional spot/,
