@@ -317,6 +317,14 @@ Deno.test("verifyCompaction passes on a second run whose backup already holds ma
       acl.detail.includes("1 audit revision(s) for 1 new run(s)"),
       acl.detail,
     );
+    // The backup, which already holds a run, against itself: a compaction
+    // commit is there, but none the backup lacks.
+    const same = verifyCompaction({ result: backup, against: backup });
+    assertFalse(same.ok);
+    assert(
+      failing(same).includes("compaction commit added"),
+      formatCompactionVerification(same),
+    );
     assert(
       verification.checks.find((check) =>
         check.name === "compaction commit added"
@@ -401,6 +409,74 @@ Deno.test("verifyCompaction holds an interrupted attempt's retained audit to the
       failing(verification),
       ["ACL document"],
       formatCompactionVerification(verification),
+    );
+
+    // The same retained audit, with each of the other things that can be
+    // wrong with it: a row that does not decode, a value that is not an
+    // ACL, a marker that is not an object, a marker naming another run; and
+    // the newest run's audit gone.
+    const retained = async (
+      data: string | null,
+      ...expected: string[]
+    ): Promise<string> => {
+      const tampered = `${dir}/retained-${crypto.randomUUID()}.sqlite`;
+      await Deno.copyFile(result, tampered);
+      const tdb = new Database(tampered);
+      if (data === null) {
+        tdb.prepare(
+          `DELETE FROM revision WHERE id = ? AND seq = (SELECT MAX(seq) FROM "commit") AND op_index = 0`,
+        ).run(ACL);
+      } else {
+        tdb.prepare(
+          `UPDATE revision SET data = ? WHERE id = ? AND seq = ? AND op_index = 0`,
+        ).run(data, ACL, first);
+      }
+      tdb.close();
+      const v = verifyCompaction({ result: tampered, against: backup });
+      for (const name of expected) {
+        assert(failing(v).includes(name), formatCompactionVerification(v));
+      }
+      await Deno.remove(tampered);
+      return v.checks.find((check) => check.name === "ACL document")!.detail;
+    };
+    assert(
+      (await retained("garbage", "ACL document")).includes("does not decode"),
+    );
+    assert(
+      (await retained(encodeMemoryBoundary(5 as never), "ACL document"))
+        .includes("not a document"),
+    );
+    assert(
+      (await retained(
+        encodeMemoryBoundary(
+          { ...document, value: { "not a did": "OWNER" } } as never,
+        ),
+        "ACL document",
+      )).includes("value is not an ACL"),
+    );
+    assert(
+      (await retained(
+        encodeMemoryBoundary({ ...document, compaction: 7 } as never),
+        "ACL document",
+      )).includes("marker malformed or missing"),
+    );
+    assert(
+      (await retained(
+        encodeMemoryBoundary(
+          {
+            ...document,
+            compaction: {
+              ...(document.compaction as Record<string, unknown>),
+              runs: [{ commitSeq: 1 }],
+            },
+          } as never,
+        ),
+        "ACL document",
+      )).includes("names another run"),
+    );
+    assert(
+      (await retained(null, "every head has its revision row", "ACL document"))
+        .includes("none at the newest run"),
     );
   }, { interruptAfterAudit: true });
 });
