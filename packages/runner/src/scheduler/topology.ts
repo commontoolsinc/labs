@@ -71,21 +71,31 @@ export function topologicalSort(
     inDegree.set(action, 0);
   }
 
-  // Build the graph based on read/write dependencies. Every reader in the
-  // work set is indexed by the document it reads once, so a writer's edges
-  // cost the readers of the documents it writes rather than the whole set.
-  const readers = indexReaders(actions, dependencies, nodes);
+  // Build the graph based on read/write dependencies. The readers a writer
+  // is ordered against are indexed by the document they read, built on first
+  // use, so a writer's edges cost the readers of the documents it writes
+  // rather than the whole set, and a pass that needs no index builds none.
+  let declaredReaders: Map<string, IndexedRead[]> | undefined;
+  let allReaders: Map<string, IndexedRead[]> | undefined;
   const addEdgesForWrites = (
     actionA: Action,
     writes: readonly IMemorySpaceAddress[],
     declaredOnly: boolean,
   ): void => {
+    if (writes.length === 0) return;
+    let readers: Map<string, IndexedRead[]>;
+    if (declaredOnly) {
+      declaredReaders ??= indexReaders(actions, dependencies, nodes, true);
+      readers = declaredReaders;
+    } else {
+      allReaders ??= indexReaders(actions, dependencies, nodes, false);
+      readers = allReaders;
+    }
     const graphA = graph.get(actionA)!;
     for (const write of writes) {
       for (const reader of readers.get(documentKey(write)) ?? []) {
         const actionB = reader.action;
         if (actionA === actionB || graphA.has(actionB)) continue;
-        if (declaredOnly && !reader.declared) continue;
         const overlaps = reader.shallow
           ? nonRecursiveReadMayOverlapWrite(reader.path, write.path)
           : arraysOverlap(write.path, reader.path);
@@ -236,8 +246,6 @@ type IndexedRead = {
   readonly path: readonly MemoryAddressPathComponent[];
   /** A shallow read, which a write below the read's own children misses. */
   readonly shallow: boolean;
-  /** A read declared by an action that has never run. */
-  readonly declared: boolean;
 };
 
 /** The key two addresses share when they name the same document. */
@@ -248,15 +256,18 @@ function documentKey(address: IMemorySpaceAddress): string {
 }
 
 /**
- * The reads every action in the work set orders against, grouped by the
- * document read: what `getOrderingReadLog` answers for each action, laid out
- * so that a writer finds the readers of a document without visiting the
- * actions that read something else.
+ * The reads the work set's actions order against, grouped by the document
+ * read: what `getOrderingReadLog` answers for each action, laid out so that
+ * a writer finds the readers of a document without visiting the actions that
+ * read something else. With `declaredOnly`, only the reads an action that has
+ * never run declares, which is all a pull-mode pass orders by, since the data
+ * edges of the actions that have run are maintained in `dependents`.
  */
 function indexReaders(
   actions: ReadonlySet<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  nodes?: Pick<NodeRegistry, "get">,
+  nodes: Pick<NodeRegistry, "get"> | undefined,
+  declaredOnly: boolean,
 ): Map<string, IndexedRead[]> {
   const readers = new Map<string, IndexedRead[]>();
   const add = (read: IndexedRead, address: IMemorySpaceAddress) => {
@@ -266,16 +277,23 @@ function indexReaders(
     else list.push(read);
   };
   for (const action of actions) {
+    if (declaredOnly) {
+      const record = nodes?.get(action);
+      if (record?.status !== "never-ran" || record.declaredReads.length === 0) {
+        continue;
+      }
+      for (const address of record.declaredReads) {
+        add({ action, path: address.path, shallow: false }, address);
+      }
+      continue;
+    }
     const log = getOrderingReadLog(action, dependencies, nodes);
     if (!log) continue;
-    const record = nodes?.get(action);
-    const declared = record?.status === "never-ran" &&
-      record.declaredReads.length > 0;
     for (const address of log.reads) {
-      add({ action, path: address.path, shallow: false, declared }, address);
+      add({ action, path: address.path, shallow: false }, address);
     }
     for (const address of log.shallowReads) {
-      add({ action, path: address.path, shallow: true, declared }, address);
+      add({ action, path: address.path, shallow: true }, address);
     }
   }
   return readers;

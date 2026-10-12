@@ -297,8 +297,19 @@ function withCommitTiming<T>(
 }
 
 const DATA_URI_SYNC_CACHE_MAX = 10_000;
-/** The URI bytes the data-URI memo may hold, which bounds what it retains. */
+/** The weight the data-URI memo may hold, which bounds what it retains. */
 const DATA_URI_MEMO_MAX_WEIGHT = 64 * 1024 * 1024;
+/** The heaviest entry the memo keeps: one sixteenth of its budget. */
+const DATA_URI_MEMO_MAX_ENTRY_WEIGHT = DATA_URI_MEMO_MAX_WEIGHT / 16;
+
+/**
+ * What a data-URI memo entry weighs: the URI's own characters, and the value
+ * it decodes to taken as four times the payload's bytes, the factor a
+ * decoded object graph's property tables and strings run to over its JSON.
+ */
+function dataUriMemoWeight(id: string): number {
+  return id.length * 2 + id.length * 4 + 128;
+}
 // Backstop for the inline conflict read-repair wait. In the connected path the
 // caught-up sync arrives within a refresh cycle; this only fires if the sync is
 // permanently undelivered on a still-open, never-reconnecting session, so the
@@ -1412,12 +1423,13 @@ export class StorageManager implements IStorageManager {
    * and the value it decodes to. A plan's inputs document is synced under
    * each schema its node reads through and again on every pre-sync wave, and
    * hashing and decoding tens of kilobytes of URI on each would cost more than
-   * the sync. The budget is by URI length, since the entry keeps the URI
-   * alive as its key.
+   * the sync. An entry weighs its URI, which it keeps alive as its key, and
+   * the value decoded from it, taken as the payload's bytes several times
+   * over; a URI too large for a share of the budget is not kept at all.
    */
   #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
     capacity: DATA_URI_SYNC_CACHE_MAX,
-    weigh: (id) => id.length * 2 + 128,
+    weigh: (id) => dataUriMemoWeight(id),
     maxWeight: DATA_URI_MEMO_MAX_WEIGHT,
   });
 
@@ -3131,7 +3143,9 @@ export class StorageManager implements IStorageManager {
     let entry = this.#dataUriMemo.get(id);
     if (entry === undefined) {
       entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
-      this.#dataUriMemo.put(id, entry);
+      if (dataUriMemoWeight(id) <= DATA_URI_MEMO_MAX_ENTRY_WEIGHT) {
+        this.#dataUriMemo.put(id, entry);
+      }
     }
     return entry;
   }

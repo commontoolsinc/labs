@@ -5136,9 +5136,12 @@ function inlineElementSnapshotId(
   if (!isObjectOrArray(value)) {
     return dataUriFromValueWithResolvedLinks(value, base);
   }
-  const baseKey = `${base.space}\0${base.id}\0${
-    normalizeCellScope(base.scope)
-  }\0${base.path.join("/")}`;
+  const baseKey = JSON.stringify([
+    base.space,
+    base.id,
+    normalizeCellScope(base.scope),
+    base.path,
+  ]);
   let byBase = inlineElementSnapshotIds.get(value);
   if (byBase === undefined) {
     byBase = new Map();
