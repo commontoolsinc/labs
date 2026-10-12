@@ -291,6 +291,17 @@ describe("schema-merge-unions", () => {
       });
     }
 
+    it("is refused when it declares no type beside a stored union of no branches", () => {
+      expect(() =>
+        mergeCfcSchemaEnvelopes({ anyOf: [] }, {
+          anyOf: [{
+            enum: [null],
+            ifc: { writeAuthorizedBy: writer("successor") },
+          }],
+        })
+      ).toThrow(/union branches/);
+    });
+
     it("is refused beside a stored branch that declares no type", () => {
       const untyped = (moduleIdentity: string, more: JSONSchema[]) =>
         ({

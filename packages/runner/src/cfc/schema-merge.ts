@@ -830,9 +830,8 @@ const correspondingUnionBranches = (
     left.some((shape) => !right.includes(shape)) ||
     added.some((branch) => {
       const type = branchType(branch, definitions);
-      return storedTypes.some((stored) =>
-        !schemaTypesAreDisjoint(type, stored)
-      );
+      return type === undefined ||
+        storedTypes.some((stored) => !schemaTypesAreDisjoint(type, stored));
     })
   ) {
     throw new Error(
