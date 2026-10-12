@@ -30,6 +30,13 @@ export interface JUnitCase {
 
   /** The `message` of the case's failure, where it failed and gave one. */
   failure?: string;
+
+  /**
+   * Whether `deno test` reported the case as cancelled: still running
+   * when its run was interrupted, or stopped by an error the test did
+   * not catch.
+   */
+  cancelled?: boolean;
 }
 
 export class JUnitParseError extends Error {}
@@ -210,6 +217,11 @@ export function parseJUnit(xml: string): JUnitCase[] {
           current.outcome = "fail";
           const message = tag.attributes.message;
           if (message !== undefined) current.failure = message;
+          if (
+            tag.name === "error" && tag.attributes.message === "Cancelled"
+          ) {
+            current.cancelled = true;
+          }
         }
         break;
       case "skipped":
@@ -348,6 +360,15 @@ export interface IngestJUnitOptions {
    * its passes too.
    */
   known?: (test: TestIdentity, file: string | undefined) => boolean;
+
+  /**
+   * Whether the run that wrote the report was interrupted by a signal.
+   * A test such a run reports as cancelled is one the interruption cut
+   * short, which neither passed nor failed, and is recorded as skipped.
+   * In a run nothing interrupted, a cancelled test is one an error it did
+   * not catch stopped, and is recorded as failed.
+   */
+  interrupted?: boolean;
 }
 
 /**
@@ -416,7 +437,7 @@ export function ingestJUnit(
     const record: TestRecord = {
       line: "record",
       test: identity(leaf.name),
-      outcome: leaf.outcome,
+      outcome: leaf.cancelled && options.interrupted ? "skip" : leaf.outcome,
       durationMs: Math.round((leaf.timeSeconds ?? 0) * 1000),
     };
     const file = fileForName(leaf.name, files);
