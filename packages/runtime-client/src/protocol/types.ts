@@ -1867,17 +1867,12 @@ export type GetHomeSpaceCellRequest = BaseRequest & {
   type: RequestType.GetHomeSpaceCell;
 };
 
-/** The {@link RequestType.EnsureHomePatternRunning} request. */
+/**
+ * The {@link RequestType.EnsureHomePatternRunning} request, which carries no
+ * payload.
+ */
 export type EnsureHomePatternRunningRequest = BaseRequest & {
   type: RequestType.EnsureHomePatternRunning;
-
-  /**
-   * Whether to bring Home up only where it already exists: where Home's root
-   * records the pattern it runs. Where it does not, the request creates
-   * nothing and starts nothing. Defaults to `false`, which creates Home where
-   * it has no root.
-   */
-  existingOnly?: boolean;
 };
 
 /** The {@link RequestType.Idle} request, which carries no payload. */
@@ -3616,17 +3611,6 @@ export type CellResponse = {
 };
 
 /**
- * A reference to the user's Home, which a request that brings Home up only
- * where it exists lacks where it does not.
- */
-export type HomePatternResponse = {
-  /**
-   * Home's root, absent where the request brought nothing up.
-   */
-  cell?: CellRef;
-};
-
-/**
  * A cell's display label. `undefined` means the cell carries none, which is
  * distinct from the request having failed.
  */
@@ -4123,7 +4107,6 @@ export type RemoteResponse =
   | CellValueResponse
   | CellGetResponse
   | CellResponse
-  | HomePatternResponse
   | CfcLabelViewResponse
   | CellFieldsResponse
   | SnapshotSharePreview
@@ -4213,7 +4196,7 @@ export type Commands = {
   };
   [RequestType.EnsureHomePatternRunning]: {
     request: EnsureHomePatternRunningRequest;
-    response: HomePatternResponse;
+    response: CellResponse;
   };
   [RequestType.Idle]: {
     request: IdleRequest;

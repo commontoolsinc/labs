@@ -25,7 +25,6 @@ import { css, html, nothing } from "lit";
 import { property, state } from "lit/decorators.js";
 
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
-import { createViewSettled } from "../lib/debug-utils.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
 import { deliverOpenPath } from "../lib/open-path.ts";
@@ -387,12 +386,6 @@ export class XAppView extends BaseView {
    * though it named the piece on screen.
    */
   #namedAMember = false;
-
-  /**
-   * The runtime this view has asked to bring the user's Home up, which it asks
-   * once, after the first piece shown under that runtime has settled.
-   */
-  #homeBroughtUpIn: RuntimeInternals | undefined = undefined;
 
   /**
    * The revision the slug watch bumps to make the selection run again, which
@@ -975,44 +968,6 @@ export class XAppView extends BaseView {
       changedProperties.has("space")
     ) {
       this.#syncSlugSubscription();
-    }
-
-    // The first piece a runtime shows is the signal to bring Home up there,
-    // whatever view it is. A runtime replaced since then has its own first.
-    const rt = this.rt;
-    if (
-      rt !== undefined && rt !== this.#homeBroughtUpIn &&
-      this._patterns.status === TaskStatus.COMPLETE &&
-      this._patterns.value?.activePattern !== undefined
-    ) {
-      this.#homeBroughtUpIn = rt;
-      void this.#bringUpHome(rt);
-    }
-  }
-
-  /**
-   * Helper for `updated()`, which asks `rt`'s worker to bring the user's Home
-   * up once the view has settled, that is once the worker is idle and what it
-   * rendered has reached the page. Bringing Home up starts the worker's
-   * housekeeping over Home, the share intake among it, so an offer that
-   * reaches the user's inbox is taken up wherever the shell is open, and not
-   * only on Home. Waiting for the settle keeps Home's start off the path to
-   * the first piece on screen.
-   *
-   * Only a Home that already exists is brought up. The share intake reads
-   * the inboxes Home holds and registers offers in Home's catalog, so without
-   * Home it has nothing to do, and creating Home here would race whatever
-   * else creates it.
-   */
-  async #bringUpHome(rt: RuntimeInternals): Promise<void> {
-    try {
-      await createViewSettled(() => rt.runtime())();
-      if (rt.signal.aborted) return;
-      await rt.runtime().ensureHomePatternRunning({ existingOnly: true });
-    } catch (error) {
-      if (!rt.signal.aborted) {
-        console.error("[AppView] Failed to bring up Home:", error);
-      }
     }
   }
 

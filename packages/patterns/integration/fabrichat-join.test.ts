@@ -13,8 +13,8 @@
  * that new page, and starts another chat, whose row's link opens the new room.
  * Then someone who shares a group with another person adds them to a second
  * group from its page, by address alone; their manager offers it to the
- * person through the profile it lists for them, the room's page shows it was
- * offered, and the person's own manager lists it once they open it.
+ * person through the profile it lists for them, and the room's page shows it
+ * was offered.
  */
 
 import type { DID } from "@commonfabric/identity";
@@ -280,9 +280,8 @@ describe("fabrichat-join", () => {
     // from the adder's home, says so. A served handler can't read the
     // manager's per-session `people`, so under server execution it finds no
     // profile for them, and queues a notice instead.
-    // TODO(danfuzz): Expect `offered` under server execution too, and the
-    // room in the person's chats below, once a served handler can read a
-    // per-session instance of its user's.
+    // TODO(danfuzz): Expect `offered` under server execution too, once a
+    // served handler can read a per-session instance of its user's.
     await fillCfInput(adder, "#fabrichat-add-member-address", addedAddress);
     await clickTrustedAction(adder, ADD_MEMBER_ACTION);
     await waitForSettledText(
@@ -302,16 +301,6 @@ describe("fabrichat-join", () => {
       ).map((outcome) => (outcome as { delivery?: string }).delivery),
     ).toEqual([SERVER_EXECUTION ? "noticed" : "offered"]);
     expect(await addRequestsAs(addedIdentity, secondRoomView)).toEqual({});
-
-    // The person opens their manager in a page that never asks for their
-    // Home's root, and finds the room offered to them in their chats: the
-    // shell brings their Home up there once the page has settled, which starts
-    // the share intake that registers the offer for their manager to accept.
-    // A room that is only noticed has nothing to register.
-    if (!SERVER_EXECUTION) {
-      await openChatManager(secondShell, addedIdentity);
-      await waitForSettledText(added, "#fabrichat-rooms", secondTitle);
-    }
   });
 });
 
