@@ -1,5 +1,6 @@
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
+  fabricAwareEqual,
   hashStringOf,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
@@ -725,14 +726,34 @@ const resolveReferenceSide = (
 };
 
 /**
+ * Keywords that annotate a branch and constrain no value. `$comment` is not
+ * one of them here: the runtime reads some of its values as property markers
+ * (`schema-view.ts`), so a branch whose comment changes does not correspond.
+ */
+const BRANCH_ANNOTATION_KEYWORDS: ReadonlySet<string> = new Set([
+  "title",
+  "description",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+]);
+
+/**
  * A branch's structural correspondence key. Policies and reference targets
- * are reconciled by the node merge; reference boundaries and every other
- * constraint, including discriminators and literal defaults, stay in the key.
- * Definition maps are inert below the merged document's root.
+ * are reconciled by the node merge, and annotations constrain nothing;
+ * reference boundaries and every other constraint, including discriminators
+ * and literal defaults, stay in the key. Definition maps are inert below the
+ * merged document's root.
  */
 const unionBranchShape = (schema: JSONSchema): JSONSchema => {
   if (!isObjectNotArray(schema)) return schema;
-  const { ifc: _ifc, $defs: _defs, ...body } = schema;
+  const { ifc: _ifc, $defs: _defs, ...annotated } = schema;
+  const body = Object.fromEntries(
+    Object.entries(annotated).filter(([key]) =>
+      !BRANCH_ANNOTATION_KEYWORDS.has(key)
+    ),
+  ) as JSONSchemaObj;
   const shape = {
     ...mapSubschemas(
       typeof body.$ref === "string" ? { ...body, $ref: "" } : body,
@@ -1079,13 +1100,13 @@ const mergeSchemaNode = (
     const { $defs: _mergedDefs, ...mergedBody } = merged;
     if (
       left !== originalLeft && originalLeft.ifc === undefined &&
-      deepEqual(leftBody, mergedBody)
+      fabricAwareEqual(leftBody, mergedBody)
     ) {
       return originalLeft;
     }
     if (
       right !== originalRight && originalRight.ifc === undefined &&
-      deepEqual(rightBody, mergedBody)
+      fabricAwareEqual(rightBody, mergedBody)
     ) {
       return originalRight;
     }

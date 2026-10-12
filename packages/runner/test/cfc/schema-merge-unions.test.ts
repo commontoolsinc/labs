@@ -1,9 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fabricAwareEqual } from "@commonfabric/data-model";
+import { FabricEpochDay } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema, JSONSchemaObj } from "../../src/builder/types.ts";
 import { mergeCfcSchemaEnvelopes } from "../../src/cfc/schema-merge.ts";
 import { droppedStoredClaim } from "../../src/cfc/claim-preservation.ts";
 import { cfcSchemaEntries } from "../../src/cfc/schema-label-view.ts";
+import { resolveCfcSchemaRefs } from "../../src/cfc/schema-refs.ts";
 
 const writer = (moduleIdentity: string, binding = "admitPanel") => ({
   __ctWriterIdentityOf: {
@@ -50,6 +53,23 @@ const constrainedMember = (
   anyOf: [{
     type: "object",
     properties: { value: constraint, addedBy: { $ref: "#/$defs/Adder" } },
+  }, { type: "undefined" }],
+  $defs: {
+    Adder: {
+      type: "string",
+      ifc: { writeAuthorizedBy: writer(moduleIdentity) },
+    },
+  },
+});
+
+const annotatedMember = (
+  moduleIdentity: string,
+  annotations: JSONSchemaObj,
+): JSONSchema => ({
+  anyOf: [{
+    type: "object",
+    ...annotations,
+    properties: { addedBy: { $ref: "#/$defs/Adder" } },
   }, { type: "undefined" }],
   $defs: {
     Adder: {
@@ -331,6 +351,68 @@ describe("schema-merge-unions", () => {
     expect(typeof branch.$ref).toBe("string");
     expect(() => mergeCfcSchemaEnvelopes(merged, holder("release-1", false)))
       .not.toThrow();
+  });
+
+  for (
+    const [keyword, before, after] of [
+      ["title", "Before", "After"],
+      ["description", "before", "after"],
+      ["examples", [{ kind: "url" }], [{ kind: "piece" }]],
+      ["deprecated", false, true],
+      ["readOnly", false, true],
+      ["writeOnly", false, true],
+    ] as const
+  ) {
+    it(`pairs a branch whose ${keyword} annotation changes and keeps the stored writer`, () => {
+      const stored = annotatedMember("stored", { [keyword]: before });
+      const candidate = annotatedMember("next", { [keyword]: after });
+      const merged = mergeCfcSchemaEnvelopes(stored, candidate);
+      expect(droppedStoredClaim(stored, merged)).toBeUndefined();
+      expect(
+        cfcSchemaEntries(merged).map((entry) =>
+          (entry.schema as JSONSchemaObj).ifc?.writeAuthorizedBy
+        ),
+      ).toEqual([writer("stored")]);
+      expect(((merged as JSONSchemaObj).anyOf![0] as JSONSchemaObj)[keyword])
+        .toEqual(after);
+      expect(() => mergeCfcSchemaEnvelopes(merged, candidate)).not.toThrow();
+    });
+  }
+
+  it("refuses a branch whose $comment changes", () => {
+    // The runtime reads some `$comment` values as property markers, so a
+    // comment is part of a branch's shape.
+    expect(() =>
+      mergeCfcSchemaEnvelopes(
+        annotatedMember("stored", { $comment: "before" }),
+        annotatedMember("next", { $comment: "after" }),
+      )
+    ).toThrow(/union branches/);
+  });
+
+  it("keeps a candidate's changed FabricPrimitive default in a referenced branch, and reports the dropped claim", () => {
+    // Two distinct `FabricEpochDay` values have no enumerable state, so a
+    // comparison blind to them would hand back the stored reference and its
+    // stored default.
+    const schema = (moduleIdentity: string, day: bigint): JSONSchema => ({
+      anyOf: [{ type: "undefined" }, { $ref: "#/$defs/Value" }],
+      $defs: {
+        Value: {
+          ifc: { writeAuthorizedBy: writer(moduleIdentity) },
+          default: new FabricEpochDay(day) as never,
+        },
+      },
+    });
+    const stored = schema("stored", 1n);
+    const merged = mergeCfcSchemaEnvelopes(stored, schema("next", 2n));
+    const branch = (merged as JSONSchemaObj).anyOf![1] as JSONSchemaObj;
+    const resolved = resolveCfcSchemaRefs(branch, merged) as JSONSchemaObj;
+    expect(fabricAwareEqual(resolved.default, new FabricEpochDay(2n))).toBe(
+      true,
+    );
+    expect(droppedStoredClaim(stored, merged)).toContain(
+      "drops the stored writeAuthorizedBy",
+    );
   });
 
   it("keeps body claims when an IFC sibling overlays a reference", () => {
