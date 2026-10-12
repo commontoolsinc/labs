@@ -51,16 +51,21 @@ describe("XAppView visit join", () => {
       view.space = FIRST_SPACE;
       view.rt = stubRuntime(log) as never;
 
-      // An update with no piece on screen yet asks nothing.
+      // An update with no piece on screen yet asks nothing, and leaves the view
+      // nothing to settle for.
       view.updated(new Map());
       expect(view.visitJoin).toBeUndefined();
+      expect(view.settling).toBeUndefined();
 
       view._spaceRootPattern.run();
       await view._spaceRootPattern.taskComplete;
       view._patterns.run();
       await view._patterns.taskComplete;
       view.updated(new Map());
-      await view.visitJoin;
+      // A settle of the view waits for the join, which waits for Home's
+      // bring-up.
+      expect(view.settling).toBe(view.visitJoin);
+      await view.settling;
 
       expect(log).toEqual(["idle", "ensure", "idle", `join ${FIRST_SPACE}`]);
     } finally {

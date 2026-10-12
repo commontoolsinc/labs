@@ -445,6 +445,17 @@ export class XAppView extends BaseView {
     return join !== undefined && join.rt === this.rt ? join.done : undefined;
   }
 
+  /**
+   * The work this view has started under its current runtime that the view
+   * is not settled without: the latest join of a visited room, which itself
+   * waits for Home's bring-up, or else the bring-up; `undefined` before a
+   * piece under that runtime is on screen. It is the same promise for as long
+   * as no other join is asked for.
+   */
+  get settling(): Promise<void> | undefined {
+    return this.visitJoin ?? this.homeBringUp;
+  }
+
   #debuggerController = new DebuggerController(this);
   #keyboard = new GlobalShortcutsController(this);
 
