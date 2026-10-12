@@ -50,10 +50,13 @@ function setLoadPieceForEvent(
   }).loadPieceForEvent = load;
 }
 
-// Resolves each time a queued event begins waiting for its piece. The wait
+// Returns a function that resolves `true` once a queued event next begins
+// waiting for its piece, or `false` if `settled` settles first. The wait
 // subscribes to storage in the same synchronous step that registers it, so a
-// commit made once this resolves is one the wait sees.
-function onEachWaitBegins(runtime: Runtime): () => Promise<void> {
+// commit made once this resolves `true` is one the wait sees.
+function onEachWaitBegins(
+  runtime: Runtime,
+): (settled: Promise<unknown>) => Promise<boolean> {
   const waits = runtime.scheduler.accessForTestingOnly.eventQueueState
     .pieceStartWaits;
   const add = waits.add.bind(waits);
@@ -63,9 +66,13 @@ function onEachWaitBegins(runtime: Runtime): () => Promise<void> {
     began.resolve();
     return waits;
   };
-  return async () => {
-    await began.promise;
+  return async (settled) => {
+    const waited = await Promise.race([
+      began.promise.then(() => true),
+      settled.then(() => false),
+    ]);
     began = Promise.withResolvers<void>();
+    return waited;
   };
 }
 
@@ -208,7 +215,7 @@ describe("scheduler-event-piece-start", () => {
     const waitBegins = onEachWaitBegins(runtimeA);
 
     const status = send(runtimeA, link, { offer: "room-1" });
-    await waitBegins();
+    expect(await waitBegins(status)).toBe(true);
     await createPiece(runtimeB, "created-later");
 
     expect(await status).toBe("done");
@@ -232,7 +239,7 @@ describe("scheduler-event-piece-start", () => {
     const waitBegins = onEachWaitBegins(runtimeA);
 
     const status = send(runtimeA, link, "queued");
-    await waitBegins();
+    expect(await waitBegins(status)).toBe(true);
     runtimeA.scheduler.addEventHandler((_tx, event) => {
       handled.push(event);
     }, link);
@@ -262,7 +269,7 @@ describe("scheduler-event-piece-start", () => {
 
     const status = send(runtimeA, link, "queued");
     for (let write = 1; write <= EVENT_DEFERRAL_DROP_THRESHOLD; write++) {
-      await waitBegins();
+      expect(await waitBegins(status)).toBe(true);
       const writeTx = runtimeA.edit();
       watched.withTx(writeTx).set(write);
       await writeTx.commit().settled;
@@ -361,7 +368,7 @@ describe("scheduler-event-piece-start", () => {
     const waitBegins = onEachWaitBegins(runtime);
 
     const status = send(runtime, streamLink(runtime, "disposed"), "queued");
-    await waitBegins();
+    expect(await waitBegins(status)).toBe(true);
     await runtime.dispose({ closeStorage: false });
     await storage.close();
 
