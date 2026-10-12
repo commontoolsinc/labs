@@ -999,9 +999,10 @@ export class XAppView extends BaseView {
    * only on Home. Waiting for the settle keeps Home's start off the path to
    * the first piece on screen.
    *
-   * Only a Home that already exists is brought up. A user with none yet has
-   * no inbox for an offer to reach, and creating Home here would race
-   * whatever else creates it.
+   * Only a Home that already exists is brought up. The share intake reads
+   * the inboxes Home holds and registers offers in Home's catalog, so without
+   * Home it has nothing to do, and creating Home here would race whatever
+   * else creates it.
    */
   async #bringUpHome(rt: RuntimeInternals): Promise<void> {
     try {

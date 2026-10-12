@@ -66,8 +66,9 @@ idle, and what it rendered has reached the page. That request passes
 `existingOnly`, so it brings Home up only where Home's root already records
 the pattern it runs. Where Home has no root, or has one another writer is
 still creating, which records no pattern yet, it creates nothing, starts
-nothing, and starts no ensure; a user with no Home has no inbox for an offer to
-reach. So any page of the shell that shows a piece starts the ensure for a user
+nothing, and starts no ensure. The share intake reads the inboxes Home holds
+and registers offers in Home's catalog, so without Home it has nothing to do. So
+any page of the shell that shows a piece starts the ensure for a user
 whose Home exists, and Home's start stays off the path to that first piece. A
 page whose view fails to load a piece starts none. None of these waits for the
 ensure. A request for another space's root starts no ensure, nor does a read
