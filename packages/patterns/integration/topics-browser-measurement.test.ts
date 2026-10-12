@@ -32,11 +32,7 @@ import {
   type TopicsBrowserPosture,
 } from "./topics-browser-posture.ts";
 import { waitForPieceView } from "./topics-navigation-helpers.ts";
-import {
-  settleView,
-  waitForRuntimeIdle,
-  waitForRuntimeSynced,
-} from "./cfc-browser-helpers.ts";
+import { settleView, waitForRuntimeIdle } from "./cfc-browser-helpers.ts";
 
 /** The page globals the client-replacement cases read and write. */
 type ReplacementGlobal = typeof globalThis & {
@@ -173,47 +169,6 @@ async function diagnoseLeftoverWork(page: Page, label: string): Promise<void> {
   out(`marker counts ${JSON.stringify(counts)}`);
 }
 
-/**
- * DO NOT MERGE. Settles the view and syncs storage until a round of both sees
- * no run complete: the experiment for whether storage sync is what the board's
- * settle leaves out. Prints each round with a `TOPICS-DIAG` prefix.
- */
-async function settleAndSync(page: Page): Promise<void> {
-  // deno-lint-ignore no-explicit-any
-  type Any = any;
-  await page.evaluate(async () => {
-    const scope = globalThis as Any;
-    const rt = scope.commonfabric.rt;
-    const state = { runs: 0, listener: undefined as Any };
-    state.listener = (marker: Any) => {
-      if (marker.type === "scheduler.run.complete") state.runs++;
-    };
-    rt.on("telemetry", state.listener);
-    scope.__cfTopicsSettle = { rt, state };
-    await rt.setTelemetryEnabled(true);
-  });
-  for (let round = 1;; round++) {
-    await page.evaluate(() => {
-      (globalThis as Any).__cfTopicsSettle.state.runs = 0;
-    });
-    await waitForRuntimeSynced(page);
-    await settleView(page);
-    await waitForRuntimeIdle(page);
-    const runs = await page.evaluate(() =>
-      (globalThis as Any).__cfTopicsSettle.state.runs as number
-    );
-    console.error(`TOPICS-DIAG settle-and-sync round ${round}: ${runs} runs`);
-    if (runs === 0) break;
-  }
-  await page.evaluate(async () => {
-    const scope = globalThis as Any;
-    const { rt, state } = scope.__cfTopicsSettle;
-    delete scope.__cfTopicsSettle;
-    rt.off("telemetry", state.listener);
-    await rt.setTelemetryEnabled(false);
-  });
-}
-
 describe("topics-browser-measurement", () => {
   let fixture: TopicBoardFixture;
   let identity: Identity;
@@ -240,12 +195,6 @@ describe("topics-browser-measurement", () => {
     await session.load();
     await session.signIn();
     await session.showBoard();
-    if (
-      Deno.env.get("GITHUB_ACTIONS") === "true" ||
-      Deno.env.get("CF_TOPICS_DIAG") !== undefined
-    ) {
-      await settleAndSync(session.page);
-    }
     await diagnoseLeftoverWork(session.page, "first window after showBoard");
     await diagnoseLeftoverWork(session.page, "second window after showBoard");
   });
