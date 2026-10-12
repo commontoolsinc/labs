@@ -5114,9 +5114,42 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
+    id: inlineElementSnapshotId(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
+}
+
+/**
+ * The snapshot ids minted for inline elements, by the element's value and
+ * then by the link it was read through, which decides how its relative links
+ * resolve. A stored value is a frozen object the replica holds until the
+ * document changes, so one element resolved by every reader of the same
+ * document version is encoded once rather than per reader: the renderer
+ * resolves each element it shows several times over.
+ */
+const inlineElementSnapshotIds = new WeakMap<object, Map<string, URI>>();
+
+function inlineElementSnapshotId(
+  value: FabricValue,
+  base: NormalizedFullLink,
+): URI {
+  if (!isObjectOrArray(value)) {
+    return dataUriFromValueWithResolvedLinks(value, base);
+  }
+  const baseKey = `${base.space}\0${base.id}\0${
+    normalizeCellScope(base.scope)
+  }\0${base.path.join("/")}`;
+  let byBase = inlineElementSnapshotIds.get(value);
+  if (byBase === undefined) {
+    byBase = new Map();
+    inlineElementSnapshotIds.set(value, byBase);
+  }
+  let id = byBase.get(baseKey);
+  if (id === undefined) {
+    id = dataUriFromValueWithResolvedLinks(value, base);
+    byBase.set(baseKey, id);
+  }
+  return id;
 }
 
 /**
