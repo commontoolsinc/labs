@@ -159,7 +159,8 @@ child's source. Only positional spots are judged: a spot a result key, a node
 input or `.for()` names does not shift. Nor is a child that is its space's
 root, which its space's genesis places whatever its cause, or a child managed
 independently in a space of its own, which its parent resumes rather than sets
-up.
+up. A spot whose node sets up a space's root is not counted as another
+positional spot either, since its child does not sit there.
 
 The refusal comes before anything the setup stages commits, so a refused
 update changes none of the piece's state. A live update the guard refuses
