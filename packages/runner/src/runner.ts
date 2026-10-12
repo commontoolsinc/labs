@@ -13463,13 +13463,13 @@ export class Runner {
     if (stored === undefined || incoming === undefined) return;
     const describe = (ref: { identity: string; symbol: string }) =>
       `${ref.identity}#${ref.symbol}`;
-    const holder = instanceName !== undefined
-      ? `instance "${instanceName}"`
-      : positional
-      ? "a positional spot"
-      : debugStr`the spot $quote${partialCause}`;
     const stamped = getInstanceNameStamp(storedChild);
     if (stamped !== undefined && stamped !== instanceName) {
+      const holder = instanceName !== undefined
+        ? `instance "${instanceName}"`
+        : positional
+        ? "a positional spot"
+        : debugStr`the spot $quote${partialCause}`;
       throw new Error(
         `refusing to set up ${describe(incoming)} for ${holder} ` +
           `over the child of ${describe(stored)} that instance ` +
