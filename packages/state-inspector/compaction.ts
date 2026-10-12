@@ -731,7 +731,6 @@ export function verifyCompaction(
       ).map((column) => `"${column.name.replace(/"/g, '""')}"`)
         // The branch head advances to the compaction commit by design.
         .filter((column) => !(table === "branch" && column === '"head_seq"'));
-      if (columns.length === 0) continue;
       const list = columns.join(", ");
       const quoted = `"${table.replace(/"/g, '""')}"`;
       const grouped = (schema: string) =>

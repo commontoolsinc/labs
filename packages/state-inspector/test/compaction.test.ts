@@ -13,6 +13,8 @@ import {
   formatCompactionVerification,
   verifyCompaction,
 } from "../compaction.ts";
+import { openSpace } from "../db.ts";
+import { reconstructRevision } from "../reconstruct.ts";
 
 const SPACE = "did:key:z6MkTestSpace";
 const ACL = `of:${SPACE}`;
@@ -396,6 +398,50 @@ Deno.test("verifyCompaction names what a tampered result lost", async () => {
       `DELETE FROM snapshot WHERE id = 'of:topic'`,
       "snapshots are the backup's, removed only at or below a boundary",
     );
+    // A hollowed row the backup never had.
+    await tampered(
+      `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+       SELECT 0, 'ghost', 1, original, resolution FROM "commit" WHERE seq = 3`,
+      "hollowed payloads",
+    );
+    // A marker with the right prefix and the wrong shape.
+    await tampered(
+      `UPDATE "commit" SET original = 'fvj1:{"hollowed":{"bytes":1}}' WHERE seq = 3`,
+      "hollowed payloads",
+    );
+    // The compaction commit under another identity, class or branch, with a
+    // plan that is not an object, and with a payload that does not decode.
+    await tampered(
+      `UPDATE "commit" SET session_id = 'compaction:other' WHERE session_id LIKE 'compaction:%'`,
+      "compaction commit recorded",
+    );
+    await tampered(
+      `UPDATE "commit" SET class = 'authored', branch = 'b' WHERE session_id LIKE 'compaction:%'`,
+      "compaction commit recorded",
+    );
+    await tampered(
+      `UPDATE "commit" SET original = 'fvj1:{"compaction":{"report":"x"}}' WHERE session_id LIKE 'compaction:%'`,
+      "compaction commit recorded",
+    );
+    await tampered(
+      `UPDATE "commit" SET original = 'not a payload' WHERE session_id LIKE 'compaction:%'`,
+      "compaction commit recorded",
+    );
+    // A second ACL document, and an ACL document whose head row is gone.
+    await tampered(
+      `INSERT INTO head (branch, id, scope_key, seq, op_index, op) VALUES ('', 'of:did:key:z6MkOther', 'space', 1, 0, 'set')`,
+      "ACL document",
+    );
+    await tampered(
+      `DELETE FROM revision WHERE id = '${ACL}' AND seq = (SELECT seq FROM head WHERE id = '${ACL}')`,
+      "every head has its revision row",
+      "ACL document",
+    );
+    // An ACL document with no rows left at all.
+    await tampered(
+      `DELETE FROM revision WHERE id = '${ACL}'`,
+      "ACL document",
+    );
     // The genesis receipt hollowed by hand.
     await tampered(
       `UPDATE "commit" SET original = (SELECT original FROM "commit" WHERE seq = 3) WHERE seq = 1`,
@@ -419,9 +465,112 @@ Deno.test("verifyCompaction names what a tampered result lost", async () => {
        UPDATE head SET seq = 1, op_index = 0, op = 'set' WHERE id = '${ACL}'`,
       "ACL document",
     );
+    // A backup whose boundary row does not decode: the exact-row comparison
+    // fails rather than throws.
+    const taintedBackup = `${dir}/tainted-backup.sqlite`;
+    await Deno.copyFile(backup, taintedBackup);
+    const tainted = new Database(taintedBackup);
+    const boundary = tainted.prepare(
+      `SELECT seq, op_index FROM revision WHERE id = 'computed:a' AND scope_key = 'space' ORDER BY seq DESC, op_index DESC LIMIT 1`,
+    ).get<{ seq: number; op_index: number }>()!;
+    tainted.prepare(
+      `UPDATE revision SET data = 'garbage' WHERE id = 'computed:a' AND scope_key = 'space' AND seq = ? AND op_index = ?`,
+    ).run(boundary.seq, boundary.op_index);
+    tainted.close();
+    const againstTainted = verifyCompaction({ result, against: taintedBackup });
+    assert(
+      failing(againstTainted).includes(
+        "materialized boundaries hold the backup's state at their row",
+      ),
+      formatCompactionVerification(againstTainted),
+    );
     // No compaction commit at all: the backup against itself.
     const none = verifyCompaction({ result: backup, against: backup });
     assertFalse(none.ok);
     assertEquals(failing(none), ["compaction commit recorded"]);
   });
+});
+
+Deno.test("reconstructRevision gives the state after exactly one row", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "reconstruct-revision-" });
+  try {
+    const path = `${dir}/space.sqlite`;
+    // A snapshot at every commit, so a reconstruction at a commit's first
+    // operation has a snapshot at its own seq to wrongly start from.
+    const engine = await open({ url: toFileUrl(path), snapshotInterval: 1 });
+    applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(1, [{
+        op: "set",
+        id: "of:list",
+        value: { value: { items: [] } },
+      }]),
+    });
+    const twoOps = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(2, [
+        {
+          op: "patch",
+          id: "of:list",
+          patches: [{ op: "add", path: "/value/items/-", value: "a" }],
+        },
+        {
+          op: "patch",
+          id: "of:list",
+          patches: [{ op: "add", path: "/value/items/-", value: "b" }],
+        },
+      ]),
+    }).seq;
+    const deleted = applyCommit(engine, {
+      sessionId: "s:a",
+      commit: commit(3, [{ op: "delete", id: "of:list" }]),
+    }).seq;
+    close(engine);
+    const space = openSpace(path);
+    try {
+      const items = (document: unknown) =>
+        (document as { value: { items: unknown[] } }).value.items;
+      assertEquals(
+        items(
+          reconstructRevision(space, { id: "of:list", seq: 1, opIndex: 0 }),
+        ),
+        [],
+      );
+      assertEquals(
+        items(
+          reconstructRevision(space, {
+            id: "of:list",
+            seq: twoOps,
+            opIndex: 0,
+          }),
+        ),
+        ["a"],
+      );
+      assertEquals(
+        items(
+          reconstructRevision(space, {
+            id: "of:list",
+            seq: twoOps,
+            opIndex: 1,
+          }),
+        ),
+        ["a", "b"],
+      );
+      assertEquals(
+        reconstructRevision(space, { id: "of:list", seq: deleted, opIndex: 0 }),
+        undefined,
+      );
+      let thrown: unknown;
+      try {
+        reconstructRevision(space, { id: "of:list", seq: twoOps, opIndex: 7 });
+      } catch (error) {
+        thrown = error;
+      }
+      assert(thrown instanceof Error && thrown.message.includes("no revision"));
+    } finally {
+      space.close();
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
 });

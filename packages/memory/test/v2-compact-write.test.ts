@@ -31,6 +31,7 @@ import {
   type CompactionRun,
   compactStore,
   decodeHollowedPayload,
+  formatCompactionReport,
   formatCompactionRun,
   HOLLOWED_MARKER_PREFIX,
   isHollowedPayload,
@@ -770,6 +771,10 @@ describe("compactStore", () => {
     });
     expect(second.instancesCompacted).toBe(2);
     expect(second.report.payloads.alreadyHollowed).toBe(0);
+    expect(second.report.payloads.exemptCompaction).toBe(1);
+    expect(formatCompactionReport(second.report)).toContain(
+      "earlier runs' commits keep 1",
+    );
 
     const resumed = await reopen(out);
     const uninterrupted = await reopen(twinOut);
@@ -935,6 +940,28 @@ describe("compactStore", () => {
           selection: { prefixes: ["computed:"] },
         }),
       ).rejects.toThrow("legacy table(s) scheduler_observation");
+    });
+
+    it("names a column declared differently from the engine's", async () => {
+      await build(standard);
+      // `branch.status` redeclared with another default: the same name and
+      // type, so only the declaration comparison can tell.
+      const db = new Database(store);
+      db.exec(`
+        CREATE TABLE branch_redeclared (
+          name TEXT NOT NULL PRIMARY KEY, parent_branch TEXT, fork_seq INTEGER,
+          created_seq INTEGER NOT NULL DEFAULT 0, head_seq INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'live', created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          deleted_at TEXT, FOREIGN KEY (parent_branch) REFERENCES branch_redeclared(name));
+        INSERT INTO branch_redeclared SELECT * FROM branch;
+        DROP TABLE branch;
+        ALTER TABLE branch_redeclared RENAME TO branch;`);
+      db.close();
+      await expect(
+        compactStore({ store, out, selection: { prefixes: ["computed:"] } }),
+      ).rejects.toThrow(
+        "branch.status is declared TEXT NOT NULL DEFAULT 'live' where the engine declares TEXT NOT NULL DEFAULT 'active'",
+      );
     });
 
     it("refuses an ACL document whose value is not an ACL", async () => {

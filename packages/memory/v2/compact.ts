@@ -1066,12 +1066,9 @@ export const compactStore = async (
 
   const engine = await open({ url: toFileUrl(store) });
   try {
-    if (engine.legacyCommitMetadataRefsRequired) {
-      throw new CompactionRefused(
-        "the store's commit table requires invocation and authorization refs on every row, which predates the schema the run writes",
-      );
-    }
     const db = engine.database;
+    // A store whose commit refs are NOT NULL (the legacy placeholder schema)
+    // fails the nullability comparison above, so none reaches here.
     if (schemaText(db) !== schemaBefore) {
       // The preflight above is what should have caught this; the store is a
       // copy, and the operator takes a fresh one.
