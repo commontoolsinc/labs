@@ -146,8 +146,8 @@ whatever number it now takes. A parent's setup refuses
 (`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
 naming both pattern identities, to set up a child:
 
-- over a stored child stamped with another instance's name, at any spot and
-  whatever the two pattern identities;
+- at a positional spot or a named instance's spot, over a stored child stamped
+  with another instance's name, whatever the two pattern identities;
 - at a positional spot, over a stored child of another pattern identity, when a
   child of the incoming pattern identity runs at another positional spot of the
   parent; or
@@ -160,12 +160,13 @@ child of a different identity with no such sign is taken for the same child
 under a newer version of its own source, since a child's identity changes
 whenever its own source does, so none of the rules blocks an ordinary update of
 a child's source. Only positional spots are judged by the last two: a spot a
-result key, a node input, `.for()` or an instance name names does not shift. No
-rule judges a child that is its space's root, which its space's genesis places
-whatever its cause, or a child managed independently in a space of its own,
-which its parent resumes rather than sets up. A spot whose node sets up a
-space's root is not counted as another positional spot either, since its child
-does not sit there.
+result key, a node input, `.for()` or an instance name names does not shift. A
+spot a result key, a node input or `.for()` names is not judged at all, since
+only a named instance stamps the child it sets up. No rule judges a child that
+is its space's root, which its space's genesis places whatever its cause, or a
+child managed independently in a space of its own, which its parent resumes
+rather than sets up. A spot whose node sets up a space's root is not counted as
+another positional spot either, since its child does not sit there.
 
 The refusal comes before anything the setup stages commits, so a refused
 update changes none of the piece's state. A live update the guard refuses

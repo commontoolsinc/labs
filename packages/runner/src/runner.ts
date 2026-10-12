@@ -13400,11 +13400,11 @@ export class Runner {
   }
 
   /**
-   * Throws, naming both pattern identities, when a sub-pattern node of
-   * `pattern` would set its child up over a child the parent `resultCell`
-   * keeps elsewhere (`#refuseDisplacedChild()`), for each node whose child
-   * this parent owns: not a child that is its space's root, nor one managed
-   * in a space of its own.
+   * Throws, naming both pattern identities, when a positional or named
+   * sub-pattern node of `pattern` would set its child up over a child the
+   * parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for each
+   * such node whose child this parent owns: not a child that is its space's
+   * root, nor one managed in a space of its own.
    */
   #refuseDisplacedChildren(
     tx: IExtendedStorageTransaction,
@@ -13412,6 +13412,15 @@ export class Runner {
     resultCell: Cell<any>,
   ): void {
     for (const { module, partialCause } of subPatternNodes(pattern)) {
+      // Only a named instance stamps the child it sets up, and a spot that a
+      // result key, a node input or `.for()` names holds no such child, nor
+      // shifts with its siblings.
+      if (
+        !isPositionalPartialCause(partialCause) &&
+        instanceNameOfPartialCause(partialCause) === undefined
+      ) {
+        continue;
+      }
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
@@ -13434,14 +13443,14 @@ export class Runner {
   }
 
   /**
-   * Throws rather than let the child of `childPattern`, at the spot
-   * `partialCause` names, set up over `storedChild` when that cell holds a
-   * different child the parent `resultCell` keeps elsewhere: a child stamped
-   * with another instance's name, or, where `partialCause` is positional, a
-   * sign that the parent's positional children have moved spots, which is a
-   * child of `childPattern`'s identity running at another positional spot, or
-   * another positional spot of `pattern` setting up the identity `storedChild`
-   * runs. A spot whose node sets up a space's root is not counted. A child
+   * Throws rather than let the child of `childPattern`, at the positional or
+   * named spot `partialCause` names, set up over `storedChild` when that cell
+   * holds a different child the parent `resultCell` keeps elsewhere: a child
+   * stamped with another instance's name, or, where `partialCause` is
+   * positional, a sign that the parent's positional children have moved
+   * spots, which is a child of `childPattern`'s identity running at another
+   * positional spot, or another positional spot of `pattern` setting up the
+   * identity `storedChild` runs. A spot whose node sets up a space's root is not counted. A child
    * whose identity differs with no such sign is the same child under a newer
    * version of its own source.
    */
@@ -13467,9 +13476,7 @@ export class Runner {
     if (stamped !== undefined && stamped !== instanceName) {
       const holder = instanceName !== undefined
         ? `instance "${instanceName}"`
-        : positional
-        ? "a positional spot"
-        : debugStr`the spot $quote${partialCause}`;
+        : "a positional spot";
       throw new Error(
         `refusing to set up ${describe(incoming)} for ${holder} ` +
           `over the child of ${describe(stored)} that instance ` +
