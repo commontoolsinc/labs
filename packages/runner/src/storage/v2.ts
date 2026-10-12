@@ -567,6 +567,16 @@ type PendingVersion =
      * writer read.
      */
     baseSeq: number;
+
+    /**
+     * Set when the commit carried a read of this document, so that the
+     * server's identity proof, should it elide the commit, was made against
+     * the view this layer's `value` was computed from (03-commit-model.md
+     * §3.6.1), and that value is the stored document. A layer the commit read
+     * nothing for is proved against the stored document alone, and its
+     * `value` says nothing about what the store holds beyond its own ops.
+     */
+    read?: true;
   }
   & (
     | {
@@ -713,7 +723,13 @@ const pendingVersion = (
     }
     | { op: "delete" },
   baseSeq: number,
-): PendingVersion => ({ localSeq, baseSeq, ...operation });
+  read: boolean,
+): PendingVersion => ({
+  localSeq,
+  baseSeq,
+  ...(read ? { read: true } : {}),
+  ...operation,
+});
 
 /**
  * The paths of `operation`'s splices that a recursive read among `reads`
@@ -1482,7 +1498,8 @@ export class StorageManager implements IStorageManager {
    * resolve against this manager's own session identity. Refcounted: concurrent
    * `syncCell()` calls for the same document share one entry. Waiters resolve
    * when the count returns to zero — whether the load produced a value or found
-   * the document absent.
+   * the document absent. A prefetch's failure (see `#registerPendingLoad()`)
+   * is kept apart from `failure`, which is what the waiters see.
    */
   #pendingLoads = new Map<string, {
     count: number;
@@ -1494,6 +1511,7 @@ export class StorageManager implements IStorageManager {
       scopeKey?: ScopeKey;
     };
     failure: unknown;
+    prefetchFailure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
 
@@ -2627,6 +2645,12 @@ export class StorageManager implements IStorageManager {
    * such reads registers nothing, and its release does nothing: the read
    * returns no data however long it is waited for, so it is not a load in
    * flight, and nothing parks on it.
+   *
+   * With `prefetch`, the load is one no reader asked for. A waiter still
+   * waits for it to settle, since its landing is what a cold read is waiting
+   * on, but its failure reaches no waiter: a reader's own load of the
+   * document decides whether that reader's wait fails. The failure still
+   * keeps the key's settling from being reported as a recovery.
    */
   #registerPendingLoad(
     address: {
@@ -2639,6 +2663,7 @@ export class StorageManager implements IStorageManager {
        * cross-matches — is then per THAT instance. */
       scopeKey?: ScopeKey;
     },
+    { prefetch = false }: { prefetch?: boolean } = {},
   ): (failure?: unknown) => void {
     if (this.refusesReadByConstruction(address)) return () => {};
     const key = entityKey(address, this.scopeKeyIdentity());
@@ -2649,17 +2674,19 @@ export class StorageManager implements IStorageManager {
         generation: this.#nextPendingLoadGeneration++,
         address,
         failure: undefined,
+        prefetchFailure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
     return (failure?: unknown) => {
-      entry.failure ??= failure;
+      if (prefetch) entry.prefetchFailure ??= failure;
+      else entry.failure ??= failure;
       entry.count--;
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
-      if (entry.failure === undefined) {
+      if (entry.failure === undefined && entry.prefetchFailure === undefined) {
         this.#loadRecoveryObserver?.({
           failedEpoch: this.#loadFailureEpoch(key),
           recoveryEpoch: this.#loadEpoch(entry.generation),
@@ -2882,7 +2909,9 @@ export class StorageManager implements IStorageManager {
    * a crossing back, and a kick already in flight or landed ends that chain.
    * A load that fails hands its kick back, so a frame carrying the crossing
    * again kicks it again; the target stays absent and the frame that
-   * carried the crossing is unaffected.
+   * carried the crossing is unaffected. No reader asked for the load, so it
+   * is registered as a prefetch: its failure fails no reader's wait on the
+   * document, an event parked on it among them.
    */
   #loadCrossings(crossings: readonly SyncCrossing[]): void {
     for (const crossing of crossings) {
@@ -2901,7 +2930,9 @@ export class StorageManager implements IStorageManager {
       if (this.#crossingKicks.has(key)) continue;
       this.#crossingKicks.add(key);
       const address = { space, scope, id };
-      const releaseLoad = this.#registerPendingLoad(address);
+      const releaseLoad = this.#registerPendingLoad(address, {
+        prefetch: true,
+      });
       // One ledger entry per target, however many selectors load it: the
       // entry stays while any of them is in flight.
       const ledgerKey = entityKey(address, this.scopeKeyIdentity());
@@ -9357,6 +9388,11 @@ export class SpaceReplica
     const { id, scope, ...pending } = operation;
     const record = this.#record(id, scope, identity);
     const intended = intendedSplicePaths(operation, reads);
+    const normalizedScope = normalizeCellScope(scope);
+    const read = [...reads.confirmed, ...reads.pending].some((candidate) =>
+      candidate.id === id &&
+      normalizeCellScope(candidate.scope) === normalizedScope
+    );
     record.pending.push(
       pendingVersion(
         localSeq,
@@ -9375,6 +9411,7 @@ export class SpaceReplica
           ? { ...pending, intended }
           : pending,
         record.confirmed.seq,
+        read,
       ),
     );
   }
@@ -9587,7 +9624,12 @@ export class SpaceReplica
         this.#scopeKeyIdentity(),
       )
       : undefined;
-    for (const { id, scope, scopeKey } of keys.values()) {
+    // Each operation's document, in the wire commit's order: an elision
+    // report names operations by that index.
+    const operationKeys = this.#touchedOf(operations, identity).map((
+      address,
+    ) => this.#docKeyOf(address));
+    for (const [key, { id, scope, scopeKey }] of keys.entries()) {
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -9600,6 +9642,39 @@ export class SpaceReplica
       }
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
+      // An accept that elided every operation on this document wrote
+      // nothing. Where the commit read the document, that is because the
+      // store already held the document this layer's transaction computed:
+      // the identity proof was made against the view the layer's `value`
+      // was computed from (03-commit-model.md §3.6.1). So the layer
+      // promotes to that document rather than by replaying its ops over
+      // whatever confirmed value the frames have delivered so far — a replay
+      // is exact only over the base the ops were diffed from, and a splice
+      // over any other base lands its elements a second time. The document a
+      // frame has delivered at or after the commit's seq is newer still, and
+      // stands. A layer the commit read nothing for was proved against the
+      // stored document alone, which shows only that its ops leave that
+      // document unchanged; its `value` is not the stored document, and the
+      // layer promotes below by replaying its ops, as any accept does.
+      const elidedHere = applied.elidedOpIndexes !== undefined &&
+        operationKeys.every((operationKey, index) =>
+          operationKey !== key || applied.elidedOpIndexes!.includes(index)
+        );
+      const computed = record.pending[lastPendingIndex]!;
+      if (elidedHere && computed.read === true) {
+        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+          record.confirmed = confirmedVersion(
+            applied.seq,
+            computed.value,
+            coverClass,
+          );
+        }
+        record.pending = record.pending.filter((entry) =>
+          entry.localSeq !== localSeq
+        );
+        record.materialized = undefined;
+        continue;
+      }
       // The verdict is in: a splice shown as the array its writer computed
       // (`displayedPatches`) promotes as the store applied it, which over a
       // moved array is a different value, so the layers are marked accepted

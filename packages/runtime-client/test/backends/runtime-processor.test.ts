@@ -4023,6 +4023,38 @@ describe("runtime-processor", () => {
     });
 
     /**
+     * Stands in for the three steps of the housekeeping, recording each
+     * call, so that a case can say none was started even of a step that
+     * fails at once.
+     */
+    function stubHousekeeping() {
+      const steps = [
+        stub(
+          PiecesController.prototype,
+          "adoptLegacySpaces",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "ensurePrivateInbox",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "startShareIntake",
+          () => Promise.resolve(undefined),
+        ),
+      ];
+      return {
+        /** How many times each step was started, in order. */
+        starts: () => steps.map(({ calls }) => calls.length),
+        [Symbol.dispose]() {
+          for (const step of steps) step.restore();
+        },
+      };
+    }
+
+    /**
      * A processor over a real runtime on emulated storage, whose Home pattern
      * is a stand-in holding `rows` as its space list and recording what is
      * sent to its streams. The space creation, the site table, and the
@@ -4033,7 +4065,9 @@ describe("runtime-processor", () => {
      * Home's handler never reaches the host, and this stand-in has none. Each
      * read the inbox ensure makes of Home waits for `inboxReadable`. The share
      * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
-     * each is made, a throw from it being a throw from the subscription.
+     * each is made, a throw from it being a throw from the subscription. Every
+     * space reads as having that stand-in stored as its root, which records a
+     * pattern, until `storeRoot()` stores another.
      */
     async function homeWorker(
       rows: readonly unknown[] | (() => unknown),
@@ -4058,6 +4092,11 @@ describe("runtime-processor", () => {
       const unsubscribed: string[] = [];
       const home = {
         getAsLink: () => cellRefToSigilLink(homeRef),
+        // The pattern Home's root records that it runs.
+        getMetaRaw: (key: string) =>
+          key === "patternIdentity"
+            ? { identity: "home-worker-pattern", symbol: "default" }
+            : undefined,
         key: (name: string) =>
           name === "spaces"
             ? { get: typeof rows === "function" ? rows : () => rows }
@@ -4089,9 +4128,19 @@ describe("runtime-processor", () => {
         "ensureDefaultPattern",
         () => Promise.resolve({ getCell: () => home } as never),
       );
+      let storedRoot: unknown = home;
+      const stored = stub(
+        PiecesController.prototype,
+        "getDefaultPattern",
+        () => Promise.resolve(storedRoot as never),
+      );
       const processor = buildProcessor({
         identity: signer,
         runtime,
+        cc: new PiecesController(
+          { as: signer, space: signer.did() },
+          runtime,
+        ),
         space: signer.did(),
       });
       /** The rows of the Home site table, as committed. */
@@ -4111,6 +4160,8 @@ describe("runtime-processor", () => {
       return {
         runtime,
         processor,
+        /** The DID of the worker's identity, and so of its Home space. */
+        homeSpace: signer.did(),
         sent,
         /** What was sent to the streams that change the space list. */
         spaceListSends: () =>
@@ -4123,8 +4174,22 @@ describe("runtime-processor", () => {
         /** The Home fields whose subscriptions the share intake has ended. */
         unsubscribed,
         siteTable,
+        /** Makes `root` the root Home's space links, `undefined` for none. */
+        storeRoot(root: unknown): void {
+          storedRoot = root;
+        },
+        /** How many times Home's root was ensured, which may create it. */
+        rootEnsures: () => ensure.calls.length,
         async [Symbol.asyncDispose]() {
           ensure.restore();
+          stored.restore();
+          // A space context's first sync, unfinished at disposal, is logged
+          // as a failure.
+          await Promise.allSettled(
+            [...processor.accessForTestingOnly.spaces.values()].map(
+              ({ ready }) => ready,
+            ),
+          );
           await runtime.dispose();
           await storageManager.close();
         },
@@ -4421,6 +4486,232 @@ describe("runtime-processor", () => {
         warn.restore();
       }
     });
+
+    describe("starting Home's root", () => {
+      // The housekeeping's first step, the adoption, is held as the
+      // housekeeping starts, so a case that the request started it reads that
+      // as soon as the request returns. What follows the adoption runs after
+      // the request has returned, so a case about it waits for the event it
+      // is about.
+
+      it("adopts Home's legacy rows, has Home ensure the private inbox, and starts the share intake", async () => {
+        const ensureSent = Promise.withResolvers<void>();
+        await using worker = await homeWorker(
+          [{ name: "team-lunch" }],
+          () => ensureSent.resolve(),
+        );
+
+        const root = await worker.processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: worker.homeSpace,
+        });
+
+        expect(root.piece).toBeDefined();
+        expect(worker.processor.accessForTestingOnly.legacySpacesAdopted)
+          .toBeDefined();
+        await ensureSent.promise;
+        expect(await worker.processor.accessForTestingOnly.shareIntake)
+          .toBeDefined();
+        expect(worker.privateInboxSends()).toBe(1);
+        expect(worker.spaceListSends()).toEqual([{
+          stream: "adoptSpace",
+          event: {
+            name: "team-lunch",
+            did: await legacySpaceDid("team-lunch"),
+          },
+        }]);
+        expect(worker.subscribed).toEqual([
+          "privateInbox",
+          "retainedPrivateInboxes",
+        ]);
+      });
+
+      it("shares its housekeeping with a later Home ensure, which adds none", async () => {
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+
+        await worker.processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: worker.homeSpace,
+        });
+        const adopted = worker.processor.accessForTestingOnly
+          .legacySpacesAdopted;
+        await worker.processor.handleEnsureHomePatternRunning({
+          type: RequestType.EnsureHomePatternRunning,
+        });
+        await worker.processor.accessForTestingOnly.privateInboxEnsured;
+
+        expect(adopted).toBeDefined();
+        expect(worker.privateInboxSends()).toBe(1);
+        expect(worker.spaceListSends()).toEqual([{
+          stream: "adoptSpace",
+          event: {
+            name: "team-lunch",
+            did: await legacySpaceDid("team-lunch"),
+          },
+        }]);
+      });
+
+      it("returns the root while the private inbox ensure is still reading", async () => {
+        // A request that waited for the ensure would never return here, since
+        // the ensure's reads wait for a release that comes only after it.
+
+        const readable = Promise.withResolvers<void>();
+        const ensureSent = Promise.withResolvers<void>();
+        await using worker = await homeWorker(
+          [],
+          () => ensureSent.resolve(),
+          readable.promise,
+        );
+
+        const root = await worker.processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: worker.homeSpace,
+        });
+
+        expect(root.piece).toBeDefined();
+        expect(worker.processor.accessForTestingOnly.legacySpacesAdopted)
+          .toBeDefined();
+        expect(worker.privateInboxSends()).toBe(0);
+        readable.resolve();
+        await ensureSent.promise;
+        expect(worker.privateInboxSends()).toBe(1);
+      });
+
+      it("returns the root when sending the private inbox ensure throws, and reports the failure", async () => {
+        const attempted = Promise.withResolvers<void>();
+        await using worker = await homeWorker([], () => {
+          attempted.resolve();
+          throw new Error("send failure");
+        });
+        const warn = stub(console, "warn", () => {});
+        try {
+          const root = await worker.processor.handleGetSpaceRootPattern({
+            type: RequestType.GetSpaceRootPattern,
+            space: worker.homeSpace,
+          });
+
+          expect(root.piece).toBeDefined();
+          expect(worker.processor.accessForTestingOnly.legacySpacesAdopted)
+            .toBeDefined();
+          await attempted.promise;
+          await worker.processor.accessForTestingOnly.privateInboxEnsured;
+          expect(warn.calls.map(({ args }) => args[0])).toEqual([
+            "[RuntimeProcessor] Ensuring the private inbox:",
+          ]);
+          expect(worker.processor.accessForTestingOnly.privateInboxEnsured)
+            .toBeUndefined();
+        } finally {
+          warn.restore();
+        }
+      });
+
+      it("starts no housekeeping when the root is read with `start` `false`", async () => {
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+
+        const root = await worker.processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: worker.homeSpace,
+          start: false,
+        });
+
+        expect(root.piece).toBeDefined();
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+
+      it("starts no housekeeping when the root started is another space's", async () => {
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+        const other = await Identity.generate({ implementation: "noble" });
+
+        const root = await worker.processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: other.did(),
+        });
+
+        expect(root.piece).toBeDefined();
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+    });
+
+    describe("ensuring an existing Home only", () => {
+      it("brings up a Home whose root records its pattern, and starts the housekeeping", async () => {
+        const ensureSent = Promise.withResolvers<void>();
+        await using worker = await homeWorker(
+          [],
+          () => ensureSent.resolve(),
+        );
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(response.cell).toBeDefined();
+        await ensureSent.promise;
+        expect(worker.privateInboxSends()).toBe(1);
+      });
+
+      it("creates nothing and starts no housekeeping where Home has no root", async () => {
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(response).toStrictEqual({});
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+
+      it("treats a root that records no pattern yet as no Home", async () => {
+        // A root another writer has linked and not yet finished creating
+        // holds a value and records no pattern, which a start refuses.
+
+        await using worker = await homeWorker([{ name: "team-lunch" }]);
+        using housekeeping = stubHousekeeping();
+        const root = worker.runtime.getCell<{ name: string }>(
+          worker.homeSpace,
+          "home-root-being-created",
+        );
+        const tx = worker.runtime.edit();
+        root.withTx(tx).set({ name: "Home" });
+        await tx.commit().settled;
+        await root.sync();
+        worker.storeRoot(root);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+            existingOnly: true,
+          });
+
+        expect(root.getRaw()).toEqual({ name: "Home" });
+        expect(response).toStrictEqual({});
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+
+      it("creates Home where it has no root when not asked for an existing Home only", async () => {
+        await using worker = await homeWorker([]);
+        using housekeeping = stubHousekeeping();
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor
+          .handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+          });
+
+        expect(response.cell).toBeDefined();
+        expect(worker.rootEnsures()).toBe(1);
+        expect(housekeeping.starts()[0]).toBe(1);
+      });
+    });
   });
 
   describe("system-pattern update wiring", () => {
@@ -4437,6 +4728,10 @@ describe("runtime-processor", () => {
           getDefaultPattern: () => Promise.resolve(undefined),
           ensureDefaultPattern: () =>
             Promise.resolve({ getCell: () => rootCell }),
+          // The housekeeping that starting Home's root starts.
+          adoptLegacySpaces: () => Promise.resolve(),
+          ensurePrivateInbox: () => Promise.resolve(),
+          startShareIntake: () => Promise.resolve(undefined),
         };
         // The space is the identity's Home, which is the identity's own.
         const processor = buildProcessor({

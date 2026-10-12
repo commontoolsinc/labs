@@ -173,7 +173,15 @@ The home default pattern holds the user's private inbox in
 where other people deliver offers to the user. The user has one inbox, whichever
 side creates it. The host sends Home's `ensurePrivateInbox` stream the first
 time a runtime worker brings up Home, and again at the worker's next bring-up of
-Home if that ensure failed, and decides by one profile: the first, in the order
+Home if that ensure failed. A worker brings up Home when a client asks it to
+ensure Home is running, to create a space, or to run the Home space's root.
+The shell asks for Home's root when it shows Home, and on every page, once per
+runtime, asks for an existing Home to be running once the first piece the page
+shows is on screen and the view has settled. That request brings Home up only
+where Home's root records the pattern it runs, and otherwise creates and
+starts nothing. Reading Home's root with `start: false`, opening another
+space's root, and the `cf` CLI start no ensure.
+The host decides by one profile: the first, in the order
 `#profile` answers in (the default, then the MRU list, then `profiles` list
 order), that points at an inbox. A loom daemon decides by the profile `#profile`
 answers with too. Home keeps an inbox it holds while that profile points at it,
@@ -271,8 +279,11 @@ no runner is registered, the tab explains that requests remain queued until one
 starts. A queue with no entries shows "No agent runs yet."
 
 A request made in a home space that holds no queue — its home pattern does not
-exist, or is a version without the field — ends `refused`, and
-`wish({ query: "#agent_queue" })` there resolves to nothing.
+exist, or is a version without the field — ends `refused`. Where the home
+pattern is a version without the field, `wish({ query: "#agent_queue" })`
+resolves to nothing; where there is no home pattern yet, the wish creates one
+on a client runtime and is refused on a serving one, as
+[Built-in Targets](wish.md#built-in-targets) describes.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -316,13 +327,15 @@ intake among them, and forgetting a room archives its entry.
 
 The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. A Home is created once, on its user's first
-open, and from then on it owns account data: profiles, favorites, navigation,
-the shared-space catalog and the private inbox pointer. It is changed only in
-place, with `cf piece setsrc` on its root, which retains that data. Nothing
-but that first open creates the root of an identity Home, and nothing replaces
-or unlinks it: root recreation refuses a Home before stopping, unlinking or
-compiling anything, whether the Home is absent, installed, or pointing at a
-target that cannot currently be loaded, and the low-level link and unlink
+open or by the first wish on a client runtime for a target under its root (see
+[Built-in Targets](wish.md#built-in-targets)), and from then on it owns account
+data: profiles, favorites, navigation, the shared-space catalog and the private
+inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
+which retains that data. Nothing but that first open or that first wish creates
+the root of an identity Home, and nothing replaces or unlinks it: root
+recreation refuses a Home before stopping, unlinking or compiling anything,
+whether the Home is absent, installed, or pointing at a target that cannot
+currently be loaded, and the low-level link and unlink
 refuse to replace or drop a root a Home holds. (`cf space set-home` is
 retired; see
 [Retired: `cf space set-home`](../../../packages/cli/README.md#retired-cf-space-set-home).)
@@ -482,8 +495,9 @@ Both the home pattern and the default app pattern follow the same mechanism:
 3. The pattern is compiled, run, linked as `spaceCell.defaultPattern`, and its
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
-   Home, absent or present, which is created on first open and updated in
-   place. A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
+   Home, absent or present, which is created on first open, or by the first
+   wish on a client runtime for a target under its root, and updated in place.
+   A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
    remains untracked by the URL updater and may carry a separate repository
    locator
 5. Before an existing eligible root starts, it is reconciled in place. A root

@@ -181,6 +181,7 @@ const flags = new Set([
   "sessionClose",
   "connectionAuth",
   "admissionNotice",
+  "elidedVerdicts",
   "routedAuthV1",
 ]);
 

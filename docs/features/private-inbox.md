@@ -52,7 +52,31 @@ The host gives Home its inbox, normally once per runtime worker, when it first
 brings up the user's Home pattern: `PiecesController.ensurePrivateInbox()` in
 `packages/piece`, called from `RuntimeProcessor` in `packages/runtime-client`,
 which does it through `ensurePrivateInboxOf()` in
-`packages/piece/src/ops/private-inbox.ts`. It decides by one profile: the first,
+`packages/piece/src/ops/private-inbox.ts`.
+
+A worker brings up Home when a client asks it for any of three things, and the
+first of them in a worker starts the ensure: to ensure Home is running
+(`ensureHomePatternRunning()`), to create a space (`createSpace()`), or for the
+root pattern of the identity's own Home space to run (`getSpaceRootPattern()`,
+unless the request passes `start: false`). The shell asks for the last of these
+when it shows Home. Whatever it shows, it also asks its worker, once per
+runtime, to ensure an existing Home is running, as soon as the first piece
+shown under that runtime is on screen and the view has settled: the worker is
+idle, and what it rendered has reached the page. That request passes
+`existingOnly`, so it brings Home up only where Home's root already records
+the pattern it runs. Where Home has no root, or has one another writer is
+still creating, which records no pattern yet, it creates nothing, starts
+nothing, and starts no ensure. The share intake reads the inboxes Home holds
+and registers offers in Home's catalog, so without Home it has nothing to do. So
+any page of the shell that shows a piece starts the ensure for a user
+whose Home exists, and Home's start stays off the path to that first piece. A
+page whose view fails to load a piece starts none. None of these waits for the
+ensure. A request for another space's root starts no ensure, nor does a read
+of Home's root with `start: false`, which reads what the root exported
+without running it. The `cf` CLI brings Home up through `PiecesController`
+directly and never starts one.
+
+The ensure decides by one profile: the first,
 in the order `#profile` answers in, that points at an inbox. That order is
 `orderProfileCandidates()` in `packages/runner/src/profile-order.ts`, which the
 `wish` builtin answers `#profile` by: Home's default profile first, then by rank
@@ -521,7 +545,10 @@ shared-space catalog, which
 `RuntimeProcessor` starts it beside the ensure, the first time a runtime
 worker brings up Home. Home opens without waiting for it; a failure to start
 it is logged, and the worker's next bring-up of Home starts it again. It runs
-until the processor is disposed. A Home pattern without a `registerSharedSpace`
+until the processor is disposed. The shell brings an existing Home up on any
+page that shows a piece, once that page has settled, as "Creating or adopting
+it" says, so an offer is taken up while any such page of the user's is open,
+and not only while Home is. A Home pattern without a `registerSharedSpace`
 stream is left alone.
 
 It subscribes to Home's `privateInbox` and `retainedPrivateInboxes`, and to
