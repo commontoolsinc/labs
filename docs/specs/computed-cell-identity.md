@@ -139,6 +139,44 @@ A named instance also records, as its descriptor's `legacyPartialCause`, the
 number, so every other anonymous root keeps the number it would have without
 instance names.
 
+A sub-pattern instance with a positional cause moves to another child's state
+when a cell is added ahead of it, since its child is the one minted from
+whatever number it now takes. A parent's setup refuses
+(`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
+naming both pattern identities, to set up a child at a positional spot over a
+stored child of another pattern identity when the parent shows its positional
+children have moved spots:
+
+- a child of the incoming pattern identity runs at another positional spot of
+  the parent; or
+- another positional spot of the pattern sets up the stored child's pattern
+  identity.
+
+A stored child of a different identity with neither sign is taken for the same
+child under a newer version of its own source, since a child's identity changes
+whenever its own source does, so neither rule blocks an ordinary update of a
+child's source. Only positional spots are judged: a spot a result key, a node
+input or `.for()` names does not shift. Nor is a child that is its space's
+root, which its space's genesis places whatever its cause, or a child managed
+independently in a space of its own, which its parent resumes rather than sets
+up.
+
+The refusal comes before anything the setup stages commits, so a refused
+update changes none of the piece's state. A live update the guard refuses
+leaves the previous pattern running. The piece's pattern pointer still names
+the refused pattern, though, so a fresh start sets that pattern up, refuses
+again, and does not start the piece until the pointer names a pattern the guard
+accepts, such as the source the piece ran before.
+
+What this leaves open:
+
+- Where a child's own source changed in the same update that moved it, its
+  identity changed with it, so the rules have nothing to judge by and let the
+  setup through. A child can then take another's state.
+- When a positional root moves to a number nothing held, its children are
+  minted afresh and the old ones are orphaned with no refusal, since nothing
+  sets up over them.
+
 ### Transaction provenance
 
 The runner already distinguishes recompute transactions from event-handler
