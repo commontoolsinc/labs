@@ -1249,14 +1249,4 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
         'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
     },
   },
-  {
-    // Reverting labs#8713 with labs#8715 takes out the meeting binding the
-    // Loom root's contract recorded as this baseline.
-    pattern: "loom/main.tsx",
-    baselines: ["20261011T182304Z-qsqQOWTGzU00g8hJ"],
-    paths: ["result.bindMeeting"],
-    reason:
-      "labs#8713, which added the Loom root's meeting binding, is reverted with labs#8715 to restore stored writer-claim enforcement; a root rolled forward loses `bindMeeting` until both re-land",
-    record: "docs/history/loom-meeting-binding-revert-break.md",
-  },
 ];
