@@ -1,6 +1,7 @@
 import { createTestSpace, env } from "@commonfabric/integration";
 import { type DID, Identity } from "@commonfabric/identity";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { isLink } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -88,7 +89,7 @@ describe("profile-before-home integration test", () => {
       await spaceCell.sync();
       const slot = (spaceCell.getRaw() as { defaultPattern?: unknown })
         .defaultPattern;
-      expect(JSON.stringify(slot)).toContain("link@1");
+      expect(isLink(slot)).toBe(true);
       const root = (await home.ensureDefaultPattern()).getCell();
       const profiles = root.key("profiles" as never).resolveAsCell();
       await profiles.sync();
