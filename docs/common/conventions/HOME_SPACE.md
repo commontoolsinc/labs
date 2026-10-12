@@ -175,10 +175,12 @@ side creates it. The host sends Home's `ensurePrivateInbox` stream the first
 time a runtime worker brings up Home, and again at the worker's next bring-up of
 Home if that ensure failed. A worker brings up Home when a client asks it to
 ensure Home is running, to create a space, or to run the Home space's root.
-The shell asks for Home's root when it shows Home, and on every page asks for
-Home to be running, once per runtime, once the first piece the page shows is on
-screen and the view has settled; reading Home's root with `start: false`,
-opening another space's root, and the `cf` CLI start no ensure.
+The shell asks for Home's root when it shows Home, and on every page, once per
+runtime, asks for an existing Home to be running once the first piece the page
+shows is on screen and the view has settled. That request brings Home up only
+where Home's root records the pattern it runs, and otherwise creates and
+starts nothing. Reading Home's root with `start: false`, opening another
+space's root, and the `cf` CLI start no ensure.
 The host decides by one profile: the first, in the order
 `#profile` answers in (the default, then the MRU list, then `profiles` list
 order), that points at an inbox. A loom daemon decides by the profile `#profile`

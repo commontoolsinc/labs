@@ -996,14 +996,18 @@ export class XAppView extends BaseView {
    * rendered has reached the page. Bringing Home up starts the worker's
    * housekeeping over Home, the share intake among it, so an offer that
    * reaches the user's inbox is taken up wherever the shell is open, and not
-   * only on Home. Waiting for the settle keeps Home's start, which for a new
-   * account creates Home, off the path to the first piece on screen.
+   * only on Home. Waiting for the settle keeps Home's start off the path to
+   * the first piece on screen.
+   *
+   * Only a Home that already exists is brought up. A user with none yet has
+   * no inbox for an offer to reach, and creating Home here would race
+   * whatever else creates it.
    */
   async #bringUpHome(rt: RuntimeInternals): Promise<void> {
     try {
       await createViewSettled(() => rt.runtime())();
       if (rt.signal.aborted) return;
-      await rt.runtime().ensureHomePatternRunning();
+      await rt.runtime().ensureHomePatternRunning({ existingOnly: true });
     } catch (error) {
       if (!rt.signal.aborted) {
         console.error("[AppView] Failed to bring up Home:", error);

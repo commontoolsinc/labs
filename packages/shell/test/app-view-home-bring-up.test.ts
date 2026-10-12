@@ -13,8 +13,9 @@ const PAGE_HREF = "http://localhost:8000/home-bring-up";
 
 /**
  * A runtime that answers the space's root with a piece, and records in `log`,
- * under `name`, each request to idle and each to bring Home up. `ensured`
- * resolves at the first bring-up.
+ * under `name`, each request to idle and each to bring Home up, marking one
+ * that brings up only an existing Home. `ensured` resolves at the first
+ * bring-up.
  */
 function stubRuntime(log: string[], name: string) {
   const ensured = defer();
@@ -24,8 +25,8 @@ function stubRuntime(log: string[], name: string) {
       log.push(`${name} idle`);
       return Promise.resolve();
     },
-    ensureHomePatternRunning: () => {
-      log.push(`${name} ensure`);
+    ensureHomePatternRunning: (options?: { existingOnly?: boolean }) => {
+      log.push(`${name} ensure${options?.existingOnly ? " existing" : ""}`);
       ensures++;
       ensured.resolve();
       return Promise.resolve({});
@@ -46,7 +47,7 @@ function stubRuntime(log: string[], name: string) {
 }
 
 describe("XAppView Home bring-up", () => {
-  it("asks its runtime to bring Home up after its first piece is on screen and the view has settled", async () => {
+  it("asks its runtime to bring up an existing Home after its first piece is on screen and the view has settled", async () => {
     const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
@@ -70,7 +71,7 @@ describe("XAppView Home bring-up", () => {
       view.updated(new Map());
       await runtime.ensured;
 
-      expect(log).toEqual(["shown", "rt idle", "rt ensure"]);
+      expect(log).toEqual(["shown", "rt idle", "rt ensure existing"]);
     } finally {
       restore();
     }
