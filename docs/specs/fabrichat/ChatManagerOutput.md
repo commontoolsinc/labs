@@ -328,12 +328,13 @@ outcome back as the add's `delivery`.
   no profile known for them points at an inbox, gets a notice instead. It
   grants nobody anything.
 - **Outcome:** `done` with `delivery`, `offered` or `noticed`, and no entry;
-  or `refused` if this user's catalog doesn't list the room, this user isn't an
-  OWNER of the room's space, the link isn't to a group room, as its creator's
-  record would say, `requestId` is longer than an offer's `id` may be,
-  `profile` attests no principal or names someone other than `member`,
-  `member` is not a principal's DID, or it is this user.
-  `offered` means sent, not received.
+  or `refused` if this user's catalog doesn't list the room, the room space's
+  access list grants this user a level other than OWNER, the link isn't to a
+  group room, as its creator's record would say, `requestId` is longer than an
+  offer's `id` may be, `profile` attests no principal or names someone other
+  than `member`, `member` is not a principal's DID, or it is this user. An
+  access list the run doesn't hold yet, as a served run may not for a room
+  created moments before, refuses nothing. `offered` means sent, not received.
 
 ### `accept(requestId: string, room: Cell<ChatRoomOutput>, counterpart?: string, keepArchived?: boolean)`
 
