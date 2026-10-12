@@ -2159,8 +2159,14 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
+      //
+      // A `data:` link is dissolved into the value it carries, as a stored
+      // write dissolves one. An event leaves this runtime, for the stream's
+      // space and whichever runtime handles it there, and a `data:` id is
+      // good only where it was minted: a link inside one resolves its
+      // schema's references against documents this runtime holds.
+      const event = findAndInlineDataUriLinks(
+        convertCellsToLinks(newValue as CellLinkInput),
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 

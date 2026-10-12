@@ -548,10 +548,13 @@ handles therefore do not require B to hold A's schema documents. A schema
 declared by a link inside B resolves in B when that next link is followed.
 
 A `data:` document is stored in no space: it is its own identifier, and
-nothing writes it. A link inside one resolves its schema's `cid:` references
-in the space carried by the address that names the document, by the same
-rule and through the same gates as a link inside a stored document. Two
-kinds of `data:` document differ in what that space holds:
+nothing writes it. Nor does the identifier reach a space inside another
+value: a stored write and a stream send both dissolve a `data:` link into
+the value it carries, so a `data:` document is read by the runtime that
+minted it. A link inside one resolves its schema's `cid:` references in the
+space carried by the address that names the document, by the same rule and
+through the same gates as a link inside a stored document. Two kinds of
+`data:` document differ in what that space holds:
 
 - A snapshot of a value read out of a stored document — an array element
   read by value — is addressed in that document's space and keeps each

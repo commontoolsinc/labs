@@ -141,11 +141,20 @@ That places an obligation on whoever mints one from a value holding links:
   encoding (`inlineExternalSchemaRefsInValue` in
   `packages/runner/src/link-utils.ts`).
 
-`findAndInlineDataUriLinks` and the storage manager's `data:` sync walk have
-no transaction to read a space through. Where either narrows a link's schema
-to a path below the link, it resolves the reference through the realm's
-schema-document registry, which holds every schema document a session has
-written or been delivered. A reference the registry does not hold cannot be
+A `data:` identifier is read by the runtime that minted it. A value leaves a
+runtime for a space by one of two routes, a stored write (`normalizeAndDiff`
+and `Cell.setRaw()`) and a stream send (`Cell.send()`), and both pass it
+through `findAndInlineDataUriLinks` first, so what goes is the value an
+identifier carries and never the identifier. The schema documents a
+snapshot's links reference are therefore ones the reading runtime already
+holds: its replica received them with the stored document the snapshot was
+taken from, and its schema-document registry registered them as they arrived
+or were written.
+
+`findAndInlineDataUriLinks` and the storage manager's `data:` sync walk rely
+on that. Neither has a transaction to read a space through, so where either
+narrows a link's schema to a path below the link, it resolves the reference
+through the registry. A reference the registry does not hold cannot be
 narrowed, and the narrowing throws.
 
 ## Reading one
