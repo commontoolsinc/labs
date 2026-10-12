@@ -26,6 +26,9 @@
 //     based at the HIGHEST dependency's resolution seq — the pre-repair
 //     semantics whose over-advance is recorded against INV-1 in
 //     09-invariants.md and kept here as the reference for legacy traffic.
+//     A declared basis advances to the seq of a named layer accepted as an
+//     identity for the read's document, where the reader's view through that
+//     layer is the one the identity was proved against (§3.6.3).
 //   - Scope and branch dimensions are not modeled; the generator stays on
 //     the default branch and space scope.
 
@@ -46,6 +49,12 @@ export interface NaiveCommit {
   sessionId: string;
   localSeq: number;
   ops: NaiveOp[];
+
+  /** The commit as submitted, elided operations included. */
+  commit: ClientCommit;
+
+  /** Operation indexes the engine elided: they wrote no revision. */
+  elidedOpIndexes: readonly number[];
 }
 
 export interface NaiveHistory {
@@ -168,6 +177,50 @@ export const naiveIsIdentityCommit = (
   return true;
 };
 
+const layersOf = (localSeq: number | number[]): number[] =>
+  Array.isArray(localSeq) ? localSeq : [localSeq];
+
+/**
+ * The seq a true-basis pending `read` from `sessionId` is scanned from: its
+ * declared `basisSeq`, or the higher seq of a layer it names that was accepted
+ * as an identity for the read's document — every operation of the layer on
+ * that document elided — where the layer's operations on it begin with a
+ * `set`, or the layer's own read of it sat on the declared basis through no
+ * layer the read does not name (03-commit-model.md §3.6.3).
+ */
+export const naiveIdentityLayerBasis = (
+  history: NaiveHistory,
+  sessionId: string,
+  read: ClientCommit["reads"]["pending"][number],
+): number => {
+  const layers = layersOf(read.localSeq);
+  let basis = read.basisSeq!;
+  for (const layer of history.accepted) {
+    if (layer.sessionId !== sessionId) continue;
+    if (!layers.includes(layer.localSeq) || layer.seq <= basis) continue;
+    const onDocument = [...layer.commit.operations.entries()].filter((
+      [, op],
+    ) => op.op !== "sqlite" && op.id === read.id);
+    if (onDocument.length === 0) continue;
+    if (onDocument.some(([, op]) => op.op !== "set" && op.op !== "patch")) {
+      continue;
+    }
+    if (
+      onDocument.some(([index]) => !layer.elidedOpIndexes.includes(index))
+    ) continue;
+    const proved = onDocument[0][1].op === "set" ||
+      layer.commit.reads.pending.some((own) =>
+        own.id === read.id && own.basisSeq === read.basisSeq &&
+        layersOf(own.localSeq).every((named) => layers.includes(named))
+      ) ||
+      layer.commit.reads.confirmed.some((own) =>
+        own.id === read.id && own.seq === read.basisSeq
+      );
+    if (proved) basis = layer.seq;
+  }
+  return basis;
+};
+
 /**
  * The reference admission decision for `commit` from `sessionId`, given the
  * accepted history so far. Mirrors §3.6 exactly, without shortcuts.
@@ -210,10 +263,13 @@ export const naiveAdmit = (
     }
     if (identity) continue;
     const cs = read.basisSeq !== undefined
-      ? conflictSeq(history, read.id, read.path, read.basisSeq, {
-        sessionId,
-        namedLocalSeqs: layers,
-      })
+      ? conflictSeq(
+        history,
+        read.id,
+        read.path,
+        naiveIdentityLayerBasis(history, sessionId, read),
+        { sessionId, namedLocalSeqs: layers },
+      )
       : conflictSeq(history, read.id, read.path, basis!);
     if (cs !== null) {
       return {
@@ -242,6 +298,8 @@ export const naiveRecord = (
     ops: toNaiveOps(
       commit.operations.filter((_, index) => !elidedOpIndexes.includes(index)),
     ),
+    commit,
+    elidedOpIndexes,
   });
   let sessionRes = history.resolution.get(sessionId);
   if (!sessionRes) {
