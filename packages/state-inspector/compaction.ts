@@ -84,6 +84,20 @@ const sameValue = (left: unknown, right: unknown): boolean =>
   encodeMemoryBoundary(left as FabricValue) ===
     encodeMemoryBoundary(right as FabricValue);
 
+/**
+ * The top-level members on which two documents differ: a member present on
+ * one side and not the other counts, whatever its value, so an explicit
+ * `null` is not the same as an absence.
+ */
+const differingMembers = (
+  left: Record<string, FabricValue>,
+  right: Record<string, FabricValue>,
+): string[] =>
+  [...new Set([...Object.keys(left), ...Object.keys(right)])].filter((key) =>
+    Object.hasOwn(left, key) !== Object.hasOwn(right, key) ||
+    !sameValue(left[key] ?? null, right[key] ?? null)
+  );
+
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -714,13 +728,7 @@ export function verifyCompaction(
               );
               continue;
             }
-            const keys = new Set([
-              ...Object.keys(document),
-              ...Object.keys(was),
-            ]);
-            const differing = [...keys].filter((key) =>
-              !sameValue(document[key] ?? null, was[key] ?? null)
-            );
+            const differing = differingMembers(document, was);
             if (!differing.every((key) => key === "compaction")) {
               problems.push(
                 `seq ${audit.seq}: differs from the backup in ${

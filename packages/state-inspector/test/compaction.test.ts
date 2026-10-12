@@ -42,10 +42,11 @@ async function buildStore(
     applyCommit(engine, {
       sessionId: `session:${SPACE}:genesis`,
       principal: SPACE,
+      // An explicit-null member beside `value`: its removal must show.
       commit: commit(1, [{
         op: "set",
         id: ACL,
-        value: { value: { [SPACE]: "OWNER" } },
+        value: { value: { [SPACE]: "OWNER" }, note: null },
       }]),
     } as never);
   }
@@ -439,29 +440,54 @@ Deno.test("verifyCompaction holds an interrupted attempt's retained audit to the
       await Deno.remove(tampered);
       return v.checks.find((check) => check.name === "ACL document")!.detail;
     };
-    assert(
-      (await retained("garbage", "ACL document")).includes("does not decode"),
-    );
-    assert(
-      (await retained(encodeMemoryBoundary(5 as never), "ACL document"))
-        .includes("not a document"),
-    );
-    assert(
-      (await retained(
+    {
+      const detail = await retained("garbage", "ACL document");
+      assert(detail.includes("does not decode"), detail);
+    }
+    {
+      const detail = await retained(
+        encodeMemoryBoundary(5 as never),
+        "ACL document",
+      );
+      assert(detail.includes("not a document"), detail);
+    }
+    // A member added with an explicit null, and the explicit-null member
+    // the backup carries removed: neither is "no difference".
+    {
+      const detail = await retained(
+        encodeMemoryBoundary({ ...document, extra: null } as never),
+        "ACL document",
+      );
+      assert(/differs from the backup in [a-z, ]*extra/.test(detail), detail);
+    }
+    {
+      const { note: _note, ...withoutNote } = document;
+      {
+        const detail = await retained(
+          encodeMemoryBoundary(withoutNote as never),
+          "ACL document",
+        );
+        assert(/differs from the backup in [a-z, ]*note/.test(detail), detail);
+      }
+    }
+    {
+      const detail = await retained(
         encodeMemoryBoundary(
           { ...document, value: { "not a did": "OWNER" } } as never,
         ),
         "ACL document",
-      )).includes("value is not an ACL"),
-    );
-    assert(
-      (await retained(
+      );
+      assert(detail.includes("value is not an ACL"), detail);
+    }
+    {
+      const detail = await retained(
         encodeMemoryBoundary({ ...document, compaction: 7 } as never),
         "ACL document",
-      )).includes("marker malformed or missing"),
-    );
-    assert(
-      (await retained(
+      );
+      assert(detail.includes("marker malformed or missing"), detail);
+    }
+    {
+      const detail = await retained(
         encodeMemoryBoundary(
           {
             ...document,
@@ -472,12 +498,17 @@ Deno.test("verifyCompaction holds an interrupted attempt's retained audit to the
           } as never,
         ),
         "ACL document",
-      )).includes("names another run"),
-    );
-    assert(
-      (await retained(null, "every head has its revision row", "ACL document"))
-        .includes("none at the newest run"),
-    );
+      );
+      assert(detail.includes("names another run"), detail);
+    }
+    {
+      const detail = await retained(
+        null,
+        "every head has its revision row",
+        "ACL document",
+      );
+      assert(detail.includes("none at the newest run"), detail);
+    }
   }, { interruptAfterAudit: true });
 });
 
