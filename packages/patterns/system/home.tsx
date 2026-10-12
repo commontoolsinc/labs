@@ -423,7 +423,7 @@ const Home = pattern(
     // create a profile. The actual create UI lives in the profile picker below.
     const createProfileStream = submitProfileCreation({
       profiles: profiles as any,
-      seedName: seedProfileName({ profiles: profiles as any, privateInbox }),
+      seedName: seedProfileName({ privateInbox }),
     });
     // The home Profile tab IS the profile picker: it lists profiles natively,
     // sets the default, stamps MRU on selection, and creates more inline.

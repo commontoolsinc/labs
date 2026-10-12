@@ -1067,6 +1067,7 @@ class Connection {
   #syncSchemaTable = false;
   #stableExpressionResultIds = false;
   #admissionNotice = false;
+  #elidedVerdicts = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #routedOwns: ((space: string) => boolean) | undefined;
@@ -1142,6 +1143,11 @@ class Connection {
   /** Whether both peers advertised `admissionNotice`. */
   get admissionNotice(): boolean {
     return this.#admissionNotice;
+  }
+
+  /** Whether both peers advertised `elidedVerdicts`. */
+  get elidedVerdicts(): boolean {
+    return this.#elidedVerdicts;
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -1787,6 +1793,8 @@ class Connection {
         clientFlags?.stableExpressionResultIds === true;
       this.#admissionNotice = clientFlags?.admissionNotice === true &&
         serverFlags?.admissionNotice === true;
+      this.#elidedVerdicts = clientFlags?.elidedVerdicts === true &&
+        serverFlags?.elidedVerdicts === true;
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
       this.#ready = true;
@@ -5021,6 +5029,7 @@ export class Server {
         principal,
         actingPrincipal,
         connection.routed,
+        connection.elidedVerdicts,
       );
       if (connection.routed) {
         if (priorOwner !== connection.id) {
@@ -5724,6 +5733,9 @@ export class Server {
                     principal: session.principal,
                     commit: message.commit,
                     sqliteAttachments,
+                    ...(session.elidedVerdicts === true
+                      ? { elidedVerdicts: true }
+                      : {}),
                     // Session-facing transact admission: `authored`, always.
                     // The class is determined HERE, by the admission path —
                     // never read from the client payload (protocol.md §1).

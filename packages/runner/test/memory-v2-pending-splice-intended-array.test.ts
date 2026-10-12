@@ -109,7 +109,11 @@ describe("memory-v2-pending-splice-intended-array", () => {
     return { list, seen, cancel };
   };
 
-  it("shows the list as it is while the other session's identical tail lands first", async () => {
+  it("shows the list as it is while the other session's identical tail lands first, and the store refuses the splice", async () => {
+    // The splice reaches the stored list from the view that produced it, but
+    // replayed on the stored list it would land its element a second time,
+    // and a client that does not advertise `elidedVerdicts` is held to that
+    // condition of the identity proof, so the store refuses it.
     const doc = "intended-identical";
     const a = connect();
     const b = connect();

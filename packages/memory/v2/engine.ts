@@ -1359,6 +1359,17 @@ export type ApplyCommitOptions = {
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
 
+  /**
+   * The committing session's client advertised `elidedVerdicts`: its replica
+   * promotes a layer the verdict elides to the document its transaction
+   * computed rather than folding the layer's ops over its confirmed base,
+   * so the identity proof holds the commit to its first condition alone: a
+   * write that reaches the stored document from the reader's view is an
+   * identity even where replaying it on the stored document would change
+   * it, as a positional `splice` does. Absent, both conditions apply.
+   */
+  elidedVerdicts?: boolean;
+
   /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
    *  determined by the ADMISSION PATH that processed the commit — the
    *  session-facing transact path is `authored` (the default here, since
@@ -1478,9 +1489,15 @@ export type AppliedCommit = {
   replayed?: true;
 
   /**
-   * Operation indexes whose `cid:` set matched the stored content exactly
-   * and applied as a no-op: no revision, no head advance, no dirty mark.
-   * The commit itself still records and advances the space log.
+   * Operation indexes that applied as a no-op: a `cid:` set that matched
+   * the stored content exactly, or every operation of an identity commit
+   * (03-commit-model.md §3.6.1). An elided operation produced no revision,
+   * advanced no head, and marked nothing dirty. The commit itself still
+   * records and advances the space log, and a replica that advertised
+   * `elidedVerdicts` promotes a pending layer every operation of which is
+   * listed here to the document its transaction computed where the commit
+   * read the document, which is when the identity proof established that
+   * document is the stored one.
    */
   elidedOpIndexes?: number[];
 
@@ -5219,6 +5236,7 @@ const applyCommitTransaction = (
     delegated,
     systemEventActor,
     allowEmptyOperations,
+    elidedVerdicts = false,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class posture gate (protocol.md §1): off the flag NOTHING
@@ -6065,12 +6083,14 @@ const applyCommitTransaction = (
   // operations on it in order: replayed on the document as the commit's
   // read of it saw it, the sequence yields the stored document, and
   // replayed on the stored document it leaves that unchanged. The second
-  // condition is for the writer's own replica, which re-folds the
-  // operations over whatever confirmed base it holds when the accept
-  // arrives: a sequence idempotent on the durable value lands on that value
-  // from any base between the read and the head, where a positional splice
-  // replayed over a base already carrying its elements would duplicate
-  // them.
+  // condition is for a writer's replica that re-folds the operations over
+  // whatever confirmed base it holds when the accept arrives: a sequence
+  // idempotent on the durable value lands on that value from any base
+  // between the read and the head, where a positional splice replayed over
+  // a base already carrying its elements would duplicate them. A replica
+  // that promotes an elided layer to the document its transaction computed
+  // (`elidedVerdicts`) needs no such guarantee, and its commits are held to
+  // the first condition alone.
   type DocumentOps = Array<
     Extract<typeof commit.operations[number], { op: "set" | "patch" }>
   >;
@@ -6234,12 +6254,14 @@ const applyCommitTransaction = (
         const basis = basisOf(first, stored, at, scopeKey);
         if (!basis.known) return false;
         const fromBasis = replay(basis.document, operations);
-        const onStored = replay(stored, operations);
-        if (
-          !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
-          !valueEqual(onStored as FabricValue, stored as FabricValue)
-        ) {
+        if (!valueEqual(fromBasis as FabricValue, stored as FabricValue)) {
           return false;
+        }
+        if (!elidedVerdicts) {
+          const onStored = replay(stored, operations);
+          if (!valueEqual(onStored as FabricValue, stored as FabricValue)) {
+            return false;
+          }
         }
       } catch {
         return false;
@@ -7160,18 +7182,20 @@ const resolvePendingReads = (
     // staleness, not from the protocol.
     const trueBasis = read.basisSeq;
     if (!options.checkStaleness) continue;
-    const conflictSeq = trueBasis !== undefined
-      ? findConflictSeq(
+    const scanTrueBasis = (afterSeq: number) =>
+      findConflictSeq(
         engine,
         scans,
         branch,
         read.id,
         resolveScopeKey(read.scope, { principal, sessionId }),
-        trueBasis,
+        afterSeq,
         read.path,
         read.nonRecursive ?? false,
         { sessionKey, namedLocalSeqs: layers },
-      )
+      );
+    let conflictSeq = trueBasis !== undefined
+      ? scanTrueBasis(trueBasis)
       : findConflictSeq(
         engine,
         scans,
@@ -7182,6 +7206,25 @@ const resolvePendingReads = (
         read.path,
         read.nonRecursive ?? false,
       );
+    // A named layer the store accepted as an identity wrote nothing, so the
+    // foreign write its proof matched stands in the interval as though the
+    // reader had not seen it. Where the reader's view of the document is the
+    // one that proof was made against, the scan starts at that layer's seq
+    // instead (03-commit-model.md §3.6.3). It is looked for only once the
+    // declared basis has found a conflict, so a read that validates pays
+    // nothing for it.
+    if (conflictSeq !== null && trueBasis !== undefined) {
+      const identityBasis = identityLayerBasis(
+        engine,
+        sessionKey,
+        branch,
+        read,
+        layers,
+      );
+      if (identityBasis > trueBasis) {
+        conflictSeq = scanTrueBasis(identityBasis);
+      }
+    }
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale pending read: ${read.id} via localSeq ${
@@ -7199,6 +7242,85 @@ const resolvePendingReads = (
   }
 
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
+};
+
+/**
+ * Helper for `resolvePendingReads()`, which returns the highest seq at which
+ * one of the own-session `layers` a true-basis pending read names was
+ * accepted as an identity commit for the read's document, where the reader's
+ * view of the document through that layer is the view the identity was proved
+ * against, or the read's declared `basisSeq` when no named layer qualifies
+ * (03-commit-model.md §3.6.3).
+ *
+ * An identity commit elides every operation (§3.6.1), so the layer leaves no
+ * revision for the staleness scan to exclude, while the write its proof
+ * matched is a foreign revision inside the read's interval. The proof
+ * established that the stored document at the layer's seq is the one the
+ * layer's transaction computed from its own view, and the reader's view
+ * through the layer is that document when the layer's operations on it begin
+ * with a `set`, whose value is independent of any base, or when the read of
+ * the document the proof reconstructed the layer's view from sat on the basis
+ * the reader declares, through no own layer the reader does not name. Below
+ * that seq the document holds exactly what the reader saw, so nothing there
+ * can make the read stale.
+ */
+const identityLayerBasis = (
+  engine: Engine,
+  sessionKey: string,
+  branch: BranchName,
+  read: ClientCommit["reads"]["pending"][number],
+  layers: readonly number[],
+): number => {
+  const basisSeq = read.basisSeq!;
+  const scope = normalizeScope(read.scope);
+  const sameDocument = (candidate: { id: string; scope?: CellScope }) =>
+    candidate.id === read.id && normalizeScope(candidate.scope) === scope;
+  let identityBasis = basisSeq;
+  for (const localSeq of layers) {
+    const row = engine.statements.selectExistingCommit.get({
+      session_id: sessionKey,
+      local_seq: localSeq,
+    }) as CommitRow | undefined;
+    if (row === undefined || row.seq <= identityBasis) continue;
+    if ((row.branch || DEFAULT_BRANCH) !== branch) continue;
+    const layer = decodeTrustedMemoryBoundary(row.original) as ClientCommit;
+    const opIndexes: number[] = [];
+    let replayable = true;
+    for (const [opIndex, operation] of layer.operations.entries()) {
+      if (operation.op === "sqlite" || !sameDocument(operation)) continue;
+      if (operation.op !== "set" && operation.op !== "patch") {
+        replayable = false;
+        break;
+      }
+      opIndexes.push(opIndex);
+    }
+    if (!replayable || opIndexes.length === 0) continue;
+    const written = new Set(
+      (engine.statements.selectCommitRevisions.all({
+        commit_seq: row.seq,
+      }) as RevisionRow[]).map((revision) => revision.op_index),
+    );
+    if (opIndexes.some((opIndex) => written.has(opIndex))) continue;
+    // The read the identity proof reconstructed the layer's view from, chosen
+    // as `applyCommitTransaction()`'s `basisOf()` chooses it: the first
+    // pending read of the document, else its first confirmed read on the
+    // branch. Another read of the document beside it proved nothing.
+    const provedPending = layer.reads.pending.find(sameDocument);
+    const provedConfirmed = provedPending === undefined
+      ? layer.reads.confirmed.find((candidate) =>
+        sameDocument(candidate) && (candidate.branch ?? branch) === branch
+      )
+      : undefined;
+    const viewIsProved = layer.operations[opIndexes[0]].op === "set" ||
+      (provedPending !== undefined &&
+        provedPending.basisSeq === basisSeq &&
+        pendingReadLayers(provedPending).every((named) =>
+          layers.includes(named)
+        )) ||
+      provedConfirmed?.seq === basisSeq;
+    if (viewIsProved) identityBasis = row.seq;
+  }
+  return identityBasis;
 };
 
 /** A true-basis read's exclusion of the own-session layers it names. */

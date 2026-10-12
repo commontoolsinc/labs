@@ -2142,7 +2142,8 @@ export class PiecesController<T = unknown> {
    * The refusal every root-replacing operation on an identity Home shares.
    *
    * A Home is created once, on its user's first open
-   * ({@link ensureDefaultPattern}), and changes only by an in-place source
+   * ({@link ensureDefaultPattern}) or by the first wish on a client runtime
+   * for a target under its root, and changes only by an in-place source
    * update, which retains the account data its root owns: profiles,
    * favorites, navigation, the shared-space catalog and the inbox pointer.
    * There is no path that drops or replaces that root, absent or present,

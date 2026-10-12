@@ -990,7 +990,11 @@ const performManagerAct = (
       });
       return;
     }
-    if (spaceAccess(room) !== "OWNER") {
+    // An access list the run doesn't hold yet, as a served run may not for a
+    // room created moments before, says nothing of this user's level, so
+    // only a level it states refuses.
+    const access = spaceAccess(room);
+    if (access !== undefined && access !== "OWNER") {
       recordOutcome(state, requestId, {
         status: "refused",
         reason: "This user can't add people to the room.",
