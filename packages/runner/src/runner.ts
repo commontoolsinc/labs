@@ -43,6 +43,7 @@ import {
 
 import { isAliasBinding } from "./alias-binding.ts";
 import { runInFrameContext } from "./builder/frame-context.ts";
+import { instanceNameOfPartialCause } from "./builder/instance-name.ts";
 import {
   patternFromFrame,
   popFrame,
@@ -931,6 +932,14 @@ function nodeOutputPartialCause(outputs: unknown): JSONValue | undefined {
 }
 
 /**
+ * The instance name a sub-pattern node's raw output binding carries, when the
+ * node is a named instance, and `undefined` otherwise.
+ */
+function instanceNameOfNodeOutputs(outputs: unknown): string | undefined {
+  return instanceNameOfPartialCause(nodeOutputPartialCause(outputs));
+}
+
+/**
  * Whether `partialCause` is one the pattern builder numbers by position: a
  * bare `{ $generated: N }`.
  */
@@ -954,6 +963,14 @@ function subPatternNodes(
     found.push({ module, partialCause });
   }
   return found;
+}
+
+/** The instance name stamped on the child `child`, if any. */
+function getInstanceNameStamp(child: Cell<any>): string | undefined {
+  const raw = child.getMetaRaw("instanceName", {
+    meta: ignoreReadForScheduling,
+  });
+  return typeof raw === "string" ? raw : undefined;
 }
 
 /** A key naming the document `link` addresses: its space, id and scope. */
@@ -1652,6 +1669,9 @@ type PatternNodeBinding = Omit<BoundNodeIO, "inputsCell"> & {
   child: Pattern;
   childResultCell: Cell<any> | undefined;
   sendToBindings: boolean;
+
+  /** The instance name of a named instance, which no other node shares. */
+  instanceName?: string;
 };
 
 /**
@@ -13304,6 +13324,7 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
+    const instanceName = instanceNameOfNodeOutputs(outputBindings);
     return {
       ...io,
       childResultCell: this.#mintChildResultCell(
@@ -13314,6 +13335,7 @@ export class Runner {
         resultCell,
       ),
       sendToBindings: true,
+      ...(instanceName !== undefined && { instanceName }),
     };
   }
 
@@ -13378,11 +13400,11 @@ export class Runner {
   }
 
   /**
-   * Throws, naming both pattern identities, when a positional sub-pattern
-   * node of `pattern` would set its child up over a child the parent
-   * `resultCell` keeps at another positional spot (`#refuseDisplacedChild()`),
-   * for each such node whose child this parent owns: not a child that is its
-   * space's root, nor one managed in a space of its own.
+   * Throws, naming both pattern identities, when a sub-pattern node of
+   * `pattern` would set its child up over a child the parent `resultCell`
+   * keeps elsewhere (`#refuseDisplacedChild()`), for each node whose child
+   * this parent owns: not a child that is its space's root, nor one managed
+   * in a space of its own.
    */
   #refuseDisplacedChildren(
     tx: IExtendedStorageTransaction,
@@ -13390,7 +13412,6 @@ export class Runner {
     resultCell: Cell<any>,
   ): void {
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      if (!isPositionalPartialCause(partialCause)) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
@@ -13407,19 +13428,22 @@ export class Runner {
         pattern,
         module.implementation as Pattern,
         child,
+        partialCause,
       );
     }
   }
 
   /**
-   * Throws rather than let the child of `childPattern`, at a positional spot,
-   * set up over `storedChild` when the parent `resultCell` shows its
-   * positional children have moved spots: `storedChild` runs another pattern
-   * identity, and either a child of `childPattern`'s identity runs at another
-   * positional spot, or another positional spot of `pattern` sets up the
-   * identity `storedChild` runs. A spot whose node sets up a space's root is
-   * not counted. A child whose identity differs with no such sign is the same
-   * child under a newer version of its own source.
+   * Throws rather than let the child of `childPattern`, at the spot
+   * `partialCause` names, set up over `storedChild` when that cell holds a
+   * different child the parent `resultCell` keeps elsewhere: a child stamped
+   * with another instance's name, or, where `partialCause` is positional, a
+   * sign that the parent's positional children have moved spots, which is a
+   * child of `childPattern`'s identity running at another positional spot, or
+   * another positional spot of `pattern` setting up the identity `storedChild`
+   * runs. A spot whose node sets up a space's root is not counted. A child
+   * whose identity differs with no such sign is the same child under a newer
+   * version of its own source.
    */
   #refuseDisplacedChild(
     tx: IExtendedStorageTransaction,
@@ -13427,20 +13451,32 @@ export class Runner {
     pattern: Pattern,
     childPattern: Pattern,
     storedChild: Cell<any>,
+    partialCause: JSONValue,
   ): void {
+    const instanceName = instanceNameOfPartialCause(partialCause);
+    const positional = isPositionalPartialCause(partialCause);
     const stored = getPatternSetupIdentityRef(storedChild) ??
       getPatternIdentityRef(storedChild);
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
       childPattern,
     );
-    if (
-      stored === undefined || incoming === undefined ||
-      samePatternRef(stored, incoming)
-    ) {
-      return;
-    }
+    if (stored === undefined || incoming === undefined) return;
     const describe = (ref: { identity: string; symbol: string }) =>
       `${ref.identity}#${ref.symbol}`;
+    const holder = instanceName !== undefined
+      ? `instance "${instanceName}"`
+      : positional
+      ? "a positional spot"
+      : debugStr`the spot $quote${partialCause}`;
+    const stamped = getInstanceNameStamp(storedChild);
+    if (stamped !== undefined && stamped !== instanceName) {
+      throw new Error(
+        `refusing to set up ${describe(incoming)} for ${holder} ` +
+          `over the child of ${describe(stored)} that instance ` +
+          `"${stamped}" set up`,
+      );
+    }
+    if (!positional || samePatternRef(stored, incoming)) return;
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
     for (const { module, partialCause } of subPatternNodes(pattern)) {
       // A space's root child sits at its space's genesis address rather than
@@ -13546,6 +13582,16 @@ export class Runner {
         if (plan.module.targetSpaceRoot) {
           this.#linkSpaceRootIfAbsent(instanceTx, childResultCell);
         }
+      }
+      if (
+        !resumeExisting && plan.instanceName !== undefined &&
+        getInstanceNameStamp(storedChild) !== plan.instanceName
+      ) {
+        storedChild.setMetaRaw(
+          "instanceName",
+          plan.instanceName,
+          rawMetaWriteAuthorization,
+        );
       }
       // Only a child in a space of its own claims one: an in-space nested
       // node is part of its parent's graph and is re-instantiated from the
