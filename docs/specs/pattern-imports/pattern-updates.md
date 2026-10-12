@@ -350,9 +350,11 @@ written over the slots that document holds. The slots the parent does not
 supply are the nested piece's own state, and they are carried over, except
 that a stored slot the new argument schema refuses is dropped, with a warning
 naming the pattern, the piece, the slot and the mismatch, and its default fills
-it where it has one. A stored slot the new schema refuses therefore does not
-stop the parent from starting. A slot the parent supplied once and supplies no
-longer keeps the value it last held.
+it where it has one. Where the argument still fails the schema as a whole, as
+a union at its root can once the parent's slots pick a branch, every stored
+slot the parent does not supply is dropped the same way. A stored slot that no
+longer fits therefore does not stop the parent from starting. A slot the parent
+supplied once and supplies no longer keeps the value it last held.
 
 A refusal is a repair failure, not a silent one. The pointer has already moved
 by the time setup runs, so re-running the same identity refuses identically;

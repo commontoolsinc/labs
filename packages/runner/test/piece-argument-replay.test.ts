@@ -382,6 +382,82 @@ describe("piece argument replay", () => {
         });
       });
     });
+
+    it("sets every stored slot to its default when the argument as a whole refuses them, and warns of each", async () => {
+      // The argument is a union whose branch the parent's `mode` picks. The
+      // stored `kept` fits one branch, so it passes when judged alone, and
+      // the parent's new `mode` picks the other.
+
+      const child = [
+        "import { Default, handler, pattern, Stream, Writable } from 'commonfabric';",
+        "",
+        "export type Arguments =",
+        "  | { mode: 'list'; kept?: string[] | Default<[]> }",
+        "  | { mode: 'count'; kept?: number | Default<0> };",
+        "",
+        "const add = handler<{ text: string }, { kept: Writable<unknown> }>(",
+        "  ({ text }, { kept }) => {",
+        "    kept.set([text]);",
+        "  },",
+        ");",
+        "",
+        "export default pattern<",
+        "  Arguments,",
+        "  { add: Stream<{ text: string }>; kept: unknown }",
+        ">(({ kept }) => ({ add: add({ kept }), kept }));",
+        "",
+      ].join("\n");
+      const parent = (mode: string) =>
+        [
+          "import { pattern } from 'commonfabric';",
+          "import Child from './child.tsx';",
+          "",
+          "export default pattern<{ unused?: string }, any>(() => {",
+          `  const child = Child({ mode: '${mode}' });`,
+          "  return { add: child.add, kept: child.kept };",
+          "});",
+          "",
+        ].join("\n");
+
+      await withRuntime(async (runtime) => {
+        const tx = runtime.edit();
+        const pattern = await compiledParent(
+          runtime,
+          changedFiles(child, parent("list")),
+          tx,
+        );
+        const cell = runtime.getCell<Record<string, unknown>>(
+          space,
+          "child-union-branch",
+          undefined,
+          tx,
+        );
+        const running = runtime.run(tx, pattern, {}, cell);
+        await tx.commit().settled;
+        await running.pull();
+        await runtime.idle();
+        (cell.key("add") as unknown as { send: (event: unknown) => void })
+          .send({ text: "one" });
+        await runtime.idle();
+        await cell.pull();
+        expect(cell.key("kept").get()).toEqual(["one"]);
+
+        const warnings = await warningsDuring(
+          "setup-stored-slot-dropped",
+          () =>
+            runChanged(
+              runtime,
+              cell,
+              changedFiles("// A comment.\n" + child, parent("count")),
+            ),
+        );
+
+        expect(cell.key("kept").get()).toBe(0);
+        expect(warnings.length).toBe(1);
+        expect(warnings[0]).toContain("its stored `kept`");
+        expect(warnings[0]).toContain("the argument as a whole refuses it");
+      });
+    });
   });
 
   it("keeps the slots an argument does not name when a running piece is run again", async () => {
