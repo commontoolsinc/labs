@@ -1067,6 +1067,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Opening a space with `start` true creates its root when it has none and
    * this runtime's identity owns the space. Reading with `start` false never
    * creates one, and neither does any other principal's open.
+   *
+   * Opening the root of this runtime's identity's own Home with `start` true
+   * also starts the worker's once-per-worker housekeeping over Home, as
+   * `ensureHomePatternRunning()` and `createSpace()` do: the adoption of
+   * legacy space entries, the private inbox ensure and the share intake. It
+   * returns without waiting for any of them.
    */
   async getSpaceRootPattern(
     space: DID,
