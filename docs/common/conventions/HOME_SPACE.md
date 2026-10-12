@@ -281,9 +281,10 @@ starts. A queue with no entries shows "No agent runs yet."
 A request made in a home space that holds no queue — its home pattern does not
 exist, or is a version without the field — ends `refused`. Where the home
 pattern is a version without the field, `wish({ query: "#agent_queue" })`
-resolves to nothing; where there is no home pattern yet, the wish creates one
-on a client runtime and is refused on a serving one, as
-[Built-in Targets](wish.md#built-in-targets) describes.
+resolves to nothing; where there is no home pattern yet, a headless wish
+resolves to nothing too, and any other creates one on a client runtime and is
+refused on a serving one, as [Built-in Targets](wish.md#built-in-targets)
+describes.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 

@@ -125,7 +125,7 @@ describe("wish-home-root", () => {
     async function runWish(
       query: string,
       label: string,
-      options: { headless?: boolean } = {},
+      options: { headless?: boolean; scope?: ("~" | ".")[] } = {},
     ) {
       const wishPattern = pattern(() => ({
         found: wishFn({ query, ...options }),
@@ -215,6 +215,37 @@ describe("wish-home-root", () => {
       }
     });
 
+    it("resolves a headless `#agent_queue` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#agent_queue", "headless queue", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("resolves a headless `~`-scoped `#default` to nothing on a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish(
+        "#default",
+        "headless home default",
+        {
+          headless: true,
+          scope: ["~"],
+        },
+      );
+      try {
+        expect(found.get()?.error).toBeUndefined();
+        expect(found.get()?.result).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
     it("reports no chat manager for a Home with no root, and creates none", async () => {
       const { found, stop } = await runWish("#chatManager", "chat manager");
       try {
@@ -239,7 +270,7 @@ describe("wish-home-root", () => {
     });
   });
 
-  it("reports a Home with no root on a serving runtime, and creates none", async () => {
+  it("resolves a headless wish to nothing for a Home with no root on a serving runtime, and creates none", async () => {
     const service = await Identity.fromPassphrase("wish home root service");
     const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     const holder = executionLeaseHolder(service.did());
@@ -305,8 +336,10 @@ describe("wish-home-root", () => {
       // finds it absent.
       await run();
       await run();
-      expect(String((observed.at(-1) as { error?: string })?.error))
-        .toContain("a serving runtime does not create one");
+      expect(observed.at(-1)).toBeDefined();
+      expect((observed.at(-1) as { error?: string }).error).toBeUndefined();
+      expect((observed.at(-1) as { result?: unknown }).result)
+        .toBeUndefined();
       expect(
         (runtime.getCell(home, home).getRaw() as
           | { defaultPattern?: unknown }

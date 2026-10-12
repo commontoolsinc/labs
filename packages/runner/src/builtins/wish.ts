@@ -129,6 +129,17 @@ class NoProfileError extends WishError {
   }
 }
 
+/**
+ * A headless wish for a Home target while Home has no root. A headless wish
+ * brings up no root, so it resolves to nothing: no result and no error.
+ */
+class NoHomeRootError extends Error {
+  constructor() {
+    super("The home space has no root.");
+    this.name = "NoHomeRootError";
+  }
+}
+
 //
 // Interval #now constants and helpers
 //
@@ -459,15 +470,17 @@ function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
  * A space that links no root resolves `defaultPattern` to a path inside the
  * space cell itself, and a write through a cell resolved there lands where no
  * root reads it and where the root's creation finds the slot taken. So a Home
- * with nothing in the slot gets its root first: on a client runtime this
- * starts the root's creation and throws `DocumentPending`, and the wish runs
- * again once the creation settles. A serving runtime creates no Home, and
- * throws a `WishError`. A slot holding anything at all is resolved through as
- * it stands ({@link findHomeRootCell}).
+ * with nothing in the slot hands out no cell until it has a root. A headless
+ * wish creates none, and throws `NoHomeRootError`, so it resolves to nothing.
+ * Otherwise, on a client runtime this starts the root's creation and throws
+ * `DocumentPending`, and the wish runs again once the creation settles. A
+ * serving runtime creates no Home, and throws a `WishError`. A slot holding
+ * anything at all is resolved through as it stands ({@link findHomeRootCell}).
  */
 function getHomeRootCell(ctx: WishContext): Cell<any> {
   const found = findHomeRootCell(ctx);
   if (found !== undefined) return found;
+  if (ctx.headless) throw new NoHomeRootError();
   if (ctx.runtime.servingPosture) {
     throw new WishError(
       "The home space has no root yet, and a serving runtime does not " +
@@ -1564,15 +1577,23 @@ function resolveSpaceTarget(
     results.push(resolutionFor(getSpaceCell(ctx)));
   }
 
-  // "~" → include home space, through its root for a target under the root
+  // "~" → include home space, through its root for a target under the root.
+  // A headless wish leaves out a Home with no root, and resolves to nothing
+  // only when nothing else resolves.
+  let homeRootAbsent = false;
   if (ctx.scope?.includes("~") && homeSpaceUserDID(ctx) !== undefined) {
     const resolution = resolutionFor(getHomeSpaceCell(ctx));
     const [first, ...rest] = resolution.pathPrefix ?? [];
-    results.push(
-      first === "defaultPattern"
-        ? { cell: getHomeRootCell(ctx), pathPrefix: rest }
-        : resolution,
-    );
+    if (first !== "defaultPattern") {
+      results.push(resolution);
+    } else {
+      try {
+        results.push({ cell: getHomeRootCell(ctx), pathPrefix: rest });
+      } catch (error) {
+        if (!(error instanceof NoHomeRootError)) throw error;
+        homeRootAbsent = true;
+      }
+    }
   }
 
   // Arbitrary DIDs → include each space
@@ -1582,6 +1603,7 @@ function resolveSpaceTarget(
   }
 
   if (results.length === 0) {
+    if (homeRootAbsent) throw new NoHomeRootError();
     console.warn(
       `[wish] Target "${parsed.key}" cannot resolve with scope: [${
         ctx.scope?.join(", ")
@@ -3481,6 +3503,24 @@ export function wish(
             }
           } catch (e) {
             if (e instanceof DocumentPending) return;
+            if (e instanceof NoHomeRootError) {
+              measureWishPhase(
+                "send-no-home-root",
+                queryKey,
+                () =>
+                  sendWishState(
+                    tx,
+                    {
+                      result: undefined,
+                      candidates: [],
+                      [UI]: undefined,
+                    } satisfies WishState<any>,
+                    wishOutputScope(schema, inputScope, true),
+                    schema,
+                  ),
+              );
+              return;
+            }
             const errorMsg = e instanceof WishError ? e.message : String(e);
             const ui = e instanceof NoProfileError && parsed &&
                 isProfilePersonaTarget(parsed) && !headless
