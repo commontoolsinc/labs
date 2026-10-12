@@ -221,8 +221,9 @@ parent with no setup marker or whose stored source no longer compiles, and an
 instance step 2 places at no set-up child. There a child can take another's
 state where its parent's children moved in the same update and either their
 pattern identities all changed or more than one of them shares the instance's
-identity, as it does with no instance names; the vintage gate catches it loudly
-where a schema then refuses the stored argument.
+identity, as it does with no instance names. Where its schema refuses a stored
+slot, setup drops the slot and logs `setup-stored-slot-dropped` rather than
+refusing.
 
 A named instance stamps its name on the child it sets up, in the child's
 `instanceName` meta. The parent's setup also refuses, whatever the child's

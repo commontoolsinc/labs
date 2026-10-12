@@ -444,8 +444,9 @@ const Home = pattern(
     // wherever its panel sits. A Home whose stored state carries no setup
     // marker, and whose children's sources have changed since it was set up,
     // finds its children by position instead, so a panel inserted ahead of an
-    // existing one moves them: `deno task pattern-vintage` refuses the profile
-    // picker's update over such a vintage for want of `profiles`.
+    // existing one moves them. Their updates then run on each other's stored
+    // state, and a stored slot a child's schema refuses is dropped, with a
+    // `setup-stored-slot-dropped` warning.
     const chatManager = FabriChatManager({ sharedSpaceCatalog: catalog });
     const ensurePrivateInboxStream = ensurePrivateInbox({
       privateInbox,
