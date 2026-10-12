@@ -82,16 +82,25 @@ beneath it:
   restriction the written handle carries (the root of its `cfcLabelView`,
   which is what `referenceRestrictionsOf` in `cfc/label-view-state.ts`
   already extracts for a dereference), and the link schema's integrity after
-  `gateRuntimeMintedIntegrity`. No `LinkReference`. A reference with nothing
-  of its own persists no link entry. It is replaced when the pointer at the
-  slot is rewritten and cleared when an ancestor overwrite removes the
-  pointer (§8.12.8, as `linkEntrySuperseded` already does).
+  `gateRuntimeMintedIntegrity`. No `LinkReference` once stage 4 lands; until
+  then the entry carries the atom as before. A reference with nothing of its
+  own persists no link entry. It is replaced when the pointer at the slot is
+  rewritten and cleared when an ancestor overwrite removes the pointer
+  (§8.12.8, as `linkEntrySuperseded` already does).
 - The join stamp, `origin: "structure"`, `observes: "followRef"`, holding the
   creating attempt's flow join (its reads, PC and triggers) where flow labels
   persist. It is a flow stamp: derived, so label metadata introspection may
   observe it, and cleared with the flow stamps when the slot is rewritten. A
   slot of a container the transaction stamps as a whole has no stamp of its
   own; the container's `*` template carries the same join to every slot.
+
+No value stamp. A link write persists no `derived` stamp at its slot: the
+writer's value stamp lands where a plain value lands, and the join's
+integrity, which certifies what the attempt computed rather than what its
+pointer reaches (§3.7.2), stays off the slot. That is what makes the
+invariant stage 2 states hold going forward: a value stamp at a slot
+describes a value the slot holds, and one found at a reference slot was
+persisted before this plan and is not input-witness evidence.
 
 A dereference composes the slot's restriction with the target's own labels.
 That is already how `cfcLabelViewForDereference` builds a label view and how
