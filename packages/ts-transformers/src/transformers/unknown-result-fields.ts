@@ -466,6 +466,20 @@ function usesThis(node: ts.Node): boolean {
 }
 
 /**
+ * The symbol of the value `identifier` reads: for the name of a shorthand
+ * property, the binding it reads rather than the property it writes.
+ */
+function valueSymbol(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  const { parent } = identifier;
+  return ts.isShorthandPropertyAssignment(parent) && parent.name === identifier
+    ? checker.getShorthandAssignmentValueSymbol(parent)
+    : checker.getSymbolAtLocation(identifier);
+}
+
+/**
  * The symbol `symbol` names, read through an import, with the declaration it
  * is read from, or `undefined` where it has none.
  */
@@ -1406,6 +1420,12 @@ function objectTypePositions(
   reading: TypeReading,
 ): DeclaredPositions {
   const inferred = mode === "inferred";
+  // The members of a type the checker reverse mapped from a source are
+  // declared by the source's members, whose values are not theirs, so each is
+  // read by its type alone.
+  const reversed =
+    ((value as ts.ObjectType).objectFlags & ts.ObjectFlags.ReverseMapped) !==
+      0;
   const fields = new Map<PositionKey, DeclaredPositions>();
   for (const property of value.getProperties()) {
     const written = inferred
@@ -1415,7 +1435,9 @@ function objectTypePositions(
     const node = memberTypeNode(property);
     fields.set(
       property.name,
-      written && node && !mentionsTypeParameter(node, checker)
+      reversed
+        ? readType(type, checker, "inferred", reading)
+        : written && node && !mentionsTypeParameter(node, checker)
         ? readTypeNode(node, new Map(), true, checker, reading)
         : written
         ? readType(type, checker, "field", reading)
@@ -1549,11 +1571,7 @@ function typeProvenance(
     return expression.text === "undefined" &&
         !checker.getSymbolAtLocation(expression)?.valueDeclaration
       ? true
-      : symbolProvenance(
-        checker.getSymbolAtLocation(expression),
-        checker,
-        reading,
-      );
+      : symbolProvenance(valueSymbol(expression, checker), checker, reading);
   } else if (ts.isObjectLiteralExpression(expression)) {
     return objectLiteralPositions(
       expression,
@@ -1654,9 +1672,11 @@ function typeProvenance(
  * The provenance of what `call` returns, as `returnProvenance()` reads its
  * signature's declaration with each type parameter standing for what
  * `callSubstitution()` finds the call gives it, beside what
- * `writtenPositions()` reads of the type the call returns. An untyped
- * `wish()`, `generateObject()` or `generateText()` declares nothing.
- * `undefined` where the declaration says nothing.
+ * `writtenPositions()` reads of the type the call returns. A function declared
+ * inside another is also read through the value the call is made on, which
+ * carries what the outer function's type parameters stood for where it was
+ * made. An untyped `wish()`, `generateObject()` or `generateText()` declares
+ * nothing. `undefined` where the declaration says nothing.
  */
 function callProvenance(
   call: ts.CallExpression | ts.TaggedTemplateExpression,
@@ -1683,26 +1703,32 @@ function callProvenance(
       callSubstitution(declaration, call, checker, reading),
     )
     : undefined;
+  if (returned === undefined) return undefined;
+  const made = returned !== true && ts.isCallExpression(call) &&
+      ts.findAncestor(declaration!.parent, ts.isFunctionLike)
+    ? valueSource(call.expression, checker, reading).returns().positions()
+    : false;
   // A type parameter the call does not bind, as one of the lift a factory's
   // signature comes from, is bound in the type of the callee, which the type
   // the call returns is instantiated from.
-  return returned === undefined ? undefined : eitherDeclares(
-    returned,
+  return eitherDeclares(
+    eitherDeclares(returned, made),
     readType(checker.getTypeAtLocation(call), checker, "inferred", reading),
   );
 }
 
 /**
  * The provenance of what the function `declaration` declares returns, with its
- * type parameters standing for what `substitution` says: the return type it
- * writes, or, where that type is inferred, what its body returns. `undefined`
- * where the declaration says neither.
+ * type parameters standing for what `substitution` says, by default what they
+ * stand for in `reading`: the return type it writes, or, where that type is
+ * inferred, what its body returns. `undefined` where the declaration says
+ * neither.
  */
 function returnProvenance(
   declaration: ts.SignatureDeclaration,
   checker: ts.TypeChecker,
   reading: TypeReading,
-  substitution: Substitution = new Map(),
+  substitution: Substitution = reading.substitution,
 ): DeclaredPositions | undefined {
   if (declaration.type) {
     return readTypeNode(
@@ -1990,6 +2016,12 @@ interface InferredArgument {
 
   /** The provenance of what it was inferred from, as alternatives. */
   readonly positions: DeclaredPositions;
+
+  /**
+   * The static type of each candidate it was inferred from, where every one
+   * has a type, which tells the keys a key type parameter stands for.
+   */
+  readonly types?: readonly ts.Type[];
 }
 
 /** What each type parameter stands for, by its declaration. */
@@ -2030,13 +2062,25 @@ function callSubstitution(
     ]);
   }
   const inference = newInference(own, checker, reading);
-  inferFromArguments(
-    inference,
-    declaration,
-    ts.isCallExpression(call) ? call.arguments : [],
-    receiver,
-  );
+  inferFromArguments(inference, declaration, callArguments(call), receiver);
   return new Map([...outer, ...inferredSubstitution(own, inference)]);
+}
+
+/**
+ * The arguments `call` passes, as the checker's `getEffectiveCallArguments()`
+ * reads them: a tagged template passes its strings, then each substitution.
+ */
+function callArguments(
+  call: ts.CallExpression | ts.TaggedTemplateExpression,
+): readonly ts.Expression[] {
+  if (ts.isCallExpression(call)) return call.arguments;
+  const { template } = call;
+  return [
+    template,
+    ...(ts.isTemplateExpression(template)
+      ? template.templateSpans.map((span) => span.expression)
+      : []),
+  ];
 }
 
 /**
@@ -2176,7 +2220,8 @@ function inferredSubstitution(
   for (const parameter of parameters) {
     const found = bestCandidates(inference, parameter);
     const written = parameter.default ??
-      (parameter.constraint && !isUnconstrained(parameter.constraint)
+      (parameter.constraint &&
+          !isUnconstrained(parameter.constraint, inference.checker)
         ? parameter.constraint
         : undefined);
     // A single candidate written out stands for the type written, which
@@ -2186,11 +2231,13 @@ function inferredSubstitution(
     if (writing) {
       substitution.set(parameter, { kind: "written", ...writing });
     } else if (found) {
+      const types = found.map((candidate) => candidate.type());
       substitution.set(parameter, {
         kind: "inferred",
         positions: found
           .map((candidate) => candidate.positions())
           .reduce(alternatives, true),
+        types: types.every((type) => type !== undefined) ? types : undefined,
       });
     } else if (written) {
       substitution.set(parameter, {
@@ -2204,12 +2251,12 @@ function inferredSubstitution(
 }
 
 /**
- * Whether the constraint `node` admits `unknown`, which a type parameter with
- * no candidate then takes.
+ * Whether the constraint `node` denotes `unknown` or `any`, however it is
+ * spelled, which a type parameter with no candidate then takes.
  */
-function isUnconstrained(node: ts.TypeNode): boolean {
-  return node.kind === ts.SyntaxKind.UnknownKeyword ||
-    node.kind === ts.SyntaxKind.AnyKeyword;
+function isUnconstrained(node: ts.TypeNode, checker: ts.TypeChecker): boolean {
+  return (checker.getTypeFromTypeNode(node).flags &
+    (ts.TypeFlags.Unknown | ts.TypeFlags.Any)) !== 0;
 }
 
 //
@@ -2378,13 +2425,16 @@ function inferFromArguments(
       checker.getTypeOfSymbol(thisParameter),
     );
   }
-  // The arguments by the position they reach, with a spread whose length is
-  // not known reaching every position after it.
+  // The arguments by the position they reach, up to the first spread whose
+  // length is not known, which reaches every position after it, and the
+  // arguments after that spread, which a rest parameter collects.
   const slots: Source[] = [];
+  const trailing: Source[] = [];
   let open: Source | undefined;
   for (const argument of passed) {
+    const reached = open ? trailing : slots;
     if (!ts.isSpreadElement(argument)) {
-      slots.push(valueSource(argument, checker, reading));
+      reached.push(valueSource(argument, checker, reading));
       continue;
     }
     const spread = valueSource(argument.expression, checker, reading);
@@ -2394,11 +2444,14 @@ function inferFromArguments(
       : undefined;
     if (tuple && !tuple.hasRestElement) {
       for (let slot = 0; slot < tuple.fixedLength; slot++) {
-        slots.push(spread.element(slot));
+        reached.push(spread.element(slot));
       }
+    } else if (open) {
+      // A second spread of unknown length leaves where the ones after it
+      // land unknown too.
+      open = unionSource([open, ...trailing.splice(0), spread.element()]);
     } else {
       open = spread.element();
-      break;
     }
   }
   const parameters = signature?.parameters ?? [];
@@ -2411,11 +2464,9 @@ function inferFromArguments(
     inferFrom(inference, source, checker.getTypeOfSymbol(parameters[index]!));
   }
   if (rest !== undefined) {
-    const collected = slots.slice(rest);
-    if (open) collected.push(open);
     inferFrom(
       inference,
-      tupleSource(collected, open !== undefined),
+      tupleSource(slots.slice(rest), open, trailing),
       checker.getTypeOfSymbol(parameters[rest]!),
     );
   }
@@ -2599,10 +2650,10 @@ function couldHold(
 /**
  * Helper for `inferFromType()`, which reads a mapped type the checker infers
  * to: one whose keys are `keyof T` infers `T` from the source read backwards,
- * as the source's own provenance; one whose keys are a type parameter infers
- * that parameter from the source's keys, which hold no `unknown`, and its
- * template from any of the source's parts. `false` for one written with an
- * `as` clause, which the checker reads as any other object type.
+ * as `reverseMappedSource()` reads it; one whose keys are a type parameter
+ * infers that parameter from the source's keys, which hold no `unknown`, and
+ * its template from any of the source's parts. `false` for one written with
+ * an `as` clause, which the checker reads as any other object type.
  */
 function inferToMappedType(
   inference: Inference,
@@ -2633,11 +2684,13 @@ function inferToMappedType(
     constraint.operator === ts.SyntaxKind.KeyOfKeyword
   ) {
     const object = typeOf(constraint.type);
-    if (object) {
+    const reversed = declaration.type &&
+      reverseMappedSource(inference, source, declaration, constraint.type);
+    if (object && reversed) {
       atPriority(
         inference,
         InferencePriority.HomomorphicMappedType,
-        () => inferFrom(inference, source, object),
+        () => inferFrom(inference, reversed, object),
       );
     }
     return true;
@@ -2658,6 +2711,84 @@ function inferToMappedType(
 }
 
 /**
+ * The value `T` stands for where `source` is of the homomorphic mapped type
+ * `declaration`, whose keys are `keyof T` written `object`, as the checker's
+ * `inferReverseMappedType()` reads it: each of the source's members is read
+ * against the template, and the part of `T` under that key is what the
+ * template's `T[K]` takes from it. A template that names no `T[K]` gives `T`
+ * nothing.
+ */
+function reverseMappedSource(
+  inference: Inference,
+  source: Source,
+  declaration: ts.MappedTypeNode,
+  object: ts.TypeNode,
+): Source | undefined {
+  const { checker, reading } = inference;
+  const key = declaration.typeParameter;
+  const isObject = (node: ts.TypeNode) =>
+    ts.isTypeReferenceNode(node) && ts.isTypeReferenceNode(object)
+      ? typeParameterFor(node, checker) === typeParameterFor(object, checker)
+      : checker.getTypeFromTypeNode(node) ===
+        checker.getTypeFromTypeNode(object);
+  const isAccess = (node: ts.Node): node is ts.IndexedAccessTypeNode =>
+    ts.isIndexedAccessTypeNode(node) && isObject(node.objectType) &&
+    ts.isTypeReferenceNode(node.indexType) &&
+    typeParameterFor(node.indexType, checker) === key;
+  const template = declaration.type!;
+  console.error(
+    ts.SyntaxKind[template.kind],
+    !!ts.forEachChild(template, function f(n): boolean | undefined {
+      return isAccess(n) || ts.forEachChild(n, f);
+    }),
+  );
+  const find = (node: ts.Node): ts.IndexedAccessTypeNode | undefined =>
+    isAccess(node) ? node : ts.forEachChild(node, find);
+  const access = find(template);
+  if (!access) return undefined;
+  const target = checker.getTypeFromTypeNode(template);
+  const accessType = checker.getTypeFromTypeNode(access);
+  const read = (part: Source): Source => {
+    const nested: Inference = {
+      ...newInference([], checker, reading),
+      targets: new Map([[accessType, key]]),
+    };
+    inferFrom(nested, part, target);
+    const found = bestCandidates(nested, key);
+    return found ? unionSource(found) : opaqueSource(() => false);
+  };
+  const members = new Map<string, Source>();
+  const member = (name: string) => {
+    let known = members.get(name);
+    if (!known) members.set(name, known = read(source.member(name)));
+    return known;
+  };
+  const any = () => {
+    const part = source.anyPart();
+    return part ? read(part) : declaredSource;
+  };
+  const keys = source.keys?.();
+  return {
+    ...opaqueSource(() => {
+      if (!keys) {
+        // A source that writes out no keys may hold any part under any key.
+        const parts = any().positions();
+        const each: [PositionKey, DeclaredPositions][] = [
+          [UNNAMED_POSITIONS, parts],
+          [ELEMENT_POSITIONS, parts],
+        ];
+        return new Map(each);
+      }
+      const parts = new Map<PositionKey, DeclaredPositions>(
+        keys.map((name) => [name, member(name).positions()]),
+      );
+      return wholly(parts) ? true : parts;
+    }),
+    member,
+  };
+}
+
+/**
  * Helper for `inferFromType()`, which reads an object type: an array's
  * elements; a tuple's slots, each from the source's slot, a rest slot from any
  * element; the type arguments of an instance of a class or an interface the
@@ -2675,14 +2806,23 @@ function inferFromObjectType(
 ) {
   const { checker } = inference;
   if (checker.isTupleType(target)) {
+    // Slots before the first variable one are read from the start, and slots
+    // after it from the end.
     const flags = ((target as ts.TypeReference).target as ts.TupleType)
       .elementFlags;
+    const variable = flags.findIndex((flag) =>
+      (flag & ts.ElementFlags.Variable) !== 0
+    );
     checker.getTypeArguments(target as ts.TypeReference).forEach(
       (element, index) => {
-        const variable = (flags[index]! & ts.ElementFlags.Variable) !== 0;
         inferFrom(
           inference,
-          variable ? source.element() : source.element(index),
+          variable < 0 || index < variable
+            ? source.element(index)
+            : index === variable ||
+                (flags[index]! & ts.ElementFlags.Variable) !== 0
+            ? source.element()
+            : elementFromEnd(source, flags.length - 1 - index),
           element,
         );
       },
@@ -2693,7 +2833,10 @@ function inferFromObjectType(
   // reaches through the iterator protocol.
   if (checker.isArrayType(target) || isIterable(target)) {
     const [element] = checker.getTypeArguments(target as ts.TypeReference);
-    if (element) inferFrom(inference, source.element(), element);
+    // A value known to hold no part supplies its elements no inference.
+    if (element && source.anyPart() !== undefined) {
+      inferFrom(inference, source.element(), element);
+    }
     return;
   }
   if ((target.objectFlags & ts.ObjectFlags.Reference) !== 0) {
@@ -2722,10 +2865,10 @@ function inferFromObjectType(
     }
   }
   // A library's object type is read by its type arguments and its signatures,
-  // as above and below, and not by its members, whose types it never needs
-  // resolved for the program.
+  // as above and below, and by the members the source writes out, and not by
+  // its other members, whose types the program never needs resolved.
   const members = declaredInLibrary(target)
-    ? []
+    ? (source.keys?.() ?? []).flatMap((key) => target.getProperty(key) ?? [])
     : checker.getPropertiesOfType(target);
   for (const property of members) {
     inferFrom(
@@ -2911,10 +3054,22 @@ interface Source {
   element(index?: number): Source;
 
   /**
+   * The element `index` slots before the last, where the value knows the slots
+   * it ends with; `elementFromEnd()` reads any element of one that does not.
+   */
+  elementFromEnd?(index: number): Source;
+
+  /**
    * Any part: a member under any key, or any element, or `undefined` for a
    * value known to hold none, which supplies no inference.
    */
   anyPart(): Source | undefined;
+
+  /**
+   * The keys of the members the value writes out, as an object literal or a
+   * type literal writes them, where it writes them out.
+   */
+  keys?(): readonly string[];
 
   /** What the value returns when called. */
   returns(): Source;
@@ -2970,6 +3125,59 @@ function opaqueSource(
   };
 }
 
+/**
+ * A source known by its provenance and its static `type`, read as
+ * `opaqueSource()` reads one, except that a part takes the type of the member
+ * under its key, the elements of an iterable that is no array, which its
+ * provenance does not hold, are read from the type its iteration yields, as
+ * inferred, and what a function returns is read from the declaration of its
+ * type's one call signature, as `functionSource()` reads it with nothing bound,
+ * so that a return type written there declares what it writes.
+ */
+function typedSource(
+  read: () => DeclaredPositions,
+  type: () => ts.Type | undefined,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Source {
+  const base = opaqueSource(read, type);
+  return {
+    ...base,
+    element: (index) => {
+      const value = type();
+      const element = value && !checker.isArrayType(value) &&
+          !checker.isTupleType(value)
+        ? iteratedType(value, checker)
+        : undefined;
+      return element
+        ? opaqueSource(
+          () => readType(element, checker, "inferred", reading),
+          () => element,
+        )
+        : base.element(index);
+    },
+    member: (key) =>
+      typedSource(
+        () => below(base.positions(), key),
+        () => {
+          const property = type()?.getProperty(key);
+          return property && checker.getTypeOfSymbol(property);
+        },
+        checker,
+        reading,
+      ),
+    returns: () => {
+      const signatures = type()?.getCallSignatures() ?? [];
+      const declaration = signatures.length === 1
+        ? signatures[0]!.declaration
+        : undefined;
+      return declaration && !ts.isJSDocSignature(declaration)
+        ? functionSource(declaration, new Map(), checker, reading).returns()
+        : base.returns();
+    },
+  };
+}
+
 /** `source`, with its provenance read by `positions` instead. */
 function withPositions(
   source: Source,
@@ -2993,6 +3201,9 @@ function unionSource(sources: readonly Source[]): Source {
     ),
     member: (key) => each((source) => source.member(key)),
     element: (index) => each((source) => source.element(index)),
+    elementFromEnd: (index) => each((source) => elementFromEnd(source, index)),
+    keys:
+      () => [...new Set(sources.flatMap((source) => source.keys?.() ?? []))],
     anyPart: () => {
       const parts = sources.flatMap((source) => source.anyPart() ?? []);
       return parts.length > 0 ? unionSource(parts) : undefined;
@@ -3003,22 +3214,41 @@ function unionSource(sources: readonly Source[]): Source {
 }
 
 /**
- * The arguments a rest parameter collects, as a tuple of `slots`, the last of
- * which stands for any number of elements where `open` says so.
+ * The arguments a rest parameter collects, as a tuple of the `leading` slots,
+ * then, where a spread of unknown length is passed, any number of `open`
+ * elements, and the `trailing` slots after it.
  */
-function tupleSource(slots: readonly Source[], open: boolean): Source {
-  const any = () => unionSource(slots);
+function tupleSource(
+  leading: readonly Source[],
+  open: Source | undefined,
+  trailing: readonly Source[],
+): Source {
+  const all = [...leading, ...(open ? [open] : []), ...trailing];
+  const any = () => unionSource(all);
   const base = opaqueSource(() =>
     new Map([[ELEMENT_POSITIONS, any().positions()]])
   );
   return {
     ...base,
     element: (index) =>
-      index === undefined || (open && index >= slots.length - 1)
+      index === undefined || (open && index >= leading.length)
         ? any()
-        : slots[index] ?? declaredSource,
-    anyPart: any,
+        : leading[index] ?? declaredSource,
+    elementFromEnd: (index) =>
+      open
+        ? index < trailing.length ? trailing.at(-1 - index)! : any()
+        : leading.at(-1 - index) ?? declaredSource,
+    // No argument collected supplies no element.
+    anyPart: () => all.length > 0 ? any() : undefined,
   };
+}
+
+/**
+ * The element `index` slots before the last of the value `source` describes,
+ * or any of its elements where it does not know the slots it ends with.
+ */
+function elementFromEnd(source: Source, index: number): Source {
+  return source.elementFromEnd?.(index) ?? source.element();
 }
 
 /** The source a type argument stands for. */
@@ -3049,9 +3279,11 @@ function valueSource(
 ): Source {
   const under = <T>(read: () => T) =>
     withSubstitution(reading, substitution, read);
-  const base = opaqueSource(
+  const base = typedSource(
     () => under(() => typeProvenance(expression, checker, reading)),
     () => checker.getTypeAtLocation(expression),
+    checker,
+    reading,
   );
   const shaped = (source: Source) =>
     withPositions({ ...source, type: base.type }, base.positions);
@@ -3074,13 +3306,7 @@ function valueSource(
     );
   }
   if (ts.isIdentifier(expression)) {
-    const { parent } = expression;
-    const binding = bindingOf(
-      ts.isShorthandPropertyAssignment(parent) && parent.name === expression
-        ? checker.getShorthandAssignmentValueSymbol(parent)
-        : checker.getSymbolAtLocation(expression),
-      checker,
-    );
+    const binding = bindingOf(valueSymbol(expression, checker), checker);
     const declaration = binding?.declaration;
     if (!binding || !declaration) return base;
     if (
@@ -3111,10 +3337,25 @@ function valueSource(
     }
     if (
       ts.isVariableDeclaration(declaration) && declaration.initializer &&
-      !reassigned(binding.resolved, checker) &&
       !reading.tracing.has(declaration)
     ) {
-      return shaped(follow(declaration.initializer));
+      if (!reassigned(binding.resolved, checker)) {
+        return shaped(follow(declaration.initializer));
+      }
+      // A reassigned binding's elements are what its type declares of them,
+      // or what its initializer's do, as `symbolProvenance()` reads it.
+      const initial = follow(declaration.initializer);
+      return {
+        ...base,
+        element: (index) => {
+          const typed = base.element(index);
+          const first = initial.element(index);
+          return opaqueSource(
+            () => eitherDeclares(typed.positions(), first.positions()),
+            typed.type,
+          );
+        },
+      };
     }
     return base;
   }
@@ -3126,6 +3367,7 @@ function valueSource(
         const part = parts.named.get(key);
         return part && !parts.unnamed ? part : base.member(key);
       },
+      keys: () => [...parts.named.keys()],
       anyPart: () =>
         parts.unnamed
           ? base.anyPart()
@@ -3151,10 +3393,21 @@ function valueSource(
             : follow(element)
         ),
       );
+    const after = elements.slice(
+      elements.findLastIndex(ts.isSpreadElement) + 1,
+    );
     return {
       ...base,
       element: (index) =>
         index !== undefined && index < plain.length ? plain[index]! : every(),
+      elementFromEnd: (index) => {
+        const element = index < after.length ? after.at(-1 - index) : undefined;
+        return !element
+          ? every()
+          : ts.isOmittedExpression(element)
+          ? declaredSource
+          : follow(element);
+      },
       // An array's elements, even none, are what its number index holds.
       anyPart: every,
     };
@@ -3181,21 +3434,21 @@ function valueSource(
       constructed &&
       (ts.isClassDeclaration(constructed) || ts.isClassExpression(constructed))
     ) {
+      const owners = () =>
+        heritageSubstitutions(
+          [constructed],
+          under(() =>
+            constructionSubstitution(constructed, expression, checker, reading)
+          ),
+          checker,
+        );
+      const symbol = checker.getTypeAtLocation(expression).symbol;
       return {
         ...base,
-        instance: (owner) =>
-          heritageSubstitutions(
-            [constructed],
-            under(() =>
-              constructionSubstitution(
-                constructed,
-                expression,
-                checker,
-                reading,
-              )
-            ),
-            checker,
-          ).get(owner) as Substitution | undefined,
+        element: (index) =>
+          (symbol && iteratedSource(symbol, owners(), checker, reading)) ??
+            base.element(index),
+        instance: (owner) => owners().get(owner) as Substitution | undefined,
       };
     }
     return shaped(
@@ -3327,7 +3580,9 @@ function resultSource(
       ...base,
       member: (key) => written().member(key),
       element: (index) => written().element(index),
+      elementFromEnd: (index) => elementFromEnd(written(), index),
       anyPart: () => written().anyPart(),
+      keys: () => written().keys?.() ?? [],
       returns: () => written().returns(),
       constructs: () => written().constructs(),
       instance: (owner) => written().instance(owner),
@@ -3345,7 +3600,12 @@ function resultSource(
     ...base,
     member: (key) => returned().member(key),
     element: (index) => returned().element(index),
+    elementFromEnd: (index) => elementFromEnd(returned(), index),
     anyPart: () => returned().anyPart(),
+    keys: () => returned().keys?.() ?? [],
+    returns: () => returned().returns(),
+    constructs: () => returned().constructs(),
+    parameter: (index) => returned().parameter(index),
     instance: (owner) => returned().instance(owner),
   };
 }
@@ -3477,16 +3737,22 @@ function nodeSource(
       unionSource(
         node.elements.map((element) => follow(tupleElementType(element))),
       );
+    const variable = (element: ts.TypeNode) =>
+      ts.isRestTypeNode(element) ||
+      (ts.isNamedTupleMember(element) && !!element.dotDotDotToken);
+    const fixed = (element: ts.TypeNode | undefined) =>
+      element && !variable(element)
+        ? follow(tupleElementType(element))
+        : every();
+    const after = node.elements.slice(
+      node.elements.findLastIndex(variable) + 1,
+    );
     return {
       ...base,
-      element: (index) => {
-        const element = index === undefined ? undefined : node.elements[index];
-        return element &&
-            !ts.isRestTypeNode(element) &&
-            !(ts.isNamedTupleMember(element) && element.dotDotDotToken)
-          ? follow(tupleElementType(element))
-          : every();
-      },
+      element: (index) =>
+        fixed(index === undefined ? undefined : node.elements[index]),
+      elementFromEnd: (index) =>
+        fixed(index < after.length ? after.at(-1 - index) : undefined),
       anyPart: every,
     };
   }
@@ -3539,6 +3805,9 @@ function nodeSource(
   );
   return {
     ...base,
+    element: (index) =>
+      (resolved && iteratedSource(resolved, owners, checker, reading)) ??
+        base.element(index),
     member: (key) => {
       const property = type.getProperty(key);
       const declared = property?.valueDeclaration ??
@@ -3572,7 +3841,7 @@ function membersSource(
   base: Source,
   checker: ts.TypeChecker,
   reading: TypeReading,
-): Pick<Source, "member" | "anyPart"> {
+): Pick<Source, "member" | "anyPart" | "keys"> {
   const named = new Map<string, () => Source>();
   const indexed: (() => Source)[] = [];
   for (const member of members) {
@@ -3602,6 +3871,7 @@ function membersSource(
     member: (key) =>
       named.get(key)?.() ??
         (indexed.length > 0 ? index() : base.member(key)),
+    keys: () => [...named.keys()],
     anyPart: () => {
       const all = [...named.values(), ...indexed];
       return all.length > 0
@@ -3623,7 +3893,9 @@ function lazySource(make: () => Source): Source {
     type: () => source().type(),
     member: (key) => source().member(key),
     element: (index) => source().element(index),
+    elementFromEnd: (index) => elementFromEnd(source(), index),
     anyPart: () => source().anyPart(),
+    keys: () => source().keys?.() ?? [],
     returns: () => source().returns(),
     constructs: () => source().constructs(),
     parameter: (index) => source().parameter(index),
@@ -3632,6 +3904,77 @@ function lazySource(make: () => Source): Source {
       return source().written;
     },
   };
+}
+
+/**
+ * The elements an instance of the interface or the class `symbol` yields when
+ * iterated, where the substitutions `owners` holds bind the type parameters of
+ * its declarations and of those it extends: the type argument, or the tuple of
+ * type arguments, its iteration yields, or, for an element type that names no
+ * type parameter of these, that type as written. An element the substitutions
+ * do not bind declares nothing. `undefined` for a type that is not iterable.
+ */
+function iteratedSource(
+  symbol: ts.Symbol,
+  owners: ReadonlyMap<ts.Node, Substitution>,
+  checker: ts.TypeChecker,
+  reading: TypeReading,
+): Source | undefined {
+  const element = iteratedType(
+    checker.getDeclaredTypeOfSymbol(symbol),
+    checker,
+  );
+  if (!element) return undefined;
+  const yielded = (type: ts.Type): Source => {
+    if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
+      const declarations = type.symbol?.declarations ?? [];
+      for (
+        const declaration of declarations.filter(ts.isTypeParameterDeclaration)
+      ) {
+        for (const substitution of owners.values()) {
+          const argument = substitution.get(declaration);
+          if (argument) return argumentSource(argument, checker, reading);
+        }
+      }
+      return opaqueSource(() => false);
+    }
+    if (checker.isTupleType(type)) {
+      return tupleSource(
+        checker.getTypeArguments(type as ts.TypeReference).map(yielded),
+        undefined,
+        [],
+      );
+    }
+    return opaqueSource(
+      () => readType(type, checker, "written", reading),
+      () => type,
+    );
+  };
+  return yielded(element);
+}
+
+/**
+ * The element type a value of `type` yields when iterated: the first type
+ * argument of what its `[Symbol.iterator]()` method returns, which the
+ * library's iterators all take as the type they yield. `undefined` for a type
+ * with no such method.
+ */
+function iteratedType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  // A member keyed by a well-known symbol is named `__@<name>@<id>`.
+  const iterator = checker.getPropertiesOfType(type).find((property) =>
+    String(property.escapedName).startsWith("__@iterator@")
+  );
+  const [signature] = iterator
+    ? checker.getTypeOfSymbol(iterator).getCallSignatures()
+    : [];
+  const returned = signature && checker.getReturnTypeOfSignature(signature);
+  return returned && (returned.flags & ts.TypeFlags.Object) !== 0 &&
+      ((returned as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0
+    ? checker.getTypeArguments(returned as ts.TypeReference)[0]
+    : undefined;
 }
 
 /** The type a tuple element written `element` holds. */
@@ -3774,7 +4117,7 @@ function readTypeNode(
     // A key whose type is a literal, or a union of them, reads each part it
     // names; an array's index reads its elements; any other key, any part.
     const object = read(node.objectType);
-    const keys = literalKeys(checker.getTypeFromTypeNode(node.indexType));
+    const keys = keyTypes(node.indexType, substitution, checker);
     if (keys) return partsAt(object, keys);
     if (typeof object === "boolean") return object;
     return object.get(ELEMENT_POSITIONS) ?? anyPart(object);
@@ -3811,6 +4154,44 @@ function readTypeNode(
     writesWholly(node, checker) ? inField ? "field" : "written" : "inferred",
     reading,
   );
+}
+
+/**
+ * The keys the written key type `node` may be, read under `substitution`, as
+ * `literalKeys()` reads them: a type parameter's are those of its written type
+ * argument, or of each type it was inferred from; a union's, those of every
+ * member; an intersection's, those each member it can read keys of allows.
+ */
+function keyTypes(
+  node: ts.TypeNode,
+  substitution: Substitution,
+  checker: ts.TypeChecker,
+): readonly string[] | undefined {
+  if (ts.isParenthesizedTypeNode(node)) {
+    return keyTypes(node.type, substitution, checker);
+  }
+  if (ts.isUnionTypeNode(node) || ts.isIntersectionTypeNode(node)) {
+    const each = node.types.map((member) =>
+      keyTypes(member, substitution, checker)
+    );
+    if (ts.isUnionTypeNode(node)) {
+      return each.every((keys) => keys !== undefined) ? each.flat() : undefined;
+    }
+    const known = each.filter((keys) => keys !== undefined);
+    return known.length > 0
+      ? known.reduce((kept, keys) => kept.filter((key) => keys.includes(key)))
+      : undefined;
+  }
+  const parameter = ts.isTypeReferenceNode(node)
+    ? typeParameterFor(node, checker)
+    : undefined;
+  const argument = parameter && substitution.get(parameter);
+  if (!argument) return literalKeys(checker.getTypeFromTypeNode(node));
+  if (argument.kind === "written") {
+    return keyTypes(argument.node, argument.substitution, checker);
+  }
+  const each = argument.types?.map(literalKeys);
+  return each?.every((keys) => keys !== undefined) ? each.flat() : undefined;
 }
 
 /**
@@ -4311,10 +4692,7 @@ function usesIn(
     // A type mentions a binding without using its value.
     if (ts.isTypeNode(node)) return;
     if (ts.isIdentifier(node) && !namesSomething(node)) {
-      const { parent } = node;
-      const symbol = ts.isShorthandPropertyAssignment(parent)
-        ? checker.getShorthandAssignmentValueSymbol(parent)
-        : checker.getSymbolAtLocation(node);
+      const symbol = valueSymbol(node, checker);
       if (symbol) {
         const resolved = resolveAlias(symbol, checker);
         const list = uses.get(resolved);

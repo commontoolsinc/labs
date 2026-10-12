@@ -1000,33 +1000,44 @@ not known, and declares nothing. So these are declared:
   parameters bound. A call's type parameters are inferred as the checker
   infers them (`inferTypeArguments()` and `inferTypes()` in TypeScript's
   checker): the receiver against the `this` parameter, each argument against
-  the type of the parameter at its position, a tuple spread slot by slot and
-  any other spread against every parameter after it, and the arguments a rest
-  parameter collects as a tuple. A parameter's type is read as the checker
-  reads it: a type parameter takes the argument whole, `NoInfer<T>` nothing,
-  a union's or an intersection's members each, a conditional type's branches
-  each, a homomorphic mapped type backwards, an array or an iterable through
-  its elements, a tuple slot by slot, an instance of a class or an interface
-  the argument instantiates too by its type arguments, and any other object
-  type by its properties, inherited ones included, its signatures, and its
-  index signatures; a library's object type is read by its type arguments and
-  its signatures alone. A union's lone type parameter takes the argument at
-  the normal priority where no other member takes it, and at a lower one where
-  a member closely matches the argument or takes it. Only the candidates found
-  at the best priority count, as the checker ranks them, and those from a
-  callback's parameters only where none other is found; a type parameter with
-  none takes its written default, or else its written constraint. The argument is followed to where each of its parts was
-  written: an object literal's members, an array literal's elements by slot,
-  a binding's annotation or its initializer, a member of a value it reads, a
-  function's result and written parameters, and the type arguments of an
-  instance a construction or a call makes. A candidate that is a field's or a
+  the type of the parameter at its position, a tagged template's strings and
+  then each of its substitutions as its arguments, a tuple spread slot by slot
+  and any other spread against every parameter after it, and the arguments a
+  rest parameter collects as a tuple, those after a spread of unknown length
+  included. A parameter's type is read as the checker reads it: a type
+  parameter takes the argument whole, `NoInfer<T>` nothing, a union's or an
+  intersection's members each, a conditional type's branches each, a
+  homomorphic mapped type backwards, each of the argument's members read
+  against its template, an array or an iterable through its elements, which a
+  rest that collects no argument supplies nothing, a tuple slot by slot, the
+  slots after a variable one from the end, an instance of a class or an
+  interface the argument instantiates too by its type arguments, and any other
+  object type by its properties, inherited ones included, its signatures, and
+  its index signatures; a type a declaration file declares is read by its type
+  arguments, its signatures, and the properties the argument writes out. A
+  union's lone type parameter takes the argument at the normal priority where
+  no other member takes it, and at a lower one where a member closely matches
+  the argument or takes it. Only the candidates found at the best priority
+  count, as the checker ranks them, and those from a callback's parameters
+  only where none other is found; a type parameter with none takes its written
+  default, or else its written constraint, unless that denotes `unknown` or
+  `any`, however it is written. The argument is followed to where each of its
+  parts was written: an object literal's members, an array literal's elements
+  by slot, a binding's annotation or its initializer, a member of a value it
+  reads, a function's result and written parameters, what an iterable yields,
+  as the type argument its iteration takes, and the type arguments of an
+  instance a construction or a call makes. A function the argument cannot be
+  followed to returns what the declaration of its type's signature writes or
+  returns, and a function made inside another function's call is read with
+  that call's type parameters bound. A candidate that is a field's or a
   type argument's written type stands for that type, so its `unknown`
   declares a reference wherever the type parameter is a field's type; any
   other candidate stands for its provenance. A method's call also binds the
   type parameters of the class or the interface declaring it, as its receiver
   instantiates them. A part read by a key whose type is no literal may be any
   part, and a key whose type is a literal, or a union of them, reads each part
-  it names, in an element access and in an indexed access type alike
+  it names, in an element access and in an indexed access type alike, where a
+  key that is a type parameter reads as what the reading binds it to
 - another pattern's result, which passed this check in its own compile; a
   cell; a literal, a function, or JSX
 
