@@ -64,12 +64,14 @@ export function getCommitLocalSeq(
 const splitSpacesBySource = new WeakMap<object, readonly MemorySpace[]>();
 
 /**
- * Records that `source` commits to `spaces` one space at a time, in order.
+ * Records that `source` commits to `spaces` one space at a time, in order. A
+ * commit to one space is no split: its acceptance is `source`'s.
  */
 export function recordSplitCommitSpaces(
   source: IStorageTransaction,
   spaces: readonly MemorySpace[],
 ): void {
+  if (spaces.length < 2) return;
   splitSpacesBySource.set(source, [...spaces]);
 }
 
