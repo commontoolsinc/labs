@@ -122,8 +122,14 @@ describe("wish-home-root", () => {
     });
 
     /** Runs `query` as a wish in a space other than Home, and demands it. */
-    async function runWish(query: string, label: string) {
-      const wishPattern = pattern(() => ({ found: wishFn({ query }) }));
+    async function runWish(
+      query: string,
+      label: string,
+      options: { headless?: boolean } = {},
+    ) {
+      const wishPattern = pattern(() => ({
+        found: wishFn({ query, ...options }),
+      }));
       const tx = runtime.edit();
       const resultCell = runtime.getCell<Record<string, any>>(
         patternSpace,
@@ -153,6 +159,9 @@ describe("wish-home-root", () => {
         const root = await resolveSpaceRootPattern(runtime, home);
         expect(getPatternIdentityRef(root!)).toBeDefined();
 
+        expect(
+          found.key(UI).key("props").key("data-profile-create-ui").get(),
+        ).toBe("wish");
         const surface = found.key(UI).key("props").key("$cell")
           .resolveAsCell() as Cell<any>;
         await surface.pull();
@@ -186,6 +195,33 @@ describe("wish-home-root", () => {
           "a favorite",
         ]);
         expect(isSigilLink(homeSlot())).toBe(true);
+      } finally {
+        stop();
+      }
+    });
+
+    it("offers no create surface for a headless `#profile` with no profile, and creates no Home root", async () => {
+      const { found, stop } = await runWish("#profile", "headless profile", {
+        headless: true,
+      });
+      try {
+        expect(found.get()?.error).toBe("No profile exists yet");
+        expect(
+          found.key(UI).key("props").key("data-profile-create-ui").get(),
+        ).toBeUndefined();
+        expect(homeSlot()).toBeUndefined();
+      } finally {
+        stop();
+      }
+    });
+
+    it("reports no chat manager for a Home with no root, and creates none", async () => {
+      const { found, stop } = await runWish("#chatManager", "chat manager");
+      try {
+        expect(String(found.get()?.error)).toContain(
+          "The home space holds no chat manager",
+        );
+        expect(homeSlot()).toBeUndefined();
       } finally {
         stop();
       }

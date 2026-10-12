@@ -304,20 +304,21 @@ These query strings resolve to well-known cells without a search. The
 `#chatManager`, and the `#profile*` targets, which require a signed-in user and
 resolve from that user's home space. The ones that resolve under the home
 pattern, the home space's root, need that root to exist: `#favorites`,
-`#journal`, `#learned`, `#learnedSummary`, `#agent_queue`, `#chatManager`,
-`#profile` while the user has no profile (its create surface writes there), and
-a `"~"`-scoped target such as `#default`. While the home space's
+`#journal`, `#learned`, `#learnedSummary`, `#agent_queue`, `#profile` while the
+user has no profile and the wish is not headless (its create surface writes
+there), and a `"~"`-scoped target such as `#default`. While the home space's
 `defaultPattern` slot is empty, as it is before the home space is first opened,
 a wish for one of these on a client runtime creates the root and waits until it
 exists, reporting a creation that failed as its error. A serving runtime
 creates none, and reports the missing root as the wish's error. A slot that
 already holds something is resolved through as it stands. The other `#profile*`
-targets only read the profile roster through the slot as it stands, so for them
-an empty slot reads as no profiles and creates nothing. `#chatManager` reports
-an error, naming
-the remedies, when the home pattern holds no chat manager: a system home
-pattern set up before its source had one gains it when the home space is next
-opened, and a custom one holds it only if it says so.
+targets, and a headless `#profile`, which offers no create surface, only read
+the profile roster through the slot as it stands, so for them an empty slot
+reads as no profiles and creates nothing. `#chatManager` only reads the home
+pattern too, and reports an error, naming the remedies, when there is no home
+pattern or it holds no chat manager: a system home pattern set up before its
+source had one gains it when the home space is next opened, and a custom one
+holds it only if it says so.
 The `scope` parameter can redirect or fan the others out across other spaces.
 
 | Target              | Description                                             |

@@ -292,6 +292,12 @@ type WishContext = {
   spaceCell?: Cell<unknown>;
   scope?: ("~" | "." | "profile" | string)[];
 
+  /**
+   * Whether the wish is headless, in which case it offers none of its own
+   * surfaces: no picker, no suggestions, and no profile creation.
+   */
+  headless?: boolean;
+
   /** Cached #now cell to avoid non-idempotent re-runs from Date.now() */
   nowCell?: Cell<unknown>;
 
@@ -433,7 +439,22 @@ function createHomeRoot(runtime: Runtime, home: MemorySpace): Promise<void> {
 
 /**
  * The root of the wishing user's Home, the cell its space links as
- * `defaultPattern`, under which every Home target a wish hands out lies.
+ * `defaultPattern`, when the slot holds anything at all, which is then
+ * resolved through as it stands. `undefined` when the slot is empty.
+ */
+function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
+  const homeSpaceCell = getHomeSpaceCell(ctx) as Cell<any>;
+  ctx.readiness.requireDocument(homeSpaceCell, ctx.tx);
+  const slot = homeSpaceCell.key("defaultPattern");
+  if (slot.getRaw() === undefined) return undefined;
+  const root = slot.resolveAsCell();
+  ctx.readiness.requireDocument(root, ctx.tx);
+  return root;
+}
+
+/**
+ * The root of the wishing user's Home, under which every Home target a wish
+ * hands out lies, brought into being when the slot is empty.
  *
  * A space that links no root resolves `defaultPattern` to a path inside the
  * space cell itself, and a write through a cell resolved there lands where no
@@ -442,33 +463,29 @@ function createHomeRoot(runtime: Runtime, home: MemorySpace): Promise<void> {
  * starts the root's creation and throws `DocumentPending`, and the wish runs
  * again once the creation settles. A serving runtime creates no Home, and
  * throws a `WishError`. A slot holding anything at all is resolved through as
- * it stands.
+ * it stands ({@link findHomeRootCell}).
  */
 function getHomeRootCell(ctx: WishContext): Cell<any> {
-  const homeSpaceCell = getHomeSpaceCell(ctx) as Cell<any>;
-  ctx.readiness.requireDocument(homeSpaceCell, ctx.tx);
-  const slot = homeSpaceCell.key("defaultPattern");
-  if (slot.getRaw() === undefined) {
-    if (ctx.runtime.servingPosture) {
-      throw new WishError(
-        "The home space has no root yet, and a serving runtime does not " +
-          "create one. Opening the home space creates it.",
-      );
-    }
-    const home = homeSpaceCell.space;
-    ctx.readiness.requireSettled(
-      `home-root:${home}`,
-      () => createHomeRoot(ctx.runtime, home),
+  const found = findHomeRootCell(ctx);
+  if (found !== undefined) return found;
+  if (ctx.runtime.servingPosture) {
+    throw new WishError(
+      "The home space has no root yet, and a serving runtime does not " +
+        "create one. Opening the home space creates it.",
     );
-    // The creation resolves only once the slot holds a link, so an empty slot
-    // here means the root went missing again after it was created.
-    if (slot.getRaw() === undefined) {
-      throw new WishError("The home space's root could not be found.");
-    }
   }
-  const root = slot.resolveAsCell();
-  ctx.readiness.requireDocument(root, ctx.tx);
-  return root;
+  const home = getHomeSpaceCell(ctx).space;
+  ctx.readiness.requireSettled(
+    `home-root:${home}`,
+    () => createHomeRoot(ctx.runtime, home),
+  );
+  // The creation resolves only once the slot holds a link, so an empty slot
+  // here means the root went missing again after it was created.
+  const created = findHomeRootCell(ctx);
+  if (created === undefined) {
+    throw new WishError("The home space's root could not be found.");
+  }
+  return created;
 }
 
 /**
@@ -939,22 +956,24 @@ function searchByHashtag(
 
 /**
  * Throws a `WishError` naming the remedies when the home pattern `homeRoot`
- * holds nothing at `field`, which it names to the user as `what`. The system
- * home pattern gains a field its current source adds only when the home space
- * is next opened, since nothing updates a piece nobody opens, so a home set up
+ * holds nothing at `field`, which it names to the user as `what`, or when there
+ * is no home pattern at all (`homeRoot` is `undefined`). The system home
+ * pattern gains a field its current source adds only when the home space is
+ * next opened, since nothing updates a piece nobody opens, so a home set up
  * before the field existed lacks it until then. A custom home pattern follows
- * no source of the system's, and holds the field only if it says so. A wish
- * creates a home root that does not exist yet ({@link getHomeRootCell}), but
- * does not open an existing one to bring it up to date.
+ * no source of the system's, and holds the field only if it says so. The wish
+ * neither creates a home root nor opens an existing one to bring it up to date.
  */
 function requireHomeField(
-  homeRoot: Cell<unknown>,
+  homeRoot: Cell<unknown> | undefined,
   field: string,
   what: string,
   ctx: WishContext,
-): void {
-  const held = resolvePath(homeRoot, [field], ctx);
-  if (held.getRaw() === undefined) {
+): asserts homeRoot is Cell<unknown> {
+  if (
+    homeRoot === undefined ||
+    resolvePath(homeRoot, [field], ctx).getRaw() === undefined
+  ) {
     throw new WishError(
       `The home space holds no ${what}. If its home pattern is the system ` +
         `one, set up before it had one, open the home space once, which ` +
@@ -1055,7 +1074,9 @@ function resolveHomeSpaceTarget(
           "User identity DID not available for #chatManager",
         );
       }
-      const homeRoot = getHomeRootCell(ctx);
+      // The chat manager is read, never created, so a Home with no root is
+      // one with no chat manager, and no root is brought up for it.
+      const homeRoot = findHomeRootCell(ctx);
       requireHomeField(homeRoot, "chatManager", "chat manager", ctx);
       return [{ cell: homeRoot, pathPrefix: ["chatManager"] }];
     }
@@ -1086,8 +1107,11 @@ function resolveHomeSpaceTarget(
         // No profile yet — throw so the #profile error path falls back to the
         // create surface (see profileCreateUI). That surface writes under the
         // Home root, which it is handed from the error path, so the root is
-        // brought into being here, where waiting on it is possible.
-        if (isProfilePersonaTarget(parsed)) getHomeRootCell(ctx);
+        // brought into being here, where waiting on it is possible. A headless
+        // wish offers no create surface, and so brings up no root.
+        if (isProfilePersonaTarget(parsed) && !ctx.headless) {
+          getHomeRootCell(ctx);
+        }
         throw new NoProfileError();
       }
       // Expose the ordered roster as `candidates`: every profile that loaded,
@@ -3196,6 +3220,7 @@ export function wish(
             tx,
             parentCell,
             scope,
+            headless: headless === true,
             nowCell,
             nowCause: cause,
           };
@@ -3458,7 +3483,7 @@ export function wish(
             if (e instanceof DocumentPending) return;
             const errorMsg = e instanceof WishError ? e.message : String(e);
             const ui = e instanceof NoProfileError && parsed &&
-                isProfilePersonaTarget(parsed)
+                isProfilePersonaTarget(parsed) && !headless
               ? profileCreateUI(ctx)
               : errorUI(errorMsg);
             measureWishPhase(

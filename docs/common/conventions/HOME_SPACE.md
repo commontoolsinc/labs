@@ -314,7 +314,9 @@ holds none until the home space is next opened, since nothing updates a piece
 nobody opens, and the wish does not open it; a custom home pattern
 ([Custom Home Pattern](#custom-home-pattern)) holds one only if it says so.
 Until then `wish({ query: "#chatManager" })` reports an error naming both
-remedies, rather than resolving to nothing.
+remedies, rather than resolving to nothing. A home space with no home pattern
+yet holds no chat manager either, and the wish reports the same error there
+without creating the home pattern.
 
 Home hands the manager its shared-space catalog ([Shared-space
 catalog](../../features/shared-space-catalog.md)), and the manager registers
