@@ -4597,11 +4597,11 @@ describe("runtime-processor", () => {
         expect(worker.privateInboxSends()).toBe(1);
       });
 
-      it("returns the root when sending the private inbox ensure throws, and reports the failure", async () => {
+      it("returns the root when Home's handling of the private inbox ensure fails, and reports the failure", async () => {
         const attempted = Promise.withResolvers<void>();
         await using worker = await homeWorker([], () => {
           attempted.resolve();
-          throw new Error("send failure");
+          throw new Error("handling failure");
         });
         const warn = stub(console, "warn", () => {});
         try {
