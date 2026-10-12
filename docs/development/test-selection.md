@@ -234,6 +234,19 @@ workflow. A run's lanes come from two jobs.
   runs, one once each capability has opened, and one as each batch starts.
   Setup captures its commands' output, so in a lane that stops without saying
   why, the last of these lines names the step it stopped in.
+- The lane replaces the shell of `🧪 Run the lane` rather than running under
+  it. GitHub stops a step that reaches its bound by sending SIGINT to the
+  step's own process, and SIGTERM a few seconds later, and a shell waiting on a
+  command passes neither on. The lane passes each signal on to the command it
+  is running and starts nothing more, a rerun included. `deno test` told to stop names the tests
+  it was in the middle of and writes its report, so the lane keeps the records
+  of the tests it finished, and the test that held it up is recorded as skipped:
+  a cancelled run sends the same signal, and a test it interrupts has not
+  failed. A test `deno test` reports as cancelled in a run the lane did not
+  signal is one an error it did not catch stopped, and is recorded as failed.
+  The lane then prints the end of each server's log, keeps its working
+  directory for the upload of what a failing lane left behind, and exits
+  without converting its coverage, which takes longer than GitHub waits.
 
 Only the `🧪 Run the lane` step is given `GITHUB_TOKEN` in its
 environment, and `tasks/ci-workflow.test.ts` fails a lane job in which the
@@ -1427,7 +1440,8 @@ unit starts only where what the packer charges for it fits in what is left of
 the budget, and the time the reruns take is what comes off it. A rerun takes
 along any other waiting units of the same suite that fit beside it. The charge
 is read from passing runs, so a rerun that hangs runs for as long as the hang,
-and the lane's step timeout is what bounds that. The lane's job summary says
+and the lane's step timeout is what bounds that; the lane passes the signal
+that timeout sends on to the rerun, as it would to a batch. The lane's job summary says
 what the reruns took, which tests passed on a rerun, which never did, which no
 rerun recorded, and which tests' units did not fit. A pull request's lanes
 rerun nothing, unless the pull request is labelled `ci: full`, which runs its
@@ -1668,10 +1682,13 @@ ignores every test inside it. Where a file declares a hook outside every
 `describe()`, that outermost one is the `global` suite the runner
 invents. A lane therefore never lists the title of a `describe()`
 holding a test the lane runs. A `describe()` a lane chose runs its hooks
-with the tests inside it ignored. Ingestion drops the case a
-`describe()` reports for itself wherever a test inside it reports,
-ignored or not, so a record of any test inside a `describe()` accounts
-for it, including one the lane's own skip list named and does not ship.
+with the tests inside it ignored. Ingestion records the case a
+`describe()` reports for itself in two separate cases: whenever it fails
+on its own account, and on every run, pass or fail, once the manifest
+holds its title in the unit that ran and no other case in the report has
+that title. A record of any test inside a
+`describe()` also accounts for it, ignored or not, including one the
+lane's own skip list named and does not ship.
 A `describe()` whose `beforeAll` fails reports no test inside it, so its
 own failing case is the record that stands.
 

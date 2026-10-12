@@ -554,7 +554,9 @@ with local dev servers; it does not report the defines in the dev bundle.
 The `generated-patterns` and `pattern-tests` targets use in-process, emulated
 stores without a serving host. The integration runner explicitly disables
 `serverExecution` for these two harnesses while preserving the other inherited
-flags. Server-backed targets receive the supplied server-execution setting.
+flags; `cf test` refuses server execution on, so the `pattern-tests` target
+would otherwise fail every file. Server-backed targets receive the supplied
+server-execution setting.
 
 For view-scoped replication, run the complete default integration suite with:
 
@@ -579,6 +581,12 @@ hosts its own memory server and runs a client ON therefore needs that loop
 too. Without it the server admits the event and nothing ever delivers it, so
 a wait on the consequence never resolves and the test hangs rather than
 failing.
+
+`cf test` hosts no serving loop: it runs a single-user test over emulated
+storage and a multi-user test against a plain memory server. It therefore
+refuses to run with `EXPERIMENTAL_SERVER_EXECUTION=true`, failing each test
+file with a message naming the missing loop, rather than run clients whose
+events nothing serves.
 
 `@commonfabric/runner/executor/serving-memory-server.deno` supplies the pair:
 a memory server over a fresh non-persistent store, with an `ExecutorHost`
