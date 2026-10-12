@@ -1596,6 +1596,49 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
+    it("drops a cascade-dropped C3's write when the installed store read-through throws at the drop", async () => {
+      // The read is a repair of the revert's result; a failure of it leaves
+      // the drop to proceed, so the refused write does not stand.
+      const harness = await createHarness();
+      let throwing = false;
+      harness.storageManager.installStoreReadThrough(
+        space,
+        ({ id, scopeKey }) => {
+          if (throwing) throw new Error("store closed");
+          return {
+            branch: "",
+            id,
+            scope: "space",
+            scopeKey,
+            seq: 0,
+            deleted: true,
+          };
+        },
+      );
+      try {
+        await seedAccepted(harness, DOCS.A, valueFor("base-a"));
+
+        const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+        harness.model.setOutcome(c2.localSeq, { kind: "rejectConflict" });
+        const c3 = beginSet(
+          harness,
+          DOCS.C,
+          valueFor("c3"),
+          sourceFromReads([{ id: DOCS.A }]),
+        );
+        harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+        expectVisible(harness, { C: valueFor("c3") });
+        throwing = true;
+
+        await expectConflict(c2.promise);
+        await expectConflict(c3.promise, "pending dependency");
+        expectVisible(harness, { A: valueFor("base-a"), C: undefined });
+      } finally {
+        throwing = false;
+        await harness.close();
+      }
+    });
+
     it("fails a C3 that depends on a C2 whose conflict is on unrelated data in the same atomic commit", async () => {
       const harness = await createHarness();
       try {

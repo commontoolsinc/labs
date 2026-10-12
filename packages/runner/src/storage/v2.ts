@@ -9442,25 +9442,27 @@ export class SpaceReplica
     if (entries.length === 0) {
       return;
     }
-    const read = this.#storeReadThrough();
-    if (read !== undefined) {
-      const upserts: SessionSyncUpsert[] = [];
-      for (const [address] of entries) {
-        const instance = this.instanceKey(
-          address.scope,
-          undefined,
-          address.scopeKey,
-        );
-        if (!isScopeKey(instance)) continue;
-        const upsert = read({ id: address.id, scopeKey: instance });
-        if (upsert !== undefined) upserts.push(upsert);
-      }
-      if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
-      return;
-    }
+    // A failure of either arm, thrown or returned, must not escape: the drop
+    // that follows is what settles the refused commit.
     let failure: unknown;
     try {
-      failure = (await this.pull(entries)).error;
+      const read = this.#storeReadThrough();
+      if (read === undefined) {
+        failure = (await this.pull(entries)).error;
+      } else {
+        const upserts: SessionSyncUpsert[] = [];
+        for (const [address] of entries) {
+          const instance = this.instanceKey(
+            address.scope,
+            undefined,
+            address.scopeKey,
+          );
+          if (!isScopeKey(instance)) continue;
+          const upsert = read({ id: address.id, scopeKey: instance });
+          if (upsert !== undefined) upserts.push(upsert);
+        }
+        if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
+      }
     } catch (error) {
       failure = error;
     }
