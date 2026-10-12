@@ -793,26 +793,71 @@ const unionBranchShape = (schema: JSONSchema): JSONSchema => {
   return shape;
 };
 
-/** Match policy-bearing union branches only when each has a unique counterpart. */
+/**
+ * The JSON types `branch` admits, with its reference resolved against
+ * `definitions`; `undefined` where it declares no `type`. `number` and
+ * `integer` admit each other's integers, so each set holds both or neither.
+ */
+const branchTypes = (
+  branch: JSONSchema,
+  definitions: SchemaDefinitions,
+): ReadonlySet<unknown> | undefined => {
+  const resolved = isObjectNotArray(branch) && typeof branch.$ref === "string"
+    ? resolveKeepingBodyClaims(branch, { $defs: definitions })
+    : branch;
+  if (!isObjectNotArray(resolved) || resolved.type === undefined) {
+    return undefined;
+  }
+  const types = new Set<unknown>(
+    Array.isArray(resolved.type) ? resolved.type : [resolved.type],
+  );
+  if (types.has("number") || types.has("integer")) {
+    types.add("number");
+    types.add("integer");
+  }
+  return types;
+};
+
+/**
+ * Pairs every stored policy-bearing union branch with the one candidate branch
+ * of its shape. A candidate branch with no stored counterpart is admitted only
+ * where its declared types share none with any stored branch's, so that no
+ * value a stored branch admits can match it instead and leave that branch's
+ * claims behind. Such a branch is `undefined` in the result.
+ */
 const correspondingUnionBranches = (
   existing: readonly JSONSchema[],
   candidate: readonly JSONSchema[],
   path: string,
-): readonly JSONSchema[] => {
+  definitions: SchemaDefinitions,
+): readonly (JSONSchema | undefined)[] => {
   const left = existing.map((branch) => hashStringOf(unionBranchShape(branch)));
   const right = candidate.map((branch) =>
     hashStringOf(unionBranchShape(branch))
   );
+  const added = candidate.filter((_, index) => !left.includes(right[index]));
+  const storedTypes = existing.map((branch) =>
+    branchTypes(branch, definitions)
+  );
   if (
-    left.length !== right.length || new Set(left).size !== left.length ||
+    new Set(left).size !== left.length ||
     new Set(right).size !== right.length ||
-    right.some((shape) => !left.includes(shape))
+    left.some((shape) => !right.includes(shape)) ||
+    added.some((branch) => {
+      const types = branchTypes(branch, definitions);
+      return types === undefined ||
+        storedTypes.some((stored) =>
+          stored === undefined || [...types].some((type) => stored.has(type))
+        );
+    })
   ) {
     throw new Error(
       `cannot reconcile policy-bearing union branches at ${path || "/"}`,
     );
   }
-  return right.map((shape) => existing[left.indexOf(shape)]);
+  return right.map((shape) =>
+    left.includes(shape) ? existing[left.indexOf(shape)] : undefined
+  );
 };
 
 const mergeSchemaNode = (
@@ -1028,18 +1073,20 @@ const mergeSchemaNode = (
       leftBranches,
       rightBranches,
       path,
+      childReferences.definitions,
     );
-    const reconciled = rightBranches.map((branch, index) =>
-      mergeSchemaNode(
-        counterparts[index],
+    const reconciled = rightBranches.map((branch, index) => {
+      const counterpart = counterparts[index];
+      return counterpart === undefined ? branch : mergeSchemaNode(
+        counterpart,
         branch,
         path,
         logicalPath,
         options,
         childReferences,
         true,
-      )
-    );
+      );
+    });
     // A stored union is reconciled again with every later writer's schema,
     // which spells its branches as the candidate does. A branch whose merge
     // changed that spelling (a reference stored as the inline body that
