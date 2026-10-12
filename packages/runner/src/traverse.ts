@@ -5444,11 +5444,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // into cells: We want to then refer to the actual object by default,
       // not the array location.
       //
-      // If the element is an object, but not a link, we create an immutable
-      // cell to hold the object, except when it is requested as Cell. While
-      // this means updates aren't propagated, it seems like the right trade-off
-      // for stability of links and the ability to mutate them without creating
-      // loops (see below).
+      // If the element is an object, but not a link, an eager read creates an
+      // immutable cell to hold the object, except when it is requested as
+      // Cell. While this means updates aren't propagated, it seems like the
+      // right trade-off for stability of links and the ability to mutate them
+      // without creating loops (see below). A query walk hands no object back
+      // to be written elsewhere, and traverses the element where it is stored.
       //
       // This makes
       // ```ts
@@ -5588,23 +5589,27 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
         }
       } else if (
+        !this.traverseCells &&
         arrayItemUsesValueIdentity(item, curSelector.schema)
       ) {
-        // We create an element link, but this is just to establish the id if we encounter
-        // other links in our data value and we need to construct a relative link.
+        // An eager read gives an inline object or array a `data:` address
+        // carrying a snapshot of its value, so that the object the read
+        // returns copies the data when written elsewhere; a link to this slot
+        // would name whatever the slot holds next. A query walk does not take
+        // this branch: it traverses the element at its address in the
+        // document that stores it, like any other nested value. That address
+        // is the one a link inside the element naming no document resolves
+        // against, so the walk goes on to the documents such a link reaches.
+        //
+        // The element link exists to give the snapshot an id for the links
+        // inside the element that name no document.
         const elementLink = getNormalizedLink(
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc
-        // Need to read recursively here
+        // The snapshot is of the whole element, so the read is recursive.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const elementAddress = curDoc.address;
-        // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
-        // Right now, we aren't passing both the link info and doc info, so we
-        // will override the doc here.
-        // I could switch based off the traverseCells flag (true for queries),
-        // but I don't want to have that change behavior here.
         curDoc = {
           ...curDoc,
           address: {

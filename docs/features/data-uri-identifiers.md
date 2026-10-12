@@ -102,8 +102,11 @@ Representative places that mint one:
   on that mutable inline element, because its content determines the snapshot's
   identity. Changes to the element cause a reactive reader to resolve it again;
   changes to another array element do not require that reader to rerun.
-- Query traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
-  document for an array element it needs to read recursively.
+- Eager traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
+  document for an array element that is an inline object or array, so that the
+  object the read returns is identified by its value. The query walk, which
+  runs with `traverseCells` set, mints none: it traverses such an element at
+  its address in the document that stores it.
 - The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
   an array element that is an inline object, when the reader touches it. The
   element's value is already in hand, so the identifier costs no read. Without
