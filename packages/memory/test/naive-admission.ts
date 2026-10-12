@@ -185,8 +185,8 @@ const layersOf = (localSeq: number | number[]): number[] =>
  * declared `basisSeq`, or the higher seq of a layer it names that was accepted
  * as an identity for the read's document — every operation of the layer on
  * that document elided — where the layer's operations on it begin with a
- * `set`, or the layer's own read of it sat on the declared basis through no
- * layer the read does not name (03-commit-model.md §3.6.3).
+ * `set`, or the read of it the identity proof used sat on the declared basis
+ * through no layer the read does not name (03-commit-model.md §3.6.3).
  */
 export const naiveIdentityLayerBasis = (
   history: NaiveHistory,
@@ -208,14 +208,20 @@ export const naiveIdentityLayerBasis = (
     if (
       onDocument.some(([index]) => !layer.elidedOpIndexes.includes(index))
     ) continue;
+    // The identity proof reconstructs the layer's view from its first pending
+    // read of the document, else its first confirmed one.
+    const ownPending = layer.commit.reads.pending.find((own) =>
+      own.id === read.id
+    );
+    const ownConfirmed = ownPending === undefined
+      ? layer.commit.reads.confirmed.find((own) => own.id === read.id)
+      : undefined;
     const proved = onDocument[0][1].op === "set" ||
-      layer.commit.reads.pending.some((own) =>
-        own.id === read.id && own.basisSeq === read.basisSeq &&
-        layersOf(own.localSeq).every((named) => layers.includes(named))
-      ) ||
-      layer.commit.reads.confirmed.some((own) =>
-        own.id === read.id && own.seq === read.basisSeq
-      );
+      (ownPending !== undefined && ownPending.basisSeq === read.basisSeq &&
+        layersOf(ownPending.localSeq).every((named) =>
+          layers.includes(named)
+        )) ||
+      ownConfirmed?.seq === read.basisSeq;
     if (proved) basis = layer.seq;
   }
   return basis;
