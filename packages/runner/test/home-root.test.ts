@@ -72,29 +72,36 @@ describe("home-root", () => {
   it("returns `undefined` for a write refused beneath another space", () => {
     const rt = makeRuntime(user, false);
 
-    expect(
-      bringUpHomeRootForRefusedWrite(rt, new SpaceRootMissingError(elsewhere)),
-    ).toBeUndefined();
+    const creation = bringUpHomeRootForRefusedWrite(
+      rt,
+      new SpaceRootMissingError(elsewhere),
+    );
+    creation?.catch(() => {});
+
+    expect(creation).toBeUndefined();
     expect(fetched).toEqual([]);
   });
 
   it("returns `undefined` for an error other than a refused write", () => {
     const rt = makeRuntime(user, false);
 
-    expect(bringUpHomeRootForRefusedWrite(rt, new Error(home)))
-      .toBeUndefined();
+    const creation = bringUpHomeRootForRefusedWrite(rt, new Error(home));
+    creation?.catch(() => {});
+
+    expect(creation).toBeUndefined();
     expect(fetched).toEqual([]);
   });
 
   it("returns `undefined` on a serving runtime, which creates no Home root", () => {
     const rt = makeRuntime(service, true);
 
-    expect(
-      bringUpHomeRootForRefusedWrite(
-        rt,
-        new SpaceRootMissingError(service.did() as MemorySpace),
-      ),
-    ).toBeUndefined();
+    const creation = bringUpHomeRootForRefusedWrite(
+      rt,
+      new SpaceRootMissingError(service.did() as MemorySpace),
+    );
+    creation?.catch(() => {});
+
+    expect(creation).toBeUndefined();
     expect(fetched).toEqual([]);
   });
 });
