@@ -213,6 +213,42 @@ Exit: a load's watch responses are read as they arrive.
       documents carrying schemas inline, and stays silent; the comment at
       `packages/runner/src/link-utils.ts` that did is gone with stage 1.
 
+### Stage 6. The first run and the render
+
+Measured on rooms of thirty and of a hundred and twenty message rows seeded
+on a local toolshed
+([`../history/development/performance/2026-10-11-fabrichat-room-load-local.md`](../history/development/performance/2026-10-11-fabrichat-room-load-local.md)),
+where the pre-sync was no longer the whole cost.
+
+- [x] The scheduler's topological sort indexes the work set's readers by
+      the document they read, so a writer's ordering edges cost the readers
+      of what it writes rather than the whole set
+      (`packages/runner/src/scheduler/topology.ts`).
+- [x] CFC commit preparation indexes a transaction's write-policy inputs by
+      the document they name, once per transaction, so the two checks a
+      written path makes read the inputs about its document
+      (`packages/runner/src/cfc/prepare.ts`).
+- [x] The storage manager keeps each data URI's hash and decoded value in a
+      weight-bounded memo, and does not sync a link that declares a stream:
+      its document holds no value a read uses, and the sync had sent one
+      root carrying the stream's event schema per stream to receive an
+      absence record (`packages/runner/src/storage/v2.ts`).
+- [x] An inline array element's snapshot id is kept by the value's identity
+      and the link it was read through, so resolving the element as a cell
+      encodes it once per document version rather than once per resolve
+      (`packages/runner/src/cell.ts`).
+- [x] Measured: the thirty-row room's first load from 71 to 30 s to the
+      messages and its second load from 42 to 16 s, on the same machine
+      within the hour.
+- [ ] A load of a materialized room still commits for a fifth of its time,
+      writing a reader's own instance of every session-scoped derivation.
+- [ ] The first-run commit of a hundred-row room is one transaction over
+      the server's slot limit, which the client re-sends unchanged.
+- [ ] Each plan's inputs document is still minted per plan; the memo
+      removes the repeat hashing and decoding, not the minting.
+
+Exit: a room of a hundred rows opens in the browser.
+
 ## Out of scope, noted
 
 The 3.2 MB watch frame is mostly two 5 KB selectors repeated 296 times. A
@@ -220,3 +256,7 @@ selector table per frame — each distinct selector once, roots naming it by
 hash, as the frame log already records them — would cut the bytes out by an
 order of magnitude. It is a protocol change under
 `docs/specs/memory-v2/04-protocol.md` and a separate plan.
+
+The compiled program is 1.7 MB per cold worker and evaluates in 0.9 s, with
+no cache in the browser; shrinking the compiled output and caching compiled
+closures in the browser are each their own work.
