@@ -1149,6 +1149,30 @@ const pieceOwnedStores = (
 ];
 
 /**
+ * Hands a deferred start the trust snapshot of the transaction it was deferred
+ * from, when it initializes on that transaction's behalf. The start runs in a
+ * transaction of its own, and on a serving runtime the stamp that gives it a
+ * run context leaves it the runtime's ambient snapshot, which names the
+ * service. A run the serving loop attached a principal's snapshot to, such as
+ * the owner the space-root ensure resolves, would otherwise hand the start's
+ * initializations to the service rather than to that principal. Called after
+ * the start is stamped and before its first read. A start no serving loop
+ * stamped takes its trust from the runtime it runs in, as its parent did.
+ */
+const carryDeferredStartTrust = (
+  from: IExtendedStorageTransaction,
+  start: IExtendedStorageTransaction,
+): void => {
+  const trustSnapshot = from.getCfcState().trustSnapshot;
+  if (
+    start.getCfcState().attributedInitialization &&
+    waveRunContextOf(start) !== undefined && trustSnapshot !== undefined
+  ) {
+    setCfcTrustSnapshot(start, trustSnapshot);
+  }
+};
+
+/**
  * Name this piece's stores for the transaction setting it up. Setup fills them
  * in the transaction that names them, so the marker is all it needs.
  */
@@ -6507,6 +6531,7 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
+      carryDeferredStartTrust(tx, startTx);
       // A deferred start minted from an EVENT-HANDLER run carries that run's
       // event context across to the start tx, so a navigateTo instantiated
       // under it can address the firing session (builtins.md §4;
@@ -7109,6 +7134,7 @@ export class Runner {
           startTx,
           speculationContext ?? { actionId, kind: "bookkeeping" },
         );
+        carryDeferredStartTrust(tx, startTx);
         if (navigateContext !== undefined) {
           setNavigateEventContext(startTx, navigateContext);
         }
@@ -7598,6 +7624,7 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
+      carryDeferredStartTrust(tx, startTx);
       // Carry the instantiating event-handler run's event context to the start
       // tx (builtins.md §4) — capture point 1, as in startAfterSuccessfulCommit
       // above.
