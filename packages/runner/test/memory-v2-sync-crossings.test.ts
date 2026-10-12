@@ -229,6 +229,39 @@ describe("memory-v2-sync-crossings", () => {
     expect(await recorder.key("log").pull()).toEqual(["first:Ada"]);
   });
 
+  it("reports no load recovery for a document whose only load, its crossing load, failed", async () => {
+    const { leaf, top } = await writeCrossing("failed crossing recovery");
+    const leafLink = leaf.getAsNormalizedFullLink();
+    const leafKey = entityKey(leafLink, managerB.scopeKeyIdentity());
+    const provider = managerB.open(farSpace);
+    const realSync = provider.sync.bind(provider);
+    provider.sync =
+      (async (...args: Parameters<IStorageProvider["sync"]>) =>
+        args[0] === leafLink.id
+          ? { error: new Error("crossing load refused") }
+          : await realSync(...args)) as IStorageProvider["sync"];
+    const recovered: string[] = [];
+    managerB.loadRecoveryObserver = ({ failedEpoch }) => {
+      recovered.push(failedEpoch);
+    };
+
+    const top2 = rt2.getCellFromLink<{ next?: { name?: string } }>({
+      ...top.getAsNormalizedFullLink(),
+      schema: topSchema,
+    });
+    await top2.sync();
+    await managerB.loadsSettled([leafKey]);
+    // The top document's own load reports its recovery, so the observer is
+    // live; the far document's failed crossing load reports none.
+    expect(recovered).toContain(
+      `load-key:${
+        entityKey(top.getAsNormalizedFullLink(), managerB.scopeKeyIdentity())
+      }`,
+    );
+    expect(recovered).not.toContain(`load-key:${leafKey}`);
+    expect(localOnB(leaf, farSpace)).toBe(false);
+  });
+
   it("leaves a link the schema does not follow unloaded", async () => {
     const { leaf, top } = await writeCrossing("unfollowed link");
     const top2 = rt2.getCellFromLink<{ next?: unknown }>({
