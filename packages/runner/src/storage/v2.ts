@@ -7840,7 +7840,10 @@ export class SpaceReplica
           this.#scopeKeyIdentity(),
         )
         : undefined;
-      await this.#waitForConflictReadRepair(rejection);
+      await Promise.all([
+        this.#waitForConflictReadRepair(rejection),
+        this.#loadAbsentTouched(rejection, touched),
+      ]);
       if (isRefusedDerivedWrite(rejection, source)) {
         this.#foldRefusedWrite(localSeq, touched, identity);
       }
@@ -9321,6 +9324,61 @@ export class SpaceReplica
       if (timer !== undefined) {
         clearTimeout(timer);
       }
+    }
+  }
+
+  /**
+   * Helper for `#finalizeRejection()`, which loads the store's copy of each
+   * document the refused commit touched that this replica holds no confirmed
+   * revision of, so that dropping the commit's layer reveals that copy
+   * rather than an absence. The read repair a conflict names reaches the
+   * documents the session watches, and a document the commit itself created
+   * is watched by nothing: the store may hold it all the same, written by
+   * another session, and a refusal for a pending dependency names no
+   * document at all. The load also stands a watch for each document, so a
+   * later write of it reaches this replica. A document the store holds
+   * nothing for stays absent. A failed load is logged and leaves the drop to
+   * proceed: the retry's commit decides what the absence was worth.
+   */
+  async #loadAbsentTouched(
+    rejection: StorageTransactionRejected,
+    touched: readonly LocalDocAddress[],
+  ): Promise<void> {
+    if (rejection.name !== "ConflictError") {
+      return;
+    }
+    const entries: [WatchAddress, undefined][] = [];
+    const keys = new Set<string>();
+    for (const address of touched) {
+      const key = this.#docKeyOf(address);
+      if (keys.has(key) || (this.#docs.get(key)?.confirmed.seq ?? 0) > 0) {
+        continue;
+      }
+      keys.add(key);
+      entries.push([{
+        id: address.id,
+        type: DOCUMENT_MIME,
+        scope: address.scope,
+        ...(address.scopeKey !== undefined
+          ? { scopeKey: address.scopeKey }
+          : {}),
+      }, undefined]);
+    }
+    if (entries.length === 0) {
+      return;
+    }
+    let failure: unknown;
+    try {
+      failure = (await this.pull(entries)).error;
+    } catch (error) {
+      failure = error;
+    }
+    if (failure !== undefined) {
+      logger.warn("conflict-read-repair-load", () => [
+        "the store's copies of the documents a refused commit created " +
+        "could not be loaded; the drop reverts them to absent",
+        failure,
+      ]);
     }
   }
 

@@ -1480,20 +1480,15 @@ the per-epic implementation notes).
 >   runner's storage manager retries that space on being told. Either peer
 >   omitting it, which parses as `false`, leaves the connection without the
 >   notice, and a refused client then learns of a grant only by asking again.
-> - **`elidedVerdicts`** is a capability hardwired to `false` on both peers.
->   It advertises that the runner's replica promotes a pending layer whose
->   accept the verdict reports as elided to the document its transaction
->   computed rather than folding its operations over the confirmed base,
->   which lets the memory server accept a stale positional write as an
->   identity for that session (the memory commit model chapter's section
->   3.6.1). The replica and the server both implement it, and it stays off
->   until the runtime converges with it on. An own commit refused for a
->   pending dependency rather than for its own stale reads gets no read
->   repair, so the documents it created revert to absent and nothing loads
->   the store's copies; with the capability on, the patterns integration test
->   `lunch-poll-vote.test.ts` lands a list element's setup in such a commit,
->   and the element never renders. A client omitting the capability, which
->   parses as `false`, is held to both conditions of the identity proof.
+> - **`elidedVerdicts`** is a build-inherent capability, hardwired to `true`
+>   on both peers. It advertises that the runner's replica promotes a pending
+>   layer whose accept the verdict reports as elided to the document its
+>   transaction computed rather than folding its operations over the
+>   confirmed base, which lets the memory server accept a stale positional
+>   write as an identity for that session (the memory commit model chapter's
+>   section 3.6.1). An older client omitting it, which parses as `false`, is
+>   held to both conditions of the identity proof, since its replica would
+>   fold such a write a second time. It is permanent.
 > - **`spaceKind`** is a build-inherent capability, hardwired to `true`. It
 >   advertises that the server seals the kind a space's genesis commit
 >   declares, and reports it in every `session.open` result
