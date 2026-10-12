@@ -94,13 +94,16 @@ beneath it:
   slot of a container the transaction stamps as a whole has no stamp of its
   own; the container's `*` template carries the same join to every slot.
 
-No value stamp. A link write persists no `derived` stamp at its slot: the
-writer's value stamp lands where a plain value lands, and the join's
-integrity, which certifies what the attempt computed rather than what its
-pointer reaches (§3.7.2), stays off the slot. That is what makes the
-invariant stage 2 states hold going forward: a value stamp at a slot
-describes a value the slot holds, and one found at a reference slot was
-persisted before this plan and is not input-witness evidence.
+The join's integrity, which certifies what the attempt computed rather than
+what its pointer reaches (§3.7.2), stays off the slot, and a link write mints
+no `derived` value stamp at a slot the flow stage would otherwise stamp. One
+value stamp can still land at a reference slot: the writer's `TransformedBy`
+stamp at a whole-value root the write asserted (`assertedValueRootPaths`),
+where the asserted value is the reference. Until stage 4, the `LinkReference`
+beside it binds that stamp to the pointer it described; stage 4 states which
+such stamps keep their witness once the atom is gone, and the invariant stage
+2 establishes is what makes a stamp persisted under it describe the value the
+slot holds.
 
 A dereference composes the slot's restriction with the target's own labels.
 That is already how `cfcLabelViewForDereference` builds a label view and how
