@@ -108,9 +108,12 @@ Implemented. What the later stages depend on it leaving behind:
 
 - `linkSlotLabel` derives the slot's entry from the link schema, the handle's
   carried root restriction and the acting principal, and nothing the source
-  holds; the persist loop joins the creating attempt's flow join onto it where
-  flow labels persist, and a reference with no restriction of its own gets its
-  entry from that join alone, or none where the join is empty.
+  holds; the persist loop stamps the creating attempt's flow join at the slot
+  beside it where flow labels persist, as a pointer-class `structure` entry
+  that label metadata introspection may observe and a reconciler's readback
+  exclusion treats as derived, except at a slot of a container the
+  transaction stamps as a whole, whose `*` template carries the same join.
+  A reference with no restriction of its own persists no link entry.
   `linkedSourceEvidence` keeps the source-derived label, through the
   references staged into the source, for write floors alone, which the deriver
   exposes as `evidence` beside `persisted`. In that evidence the source's
@@ -381,10 +384,11 @@ specification does not require.
   through its floor instead, which reads the element's own evidence.
 - Under flow labels `persist`, a reference written by an attempt that read
   labeled data carries that join at its slot even when the reference has no
-  declared or carried restriction. A write that replaces a reference at a
-  declared position reads the position it overwrites, so the new reference's
-  entry repeats the position's declared label; the entry labels the
-  reference and leaves with it, the declaration stays.
+  declared or carried restriction, unless the container it sits in is
+  stamped as a whole by the same transaction. A write that replaces a
+  reference at a declared position reads the position it overwrites, so the
+  slot's join stamp repeats the position's declared label; the stamp labels
+  the reference and leaves with it, the declaration stays.
 - A labeled append to a list another session appended to concurrently retries
   instead of committing a misplaced envelope.
 - A link to a piece document that holds no value yet carries nothing of the

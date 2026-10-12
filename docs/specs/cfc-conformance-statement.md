@@ -192,8 +192,9 @@ templates included, and the render path reads them through
 at the receiving slot the reference's own label as §8.2.3 and §8.12.8 state
 it: the link schema's declarations, the restriction the written handle
 carries at its root, and, where flow labels persist, the creating attempt's
-flow join, which alone gives a reference with no declared or carried
-restriction its entry. Nothing of the source's labels is copied to the slot,
+flow join, stamped at the slot as a pointer-class `structure` entry beside
+the link entry, or carried to the slot by the `*` template of a container the
+transaction stamps as a whole. Nothing of the source's labels is copied to the slot,
 and the write takes no dependency on the source's envelope. A write floor on
 the slot, including a floor declared under a wildcard on every element of a
 list, resolves the source's current evidence through `linkedSourceEvidence`,

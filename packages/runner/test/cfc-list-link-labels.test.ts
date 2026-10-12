@@ -370,22 +370,12 @@ describe("cfc-list-link-labels", () => {
           });
           expect(replaced.error).toBeUndefined();
           // Where flow labels persist, the replacing attempt read the
-          // position it overwrote, and that observation is part of the new
-          // reference's own restriction.
+          // position it overwrote, and that observation is stamped at the
+          // slot as the new reference's own restriction, beside the
+          // declaration and spelled the same.
           expect(storedLabels(runtime, "declared-holder")).toEqual(
             flow === "persist"
-              ? [
-                labelString(["x"], [LABEL]),
-                labelString(["x"], [LABEL], [{
-                  type: CFC_ATOM_TYPE.LinkReference,
-                  source: { space, id: idOf(runtime, "b"), path: [] },
-                  target: {
-                    space,
-                    id: idOf(runtime, "declared-holder"),
-                    path: ["x"],
-                  },
-                }]),
-              ].sort()
+              ? [labelString(["x"], [LABEL]), labelString(["x"], [LABEL])]
               : [labelString(["x"], [LABEL])],
           );
         } finally {

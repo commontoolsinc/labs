@@ -539,9 +539,9 @@ describe("cfc-reference-identity-reads", () => {
     it("reaches the same label on dereference when the probe consumed one", async () => {
       // What the slot reaches does not come from the probe. An unmarked probe
       // at the same position consumes the holder's pointer label, which then
-      // joins the writing attempt's flow join: the reference written under
-      // it carries that join as its own restriction (CFC §8.2.3), and the
-      // container the reference landed in takes a stamp over its shape. The
+      // joins the writing attempt's flow join, and the container the
+      // reference landed in, written as a whole, carries that join on its
+      // stamps (CFC §8.2.3) and to every slot through its `*` template. The
       // slot stores nothing of the source either way, and the dereference
       // reaches the source's label either way, so the skip removes the
       // attempt's own taint and not the protection.
@@ -553,7 +553,7 @@ describe("cfc-reference-identity-reads", () => {
         target,
         (tx) => readMaybeLink(tx, { ...holder, path: ["ref"] })!,
       );
-      expect(carried.slot).toEqual(["pointer-label"]);
+      expect(carried.slot).toBeUndefined();
       expect(carried.reached).toContain("on-target");
       expect(carried.container).toEqual(["pointer-label"]);
     });

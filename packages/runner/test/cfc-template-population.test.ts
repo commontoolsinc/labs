@@ -414,12 +414,12 @@ describe("CFC template population (Stage A): the two under-taints", () => {
 
   it("slot writes leave the container's templates in place", async () => {
     // A bare SLOT write does not clear the container's templates: it
-    // replaces one child, not the membership, and slot writes mint nothing —
-    // clearing would open an unlabeled window until the next declared
-    // reconcile. The container-anchored enumerate stamp already survives
-    // slot writes (exact-path never matches a deeper write); the twins
-    // follow the same discipline. Only a write covering the CONTAINER
-    // clears.
+    // replaces one child, not the membership, and a slot write mints no
+    // template, only the written slot's own join stamp — clearing would
+    // open an unlabeled window until the next declared reconcile. The
+    // container-anchored enumerate stamp already survives slot writes
+    // (exact-path never matches a deeper write); the twins follow the same
+    // discipline. Only a write covering the CONTAINER clears.
 
     const rt = makeRuntime();
     await seedDoc(rt, "tp-el-sw", { n: 1 }, []);
@@ -442,7 +442,9 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     expect((await slotWrite.commit().settled).ok).toBeDefined();
 
     const templates = entriesOf(listId).filter(
-      (e) => e.origin === "structure" && e.path.length === 1,
+      (e) =>
+        e.origin === "structure" && e.path.length === 1 &&
+        e.path[0] === "*",
     );
     expect(templates.map((e) => e.observes).sort()).toEqual(
       ["followRef", "shape", "value"],
@@ -450,6 +452,13 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     for (const entry of templates) {
       expect(entry.label.confidentiality).toEqual(["memb-secret"]);
     }
+    // The slot write read the slot it replaced, which the template labels,
+    // and the reference it placed there carries that join as its own.
+    const slot = entriesOf(listId).filter((e) =>
+      e.origin === "structure" && e.path.length === 1 && e.path[0] === "0"
+    );
+    expect(slot.map((e) => e.observes)).toEqual(["followRef"]);
+    expect(slot[0].label.confidentiality).toEqual(["memb-secret"]);
   });
 
   it("recompute with templates present is a no-op (SC-11: zero cfc writes)", async () => {

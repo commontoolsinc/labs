@@ -8696,8 +8696,9 @@ const linkedSourceEvidence = (
  * the link schema's, gated against runtime-minted evidence an author could
  * forge, plus the runtime's own `LinkReference`. Nothing of the source's
  * labels is in it: the source's labels stay with the source and are consumed
- * when the reference is followed (§8.2.4), and the persist loop joins the
- * creating attempt's flow join onto the entry where flow labels persist.
+ * when the reference is followed (§8.2.4), and the persist loop stamps the
+ * creating attempt's flow join at the slot beside the entry where flow
+ * labels persist.
  *
  * A handle's carried view below its root describes positions of the target,
  * which the target labels itself, so only the root is read.
@@ -11201,6 +11202,9 @@ export function* prepareBoundaryCommitSteps(
   // describing one the document no longer holds. Such a document enters the
   // persist loop whatever the flow-label mode and whatever the flow join, and
   // the loop drops the entry there (`linkCleared`).
+  // The containers whose membership this transaction re-derives, whose `*`
+  // templates carry the join to every slot (`ownRestampContainerPaths`).
+  const ownRestamps = ownRestampContainerPaths(tx);
   for (const [key, target] of valueTargets) {
     if (targetKeys.has(key)) {
       continue;
@@ -12184,37 +12188,40 @@ export function* prepareBoundaryCommitSteps(
       // Every attempted link is checked; only the final reference contributes
       // labels to the value this transaction stores at the slot.
       if (!currentLinkWriteInputs.has(input)) continue;
-      // The creating attempt's join is part of the reference's own
-      // restriction (CFC §8.2.3): which reference the slot holds was decided
-      // under everything the attempt observed. Its confidentiality joins the
-      // slot entry where flow labels persist, and a reference with no
-      // declared or carried restriction of its own gets its entry from the
-      // join alone; the flow stage leaves recorded link slots to this.
-      const joined = flowPersist && flowConfidentiality.length > 0
-        ? { confidentiality: [...flowConfidentiality] }
-        : undefined;
-      const entries: DerivedLink["entries"] =
-        result.entries.length > 0 || joined === undefined ? result.entries : [{
-          path: [],
-          label: { integrity: [linkReferenceIntegrity(input) as CfcAtom] },
-        }];
-      for (const entry of entries) {
+      const slotPath = canonicalizeLogicalPath(input.target.path);
+      for (const entry of result.entries) {
         const persisted: LabelMapEntry = {
-          path: [...canonicalizeLogicalPath(input.target.path), ...entry.path],
-          label: joined === undefined
-            ? entry.label
-            : mergeLabels(entry.label, joined),
+          path: [...slotPath, ...entry.path],
+          label: entry.label,
           origin: "link",
         };
-        // A clause the join brought from another space is protected here
-        // as it is on a flow stamp, whichever space the reference names.
-        if (
-          input.source.space !== space ||
-          (joined !== undefined && flowJoinIsCrossSpace)
-        ) {
-          crossSpaceEligible?.add(persisted);
-        }
+        if (input.source.space !== space) crossSpaceEligible?.add(persisted);
         persistedLabelEntries.push(persisted);
+      }
+      // The creating attempt's join is part of the reference's own
+      // restriction (CFC §8.2.3): which reference the slot holds was decided
+      // under everything the attempt observed. Where flow labels persist, the
+      // join's confidentiality is stamped at the slot as a pointer-class
+      // structure entry of its own, beside the link entry that holds what
+      // the reference declares and carries: the two are read alike, by a
+      // probe of the slot, and stay apart because the stamp is what the
+      // attempt derived, which label metadata introspection may observe,
+      // while the link entry is authored. A slot of a container this
+      // transaction stamps as a whole, a coordinator's declared container or
+      // a pure-link structure it wrote, is left to that container's `*`
+      // template, which carries the same join to every child. The flow
+      // stage leaves recorded link slots to this.
+      if (
+        flowPersist && flowConfidentiality.length > 0 &&
+        !(slotPath.length > 0 &&
+          ownRestamps.get(key)?.has(pathKey(slotPath.slice(0, -1))))
+      ) {
+        persistedLabelEntries.push(markFlowStampEntry({
+          path: [...slotPath],
+          label: { confidentiality: [...flowConfidentiality] },
+          origin: "structure",
+          observes: "followRef",
+        }));
       }
     }
 
@@ -12227,9 +12234,9 @@ export function* prepareBoundaryCommitSteps(
       //
       // A written reference is a selection made under what the attempt
       // observed (CFC §8.2.3), so the join's confidentiality reaches its
-      // slot on the link entry the link write mints, which holds the
-      // reference's own declared and carried restriction beside it. The
-      // join's integrity stays off the slot: it certifies what the attempt
+      // slot on the pointer-class stamp the link loop above mints beside
+      // the link entry, or on the `*` template of the container it sits in.
+      // The join's integrity stays off the slot: it certifies what the attempt
       // computed, not what its pointer reaches (§3.7.2). A routing
       // transaction that observed nothing but its own wiring, as the list
       // builtins' coordinators do under the machinery marker, has an empty
@@ -12251,7 +12258,7 @@ export function* prepareBoundaryCommitSteps(
           continue;
         }
         seenFlowPaths.add(flowKey);
-        // A recorded link write carries the join on its link entry, below.
+        // A recorded link write carries the join at its slot, above.
         if (currentLinkWritePaths.has(flowKey)) {
           continue;
         }

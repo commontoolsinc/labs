@@ -826,10 +826,14 @@ describe("cfc-current-principal-confidentiality", () => {
         expect(itemLabel).not.toContainEqual(
           cfcAtom.user(visitorIdentity.did()),
         );
-        // The slot stores nothing of the item's label; the list's declared
-        // template entry binds the owner to every position, and a read of the
-        // item through the slot answers to the owner.
-        expect(storedConfidentialityAt(visitor, link, ["0"])).toEqual([]);
+        // The slot stores nothing of the item's label. It carries the join
+        // of the appending attempt, which read the list under its owner's
+        // binding; the list's declared template entry binds the owner to
+        // every position as well, and a read of the item through the slot
+        // answers to the owner.
+        const slot = storedConfidentialityAt(visitor, link, ["0"]);
+        expect(slot).toContainEqual(cfcAtom.user(ownerIdentity.did()));
+        expect(slot).not.toContainEqual(cfcAtom.user(visitorIdentity.did()));
         const template = storedConfidentialityAt(visitor, link, ["*"]);
         expect(template).toContainEqual(cfcAtom.user(ownerIdentity.did()));
         expect(template).not.toContainEqual(
