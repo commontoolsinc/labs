@@ -275,8 +275,11 @@ no runner is registered, the tab explains that requests remain queued until one
 starts. A queue with no entries shows "No agent runs yet."
 
 A request made in a home space that holds no queue — its home pattern does not
-exist, or is a version without the field — ends `refused`, and
-`wish({ query: "#agent_queue" })` there resolves to nothing.
+exist, or is a version without the field — ends `refused`. Where the home
+pattern is a version without the field, `wish({ query: "#agent_queue" })`
+resolves to nothing; where there is no home pattern yet, the wish creates one
+on a client runtime and is refused on a serving one, as
+[Built-in Targets](wish.md#built-in-targets) describes.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -489,9 +492,9 @@ Both the home pattern and the default app pattern follow the same mechanism:
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
    Home, absent or present, which is created on first open, or by the first
-   wish for a target under its root, and updated in place. A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
-   remains untracked by the URL updater and may carry a separate repository
-   locator
+   wish for a target under its root, and updated in place. A URL-based
+   pattern stamps `patternSource`; a custom `RuntimeProgram` remains untracked
+   by the URL updater and may carry a separate repository locator
 5. Before an existing eligible root starts, it is reconciled in place. A root
    with stored `patternSource` tracks that source. A pre-provenance root is
    admitted only when its stored `{ identity, symbol }` exactly matches the

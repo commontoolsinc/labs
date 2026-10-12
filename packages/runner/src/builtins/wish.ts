@@ -939,11 +939,13 @@ function searchByHashtag(
 
 /**
  * Throws a `WishError` naming the remedies when the home pattern `homeRoot`
- * holds nothing at `field`, which it names to the user as `what`. The system home pattern gains a field its current source adds only
- * when the home space is next opened, since nothing updates a piece nobody
- * opens, so a home set up before the field existed lacks it until then. A
- * custom home pattern follows no source of the system's, and holds the field
- * only if it says so. The wish does not open the home itself.
+ * holds nothing at `field`, which it names to the user as `what`. The system
+ * home pattern gains a field its current source adds only when the home space
+ * is next opened, since nothing updates a piece nobody opens, so a home set up
+ * before the field existed lacks it until then. A custom home pattern follows
+ * no source of the system's, and holds the field only if it says so. A wish
+ * creates a home root that does not exist yet ({@link getHomeRootCell}), but
+ * does not open an existing one to bring it up to date.
  */
 function requireHomeField(
   homeRoot: Cell<unknown>,

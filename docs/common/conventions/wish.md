@@ -306,10 +306,14 @@ resolve from that user's home space. The ones that resolve under the home
 pattern, the home space's root, need that root to exist: `#favorites`,
 `#journal`, `#learned`, `#learnedSummary`, `#agent_queue`, `#chatManager`,
 `#profile` while the user has no profile (its create surface writes there), and
-a `"~"`-scoped target such as `#default`. While the home space has no root, a
-client runtime creates one and the wish waits until it exists, reporting a
-creation that failed as its error. A serving runtime creates none, and reports
-the missing root as the wish's error. `#chatManager` reports an error, naming
+a `"~"`-scoped target such as `#default`. The other `#profile*` targets read
+the profile roster through the home space's `defaultPattern` slot as it stands,
+and an empty slot reads as no profiles. While that slot is empty, as it is
+before the home space is first opened, a client runtime creates the root and
+the wish waits until it exists, reporting a creation that failed as its error.
+A serving runtime creates none, and reports the missing root as the wish's
+error. A slot that already holds something is resolved through as it stands.
+`#chatManager` reports an error, naming
 the remedies, when the home pattern holds no chat manager: a system home
 pattern set up before its source had one gains it when the home space is next
 opened, and a custom one holds it only if it says so.
