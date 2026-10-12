@@ -12,7 +12,8 @@
  * manager hasn't resolved, an add reads `access-only` at once. The manager
  * refuses to offer anything but a group room, and an add whose id is too long
  * to key an offer by, which then reads `access-only` with the manager's
- * reason. A group named by both of Alice's profiles,
+ * reason; an access list it doesn't hold yet doesn't read as one refusing its
+ * user. A group named by both of Alice's profiles,
  * which point at two inboxes, is offered once to each, and lists her once;
  * one named by two of her profiles pointing at one inbox is offered there
  * once; and one naming profiles of Alice and Carol that point at the same
@@ -100,6 +101,19 @@ const addGesture = {
 };
 
 const typed = (text: string) => ({ type: "click", target: { value: text } });
+
+/**
+ * A space no runtime here holds anything of, whose access list is therefore
+ * not known to anyone asking.
+ */
+const UNSEEN_SPACE = "did:key:z6MkpTHR8VNsBxYAAWHut2Geadd9jSwuBV8xRoAnwWsdvktH";
+
+/** A link to a room in `UNSEEN_SPACE`, as an event carries one. */
+const UNSEEN_ROOM = {
+  "/": {
+    "link@1": { id: "of:fid1:unseen-room", path: [], space: UNSEEN_SPACE },
+  },
+};
 
 /** An add's id longer than an offer's may be, once a room's space keys it. */
 const LONG_ID = "x".repeat(320);
@@ -395,6 +409,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       kind: CHAT_ROOM_OFFER_KIND,
     });
   });
+  const action_list_unseen = action(() => {
+    registerSharedSpaceIn(catalog, {
+      space: UNSEEN_SPACE,
+      host: "http://localhost:8000",
+      kind: CHAT_ROOM_OFFER_KIND,
+    });
+  });
   const held = Writable.of<{ room?: Cell<ChatRoomLink> }>({});
   const action_hold = action(() =>
     held.key("room").set(
@@ -626,6 +647,24 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             shared.every((id, index) => id === expected[index]) &&
             setup.second.received.length === 1 &&
             setup.second.received[0] === "g-two";
+        }),
+      },
+      // An access list not known yet doesn't read as one refusing this user:
+      // the offer goes on to the checks after it.
+      { action: action_list_unseen },
+      {
+        action: manager.offerRoom,
+        event: {
+          requestId: "o-unseen",
+          room: UNSEEN_ROOM,
+          member: setup.aliceDid,
+        },
+      },
+      {
+        assertion: assert(() => {
+          const refused = requests.get()["o-unseen"];
+          return refused?.status === "refused" &&
+            refused.reason === "The request names no group room.";
         }),
       },
       { label: "bob-done" },
