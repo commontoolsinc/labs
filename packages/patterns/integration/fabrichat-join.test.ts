@@ -12,14 +12,16 @@
  * first opens their manager again, creates a group from the group controls of
  * that new page, and starts another chat, whose row's link opens the new room.
  * Then someone who shares a group with another person adds them to a second
- * group from its page, by address alone; their manager tells the person of it
- * through the profile it lists for them, and the room's page shows how.
+ * group from its page, by address alone; their manager offers it to the
+ * person through the profile it lists for them, and the room's page shows it
+ * was offered.
  */
 
 import type { DID } from "@commonfabric/identity";
 import { Identity } from "@commonfabric/identity";
 import { env, type Page, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { expect } from "@std/expect";
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import {
@@ -47,6 +49,12 @@ const ADD_MEMBER_ACTION = "ChatAddMember";
 
 // What a direct room calls itself, which is also what a link to it shows.
 const DIRECT_ROOM_NAME = "Direct chat";
+
+// Whether this run's servers serve handlers from a serving loop.
+const SERVER_EXECUTION = (() => {
+  const raw = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+  return raw === undefined ? SERVER_EXECUTION_DEFAULT_ENABLED : raw === "true";
+})();
 
 // What a room with no messages shows in place of them.
 const EMPTY_ROOM_TEXT = "No messages yet";
@@ -266,22 +274,22 @@ describe("fabrichat-join", () => {
       "Grace Hopper",
     );
 
-    // Added by their address alone, the person is told of the room through
-    // the profile the adder's manager lists for them. That profile points at
-    // no inbox, so the manager queues a notice for them, and the room's page,
-    // reading the manager's verdict from the adder's home, says so.
+    // Added by their address alone, the person is offered the room through
+    // the profile the adder's manager lists for them, which points at their
+    // Home's private inbox, and the room's page, reading the manager's verdict
+    // from the adder's home, says so. A served handler can't read the
+    // manager's per-session `people`, so under server execution it finds no
+    // profile for them, and queues a notice instead.
+    // TODO(danfuzz): Expect `offered` under server execution too, once a
+    // served handler can read a per-session instance of its user's.
     await fillCfInput(adder, "#fabrichat-add-member-address", addedAddress);
     await clickTrustedAction(adder, ADD_MEMBER_ACTION);
     await waitForSettledText(
       adder,
       "#fabrichat-add-member-outcome",
-      `Added ${addedAddress}. Your chats remind you to send them this chat's link.`,
-    );
-    await openChatManager(firstShell, adderIdentity);
-    await waitForSettledText(
-      adder,
-      "body",
-      `${addedAddress} may not know of this chat yet.`,
+      SERVER_EXECUTION
+        ? `Added ${addedAddress}. Your chats remind you to send them this chat's link.`
+        : `Added ${addedAddress}, and offered them this chat.`,
     );
 
     // The adds the room records are the adder's own: the adder reads theirs
@@ -291,7 +299,7 @@ describe("fabrichat-join", () => {
       Object.values(
         await addRequestsAs(adderIdentity, secondRoomView),
       ).map((outcome) => (outcome as { delivery?: string }).delivery),
-    ).toEqual(["noticed"]);
+    ).toEqual([SERVER_EXECUTION ? "noticed" : "offered"]);
     expect(await addRequestsAs(addedIdentity, secondRoomView)).toEqual({});
   });
 });
