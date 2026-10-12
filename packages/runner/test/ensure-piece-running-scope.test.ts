@@ -94,6 +94,10 @@ describe("ensurePieceRunningVerdict()", () => {
           root: { space, id, scope: "space" },
           rootIsEmpty: false,
           observedDocIds: [id],
+          observedDocs: [
+            { space, id, scope: "user" },
+            { space, id, scope: "space" },
+          ],
         });
         expect(server.demandSetSizesForSpace(space).perSession)
           .toMatchObject([{ tracked: 2, watches: 2 }]);
@@ -112,6 +116,7 @@ describe("ensurePieceRunningVerdict()", () => {
           started: false,
           reason: "chain-cycle",
           observedDocIds: [id],
+          observedDocs: [{ space, id, scope: "user" }],
         });
         expect(server.demandSetSizesForSpace(space).perSession)
           .toMatchObject([{ tracked: 1, watches: 1 }]);

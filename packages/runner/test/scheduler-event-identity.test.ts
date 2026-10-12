@@ -37,7 +37,12 @@ function eventKey(id: string): string {
 // A piece-start outcome for the `loadPieceForEvent` seam, carrying only what
 // these cases turn on: a started piece has its pattern graph installed.
 function pieceLoadVerdict(started: boolean): EnsurePieceVerdict {
-  return { started, graphIsInstalled: () => started, observedDocIds: [] };
+  return {
+    started,
+    graphIsInstalled: () => started,
+    observedDocIds: [],
+    observedDocs: [],
+  };
 }
 
 describe("scheduler event identity", () => {

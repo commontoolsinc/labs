@@ -33,6 +33,15 @@ const patternIdentity = {
   symbol: "default",
 };
 
+// A start verdict for a piece whose result document nothing ever writes.
+const neverStartedVerdict: EnsurePieceVerdict = {
+  started: false,
+  reason: "no-pattern-meta",
+  rootIsEmpty: true,
+  observedDocIds: ["of:never-written"],
+  observedDocs: [{ space, id: "of:never-written", scope: "space" }],
+};
+
 type LoadPieceForEvent = (
   runtime: Runtime,
   eventLink: NormalizedFullLink,
@@ -248,8 +257,85 @@ describe("scheduler-event-piece-start", () => {
     expect(verdicts.map(({ started, reason }) => ({ started, reason })))
       .toEqual([
         { started: false, reason: "no-pattern-meta" },
+        { started: false, reason: "no-pattern-meta" },
         { started: true, reason: undefined },
       ]);
+  });
+
+  it("delivers a send whose piece's creation commit lands after the start read its documents and before the wait began watching them", async () => {
+    const link = streamLink(runtimeA, "created-in-gap");
+    // Resolves once runtimeA's storage reports a change to the stream's
+    // document, which is the one the start reads.
+    const arrived = Promise.withResolvers<void>();
+    runtimeA.storageManager.subscribe({
+      next: (notification) => {
+        if (notification.type === "reset") return undefined;
+        for (const change of notification.changes) {
+          if (change.address.id === link.id) {
+            arrived.resolve();
+            return { done: true };
+          }
+        }
+        return undefined;
+      },
+    });
+    let walks = 0;
+    setLoadPieceForEvent(runtimeA, async (runtime, eventLink) => {
+      walks++;
+      const verdict = await ensurePieceRunningVerdict(runtime, eventLink);
+      if (walks === 1) {
+        await createPiece(runtimeB, "created-in-gap");
+        await arrived.promise;
+      }
+      return verdict;
+    });
+
+    const sentAt = performance.now();
+    const status = await send(runtimeA, link, "queued");
+
+    expect(status).toBe("done");
+    // The end of the retry window would find the piece too.
+    expect(performance.now() - sentAt).toBeLessThan(
+      runtimeA.commitBackpressure.retryWindowMs,
+    );
+    expect(walks).toBe(2);
+    expect(handled).toEqual(["queued"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("does not wake for a write to a document with the observed ID in another space", async () => {
+    const otherSpace = (await Identity.fromPassphrase(
+      "scheduler event piece start, another space",
+    )).did();
+    const link = streamLink(runtimeA, "foreign-write");
+    let walks = 0;
+    setLoadPieceForEvent(runtimeA, () => {
+      walks++;
+      return Promise.resolve({
+        started: false,
+        reason: "no-pattern-meta",
+        rootIsEmpty: true,
+        observedDocIds: [link.id],
+        observedDocs: [{ space, id: link.id, scope: "space" }],
+      });
+    });
+    const waitBegins = onEachWaitBegins(runtimeA);
+
+    const status = send(runtimeA, link, "queued");
+    expect(await waitBegins(status)).toBe(true);
+    const tx = runtimeA.edit();
+    runtimeA.getCellFromEntityId<number>(otherSpace, link.id, [], undefined, tx)
+      .set(1);
+    await tx.commit().settled;
+    runtimeA.scheduler.addEventHandler((_tx, event) => {
+      handled.push(event);
+    }, link);
+
+    expect(await status).toBe("done");
+    // The attempt, its recheck, and the attempt the handler's registration
+    // woke: the write in the other space woke nothing.
+    expect(walks).toBe(3);
+    expect(handled).toEqual(["queued"]);
   });
 
   it("delivers a send whose stream's backlink reaches a result document with no pointer once the pointer lands", async () => {
@@ -272,9 +358,9 @@ describe("scheduler-event-piece-start", () => {
   });
 
   it("waits for a piece whose owning document is the same ID in another scope", async () => {
-    // The traversal records document IDs, not scopes, so a backlink from the
-    // stream's scope to the same ID in another one records a single ID. The
-    // root differing from the stream's link is what says it was followed.
+    // `observedDocIds` names a backlink from the stream's scope to the same ID
+    // in another one once, so counting IDs cannot say it was followed. The
+    // root differing from the stream's link is what says so.
     const link: NormalizedFullLink = {
       ...streamLink(runtimeA, "scoped"),
       scope: "user",
@@ -286,6 +372,10 @@ describe("scheduler-event-piece-start", () => {
         root: { space, id: link.id, scope: "space" },
         rootIsEmpty: false,
         observedDocIds: [link.id],
+        observedDocs: [
+          { space, id: link.id, scope: "user" },
+          { space, id: link.id, scope: "space" },
+        ],
       }));
     const waitBegins = onEachWaitBegins(runtimeA);
 
@@ -301,6 +391,7 @@ describe("scheduler-event-piece-start", () => {
         started: true,
         graphIsInstalled: () => false,
         observedDocIds: [],
+        observedDocs: [],
       }));
     const waitBegins = onEachWaitBegins(runtimeA);
 
@@ -326,14 +417,16 @@ describe("scheduler-event-piece-start", () => {
     const watched = runtimeA.getCell<number>(space, "watched", undefined, tx);
     watched.set(0);
     await tx.commit().settled;
-    let attempts = 0;
+    let walks = 0;
+    const { id } = watched.getAsNormalizedFullLink();
     setLoadPieceForEvent(runtimeA, () => {
-      attempts++;
+      walks++;
       return Promise.resolve({
         started: false,
         reason: "no-pattern-meta",
         rootIsEmpty: true,
-        observedDocIds: [watched.getAsNormalizedFullLink().id],
+        observedDocIds: [id],
+        observedDocs: [{ space, id, scope: "space" }],
       });
     });
     const waitBegins = onEachWaitBegins(runtimeA);
@@ -347,7 +440,9 @@ describe("scheduler-event-piece-start", () => {
     }
 
     expect(await status).toBe("error");
-    expect(attempts).toBe(EVENT_DEFERRAL_DROP_THRESHOLD + 1);
+    // Each attempt that waits is rechecked once, uncounted, after the wait
+    // begins watching; the attempt past the budget drops without waiting.
+    expect(walks).toBe(2 * EVENT_DEFERRAL_DROP_THRESHOLD + 1);
     expect(handled).toEqual([]);
     expect(errors.length).toBe(1);
     expect(errors[0]).toBeInstanceOf(EventDroppedError);
@@ -364,15 +459,10 @@ describe("scheduler-event-piece-start", () => {
     const windowErrors: Error[] = [];
     runtime.scheduler.onError((error) => windowErrors.push(error));
     try {
-      let attempts = 0;
+      let walks = 0;
       setLoadPieceForEvent(runtime, () => {
-        attempts++;
-        return Promise.resolve({
-          started: false,
-          reason: "no-pattern-meta",
-          rootIsEmpty: true,
-          observedDocIds: ["of:never-written"],
-        });
+        walks++;
+        return Promise.resolve(neverStartedVerdict);
       });
 
       const status = await send(
@@ -382,7 +472,8 @@ describe("scheduler-event-piece-start", () => {
       );
 
       expect(status).toBe("error");
-      expect(attempts).toBe(2);
+      // The attempt, its recheck, and the last ask the window's end makes.
+      expect(walks).toBe(3);
       expect(windowErrors.length).toBe(1);
       expect(windowErrors[0]).toBeInstanceOf(EventDroppedError);
     } finally {
@@ -440,12 +531,7 @@ describe("scheduler-event-piece-start", () => {
     const status = send(runtime, streamLink(runtime, "in-flight"), "queued");
     await attempted.promise;
     const disposed = runtime.dispose({ closeStorage: false });
-    verdict.resolve({
-      started: false,
-      reason: "no-pattern-meta",
-      rootIsEmpty: true,
-      observedDocIds: ["of:never-written"],
-    });
+    verdict.resolve(neverStartedVerdict);
     await disposed;
     await storage.close();
 
@@ -461,13 +547,7 @@ describe("scheduler-event-piece-start", () => {
     const runtime = newRuntime(storage);
     const disposeErrors: Error[] = [];
     runtime.scheduler.onError((error) => disposeErrors.push(error));
-    setLoadPieceForEvent(runtime, () =>
-      Promise.resolve({
-        started: false,
-        reason: "no-pattern-meta",
-        rootIsEmpty: true,
-        observedDocIds: ["of:never-written"],
-      }));
+    setLoadPieceForEvent(runtime, () => Promise.resolve(neverStartedVerdict));
     const waitBegins = onEachWaitBegins(runtime);
 
     const status = send(runtime, streamLink(runtime, "disposed"), "queued");

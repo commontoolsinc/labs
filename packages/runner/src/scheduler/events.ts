@@ -13,6 +13,7 @@ import type { Cancel } from "../cancel.ts";
 import {
   ensurePieceRunningVerdict,
   type EnsurePieceVerdict,
+  type OwningRootAddress,
 } from "../ensure-piece-running.ts";
 import {
   isAclDocumentWriteRefusal,
@@ -518,25 +519,47 @@ function pieceMayStillStart(
       (root.scope ?? "space") !== (eventLink.scope ?? "space"));
 }
 
+/** The identity of an observed document: its space, scope and ID. */
+function observedDocKey(
+  space: string,
+  scope: string | undefined,
+  id: string,
+): string {
+  return JSON.stringify([space, scope ?? "space", id]);
+}
+
 /**
- * Waits, for a loading head whose piece could not be started, until a new
- * start attempt could find something different, and returns what ended the
- * wait: a storage notification changing one of `observedDocIds`, a handler
- * registering for the head's stream, the head settling by another path, the
- * retry window ending at `deadline`, or the scheduler being disposed.
+ * The wait of a loading head whose piece could not be started, which
+ * `beginPieceStartWait()` begins. `woken` resolves with what ended it: a
+ * storage notification changing an observed document, a handler registering
+ * for the head's stream, the head settling by another path, the retry window
+ * ending, or the scheduler being disposed. `observe()` adds documents to
+ * watch, and ends the wait at once if one of them has changed since it began.
  */
-function awaitPieceStartWake(
+interface PieceStartWait {
+  readonly woken: Promise<PieceStartWake>;
+  observe(docs: readonly OwningRootAddress[]): void;
+  end(cause: PieceStartWake): void;
+}
+
+/**
+ * Begins the wait of a loading head whose piece could not be started,
+ * watching `docs`, until `deadline` at the latest. The wait watches storage
+ * from the moment it begins, so a start attempt made after this sees every
+ * change the wait could miss.
+ */
+function beginPieceStartWait(
   state: Pick<
     SchedulerEventQueueState,
     "runtime" | "pieceStartWaits" | "pieceStartWaitsEnded"
   >,
   event: QueuedEvent,
-  observedDocIds: readonly string[],
+  docs: readonly OwningRootAddress[],
   deadline: number,
-): Promise<PieceStartWake> {
-  if (state.pieceStartWaitsEnded()) return Promise.resolve("disposed");
+): PieceStartWait {
   const { promise, resolve } = Promise.withResolvers<PieceStartWake>();
-  const observed = new Set(observedDocIds);
+  const observed = new Set<string>();
+  const changed = new Set<string>();
   let ended = false;
   const subscription: IStorageNotification = {
     next: (notification) => {
@@ -546,10 +569,16 @@ function awaitPieceStartWake(
         return { done: true };
       }
       for (const change of notification.changes) {
-        if (observed.has(change.address.id)) {
+        const key = observedDocKey(
+          notification.space,
+          change.address.scope,
+          change.address.id,
+        );
+        if (observed.has(key)) {
           end("documents-changed");
           return { done: true };
         }
+        changed.add(key);
       }
       return undefined;
     },
@@ -563,14 +592,26 @@ function awaitPieceStartWake(
     delete event.endPieceStartWait;
     resolve(cause);
   };
+  const observe = (more: readonly OwningRootAddress[]): void => {
+    for (const doc of more) {
+      const key = observedDocKey(doc.space, doc.scope, doc.id);
+      if (changed.has(key)) end("documents-changed");
+      observed.add(key);
+    }
+  };
   const windowTimer = setTimeout(
     () => end("window-spent"),
     Math.max(0, deadline - performance.now()),
   );
-  event.endPieceStartWait = end;
-  state.pieceStartWaits.add(event);
-  state.runtime.storageManager.subscribe(subscription);
-  return promise;
+  if (state.pieceStartWaitsEnded()) {
+    end("disposed");
+  } else {
+    event.endPieceStartWait = end;
+    state.pieceStartWaits.add(event);
+    state.runtime.storageManager.subscribe(subscription);
+    observe(docs);
+  }
+  return { woken: promise, observe, end };
 }
 
 /**
@@ -934,9 +975,12 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       let attempts = 0;
       let deadline: number | undefined;
       let windowSpent = false;
+      // Begun before a start attempt that rechecks the one before it.
+      let wait: PieceStartWait | undefined;
       try {
         while (true) {
-          attempts++;
+          const rechecking = wait !== undefined;
+          if (!rechecking) attempts++;
           const verdict = await (state.loadPieceForEvent ??
             ensurePieceRunningVerdict)(
               state.runtime,
@@ -946,13 +990,17 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           if (
             queuedEvent.finalOutcomeNotified ||
             !state.eventQueue.includes(queuedEvent)
-          ) return;
+          ) {
+            wait?.end("settled");
+            return;
+          }
 
           const loadedHandler = findEventHandler(
             state.eventHandlers,
             args.eventLink,
           );
           if (loadedHandler) {
+            wait?.end("settled");
             queuedEvent.handler = loadedHandler;
             queuedEvent.action = (tx) => loadedHandler(tx, args.event);
             delete queuedEvent.handlerLoadPending;
@@ -1019,12 +1067,21 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }
           deadline ??= performance.now() +
             state.runtime.commitBackpressure.retryWindowMs;
-          const wake = await awaitPieceStartWake(
-            state,
-            queuedEvent,
-            verdict.observedDocIds,
-            deadline,
-          );
+          if (wait === undefined) {
+            // The attempt read its documents before anything watched them,
+            // so a commit landing in between would wake nothing. Watch them
+            // first, then ask once more; that recheck is not a re-attempt.
+            wait = beginPieceStartWait(
+              state,
+              queuedEvent,
+              verdict.observedDocs,
+              deadline,
+            );
+            continue;
+          }
+          wait.observe(verdict.observedDocs);
+          const wake = await wait.woken;
+          wait = undefined;
           if (wake === "settled") return;
           if (wake === "disposed") {
             dropQueuedEvent(
