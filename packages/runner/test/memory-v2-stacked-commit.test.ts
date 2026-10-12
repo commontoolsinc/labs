@@ -5598,11 +5598,11 @@ describe("memory-v2-stacked-commit", () => {
       }
     });
 
-    it("drops the layer when the verdict elides the splice as an identity", async () => {
+    it("promotes an elided splice to the list it computed over a frame carrying that list", async () => {
       // The other writer's identical tail landed first, so the splice reaches
       // the stored list from the reader's view and the server elides it.
-      // Nothing was written: the layer leaves the stack without a promotion,
-      // and the list's confirmed seq stays the frame's.
+      // Nothing was written, and the layer promotes to the list it computed,
+      // which is the list the frame carries.
       const harness = await createHarness();
       const responseGate = Promise.withResolvers<void>();
       try {
@@ -5630,14 +5630,57 @@ describe("memory-v2-stacked-commit", () => {
           }],
         });
         await clock.settle();
-        const frameSeq = currentSeq(harness, DOCS.A);
         expectVisible(harness, { A: { items: ["a", "b", "c"] } });
 
         responseGate.resolve();
         await expectResultOk(splice);
         expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
         expectVisible(harness, { A: { items: ["a", "b", "c"] } });
-        expect(currentSeq(harness, DOCS.A)).toBe(frameSeq);
+      } finally {
+        responseGate.resolve();
+        await harness.close();
+      }
+    });
+
+    it("promotes an elided splice to the list it computed over an intermediate frame", async () => {
+      // The replica has integrated a frame that moved the list, but not the
+      // state the identity was proved against: another writer took the list
+      // to `x` and then to `c`, and only the first frame has arrived. The
+      // promotion lands on the list the splice computed, which the proof
+      // established is the stored one, not on the frame.
+      const harness = await createHarness();
+      const responseGate = Promise.withResolvers<void>();
+      try {
+        await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });
+        await watch(harness);
+        harness.model.setOutcome(2, {
+          kind: "accept",
+          elideOps: true,
+          responseGate: responseGate.promise,
+          remoteInterleave: {
+            label: "foreign",
+            operations: [{
+              op: "set",
+              id: DOCS.A,
+              value: { items: ["a", "b", "c"] },
+            }],
+          },
+        });
+        const splice = growTo(harness, { items: ["a", "b", "c"] }, ["c"]);
+        harness.pushSync({
+          upserts: [{
+            id: DOCS.A,
+            seq: currentSeq(harness, DOCS.A) + 1,
+            value: { items: ["a", "b", "x"] },
+          }],
+        });
+        await clock.settle();
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
+
+        responseGate.resolve();
+        await expectResultOk(splice);
+        expect(hasPendingOverlay(harness, DOCS.A)).toBe(false);
+        expectVisible(harness, { A: { items: ["a", "b", "c"] } });
       } finally {
         responseGate.resolve();
         await harness.close();
@@ -5645,10 +5688,9 @@ describe("memory-v2-stacked-commit", () => {
     });
 
     it("promotes an elided splice over the base it read when no frame has moved the list", async () => {
-      // Elided or not, the store holds the list the splice computed. With no
-      // frame delivered since the layer was laid, the confirmed value is the
-      // one the splice was diffed from, so replaying it there is exact, and
-      // dropping the layer would show a list the store no longer holds.
+      // Elided or not, the store holds the list the splice computed, and
+      // with no frame delivered since the layer was laid the promotion is
+      // what makes the replica hold it too.
       const harness = await createHarness();
       try {
         await seedAccepted(harness, DOCS.A, { items: ["a", "b"] });

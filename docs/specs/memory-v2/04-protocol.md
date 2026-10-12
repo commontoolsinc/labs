@@ -314,9 +314,10 @@ client connected to an older server, or a server connected to an older client,
 leaves a refused principal to learn of a later grant by opening the session
 again.
 
-`elidedVerdicts` advertises that the peer's replica drops a pending layer
+`elidedVerdicts` advertises that the peer's replica promotes a pending layer
 whose accept the verdict reports as elided (`elidedOpIndexes`, section
-4.3.1) rather than folding the layer's operations over its confirmed base.
+4.3.1) to the document its transaction computed, rather than folding the
+layer's operations over its confirmed base.
 It is build-inherent and defaults to `false` when absent. A server waives
 the second condition of the identity proof (03-commit-model.md §3.6.1) only
 for sessions opened on a connection where both peers advertise it: an older

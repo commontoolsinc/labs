@@ -5,8 +5,9 @@ import { SessionRegistry } from "../v2/session-registry.ts";
 describe("session-registry", () => {
   it("refuses to resume a session opened with `elidedVerdicts` for a client that does not advertise it", () => {
     // A commit the session had accepted under the waived identity proof may
-    // replay as an elided positional write, which only a replica that drops
-    // elided layers handles; the downgraded client opens a fresh session.
+    // replay as an elided positional write, which only a replica that
+    // promotes elided layers by their computed document handles; the
+    // downgraded client opens a fresh session.
     const registry = new SessionRegistry();
     const opened = registry.open(
       "space",

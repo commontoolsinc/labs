@@ -1481,9 +1481,10 @@ the per-epic implementation notes).
 >   omitting it, which parses as `false`, leaves the connection without the
 >   notice, and a refused client then learns of a grant only by asking again.
 > - **`elidedVerdicts`** is a build-inherent capability, hardwired to `true`
->   on both peers. It advertises that the runner's replica drops a pending
->   layer whose accept the verdict reports as elided rather than folding its
->   operations over the confirmed base, which lets the memory server accept
+>   on both peers. It advertises that the runner's replica promotes a pending
+>   layer whose accept the verdict reports as elided to the document its
+>   transaction computed rather than folding its operations over the
+>   confirmed base, which lets the memory server accept
 >   a stale positional write as an identity for that session (the memory
 >   commit model chapter's section 3.6.1). An older client omitting it,
 >   which parses as `false`, is held to both conditions of the identity

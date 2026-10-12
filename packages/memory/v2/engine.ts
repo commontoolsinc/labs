@@ -1360,15 +1360,15 @@ export type ApplyCommitOptions = {
   sqliteAttachments?: ReadonlyMap<string, string>;
 
   /**
-   * The committing session's replica drops a layer the verdict elides
-   * rather than folding its ops over its confirmed base (the client
-   * advertised `elidedVerdicts`), so the identity proof holds the commit to
-   * its first condition alone: a write that reaches the stored document
-   * from the reader's view is an identity even where replaying it on the
-   * stored document would change it, as a positional `splice` does. Absent,
-   * both conditions apply.
+   * The committing session's client advertised `elidedVerdicts`: its replica
+   * promotes a layer the verdict elides to the document its transaction
+   * computed rather than folding the layer's ops over its confirmed base,
+   * so the identity proof holds the commit to its first condition alone: a
+   * write that reaches the stored document from the reader's view is an
+   * identity even where replaying it on the stored document would change
+   * it, as a positional `splice` does. Absent, both conditions apply.
    */
-  replicaDropsElided?: boolean;
+  elidedVerdicts?: boolean;
 
   /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
    *  determined by the ADMISSION PATH that processed the commit — the
@@ -1494,8 +1494,9 @@ export type AppliedCommit = {
    * (03-commit-model.md §3.6.1). An elided operation produced no revision,
    * advanced no head, and marked nothing dirty. The commit itself still
    * records and advances the space log, and a replica that advertised
-   * `elidedVerdicts` drops a pending layer every operation of which is
-   * listed here rather than promoting it.
+   * `elidedVerdicts` promotes a pending layer every operation of which is
+   * listed here to the document its transaction computed, which the
+   * identity proof established is the stored one.
    */
   elidedOpIndexes?: number[];
 
@@ -5234,7 +5235,7 @@ const applyCommitTransaction = (
     delegated,
     systemEventActor,
     allowEmptyOperations,
-    replicaDropsElided = false,
+    elidedVerdicts = false,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class posture gate (protocol.md §1): off the flag NOTHING
@@ -6086,8 +6087,9 @@ const applyCommitTransaction = (
   // idempotent on the durable value lands on that value from any base
   // between the read and the head, where a positional splice replayed over
   // a base already carrying its elements would duplicate them. A replica
-  // that drops an elided layer instead (`replicaDropsElided`) needs no such
-  // guarantee, and its commits are held to the first condition alone.
+  // that promotes an elided layer to the document its transaction computed
+  // (`elidedVerdicts`) needs no such guarantee, and its commits are held to
+  // the first condition alone.
   type DocumentOps = Array<
     Extract<typeof commit.operations[number], { op: "set" | "patch" }>
   >;
@@ -6254,7 +6256,7 @@ const applyCommitTransaction = (
         if (!valueEqual(fromBasis as FabricValue, stored as FabricValue)) {
           return false;
         }
-        if (!replicaDropsElided) {
+        if (!elidedVerdicts) {
           const onStored = replay(stored, operations);
           if (!valueEqual(onStored as FabricValue, stored as FabricValue)) {
             return false;

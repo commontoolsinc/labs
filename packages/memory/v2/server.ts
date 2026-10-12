@@ -5734,7 +5734,7 @@ export class Server {
                     commit: message.commit,
                     sqliteAttachments,
                     ...(session.elidedVerdicts === true
-                      ? { replicaDropsElided: true }
+                      ? { elidedVerdicts: true }
                       : {}),
                     // Session-facing transact admission: `authored`, always.
                     // The class is determined HERE, by the admission path —

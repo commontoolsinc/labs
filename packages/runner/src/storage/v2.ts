@@ -9606,29 +9606,32 @@ export class SpaceReplica
       const firstPendingIndex = pendingIndexes[0]!;
       const lastPendingIndex = pendingIndexes[pendingIndexes.length - 1]!;
       // An accept that elided every operation on this document wrote
-      // nothing: the store already held what the layer would have written.
-      // A promotion replays the layer's ops over the confirmed value, which
-      // is exact where that value is the base the ops were diffed from, or
-      // where the layer is a `set`, whose value is the stored document
-      // whatever it replays over. A patch layer over a document a frame has
-      // moved past its base is the other case: replaying it would fold its
-      // ops a second time, a splice included, and give the document a
-      // confirmed seq the store never gave it, so the layer is dropped and
-      // the frame's value, the store's as integrated, stands.
-      if (
-        applied.elidedOpIndexes !== undefined &&
-        record.confirmed.seq > record.pending[firstPendingIndex]!.baseSeq &&
-        pendingIndexes.every((index) =>
-          record.pending[index]!.op === "patch"
-        ) &&
+      // nothing, because the store already held the document this layer's
+      // transaction computed: that is what the identity proof established
+      // (03-commit-model.md §3.6.1). So the layer promotes to that document,
+      // which the layer carries as `value`, rather than by replaying its ops
+      // over whatever confirmed value the frames have delivered so far — a
+      // replay is exact only over the base the ops were diffed from, and a
+      // splice over any other base lands its elements a second time. The
+      // document a frame has delivered at or after the commit's seq is newer
+      // still, and stands.
+      const elidedHere = applied.elidedOpIndexes !== undefined &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
-        )
-      ) {
+        );
+      if (elidedHere) {
+        const computed = record.pending[lastPendingIndex]!;
+        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+          record.confirmed = confirmedVersion(
+            applied.seq,
+            computed.value,
+            coverClass,
+          );
+        }
         record.pending = record.pending.filter((entry) =>
           entry.localSeq !== localSeq
         );
-        dropMaterializedSuffix(record, firstPendingIndex);
+        record.materialized = undefined;
         continue;
       }
       // The verdict is in: a splice shown as the array its writer computed

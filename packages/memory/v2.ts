@@ -1320,9 +1320,10 @@ export type MemoryProtocolFlags = {
   admissionNotice?: boolean;
 
   /**
-   * The peer's replica drops a pending layer whose accept the verdict
-   * reports as elided (`AppliedCommit.elidedOpIndexes`) rather than folding
-   * the layer's ops over its confirmed base. A server that sees a client
+   * The peer's replica promotes a pending layer whose accept the verdict
+   * reports as elided (`AppliedCommit.elidedOpIndexes`) to the document its
+   * transaction computed, rather than folding the layer's ops over its
+   * confirmed base. A server that sees a client
    * advertise it waives the second condition of the identity proof
    * (03-commit-model.md §3.6.1) for that session's commits: a write that
    * reaches the stored document from the reader's view is an identity even
@@ -2596,8 +2597,9 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // the notice. A routed connection records no refusal, so it is told
   // nothing whatever both peers advertise.
   admissionNotice: true,
-  // Build-inherent: this build's replica drops an elided layer rather than
-  // folding its ops, so the server may elide a positional write for it.
+  // Build-inherent: this build's replica promotes an elided layer to the
+  // document its transaction computed rather than folding its ops, so the
+  // server may elide a positional write for it.
   elidedVerdicts: true,
   // Build-inherent: this build's server records the diagnostics a client
   // reports about its session.

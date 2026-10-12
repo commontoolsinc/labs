@@ -119,8 +119,9 @@ export type SessionState = {
 
   /**
    * Set when the opening connection's client advertised `elidedVerdicts`:
-   * its replica drops a layer the verdict elides rather than folding it, so
-   * the engine may elide a positional write for this session. Set per open
+   * its replica promotes a layer the verdict elides to the document its
+   * transaction computed rather than folding it, so the engine may elide a
+   * positional write for this session. Set per open
    * from the opening connection, and a resume by a client without the
    * capability is refused, since a replayed verdict may carry an elision only
    * such a replica handles.
@@ -184,8 +185,9 @@ export class SessionRegistry {
     }
     // A commit this session had accepted under the waived identity proof
     // may replay as an elided positional write, which only a replica that
-    // drops elided layers folds correctly; a client that no longer advertises
-    // the capability opens a fresh session instead of resuming this one.
+    // promotes elided layers by their computed document handles; a client
+    // that no longer advertises the capability opens a fresh session instead
+    // of resuming this one.
     if (existing?.elidedVerdicts === true && !elidedVerdicts) {
       throw authorizationError(
         "A session opened with elidedVerdicts requires a client that advertises it",

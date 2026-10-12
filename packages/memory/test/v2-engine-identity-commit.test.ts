@@ -238,9 +238,9 @@ describe("applyCommit() with an identity commit", () => {
 
   it("accepts a patch that reaches the stored document but is not idempotent on it, for a replica that drops elided layers", () => {
     // The same race as above, from a session whose client advertised
-    // `elidedVerdicts`: its replica drops the elided layer rather than
-    // replaying the splice over the stored list, so the second condition
-    // guards nothing for it, and the write is elided.
+    // `elidedVerdicts`: its replica promotes the elided layer to the list it
+    // computed rather than replaying the splice over the stored list, so the
+    // second condition guards nothing for it, and the write is elided.
     const install = applyCommit(engine, {
       sessionId: "s:a",
       commit: commit(1, { operations: [setOp("of:list", ["a"])] }),
@@ -257,7 +257,7 @@ describe("applyCommit() with an identity commit", () => {
 
     const verdict = applyCommit(engine, {
       sessionId: "s:a",
-      replicaDropsElided: true,
+      elidedVerdicts: true,
       commit: commit(2, {
         reads: {
           confirmed: [{ id: "of:list", path: [], seq: install.seq }],
@@ -293,7 +293,7 @@ describe("applyCommit() with an identity commit", () => {
     expect(() =>
       applyCommit(engine, {
         sessionId: "s:a",
-        replicaDropsElided: true,
+        elidedVerdicts: true,
         commit: commit(2, {
           reads: {
             confirmed: [{ id: "of:list", path: [], seq: install.seq }],
