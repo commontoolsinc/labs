@@ -24,6 +24,20 @@ export const LIST_OP_REFERENCED_ARGUMENT_FIELDS: readonly string[] = [
  */
 export const LIST_OP_CAPTURED_ARGUMENT_FIELDS: readonly string[] = ["params"];
 
+/**
+ * The reserved callback slots `usage` reports unused, which a run leaves out
+ * of a row's argument and drops from a stored argument that a run under an
+ * earlier reading of the schema filled.
+ */
+export function unusedListOpArgumentFields(
+  usage: ListOpArgumentUsage,
+): readonly string[] {
+  return [
+    ...(usage.usesIndex ? [] : ["index"]),
+    ...(usage.usesArray ? [] : ["array"]),
+  ];
+}
+
 const usageCache = new WeakMap<object, ListOpArgumentUsage>();
 
 /**
