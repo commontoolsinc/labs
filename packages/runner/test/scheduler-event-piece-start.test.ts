@@ -141,9 +141,13 @@ describe("scheduler-event-piece-start", () => {
     return link;
   }
 
-  // Commits the piece whose result document is `name`, pattern pointer
-  // included, as one creation commit.
-  async function createPiece(runtime: Runtime, name: string): Promise<void> {
+  // Commits the piece whose result document is `name` as one creation commit,
+  // its pattern pointer included unless `withPointer` is `false`.
+  async function createPiece(
+    runtime: Runtime,
+    name: string,
+    { withPointer = true }: { withPointer?: boolean } = {},
+  ): Promise<void> {
     const tx = runtime.edit();
     const resultCell = runtime.getCell(space, name, undefined, tx);
     const argumentCell = getMetaCell(resultCell, "argument", tx);
@@ -151,11 +155,13 @@ describe("scheduler-event-piece-start", () => {
       partialCause: "events",
     }, tx);
     resultCell.setRaw({ events: eventsCell.getAsWriteRedirectLink() });
-    resultCell.setMetaRaw(
-      "patternIdentity",
-      patternIdentity,
-      rawMetaWriteAuthorization,
-    );
+    if (withPointer) {
+      resultCell.setMetaRaw(
+        "patternIdentity",
+        patternIdentity,
+        rawMetaWriteAuthorization,
+      );
+    }
     resultCell.setMetaRaw(
       "argument",
       argumentCell.getAsWriteRedirectLink(),
@@ -163,6 +169,18 @@ describe("scheduler-event-piece-start", () => {
     );
     setResultCell(eventsCell, resultCell);
     argumentCell.set({});
+    const { error } = await tx.commit().settled;
+    expect(error).toBeUndefined();
+  }
+
+  // Commits the pattern pointer of the piece whose result document is `name`.
+  async function writePointer(runtime: Runtime, name: string): Promise<void> {
+    const tx = runtime.edit();
+    runtime.getCell(space, name, undefined, tx).setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
     const { error } = await tx.commit().settled;
     expect(error).toBeUndefined();
   }
@@ -232,6 +250,48 @@ describe("scheduler-event-piece-start", () => {
         { started: false, reason: "no-pattern-meta" },
         { started: true, reason: undefined },
       ]);
+  });
+
+  it("delivers a send whose stream's backlink reaches a result document with no pointer once the pointer lands", async () => {
+    await createPiece(runtimeB, "pointer-later", { withPointer: false });
+    const link = streamLink(runtimeA, "pointer-later");
+    const waitBegins = onEachWaitBegins(runtimeA);
+
+    const sentAt = performance.now();
+    const status = send(runtimeA, link, "queued");
+    expect(await waitBegins(status)).toBe(true);
+    await writePointer(runtimeB, "pointer-later");
+
+    expect(await status).toBe("done");
+    // As in the case above, the retry window's end would find the piece too.
+    expect(performance.now() - sentAt).toBeLessThan(
+      runtimeA.commitBackpressure.retryWindowMs,
+    );
+    expect(handled).toEqual(["queued"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("waits for a piece whose owning document is the same ID in another scope", async () => {
+    // The traversal records document IDs, not scopes, so a backlink from the
+    // stream's scope to the same ID in another one records a single ID. The
+    // root differing from the stream's link is what says it was followed.
+    const link: NormalizedFullLink = {
+      ...streamLink(runtimeA, "scoped"),
+      scope: "user",
+    };
+    setLoadPieceForEvent(runtimeA, () =>
+      Promise.resolve({
+        started: false,
+        reason: "no-pattern-meta",
+        root: { space, id: link.id, scope: "space" },
+        rootIsEmpty: false,
+        observedDocIds: [link.id],
+      }));
+    const waitBegins = onEachWaitBegins(runtimeA);
+
+    const status = send(runtimeA, link, "queued");
+
+    expect(await waitBegins(status)).toBe(true);
   });
 
   it("delivers a send whose piece has no graph installed once a handler registers for its stream", async () => {
