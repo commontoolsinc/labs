@@ -136,7 +136,11 @@ foreign write that carried the same value, so the writer sets differ where
 the content does not (`PendingStacks_IdentityWriterForm.cfg` is the witness,
 on the writer-set form restricted to commits that wrote). `ElidedUnchanged`
 pins the exemption's premise: every path an elided commit would have written
-already held its value at its resolution point.
+already held its value at its resolution point. A later own commit whose
+pending read names such a layer is scanned from the layer's seq where its view
+through the layer is the one the identity was proved against
+(`03-commit-model.md` §3.6.3): the document at that seq is the reader's view,
+so the writes at or below it are already in what the reader saw.
 
 ### INV-2 — Overlap over-approximation only
 
