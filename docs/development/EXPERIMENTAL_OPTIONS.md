@@ -1486,9 +1486,11 @@ the per-epic implementation notes).
 >   transaction computed rather than folding its operations over the
 >   confirmed base, which lets the memory server accept a stale positional
 >   write as an identity for that session (the memory commit model chapter's
->   section 3.6.1). An older client omitting it, which parses as `false`, is
->   held to both conditions of the identity proof, since its replica would
->   fold such a write a second time. It is permanent.
+>   section 3.6.1). The waiver needs both peers: an older client omitting
+>   it, which parses as `false`, is held to both conditions of the identity
+>   proof, since its replica would fold such a write a second time, and an
+>   older server, which advertises nothing, holds every session to both
+>   conditions whatever the client advertises. It is permanent.
 > - **`spaceKind`** is a build-inherent capability, hardwired to `true`. It
 >   advertises that the server seals the kind a space's genesis commit
 >   declares, and reports it in every `session.open` result
