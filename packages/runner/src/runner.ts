@@ -442,27 +442,25 @@ type StartAttempt = {
 };
 
 /**
- * `schema` with a handler's `$event` slot removed: what a handler node's
- * bound inputs are synced under at start, where the slot holds the stream
- * link rather than an event.
+ * `schema` with a handler's `$event` slot declared as a stream: what a
+ * handler node's bound inputs are synced under at start, where the slot
+ * holds the stream link rather than an event. Declared so, the slot's
+ * document is not loaded under the event schema the link carries; the
+ * stream is named whole beside the plan (`#cellsNodePlanReads`).
  */
-function schemaWithoutEventSlot(
+function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
-  const { $event: _event, ...properties } = schema.properties as Record<
-    string,
-    JSONSchema
-  >;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
   return {
     ...schema,
-    properties,
+    properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
   };
 }
@@ -6599,11 +6597,22 @@ export class Runner {
     return tx;
   }
 
-  /** Load one family document under the identity captured before awaiting. */
+  /**
+   * Load one family document under the identity captured before awaiting.
+   * A cell declared a stream is loaded whole: its document holds no value
+   * a read uses, so a selector carrying the event schema would ask the
+   * store to walk a shape that is never there, and the gate's probe of the
+   * document reads its record, which the whole document brings.
+   */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
+    if (ContextualFlowControl.declaresStream(cell.schema)) {
+      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
+        Cell<T>
+      >;
+    }
     return syncCellForIdentity(cell, identity);
   }
 
@@ -9140,7 +9149,7 @@ export class Runner {
   #planReadSchema(plan: NodePlan): JSONSchema | undefined {
     switch (plan.kind) {
       case "javascript":
-        return schemaWithoutEventSlot(plan.module.argumentSchema);
+        return schemaWithEventSlotAsStream(plan.module.argumentSchema);
       case "raw":
         return plan.module.argumentSchema;
       case "passthrough":
@@ -9441,7 +9450,7 @@ export class Runner {
       case "javascript": {
         const cells = [
           plan.inputsCell.asSchema(
-            schemaWithoutEventSlot(plan.module.argumentSchema),
+            schemaWithEventSlotAsStream(plan.module.argumentSchema),
           ),
         ];
         // A handler node's `$event` slot names its stream's document through
