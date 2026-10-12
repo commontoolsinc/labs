@@ -242,6 +242,54 @@ does not, and the view-scoped replication flag is off), so the publish is a
 single request answered with an empty list, and its 74 ms is the wait for the
 main thread's turn and nothing else.
 
+The main thread's figures for those two phases are not the same measurement:
+on that arm the commit and the publish are direct calls, so their rows hold
+only the work, and the work the worker waits behind is in the same thread's
+settle instead. To see the two threads against each other, the port now times
+every request on both sides (`executor/port/request/<method>` where it was
+asked, `executor/port/handle/<method>` where it was answered), and one burst
+under the worker with rendered views reads:
+
+| request | handler, on the main thread | round trip, as the worker sees it |
+| --- | --- | --- |
+| `sink.commitWave` (16) | 21 ms median, 113 ms at the 90th percentile | 27 ms median, 127 ms at the 90th, 74 ms average over the burst |
+| `server.viewInterestsForSpace` (19) | 0.0 ms | 1.9 ms median, 110 ms at the 90th, 74 ms average over the burst |
+
+Over the same burst the main thread spent 2.6 s of 6.0 s in instrumented work
+(2.56 s in flush passes of 102 ms median, 0.85 s encoding frames inside them)
+and 3.3 s in gaps where nothing instrumented ran, the longest 150 ms. The
+thread the worker waits on is not saturated; it is busy in 100 ms pieces, and
+a request that arrives during one waits it out. The commit makes its own: the
+sink reports the commit to the server, the server marks the space dirty and
+starts a flush pass for the viewing sessions, and the publish request that
+follows the commit queues behind that pass. So the worker idles for about half
+of each 294 ms cycle while the main thread idles for about half of the burst,
+and the two take turns.
+
+That is the shape an overlapped commit would change. The wave machinery
+already lets a wave open while its predecessor's commit is in flight: the
+serving runtime's own optimistic layer holds the predecessor's writes, the
+successor takes its basis with them applied, and `noteOwnWaveCommit` rebases
+the successor's writes to the landed commit rather than conflicting. What the
+cycle does not yet do is start the next drain and settle before the commit's
+answer arrives, and not await the publish at all. Assuming the commit lands,
+which within one space it does here on every wave of every run, the worker's
+cycle would be its own work alone, about 146 ms of the 294, and the burst
+would be bounded by the main thread's fan-out, which the main-thread arm puts
+near 3 s: from 4.3 s to somewhere above 3 s, after which both served arms and
+the client arm sit on the same floor, the per-session walks and encodes. The
+cost is the rejection path, which has to withdraw the successor wave's
+contributions along with the rejected one's (the wave already withdraws a
+contribution that read withdrawn state within a wave; across waves it would
+abort the open wave and re-derive from the store), and the watermark, which
+must keep advancing only over commits that have answered. Stage 4 of the
+serving-cycle plan is the precedent to measure against: pipelining the publish
+and the outbox drain cost coverage because their loads and appends landed in
+the next settle's barrier, and this harness runs the publish empty, so the
+publish is better taken off the cycle another way: the server telling the
+worker when a session's view interests change, as it tells it when demand
+changes, so a cycle with no change asks nothing.
+
 The levers this leaves, in the order of what they cost here:
 
 - the memory server's per-session walk of a view-bearing document under the
@@ -254,7 +302,9 @@ The levers this leaves, in the order of what they cost here:
 - the client arm's duplicate derived writes, five clients committing the
   same documents and four of them refused;
 - the serving loop's port round trips under the worker, the commit and the
-  publish, half of a cycle.
+  publish, half of a cycle: the worker and the main thread take turns, and an
+  overlapped commit and a pushed view-interest change would let them run at
+  once.
 
 ## What this says about the three questions the previous record left
 
@@ -290,7 +340,8 @@ with `EXPERIMENTAL_SERVER_EXECUTION`, `SERVER_EXECUTION_WORKER` and
 this change gives it; the data-only tables with the harness's default root
 watch and no view, the rendered-view table with `renderView` on every voter,
 `renderPoll` on the fixture and no root watch. The spans: a throwaway probe hosting the same harness in
-the test process with the loop on its thread, `CF_TIMING_MEASURES` on for one
+the test process with the loop on its thread, or in a worker for the port
+rows, `CF_TIMING_MEASURES` on for one
 burst after two warm-ups and, for the two profiles, V8's sampling profiler
 over that burst through `node:inspector` in the same process, the loop realm's measures taken from its own
 timeline and one voter's through the harness's `timingMeasures()`, both read

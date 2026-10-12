@@ -12,9 +12,10 @@ import type {
   SessionViewInterest,
 } from "@commonfabric/memory/v2";
 import { ProtocolError } from "@commonfabric/memory/v2";
-import type {
-  getLoggerCountsBreakdown,
-  TimingStatsBreakdown,
+import {
+  getLogger,
+  type getLoggerCountsBreakdown,
+  type TimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
 import type {
   AdmittedCommitNotice,
@@ -320,6 +321,15 @@ const errorOf = (fault: PortFault): Error => {
  * start in that order; its answer is posted when it settles. A notice handler
  * that throws, or an answer that cannot be posted, is reported to `onFault`.
  */
+/**
+ * The port's timing rows, under the serving loop's `executor` statistics:
+ * `executor/port/request/<method>` on the side that asked, the whole round
+ * trip, and `executor/port/handle/<method>` on the side that answered, the
+ * handler's own time. The difference is what the request spent waiting for
+ * the other thread's turn and in transit.
+ */
+const timing = getLogger("executor", { enabled: false });
+
 export class PortEndpoint<
   OutRequests extends RequestMap,
   OutNotices extends NoticeMap,
@@ -364,11 +374,18 @@ export class PortEndpoint<
     const id = this.#nextId++;
     const { promise, resolve, reject } = Promise.withResolvers<unknown>();
     this.#pending.set(id, { resolve, reject });
+    const sentAt = performance.now();
     const failure = this.#post({ t: "req", id, method, params });
     if (failure !== undefined) {
       this.#pending.delete(id);
       reject(failure);
     }
+    // The round trip as this side sees it: the wait for the other thread's
+    // turn, the handler's own time (its `executor/port/handle/<method>` row,
+    // recorded over there) and the answer's way back.
+    promise.finally(() =>
+      timing.time(sentAt, "executor", "port", "request", method)
+    ).catch(() => {});
     return promise as Promise<OutRequests[Method]["result"]>;
   }
 
@@ -483,16 +500,26 @@ export class PortEndpoint<
       });
       return;
     }
+    const startedAt = performance.now();
+    const done = () =>
+      timing.time(startedAt, "executor", "port", "handle", request.method);
     let outcome: unknown;
     try {
       outcome = handler(request.params);
     } catch (error) {
+      done();
       this.#post({ t: "err", id, fault: faultOf(error) });
       return;
     }
     Promise.resolve(outcome).then(
-      (result) => this.#post({ t: "ok", id, result }),
-      (error) => this.#post({ t: "err", id, fault: faultOf(error) }),
+      (result) => {
+        done();
+        this.#post({ t: "ok", id, result });
+      },
+      (error) => {
+        done();
+        this.#post({ t: "err", id, fault: faultOf(error) });
+      },
     );
   }
 }

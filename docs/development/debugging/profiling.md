@@ -692,6 +692,14 @@ measurement: a wave that overruns the flush deadline reports that deadline
 however far past it the wave ran, so the counter says how often and the span
 says by how much.
 
+With the loop in a worker, each request over its port is timed on both sides:
+`executor/port/request/<method>` on the side that asked is the whole round
+trip, and `executor/port/handle/<method>` on the side that answered is the
+handler's own time, so their difference is what the request spent waiting for
+the other thread's turn and in transit. A wave commit under the worker is the
+`sink.commitWave` request, and its `executor/wave/commit` phase is that round
+trip plus the sink's bookkeeping around it.
+
 `memory/frame/queue` against `memory/frame/handle` splits an inbound frame's
 time into waiting behind the frames already in flight on its connection and
 doing its own work. Only the second is that frame's cost, so a queue time far
