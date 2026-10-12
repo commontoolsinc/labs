@@ -259,7 +259,9 @@ const ensureChatRoom = handler<void, { chatRoom: ChatRoomCell }>(
  * The read participates in the handler transaction, so competing bindings
  * retry against the association that committed first. A request whose reply
  * cell is the association itself changes nothing and gets no response, since
- * any response would replace the association.
+ * any response would replace the association. A reply cell within or above the
+ * association is not detected: a cell can be compared with another only for
+ * identity.
  */
 const bindMeeting = handler<
   BindMeetingRequest,

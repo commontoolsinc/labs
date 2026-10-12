@@ -276,8 +276,11 @@ including extra fields without a key or a malformed stored key, receives
 `{status: "invalid-state"}` and stays intact. Extra metadata alongside a valid
 key stays intact on replay or conflict. A request whose `reply` is the
 association cell itself changes nothing and receives no response, since any
-response written there would replace the association. A caller omitting `reply`
-confirms success by observing the matching `meeting.key` in the root's output.
+response written there would replace the association. A reply cell that lies
+within the association, such as one of its fields, or contains it is not
+detected, and the response written there changes the association; a caller
+passes a reply cell of its own. A caller omitting `reply` confirms success by
+observing the matching `meeting.key` in the root's output.
 
 The association is meaningful shared state, independent of panels, chat, and
 each viewer's overlay. Source updates preserve it through its `PerSpace` input.
