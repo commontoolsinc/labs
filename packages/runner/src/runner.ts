@@ -2186,6 +2186,15 @@ type PieceVariantRegistration = {
   selection: ImplementationSelection;
 };
 
+/** The in-flight follows of one registration of a piece's pattern watcher. */
+type WatcherFollows = {
+  /** Follows that have not settled. */
+  pending: Set<Promise<unknown>>;
+
+  /** Resolves when the registration is cancelled. */
+  cancelled: Promise<void>;
+};
+
 export class Runner {
   /** Scoped defaults in a caller-owned setup share its commit or abort. */
   readonly #callerOwnedSetupTransactions = new WeakSet<
@@ -2221,12 +2230,14 @@ export class Runner {
 
   /**
    * The entries of `#pendingWatcherPatternLoads`, by the doc key of the piece
-   * whose watcher started each. A caller that moved a running piece's pattern
-   * pointer waits on that piece's entries alone (see
-   * `patternPointerFollowed()`), so that another piece's slow load does not
-   * hold it. A piece with nothing in flight has no entry.
+   * whose watcher started each, under the watcher registration that did. A
+   * caller that moved a running piece's pattern pointer waits on that piece's
+   * entries alone (see `patternPointerFollowed()`), so that another piece's
+   * slow load does not hold it. A piece with nothing in flight has no entry.
+   * A cancelled registration's entry stays until its loads settle, which
+   * takes as long as their storage reads do, and is not waited on.
    */
-  #watcherPatternLoadsByPiece = new Map<string, Set<Promise<unknown>>>();
+  #watcherFollowsByPiece = new Map<string, WatcherFollows>();
 
   /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
@@ -5374,6 +5385,10 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
+      const { promise: cancelled, resolve: markCancelled } = Promise
+        .withResolvers<void>();
+      const follows: WatcherFollows = { pending: new Set(), cancelled };
+      addCancel(markCancelled);
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -5615,7 +5630,7 @@ export class Runner {
                 err,
               );
             });
-          this.#trackWatcherPatternLoad(pieceKey, named);
+          this.#trackWatcherPatternLoad(pieceKey, follows, named);
           return;
         }
         // Async load for a pattern change after initial start. Errors are
@@ -5803,7 +5818,7 @@ export class Runner {
               err,
             );
           });
-        this.#trackWatcherPatternLoad(pieceKey, watcherLoad);
+        this.#trackWatcherPatternLoad(pieceKey, follows, watcherLoad);
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5833,7 +5848,7 @@ export class Runner {
             }
             followPointer(newRef, newKey);
           });
-          this.#trackWatcherPatternLoad(pieceKey, followed);
+          this.#trackWatcherPatternLoad(pieceKey, follows, followed);
         }),
       );
     };
@@ -10244,26 +10259,26 @@ export class Runner {
   }
 
   /**
-   * Helper for the pattern watcher, which records `load` as in flight for the
-   * piece `pieceKey` names until it settles.
+   * Helper for the pattern watcher, which records `load` as in flight until
+   * it settles, for the watcher registration `follows` of the piece
+   * `pieceKey` names.
    */
-  #trackWatcherPatternLoad(pieceKey: string, load: Promise<unknown>): void {
+  #trackWatcherPatternLoad(
+    pieceKey: string,
+    follows: WatcherFollows,
+    load: Promise<unknown>,
+  ): void {
     this.#pendingWatcherPatternLoads.add(load);
-    let loads = this.#watcherPatternLoadsByPiece.get(pieceKey);
-    if (loads === undefined) {
-      loads = new Set();
-      this.#watcherPatternLoadsByPiece.set(pieceKey, loads);
-    }
-    const ofPiece = loads;
-    ofPiece.add(load);
+    follows.pending.add(load);
+    this.#watcherFollowsByPiece.set(pieceKey, follows);
     load.finally(() => {
       this.#pendingWatcherPatternLoads.delete(load);
-      ofPiece.delete(load);
+      follows.pending.delete(load);
       if (
-        ofPiece.size === 0 &&
-        this.#watcherPatternLoadsByPiece.get(pieceKey) === ofPiece
+        follows.pending.size === 0 &&
+        this.#watcherFollowsByPiece.get(pieceKey) === follows
       ) {
-        this.#watcherPatternLoadsByPiece.delete(pieceKey);
+        this.#watcherFollowsByPiece.delete(pieceKey);
       }
     });
   }
@@ -10287,7 +10302,9 @@ export class Runner {
    * observed. The piece then runs the pattern its pointer names, unless a
    * follow failed, which is logged and leaves the piece on the pattern it was
    * running. Resolves at once when nothing is in flight, as for a piece that
-   * is not running. A subpath cell stands for its root document.
+   * is not running, and resolves when the piece is stopped with a follow in
+   * flight, whose remaining work has no effect. A subpath cell stands for its
+   * root document.
    *
    * The watcher observes a move in a scheduler pass, so a caller that has
    * just committed one awaits `Runtime.idle()` before calling this. Following
@@ -10298,7 +10315,9 @@ export class Runner {
    *
    * Not covered: the commit that rolls back a pointer naming a pattern that
    * cannot be loaded, and, on a runtime that seals its writes into a serving
-   * wave, the re-instantiation, which follows the wave's settlement.
+   * wave, the re-instantiation. That one follows the wave's settlement, and a
+   * wave settles after the cycle that sealed into it has ended, so a caller
+   * running within that cycle could not wait for it.
    */
   async patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
     const link = resultCell.getAsNormalizedFullLink();
@@ -10306,13 +10325,16 @@ export class Runner {
       ? this.#runtime.getCellFromLink({ ...link, path: [] })
       : resultCell;
     const key = this.#getDocKey(rootCell);
-    // A settled load's continuation can start another, so the entry is read
-    // again after each wait.
-    let loads: Set<Promise<unknown>> | undefined;
-    while (
-      (loads = this.#watcherPatternLoadsByPiece.get(key)) !== undefined
-    ) {
-      await Promise.allSettled([...loads]);
+    // A settled follow's continuation can start another, so the entry is read
+    // again after each wait. A cancelled registration's follows run on to no
+    // effect, so the wait ends with the cancellation.
+    let follows: WatcherFollows | undefined;
+    while ((follows = this.#watcherFollowsByPiece.get(key)) !== undefined) {
+      const cancelled = await Promise.race([
+        Promise.allSettled([...follows.pending]).then(() => false),
+        follows.cancelled.then(() => true),
+      ]);
+      if (cancelled) return;
     }
   }
 

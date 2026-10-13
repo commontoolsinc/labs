@@ -377,7 +377,12 @@ writer authority the new pattern inherits, and any document the new pattern
 reads that the replica lacks. `ensureDefaultPattern` waits for that
 re-instantiation, through the runner's `patternPointerFollowed()`, so the root
 it returns runs the new pattern whether or not the root was running when it
-was opened.
+was opened. A runtime that seals its writes into a serving wave is the
+exception. There the watcher re-instantiates once the wave carrying the new
+pattern's setup has settled, so that a withdrawn setup leaves the old graph in
+place, and a wave settles after the cycle that sealed into it has ended. A call
+made within that cycle cannot wait for the settlement, so on such a runtime
+`ensureDefaultPattern` returns with the old pattern's graph still running.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and

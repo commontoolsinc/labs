@@ -2539,7 +2539,11 @@ export class PiecesController<T = unknown> {
    *
    * An existing root follows its origin before it is started. A root that was
    * already running when its origin moved it has been re-instantiated on the
-   * incoming pattern by the time this resolves, as one started here has.
+   * incoming pattern by the time this resolves, as one started here has. The
+   * exception is a runtime that seals its writes into a serving wave: there
+   * the re-instantiation follows the wave's settlement, which a call made
+   * within the wave's cycle cannot wait for, and this resolves with the
+   * outgoing pattern's graph still running.
    *
    * @returns The default pattern piece, either existing or newly created
    */
