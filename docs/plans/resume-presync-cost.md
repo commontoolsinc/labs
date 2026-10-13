@@ -291,8 +291,9 @@ where the pre-sync was no longer the whole cost.
       spells its source and its target in full, and on an in-place link
       entry both restate the link stored beside it.
       `cfc-independent-reference-labels.md` stops minting the atom, so a
-      row written after it carries none; this item closes on a
-      measurement of such a row.
+      slot written after it carries none, and a slot written before keeps
+      its atom until its pointer is replaced; this item closes on a
+      measurement of a freshly written row.
 - [ ] A load of a materialized room still commits for a fifth of its time,
       writing a reader's own instance of every session-scoped derivation
       in a commit of its own: 429 commits of about 400 bytes on the

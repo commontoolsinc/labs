@@ -1727,6 +1727,57 @@ describe("ExtendedStorageTransaction CFC gate", () => {
     }
   });
 
+  it("marks a link write CFC-relevant by what the link schema's `ifc` holds, and leaves alone one whose `ifc` holds nothing", async () => {
+    const { runtime, storageManager } = createRuntime();
+    try {
+      // Links a cell under `schema` into an unlabeled holder, and reports
+      // whether that made the transaction one the boundary prepares.
+      const relevantAfterLinking = (name: string, schema: JSONSchema) => {
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          `cfc-link-relevance-source-${name}`,
+          schema,
+          tx,
+        );
+        runtime.getCell(
+          signer.did(),
+          `cfc-link-relevance-holder-${name}`,
+          undefined,
+          tx,
+        ).set({ slot: source });
+        const relevant = tx.getCfcState().relevant;
+        tx.abort("test");
+        return relevant;
+      };
+
+      expect(relevantAfterLinking("empty", { type: "string", ifc: {} }))
+        .toBe(false);
+      expect(
+        relevantAfterLinking("no-atoms", {
+          type: "string",
+          ifc: { confidentiality: [], integrity: [] },
+        }),
+      ).toBe(false);
+      expect(
+        relevantAfterLinking("label", {
+          type: "string",
+          ifc: { confidentiality: ["secret"] },
+        }),
+      ).toBe(true);
+      // An empty ceiling is a ceiling: it admits nothing confidential.
+      expect(
+        relevantAfterLinking("ceiling", {
+          type: "string",
+          ifc: { maxConfidentiality: [] },
+        }),
+      ).toBe(true);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("marks labeled reads as CFC-relevant and leaves unlabeled reads alone", async () => {
     const { runtime, storageManager } = createRuntime();
     try {
