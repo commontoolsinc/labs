@@ -3,7 +3,6 @@ import {
   fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
-  isDeepFrozen,
   isKeyableObjectOrArray,
   isWalkableObjectOrArray,
   valueEqual,
@@ -100,50 +99,6 @@ type UnwrapOneLevelOptions = {
    */
   argumentCapSchema?: JSONSchema;
 };
-
-/**
- * A deep-frozen schema with the content of `schema`, where `schema` is an
- * object whose members are all deep-frozen and which is not frozen itself,
- * and `schema` as it is otherwise.
- *
- * A pattern's authored argument schema has that shape: a fresh root over the
- * frozen result of `sanitizeSchemaForLinks()`. `schemaAtPath()` keeps a
- * narrowing only for a deep-frozen schema, since a mutable one can change
- * under it, and the binding walk narrows the authored schema at every slot
- * it binds, so the walk narrows this stand-in.
- *
- * The stand-in made for a root is returned again only while the root holds
- * the same members under the same keys, compared by identity. Every member
- * being deep-frozen, that says the content is what the stand-in was made
- * from, and a root that has changed gets a stand-in of its own.
- */
-export const frozenSchemaStandIn = (
-  schema: JSONSchema | undefined,
-): JSONSchema | undefined => {
-  if (!isObjectNotArray(schema) || isDeepFrozen(schema)) return schema;
-  const root = schema as Record<string, unknown>;
-  const keys = Object.keys(root);
-  const kept = frozenStandIns.get(root);
-  if (
-    kept !== undefined && kept.keys.length === keys.length &&
-    keys.every((key, index) =>
-      key === kept.keys[index] && root[key] === kept.members[index]
-    )
-  ) {
-    return kept.standIn;
-  }
-  const members = keys.map((key) => root[key]);
-  if (!members.every((member) => isDeepFrozen(member))) return schema;
-  // A clone, because the root stays its holder's to change.
-  const standIn = deepFrozenCloneAndInternSchema(schema);
-  frozenStandIns.set(root, { keys, members, standIn });
-  return standIn;
-};
-
-const frozenStandIns = new WeakMap<
-  object,
-  { keys: readonly string[]; members: readonly unknown[]; standIn: JSONSchema }
->();
 
 /**
  * Folds the source slot's declared cell scope into the serialized alias link's
@@ -794,11 +749,6 @@ export function unwrapOneLevelAndBindToDoc(
     resultCell.getAsNormalizedFullLink(),
   )!;
   argumentCellLink = canonicalSchemaLink(argumentCellLink);
-  // The authored schemas are narrowed once per slot bound below.
-  const authoredArgumentSchema = frozenSchemaStandIn(
-    options?.sourceSchemas?.argument,
-  );
-  const argumentCapSchema = frozenSchemaStandIn(options?.argumentCapSchema);
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.
@@ -911,7 +861,7 @@ export function unwrapOneLevelAndBindToDoc(
           ? ContextualFlowControl.schemaAtPath(link.schema, path)
           : undefined;
         const authoredRootSchema = alias.cell === "argument"
-          ? authoredArgumentSchema
+          ? options?.sourceSchemas?.argument
           : undefined;
         return createSigilLinkFromParsedLink(
           foldDeclaredScopeIntoLinkSchema(
@@ -920,7 +870,7 @@ export function unwrapOneLevelAndBindToDoc(
               path,
               targetSchema ?? sourceSchema,
               alias.cell === "argument"
-                ? authoredRootSchema ?? argumentCapSchema
+                ? authoredRootSchema ?? options?.argumentCapSchema
                 : undefined,
             ),
             authoredRootSchema,
