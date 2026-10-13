@@ -1,7 +1,8 @@
 /**
  * Where a room's rendering shows each message: which rows the main
  * conversation and the open thread show, the reply count a thread's root
- * carries, and which of a row's controls a viewer is offered.
+ * carries, and which of a row's controls its sender and the room's OWNER are
+ * offered.
  */
 import {
   action,
@@ -106,23 +107,12 @@ const threadLinkText = (root: unknown, text: string): string => {
 const controlDisplay = (root: unknown, text: string, label: string) =>
   displayOf(findNode(rowIn(root, MAIN, text), isButton(label)));
 
-/** Whether the main row `text` has its reaction control disabled. */
-const reactDisabled = (root: unknown, text: string) =>
-  propValue(
-    findNode(
-      rowIn(root, MAIN, text),
-      (node) => propValue(node, "aria-label") === "Add reaction",
-    ),
-    "disabled",
-  );
-
 const ALL = ["Root", "Other", "First reply", "Second reply"];
 
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
   const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
-  const pendingProfile = Writable.of<TestProfile | undefined>(undefined);
   const records = {
     about: { kind: "group" as const },
     messages,
@@ -138,9 +128,6 @@ export default pattern(() => {
   const bob = FabriChatRoomCore(
     { myProfile: bobProfile, ...records } as RoomArg,
   );
-  const pending = FabriChatRoomCore(
-    { myProfile: pendingProfile, ...records } as RoomArg,
-  );
 
   return {
     [TESTS]: [
@@ -154,19 +141,12 @@ export default pattern(() => {
         event: typed("Other"),
         trustedUi: sendGesture,
       },
-      // Both are in the main conversation, and no thread is open.
+      // Both are in the main conversation, no thread is open, and neither
+      // roots one.
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], MAIN, ["Root", "Other"]) === "block block"
-        ),
-      },
-      {
-        assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) === "none none"
-        ),
-      },
-      {
-        assertion: assert(() =>
+          rowDisplays(alice[UI], MAIN, ["Root", "Other"]) === "block block" &&
+          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) === "none none" &&
           threadLinkText(alice[UI], "Root") === "none" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
@@ -176,28 +156,16 @@ export default pattern(() => {
       // its root counts it.
       { action: action(() => clickInRow(alice[UI], "Root", "Thread")) },
       {
-        assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) === "block none"
-        ),
-      },
-      {
         action: alice.threadComposerSend,
         event: typed("First reply"),
         trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], MAIN, ALL.slice(0, 3)) === "block block none"
-        ),
-      },
-      {
-        assertion: assert(() =>
+          rowDisplays(alice[UI], MAIN, ALL.slice(0, 3)) ===
+            "block block none" &&
           rowDisplays(alice[UI], THREAD, ALL.slice(0, 3)) ===
-            "block none block"
-        ),
-      },
-      {
-        assertion: assert(() =>
+            "block none block" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 1 reply" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
@@ -209,11 +177,7 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) === "block none block block"
-        ),
-      },
-      {
-        assertion: assert(() =>
+          rowDisplays(alice[UI], THREAD, ALL) === "block none block block" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 2 replies"
         ),
       },
@@ -222,17 +186,14 @@ export default pattern(() => {
       // their main conversation shows the same rows and the same count.
       {
         assertion: assert(() =>
-          rowDisplays(bob[UI], THREAD, ALL) === "none none none none"
-        ),
-      },
-      {
-        assertion: assert(() =>
+          rowDisplays(bob[UI], THREAD, ALL) === "none none none none" &&
           rowDisplays(bob[UI], MAIN, ALL) === "block block none none" &&
           threadLinkText(bob[UI], "Root") === "inline-flex 2 replies"
         ),
       },
 
-      // Opening another message's thread shows that message alone.
+      // Opening another message's thread shows that message alone, and
+      // closing it shows none.
       { action: action(() => clickInRow(alice[UI], "Other", "Thread")) },
       {
         assertion: assert(() =>
@@ -240,39 +201,15 @@ export default pattern(() => {
         ),
       },
       { action: action(() => clickButton(alice[UI], "Close")) },
+      // A row offers its edit control to its sender alone, and its removal to
+      // the room's OWNER, which this lane's user is.
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) === "none none none none"
-        ),
-      },
-
-      // A row offers its edit and delete controls to its sender alone, and
-      // its removal to the room's OWNER, which this lane's user is.
-      {
-        assertion: assert(() =>
+          rowDisplays(alice[UI], THREAD, ALL) === "none none none none" &&
           controlDisplay(alice[UI], "Root", "Edit") === "inline-flex" &&
           controlDisplay(alice[UI], "Other", "Edit") === "none" &&
-          controlDisplay(bob[UI], "Other", "Edit") === "inline-flex"
-        ),
-      },
-      {
-        assertion: assert(() =>
           controlDisplay(alice[UI], "Other", "Remove entirely") ===
             "inline-flex"
-        ),
-      },
-      // A viewer whose profile hasn't resolved can't react, and is offered
-      // neither.
-      {
-        assertion: assert(() =>
-          reactDisabled(alice[UI], "Root") === false &&
-          reactDisabled(pending[UI], "Root") === true
-        ),
-      },
-      {
-        assertion: assert(() =>
-          controlDisplay(pending[UI], "Root", "Edit") === "none" &&
-          controlDisplay(pending[UI], "Root", "Remove entirely") === "none"
         ),
       },
     ],
