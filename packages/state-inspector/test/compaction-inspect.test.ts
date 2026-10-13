@@ -8,6 +8,7 @@ import { toFileUrl } from "@std/path";
 import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
 import { compactStore } from "@commonfabric/memory/v2/compact";
 
+import { main } from "../cli.ts";
 import { openSpace } from "../db.ts";
 import { classifyDocument } from "../model.ts";
 import { describeCommitPayload, listCommits } from "../queries.ts";
@@ -109,9 +110,18 @@ Deno.test("the commit listing names a compaction run and the payloads it hollowe
         classifyDocument({ value: 1, compaction: null } as never).compaction,
         undefined,
       );
+      // A record without `lastCommitSeq` still counts its runs.
+      assertEquals(
+        classifyDocument(
+          { value: 1, compaction: { runs: [{ commitSeq: 9 }] } } as never,
+        ).compaction,
+        { runs: 1, lastCommitSeq: 0 },
+      );
     } finally {
       space.close();
     }
+    // The inspector's own CLI prints the same tail.
+    assertEquals(main(["commits", `${dir}/result.sqlite`, "--limit", "5"]), 0);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }
