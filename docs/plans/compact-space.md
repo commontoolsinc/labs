@@ -1075,8 +1075,9 @@ until the engine can tell compacted history from absence.
    it 14,273 against 44,928, with the traversal still the bound; writes 1–5
    ms at the engine, as after stage 1; a topic edit through the served API
    via `cf cell set`, eight warm samples a side, 3.4 s median on the
-   compacted file against 2.7 s on the uncompacted, the cold edit 8.9 s
-   against 9.2 s, the session's watch add being the time in both — an
+   compacted file against 2.7 s on the uncompacted, the two cold edits 10.7 s
+   and 8.9 s against 9.0 s and 9.2 s, the session's watch add being the time
+   in both — an
    inconclusive comparison, so the served-edit acceptance check of §3 step 7
    stays open until a browser-side `transact` timing is taken against both
    files.
