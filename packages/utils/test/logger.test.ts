@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import {
   clearTimingMeasures,
@@ -2103,6 +2104,101 @@ describe("logger", () => {
         measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
       ).toBe(false);
       performance.clearMeasures("someone-elses-measure");
+    });
+
+    it("calls `performance.clearMeasures()` once to drain any number of spans", () => {
+      // Every span has a name of its own, and a host that keeps its timeline
+      // as a list reads all of it to remove one name. A removal per span
+      // therefore costs the square of the span count, which the number of
+      // calls shows without anything being timed.
+
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-drain-calls");
+      for (let i = 0; i < 20; i++) {
+        logger.timeStart("phase", "drain-calls");
+        logger.timeEnd("phase", "drain-calls");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(20);
+
+      using clear = spy(performance, "clearMeasures");
+      clearTimingMeasures();
+      expect(clear.calls.length).toBe(1);
+      expect(
+        measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+      ).toBe(false);
+    });
+
+    describe("beside a measure the host recorded", () => {
+      const HOST_MEASURE = "host/phase";
+
+      const hostMeasures = () =>
+        performance.getEntriesByName(HOST_MEASURE, "measure").map((entry) => ({
+          startTime: entry.startTime,
+          duration: entry.duration,
+          detail: "detail" in entry ? entry.detail : undefined,
+        }));
+
+      beforeEach(() => {
+        performance.measure(HOST_MEASURE, {
+          start: 100,
+          end: 350,
+          detail: { phase: "host" },
+        });
+      });
+
+      afterEach(() => {
+        performance.clearMeasures(HOST_MEASURE);
+      });
+
+      it("calls `performance.clearMeasures()` once to drain any number of spans", () => {
+        setTimingMeasuresEnabled(true);
+        const logger = getLogger("measure-drain-calls-beside-host");
+        for (let i = 0; i < 20; i++) {
+          logger.timeStart("phase", "drain-calls-beside-host");
+          logger.timeEnd("phase", "drain-calls-beside-host");
+        }
+        expect(getTimingMeasuresState().emitted).toBe(20);
+
+        using clear = spy(performance, "clearMeasures");
+        clearTimingMeasures();
+        expect(clear.calls.length).toBe(1);
+        expect(
+          measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+        ).toBe(false);
+      });
+
+      it("keeps that measure's start, duration, and detail", () => {
+        setTimingMeasuresEnabled(true);
+        const logger = getLogger("measure-keep-host");
+        logger.timeStart("phase", "keep-host");
+        logger.timeEnd("phase", "keep-host");
+        expect(getTimingMeasuresState().emitted).toBe(1);
+
+        clearTimingMeasures();
+        expect(hostMeasures()).toEqual([
+          { startTime: 100, duration: 250, detail: { phase: "host" } },
+        ]);
+      });
+
+      it("leaves that measure's entry in place when it has no spans to drain", () => {
+        // A drain with nothing of its own to remove has no reason to touch a
+        // timeline it shares, so the host's entry is the same object after it.
+
+        expect(
+          measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+        ).toBe(false);
+        const [before] = performance.getEntriesByName(HOST_MEASURE, "measure");
+        expect(before).toBeDefined();
+
+        using clear = spy(performance, "clearMeasures");
+        using measure = spy(performance, "measure");
+        clearTimingMeasures();
+        expect(clear.calls.length).toBe(0);
+        expect(measure.calls.length).toBe(0);
+        expect(performance.getEntriesByName(HOST_MEASURE, "measure")[0]).toBe(
+          before,
+        );
+      });
     });
 
     it("emits again after something else clears the timeline", () => {

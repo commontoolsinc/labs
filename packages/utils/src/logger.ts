@@ -520,9 +520,9 @@ export function willEmitTimingMeasure(): boolean {
  * What marks a measure as this logger's.
  *
  * The performance timeline is shared with whatever else the host instruments,
- * so emitted entries carry a prefix for two reasons: clearing can then remove
- * only what this emitted rather than destroying a page's own measures, and a
- * human scanning a timeline can tell logger spans from application ones.
+ * so emitted entries carry a prefix for two reasons: a drain can then tell
+ * what this emitted from a page's own measures, which it keeps, and a human
+ * scanning a timeline can tell logger spans from application ones.
  */
 export const TIMING_MEASURE_PREFIX = "cf:";
 
@@ -673,19 +673,43 @@ export function getTimingMeasuresState(): {
 }
 
 /**
- * Drop every emitted measure and give the budget back.
+ * Drops every emitted measure and gives the budget back.
  *
  * A consumer that has read the entries should call this: the entries are the
  * only copy, so draining is what keeps a long run from growing without bound.
+ *
+ * The cost is proportional to the size of the timeline. A measure this did
+ * not emit stays on the timeline, as a new entry recorded from the name,
+ * start, duration, and detail of the one it replaces, so whatever observes the
+ * timeline is handed that measure a second time. A timeline holding no emitted
+ * measure is not touched.
  */
 export function clearTimingMeasures(): void {
   try {
-    // By name rather than wholesale: the timeline belongs to the host, and a
-    // page or worker that instruments itself would otherwise lose its own
-    // measures to a call that claims only to drain this feature's.
+    const others: PerformanceEntry[] = [];
+    let holdsEmitted = false;
     for (const entry of performance.getEntriesByType("measure")) {
       if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
-        performance.clearMeasures(entry.name);
+        holdsEmitted = true;
+      } else {
+        others.push(entry);
+      }
+    }
+    if (holdsEmitted) {
+      // One call removes every measure, and the others are then recorded
+      // again. The only narrower removal the timeline has is by name, which
+      // costs a host that keeps its timeline as a list a read of all of it,
+      // and every emitted measure has a name of its own: that is a read of
+      // the timeline per measure. Recording the others again is what keeps a
+      // page or worker that instruments itself from losing its measures to a
+      // call that claims only to drain this feature's.
+      performance.clearMeasures();
+      for (const entry of others) {
+        performance.measure(entry.name, {
+          start: entry.startTime,
+          duration: entry.duration,
+          detail: "detail" in entry ? entry.detail : undefined,
+        });
       }
     }
   } catch { /* not every host implements it */ }
