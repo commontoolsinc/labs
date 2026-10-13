@@ -4,23 +4,26 @@
  * caller reads, and — in equal measure — the positions it passes over, each
  * asserted as the call still dispatching.
  *
- * The gate itself is `verbInputSchemaError` (../lib/callable.ts). What is
- * driven here is the whole path a caller takes to it, so the refusal is pinned
- * against schemas the transformer emits rather than against hand-built ones
- * that could only assert back what this file assumed.
+ * The gate itself is `verbInputSchemaError`
+ * (`packages/piece/src/verb-input.ts`). What is driven here is the whole path
+ * a caller takes to it, so the refusal is pinned against schemas the
+ * transformer emits rather than against hand-built ones that could only assert
+ * back what this file assumed.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { resolvedSchema } from "../../runner/test/schema-ref-helpers.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import {
+  undeclaredVerbFieldError,
+  verbInputSchemaError,
+} from "@commonfabric/piece/verb-input";
 import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   eventSchemaJudgesRootFields,
   executeResolvedCallable,
-  undeclaredVerbFieldError,
-  verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";

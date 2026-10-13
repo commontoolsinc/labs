@@ -41,14 +41,25 @@ const droppedSlots = (): number =>
 
 describe("Home interface upgrade", () => {
   for (
-    const mode of ["explicit", "automatic-running", "automatic-cold"] as const
+    const { mode, fixture, suffix, hasInboxRequests } of [
+      { fixture: "home-before.tsx.txt", suffix: "", hasInboxRequests: false },
+      {
+        fixture: "home-with-inbox-request.tsx.txt",
+        suffix: " from the inbox-request Home",
+        hasInboxRequests: true,
+      },
+    ].flatMap((release) =>
+      (["explicit", "automatic-running", "automatic-cold"] as const).map(
+        (mode) => ({ ...release, mode }),
+      )
+    )
   ) {
     const description = mode === "explicit"
       ? "preserves manager requests, direct counterparts and queued notices across the Home code change"
       : `preserves populated Home and manager state through a ${
         mode === "automatic-cold" ? "cold" : "running"
       } system-origin update`;
-    it(description, async () => {
+    it(description + suffix, async () => {
       const server = newLoopbackServer();
       const patterns = fromFileUrl(new URL("..", import.meta.url));
       const temporary = await Deno.makeTempDir({
@@ -65,7 +76,7 @@ describe("Home interface upgrade", () => {
       }
       const oldHome = await Deno.readTextFile(
         new URL(
-          "./fixtures/home-interface-upgrade/home-before.tsx.txt",
+          `./fixtures/home-interface-upgrade/${fixture}`,
           import.meta.url,
         ),
       );
@@ -103,8 +114,9 @@ describe("Home interface upgrade", () => {
           file.name === previous.main
         );
         expect(entry).toBeDefined();
-        // Snapshot of Home at 676e4cae1b, before the interface change. Retaining
-        // its entry path keeps every production dependency's identity intact.
+        // Snapshots of Home at `676e4cae1b` and `181f2464ac`, before the
+        // interface change. Retaining the entry path keeps each production
+        // dependency's identity intact.
         entry!.contents = oldHome;
         let home: Cell<unknown>;
         if (mode === "explicit") {
@@ -160,6 +172,20 @@ describe("Home interface upgrade", () => {
         runtime.prepareTxForCommit(roomTx);
         expect((await roomTx.commit().settled).error).toBeUndefined();
         const seedTx = runtime.edit();
+        const unlistedProfile = runtime.getCell(
+          owner.did(),
+          "retained unlisted profile",
+        ).getAsNormalizedFullLink();
+        const retainedRequest = {
+          [`${unlistedProfile.space}/${unlistedProfile.id}`]: true,
+        };
+        if (hasInboxRequests) {
+          runtime.getCellFromLink(
+            getDerivedInternalCellLink(home, {
+              partialCause: "privateInboxRequests",
+            }),
+          ).withTx(seedTx).set(retainedRequest);
+        }
         const counterpart =
           (await Identity.fromPassphrase("retained direct counterpart")).did();
         const direct = {
@@ -250,10 +276,24 @@ describe("Home interface upgrade", () => {
           );
           await catalog.sync();
           const { space, id, path } = catalog.getAsNormalizedFullLink();
-          return [...values, {
+          const owned = [...values, {
             address: { space, id, path },
             value: catalog.getRaw(),
           }];
+          if (hasInboxRequests) {
+            const requests = reader.getCellFromLink(
+              getDerivedInternalCellLink(root, {
+                partialCause: "privateInboxRequests",
+              }),
+            );
+            await requests.sync();
+            const { space, id, path } = requests.getAsNormalizedFullLink();
+            owned.push({
+              address: { space, id, path },
+              value: requests.getRaw(),
+            });
+          }
+          return owned;
         };
         const noticeRecords = async (root: Cell<unknown>) => {
           const items = await root.key("chatManager").key("outgoingNotices")
@@ -295,6 +335,9 @@ describe("Home interface upgrade", () => {
             },
           },
         });
+        if (hasInboxRequests) {
+          expect(ownedBefore[4].value).toEqual(retainedRequest);
+        }
         // Raw stored snapshots retain complete data and serialized room links;
         // a projected query result can lazily change as the source rolls.
         const before = await storedFields(runtime, home);

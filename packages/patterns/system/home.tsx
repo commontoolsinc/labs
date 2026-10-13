@@ -57,11 +57,15 @@ import {
   ensurePrivateInbox,
   type EnsurePrivateInboxEvent,
   pointProfilesAtPrivateInbox,
+  PrivateInboxAnswering,
   type PrivateInboxHolder,
+  type PrivateInboxReceipt,
   type PrivateInboxRefusalHolder,
   type PrivateInboxReplacementHolder,
+  type PrivateInboxRequest,
   replaceRefusedPrivateInbox,
   repointProfilesFromReplacedInbox,
+  requestPrivateInbox,
   type RetainedPrivateInboxes,
   TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE,
   TRUSTED_REPLACE_REFUSED_INBOX_ACTION,
@@ -191,8 +195,15 @@ export type HomeOutput = {
   // profile's inbox in `privateInboxRefusal`.
   // The host sends it the first time a runtime worker brings up Home, and
   // again at that worker's next bring-up if the ensure failed, so Home adopts
-  // again only then.
+  // again only then. `requestPrivateInbox` sends it an event naming nothing,
+  // which adopts nothing.
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
+  // For a client, such as a loom daemon, that would otherwise create an inbox
+  // of its own: has Home ensure its inbox, as `ensurePrivateInbox` does for an
+  // event naming nothing, and links the handling's receipt to Home's answer
+  // for the profile the request names, which reads `ensured` once that profile
+  // points at Home's inbox, or a final status saying why it never will.
+  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxReceipt>;
   // For the owner, from the button on Home's refusal notice: replaces the
   // refused inbox with the one Home holds, or with one it creates when it holds
   // none, and points the profiles that point at the refused inbox at Home's.
@@ -401,6 +412,11 @@ const Home = pattern(
     const privateInboxReplacement = new Writable<PrivateInboxReplacementHolder>(
       {},
     ).for("privateInboxReplacement");
+    // The profiles requests for Home's inbox have named, by entity, which
+    // Home goes on answering for.
+    const privateInboxRequests = new Writable<Record<string, boolean>>({}).for(
+      "privateInboxRequests",
+    );
     // The refusal notice reads the refusal's code and time, and never its
     // `inbox`: the stored link carries the label the refused inbox's owner
     // gives its offers. The notice renders after everything else, for the
@@ -480,6 +496,13 @@ const Home = pattern(
     // the Profile tab. Owns its own durable cell (seeded via Default<>).
     const selfComponent = Self({});
     const activeTab = new Writable("spaces").for("activeTab");
+    // Home's answers to requests for its inbox, which `requestPrivateInbox`
+    // links a request's receipt to.
+    const privateInboxAnswering = PrivateInboxAnswering({
+      privateInbox,
+      profiles: profiles as any,
+      requested: privateInboxRequests,
+    });
     const registerSpace = registerSharedSpace({ catalog });
     const changeMembership = changeSharedSpaceMembership({ catalog });
     const removeImportedSpace = removeSharedSpace({ catalog });
@@ -698,6 +721,12 @@ const Home = pattern(
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
       ensurePrivateInbox: ensurePrivateInboxStream,
+      requestPrivateInbox: requestPrivateInbox({
+        profiles: profiles as any,
+        requested: privateInboxRequests,
+        answers: privateInboxAnswering.answers,
+        ensure: ensurePrivateInboxStream,
+      }),
       replaceRefusedPrivateInbox: replaceRefusedInboxStream,
     };
   },
