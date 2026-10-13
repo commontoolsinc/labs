@@ -208,6 +208,39 @@ describe("Runner.patternPointerFollowed()", () => {
     expect(markerOf(moved)).toBe("v1");
   });
 
+  it("resolves when the piece is stopped with a follow in flight", async () => {
+    const v2Identity = await persistV2();
+    const cell = await runV1("followed-stopped-mid-follow");
+    const hold = holdNextNaming();
+    await repoint(cell, v2Identity);
+    await hold.entered;
+
+    const state = settlementOf(rt.runner.patternPointerFollowed(cell));
+    await clock.settle();
+    expect(state.settled).toBe(false);
+
+    // The naming step stays held, so the follow has not settled when the
+    // wait does.
+    rt.runner.stop(cell);
+    await clock.settle();
+    expect(state.settled).toBe(true);
+  });
+
+  it("resolves at once for a piece stopped with a follow in flight", async () => {
+    const v2Identity = await persistV2();
+    const cell = await runV1("followed-after-stop-mid-follow");
+    const hold = holdNextNaming();
+    await repoint(cell, v2Identity);
+    await hold.entered;
+    rt.runner.stop(cell);
+
+    // The naming step stays held, so the stopped watcher's follow is still
+    // in flight when the wait is asked for.
+    const state = settlementOf(rt.runner.patternPointerFollowed(cell));
+    await clock.settle();
+    expect(state.settled).toBe(true);
+  });
+
   it("resolves for a piece that is not running", async () => {
     const cell = await runV1("followed-stopped");
     rt.runner.stop(cell);
