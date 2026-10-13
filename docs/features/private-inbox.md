@@ -358,7 +358,12 @@ Under server execution, the serving runtime runs Home's handler, writes the
 receipt and runs `PrivateInboxAnswering`, as part of Home, so it is the
 serving runtime's answers the receipt links to. A client whose runtime runs
 Home too computes them as well, over its own view of the profiles, and reads
-its own answer until the served one arrives.
+its own answer until the served one arrives. A client's runtime can also
+settle before the served pointer write reaches it, so a read taken once that
+runtime has settled can still find `pending` while the served answer is
+already `ensured`, and the next read after that write arrives finds
+`ensured`. A client subscribed to the receipt, as `requestPrivateInboxOf()`
+is, is handed that next value when it comes, so it needs no read of its own.
 
 `requestPrivateInboxOf()` in `packages/piece/src/ops/private-inbox.ts` is the
 host's implementation of that client. It returns `ensured` with the inbox,
