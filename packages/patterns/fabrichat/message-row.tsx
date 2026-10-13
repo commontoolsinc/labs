@@ -25,6 +25,7 @@ import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.t
 import {
   type ActivityCell,
   type ActivityCountersCell,
+  type ActRefusalCell,
   canActIn,
   commitDelete,
   commitDeleteReaction,
@@ -42,6 +43,7 @@ import {
   type MessageCell,
   messageEntries,
   type MessageRecord,
+  type MessageRequestsCell,
   type MessagesCell,
   type ReactionListsCell,
   type RequestsCell,
@@ -152,6 +154,15 @@ export interface FabriChatMessageRowInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
   /** Whether the viewer's manager can take the viewer into the room. */
   canJoin?: boolean;
 
@@ -218,6 +229,8 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
     joinRoom,
     catalog,
@@ -232,6 +245,8 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
     joinRoom,
     catalog,
@@ -493,6 +508,8 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        outcomes,
+                        refusal,
                         canJoin,
                         joinRoom,
                         catalog,
@@ -525,6 +542,8 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        outcomes,
+                        refusal,
                         canJoin,
                         joinRoom,
                         catalog,
@@ -585,6 +604,8 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
+                    outcomes,
+                    refusal,
                     canJoin,
                     joinRoom,
                     catalog,
