@@ -225,9 +225,23 @@ where the pre-sync was no longer the whole cost.
       of what it writes rather than the whole set
       (`packages/runner/src/scheduler/topology.ts`).
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
-      the document they name, once per transaction, so the two checks a
-      written path makes read the inputs about its document
+      the document they name, once per transaction, so every check a
+      written path makes reads the inputs about its document
       (`packages/runner/src/cfc/prepare.ts`).
+- [x] A boundary pass holds one view of the transaction's reads, the
+      stored envelope behind each and the labeled set a protected entry
+      quantifies over, built once and reused across the pass's targets
+      while the read list, the trigger reads and the resolved envelopes
+      stand; the reactivity log stands across a verifier read it does not
+      list; a commit's digest records are kept by the activity each
+      describes, so a rebuild hands out the records it built before; and a
+      deep-frozen document's schema entries are kept by the document. On
+      the thirty-row room's reload, preparation fell from a fifth of the
+      load to a twentieth, and its mean from 17 to 5 ms per commit on a
+      pair of runs at the same load. The binding walk's narrowing of a
+      pattern's authored argument schema, which the record above charged
+      to preparation, is its own cost, and the schema is now interned once
+      per pattern so the narrowing is kept (`packages/runner/src/runner.ts`).
 - [x] The storage manager keeps each data URI's hash and decoded value in a
       weight-bounded memo, and does not sync a link that declares a stream:
       its document holds no value a read uses, and the sync had sent one
