@@ -173,11 +173,14 @@ export type Transport = {
    * Selects routed envelopes and optional streaming after authentication
    * negotiation. `uploadWindow` advertises peer credit in on-wire record bytes;
    * the transport selects credits only when it supports the advertised window.
+   * `frameSlots` is a positive safe integer or `null` to disable slot counting;
+   * an omitted value selects the transport's default bound.
    */
   setRoutedMessagesEnabled?(
     enabled: boolean,
     transportVersion?: number,
     uploadWindow?: number,
+    frameSlots?: number | null,
   ): void;
 
   /**
@@ -1939,6 +1942,7 @@ export class Client {
             ? helloOk.routerTransport
             : undefined,
           helloOk.routerUploadWindow,
+          routed ? helloOk.routerFrameSlots : undefined,
         );
         this.#transport.setMessageCompressionEnabled?.(
           expectedFlags.messageCompressionV1 &&
@@ -4879,6 +4883,7 @@ const parseHelloOk = (
   sessionOpen?: unknown;
   routerTransport?: number;
   routerUploadWindow?: number;
+  routerFrameSlots?: number | null;
 } | null => {
   if (!isPlainObject(message)) {
     return null;
@@ -4893,6 +4898,14 @@ const parseHelloOk = (
   if (message.routerTransport !== undefined && message.routerTransport !== 1) {
     return null;
   }
+  const frameSlots = message.routerFrameSlots;
+  if (
+    frameSlots !== undefined && frameSlots !== null &&
+    (typeof frameSlots !== "number" || !Number.isSafeInteger(frameSlots) ||
+      frameSlots <= 0)
+  ) {
+    return null;
+  }
   return {
     flags: parsed,
     sessionOpen: message.sessionOpen,
@@ -4900,6 +4913,7 @@ const parseHelloOk = (
     ...(typeof message.routerUploadWindow === "number"
       ? { routerUploadWindow: message.routerUploadWindow }
       : {}),
+    ...(frameSlots === undefined ? {} : { routerFrameSlots: frameSlots }),
   };
 };
 
