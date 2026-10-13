@@ -454,7 +454,9 @@ arrays, and primitives alike, `$defs` identities and prose intact — and
 capability-bearing positions: a cell-like wrapper takes the capability the
 body's usage earns (writable where it writes, read-only where it reads,
 comparable where it only compares, OPAQUE where it never touches the
-position), and an identity-only comparison of a plain-declared position adds
+position). A use at any path reaches every position above it, the event
+itself among them, so an event that is a cell earns the capability of every
+use the body makes. An identity-only comparison of a plain-declared position adds
 the comparable marker the runtime materializes it through. A reference to a
 type alias that takes no type parameters is walked as the node the alias
 names, so a cell declared through an alias takes its capability the way the

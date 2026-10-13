@@ -789,6 +789,62 @@ type Ev = { c: Writable<number>; s: PerUser<Writable<number>> };`,
     });
   });
 
+  describe("an event that is a cell", () => {
+    // A use at any path reaches the event itself, so a cell the event is
+    // earns the capability of every use the body makes.
+
+    for (
+      const [use, callback, capability] of [
+        ["reads", "(e, { c }) => { c.set(e.get()); }", "readonly"],
+        ["writes", "(e, { c }) => { e.set(1); c.set(-1); }", "cell"],
+        [
+          "only compares",
+          "(e, { c }) => { if (e.equals(e)) c.set(1); }",
+          "comparable",
+        ],
+        ["never uses", "(e, { c }) => { c.set(1); }", "opaque"],
+      ] as const
+    ) {
+      it(`gives a cell the event is the \`${capability}\` capability where the body ${use} it`, async () => {
+        const { event } = await eventSchema("", "Writable<number>", callback);
+
+        expect(event).toEqual({ type: "number", asCell: [capability] });
+      });
+    }
+
+    it("gives a cell the event is through an alias the capability the body's use earns", async () => {
+      const { event } = await eventSchema(
+        "type Ref = Writable<number>;",
+        "Ref",
+        "(e, { c }) => { c.set(e.get()); }",
+      );
+
+      expect(event).toEqual({ type: "number", asCell: ["readonly"] });
+    });
+
+    it("tells the event from a property the empty string names", () => {
+      const { sourceFile, checker } = createProgramWithFiles({
+        "/test.ts": `import { Writable } from "commonfabric";
+type Ev = { "": Writable<number>; n: number };`,
+        "/commonfabric.d.ts": commonfabricTypes,
+      });
+      const alias = findTypeAlias(sourceFile, "Ev");
+
+      // The body reads `n` alone; that use reaches the event, not `e[""]`.
+      const result = overlayContractCapabilities(
+        alias.type,
+        checker.getTypeAtLocation(alias.type),
+        createParamSummary({ capability: "readonly", readPaths: [["n"]] }),
+        checker,
+        ts.factory,
+        sourceFile,
+      );
+
+      expect(shrunkProps(result, sourceFile).props.get('""')?.type)
+        .toBe("__cfHelpers.OpaqueCell<number>");
+    });
+  });
+
   describe("a position the overlay does not read inside", () => {
     // Where the overlay keeps a node as written because it cannot read
     // inside it, and no use the body makes reaches inside, every cell in it

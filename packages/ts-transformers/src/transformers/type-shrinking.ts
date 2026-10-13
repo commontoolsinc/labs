@@ -2848,9 +2848,12 @@ export function validateShrinkCoverage(
 //
 
 /** A serialized path key with numeric segments normalized to `*`, so an
- * element access observed at one index matches the element position. */
+ * element access observed at one index matches the element position. Each
+ * segment opens with a separator, so the root, `[]`, keys apart from a
+ * property the empty string names, `[""]`. */
 function contractPathKey(segments: readonly string[]): string {
-  return contractPathSegments(segments).join("\x00");
+  return contractPathSegments(segments).map((segment) => "\x00" + segment)
+    .join("");
 }
 
 /** `segments` with each array index read as any index, `*`. */
@@ -2858,12 +2861,15 @@ function contractPathSegments(segments: readonly string[]): string[] {
   return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment);
 }
 
+/** Adds to `target` the key of every prefix of each of `paths`, the root
+ * among them, since a use at a path reaches every position above it, the
+ * event itself too, which a cell may be. */
 function addPrefixKeys(
   target: Set<string>,
   paths: readonly (readonly string[])[] | undefined,
 ): void {
   for (const path of paths ?? []) {
-    for (let i = 1; i <= path.length; i++) {
+    for (let i = 0; i <= path.length; i++) {
       target.add(contractPathKey(path.slice(0, i)));
     }
   }
