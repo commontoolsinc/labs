@@ -230,14 +230,18 @@ where the pre-sync was no longer the whole cost.
       of 3,900 actions with 1,991 breaks in one settle, and that pass had
       cost 4 to 5 s, nearly all of it the comparator
       (`packages/runner/src/scheduler/topology.ts`).
-- [ ] The room's one cycle is a component of 180 computations: each message
-      row's `placement`, `inOpenThread` and `cannotWrite` passes the
-      captured `messages` cell to a helper, so the transformer marks each a
-      writer of the list (`materializerWriteInputPaths: [["messages"]]`),
-      and each reads it. The sixty row instances' computations then all
-      order against one another, 32,220 edges per `messages` document.
-      Passing the helpers a read-only view of the list, or an analysis that
-      follows the helper, would remove the component.
+- [x] The room's helpers that only read the messages, `messageEntries()`
+      and `canActIn()`, take them as `MessagesReadCell`, a parameter spelled
+      `Cell` and so one that declares no write. A computation that passes
+      the captured list to one is charged its reads alone: each message
+      row's `placement`, `inOpenThread` and `cannotWrite`, and the room's
+      `entries` and `canSend`, emit no `materializerWriteInputPaths`, and
+      receive the list as a `ReadonlyCell`. Declared `Writable`, the
+      parameter had made each of them a writer of the list it reads, and
+      the sixty row instances' 180 computations one component of the sort,
+      32,220 ordering edges per `messages` document
+      (`packages/patterns/fabrichat/room-records.tsx`). The row takes no
+      second input for this, so its argument document is unchanged.
 - [ ] The cycle break prefers the lowest remaining in-degree, which picks an
       action downstream of the cycle before the cycle's own members: a
       render effect with one unmet input against a computation with 179.

@@ -2642,7 +2642,11 @@ Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
 in another file, the callee's declared Common Fabric wrapper parameter type
 (`Writable<T>` → read+write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` →
-write, etc.) is what capability analysis charges to that argument. Spread
+write, etc.) is what capability analysis charges to that argument. A
+parameter spelled bare `Cell<T>` declares no capability, write intent being
+spelled `Writable<T>`: its argument is charged the whole read of a value that
+leaves the analysis, and no write (`getExplicitCellKindFromTypeNode`;
+`test/policy/capability-analysis.test.ts`). Spread
 arguments of fixed-length tuple type expand positionally against the callee's
 parameter list before matching (#4578). Two write-tracking hardenings
 (#4554): `send` is a WRITER_METHOD (`Stream.send()` delegates to `set()` at
