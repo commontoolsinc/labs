@@ -103,10 +103,12 @@ Representative places that mint one:
   identity. Changes to the element cause a reactive reader to resolve it again;
   changes to another array element do not require that reader to rerun.
 - Traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
-  document for an array element that is an inline object or array, so that the
-  object a read returns is identified by its value. A traversal whose context
-  sets `inlineArrayItemsInPlace` mints none and traverses such an element at
-  its address in the document that stores it; `GraphQueryWalk` in
+  document for an array element that is an inline object or array and is read
+  as a value, so that the object a read returns is identified by its value. An
+  element the schema requests as a cell gets no snapshot: its handle links to
+  the array slot. A traversal whose context sets `inlineArrayItemsInPlace`
+  mints none either way and traverses an inline element at its address in the
+  document that stores it; `GraphQueryWalk` in
   `packages/runner/src/graph-query.ts` sets it for the walk a memory server
   runs to resolve a schema query.
 - The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
