@@ -407,28 +407,55 @@ export type PatchDraftCandidate = {
   tailSpliceStartIndex?: number;
 };
 
-const findDeepestArrayPath = (
+/**
+ * Returns the path of the array a write at `path` is diffed as a change to,
+ * given the document the commit started from and the one it leaves. Returns
+ * `null` where the write is diffed at `path` itself.
+ *
+ * Where every prefix of `path` is in both documents, that array is the deepest
+ * one above `path`. Where a prefix is in one document alone, everything
+ * beneath it arrived or left with it, and the array is the shallowest one at
+ * or below that prefix's parent: the array the prefix is an element of, which
+ * gained or lost the element, or else the first array inside what arrived. An
+ * array any deeper would be named through an element the stored document does
+ * not hold, or would be an element itself, added by its index. Where no array
+ * sits that far down, it is the deepest one above the prefix.
+ *
+ * With no array above `path`, the path above the first segment written as an
+ * index, or as `length`, stands in for one.
+ */
+const findArrayPatchPath = (
   before: FabricValue | undefined,
   after: FabricValue | undefined,
   path: readonly string[],
 ): readonly string[] | null => {
-  let deepestArrayPath: readonly string[] | null = null;
+  const options = { allowArrayLength: true };
+  let arrayDepth = -1;
+  // Whether a prefix of `path` already looked at is in one document alone.
+  let diverged = false;
 
-  for (let index = 0; index < path.length; index += 1) {
-    const prefix = path.slice(0, index);
-    const beforeValue = readValueAtPath(before, prefix, {
-      allowArrayLength: true,
-    });
-    const afterValue = readValueAtPath(after, prefix, {
-      allowArrayLength: true,
-    });
-    if (Array.isArray(beforeValue) || Array.isArray(afterValue)) {
-      deepestArrayPath = prefix;
+  for (let depth = 0; depth < path.length; depth += 1) {
+    const prefix = path.slice(0, depth);
+    const isArray = Array.isArray(readValueAtPath(before, prefix, options)) ||
+      Array.isArray(readValueAtPath(after, prefix, options));
+    if (isArray) {
+      arrayDepth = depth;
+      if (diverged) {
+        break;
+      }
+    }
+    if (!diverged) {
+      const child = path.slice(0, depth + 1);
+      diverged = hasValueAtPath(before, child, options) !==
+        hasValueAtPath(after, child, options);
+      if (diverged && isArray) {
+        break;
+      }
     }
   }
 
-  if (deepestArrayPath) {
-    return deepestArrayPath;
+  if (arrayDepth !== -1) {
+    return path.slice(0, arrayDepth);
   }
 
   const firstArrayLikeSegment = path.findIndex((segment) =>
@@ -3677,7 +3704,7 @@ export class V2StorageTransaction implements IStorageTransaction {
         continue;
       }
 
-      const arrayPatchPath = findDeepestArrayPath(
+      const arrayPatchPath = findArrayPatchPath(
         base,
         doc.current.value,
         detail.address.path,

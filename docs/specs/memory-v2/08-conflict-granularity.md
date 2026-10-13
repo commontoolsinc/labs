@@ -93,6 +93,16 @@ reader-dirty index handle conservatively:
 engine as a `splice` or whole-array `replace` on the array path — never as an
 indexed structural op.
 
+Which array a write is diffed against is decided by `findArrayPatchPath`
+(runner `storage/v2-transaction.ts`), from the document the commit started from
+and the one it leaves. A write beneath an element both documents hold is diffed
+against the deepest array above it. A write beneath an element one document
+lacks is a change to the array that gains or loses that element, and is diffed
+there: an element that arrives holding a nested array, or a record with an
+array inside it, reaches the engine in one of the three shapes above, on the
+array that holds the element. An array that arrives beneath a new key of a
+plain object is sent whole, as an `add` at its own path.
+
 The generator sends a write at or beneath an integer-like key of a plain object
 as an op at the written path where the key is past the range of array indices.
 Where the key is inside that range, or is `length`, and no array sits above it,
