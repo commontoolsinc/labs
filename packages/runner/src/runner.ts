@@ -10300,8 +10300,9 @@ export class Runner {
    * follow failed, which is logged and leaves the piece on the pattern it was
    * running. Resolves at once when nothing is in flight, as for a piece that
    * is not running, and resolves when the piece is stopped with a follow in
-   * flight, whose remaining work has no effect. A subpath cell stands for its
-   * root document.
+   * flight, whose remaining work has no effect. A piece started again by then
+   * has a watcher of its own, whose follows this goes on to wait for. A
+   * subpath cell stands for its root document.
    *
    * The watcher observes a move in a scheduler pass, so a caller that has
    * just committed one awaits `Runtime.idle()` before calling this. Following
@@ -10324,14 +10325,18 @@ export class Runner {
     const key = this.#getDocKey(rootCell);
     // A settled follow's continuation can start another, so the entry is read
     // again after each wait. A cancelled registration's follows run on to no
-    // effect, so the wait ends with the cancellation.
+    // effect, so the wait ends with the cancellation, unless the piece has
+    // been started again and its new registration has a follow in flight,
+    // which the entry then names.
     let follows: WatcherFollows | undefined;
     while ((follows = this.#watcherFollowsByPiece.get(key)) !== undefined) {
       const cancelled = await Promise.race([
         Promise.allSettled([...follows.pending]).then(() => false),
         follows.cancelled.then(() => true),
       ]);
-      if (cancelled) return;
+      if (cancelled && this.#watcherFollowsByPiece.get(key) === follows) {
+        return;
+      }
     }
   }
 
