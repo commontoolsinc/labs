@@ -172,10 +172,14 @@ below the storm's 180 ms after stage 1's bounded base search, and stay there;
 after compaction the longest tails in the store are authored documents, since
 every compacted instance is down to its one row. The edit through the served
 API, read as `cf`'s round trip, is seconds on both files, and the seconds are
-the session's watch add over the topic's graph (6.4 s cold on the uncompacted
-file, 7.2 s on the compacted, 2,864 traversals each), not the write: once a
-board read has warmed the documents the same watch add is 31–105 ms on either
-file. Read where the storm record's 180 ms was read, as the server's
+a watch add, not the write — and a broad one: the session's request of 932
+watches delivering 5,613 documents (6.4 s on the uncompacted file, 7.2 s on
+the compacted; `stage6/health-after-edit{,-baseline}.json`). The single-topic
+watch in those same sessions, one watch delivering 314 documents, took
+214–224 ms; the follow-up's edit sessions registered only that single-topic
+watch and, after a board read had warmed the documents, it took 31–105 ms on
+either file. The two widths are not one request, so the seconds say what the
+broad watch costs, not what warming saved. Read where the storm record's 180 ms was read, as the server's
 `transact` frame with the slow-query threshold at zero, the write is 2–6 ms
 on both files with no lock wait, and with a browser's board session holding
 its watch while the edits land it is 1–2 ms compacted against 2–6 ms

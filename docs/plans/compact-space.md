@@ -1100,8 +1100,10 @@ until the engine can tell compacted history from absence.
    browser's board session holding its watch 1–2 ms compacted against 2–6
    ms uncompacted, the board session's refresh per edit 1–2 ms against 2–3
    ms — no slower, so the served-edit acceptance check of §3 step 7 is
-   closed (the earlier seconds were the client's cold watch add, 31–105 ms
-   once the documents are warm). The same session showed what a browser's
+   closed (the earlier seconds were the client session's broad watch add,
+   932 watches delivering 5,613 documents; the single-topic watch of 314
+   documents took 214–224 ms in those sessions and 31–105 ms in the
+   follow-up's, where a board read had warmed them). The same session showed what a browser's
    board page costs the server, which the `cf` instrument understates five
    times over; that is recorded in the runbook and taken up outside this
    plan.
