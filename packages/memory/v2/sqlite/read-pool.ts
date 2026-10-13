@@ -57,12 +57,16 @@ export class ReadConnectionPool {
   }
 
   /**
-   * Returns the pooled connection for `path` in the given mode, opening one
-   * on a miss and evicting the oldest past `#max`. Keyed by mode as well as
-   * path: the two modes return different JS values for the same stored row,
-   * so one connection cannot serve both.
+   * Returns the pooled connection for `path`, opening one on a miss and
+   * evicting (closing) the least recently used past the cap. `int64` selects
+   * the mode a labeled read runs in (see the note at the top of this file).
+   * Keyed by mode as well as path: the two modes return different JS values
+   * for the same stored row, so one connection cannot serve both.
+   *
+   * The returned connection stays open until a later call evicts it or the
+   * pool closes.
    */
-  #connection(path: string, int64: boolean): Database {
+  connection(path: string, int64: boolean): Database {
     const key = int64 ? `int64\n${path}` : `plain\n${path}`;
     const existing = this.#byPath.get(key);
     if (existing) {
@@ -103,7 +107,7 @@ export class ReadConnectionPool {
     sql: string,
     params?: SqliteParams,
   ): Row[] {
-    return runQuery<Row>(this.#connection(path, false), sql, params);
+    return runQuery<Row>(this.connection(path, false), sql, params);
   }
 
   /**
@@ -121,7 +125,7 @@ export class ReadConnectionPool {
     sql: string,
     params?: SqliteParams,
   ): { rows: Row[]; columns: QueryColumn[] } {
-    return runQueryWithOrigins<Row>(this.#connection(path, true), sql, params);
+    return runQueryWithOrigins<Row>(this.connection(path, true), sql, params);
   }
 
   close(): void {

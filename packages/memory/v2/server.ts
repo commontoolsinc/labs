@@ -212,6 +212,7 @@ import {
 } from "./sqlite/exec.ts";
 import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import { ReadWorkerPool } from "./sqlite/read-worker-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
@@ -1096,6 +1097,9 @@ class Connection {
 
   #pendingReceives = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
+
+  /** Aborted when the connection closes, cancelling its SQLite reads. */
+  #closing = new AbortController();
 
   /**
    * The request ids a response has gone out for, each kept until its frame's
@@ -1982,7 +1986,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.#server.sqliteQuery(parsed);
+          const response = await this.#server.sqliteQuery(
+            parsed,
+            this.#closing.signal,
+          );
           this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2245,6 +2252,7 @@ class Connection {
       return;
     }
     this.#closed = true;
+    this.#closing.abort(new Error("the memory connection closed"));
     for (const timer of this.#routedExpiries.values()) clearTimeout(timer);
     this.#routedExpiries.clear();
     this.#principals.clear();
@@ -2470,11 +2478,20 @@ export class Server {
   #diskSources = new DiskSourceRegistry();
 
   /**
-   * Pooled read-only connections (keyed by canonical file path) for SQLite
-   * reads — injected on-disk sources and cell-derived dbs alike run here,
-   * unattached, instead of attach/detach-per-op on the engine connection.
+   * Pooled read-only connections (keyed by canonical file path) for reads of
+   * cell-derived dbs, unattached, instead of attach/detach-per-op on the engine
+   * connection. They run on this thread because the engine connection writes
+   * the same files from it: a read holding a file's lock on another thread
+   * would leave a commit to that file waiting in SQLite's busy handler here.
    */
   #readPool = new ReadConnectionPool();
+
+  /**
+   * Workers that read injected on-disk sources, which the engine never writes,
+   * off this thread: a read of a multi-gigabyte file, or one waiting on another
+   * process's write lock, holds a worker rather than every connection.
+   */
+  #readWorkers = new ReadWorkerPool();
 
   /**
    * Schemas already created on the write path, keyed by `(space, id, schema)`.
@@ -3726,6 +3743,7 @@ export class Server {
     this.#resolvedEngines.clear();
     this.#connections.clear();
     this.#readPool.close();
+    await this.#readWorkers.close();
   }
 
   /**
@@ -3870,8 +3888,9 @@ export class Server {
 
   /**
    * Read a cell-derived database on a pooled read-only connection — unattached,
-   * like injected on-disk sources. (Writes still ATTACH to the engine connection
-   * in `#attachCommitSqliteDbs` for commit atomicity.)
+   * and on this thread, which writes the same file (see `#readPool`). (Writes
+   * still ATTACH to the engine connection in `#attachCommitSqliteDbs` for
+   * commit atomicity.)
    *
    * A cell-db file is created lazily by the first WRITE (its ATTACH), and that
    * write's `ensureTables` creates the declared tables. So a read can find:
@@ -4578,8 +4597,14 @@ export class Server {
     return invalid === null ? { commit } : { refused: invalid.message };
   }
 
+  /**
+   * Runs the guarded read-only query `message` and returns its rows, or the
+   * error it failed with. A read of an injected on-disk source runs on a read
+   * worker, and `signal` cancels it.
+   */
   async sqliteQuery(
     message: SqliteQueryRequest,
+    signal?: AbortSignal,
   ): Promise<ResponseMessage<SqliteQueryWireResult>> {
     const queryParams = message.namedParams === undefined
       ? message.params
@@ -4634,16 +4659,16 @@ export class Server {
     }
     try {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
-      // real read-only, each file its own `main` namespace). The only
-      // per-source difference is path resolution: an injected on-disk source's
-      // registered path, else the cell-derived path (which the db's scope
+      // real read-only, each file its own `main` namespace). An injected
+      // on-disk source is read at its registered path on a read worker; a
+      // cell-derived db at its cell-derived path (which the db's scope
       // qualifies using the carried reader, or the session principal / id
-      // when no reader is carried).
+      // when no reader is carried) on this thread, which also writes it.
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
       // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located
-      // by TRUE origin, never output name). Unlabeled dbs — the common case,
-      // and all injected on-disk sources — pay nothing.
+      // by TRUE origin, never output name). Unlabeled dbs — the common case —
+      // pay nothing.
       const wantColumns = dbNeedsColumnProvenance(message.db.tables);
       // Bind @db/sqlite's column-origin symbols before a labeled read; fail
       // loudly if they can't be bound rather than mislabeling the result.
@@ -4661,15 +4686,10 @@ export class Server {
       }
       const disk = this.#diskSources.get(message.space, message.db.id);
       const result = disk
-        ? (wantColumns
-          ? this.#readPool.queryWithOrigins(
-            disk.path,
-            message.sql,
-            queryParams,
-          )
-          : {
-            rows: this.#readPool.query(disk.path, message.sql, queryParams),
-          })
+        ? await this.#readWorkers.query(disk.path, message.sql, queryParams, {
+          labeled: wantColumns,
+          signal,
+        })
         : await this.#readCellDb(
           message.space,
           message.db,

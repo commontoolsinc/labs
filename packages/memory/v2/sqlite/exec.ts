@@ -9,7 +9,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { isPlainObject } from "@commonfabric/utils/types";
 import type { SqliteNativeRow } from "../../v2.ts";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
-import { columnOrigins } from "./column-origin.ts";
+import { type ColumnOrigin, columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
 
 // Reserved schema names that may never be used as a pattern-db attach alias.
@@ -106,16 +106,84 @@ export function bindArgs(params?: SqliteParams): BindValue[] {
     )]) as BindValue[];
 }
 
-function rowFromNative<Row extends SqliteNativeRow>(
-  names: string[],
-  values: unknown[],
-): Row {
-  return Object.fromEntries(
-    names.map((key, index) => [
-      key,
-      fabricFromConvertibleJsValue(values[index]),
-    ]),
-  ) as Row;
+/**
+ * A guarded read's result as the SQLite driver returns it: the output column
+ * names, each row's values in column order, and, when asked for, each column's
+ * TRUE origin. The values are the driver's own (string, number, bigint, null,
+ * `Uint8Array`), which a structured clone carries between threads; {@link
+ * rowsFromNative} converts them to the rows a caller sees.
+ */
+export type NativeQueryResult = {
+  /** The statement's output column names, in result order. */
+  names: string[];
+
+  /** Each row's values, in the order of {@link names}. */
+  values: unknown[][];
+
+  /** Each result column's TRUE origin, present when it was asked for. */
+  origins?: ColumnOrigin[];
+};
+
+/**
+ * Runs a single guarded read-only SELECT on `db` with already-bound `args`
+ * (see {@link bindArgs}), returning the driver's values unconverted. With
+ * `withOrigins`, also reads each result column's TRUE origin, which needs the
+ * column-origin symbols bound on this thread (`ensureColumnOriginAvailable()`)
+ * and throws when they are not.
+ */
+export function runNativeQuery(
+  db: Database,
+  sql: string,
+  args: BindValue[],
+  withOrigins: boolean,
+): NativeQueryResult {
+  assertReadOnly(sql);
+  const stmt = db.prepare(sql);
+  try {
+    const names = stmt.columnNames();
+    const origins = withOrigins
+      ? columnOrigins(stmt.unsafeHandle, names.length)
+      : undefined;
+    const values = stmt.values<unknown[]>(...args);
+    return origins === undefined ? { names, values } : {
+      names,
+      values,
+      origins,
+    };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+/** Converts a {@link NativeQueryResult}'s values to rows keyed by output name. */
+export function rowsFromNative<Row extends SqliteNativeRow = SqliteNativeRow>(
+  result: NativeQueryResult,
+): Row[] {
+  return result.values.map((values) =>
+    Object.fromEntries(
+      result.names.map((key, index) => [
+        key,
+        fabricFromConvertibleJsValue(values[index]),
+      ]),
+    ) as Row
+  );
+}
+
+/**
+ * Pairs each output column of a {@link NativeQueryResult} with its origin, a
+ * missing origin reading as `null` (no single source column). The result must
+ * carry origins.
+ */
+export function columnsFromNative(result: NativeQueryResult): QueryColumn[] {
+  const { origins } = result;
+  if (origins === undefined) {
+    throw new Error("sqlite: the query result carries no column origins");
+  }
+  return result.names.map((output, i) => ({
+    output,
+    table: origins[i]?.table ?? null,
+    column: origins[i]?.column ?? null,
+  }));
 }
 
 /** Run a single guarded read-only SELECT and return all rows. */
@@ -124,15 +192,7 @@ export function runQuery<Row extends SqliteNativeRow = SqliteNativeRow>(
   sql: string,
   params?: SqliteParams,
 ): Row[] {
-  assertReadOnly(sql);
-  const stmt = db.prepare(sql);
-  try {
-    const names = stmt.columnNames();
-    return stmt.values<unknown[]>(...bindArgs(params))
-      .map((values) => rowFromNative<Row>(names, values));
-  } finally {
-    stmt.finalize();
-  }
+  return rowsFromNative<Row>(runNativeQuery(db, sql, bindArgs(params), false));
 }
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -157,24 +217,11 @@ export function runQueryWithOrigins<
   sql: string,
   params?: SqliteParams,
 ): { rows: Row[]; columns: QueryColumn[] } {
-  assertReadOnly(sql);
-  const stmt = db.prepare(sql);
-  try {
-    const names = stmt.columnNames();
-    const origins = columnOrigins(stmt.unsafeHandle, names.length);
-    const rows = stmt.values<unknown[]>(...bindArgs(params))
-      .map((values) => rowFromNative<Row>(names, values));
-    return {
-      rows,
-      columns: names.map((output, i) => ({
-        output,
-        table: origins[i]?.table ?? null,
-        column: origins[i]?.column ?? null,
-      })),
-    };
-  } finally {
-    stmt.finalize();
-  }
+  const result = runNativeQuery(db, sql, bindArgs(params), true);
+  return {
+    rows: rowsFromNative<Row>(result),
+    columns: columnsFromNative(result),
+  };
 }
 
 /** Run a single guarded INSERT/UPDATE/DELETE. */
