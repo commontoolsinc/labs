@@ -6,8 +6,8 @@
  * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
  * which rewrites relative links against a base before encoding (and whose
  * companion {@link dataUriSnapshotWithResolvedLinks} also returns the value
- * it encoded), and {@link findAndInlineDataUriLinks}, which dissolves `data:`
- * URI links back into the values they carry.
+ * to walk under the result), and {@link findAndInlineDataUriLinks}, which
+ * dissolves `data:` URI links back into the values they carry.
  *
  * The payload encodes the cell's VALUE, and the codec's decode entry
  * points return that value. The document view that the address grammar
@@ -30,6 +30,7 @@ import {
   type FabricValue,
   refuseFabricInstance,
 } from "@commonfabric/data-model";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
   dataUriFromValue,
   isFabricDataUri,
@@ -39,7 +40,11 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedLink,
+  type PrimitiveCellLink,
+} from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
   isCellLink,
@@ -93,20 +98,22 @@ export function dataUriFromValueWithResolvedLinks(
 
 /**
  * Like {@link dataUriFromValueWithResolvedLinks}, except that it also returns
- * the value the URI encodes: `data` with its links rewritten.
+ * the value a reader walks under the URI.
  *
- * A reader that goes on to walk a value under the `data:` address walks this
- * one. A link in `data` that names no document takes its id from the address
- * it is read under, which under the `data:` address is the snapshot itself;
- * the same link in the returned value names the document of `base`.
+ * That value is `data` with one change: a link that names no document is
+ * given the id of `base`. Such a link takes its id from the address it is
+ * read under, which under the `data:` address is the snapshot itself, so
+ * `data` walked there as given would read the link's path inside the
+ * snapshot. Every other link is `data`'s own, schema included, and `data`
+ * itself is returned where it holds no such link or `base` has no id.
  *
- * The returned value shares every container of `data` that holds no link, so
+ * The returned value shares the containers of `data` it did not rewrite, so
  * it is to be read and not written.
  *
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
  *   against it.
- * @returns The `data:` URI as `id`, and the value it encodes as `value`.
+ * @returns The `data:` URI as `id`, and the value to walk under it as `value`.
  * @throws If `data` contains a reference cycle.
  */
 export function dataUriSnapshotWithResolvedLinks(
@@ -114,74 +121,93 @@ export function dataUriSnapshotWithResolvedLinks(
   base?: Cell | NormalizedLink,
 ): { id: URI; value: FabricValue } {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  const baseId = baseLink?.id;
+  let namesNoDocument = false;
+  const encoded = mapLinks(data, (link) => {
+    if (linkRefPayload(link).id === undefined) namesNoDocument = true;
+    return createSigilLinkFromParsedLink(parseLink(link, baseLink), {
+      includeSchema: true,
+      keepAsCell: KeepAsCell.All,
+    });
+  });
+  const value = namesNoDocument && baseId !== undefined
+    ? mapLinks(data, (link) => {
+      const payload = linkRefPayload(link);
+      return payload.id === undefined
+        ? linkRefFrom({ ...payload, id: baseId })
+        : link;
+    })
+    : data;
+  return { id: dataUriFromValue(encoded), value };
+}
 
-  function traverseAndAddBaseIdToRelativeLinks(
-    value: FabricValue,
-    seen: Set<object>,
-  ): FabricValue {
-    if (!isObjectOrArray(value)) return value;
-    if (seen.has(value)) {
-      throw new Error(`Cycle detected when creating data URI`);
-    }
-    seen.add(value);
-    try {
-      if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value, baseLink);
-        return createSigilLinkFromParsedLink(link, {
-          includeSchema: true,
-          keepAsCell: KeepAsCell.All,
-        });
-      } else if (value instanceof FabricPrimitive) {
-        // A `FabricPrimitive` is a leaf; the value encoding represents it
-        // via its codec.
-        return value;
-      } else if (value instanceof FabricInstance) {
-        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
-        // carry cell links, which need the same relative-to-absolute
-        // rewriting as everything else. That requires codec-mediated
-        // traversal into instance state; until that exists, the instance
-        // passes through unrewritten (encoded correctly in form, but any
-        // relative link within it stays relative).
-        return value;
-      } else if (Array.isArray(value)) {
-        // Copy on write, here and in the object branch below: a container
-        // whose members all come back by identity is returned by identity
-        // too, so the encoder that reads the result gets the caller's own
-        // containers. A value carrying no link anywhere within it comes
-        // through this walk without an allocation.
-        let next: FabricValue[] | undefined;
-        for (let index = 0; index < value.length; index++) {
-          if (!(index in value)) continue;
-          const current = value[index];
-          const rewritten = traverseAndAddBaseIdToRelativeLinks(current, seen);
-          if (next) {
-            next[index] = rewritten;
-          } else if (!Object.is(rewritten, current)) {
-            next = value.slice();
-            next[index] = rewritten;
-          }
-        }
-        return next ?? value;
-      } else { // not an array
-        let next: Record<string, FabricValue> | undefined;
-        for (const [key, entry] of Object.entries(value)) {
-          const rewritten = traverseAndAddBaseIdToRelativeLinks(entry, seen);
-          if (next) {
-            next[key] = rewritten;
-          } else if (!Object.is(rewritten, entry)) {
-            next = { ...value };
-            next[key] = rewritten;
-          }
-        }
-        return next ?? value;
-      }
-    } finally {
-      seen.delete(value);
-    }
+/**
+ * Helper for {@link dataUriSnapshotWithResolvedLinks}, which returns `value`
+ * with each primitive cell link in it replaced by what `rewrite` returns for
+ * it.
+ *
+ * @throws If `value` contains a reference cycle.
+ */
+function mapLinks(
+  value: FabricValue,
+  rewrite: (link: PrimitiveCellLink) => FabricValue,
+  seen: Set<object> = new Set(),
+): FabricValue {
+  if (!isObjectOrArray(value)) return value;
+  if (seen.has(value)) {
+    throw new Error(`Cycle detected when creating data URI`);
   }
-
-  const value = traverseAndAddBaseIdToRelativeLinks(data, new Set());
-  return { id: dataUriFromValue(value), value };
+  seen.add(value);
+  try {
+    if (isPrimitiveCellLink(value)) {
+      return rewrite(value);
+    } else if (value instanceof FabricPrimitive) {
+      // A `FabricPrimitive` is a leaf; the value encoding represents it
+      // via its codec.
+      return value;
+    } else if (value instanceof FabricInstance) {
+      // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
+      // carry cell links, which need the same relative-to-absolute
+      // rewriting as everything else. That requires codec-mediated
+      // traversal into instance state; until that exists, the instance
+      // passes through unrewritten (encoded correctly in form, but any
+      // relative link within it stays relative).
+      return value;
+    } else if (Array.isArray(value)) {
+      // Copy on write, here and in the object branch below: a container
+      // whose members all come back by identity is returned by identity
+      // too, so the encoder that reads the result gets the caller's own
+      // containers. A value carrying no link anywhere within it comes
+      // through this walk without an allocation.
+      let next: FabricValue[] | undefined;
+      for (let index = 0; index < value.length; index++) {
+        if (!(index in value)) continue;
+        const current = value[index];
+        const rewritten = mapLinks(current, rewrite, seen);
+        if (next) {
+          next[index] = rewritten;
+        } else if (!Object.is(rewritten, current)) {
+          next = value.slice();
+          next[index] = rewritten;
+        }
+      }
+      return next ?? value;
+    } else { // not an array
+      let next: Record<string, FabricValue> | undefined;
+      for (const [key, entry] of Object.entries(value)) {
+        const rewritten = mapLinks(entry, rewrite, seen);
+        if (next) {
+          next[key] = rewritten;
+        } else if (!Object.is(rewritten, entry)) {
+          next = { ...value };
+          next[key] = rewritten;
+        }
+      }
+      return next ?? value;
+    }
+  } finally {
+    seen.delete(value);
+  }
 }
 
 /**

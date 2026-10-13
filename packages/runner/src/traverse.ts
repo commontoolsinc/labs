@@ -5579,13 +5579,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // references in its schema.
         // Need to read recursively here
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-        // An eager read continues over the value the snapshot encodes, not
-        // over the stored element. A link inside the element that names no
-        // document takes its id from the address it is read under. Read
-        // under the `data:` address the stored link would name the snapshot;
-        // the snapshot's value holds it as a full link to the document
-        // storing the element. A query walk continues over the stored
-        // element, whose links carry the schemas its selectors are keyed by.
+        // A link inside the element that names no document takes its id from
+        // the address it is read under, which under the `data:` address is
+        // the snapshot. The walk continues over the element with each such
+        // link given the id of the document storing the element.
         const snapshot = dataUriSnapshotWithResolvedLinks(
           curDoc.value,
           elementLink,
@@ -5593,11 +5590,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const elementAddress = curDoc.address;
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
-        // will override the doc's address here in both modes.
+        // will override the doc here.
         curDoc = {
           ...curDoc,
           address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
-          value: this.traverseCells ? curDoc.value : snapshot.value,
+          value: snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;

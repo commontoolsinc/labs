@@ -74,13 +74,15 @@ throws if `data` contains a reference cycle. It lives in the runner rather than
 in the codec because it needs the cell and link machinery, which `data-model`
 does not have.
 
-`dataUriSnapshotWithResolvedLinks(data, base?)` is the same function returning
-the prepared value beside the identifier. A caller that goes on to read a value
-under the identifier it minted reads the prepared value, which is what the
-identifier decodes to, and not `data`. A link in `data` that names no document
-takes its identifier from the address it is read under. Under the minted
-address that is the `data:` identifier itself, so the link's path would be read
-inside the snapshot and not in the document that stores the link.
+`dataUriSnapshotWithResolvedLinks(data, base?)` mints the same identifier and
+returns beside it the value to walk under that identifier. A caller that holds
+`data` and goes on to read it under the identifier it minted walks that value
+and not `data`. A link in `data` that names no document takes its identifier
+from the address it is read under. Under the minted address that is the `data:`
+identifier itself, so the link's path would be read inside the snapshot and not
+in the document that stores the link. The returned value is `data` with each
+such link given the identifier of `base`; every other link is left as `data`
+holds it, schema included.
 
 The walk rebuilds a container only when a link under it was rewritten;
 everything else it hands back by identity, so a value carrying no link at all
@@ -111,11 +113,10 @@ Representative places that mint one:
   identity. Changes to the element cause a reactive reader to resolve it again;
   changes to another array element do not require that reader to rerun.
 - Traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
-  document for an inline array element it needs to read recursively. An eager
-  read continues over the prepared value `dataUriSnapshotWithResolvedLinks`
-  returns, so a link inside the element that names no document resolves against
-  the document storing the element. A query walk continues over the element as
-  stored.
+  document for an inline array element it needs to read recursively. It
+  continues over the value `dataUriSnapshotWithResolvedLinks` returns, so a link
+  inside the element that names no document resolves against the document
+  storing the element.
 - The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
   an array element that is an inline object, when the reader touches it. The
   element's value is already in hand, so the identifier costs no read. Without
