@@ -776,6 +776,100 @@ interface Ev { c: Writable<number>; r?: Reply }`,
     });
     expect(event).toEqual(written.event);
   });
+
+  describe("a cell the callback uses in a way its summary does not record", () => {
+    // A use the capability analysis does not follow member by member gives no
+    // capability narrower than the one written to show sufficient, so a cell
+    // it reaches keeps the one written, and a cell it does not reach still
+    // earns its own.
+
+    const cell = (asCell: string) => ({ type: "number", asCell: [asCell] });
+    for (
+      const [use, declaration, event, callback, expected] of [
+        [
+          "a rest element of an object destructuring",
+          `import type { ReadonlyCell } from "commonfabric";
+type Ev = { a: Writable<number>; b: ReadonlyCell<number> };`,
+          "Ev",
+          "(e, { c }) => { const { ...rest } = e; c.set(rest.a.get()); }",
+          {
+            type: "object",
+            properties: { a: cell("cell"), b: cell("readonly") },
+            required: ["a", "b"],
+          },
+        ],
+        [
+          "an array destructuring",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "(e, { c }) => { const [, b] = e; c.set(b!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "an array destructuring of the parameter",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "([a], { c }) => { c.set(a!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "a key that can name any element",
+          "type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(e.list[c.get()]!.v.get()); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
+          "a helper with no summary, handed the cell",
+          `declare function keep(value: unknown): boolean;
+type Ev = { x: Writable<number>; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { if (keep(e.x)) c.set(1); }",
+          {
+            type: "object",
+            properties: { x: cell("cell"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+        [
+          "a traversal of the cell's value alone",
+          "type Ev = { x: Writable<number>; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(JSON.stringify(e.x.get()).length); }",
+          {
+            type: "object",
+            properties: { x: cell("readonly"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+      ] as const
+    ) {
+      it(`gives each cell what ${use} lets the callback do`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          callback,
+        );
+
+        expect(schema).toEqual(expected);
+        expect(reported).toEqual([]);
+      });
+    }
+  });
 });
 
 describe("applyShrinkAndWrap()", () => {

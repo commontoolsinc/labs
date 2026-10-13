@@ -2936,6 +2936,16 @@ interface ContractObservation {
    * the authored type is plain — `equals`-style comparison materializes
    * through a comparable cell, not through the value. */
   readonly exactComparableCell: ReadonlySet<string>;
+
+  /** Positions whose value escaped whole, a cell's handle among them, at
+   * and below which the body's uses are not recorded one by one. */
+  readonly escaped: readonly string[];
+
+  /** The prefixes of the body's wildcards, and of its reads through a key
+   * that can name any member, below which its uses are not recorded one by
+   * one. Its use of a prefix itself is: a `.get()` reads it, and a write
+   * through such a key writes it. */
+  readonly reachedBelow: readonly string[];
 }
 
 function contractObservationFrom(
@@ -2959,7 +2969,33 @@ function contractObservationFrom(
   for (const path of summary.identityCellPaths ?? []) {
     exactComparableCell.add(contractPathKey(path));
   }
-  return { write, read, comparable, exactComparableCell };
+  const escaped = (summary.escapedPaths ?? []).map(contractPathKey);
+  const reachedBelow = (summary.wildcardPaths ?? []).map(contractPathKey);
+  return {
+    write,
+    read,
+    comparable,
+    exactComparableCell,
+    escaped,
+    reachedBelow,
+  };
+}
+
+/**
+ * Whether the body may use the position at `path` in a way the summary does
+ * not record: it lies at or below a value that escaped whole, or strictly
+ * below a wildcard's prefix (`ContractObservation`).
+ */
+function usedUntracked(
+  observation: ContractObservation,
+  path: readonly string[],
+): boolean {
+  const key = contractPathKey(path);
+  const below = (prefix: string) =>
+    prefix === "" ? key !== "" : key.startsWith(`${prefix}\x00`);
+  return observation.escaped.some((prefix) =>
+    key === prefix || below(prefix)
+  ) || observation.reachedBelow.some(below);
 }
 
 function contractCapabilityAt(
@@ -3117,6 +3153,9 @@ export function overlayContractCapabilities(
 
     if (namesCellWrapper(current, checker)) {
       if (preservedWrapperFor(current, currentType, checker)) return current;
+      // No capability narrower than the one written can be shown to suffice
+      // for a use the summary does not record.
+      if (usedUntracked(observation, path)) return current;
       const innerNode = current.typeArguments?.[0];
       if (!innerNode) return current;
       // The wrapper's capability is this position's to overlay; the target's

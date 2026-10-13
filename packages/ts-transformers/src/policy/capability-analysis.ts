@@ -139,6 +139,7 @@ interface ObservedCapabilityUsage {
   readonly escapedPaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly wildcardPaths: readonly (readonly string[])[];
   readonly hasUnverifiedCellUse: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
@@ -2011,6 +2012,7 @@ function normalizeObservedCapabilityUsage(
     escapedPaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
+    wildcardPaths: wildcardPrefixes,
     hasUnverifiedCellUse: state.hasUnverifiedCellUse,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
       !state.hasNonIdentityUse &&

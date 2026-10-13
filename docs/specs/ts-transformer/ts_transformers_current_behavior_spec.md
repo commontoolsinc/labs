@@ -470,7 +470,15 @@ past the cut to hold one, and the expansion stops there unless a use the body
 makes reaches below. The remainder is printed from its instantiation and marked
 `SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
 cell no use reaches earns; a finite chain deeper than the cut reads the same as
-reading it to its end would. Observed
+reading it to its end would. A cell the body uses in a way its summary does not
+record one path at a time keeps the capability written for it, since no
+narrower one can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among them,
+and one strictly below a wildcard's prefix (`wildcardPaths`), as a destructuring
+of an array, an object's rest element, or a key that can name any element
+reaches. The prefix's own cell keeps the capability its recorded use earns: a
+`.get()` before `JSON.stringify()` reads it, and a write through such a key
+writes it. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A reference the alias reading above does not see through — to an interface, or
@@ -2621,8 +2629,9 @@ computation's input schema:
   opaque access at or below that path. Comparable and cell-like subsets are
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
-  overlap it in either direction; disjoint paths survive. A root wildcard still
-  suppresses `identityOnly`. This matters because closure captures share one
+  overlap it in either direction; disjoint paths survive. The summary carries
+  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a).
+  A root wildcard still suppresses `identityOnly`. This matters because closure captures share one
   synthetic root: blanket erasure degraded disjoint `equals()`-only captures
   into unsatisfiable full-value self-demands
   (`test/policy/capability-analysis.test.ts`).
