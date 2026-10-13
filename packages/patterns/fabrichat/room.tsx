@@ -318,10 +318,16 @@ export interface OfferRoomRequest {
  * The part of the viewer's manager a room reaches: what it tells a member it
  * admits through, and what it tells of the viewer joining it.
  */
-export interface RoomManager {
+export interface RoomManagerCommands {
   /** Offers the room to a member, and records how it told them. */
   offerRoom: Stream<OfferRoomRequest>;
 
+  /** Makes a room the viewer has joined one of their chats. */
+  joinRoom?: Stream<JoinRoomRequest>;
+}
+
+/** The manager's private observations used by the room's rendering. */
+export interface RoomManagerObservations {
   /** The outcome of each of the manager's requests, by its `requestId`. */
   requests: Record<string, ChatRequestOutcome>;
 
@@ -330,9 +336,21 @@ export interface RoomManager {
    * the profiles attesting it.
    */
   people: PerSession<Record<string, ProfileCell[]>>;
+}
 
-  /** Makes a room the viewer has joined one of their chats. */
-  joinRoom?: Stream<JoinRoomRequest>;
+/** A room's complete manager relationship, with command and observation roles. */
+export interface RoomManager
+  extends RoomManagerCommands, RoomManagerObservations {}
+
+/** The command role, including the direct-chat control and flat Home aliases. */
+interface ViewerManagerCommands extends RoomManagerCommands {
+  openDirect: Stream<StartDirectEvent>;
+  commands?: RoomManagerCommands & { openDirect: Stream<StartDirectEvent> };
+}
+
+/** The observation role, including the flat Home aliases. */
+interface ViewerManagerObservations extends RoomManagerObservations {
+  observations?: RoomManagerObservations;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
@@ -567,6 +585,12 @@ export interface AddMemberInput {
    */
   manager?: RoomManager;
 
+  /** Commands supplied independently of private rendering observations. */
+  managerCommands?: RoomManagerCommands;
+
+  /** Private rendering observations, supplied independently of commands. */
+  managerObservations?: RoomManagerObservations;
+
   /** The principals of those already in the room, whom the picker leaves out. */
   present: PerSession<string[]>;
 }
@@ -610,14 +634,18 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
       requests,
       self,
       manager,
+      managerCommands,
+      managerObservations,
       present,
     },
   ) => {
     const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
+    const commands = managerCommands ?? manager;
+    const observations = managerObservations ?? manager;
     // Read as values: a handler bound to a manager that isn't there is bound
     // to a stream that still reads as present, whose sends are dropped.
     const canOffer = computed(() =>
-      manager?.offerRoom !== undefined && self !== undefined
+      commands?.offerRoom !== undefined && self !== undefined
     );
     const bindings = {
       room,
@@ -627,7 +655,7 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
       latest,
       self,
       canOffer,
-      offerRoom: manager?.offerRoom,
+      offerRoom: commands?.offerRoom,
     };
     const add = commitAddMember(bindings);
     const canAdd = computed(() =>
@@ -640,7 +668,11 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
       canAdd && myProfile?.get() !== undefined ? "flex" : "none"
     );
     const outcomes = computed((): Record<string, AddMemberOutcome> =>
-      withDeliveries(requests?.get() ?? {}, spaceOf(room), manager?.requests)
+      withDeliveries(
+        requests?.get() ?? {},
+        spaceOf(room),
+        observations?.requests,
+      )
     );
     // What the session's latest add came to: how the person was told of the
     // room, once that is decided, and what to do where they weren't.
@@ -667,7 +699,7 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
     // Each person the manager lists who isn't in the room, by the first
     // profile attesting them, per session, as the manager's people are.
     const candidates = computed((): PerSession<ProfileCell[]> =>
-      Object.entries(manager?.people ?? {}).flatMap(
+      Object.entries(observations?.people ?? {}).flatMap(
         ([principal, profiles]): ProfileCell[] =>
           present.includes(principal) || profiles[0] === undefined
             ? []
@@ -935,6 +967,12 @@ export interface FabriChatRoomCoreInput {
    * while the viewer has none, or theirs hasn't resolved.
    */
   manager?: RoomManager;
+
+  /** Commands supplied independently of private rendering observations. */
+  managerCommands?: RoomManagerCommands;
+
+  /** Private rendering observations, supplied independently of commands. */
+  managerObservations?: RoomManagerObservations;
 }
 
 /**
@@ -973,7 +1011,11 @@ export const FabriChatRoomCore = pattern<
     startDirect,
     self,
     manager,
+    managerCommands,
+    managerObservations,
   } = input;
+  const commands = managerCommands ?? manager;
+  const observations = managerObservations ?? manager;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
   // A room the manager created has `about`, and is its space's root; a
@@ -982,7 +1024,7 @@ export const FabriChatRoomCore = pattern<
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
   const canJoin = computed(() =>
-    ownSpace && manager?.joinRoom !== undefined && self !== undefined
+    ownSpace && commands?.joinRoom !== undefined && self !== undefined
   );
   const records = {
     kind,
@@ -994,7 +1036,7 @@ export const FabriChatRoomCore = pattern<
     activity,
     counters,
     canJoin,
-    joinRoom: manager?.joinRoom,
+    joinRoom: commands?.joinRoom,
     self,
   };
   const alsoToMain = new Writable.perSession(false);
@@ -1054,7 +1096,8 @@ export const FabriChatRoomCore = pattern<
     kind,
     requests: addRequests,
     self,
-    manager,
+    managerCommands: commands,
+    managerObservations: observations,
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
@@ -1229,7 +1272,7 @@ export const FabriChatRoomCore = pattern<
               activity={activity}
               counters={counters}
               canJoin={canJoin}
-              joinRoom={manager?.joinRoom}
+              joinRoom={commands?.joinRoom}
               self={self}
             />
           ))}
@@ -1296,7 +1339,7 @@ export const FabriChatRoomCore = pattern<
               activity={activity}
               counters={counters}
               canJoin={canJoin}
-              joinRoom={manager?.joinRoom}
+              joinRoom={commands?.joinRoom}
               self={self}
             />
           ))}
@@ -1389,10 +1432,16 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     // The viewer's manager, which starts a direct chat with a participant,
     // makes this room one of the viewer's chats once they join it, and tells
     // someone the viewer adds of it.
-    const managerWish = wish<
-      RoomManager & { openDirect: Stream<StartDirectEvent> }
-    >({ query: "#chatManager" });
-    const startsDirect = computed(() => managerWish.result !== undefined);
+    const managerCommands = wish<ViewerManagerCommands>({
+      query: "#chatManager",
+    });
+    const managerObservations = wish<ViewerManagerObservations>({
+      query: "#chatManager",
+    });
+    const commands = managerCommands.result?.commands ?? managerCommands.result;
+    const observations = managerObservations.result?.observations ??
+      managerObservations.result;
+    const startsDirect = computed(() => commands !== undefined);
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
     const setupDisplay = computed((): ChatDisplay =>
@@ -1411,9 +1460,10 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         roster: participants,
         addRequests,
         startsDirect,
-        startDirect: managerWish.result?.openDirect,
+        startDirect: commands?.openDirect,
         self,
-        manager: managerWish.result,
+        managerCommands: commands,
+        managerObservations: observations,
       },
     );
 

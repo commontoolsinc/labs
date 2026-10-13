@@ -22,6 +22,12 @@ import FabriChatManager, {
 } from "../fabrichat/manager.tsx";
 import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
+import SharedSpaceCollection from "./shared-space-collection.tsx";
+import {
+  sharedSpaceCollectionViewOf,
+  type SharedSpaceInterface,
+  sharedSpaceReceiptViewOf,
+} from "./shared-space-interface.ts";
 import {
   changeSharedSpaceMembership,
   readSharedSpaceCatalog,
@@ -157,6 +163,10 @@ export type HomeOutput = {
   // `replaceRefusedPrivateInbox` writes it, from the button on Home's refusal
   // notice. No `replacement` before the first.
   privateInboxReplacement: Writable<PrivateInboxReplacementHolder>;
+  // Independent roles for product consumers. Select `commands` for writes,
+  // `view` for collection lists, and `receipts` for offer admission evidence.
+  sharedSpaces: SharedSpaceInterface;
+  // Flat aliases address the same catalog and command streams.
   sharedSpaceCatalog: SharedSpaceCatalog;
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
@@ -470,6 +480,19 @@ const Home = pattern(
     // the Profile tab. Owns its own durable cell (seeded via Default<>).
     const selfComponent = Self({});
     const activeTab = new Writable("spaces").for("activeTab");
+    const registerSpace = registerSharedSpace({ catalog });
+    const changeMembership = changeSharedSpaceMembership({ catalog });
+    const removeImportedSpace = removeSharedSpace({ catalog });
+    const sharedSpaces = {
+      view: computed(() => sharedSpaceCollectionViewOf(catalog.get())),
+      receipts: computed(() => sharedSpaceReceiptViewOf(catalog.get())),
+      commands: { register: registerSpace, changeMembership },
+      imports: { remove: removeImportedSpace },
+    };
+    const socialSpaceCollection = SharedSpaceCollection({
+      catalog,
+      view: sharedSpaces.view,
+    });
 
     return {
       [NAME]: `Home`,
@@ -487,6 +510,7 @@ const Home = pattern(
               <cf-tab value="self">Self</cf-tab>
               <cf-tab value="agent-runs">Agent runs</cf-tab>
               <cf-tab value="chats">Chats</cf-tab>
+              <cf-tab value="social-spaces">Social spaces</cf-tab>
             </cf-tab-list>
             <cf-tab-panel value="agent-runs" id="home-agent-runs">
               {agentQueue}
@@ -589,6 +613,9 @@ const Home = pattern(
             <cf-tab-panel value="chats" id="home-chats">
               {chatManager}
             </cf-tab-panel>
+            <cf-tab-panel value="social-spaces" id="home-social-spaces">
+              {socialSpaceCollection}
+            </cf-tab-panel>
           </cf-tabs>
 
           <div slot="header">
@@ -655,12 +682,13 @@ const Home = pattern(
       privateInboxRefusal,
       privateInboxReplacement,
 
+      sharedSpaces,
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
 
       // Exported handlers
-      registerSharedSpace: registerSharedSpace({ catalog }),
-      changeSharedSpaceMembership: changeSharedSpaceMembership({ catalog }),
-      removeSharedSpace: removeSharedSpace({ catalog }),
+      registerSharedSpace: registerSpace,
+      changeSharedSpaceMembership: changeMembership,
+      removeSharedSpace: removeImportedSpace,
       addFavorite: addFavorite({ favorites }),
       removeFavorite: removeFavorite({ favorites }),
       addJournalEntry: addJournalEntry({ journal }),
