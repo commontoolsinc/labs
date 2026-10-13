@@ -104,6 +104,7 @@ import {
 import { getDefaultModuleByteCache } from "./compile-byte-cache.ts";
 import {
   appendLoggerDeltaMessages,
+  ServedLoggerCounts,
   snapshotLoggerErrorWarnCounts,
 } from "./console-capture.ts";
 import {
@@ -361,6 +362,14 @@ export interface TestRunResult {
 
   /** If true, console warnings are expected and should not fail the test. */
   allowConsoleWarnings?: boolean;
+
+  /**
+   * Logger-level warn activity of a serving loop hosted in the test's
+   * process, detected as `consoleWarnings` is. It is reported and never fails
+   * the test: the loop's routine warnings are not the pattern's doing. Its
+   * errors are in `consoleErrors`.
+   */
+  servedWarnings?: string[];
 }
 
 export interface TestRunnerOptions {
@@ -1210,6 +1219,8 @@ export async function runTestPattern(
   // failure before that `try` closes it all the same. A failure to close is
   // logged and raised, since the loop may still be running.
   await using servingCleanup = new AsyncDisposableStack();
+  // Set on that arm: whether the caller is running the serving loop's work.
+  let inServingContext: (() => boolean) | undefined;
   // A caller-supplied store is FILE-BACKED, which the default emulation is not:
   // `StorageManager.emulate` runs against `:memory:` and leaves nothing to
   // snapshot. See `TestRunnerOptions.storageHost`.
@@ -1228,10 +1239,11 @@ export async function runTestPattern(
         }
         // Loaded with the storage cache, for the same reason.
         // deno-lint-ignore cf-imports/no-inline-module-import
-        const { startServingMemoryServer } = await import(
+        const servingModule = await import(
           "@commonfabric/runner/executor/serving-memory-server.deno"
         );
-        const serving = await startServingMemoryServer({
+        inServingContext = servingModule.inServingContext;
+        const serving = await servingModule.startServingMemoryServer({
           apiUrl,
           experimental,
           fetch: mockFetch,
@@ -1562,6 +1574,12 @@ export async function runTestPattern(
     // while capturing everything the pattern's own handlers log at error/warn
     // level through the runtime logger.
     const loggerCountsBeforeRun = snapshotLoggerErrorWarnCounts();
+    // The serving loop logs into this process's loggers too. What it logs is
+    // kept apart from the deltas and reported on its own, its errors failing
+    // the file as the test's own would.
+    const servedLoggerCounts = inServingContext === undefined
+      ? undefined
+      : servingCleanup.use(new ServedLoggerCounts(inServingContext));
     consoleCaptureActive = true;
     if (readBudgets !== undefined) {
       runtime.scheduler.setReadStatsEnabled(true, { attempts: true });
@@ -2295,7 +2313,10 @@ export async function runTestPattern(
       loggerCountsBeforeRun,
       consoleErrors,
       consoleWarnings,
+      servedLoggerCounts,
     );
+    const servedWarnings: string[] = [];
+    servedLoggerCounts?.appendMessages(consoleErrors, servedWarnings);
 
     const errorMessages = [
       ...runtimeErrors.map((e) => String(e)),
@@ -2316,6 +2337,7 @@ export async function runTestPattern(
       allowConsoleErrors,
       consoleWarnings,
       allowConsoleWarnings,
+      servedWarnings,
     };
   } catch (err) {
     let errorMessage = err instanceof Error ? err.message : String(err);
@@ -2692,6 +2714,15 @@ export async function runTests(
               "    Run again with `--cfc-denials` to see what CFC denied, and why.",
             );
           }
+        }
+      }
+
+      if (result.servedWarnings && result.servedWarnings.length > 0) {
+        console.log(
+          `  ⊘ ${result.servedWarnings.length} serving-loop warning(s) (not counted):`,
+        );
+        for (const msg of result.servedWarnings) {
+          console.log(`    ${msg}`);
         }
       }
     }
