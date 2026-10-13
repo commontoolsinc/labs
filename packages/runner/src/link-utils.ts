@@ -1029,10 +1029,10 @@ export function getDerivedInternalCellLink(
   const resultCellLink = resultCell.getAsNormalizedFullLink();
   return {
     space: resultCellLink.space,
-    // The kind's ONLY representation is the URI scheme applied here by
-    // toURI. The hash, which the runtime's `DerivedInternalCellIds` supplies,
-    // is kind-free, so this is the single place a computed identity is
-    // established.
+    // The runtime's `DerivedInternalCellIds` mints the hash, which is
+    // kind-free. The kind's ONLY representation is the URI scheme `toURI`
+    // applies here, so this is the single place a hash becomes the id of a
+    // computed cell.
     id: toURI(
       cellRuntime(resultCell).derivedInternalCellIds.idFor(
         resultCell,
