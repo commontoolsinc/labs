@@ -686,12 +686,14 @@ export function getTimingMeasuresState(): {
  */
 export function clearTimingMeasures(): void {
   try {
-    const others: PerformanceEntry[] = [];
+    const others: PerformanceMeasure[] = [];
     let holdsEmitted = false;
     for (const entry of performance.getEntriesByType("measure")) {
       if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
         holdsEmitted = true;
-      } else {
+      } else if (entry instanceof PerformanceMeasure) {
+        // Every entry of this type is one; the check is what gives the
+        // recording below a typed `.detail` to read.
         others.push(entry);
       }
     }
@@ -708,7 +710,7 @@ export function clearTimingMeasures(): void {
         performance.measure(entry.name, {
           start: entry.startTime,
           duration: entry.duration,
-          detail: "detail" in entry ? entry.detail : undefined,
+          detail: entry.detail,
         });
       }
     }
