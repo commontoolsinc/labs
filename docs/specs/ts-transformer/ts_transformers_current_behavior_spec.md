@@ -486,12 +486,15 @@ cell is built from its parts, each printed from its own type. A tuple is kept
 as written, as a tuple written out is, and so is a type that carries a scope,
 since only a scope wrapper names its scope: a scoped cell keeps the capability
 written for it. An optional member's node is read at the member's type without
-the `undefined` its `?` adds, so `replyTo?: Reply` reads as `Reply` and not as
-a union with `undefined`. A printed node is overlaid on its
+the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
+holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
+with `undefined`. A printed node is overlaid on its
 unfolding (`unfoldPrint()`) and never taken apart, since schema generation
 reads a print by the type it was printed from; it goes through the same
-expansion a reference does, so a recursion through prints is cut where one
-through references is. The tests under
+expansion a reference does, after the identity-only comparison that wraps a
+plain position `comparable`, so a recursion through prints is cut where one
+through references is, and a print compared only by identity keeps its
+`comparable` marker. The tests under
 `overlayContractCapabilities()` in `test/type-shrinking.test.ts` hold each
 generic shape to the schema of the same type written out.
 

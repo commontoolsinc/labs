@@ -625,6 +625,57 @@ type Box = { c: Writable<number>; l: List<Writable<string>> };`,
       });
     }
 
+    for (
+      const [shape, argument, written] of [
+        ["an object", "{ name: string }", "{ name: string }"],
+        ["an array", "string[]", "string[]"],
+      ] as const
+    ) {
+      it(`marks ${shape} the reference gives as an argument \`comparable\` where the callback only compares its identity, as written out`, async () => {
+        const callback = "(e, { c }) => { c.set(equals(e.v, e.v) ? 1 : 0); }";
+        const generic = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box<T> = { c: Writable<number>; v: T };`,
+          `Box<${argument}>`,
+          callback,
+        );
+        const plain = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box = { c: Writable<number>; v: ${written} };`,
+          "Box",
+          callback,
+        );
+        const v = (schema: Record<string, unknown>) =>
+          (schema.properties as Record<string, Record<string, unknown>>).v!;
+
+        expect(v(plain.event).asCell).toEqual(["comparable"]);
+        expect(generic.event).toEqual(plain.event);
+      });
+    }
+
+    it("reads an optional member whose generic alias denotes a union of several members without the `undefined` its `?` adds", async () => {
+      const callback = "(e, { c }) => { c.set(e.c.get()); }";
+      const generic = await eventSchema(
+        `type Identity<T> = T;
+type Box = { c: Writable<number>; v?: Identity<Writable<number> | string> };`,
+        "Box",
+        callback,
+      );
+      const plain = await eventSchema(
+        "type Box = { c: Writable<number>; v?: Writable<number> | string };",
+        "Box",
+        callback,
+      );
+      const alternatives = (schema: Record<string, unknown>) =>
+        (schema.properties as Record<string, Record<string, unknown>>).v!
+          .anyOf as unknown[];
+
+      expect(alternatives(generic.event)).toHaveLength(2);
+      expect(alternatives(generic.event)).toEqual(
+        expect.arrayContaining(alternatives(plain.event)),
+      );
+    });
+
     it("reads a reference to a generic union alias as the union, overlaying the cell in a member", async () => {
       const { event } = await eventSchema(
         "type Maybe<T> = T | undefined;",

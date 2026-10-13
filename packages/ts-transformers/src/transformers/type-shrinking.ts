@@ -4,6 +4,7 @@ import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
 import {
   cfcCarrierProperty,
   isCfcCarrierMember,
+  memberValueType,
 } from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
@@ -3010,8 +3011,11 @@ function contractCapabilityAt(
  * type that carries a scope, are kept as written, as a tuple written out is,
  * and as only a scope wrapper names its scope. A printed node is overlaid on
  * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
- * reference takes, cut where a recursion is. An optional member's
- * node is read at the member's type without the `undefined` its `?` adds.
+ * reference takes, cut where a recursion is, and only once a position the
+ * body compares by identity alone has been wrapped `comparable`, as a
+ * reference is. An optional member's node is read at
+ * the member's type without the `undefined` its `?` adds
+ * (`memberValueType()`, which leaves a type that also holds `null` whole).
  */
 export function overlayContractCapabilities(
   node: ts.TypeNode,
@@ -3061,27 +3065,6 @@ export function overlayContractCapabilities(
     currentType: ts.Type | undefined,
     path: readonly string[],
   ): ts.TypeNode => {
-    // A printed node is not taken apart: capabilities inside it are overlaid
-    // on its unfolding, or not at all.
-    const printedType = state?.printedFrom(current);
-    if (printedType && isUnfoldableKind(current)) {
-      return expand(
-        current,
-        printedType,
-        path,
-        () =>
-          unfoldPrint(
-            current,
-            printedType,
-            checker,
-            sourceFile,
-            factory,
-            typeRegistry,
-            state,
-          ),
-      );
-    }
-
     if (ts.isParenthesizedTypeNode(current)) {
       const inner = walk(current.type, currentType, path);
       return inner === current.type
@@ -3109,6 +3092,27 @@ export function overlayContractCapabilities(
       // structure serves, and the observed comparison adds the identity
       // handle the runtime materializes it through.
       return wrapTypeNodeWithCapability(current, "comparable", factory);
+    }
+
+    // A printed node is not taken apart: capabilities inside it are overlaid
+    // on its unfolding, or not at all.
+    const printedType = state?.printedFrom(current);
+    if (printedType && isUnfoldableKind(current)) {
+      return expand(
+        current,
+        printedType,
+        path,
+        () =>
+          unfoldPrint(
+            current,
+            printedType,
+            checker,
+            sourceFile,
+            factory,
+            typeRegistry,
+            state,
+          ),
+      );
     }
 
     if (namesCellWrapper(current, checker)) {
@@ -3142,8 +3146,8 @@ export function overlayContractCapabilities(
           : undefined;
         const walked = walk(
           member.type,
-          memberType && member.questionToken
-            ? withoutOptionalUndefined(memberType)
+          memberSymbol && memberType
+            ? memberValueType(memberSymbol, memberType, checker)
             : memberType,
           [...path, name],
         );
@@ -4012,20 +4016,6 @@ function unfoldReferencedType(
     state,
     true,
   );
-}
-
-/**
- * Returns the type of an optional member as its node writes it: `type`, the
- * member's type, without the `undefined` its `?` adds. Where more than one
- * member of the union remains, returns `type` whole, as the checker names no
- * type for the rest of a union.
- */
-function withoutOptionalUndefined(type: ts.Type): ts.Type {
-  if (!type.isUnion()) return type;
-  const written = type.types.filter((member) =>
-    (member.flags & ts.TypeFlags.Undefined) === 0
-  );
-  return written.length === 1 ? written[0]! : type;
 }
 
 /** The structure an unfolding builds one level of. */
