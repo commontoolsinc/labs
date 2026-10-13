@@ -170,7 +170,7 @@ export const localJobSpecOf = async (
         fabric.space,
         undefined,
       ),
-      inputs: {},
+      inputs: { ...request.inputs },
     },
     patternIndexUrl: profile.patternIndexUrl,
     patternIndexPublish: profile.patternIndexPublish,

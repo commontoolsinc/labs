@@ -28,6 +28,9 @@ import {
   type HarnessToolBackingAvailability,
   withheldToolIds,
 } from "@commonfabric/cf-harness/contracts/tool-descriptor";
+import { checkInputCellSpec } from "@commonfabric/cf-harness/input-cells";
+import { isDID } from "@commonfabric/identity/did";
+import type { MemorySpace } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 /** One profile, as the host file states it. */
@@ -115,6 +118,9 @@ export interface LocalJobNarrowing {
 
   /** The request's browser host declaration, when it made one. */
   browserHost?: unknown;
+
+  /** The pieces the request hands the job, by name. */
+  inputs?: Readonly<Record<string, string>>;
 }
 
 const ROLES: readonly PromptSlotRole[] = ["direct-command", "context", "quote"];
@@ -348,6 +354,39 @@ export const readLocalJobProfiles = async (
 };
 
 /**
+ * Why `profile` cannot hold `inputs`, or `undefined` when it can: each one is
+ * held to the rule the harness mints an input cell under, against the
+ * profile's own space, so a piece in any other space is refused here rather
+ * than when the job starts. A space the profile names by name rather than by
+ * DID is compared as a name, as the harness compares it.
+ */
+const refuseInputs = (
+  profile: LocalJobProfile,
+  inputs: Readonly<Record<string, string>> | undefined,
+): string | undefined => {
+  if (inputs === undefined || Object.keys(inputs).length === 0) {
+    return undefined;
+  }
+  const { fabric } = profile;
+  if (fabric === undefined) {
+    return "The profile has no fabric session, so it can hold no inputs.";
+  }
+  const byDid = isDID(fabric.space);
+  for (const [name, ref] of Object.entries(inputs)) {
+    try {
+      checkInputCellSpec(
+        { name, ref },
+        byDid ? fabric.space as MemorySpace : undefined,
+        byDid ? undefined : fabric.space,
+      );
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+  return undefined;
+};
+
+/**
  * The profile a caller's request runs under: `profile` narrowed to the tools
  * and turns the caller asked for, and to a browser host only when the
  * request declared one, or the reason the request asks for more than the
@@ -375,6 +414,8 @@ export const narrowLocalJobProfile = (
   if (browserHost !== undefined && profile.browserHost !== true) {
     return { refusal: "The profile does not admit a browser host." };
   }
+  const inputRefusal = refuseInputs(profile, narrowing.inputs);
+  if (inputRefusal !== undefined) return { refusal: inputRefusal };
   const { browserHost: _admitted, subagentProfiles, ...rest } = profile;
   // Narrowed away from `delegate_task`, a job has nothing to spawn its
   // subagents with, and so is granted none.

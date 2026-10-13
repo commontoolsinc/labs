@@ -184,6 +184,8 @@ describe("local-jobs/api", () => {
       ["tools that are not names", { ...BODY, tools: [1] }],
       ["a turn count below one", { ...BODY, maxModelTurns: 0 }],
       ["a fractional turn count", { ...BODY, maxModelTurns: 1.5 }],
+      ["inputs that are not an object", { ...BODY, inputs: ["/of:x"] }],
+      ["an input that is not an address", { ...BODY, inputs: { focus: 1 } }],
     ];
     for (const [what, body] of invalid) {
       it(`returns 400 for ${what}`, async () => {
@@ -193,6 +195,19 @@ describe("local-jobs/api", () => {
         expect((await response.json()).code).toBe("invalid_request");
       });
     }
+
+    it("returns 400 for inputs under a profile with no fabric session", async () => {
+      const response = await apiWith().post("/jobs", {
+        ...BODY,
+        inputs: { focus: `/of:fid1:${"A".repeat(43)}` },
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        code: "beyond_profile",
+        error: "The profile has no fabric session, so it can hold no inputs.",
+      });
+    });
 
     it("accepts a boolean result schema and a request that narrows nothing", async () => {
       const response = await apiWith().post("/jobs", {

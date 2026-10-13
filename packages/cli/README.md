@@ -1642,7 +1642,8 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 `<socket>.token`, also 0600 and minted at each start: reaching the socket is the
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
-instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?}`
+instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
+inputs?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
@@ -1674,10 +1675,14 @@ A profile, named in the host's file, is the authority a job runs with: its
 tools, its host Loom files, its model-turn cap, the prompt-slot role its task
 binds as, and whether a job may bring a browser host (`browserHost: true`). A
 request may name fewer tools and fewer turns, and, under a profile that admits
-one, declare a browser host (below); leaving it out declines the browser. It may
-set nothing else. A job runs through the same `cf-harness` path as an agent run,
-with no fabric session. Every tool call, including delegated calls, counts as
-progress, and so does its return; prose and reasoning do not. A `step` carries
+one, declare a browser host (below); leaving it out declines the browser. Under
+a profile with a fabric session it may hand the job pieces as
+`inputs: {<name>: <address>}`: each becomes an input cell the model holds as a
+handle from its first turn, and a piece outside the profile's space is refused
+at enqueue as `beyond_profile`. It may set nothing else. A job runs through the
+same `cf-harness` path as an agent run, with the fabric session its profile
+names, if any. Every tool call, including delegated calls, counts as progress,
+and so does its return; prose and reasoning do not. A `step` carries
 `{turn, tool}`, and the same step again with `returned: true` once the calls of
 that turn have returned and the loop's model has the turn. A `command` records
 each command the host ran for it. Children add

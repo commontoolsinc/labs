@@ -52,6 +52,13 @@ export interface LocalJobRequest {
    * declaring it is what counts, as on the console's task route.
    */
   browserHost?: Record<string, unknown>;
+
+  /**
+   * Pieces the job holds from its first turn, by the name the model sees:
+   * each address becomes an input cell, and the model a handle to it. Only a
+   * profile with a fabric session holds them, and only pieces in its space.
+   */
+  inputs?: Record<string, string>;
 }
 
 /** One event of a job, in `seq` order. */

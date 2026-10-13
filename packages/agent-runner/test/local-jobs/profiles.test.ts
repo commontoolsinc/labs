@@ -328,6 +328,66 @@ describe("local-jobs/profiles", () => {
         .toEqual({ profile: { ...carry, tools: ["delegate_task"] } });
     });
 
+    describe("with inputs", () => {
+      /** A piece in the CARRY profile's own space, addressed relative to it. */
+      const PIECE = `/of:fid1:${"A".repeat(43)}`;
+
+      /** The same piece's id in a space the profile does not open. */
+      const ELSEWHERE =
+        `//did:key:z6MkfffOtherSpaceZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ/of:fid1:${
+          "A".repeat(43)
+        }`;
+
+      it("returns the profile unchanged for inputs naming pieces in its fabric space", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        expect(
+          narrowLocalJobProfile(carry, {
+            inputs: {
+              focus: PIECE,
+              same: `//${CARRY.fabric.space}/of:fid1:${"B".repeat(43)}`,
+            },
+          }),
+        ).toEqual({ profile: carry });
+      });
+
+      it("refuses inputs under a profile with no fabric session", () => {
+        expect(narrowLocalJobProfile(profile, { inputs: { focus: PIECE } }))
+          .toEqual({
+            refusal:
+              "The profile has no fabric session, so it can hold no inputs.",
+          });
+      });
+
+      it("refuses an input naming a piece in another space, naming the input", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { focus: ELSEWHERE },
+        });
+
+        expect(narrowed).toEqual({ refusal: expect.any(String) });
+        expect((narrowed as { refusal: string }).refusal).toContain(
+          "`focus`",
+        );
+        expect((narrowed as { refusal: string }).refusal).toContain(
+          "another space",
+        );
+      });
+
+      it("refuses an input whose name the harness does not admit", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { "-focus": PIECE },
+        });
+
+        expect((narrowed as { refusal: string }).refusal).toContain(
+          "name must match",
+        );
+      });
+    });
+
     it("refuses more turns than the profile's cap", () => {
       expect(narrowLocalJobProfile(profile, { maxModelTurns: 25 })).toEqual({
         refusal: "The profile allows at most 24 model turns.",

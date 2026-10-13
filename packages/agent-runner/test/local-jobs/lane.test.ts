@@ -24,6 +24,7 @@ import { browserChild, delegatedBrowse } from "./fixtures/delegated-browse.ts";
 import type { LocalJobProfile } from "../../src/local-jobs/profiles.ts";
 import {
   type LocalJob,
+  type LocalJobRequest,
   type LocalJobState,
   LocalJobStore,
 } from "../../src/local-jobs/store.ts";
@@ -133,7 +134,11 @@ const laneWith = (
     runs[index] !== undefined
       ? Promise.resolve(runs[index])
       : new Promise<HeldRun>((resolve) => started.push(resolve));
-  const enqueue = (key: string, request = REQUEST, profile = "ask") => {
+  const enqueue = (
+    key: string,
+    request: LocalJobRequest = REQUEST,
+    profile = "ask",
+  ) => {
     const enqueued = store.enqueue("cfs:weaver", profile, key, request);
     if ("conflict" in enqueued) throw new Error(enqueued.conflict);
     lane.kick();
@@ -1022,6 +1027,30 @@ describe("local-jobs/lane", () => {
           patternIndexPublish: false,
         });
         expect(reads).toEqual([]);
+        run.settle({ outcome: "cancelled" });
+        await Deno.remove(key.dir, { recursive: true });
+      });
+
+      it("passes the request's inputs to the run as input cells", async () => {
+        // Each input reaches the harness as `--input-cell`, so the model
+        // holds the piece as a handle from its first turn.
+        const key = await identityKey();
+        const piece = `/of:fid1:${"A".repeat(43)}`;
+        const { lane, nextRun, enqueue } = laneWith({
+          profiles: new Map([["carry", {
+            ...CARRY,
+            fabric: {
+              ...CARRY.fabric!,
+              space: key.did,
+              identityKeyPath: key.path,
+            },
+          }]]),
+        });
+        lane.start();
+        enqueue("a", { ...REQUEST, inputs: { focus: piece } }, "carry");
+        const run = await nextRun(0);
+
+        expect(run.spec.fabric?.inputs).toEqual({ focus: piece });
         run.settle({ outcome: "cancelled" });
         await Deno.remove(key.dir, { recursive: true });
       });

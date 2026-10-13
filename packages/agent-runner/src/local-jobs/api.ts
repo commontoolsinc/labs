@@ -8,7 +8,7 @@
  * - `GET /health` — the lane is serving.
  * - `POST /jobs` — enqueue `{caller, profile, idempotencyKey, task,
  *   instructions?, context?, resultSchema, tools?, maxModelTurns?,
- *   browserHost?}`;
+ *   browserHost?, inputs?}`, where `inputs` maps a name to a piece address;
  *   answers `201` with the new job, or `200` with the one the key already
  *   names for the same request.
  * - `GET /jobs?limit=n` — the newest jobs, newest first.
@@ -117,6 +117,7 @@ const enqueueRequestOf = (
     tools,
     maxModelTurns,
     browserHost,
+    inputs,
   } = value as Record<string, unknown>;
   const name = (field: unknown) =>
     typeof field === "string" && field.length > 0 &&
@@ -152,6 +153,15 @@ const enqueueRequestOf = (
   if (browserHost !== undefined && !isObjectNotArray(browserHost)) {
     return { error: "`browserHost` must be an object." };
   }
+  if (
+    inputs !== undefined &&
+    (!isObjectNotArray(inputs) ||
+      !Object.values(inputs).every((address) =>
+        typeof address === "string" && address.length > 0
+      ))
+  ) {
+    return { error: "`inputs` must map names to piece addresses." };
+  }
   return {
     caller: caller as string,
     profile: profile as string,
@@ -165,6 +175,9 @@ const enqueueRequestOf = (
       ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
       ...(browserHost !== undefined
         ? { browserHost: browserHost as Record<string, unknown> }
+        : {}),
+      ...(inputs !== undefined
+        ? { inputs: inputs as Record<string, string> }
         : {}),
     },
   };
