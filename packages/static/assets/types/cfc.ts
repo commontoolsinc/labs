@@ -57,6 +57,7 @@ export declare const CFC_ATOM_TYPE: {
   readonly ExternalIngest: "https://commonfabric.org/cfc/atom/ExternalIngest";
   readonly HasRole: "https://commonfabric.org/cfc/atom/HasRole";
   readonly InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe";
+  readonly LinkReference: "https://commonfabric.org/cfc/atom/LinkReference";
   readonly LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived";
   readonly Origin: "https://commonfabric.org/cfc/atom/Origin";
   readonly Policy: "https://commonfabric.org/cfc/atom/Policy";
