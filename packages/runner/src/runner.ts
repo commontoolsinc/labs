@@ -43,6 +43,7 @@ import {
 
 import { isAliasBinding } from "./alias-binding.ts";
 import { runInFrameContext } from "./builder/frame-context.ts";
+import { instanceNameOfPartialCause } from "./builder/instance-name.ts";
 import {
   patternFromFrame,
   popFrame,
@@ -929,6 +930,14 @@ function nodeOutputPartialCause(outputs: unknown): JSONValue | undefined {
 }
 
 /**
+ * The instance name a sub-pattern node's raw output binding carries, when the
+ * node is a named instance, and `undefined` otherwise.
+ */
+function instanceNameOfNodeOutputs(outputs: unknown): string | undefined {
+  return instanceNameOfPartialCause(nodeOutputPartialCause(outputs));
+}
+
+/**
  * Whether `partialCause` is one the pattern builder numbers by position: a
  * bare `{ $generated: N }`.
  */
@@ -939,22 +948,45 @@ function isPositionalPartialCause(partialCause: unknown): boolean {
 }
 
 /**
- * The numbers of the positional spots, `{ $generated: N }`, that the stored
- * manifest of derived internal cells on the parent `cell` records: the spots
- * at which a child of the parent can already be set up.
+ * The manifest of derived internal cells `cell` holds, as setup recorded it.
  */
-function recordedPositionalSpots(cell: Cell<any>): Set<number> {
+function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
   const stored = convertibleJsFromFabricValue(
     cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
   );
+  return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
+}
+
+/**
+ * The numbers of the positional spots, `{ $generated: N }`, that a parent's
+ * stored `manifest` records: the spots at which a child of the parent can
+ * already be set up.
+ */
+function recordedPositionalSpots(
+  manifest: readonly InternalCellDescriptor[],
+): Set<number> {
   const spots = new Set<number>();
-  if (!Array.isArray(stored)) return spots;
-  for (const entry of stored as InternalCellDescriptor[]) {
+  for (const entry of manifest) {
     if (isPositionalPartialCause(entry.partialCause)) {
       spots.add(positionalNumber(entry.partialCause));
     }
   }
   return spots;
+}
+
+/**
+ * The names of the named instances whose spots a parent's stored `manifest`
+ * records: the instances whose child can already be set up.
+ */
+function recordedInstanceNames(
+  manifest: readonly InternalCellDescriptor[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const entry of manifest) {
+    const name = instanceNameOfPartialCause(entry.partialCause);
+    if (name !== undefined) names.add(name);
+  }
+  return names;
 }
 
 /** The number in the positional partial cause `partialCause`. */
@@ -976,6 +1008,14 @@ function subPatternNodes(
     found.push({ module, partialCause });
   }
   return found;
+}
+
+/** The instance name stamped on the child `child`, if any. */
+function getInstanceNameStamp(child: Cell<any>): string | undefined {
+  const raw = child.getMetaRaw("instanceName", {
+    meta: ignoreReadForScheduling,
+  });
+  return typeof raw === "string" ? raw : undefined;
 }
 
 /** A key naming the document `link` addresses: its space, id and scope. */
@@ -1701,6 +1741,9 @@ type PatternNodeBinding = Omit<BoundNodeIO, "inputsCell"> & {
   child: Pattern;
   childResultCell: Cell<any> | undefined;
   sendToBindings: boolean;
+
+  /** The instance name of a named instance, which no other node shares. */
+  instanceName?: string;
 };
 
 /**
@@ -13379,6 +13422,7 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
+    const instanceName = instanceNameOfNodeOutputs(outputBindings);
     return {
       ...io,
       childResultCell: this.#mintChildResultCell(
@@ -13389,6 +13433,7 @@ export class Runner {
         resultCell,
       ),
       sendToBindings: true,
+      ...(instanceName !== undefined && { instanceName }),
     };
   }
 
@@ -13453,10 +13498,10 @@ export class Runner {
   }
 
   /**
-   * Throws, naming both pattern identities, when a positional sub-pattern
-   * node of `pattern` would set its child up over a child the parent
-   * `resultCell` keeps at another positional spot (`#refuseDisplacedChild()`),
-   * for each such node whose child this parent owns: not a child that is its
+   * Throws, naming the pattern identities it knows, when a positional or
+   * named sub-pattern node of `pattern` would set its child up over a child
+   * the parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for
+   * each such node whose child this parent owns: not a child that is its
    * space's root, nor one managed in a space of its own.
    *
    * Only a parent its updater has pointed at `pattern` is judged: its stored
@@ -13485,14 +13530,19 @@ export class Runner {
     ) {
       return;
     }
-    const recorded = recordedPositionalSpots(parent);
+    const manifest = storedManifestOf(parent);
+    const recorded = recordedPositionalSpots(manifest);
+    const recordedInstances = recordedInstanceNames(manifest);
     for (const { module, partialCause } of subPatternNodes(pattern)) {
-      if (
-        !isPositionalPartialCause(partialCause) ||
-        !recorded.has(positionalNumber(partialCause))
-      ) {
-        continue;
-      }
+      // Only a spot the stored manifest records can hold a child already, and
+      // only a positional or named one can hold another's: a spot a result
+      // key, a node input or `.for()` names does not shift with its siblings,
+      // and no instance stamps the child there.
+      const instanceName = instanceNameOfPartialCause(partialCause);
+      const judged = isPositionalPartialCause(partialCause)
+        ? recorded.has(positionalNumber(partialCause))
+        : instanceName !== undefined && recordedInstances.has(instanceName);
+      if (!judged) continue;
       // A space's root sits where its space's genesis reserved it, whatever
       // the node's cause, so no shift between this parent's spots moves it.
       if (module.targetSpaceRoot) continue;
@@ -13509,20 +13559,24 @@ export class Runner {
         pattern,
         module.implementation as Pattern,
         child,
+        partialCause,
         recorded,
       );
     }
   }
 
   /**
-   * Throws rather than let the child of `childPattern`, at a positional spot,
-   * set up over `storedChild` when the parent `resultCell` shows its
-   * positional children have moved spots: `storedChild` runs another pattern
-   * identity, and either a child of `childPattern`'s identity runs at another
-   * positional spot, or another positional spot of `pattern` sets up the
-   * identity `storedChild` runs. A child is looked for only at the positional
-   * spots in `recorded`, the ones the parent's stored manifest records, and no
-   * spot whose node sets up a space's root is counted. A child whose identity
+   * Throws rather than let the child of `childPattern`, at the positional or
+   * named spot `partialCause` names, set up over `storedChild` when that cell
+   * holds a different child the parent `resultCell` keeps elsewhere: a child
+   * stamped with another instance's name, or, where `partialCause` is
+   * positional, a sign that the parent's positional children have moved
+   * spots, which is `storedChild` running another pattern identity while
+   * either a child of `childPattern`'s identity runs at another positional
+   * spot, or another positional spot of `pattern` sets up the identity
+   * `storedChild` runs. A child is looked for only at the positional spots in
+   * `recorded`, the ones the parent's stored manifest records, and no spot
+   * whose node sets up a space's root is counted. A child whose identity
    * differs with no such sign is the same child under a newer version of its
    * own source.
    */
@@ -13532,24 +13586,42 @@ export class Runner {
     pattern: Pattern,
     childPattern: Pattern,
     storedChild: Cell<any>,
+    partialCause: JSONValue,
     recorded: ReadonlySet<number>,
   ): void {
     this.#displacedChildReadRecorder?.(
       storedChild.getAsNormalizedFullLink().id,
     );
+    const instanceName = instanceNameOfPartialCause(partialCause);
+    const positional = isPositionalPartialCause(partialCause);
     const stored = getPatternSetupIdentityRef(storedChild) ??
       getPatternIdentityRef(storedChild);
     const incoming = this.#runtime.patternManager.getArtifactEntryRef(
       childPattern,
     );
-    if (
-      stored === undefined || incoming === undefined ||
-      samePatternRef(stored, incoming)
-    ) {
-      return;
-    }
     const describe = (ref: { identity: string; symbol: string }) =>
       `${ref.identity}#${ref.symbol}`;
+    // The stamp alone decides this refusal, so it holds for a child whose
+    // pattern identity was never stored; the identities only name the two
+    // sides in the message.
+    const stamped = getInstanceNameStamp(storedChild);
+    if (stamped !== undefined && stamped !== instanceName) {
+      const holder = instanceName !== undefined
+        ? `instance "${instanceName}"`
+        : "a positional spot";
+      const settingUp = incoming !== undefined
+        ? describe(incoming)
+        : "a pattern with no identity";
+      const over = stored !== undefined
+        ? `the child of ${describe(stored)}`
+        : "a child with no stored pattern identity";
+      throw new Error(
+        `refusing to set up ${settingUp} for ${holder} over ${over} that ` +
+          `instance "${stamped}" set up`,
+      );
+    }
+    if (stored === undefined || incoming === undefined) return;
+    if (!positional || samePatternRef(stored, incoming)) return;
     const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
     for (const { module, partialCause } of subPatternNodes(pattern)) {
       // A space's root child sits at its space's genesis address rather than
@@ -13661,6 +13733,16 @@ export class Runner {
         if (plan.module.targetSpaceRoot) {
           this.#linkSpaceRootIfAbsent(instanceTx, childResultCell);
         }
+      }
+      if (
+        !resumeExisting && plan.instanceName !== undefined &&
+        getInstanceNameStamp(storedChild) !== plan.instanceName
+      ) {
+        storedChild.setMetaRaw(
+          "instanceName",
+          plan.instanceName,
+          rawMetaWriteAuthorization,
+        );
       }
       // Only a child in a space of its own claims one: an in-space nested
       // node is part of its parent's graph and is re-instantiated from the

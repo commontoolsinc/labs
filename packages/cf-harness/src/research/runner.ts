@@ -49,7 +49,7 @@ import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import { findSectionPassage, rankSections } from "../docs-corpus/sections.ts";
 import { errorMessage } from "../error-message.ts";
 import { inputCellsContextMessage } from "../input-cells.ts";
-import { ORIENTATION_GUIDANCE } from "../orientation.ts";
+import { orientationGuidance } from "../orientation.ts";
 import { PATTERN_COMPOSITION_GUIDANCE } from "../pattern-authoring.ts";
 import { PIECE_TARGETING_GUIDANCE } from "../piece-targeting.ts";
 import type {
@@ -523,7 +523,10 @@ const sourceCatalog = (state: ResearchState): string =>
 const researchModel = (providerId: string): string =>
   providerId === "openai-codex" ? RESEARCH_CODEX_MODEL : RESEARCH_MODEL;
 
-const systemPrompt = (purpose?: HarnessResearchPurpose): string =>
+const systemPrompt = (
+  purpose: HarnessResearchPurpose | undefined,
+  patternIndex: boolean,
+): string =>
   [
     "You are the private Common Fabric research loop inside the harness.",
     purpose === "orient"
@@ -534,7 +537,7 @@ const systemPrompt = (purpose?: HarnessResearchPurpose): string =>
     "This is CF documentation, skills, pattern-index, source, dependency, and handle research; it is not web research.",
     PIECE_TARGETING_GUIDANCE,
     PATTERN_COMPOSITION_GUIDANCE,
-    ...(purpose === "orient" ? [ORIENTATION_GUIDANCE] : []),
+    ...(purpose === "orient" ? [orientationGuidance({ patternIndex })] : []),
     "Search for the next unresolved fact. Search results are leads, not proof of applicability. Read exact evidence only when it changes the decision; do not keep searching after the question is answered.",
     "A long section or source file is never represented by its first chunk alone. Follow nextOffset with another exact read whenever the needed answer could continue later.",
     "Use the pattern index and available data to find a short path to the goal. Prefer composing suitable existing pieces; describe the smallest missing reusable capability when authoring is needed. If the approach becomes large or tangled, reconsider the component boundaries and data contracts before expanding it. One source file per component does not mean one component for the entire goal.",
@@ -1379,7 +1382,13 @@ async (request) => {
     ? undefined
     : await carryPriorResearch(request, state, request.priorResearch);
   const transcript: HarnessTranscriptMessage[] = [
-    { role: "system", content: systemPrompt(request.purpose) },
+    {
+      role: "system",
+      content: systemPrompt(
+        request.purpose,
+        request.getPatternIndex !== undefined,
+      ),
+    },
     { role: "user", content: userPrompt(request, carried) },
   ];
   for (const pattern of request.attachedPatterns ?? []) {
