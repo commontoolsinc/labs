@@ -274,7 +274,11 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     await runtime.idle();
     expect(await roomsNow()).toBeUndefined();
 
+    // The home is already running, so opening it moves its pattern pointer
+    // and leaves the swap to the pointer watcher, which names the newer
+    // pattern's cells before swapping. `idle()` does not wait for that.
     await controller.ensureDefaultPattern();
+    await runtime.runner.idlePointerMaintenance();
     await runtime.idle();
     expect(await roomsNow()).toEqual([]);
   });
