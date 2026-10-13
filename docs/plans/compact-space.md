@@ -1,6 +1,8 @@
 # `compact-space` — shrinking one space's history after a write storm
 
-**Status:** proposed; design only, nothing built. Written 2026-10-08 against
+**Status:** stages 1–3 landed (the bounded base search, the basis guard,
+the dry run); stage 4, the write path, in review; stages 5–8 open. Design
+written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
 21 GB on disk, 2.29 million commits, 46,729 computed documents rewritten
@@ -311,7 +313,9 @@ Each is something a reader relies on today, with the code that relies on it.
   marker carrying a hash of what it held, whether or not a surviving row
   still points at the commit: nothing reads a payload beyond replay
   detection and the pending-read layer replay, which the window serves, and
-  the genesis receipt, which is exempt below. A resubmission then mismatches
+  the genesis receipt, which is exempt below, and a compaction commit's own
+  payload, a run's record rather than a client's write, which is exempt
+  too. A resubmission then mismatches
   the stored bytes and is refused as a replay mismatch, which the client
   surfaces as a terminal error for a write that in fact landed, and never
   mutates state. `origin-committed` preconditions, `commitClassOfSeq` and the commit
@@ -485,7 +489,7 @@ cf space compact <store.sqlite> [selection] [cut] [--dry-run] [--json]
 | `--before-seq <n>` | Rows with `seq < n` are candidates; the first row at or above `n` becomes the base. | the head: everything behind it |
 | `--before <timestamp>` | The same, with `n` taken as the newest commit created before the timestamp (`commit.created_at`, UTC). | — |
 | `--keep-last <n>` | Keep the newest `n` revisions per instance, the oldest of them rewritten as the base. | 0 |
-| `--keep-payloads <duration>` | Commit rows created within this window of the newest commit keep their `original`; every older row's payload is hollowed except seq 1's and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
+| `--keep-payloads <duration>` | Commit rows created within this window of the newest client commit (a compaction commit does not move it) keep their `original`; every older row's payload is hollowed except seq 1's, compaction commits', and those an `op_*` row references, whether or not a surviving revision points at the commit (I6). The window bounds how far back a resubmission is answered faithfully rather than refused; it bounds no safety property. | `24h` |
 | `--dry-run` | Compute and report; write nothing. | off |
 | `--json` | The report as JSON, per the `cf` JSON contract. | off |
 
@@ -503,6 +507,10 @@ The dry-run report, printed before any write and by `--dry-run` alone:
 - commit rows outside the retained window, how many of them an `op_*` row
   or the genesis exemption keeps, and the bytes of `original` the rest give
   up, split into commits that still own a head and commits that do not;
+- earlier runs' compaction commits, counted apart from the window whichever
+  side of its cutoff they were created on: the window is measured over client
+  commits, and a compaction commit's `created_at` is the time its run
+  inserted it;
 - invocation and authorization rows that become unreferenced (empty in the
   Topics store, where every commit's refs are null);
 - the ten instances contributing the most rows, with their head seq and op;
@@ -698,20 +706,45 @@ it.
   "compaction": {
     "lastCommitSeq": 1494536,
     "compactedAt": "2026-10-09T18:00:00Z",
-    "runs": [{ "commitSeq": 1494537, "documents": "computed:", "hollowed": 1307316 }]
+    "runs": [{
+      "commitSeq": 1494537,
+      "runId": "2026-10-09T18:00:00.000Z",
+      "documents": "computed:",
+      "truncated": 232853,
+      "hollowed": 1307316,
+      "lastCommitSeq": 1494536
+    }]
   }
 }
 ```
 
 `lastCommitSeq` is the newest seq any hollowed or deleted row had; a reader
-that wants history older than it knows to ask for the archive. The member is
+that wants history older than it knows to ask for the archive. Each run
+that completes appends its own entry to `runs`, with what it actually
+truncated and hollowed; the audit revision is the last thing a run writes,
+so a run interrupted before it is on record only in its compaction commit,
+whose payload is the plan it set out with, and the run that resumes it
+reports what remained.
+
+**A space with no ACL document gets no marker.** The Topics space is one:
+its 2026-10-09 snapshot holds no `of:did:…` row at all, because the space
+predates ACL genesis, and the server treats a populated space without an
+ACL document as open to authenticated principals. An ACL document whose
+`value` is not an ACL fails closed, so writing a marker-only document where
+none existed would lock the space's members out. The tool therefore writes
+the audit revision only where an ACL document exists, reports `absent`
+otherwise, and leaves the compaction commit — a `system` commit under the
+`compaction:` session with the run's plan as its payload — as the run's one
+record in such a store. A tombstoned ACL document is left as it is for the
+same reason: a `set` would recreate it. The member is
 a sibling of `value` rather than inside it because `value` is the ACL, with
 its own schema and its own admission, and because the state inspector
 classifies an entity by its top-level paths and can learn one more. The
 shell's space header is where the icon belongs; that is a change for the
 shell's owners and is [left open](#what-is-deliberately-left-open) here, with
 the marker as the hook it hangs on. The compaction commit itself is the
-second record, with the run's report as its `original`, for `cf inspect`.
+other record — the only one where the store has no live ACL document — with
+the run's report as its `original`, for `cf inspect`.
 
 ### Rollback
 
@@ -961,13 +994,12 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 and 2 have landed, stage 3 is in
-review, and stage 4 onward is open. Two engine changes come
-first, and both have landed: the base search, because it preserves history,
-helps the uncompacted store from the deploy that carries it, and is the
-measurement the compaction decision was made against; and the basis guard,
-because no store may be compacted until the engine can tell compacted
-history from absence.
+Each stage is a pull request. Stages 1 through 3 have landed, and stage 4
+onward is open. Two engine changes came first, and both have landed: the
+base search, because it preserves history, helps the uncompacted store from
+the deploy that carries it, and is the measurement the compaction decision
+was made against; and the basis guard, because no store may be compacted
+until the engine can tell compacted history from absence.
 
 1. **The snapshot-bounded base search** — done ([labs#8628](https://github.com/commonfabric/labs/pull/8628)), measured on
    the August copy, on the 2026-10-09 production snapshot, and through a
@@ -986,7 +1018,7 @@ history from absence.
    the tool will transform them, red on the engine before and green after;
    an uncompacted instance's genuine absence still proves identity as
    today, and so does a basis at the boundary itself.
-3. **Dry run and report** — [labs#8649](https://github.com/commonfabric/labs/pull/8649). `packages/memory/v2/compact.ts`
+3. **Dry run and report** — done ([labs#8649](https://github.com/commonfabric/labs/pull/8649)). `packages/memory/v2/compact.ts`
    with the selection, the cut, and the report, read-only; `cf space compact
    --dry-run` over it, which refuses to run without the flag until stage 4.
    Tests: a store built with the engine, patched past the snapshot interval,
@@ -996,9 +1028,10 @@ history from absence.
    `(seq, op_index)` that considers only snapshots below that seq, tested on
    a multi-operation commit with and without a snapshot at it. Run on the
    2026-10-09 snapshot; its numbers are in the cost section above.
-4. **The write path.** The compaction commit with its per-run identity and
-   its ACL-document marker, materialize, truncate, hollow (commit 1 exempt),
-   `VACUUM INTO`, `--verify --against`. Tests: every head reads back identical
+4. **The write path** — in review. The compaction commit with its per-run
+   identity and its ACL-document marker, materialize, truncate, hollow
+   (commit 1, the `op_*`-referenced commits and every compaction commit
+   exempt), `VACUUM INTO`, `--verify --against`. Tests: every head reads back identical
    through both the engine and the inspector's replay, with the ACL document
    checked as step 3 states; a confirmed read below the cut conflicts; all
    four protocol cases of §3, in every variant, against the tool's own

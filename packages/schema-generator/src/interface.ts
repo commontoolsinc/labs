@@ -5,6 +5,7 @@ import type {
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import { type Mutable } from "@commonfabric/utils/types";
+import type { ExpansionBudget } from "./typescript/expanding-recursion.ts";
 
 /**
  * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
@@ -61,6 +62,15 @@ export interface SchemaHint {
    * (`SchemaGenerationOptions.definesDocument`).
    */
   readonly definesDocument?: true;
+  /**
+   * Whether every cell the reading of the node reaches, outside the value of
+   * another cell, is opaque, whatever capability its wrapper writes; a stream
+   * or a SQLite handle keeps its brand. The contract overlay of a handler's
+   * event or state (`overlayContractCapabilities()`) marks the remainder past
+   * a recursion it cuts with it, since no use the callback makes reaches the
+   * cells there.
+   */
+  readonly cellsOpaque?: true;
 }
 
 export type SchemaHints = WeakMap<ts.Node, SchemaHint>;
@@ -161,12 +171,6 @@ export interface GenerationContext {
   /** TypeScript type checker */
   readonly typeChecker: ts.TypeChecker;
 
-  /** Pre-computed cyclic type set */
-  readonly cyclicTypes: ReadonlySet<ts.Type>;
-
-  /** Pre-computed cyclic name set */
-  readonly cyclicNames: ReadonlySet<string>;
-
   // Accumulating state (grows during generation)
 
   /** Named type definitions for $refs */
@@ -194,6 +198,18 @@ export interface GenerationContext {
 
   /** Current recursion path for cycle detection */
   definitionStack: Set<string | ts.Type>;
+
+  /**
+   * The types the current reading is read within, outermost first, where its
+   * nesting bound does not end a recursion (`cutsExpansion()`).
+   */
+  expandingPath: ts.Type[];
+
+  /**
+   * The readings this generation has made inside a recursion of their own
+   * declaration, across every path (`exhaustsBudget()`).
+   */
+  expansionBudget: ExpansionBudget;
 
   /** Currently building these named types */
   inProgressNames: Set<string>;
@@ -261,6 +277,12 @@ export interface GenerationContext {
    * this reading reports.
    */
   documentWithinView?: boolean;
+
+  /**
+   * Whether the cells this reading reaches are opaque (`SchemaHint.cellsOpaque`).
+   * The named types it reads are stored apart from other readings'.
+   */
+  cellsOpaque?: boolean;
 
   /**
    * The root type node of a schema whose root policy's writer the caller

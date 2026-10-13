@@ -227,6 +227,7 @@ import {
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
   type StoredCfcMetadata,
+  type TrustSnapshot,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -5609,6 +5610,33 @@ const storedRepresentedPrincipalsAt = (
   ];
 };
 
+/**
+ * Whether the run on `tx` acts for no one on a serving runtime, so that a
+ * claim or an owner binding resolved for it would name a principal it does not
+ * act for. A run acts for the actor its serving loop stamps on it. A run of
+ * the loop's own (`bookkeeping`) acts for the principal whose trust snapshot
+ * the loop attached to it, such as the owner the space-root ensure resolves or
+ * the parent of a start it defers, and for no one under the serving runtime's
+ * ambient snapshot, which names the runtime itself. Any other run with no
+ * stamped actor acts for no one whatever snapshot it carries: a demanded
+ * derivation carries its demander's for its reads, before the seal settles
+ * whether it acts for anyone. A transaction no serving loop stamped acts for
+ * no one under the ambient snapshot. Off the serving posture every run acts
+ * for the runtime's own user.
+ */
+const servedRunActsForNoOne = (
+  tx: IExtendedStorageTransaction,
+  trustSnapshot: TrustSnapshot,
+): boolean => {
+  const servingIdentity = tx.getCfcState().servingIdentity;
+  if (servingIdentity === undefined || waveRunActorOf(tx) !== undefined) {
+    return false;
+  }
+  const kind = waveRunContextOf(tx)?.kind;
+  if (kind !== undefined && kind !== "bookkeeping") return true;
+  return trustSnapshot.actingPrincipal === servingIdentity;
+};
+
 const currentPrincipalIntegrityReason = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -5670,6 +5698,18 @@ const currentPrincipalIntegrityReason = (
       return `ownerPrincipal requires matching represents-principal integrity at /${
         path.join("/")
       }`;
+    }
+    // A run that acts for no one would match or bind an owner it does not
+    // act for, the service under the serving runtime's own snapshot. Only an
+    // initialization on nobody's behalf at a placeholder owner checks no
+    // owner and binds no one, so only that is left to admit.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/64
+    if (
+      servedRunActsForNoOne(tx, trustSnapshot) &&
+      (!isCurrentPrincipalPlaceholder(ownerPrincipalSpec) ||
+        !pathHoldsUnattributedInitialization(tx, target, path))
+    ) {
+      return `ownerPrincipal requires the run's actor at /${path.join("/")}`;
     }
     if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
       return `ownerPrincipal mismatch at /${path.join("/")}`;
@@ -5734,10 +5774,10 @@ const currentPrincipalIntegrityReason = (
       path.join("/")
     }`;
   }
-  // A served run with no actor keeps the serving runtime's own trust
-  // snapshot, so a claim it minted would name the service.
+  // A run that acts for no one would mint a claim naming a principal it does
+  // not act for, the service under the serving runtime's own snapshot.
   if (
-    waveRunContextOf(tx) !== undefined && waveRunActorOf(tx) === undefined &&
+    servedRunActsForNoOne(tx, trustSnapshot) &&
     claimsCurrentPrincipalAt(tx, target, path)
   ) {
     return `current-principal integrity requires the run's actor at /${
