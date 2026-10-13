@@ -417,10 +417,14 @@ interface SessionOpenInvocation {
   aud: DID;
   args: {
     protocol: "memory";
+    // The request's `session` descriptor, field for field: the server refuses
+    // an open whose descriptor differs from the signed one.
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
       sessionToken?: string;
+      resumeKey?: string;
+      resumeAttempt?: number;
     };
   };
   challenge: string;
