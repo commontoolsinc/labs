@@ -1522,7 +1522,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/private-inbox.tsx",
-              "moduleIdentity": "tMHp3P9tRDvBIrnIw7qPb60qzTjtciBxPvYNhBoXI1g",
+              "moduleIdentity": "5OBVSze6q_RXO5lLvLcAuGW9x7CBx8AZ8aOyGn346K8",
               "path": [
                 "replaceRefusedPrivateInbox"
               ]
