@@ -346,14 +346,14 @@ where the pre-sync was no longer the whole cost.
       with, for a pattern node, the pattern that module holds. What the
       bound outputs redirect to is still read through the planning
       transaction on every plan, so an action's transaction records the
-      reads it did before and an instantiation writes what it did before. A
-      reload of the thirty-row
-      room made 9,528 plans and computed 9,528 bindings; it now computes
-      3,111, none of them at instantiation, and holds 69 MB of bindings at
-      its peak and none once the tree is running. The 1,823 further calls
-      the planner made to itself for nodes whose module is a registry
-      reference bound nothing, and are gone with the loop that resolves the
-      reference first.
+      reads it did before and an instantiation writes what it did before.
+      Measured at `1384591508`, when the room built two rows a message, a
+      reload of the thirty-message room made 9,528 plans and computed 9,528
+      bindings; it now computes 3,111, none of them at instantiation, and
+      holds 69 MB of bindings at its peak and none once the tree is
+      running. The 1,823 further calls the planner made to itself for nodes
+      whose module is a registry reference bound nothing, and are gone with
+      the loop that resolves the reference first.
 - [x] A runtime keeps the ids of the derived internal cells it has hashed
       most recently, 65,536 of them (`DerivedInternalCellIds`,
       `packages/runner/src/derived-internal-cell-ids.ts`). Every action
@@ -364,8 +364,9 @@ where the pre-sync was no longer the whole cost.
       (`EventHandlerRegistry`, `packages/runner/src/scheduler/events.ts`),
       where a registration and a dispatch each compared the link of every
       handler registered. The reload registers 1,154.
-- [x] Measured as process CPU time on a Deno reload of the thirty-row room,
-      main against the three changes above, two runs of each side by side:
+- [x] Measured as process CPU time on a Deno reload of that room, main at
+      `1384591508` against the three changes above, two runs of each side
+      by side:
       the two `messages.map` actions from 8.4 to 5.0 s, node plans at
       instantiation from 3.1 to 0.4 s and in the pre-sync from 13.8 to
       6.2 s, derived cell ids from 2.1 to 0.4 s, handler registration from
