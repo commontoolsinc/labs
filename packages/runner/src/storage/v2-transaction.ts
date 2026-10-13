@@ -4,6 +4,7 @@ import {
   deepFreeze,
   isDeepFrozen,
   isFabricPlainContainer,
+  missingContainerIsArray,
   valueEqual,
   valueEqualByWalk,
 } from "@commonfabric/data-model";
@@ -421,8 +422,14 @@ export type PatchDraftCandidate = {
  * not hold, or would be an element itself, added by its index. Where no array
  * sits that far down, it is the deepest one above the prefix.
  *
- * With no array above `path`, the path above the first segment written as an
- * index, or as `length`, stands in for one.
+ * With no array above `path` the write is diffed at `path` itself: a segment
+ * written as an index, or as `length`, is then a key of the plain object that
+ * holds it. In one case the path of a plain object is returned in an array's
+ * place. The server creates a container the starting document lacks as it
+ * applies an `add` beneath it, and shapes it by the segment that follows: an
+ * array where `missingContainerIsArray()` says so. The commit holds a plain
+ * object there, so where such a segment follows a container the starting
+ * document lacks, that container's path is returned and it is sent whole.
  */
 const findArrayPatchPath = (
   before: FabricValue | undefined,
@@ -431,8 +438,9 @@ const findArrayPatchPath = (
 ): readonly string[] | null => {
   const options = { allowArrayLength: true };
   let arrayDepth = -1;
-  // Whether a prefix of `path` already looked at is in one document alone.
-  let diverged = false;
+  // Length of the shortest prefix of `path` that is in one document alone,
+  // once one has been found.
+  let divergedDepth: number | undefined;
 
   for (let depth = 0; depth < path.length; depth += 1) {
     const prefix = path.slice(0, depth);
@@ -440,16 +448,20 @@ const findArrayPatchPath = (
       Array.isArray(readValueAtPath(after, prefix, options));
     if (isArray) {
       arrayDepth = depth;
-      if (diverged) {
+      if (divergedDepth !== undefined) {
         break;
       }
     }
-    if (!diverged) {
+    if (divergedDepth === undefined) {
       const child = path.slice(0, depth + 1);
-      diverged = hasValueAtPath(before, child, options) !==
-        hasValueAtPath(after, child, options);
-      if (diverged && isArray) {
-        break;
+      if (
+        hasValueAtPath(before, child, options) !==
+          hasValueAtPath(after, child, options)
+      ) {
+        divergedDepth = depth + 1;
+        if (isArray) {
+          break;
+        }
       }
     }
   }
@@ -458,12 +470,20 @@ const findArrayPatchPath = (
     return path.slice(0, arrayDepth);
   }
 
-  const firstArrayLikeSegment = path.findIndex((segment) =>
-    segment === "length" || isArrayIndexPropertyName(segment)
-  );
-  return firstArrayLikeSegment === -1
-    ? null
-    : path.slice(0, firstArrayLikeSegment);
+  // No prefix is missing from the starting document, so the server has no
+  // container to create.
+  if (
+    divergedDepth === undefined ||
+    hasValueAtPath(before, path.slice(0, divergedDepth), options)
+  ) {
+    return null;
+  }
+  for (let index = divergedDepth; index < path.length; index += 1) {
+    if (missingContainerIsArray(path[index]!)) {
+      return path.slice(0, index);
+    }
+  }
+  return null;
 };
 
 /**

@@ -103,13 +103,20 @@ array inside it, reaches the engine in one of the three shapes above, on the
 array that holds the element. An array that arrives beneath a new key of a
 plain object is sent whole, as an `add` at its own path.
 
-The generator sends a write at or beneath an integer-like key of a plain object
-as an op at the written path where the key is past the range of array indices.
-Where the key is inside that range, or is `length`, and no array sits above it,
-the generator sends the record holding the key whole, as a `replace`, or as an
-`add` where the record is new. That is conservative for both matchers, and it
-costs that record the per-key granularity of §1: two writers of different keys
-of it conflict.
+With no array above it, a write is diffed at the path it was made at, and that
+holds for a key written as an integer, inside the range of array indices or
+past it, and for a key named `length`: beneath a plain object each is a key of
+that object. So a record keyed by ids or counters keeps the per-key granularity
+of §1, and a mergeable op at such a key (an `increment`, a first `append`)
+travels alone, with no `replace` of the record beside it to undo it.
+
+One case is sent coarser. The engine creates a container the stored document
+lacks as it applies an `add` beneath it, and shapes it by the segment that
+follows: an array for an index inside the range or for `-`, an object for
+anything else (`01-data-model.md` §6.2). Where the commit holds a plain object
+at a path the starting document lacks, and a segment that would make the
+engine create an array follows it, the generator sends that object whole, as
+one `add` at its path.
 
 Because the safety of leaf-only matching *depends* on this — and it is a
 whole-system property of the producer rather than something the engine enforces —
