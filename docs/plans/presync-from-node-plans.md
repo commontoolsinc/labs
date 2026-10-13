@@ -101,9 +101,11 @@ A plan has two parts, and the runner computes them differently. Binding the
 node's inputs and outputs to the piece's argument and result documents, and
 building `inputsCell` from the bound inputs, reads nothing through a
 transaction: the result is a function of the node, its pattern's manifest and
-argument schema, the result cell's link and the argument link. The runner
-holds that part by those four from the plan a pre-sync makes of a node until
-the plan its instantiation makes takes it (`NodeBindingMemo`,
+argument schema, the result cell's link and the argument link, for a given
+kind of module. The runner holds that part by those four and by the kind of
+module the node resolved to, with the pattern a pattern node's module holds,
+from the plan a pre-sync makes of a node until the plan its instantiation
+makes takes it (`NodeBindingMemo`,
 `packages/runner/src/node-binding-memo.ts`), so the two plans share one
 binding, a running node's bindings are held by the node alone, and a pattern
 node's bound child is the same pattern object in both plans, under which the

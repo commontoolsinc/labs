@@ -90,6 +90,7 @@ describe("node-binding-memo", () => {
       const cases: [string, Partial<NodeBindingSubject>][] = [
         ["node", { node: {} }],
         ["pattern", { pattern: {} }],
+        ["implementation", { implementation: {} }],
         ["variant", { variant: "raw:map" }],
         ["result document", { resultLink: linkTo("other") }],
         ["result path", { resultLink: linkTo("result", { path: ["a"] }) }],

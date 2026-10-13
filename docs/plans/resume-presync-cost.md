@@ -303,18 +303,20 @@ where the pre-sync was no longer the whole cost.
       (`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`).
       Binding reads nothing through a transaction, so the held part is keyed
       by what it is computed from: the node, its pattern, the result cell's
-      link and the argument link. What the bound outputs redirect to is
-      still read through the planning transaction on every plan, so an
-      action's transaction records the reads it did before and an
-      instantiation writes what it did before. A reload of the thirty-row
+      link, the argument link, and the kind of module the node resolved to
+      with, for a pattern node, the pattern that module holds. What the
+      bound outputs redirect to is still read through the planning
+      transaction on every plan, so an action's transaction records the
+      reads it did before and an instantiation writes what it did before. A
+      reload of the thirty-row
       room made 9,528 plans and computed 9,528 bindings; it now computes
       3,111, none of them at instantiation, and holds 69 MB of bindings at
       its peak and none once the tree is running. The 1,823 further calls
       the planner made to itself for nodes whose module is a registry
       reference bound nothing, and are gone with the loop that resolves the
       reference first.
-- [x] A runtime keeps the id of each derived internal cell it has hashed
-      (`DerivedInternalCellIds`,
+- [x] A runtime keeps the ids of the derived internal cells it has hashed
+      most recently, 65,536 of them (`DerivedInternalCellIds`,
       `packages/runner/src/derived-internal-cell-ids.ts`). Every action
       whose scheduler summary is complete lists its pattern's derived cells,
       so a row of 49 nodes hashed each of its cells' ids once per such

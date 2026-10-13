@@ -20,6 +20,7 @@ import {
   waveSettlementOf,
 } from "../executor/wave.ts";
 import {
+  addressKey,
   areNormalizedLinksSame,
   type NormalizedFullLink,
 } from "../link-utils.ts";
@@ -97,7 +98,7 @@ const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
 /**
  * The handlers registered for event streams, at most one per stream, each
- * held under its stream's address: the members of a link
+ * held under its stream's address (`addressKey()`): the members of a link
  * `areNormalizedLinksSame()` compares. Registering, removing and finding a
  * handler therefore cost the same however many streams are registered.
  * Iteration yields the registrations in the order they were made, a handler
@@ -120,7 +121,7 @@ export class EventHandlerRegistry {
 
   /** Returns the handler registered for the stream `link` names, if any. */
   get(link: NormalizedFullLink): EventHandler | undefined {
-    return this.#byStream.get(streamKey(link))?.[1];
+    return this.#byStream.get(addressKey(link))?.[1];
   }
 
   /**
@@ -130,7 +131,7 @@ export class EventHandlerRegistry {
   registration(
     link: NormalizedFullLink,
   ): readonly [NormalizedFullLink, EventHandler] | undefined {
-    return this.#byStream.get(streamKey(link));
+    return this.#byStream.get(addressKey(link));
   }
 
   /**
@@ -138,7 +139,7 @@ export class EventHandlerRegistry {
    * handler registered for it.
    */
   set(link: NormalizedFullLink, handler: EventHandler): void {
-    const key = streamKey(link);
+    const key = addressKey(link);
     // Removed first, so that a replacement is the newest registration.
     this.#byStream.delete(key);
     this.#byStream.set(key, [link, handler]);
@@ -146,7 +147,7 @@ export class EventHandlerRegistry {
 
   /** Removes the registration for the stream `link` names, if any. */
   delete(link: NormalizedFullLink): void {
-    this.#byStream.delete(streamKey(link));
+    this.#byStream.delete(addressKey(link));
   }
 
   /** Iterates the registrations, oldest first. */
@@ -155,19 +156,6 @@ export class EventHandlerRegistry {
   > {
     return this.#byStream.values();
   }
-}
-
-/**
- * The address of the stream `link` names, as a map key: its members as one
- * JSON array, so that no two streams share a key.
- */
-function streamKey(link: NormalizedFullLink): string {
-  return JSON.stringify([
-    link.space,
-    link.scope ?? "space",
-    link.id,
-    link.path,
-  ]);
 }
 
 const guardedImplementations = Symbol("guarded event implementations");

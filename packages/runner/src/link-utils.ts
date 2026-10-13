@@ -1030,8 +1030,9 @@ export function getDerivedInternalCellLink(
   return {
     space: resultCellLink.space,
     // The kind's ONLY representation is the URI scheme applied here by
-    // toURI; the hash preimage is kind-free, so this mint site is the single
-    // place a computed identity is established.
+    // toURI. The hash, which the runtime's `DerivedInternalCellIds` supplies,
+    // is kind-free, so this is the single place a computed identity is
+    // established.
     id: toURI(
       cellRuntime(resultCell).derivedInternalCellIds.idFor(
         resultCell,

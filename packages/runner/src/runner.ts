@@ -315,12 +315,23 @@ const RESULT_SHORTCUT_LIMIT = 4096;
 const NODE_BINDING_LIMIT = 65_536;
 
 /**
- * The most characters of key and inputs document the held node bindings of
- * one kind have between them. An inputs document carries a schema inline
- * for every link it holds, and runs to tens of thousands of characters, so
- * this bound is the one a large tree reaches first.
+ * The most weight the held node bindings of one kind have between them, in
+ * characters: those of each binding's key, and of its inputs document or,
+ * for a pattern node, {@link BOUND_CHILD_NODE_WEIGHT} for each node of its
+ * bound child. An inputs document carries a schema inline for every link it
+ * holds, and runs to tens of thousands of characters, so this bound is the
+ * one a large tree reaches first.
  */
 const NODE_BINDING_WEIGHT_LIMIT = 256 * 1024 * 1024;
+
+/**
+ * What one node of a pattern node's bound child counts toward
+ * {@link NODE_BINDING_WEIGHT_LIMIT}. Binding a child copies each of its
+ * nodes along the paths that hold an alias and shares the rest, schemas
+ * among it, with the pattern it was bound from, so the copy is not measured
+ * but taken to be a few thousand characters a node.
+ */
+const BOUND_CHILD_NODE_WEIGHT = 4096;
 
 /**
  * Presence probes `Runner.#patternToNameBeforeRun` may spend before it stops
@@ -2539,11 +2550,13 @@ export class Runner {
 
   /**
    * The bindings of the pattern nodes a resume pre-sync of this runner has
-   * planned and no instantiation has taken yet.
+   * planned and no instantiation has taken yet, weighed by the node count of
+   * their bound children.
    */
   readonly #patternNodeBindings = new NodeBindingMemo<PatternNodeBindingCore>({
     capacity: NODE_BINDING_LIMIT,
     maxWeight: NODE_BINDING_WEIGHT_LIMIT,
+    weigh: (binding) => binding.child.nodes.length * BOUND_CHILD_NODE_WEIGHT,
   });
 
   /**
@@ -13552,6 +13565,9 @@ export class Runner {
       const subject = {
         node,
         pattern,
+        // A node whose module is a registry reference keeps its identity
+        // when the registry puts another pattern under the name.
+        implementation,
         resultLink: resultCell.getAsNormalizedFullLink(),
         argumentLink: argumentCellLink,
         variant: bindingVariant("pattern", undefined),

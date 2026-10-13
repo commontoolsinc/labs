@@ -151,11 +151,61 @@ describe("derived-internal-cell-ids", () => {
       );
     });
 
-    it("hashes again for an equal partial cause held in another object", () => {
+    it("hashes an id once for partial causes equal in content", () => {
       const { ids, mints } = counted();
-      const one = ids.idFor(first, { $generated: 1 });
-      const other = ids.idFor(first, { $generated: 1 });
+      const one = ids.idFor(first, { $generated: 1, name: ["a", null] });
+      const other = ids.idFor(first, { $generated: 1, name: ["a", null] });
 
+      expect(other.toString()).toBe(one.toString());
+      expect(mints()).toBe(1);
+    });
+
+    it("returns the id of a partial cause as it is when asked, after a change in place", () => {
+      const { ids, mints } = counted();
+      const partialCause = { $generated: 1 };
+      const before = ids.idFor(first, partialCause);
+      partialCause.$generated = 2;
+      const after = ids.idFor(first, partialCause);
+
+      expect(before.toString()).toBe(derived(first, { $generated: 1 }));
+      expect(after.toString()).toBe(derived(first, { $generated: 2 }));
+      expect(mints()).toBe(2);
+    });
+
+    it("returns one id for partial causes whose members come in another order", () => {
+      const { ids } = counted();
+
+      expect(ids.idFor(first, { a: 1, b: 2 }).toString()).toBe(
+        derived(first, { a: 1, b: 2 }),
+      );
+      expect(ids.idFor(first, { b: 2, a: 1 }).toString()).toBe(
+        derived(first, { b: 2, a: 1 }),
+      );
+    });
+
+    it("hashes each time for a partial cause that holds one object twice", () => {
+      // `createRef()` reads the second occurrence of an object as a cycle, so
+      // the id differs from that of two equal objects, and content alone
+      // does not name it.
+
+      const { ids, mints } = counted();
+      const shared = { n: 1 };
+      const twice = { left: shared, right: shared };
+      const apart = { left: { n: 1 }, right: { n: 1 } };
+
+      expect(ids.idFor(first, twice).toString()).toBe(derived(first, twice));
+      expect(ids.idFor(first, twice).toString()).toBe(derived(first, twice));
+      expect(ids.idFor(first, apart).toString()).toBe(derived(first, apart));
+      expect(mints()).toBe(3);
+    });
+
+    it("hashes each time for a partial cause that holds an instance of a class", () => {
+      const { ids, mints } = counted();
+      const partialCause = { at: new Date(0) } as unknown as JSONValue;
+      const one = ids.idFor(first, partialCause);
+      const other = ids.idFor(first, partialCause);
+
+      expect(one.toString()).toBe(derived(first, partialCause));
       expect(other.toString()).toBe(one.toString());
       expect(mints()).toBe(2);
     });

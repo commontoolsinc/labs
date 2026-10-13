@@ -1,7 +1,7 @@
 import { hashSchema } from "@commonfabric/data-model-schema";
 import { LRUCache } from "@commonfabric/utils/cache";
 
-import type { NormalizedFullLink } from "./link-types.ts";
+import { addressKey, type NormalizedFullLink } from "./link-types.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 
 /** What a node binding is computed from, which is what the memo keys on. */
@@ -11,6 +11,13 @@ export type NodeBindingSubject = {
 
   /** The pattern holding the node, by identity. */
   pattern: object;
+
+  /**
+   * Any further object the binding is computed from, by identity: the
+   * pattern a pattern node's module resolved to, which a registry may
+   * replace under an unchanged node.
+   */
+  implementation?: object;
 
   /** The link of the result cell the node is bound on. */
   resultLink: NormalizedFullLink;
@@ -126,6 +133,9 @@ export class NodeBindingMemo<Binding> {
     return JSON.stringify([
       this.#subjectId(subject.node),
       this.#subjectId(subject.pattern),
+      subject.implementation === undefined
+        ? null
+        : this.#subjectId(subject.implementation),
       subject.variant,
       linkMembers(subject.resultLink),
       subject.argumentLink === undefined
@@ -145,13 +155,13 @@ export class NodeBindingMemo<Binding> {
   }
 }
 
-/** The members of `link` a binding reads, its schema as a content hash. */
-function linkMembers(link: NormalizedFullLink): unknown[] {
+/**
+ * The members of `link` a binding reads: its address, and its schema as a
+ * content hash.
+ */
+function linkMembers(link: NormalizedFullLink): [string, string | null] {
   return [
-    link.space,
-    link.scope,
-    link.id,
-    link.path,
+    addressKey(link),
     link.schema === undefined ? null : hashSchema(link.schema),
   ];
 }
