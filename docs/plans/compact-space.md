@@ -1025,8 +1025,8 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 through 4 have landed, stage 6 has
-run, stage 5 is in review, and stage 7 onward is open. Two engine changes came first, and both have landed: the
+Each stage is a pull request. Stages 1 through 5 have landed, stage 6 has
+run and closed its acceptance checks, and stage 7 onward is open. Two engine changes came first, and both have landed: the
 base search, because it preserves history, helps the uncompacted store from
 the deploy that carries it, and is the measurement the compaction decision
 was made against; and the basis guard, because no store may be compacted
@@ -1078,7 +1078,8 @@ until the engine can tell compacted history from absence.
    a store with a second branch is refused; a run interrupted after the first
    instance resumes to the same result as an uninterrupted one, with two
    compaction commits.
-5. **Documentation and the spec amendment** — in review. The `cf space
+5. **Documentation and the spec amendment** — done ([labs#8786](https://github.com/commonfabric/labs/pull/8786),
+   merged 2026-10-13). The `cf space
    compact` section of `packages/cli/README.md` (the command-docs gate
    requires it; landed with stage 4), the §7.1 paragraph in `02-storage.md`,
    the state inspector learning the `compaction` member (the ACL document's
