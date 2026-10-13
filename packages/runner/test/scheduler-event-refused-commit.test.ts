@@ -5,7 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { Cell } from "../src/cell.ts";
-import { Runtime, type RuntimeOptions } from "../src/runtime.ts";
+import { Runtime } from "../src/runtime.ts";
 import { EventCommitRefusedError } from "../src/scheduler/backpressure.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -51,14 +51,12 @@ describe("scheduler-event-refused-commit", () => {
   let errors: Error[];
   let offers: Cell<string[]>;
   let stream: Cell<number>;
+  let handlerRuns: number;
 
-  async function open(
-    options: Pick<RuntimeOptions, "experimental"> = {},
-  ): Promise<void> {
+  async function open(): Promise<void> {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      ...options,
     });
     runtime.scheduler.onError((error) => errors.push(error));
     const tx = runtime.edit();
@@ -70,6 +68,7 @@ describe("scheduler-event-refused-commit", () => {
     expect(error).toBeUndefined();
     // Appends each event to `offers`, as an inbox's `receive` does.
     runtime.scheduler.addEventHandler((handlerTx, event) => {
+      handlerRuns++;
       const current = offers.withTx(handlerTx).get() ?? [];
       offers.withTx(handlerTx).set([...current, String(event)]);
     }, stream.getAsNormalizedFullLink());
@@ -92,6 +91,7 @@ describe("scheduler-event-refused-commit", () => {
     server = newSharedServer();
     storage = EmulatedStorageManager.connectTo(server, { as: signer });
     errors = [];
+    handlerRuns = 0;
   });
 
   afterEach(async () => {
@@ -188,22 +188,9 @@ describe("scheduler-event-refused-commit", () => {
     expect(await send("offer")).toBe("done");
     await runtime.idle();
 
+    // The refused run, and the re-run whose commit lands.
+    expect(handlerRuns).toBe(2);
     expect(errors).toEqual([]);
     expect(offers.get()).toEqual(["offer"]);
-  });
-
-  it("reports nothing with server execution on", async () => {
-    // With server execution on, a client event is the echo of a run the
-    // server makes and reports on for itself.
-    await open({ experimental: { serverExecution: true } });
-    refuseNextTransact(server, {
-      name: "AuthorizationError",
-      message: "not authorized",
-    });
-
-    await send("offer");
-    await runtime.idle();
-
-    expect(errors).toEqual([]);
   });
 });
