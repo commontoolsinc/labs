@@ -113,7 +113,8 @@ export class ServedLoggerCounts implements Disposable {
 
   /**
    * Constructs an instance which counts each error and warning logged while
-   * `inServingContext()` returns `true`.
+   * `inServingContext()` returns `true`. The unnamed global `log` is left
+   * out, as the run's deltas leave it out: no registry entry holds it.
    */
   constructor(inServingContext: () => boolean) {
     setLoggerCountObserver((name, key, level) => {

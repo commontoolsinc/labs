@@ -611,7 +611,9 @@ context described below. A logger error the loop logs fails the file as a
 console error marked `[served]`, under `allowConsoleErrors`. A logger warning
 it logs is listed under the file as a serving-loop warning and fails nothing,
 since the loop warns about work it goes on to recover from, a dropped wave
-contribution among them. A multi-user run's serving loop runs in the
+contribution among them. A performance diagnostic, a warning
+`packages/cli/lib/perf-diagnostic-logs.ts` names, is left out of that list as
+it is left out of the test's own warnings. A multi-user run's serving loop runs in the
 orchestrator, where no counts are taken. A served handler runs under the
 serving runtime's CFC posture rather than the test's.
 
