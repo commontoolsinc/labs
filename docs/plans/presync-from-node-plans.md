@@ -54,7 +54,10 @@ calls it from `#instantiateNode`. The pre-sync calls it from
 from the plan. The list-children pass is the one caller that binds a node
 without it: `#syncListSlotResolutions` and `#syncResumeListChildren` derive a
 list coordinator's inputs through `#buildRawNodeInputs`, the binder a raw
-node's plan uses.
+node's plan uses. The bindings a pre-sync's plan computes are held until the
+plan the node's instantiation makes takes them (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`); "One plan per node" below says
+which part of a plan that covers.
 
 The pre-sync (`#syncCellsForRunningPattern`) names the result document and
 then syncs what each node's plan names (`#cellsNodePlanReads`): a JavaScript
@@ -86,11 +89,12 @@ nodes and none of that round's syncs has failed.
 
 `runSynced` runs the same pre-sync before setup. On a fresh start the result
 document has no `argument` meta link yet, so the plans bind against an
-immutable cell holding the caller's argument. `run()` is synchronous and runs
-no pre-sync for a fresh piece. Over a piece set up elsewhere, `run()` asks
-the gate described below and, when the gate finds a document absent, defers
-setup and start until the same pre-sync has landed
-(`#runAfterNamedFamilyLands`).
+immutable cell holding the caller's argument. A fresh start whose caller
+passes no argument has nothing to bind against: the pre-sync plans none of
+its nodes and logs that it skipped them. `run()` is synchronous and runs no
+pre-sync for a fresh piece. Over a piece set up elsewhere, `run()` asks the
+gate described below and, when the gate finds a document absent, defers setup
+and start until the same pre-sync has landed (`#runAfterNamedFamilyLands`).
 
 A start that resumes a piece from storage awaits the pre-sync and then
 instantiates the piece with `awaitSyncBeforeInitialRun` set (`#doStart`).
@@ -103,9 +107,12 @@ releases it whether or not they have landed. A pattern node passes the option
 on to its child's start, and a list builtin passes it to the element runs of
 its first non-empty reconcile after a resume (`resumeBatchAwaitSync`). Events
 wait on specific loads where computations do not. The event at the head of
-the queue parks on the loads in flight for documents its handler reads, and a
-client dispatch whose handler did not run is run again parked on the loads
-its own reads registered (`packages/runner/src/scheduler/events.ts`).
+the queue parks on the loads in flight for documents its handler reads. A
+client dispatch whose handler did not run, on a runtime without server
+execution, is run again unless its caller sent it with `retries: false`, in
+which case it is dropped. The run that follows is parked on the loads the
+first run's reads registered when any are in flight, and otherwise waits a
+backoff step (`packages/runner/src/scheduler/events.ts`).
 
 Two gates decide whether a run or a swap over a stored piece must name the
 piece's family first, and both probe the replica for documents.
