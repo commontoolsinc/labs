@@ -116,9 +116,9 @@ export function renderVDomToHtml(
  * Helper for `renderPiece()`, which waits until `runtime` has nothing left to
  * compute and no storage work outstanding that a computation is waiting for.
  *
- * It waits neither for the store to settle commits nor for builtin I/O in
- * flight, such as a fetch or a language-model call, so a tree read after it
- * can still change.
+ * A commit may still be pending when it resolves, and so may builtin I/O such
+ * as a fetch or a language-model call, so a tree read after it can still
+ * change.
  */
 async function idleWithNothingLoading(runtime: Runtime): Promise<void> {
   const storage = runtime.storageManager;
@@ -128,8 +128,11 @@ async function idleWithNothingLoading(runtime: Runtime): Promise<void> {
   // computation once it settles: a resumed list waits there for its result
   // container, and builds no row until it has it. The re-armed computation can
   // register more, so we repeat until an idle leaves nothing registered.
+  //
+  // `crossSpaceSettled()` waits for that barrier alone. A storage manager
+  // without it is asked for a full sync, which takes the barrier in.
   while ((storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0) {
-    await storage.synced();
+    await (storage.crossSpaceSettled?.() ?? storage.synced());
     await runtime.idle();
   }
 }
