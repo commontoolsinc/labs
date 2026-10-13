@@ -250,14 +250,29 @@ describe("graph-query", () => {
           ]);
         });
 
-        it("requests only stored documents from its manager", () => {
-          const { manager, walk } = walkOver(documents());
+        it("names the stored document as the referrer of a missing document linked from inside the object", () => {
+          // A miss is retired when its referrer is walked again without the
+          // link, so the referrer has to be a document a walk can visit.
+          const manager = new StubObjectManager(
+            new Map<string, FabricValue>([
+              [keyFor("of:root"), { donuts: [{ glaze: linkTo("of:absent") }] }],
+            ]),
+          );
+          const misses: { missKey: string; referrerKey?: string }[] = [];
+          const walk = new GraphQueryWalk({
+            manager,
+            space: SPACE,
+            schemaTracker: new MapSetStringToPathSelectors(true),
+            identity: TEST_SCOPE_IDENTITY,
+            onMissedDoc: (missKey, _selector, referrerKey) => {
+              misses.push({ missKey, referrerKey });
+            },
+          });
 
           walk.visit(documentFor(manager, "of:root"), selector);
 
-          expect([...new Set(manager.requested)].toSorted()).toEqual([
-            keyFor("of:glaze"),
-            keyFor("of:root"),
+          expect(misses).toEqual([
+            { missKey: keyFor("of:absent"), referrerKey: keyFor("of:root") },
           ]);
         });
       });
