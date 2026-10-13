@@ -154,9 +154,9 @@ room's members by principal or by profile itself.
   whose space's root is a room.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
-  stored. A room reads it to tell whether the viewer's chats list it, without
-  this manager's own facts having been computed, before it sends
-  [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput).
+  stored. Membership checks belong to the manager's Home-space handling. A
+  room sends [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput)
+  after a successful message or reaction without reading this private catalog.
 - **`direct`** holds, for each counterpart principal, the entry of the direct
   room this user shares with them. It has at most one entry per counterpart. It
   keeps a direct room's entry even after the room is forgotten, so the

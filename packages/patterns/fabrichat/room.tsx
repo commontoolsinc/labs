@@ -45,8 +45,7 @@ import {
   type ParticipantRosterCell,
   rosterProfiles,
 } from "../loom/participants.tsx";
-import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
-import { isInMain, type ShownIn } from "./logic.ts";
+import { isInMain, type ShownIn, viewPlaces } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCounters,
@@ -63,6 +62,7 @@ import {
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
+  isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
   messageEntries,
@@ -333,9 +333,6 @@ export interface RoomManager {
 
   /** Makes a room the viewer has joined one of their chats. */
   joinRoom?: Stream<JoinRoomRequest>;
-
-  /** The shared-space catalog the manager lists the viewer's rooms from. */
-  sharedSpaceCatalog?: SharedSpaceCatalogStorage;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
@@ -998,13 +995,20 @@ export const FabriChatRoomCore = pattern<
     counters,
     canJoin,
     joinRoom: manager?.joinRoom,
-    catalog: manager?.sharedSpaceCatalog,
     self,
   };
   const alsoToMain = new Writable.perSession(false);
   const windows = new Writable.perSession<WindowsValue>();
 
   const entries = computed(() => messageEntries(messages));
+  // Every message's place in the views, derived once for the whole list. Each
+  // row reads its own message's entry, so no row scans the list, and a change
+  // to one message re-runs only the rows whose entries changed.
+  const places = computed(() =>
+    viewPlaces(
+      entries.map(({ key, sentAt, replyTo }) => ({ key, sentAt, replyTo })),
+    )
+  );
   const mainEntries = computed(() =>
     entries.filter(isInMain).sort(compareEntries)
   );
@@ -1054,6 +1058,7 @@ export const FabriChatRoomCore = pattern<
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
+  const isOwner = computed(() => isOwnerOf(messages));
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
   const aboutView = {
@@ -1071,10 +1076,28 @@ export const FabriChatRoomCore = pattern<
   const title = computed(() =>
     about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
   );
-  const hasThread = computed(() => {
+  // The key of the session's open thread's root; `""` while no thread is
+  // open.
+  const openThreadKey = computed(() => {
     const root = composer.get()?.thread;
-    return root?.get() !== undefined && entryFor(entries, root) !== undefined;
+    return (root?.get() === undefined ? undefined : entryFor(entries, root))
+      ?.key ?? "";
   });
+  const hasThread = computed(() => openThreadKey !== "");
+  // The session's open thread: its root, and every message in the thread the
+  // root starts, in the order the room recorded them. The thread's list maps
+  // it, so a session holds a thread row for each message of the thread it has
+  // open, and none while it has no thread open. The list is the session's
+  // own, as the open thread is, and the rows mapped from it are stored per
+  // session with it, so no viewer's rows replace another's.
+  const threadMessages = computed((): PerSession<MessageCell[]> =>
+    openThreadKey === ""
+      ? []
+      : entries.filter((entry) =>
+        entry.key === openThreadKey ||
+        places[entry.key]?.thread === openThreadKey
+      ).map((entry) => entry.cell)
+  );
   const replyingTo = computed(() => bodyText(composer.get()?.replyTo?.get()));
   // Per-session and per-viewer parts are hidden by a prop, never built as a
   // different tree (see `FabriChatMessageRow`).
@@ -1196,6 +1219,9 @@ export const FabriChatRoomCore = pattern<
               myProfile={myProfile}
               kind={kind}
               composer={composer}
+              places={places}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1204,7 +1230,6 @@ export const FabriChatRoomCore = pattern<
               counters={counters}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
-              catalog={manager?.sharedSpaceCatalog}
               self={self}
             />
           ))}
@@ -1254,13 +1279,16 @@ export const FabriChatRoomCore = pattern<
               Close
             </cf-button>
           </cf-hstack>
-          {messages.map((message) => (
+          {threadMessages.map((message) => (
             <FabriChatMessageRow
               message={message}
               inThread
               myProfile={myProfile}
               kind={kind}
               composer={composer}
+              places={places}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1269,7 +1297,6 @@ export const FabriChatRoomCore = pattern<
               counters={counters}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
-              catalog={manager?.sharedSpaceCatalog}
               self={self}
             />
           ))}
