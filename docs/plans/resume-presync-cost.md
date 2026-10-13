@@ -269,16 +269,28 @@ where the pre-sync was no longer the whole cost.
       as fully mutable trees. It goes when `factoryFromPattern` produces a
       deep-frozen argument schema, which changes every pattern and is a
       change of its own.
+- [x] A preparation seals a frozen snapshot of the transaction's activity
+      and computes its digest only when something reads it. A commit whose
+      activity epoch stands where the preparation left it accepts the
+      snapshot by identity; one whose epoch moved snapshots again, hashes
+      both and compares (`docs/specs/cfc-commit-preparation.md`, "The
+      prepared digest and the commit-time recheck"). The snapshot's records
+      are frozen without entering the deep-frozen cache. On the thirty-row
+      room's reload each of the 1,223 prepared commits had hashed a digest
+      and none does; the digest fell from 3.2–4.2% of the load's profiler
+      samples to 0.5–0.6%, and preparation from 6.1–7.8% to 3.5–4.4%, over
+      three base and two changed runs interleaved on one machine at a load
+      average between 250 and 500. The shares count samples: at that load
+      most of the time between two samples is time descheduled.
 - [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
-      transaction elides as equal to what is stored, read 345 documents
-      each on average, and take nine tenths of what preparation still
-      costs. An elided write is still an attempt the gates answer to
-      (the Contextual Flow Control specification's §8.10.2.1), so such a
-      commit cannot skip preparation without changing what is refused.
-      What it mostly pays is the prepared digest, built and
-      hashed over every read for a comparison that the unchanged activity
-      epoch already answers at commit; hashing it only when the epoch has
-      moved is the next cut, and the flow join after it.
+      transaction elides as equal to what is stored, and read 345 documents
+      each on average. An elided write is still an attempt the gates answer
+      to (the Contextual Flow Control specification's §8.10.2.1), so such a
+      commit cannot skip preparation without changing what is refused. What
+      it still pays toward a digest is the snapshot, one record per read,
+      which is taken where the preparation ends: taken any later, it would
+      rest on every activity site reporting itself before the journal
+      changes. The flow join is the next cut.
 - [x] The storage manager keeps each data URI's hash and decoded value in a
       weight-bounded memo, and does not sync a link that declares a stream:
       its document holds no value a read uses, and the sync had sent one
