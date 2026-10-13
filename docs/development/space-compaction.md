@@ -122,7 +122,7 @@ against the same reads on the uncompacted snapshot with the same engine
 | board again, warm | 10,073 ms | 8,201 ms |
 | patch replays after the cold board load | 44,928 | 14,273 |
 | one patch on each of the six longest-tailed documents, through the engine | 1–5 ms | 1–5 ms |
-| a topic title edit through the served API, via `cf cell set`: the cold edit of each of two sessions, then the median and range of eight warm edits | 9.0 s and 9.2 s cold; 2.7 s (2.6–3.1 s) warm | 10.7 s and 8.9 s cold; 3.4 s (2.8–3.7 s) warm |
+| a topic title edit through the served API, via `cf cell set`: the cold edit of each of two sessions, then the median and range of seven warm edits | 9.0 s and 9.2 s cold; 2.7 s (2.6–3.1 s) warm | 10.7 s and 8.9 s cold; 3.3 s (2.8–3.7 s) warm |
 
 The board's cold load is a traversal over 21,901 documents either way, which
 compaction does not touch; the replays that remain come from the authored
@@ -135,9 +135,9 @@ topic's graph (6.4 s cold on the uncompacted file, 7.2 s on the compacted,
 2,864 traversals each, `session.watch.add` the only slow query), not the
 write, whose server-side frame is in the noise. Measured the same way on both
 files, the comparison is **inconclusive**, and the plan's "no slower"
-acceptance check for the served edit is **open**: over eight warm edits a
-side, served in turn on one laptop, the compacted file's median is 0.6 s
-slower (3.4 s against 2.7 s); its two cold edits, one per session, point in
+acceptance check for the served edit is **open**: over seven warm edits a
+side, served in turn on one laptop, the compacted file's median is 0.5 s
+slower (3.3 s against 2.7 s); its two cold edits, one per session, point in
 opposite directions (10.7 s against 9.0 s in the first session, 8.9 s
 against 9.2 s in the second); its warm series trends down through the run
 (3.5 s to 2.8 s); and `cf`'s own warm reads on that side run 0.1 s slower

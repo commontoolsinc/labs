@@ -1074,7 +1074,7 @@ until the engine can tell compacted history from absence.
    the board's cold load 15.5 s against 20.2 s and the patch replays behind
    it 14,273 against 44,928, with the traversal still the bound; writes 1–5
    ms at the engine, as after stage 1; a topic edit through the served API
-   via `cf cell set`, eight warm samples a side, 3.4 s median on the
+   via `cf cell set`, seven warm samples a side, 3.3 s median on the
    compacted file against 2.7 s on the uncompacted, the two cold edits 10.7 s
    and 8.9 s against 9.0 s and 9.2 s, the session's watch add being the time
    in both — an
