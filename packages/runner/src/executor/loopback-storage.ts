@@ -18,7 +18,7 @@ import {
   StorageManager,
 } from "../storage/v2.ts";
 import { createSignedSessionOpenAuth } from "../storage/v2-remote-session.ts";
-import { runInServingContext } from "./serving-context.ts";
+import { servingContextLoopback } from "./serving-context.ts";
 
 class LoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
@@ -38,17 +38,16 @@ class LoopbackSessionFactory implements SessionFactory {
   /** The loopback transport, with each server frame taken in the serving
    * context and reported AFTER the session has taken it. */
   #transport(): MemoryClient.Transport {
-    const inner = MemoryClient.loopback(this.#getServer());
+    const inner = servingContextLoopback(this.#getServer(), true);
     const report = this.#onServerFrame;
+    if (report === undefined) return inner;
     return {
       ...inner,
       setReceiver: (next) =>
-        inner.setReceiver((payload) =>
-          runInServingContext(true, () => {
-            next(payload);
-            report?.(payload);
-          })
-        ),
+        inner.setReceiver((payload) => {
+          next(payload);
+          report(payload);
+        }),
     };
   }
 

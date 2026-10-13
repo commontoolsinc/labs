@@ -7,20 +7,21 @@
  * The context is entered where work crosses from one side to the other,
  * since everything else inherits it across its awaits and timers. An
  * `ExecutorHost` enters it for everything the memory server and its owner
- * call it for, the serving runtimes' loopback sessions take each server frame
- * in it, and an emulated client session takes each one outside it. A server
- * frame needs both, because the memory server sends it on a turn armed by
- * whichever session's request caused it. The memory server's own work runs in
- * the context of the session whose request it is handling.
+ * call it for, and each in-process session takes its server frames through
+ * {@link servingContextLoopback}: the serving runtimes' in the context, an
+ * emulated client's outside it. The memory server's own work runs in the
+ * context of the session whose request it is handling.
  *
  * The context rides `AsyncLocalStorage` where the host provides it (Deno). A
  * browser has none, and hosts no serving loop; there the promise-aware
  * fallback keeps the context current until a promise run in it settles.
  *
- * This module is a leaf apart from utils: the top-level `await` that picks
- * the store would stall module evaluation inside an import cycle.
+ * This module imports nothing from the runner: the top-level `await` that
+ * picks the store would stall module evaluation inside an import cycle.
  */
 
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
 import { isDeno } from "@commonfabric/utils/env";
 import {
   type AsyncLocalStore,
@@ -48,4 +49,25 @@ export function inServingContext(): boolean {
  */
 export function runInServingContext<R>(serving: boolean, fn: () => R): R {
   return servingContext.run(serving, fn);
+}
+
+/**
+ * Returns a loopback transport to `server` whose receiver takes each server
+ * frame in the serving context when `serving` is `true`, and outside it when
+ * `false`. The memory server sends each frame on a turn armed by whichever
+ * session's request caused it, and the context that turn carries is set
+ * aside here.
+ */
+export function servingContextLoopback(
+  server: MemoryServer,
+  serving: boolean,
+): MemoryClient.Transport {
+  const inner = MemoryClient.loopback(server);
+  return {
+    ...inner,
+    setReceiver: (next) =>
+      inner.setReceiver((payload) =>
+        runInServingContext(serving, () => next(payload))
+      ),
+  };
 }
