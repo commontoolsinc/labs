@@ -17,7 +17,6 @@ import {
   Writable,
 } from "commonfabric";
 import type { ViewPlace } from "./logic.ts";
-import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
@@ -164,9 +163,6 @@ export interface FabriChatMessageRowInput {
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
 
-  /** The shared-space catalog the viewer's manager lists its rooms from. */
-  catalog?: SharedSpaceCatalogStorage;
-
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
 }
@@ -229,7 +225,6 @@ export const FabriChatMessageRow = pattern<
     counters,
     canJoin,
     joinRoom,
-    catalog,
     self,
   } = input;
   const records = {
@@ -243,7 +238,6 @@ export const FabriChatMessageRow = pattern<
     counters,
     canJoin,
     joinRoom,
-    catalog,
     self,
   };
   const pickerOpen = new Writable.perSession(false);
@@ -484,7 +478,6 @@ export const FabriChatMessageRow = pattern<
                         counters,
                         canJoin,
                         joinRoom,
-                        catalog,
                         self,
                         message,
                         emoji: tally.emoji,
@@ -516,7 +509,6 @@ export const FabriChatMessageRow = pattern<
                         counters,
                         canJoin,
                         joinRoom,
-                        catalog,
                         self,
                         message,
                         emoji: tally.emoji,
@@ -576,7 +568,6 @@ export const FabriChatMessageRow = pattern<
                     counters,
                     canJoin,
                     joinRoom,
-                    catalog,
                     self,
                     message,
                     emoji,
