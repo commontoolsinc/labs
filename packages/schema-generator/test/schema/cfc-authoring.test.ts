@@ -2043,6 +2043,32 @@ describe("Schema: CFC authoring aliases", () => {
       expect(unread).toHaveLength(1);
     });
 
+    it("leaves an `AnyOf` clause whose every alternative is a `PolicyOf` read from a type alone out of a confidentiality list", async () => {
+      // A clause with no alternative left would be as unmatchable as the
+      // atom alone.
+      const { ifc, unread } = await readFromType(`
+        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
+        interface Holder {
+          value: Labeled<readonly [AnyOf<readonly [PolicyOf<typeof rules>]>]>;
+        }
+      `);
+
+      expect(ifc).toEqual({ confidentiality: [] });
+      expect(unread).toHaveLength(1);
+    });
+
+    it("keeps the alternatives beside a `PolicyOf` it leaves out of an `AnyOf` clause", async () => {
+      const { ifc, unread } = await readFromType(`
+        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
+        interface Holder {
+          value: Labeled<readonly [AnyOf<readonly ["a", PolicyOf<typeof rules>]>, "b"]>;
+        }
+      `);
+
+      expect(ifc).toEqual({ confidentiality: [{ anyOf: ["a"] }, "b"] });
+      expect(unread).toHaveLength(1);
+    });
+
     it("leaves a `PolicyOf` read from a type alone out of a `Cfc` payload's confidentiality list", async () => {
       const { ifc, unread } = await readFromType(`
         type Labeled<L extends readonly unknown[]> = Cfc<string, { confidentiality: L }>;

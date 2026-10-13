@@ -1633,7 +1633,9 @@ Mechanics:
   denotes it, has no binding to read: its brand is read as an ordinary object,
   `{ __ct_cfc_policy_of__: undefined }`, not as a policy atom
   (`isUnboundPolicyOf`, `unread-label-diagnostics.ts`). A confidentiality
-  list leaves such an atom out: no exchange rule could match it, so carried
+  list leaves such an atom out, as an atom of its own or as an alternative of
+  an `AnyOf` clause, and the clause with it when no alternative remains: no
+  exchange rule could match it, so carried
   it would hold the value closed to every reader, the ones its policy
   releases to included, while left out the value keeps the labels the
   runtime derives for it, the argument labels a lift joins into its result
