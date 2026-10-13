@@ -679,10 +679,11 @@ export function getTimingMeasuresState(): {
  * only copy, so draining is what keeps a long run from growing without bound.
  *
  * The cost is proportional to the size of the timeline. A measure this did
- * not emit stays on the timeline, as a new entry recorded from the name,
- * start, duration, and detail of the one it replaces, so whatever observes the
- * timeline is handed that measure a second time. A timeline holding no emitted
- * measure is not touched.
+ * not emit stays on the timeline, as a new entry with the name, start,
+ * duration, and detail of the one it replaces, so whatever observes the
+ * timeline is handed that measure a second time. One the host refuses to
+ * record again is dropped, and the others are kept. A timeline holding no
+ * emitted measure is not touched.
  */
 export function clearTimingMeasures(): void {
   try {
@@ -707,15 +708,30 @@ export function clearTimingMeasures(): void {
       // call that claims only to drain this feature's.
       performance.clearMeasures();
       for (const entry of others) {
-        performance.measure(entry.name, {
-          start: entry.startTime,
-          duration: entry.duration,
-          detail: entry.detail,
-        });
+        recordAgain(entry);
       }
     }
   } catch { /* not every host implements it */ }
   resetTimingMeasureBudget();
+}
+
+/**
+ * Helper for `clearTimingMeasures()`, which records a measure that the drain
+ * removed along with the emitted ones.
+ *
+ * Never throws: a host refusing this measure costs this measure alone, and
+ * the caller goes on to record the ones after it.
+ */
+function recordAgain(entry: PerformanceMeasure): void {
+  try {
+    performance.measure(entry.name, {
+      start: entry.startTime,
+      // The end and not the duration: a measure may end before it starts, and
+      // a host admits that end while refusing the negative duration it makes.
+      end: entry.startTime + entry.duration,
+      detail: entry.detail,
+    });
+  } catch { /* the host refused this one */ }
 }
 
 /**

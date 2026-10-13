@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { spy } from "@std/testing/mock";
+import { spy, stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import {
   clearTimingMeasures,
@@ -2130,13 +2130,24 @@ describe("logger", () => {
 
     describe("beside a measure the host recorded", () => {
       const HOST_MEASURE = "host/phase";
+      const BACKWARDS_MEASURE = "host/backwards";
+      const REFUSED_MEASURE = "host/refused";
+      const LATER_MEASURE = "host/later";
 
-      const hostMeasures = () =>
-        performance.getEntriesByName(HOST_MEASURE, "measure").map((entry) => ({
+      const measuresNamed = (name: string) =>
+        performance.getEntriesByName(name, "measure").map((entry) => ({
           startTime: entry.startTime,
           duration: entry.duration,
           detail: "detail" in entry ? entry.detail : undefined,
         }));
+
+      const emitOneSpan = (name: string) => {
+        setTimingMeasuresEnabled(true);
+        const logger = getLogger(name);
+        logger.timeStart("phase", name);
+        logger.timeEnd("phase", name);
+        expect(getTimingMeasuresState().emitted).toBe(1);
+      };
 
       beforeEach(() => {
         performance.measure(HOST_MEASURE, {
@@ -2147,7 +2158,16 @@ describe("logger", () => {
       });
 
       afterEach(() => {
-        performance.clearMeasures(HOST_MEASURE);
+        for (
+          const name of [
+            HOST_MEASURE,
+            BACKWARDS_MEASURE,
+            REFUSED_MEASURE,
+            LATER_MEASURE,
+          ]
+        ) {
+          performance.clearMeasures(name);
+        }
       });
 
       it("calls `performance.clearMeasures()` once to drain any number of spans", () => {
@@ -2168,15 +2188,49 @@ describe("logger", () => {
       });
 
       it("keeps that measure's start, duration, and detail", () => {
-        setTimingMeasuresEnabled(true);
-        const logger = getLogger("measure-keep-host");
-        logger.timeStart("phase", "keep-host");
-        logger.timeEnd("phase", "keep-host");
-        expect(getTimingMeasuresState().emitted).toBe(1);
+        emitOneSpan("measure-keep-host");
 
         clearTimingMeasures();
-        expect(hostMeasures()).toEqual([
+        expect(measuresNamed(HOST_MEASURE)).toEqual([
           { startTime: 100, duration: 250, detail: { phase: "host" } },
+        ]);
+      });
+
+      it("keeps a measure that ends before it starts, and the one recorded after it", () => {
+        // A host admits a measure whose end precedes its start, and refuses
+        // the negative duration that measure then reports when it is handed
+        // back as a duration.
+
+        performance.measure(BACKWARDS_MEASURE, { start: 100, end: 50 });
+        performance.measure(LATER_MEASURE, { start: 400, end: 425 });
+        emitOneSpan("measure-keep-backwards");
+
+        clearTimingMeasures();
+        expect(measuresNamed(BACKWARDS_MEASURE)).toEqual([
+          { startTime: 100, duration: -50, detail: null },
+        ]);
+        expect(measuresNamed(LATER_MEASURE)).toEqual([
+          { startTime: 400, duration: 25, detail: null },
+        ]);
+      });
+
+      it("drops only the measure the host refuses to record again", () => {
+        performance.measure(REFUSED_MEASURE, { start: 200, end: 210 });
+        performance.measure(LATER_MEASURE, { start: 400, end: 425 });
+        emitOneSpan("measure-refused-host");
+
+        const realMeasure = performance.measure;
+        using _refusal = stub(performance, "measure", (...args) => {
+          if (args[0] === REFUSED_MEASURE) throw new TypeError("refused");
+          return realMeasure.apply(performance, args);
+        });
+        clearTimingMeasures();
+        expect(measuresNamed(HOST_MEASURE)).toEqual([
+          { startTime: 100, duration: 250, detail: { phase: "host" } },
+        ]);
+        expect(measuresNamed(REFUSED_MEASURE)).toEqual([]);
+        expect(measuresNamed(LATER_MEASURE)).toEqual([
+          { startTime: 400, duration: 25, detail: null },
         ]);
       });
 
