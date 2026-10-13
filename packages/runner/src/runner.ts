@@ -89,7 +89,6 @@ import {
   recordNewDocumentProtectedDefaults,
   recordNewProtectedDefaults,
 } from "./cfc/default-initialization.ts";
-import { readStoredCfcMetadata } from "./cfc/metadata.ts";
 import {
   CFC_POLICY_MANIFEST_DOC_SCHEMA,
   CFC_POLICY_MANIFEST_ID_PREFIX,
@@ -101,7 +100,6 @@ import {
   recordReferencedArgumentFields,
   recordReplayedArgumentSlots,
 } from "./cfc/reference-initialization.ts";
-import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { spaceReaderRole } from "./cfc/space-membership.ts";
 import { isTrustedGesture } from "./cfc/ui-contract.ts";
@@ -805,98 +803,6 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     "output",
   );
 };
-
-/** Whether `schema` says who may write a value it describes, at any depth. */
-const declaresWriter = (schema: JSONSchema | undefined): boolean =>
-  schema !== undefined &&
-  cfcSchemaEntries(schema).some(({ schema: entry }) =>
-    isObjectOrArray(entry) && isObjectOrArray(entry.ifc) &&
-    (entry.ifc.writeAuthorizedBy !== undefined ||
-      entry.ifc.writePolicyAnyOf !== undefined ||
-      entry.ifc.uiContract !== undefined)
-  );
-
-/**
- * Whether `value`, a node's bindings, holds an alias to the whole of this
- * pattern's derived internal cell `partialCause`. An alias to a position inside
- * the cell does not count, and neither does one deferred to a nested pattern,
- * which names that pattern's cell, not this one's.
- */
-const bindsDerivedCell = (value: unknown, partialCause: JSONValue): boolean => {
-  if (isAliasBinding(value)) {
-    return (value.$alias.defer ?? 0) === 0 &&
-      value.$alias.path.length === 0 &&
-      deepEqual(value.$alias.partialCause, partialCause);
-  }
-  if (Array.isArray(value)) {
-    return value.some((item) => bindsDerivedCell(item, partialCause));
-  }
-  return isObjectNotArray(value) &&
-    Object.values(value).some((item) => bindsDerivedCell(item, partialCause));
-};
-
-/**
- * Whether one of `pattern`'s nodes fills the derived internal cell
- * `partialCause` names: a lift, a builtin or a sub-pattern whose output is the
- * cell. A handler lists nothing under its `outputs`, so a cell that only
- * handlers write is the pattern's own state. A node that fills only a
- * position inside a cell leaves the cell the pattern's state at its other
- * positions; the builder never emits such an output, since every node it
- * builds writes a cell of its own.
- */
-const nodeFillsDerivedCell = (
-  pattern: Pattern,
-  partialCause: JSONValue,
-): boolean =>
-  pattern.nodes.some((node) => bindsDerivedCell(node.outputs, partialCause));
-
-/**
- * The value a pattern's derived internal cell is seeded with where it holds
- * none, or `undefined` where it is seeded with nothing. A declared default is
- * the seed. A cell with no default whose schema says who may write it
- * (`declaresWriter()`) is seeded with `undefined` where the cell is the site
- * that declares that policy: the seed's envelope is what stores it, so a cell
- * created without a value is held to its writer from its first write. That is
- * the pattern's own state, a cell no node fills. A cell a node fills (a
- * builtin's result, a lift's output, a sub-pattern's result) holds what the
- * node produces, and the writers its schema names belong to what it carries,
- * so it is not seeded. A cell a node fills only part of is seeded, so the
- * policy of its other positions is stored; a seed of `undefined` leaves that
- * node no object to write into, and its write fails rather than the policy
- * going unstored. Nor is a cell whose schema makes it a link (`asCell`):
- * it holds a reference, and the policy it describes is the referenced cell's,
- * which that cell's own seed stores.
- */
-const derivedCellSeed = (
-  pattern: Pattern,
-  descriptor: NonNullable<Pattern["derivedInternalCells"]>[number],
-): { readonly value: FabricValue } | undefined => {
-  const schema = descriptor.schema;
-  if (!isObjectOrArray(schema)) return undefined;
-  if (schema.default !== undefined) {
-    return {
-      value: fabricFromConvertibleJsValue(schema.default as JSONValue),
-    };
-  }
-  return schema.asCell === undefined && declaresWriter(schema) &&
-      !nodeFillsDerivedCell(pattern, descriptor.partialCause)
-    ? { value: undefined }
-    : undefined;
-};
-
-/**
- * Whether `seed`, a derived internal cell's seed (`derivedCellSeed()`), is due
- * at `link`, a document that holds no value. A default is. An `undefined` seed
- * is due only while the document stores no envelope: storing one is all it
- * does, and a document that stores one keeps it, so a cell that holds no value
- * again, as a cleared one does, is not seeded on every start.
- */
-const seedIsDue = (
-  tx: IExtendedStorageTransaction,
-  seed: { readonly value: FabricValue },
-  link: NormalizedFullLink,
-): boolean =>
-  seed.value !== undefined || readStoredCfcMetadata(tx, link) === undefined;
 
 /**
  * The kind-free ids of a pattern's derived internal cells on `resultCell` — the
@@ -3713,29 +3619,32 @@ export class Runner {
           scopeRank(derivedScope) >
             scopeRank(resultCell.getAsNormalizedFullLink().scope))
       ) {
-        const seed = derivedCellSeed(pattern, descriptor);
-        const seeded = derivedCell.getAsNormalizedFullLink();
-        if (
-          seed !== undefined &&
-          derivedCell.getRawUntyped({ meta: ignoreReadForScheduling }) ===
-            undefined &&
-          seedIsDue(tx, seed, seeded)
-        ) {
-          derivedCell.setRawUntyped(seed.value);
-          // The cell is the pattern's own and absent until now, so its seed
-          // is an initialization whether or not anything projects it: a
-          // result field, a sub-pattern's argument, or nothing.
-          tx.recordCfcWritePolicyInput({
-            kind: "initialization",
-            mode: "seed",
-            target: {
-              space: seeded.space,
-              id: seeded.id,
-              scope: seeded.scope,
-              path: [...seeded.path],
-            },
-            value: seed.value,
-          }, runtimeWritePolicyAuthorization);
+        const schemaDefault = isObjectOrArray(descriptor.schema)
+          ? descriptor.schema.default as JSONValue | undefined
+          : undefined;
+        if (schemaDefault !== undefined) {
+          const currentValue = derivedCell.getRawUntyped({
+            meta: ignoreReadForScheduling,
+          });
+          if (currentValue === undefined) {
+            const seed = fabricFromConvertibleJsValue(schemaDefault);
+            derivedCell.setRawUntyped(seed);
+            // The cell is the pattern's own and absent until now, so its
+            // default is an initialization whether or not anything projects
+            // it: a result field, a sub-pattern's argument, or nothing.
+            const seeded = derivedCell.getAsNormalizedFullLink();
+            tx.recordCfcWritePolicyInput({
+              kind: "initialization",
+              mode: "seed",
+              target: {
+                space: seeded.space,
+                id: seeded.id,
+                scope: seeded.scope,
+                path: [...seeded.path],
+              },
+              value: seed,
+            }, runtimeWritePolicyAuthorization);
+          }
         }
       }
     }
@@ -6866,20 +6775,13 @@ export class Runner {
 
   /**
    * Load one family document under the identity captured before awaiting.
-   * A cell declared a stream is loaded whole: its document holds no value
-   * a read uses, so a selector carrying the event schema would ask the
-   * store to walk a shape that is never there, and the gate's probe of the
-   * document reads its record, which the whole document brings.
+   * A cell declared a stream is loaded whole, as the storage manager loads
+   * every such cell (`StorageManager.syncCell`).
    */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
-    if (ContextualFlowControl.declaresStream(cell.schema)) {
-      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
-        Cell<T>
-      >;
-    }
     return syncCellForIdentity(cell, identity);
   }
 
@@ -8982,8 +8884,10 @@ export class Runner {
         if (scopeRank(derivedLink.scope) <= scopeRank(resultLink.scope)) {
           continue;
         }
-        const seed = derivedCellSeed(instance.pattern, descriptor);
-        if (seed === undefined) continue;
+        const schemaDefault = isObjectOrArray(descriptor.schema)
+          ? descriptor.schema.default
+          : undefined;
+        if (schemaDefault === undefined) continue;
         if (!isCurrent()) return false;
         if (options.allowReadOnly && !this.#runtime.servingPosture) {
           let readOnly = readOnlySpaces.get(derivedLink.space);
@@ -9073,8 +8977,7 @@ export class Runner {
           }
           if (
             derived.getRawUntyped({ meta: ignoreReadForScheduling }) !==
-              undefined ||
-            !seedIsDue(tx, seed, derivedLink)
+              undefined
           ) return;
           // A default belongs to its owning piece, so it carries the label on
           // the piece's root. The pattern pointer and the manifest read above
@@ -9091,12 +8994,13 @@ export class Runner {
           // same ownership claim as setup through the ordinary writer-fit gate.
           recordRuntimeOwnedStore(tx, owner, derivedLink);
           setResultCell(derived, owner.asSchema(instance.pattern.resultSchema));
-          derived.setRawUntyped(seed.value);
+          const value = fabricFromConvertibleJsValue(schemaDefault);
+          derived.setRawUntyped(value);
           tx.recordCfcWritePolicyInput({
             kind: "initialization",
             mode: "seed",
             target: { ...derivedLink, path: [] },
-            value: seed.value,
+            value,
           }, runtimeWritePolicyAuthorization);
         });
         if (outcome.error) {
