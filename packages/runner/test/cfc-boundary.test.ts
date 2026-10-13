@@ -1759,6 +1759,14 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           ifc: { confidentiality: [], integrity: [] },
         }),
       ).toBe(false);
+      // `observes` says which reads a declared label answers to, and there
+      // is no label here for it to classify.
+      expect(
+        relevantAfterLinking("observes-only", {
+          type: "string",
+          ifc: { observes: "shape" },
+        }),
+      ).toBe(false);
       expect(
         relevantAfterLinking("label", {
           type: "string",
