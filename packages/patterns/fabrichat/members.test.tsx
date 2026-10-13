@@ -126,7 +126,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
-    openThreadKey: "",
     cannotWrite: false,
     isOwner: false,
     ...records,
@@ -186,7 +185,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
-    openThreadKey: "",
     cannotWrite: false,
     isOwner: false,
     ...records,
