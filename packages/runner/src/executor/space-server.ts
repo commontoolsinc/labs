@@ -5512,6 +5512,7 @@ export class SpaceServer implements TransactionSealDestination {
         spaceVerdict.observedDocIds.push(id);
       }
     }
+    for (const doc of verdict.observedDocs) spaceVerdict.observedDocs.push(doc);
     return { verdict: spaceVerdict, termini };
   }
 
