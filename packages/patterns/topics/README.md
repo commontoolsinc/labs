@@ -177,13 +177,16 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   Four derivations run over the whole board, and each declares only what it
   reads. `crossrefTable` takes one list of references per topic and builds the
   mention pivot from it; `cardRowsByActivity` takes the seven scalars a card
-  shows per topic (`CardSource`), orders the topics by activity and builds one
-  row per card — the badge, title, snippet and caption as plain strings, plus
-  the topic as a reference for the Open link; `mentionableIndex` takes the three
-  display strings per topic and builds the mention universe; `namesTable` takes
-  the namespace map and builds one row per numbered member, for a caller's
-  reverse lookup, without reading through any of them. None expands a topic's
-  prose, thread, verbs, or rendered UI.
+  uses per topic (`CardSource`: the six it shows, and `createdAt` as the sort's
+  fallback for a topic that has never run), orders the topics by activity and
+  builds one row per card — the badge, title, snippet and caption as plain
+  strings, plus the topic as a reference for the Open link; `mentionableIndex`
+  takes the three display strings per topic and builds the mention universe;
+  `namesTable` takes the namespace map and builds one row per numbered member,
+  for a caller's reverse lookup, without reading through any of them. None
+  expands a topic's thread, verbs, or rendered UI. The card derivation alone
+  reads prose: the body string, whole, which it cuts to its 120-character
+  snippet — and nothing else of the topic.
 
   The card rows are strings, and that is deliberate: the card list is a mapped
   sub-pattern, and every helper call or conditional in a mapped body —
@@ -200,9 +203,10 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   The published `index` declares the six scalars a survey reads, so a survey
   cannot expand a topic past them, while the card list reads the row, never the
   topic. Neither widens the topic, which is what leaves both free to be that
-  narrow — and it is why every field `CardSource` reads carries a default or is
-  optional, since that schema is what a piece holding older topics is updated
-  against.
+  narrow — and it is why every field `CardSource` reads but `createdAt` carries
+  a default or is optional, since that schema is what a piece holding older
+  topics is updated against (`createdAt` is required for the reason
+  `TopicSummary` gives: the Topic pattern publishes it unconditionally).
 
   The rule for new code stands regardless: prefer a scalar reduction
   (`topics.get().length`) over anything that hands the array to a helper.
