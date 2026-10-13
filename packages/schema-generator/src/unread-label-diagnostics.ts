@@ -1,18 +1,20 @@
 /**
  * Reports the CFC labels a generated schema could not read. The lowering
  * carries such a label as no label at all or as a `null` atom, which says
- * nothing about the value it was written to protect.
+ * nothing about the value it was written to protect, and leaves a `PolicyOf`
+ * whose binding it could not read out of a confidentiality list.
  */
 
 import { getLogger } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
 import type {
   GenerationContext,
   SchemaGenerationDiagnostic,
 } from "./interface.ts";
+import { CFC_POLICY_OF_BRAND } from "./typescript/value-annotation.ts";
 
 const logger = getLogger("schema-generator.unread");
 
@@ -59,9 +61,25 @@ export function holdsUnreadMetadataLabel(
       holdsUnreadLabel(uiContract.requiredEventIntegrity));
 }
 
-/** Whether `value`, an atom or a part of one, holds an `undefined`. */
+/**
+ * Whether `value`, an atom as the lowering read it, is a `PolicyOf` read with
+ * no binding: its brand, `{ readonly __ct_cfc_policy_of__?: Rules }`, read as
+ * an ordinary object. Only syntax names the binding `PolicyOf<typeof rules>`
+ * holds, so a `PolicyOf` reached from a type alone is read this way, and
+ * never as the policy atom the syntax would have given.
+ */
+export function isUnboundPolicyOf(value: unknown): boolean {
+  if (!isObjectNotArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === 1 && keys[0] === CFC_POLICY_OF_BRAND;
+}
+
+/**
+ * Whether `value`, an atom or a part of one, holds an `undefined` or a
+ * `PolicyOf` with no binding.
+ */
 const holdsUnreadValue = (value: unknown): boolean =>
-  value === undefined ||
+  value === undefined || isUnboundPolicyOf(value) ||
   (isObjectOrArray(value) &&
     (Array.isArray(value) ? value : Object.values(value)).some(
       holdsUnreadValue,
@@ -147,7 +165,8 @@ export function reportUnreadLabel(
       ) +
       ". An atom is a literal, an object literal of them, `AnyOf<…>`, or " +
       "`PolicyOf<typeof …>`; the schema carries what it could not read as " +
-      "no label, or as an atom that serializes as `null`.",
+      "no label, or as an atom that serializes as `null`, and leaves a " +
+      "`PolicyOf` it could not bind out of a confidentiality list.",
     ...((labelNode ?? context.typeNode) &&
       { node: labelNode ?? context.typeNode }),
   };

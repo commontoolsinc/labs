@@ -1631,7 +1631,15 @@ Mechanics:
   never by an alias name, so an authored type named `AnyOf` is read as
   itself. A `PolicyOf` reached from a type alone, with no annotation that
   denotes it, has no binding to read: its brand is read as an ordinary object,
-  `{ __ct_cfc_policy_of__: undefined }`, not as a policy atom. A label list the
+  `{ __ct_cfc_policy_of__: undefined }`, not as a policy atom
+  (`isUnboundPolicyOf`, `unread-label-diagnostics.ts`). A confidentiality
+  list leaves such an atom out: no exchange rule could match it, so carried
+  it would hold the value closed to every reader, the ones its policy
+  releases to included, while left out the value keeps the labels the
+  runtime derives for it, the argument labels a lift joins into its result
+  and the label a link carries from its target. Every other label list
+  carries the atom as read, since fewer required or ceiling atoms would admit
+  more. A label list the
   extraction cannot read in full is reported as the `cfc-label:unread` warning
   (`unread-label-diagnostics.ts`), naming the label: an argument that is not a
   tuple, or an atom with anything unread in it, whether the atom itself, a
@@ -1640,8 +1648,8 @@ Mechanics:
   contract that writes no `requiredEventIntegrity` requires its trusted
   pattern, and that list is checked too. The schema carries what it could not
   read as no label, as an atom that serializes as `null` (an unread value, not
-  an authored `null`, which is a literal read like any other), or as a field
-  left out.
+  an authored `null`, which is a literal read like any other), as a field
+  left out, or, for a `PolicyOf` in a confidentiality list, as no atom.
   Projection paths encode as JSON Pointers with `~0`/`~1` escaping
   (`encodeJsonPointerPath`).
 - `ifc` combines with the base schema's existing `ifc` one key at a time

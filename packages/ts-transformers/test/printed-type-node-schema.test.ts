@@ -3196,6 +3196,34 @@ export default pattern<{ ${input} }>(({ a, b }) => (${result}));`,
       expect(pattern().out).toMatchObject({ ifc: policy("readers") });
     });
 
+    it("leaves the policy out of a lift's result element written from a binding in an array literal", async () => {
+      // The element's type spells the policy as its brand, and the literal
+      // names no binding to read it at, so the declared list carries no atom
+      // for it rather than one nothing can match. The value keeps the
+      // argument's label through the lift's join at runtime.
+      const { lift, pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => [a]) }",
+      );
+
+      expect((lift!.items as Schema).ifc).toEqual({ confidentiality: [] });
+      expect(((pattern().out as Schema).items as Schema).ifc).toEqual({
+        confidentiality: [],
+      });
+    });
+
+    it("leaves the policy out of a pattern's result member holding a lift that returns a binding", async () => {
+      // The lift's own result is read at the binding's annotation; the
+      // pattern's member, printed from the lift's type, is not.
+      const { lift, pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => a) }",
+      );
+
+      expect(lift).toMatchObject({ ifc: policy("readers") });
+      expect((pattern().out as Schema).ifc).toEqual({ confidentiality: [] });
+    });
+
     it("reads each member at its own binding's policy where the two policies' rules share a type", async () => {
       const { lift } = await inferred(
         "a: Confidential<string, [PolicyOf<typeof readers>]>; b: Confidential<string, [PolicyOf<typeof writers>]>",

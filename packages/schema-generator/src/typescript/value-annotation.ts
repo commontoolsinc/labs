@@ -15,7 +15,7 @@ import { denotesSameType, readMemberAnnotation } from "./type-node.ts";
  * The member `PolicyOf<Rules>` is: `{ readonly __ct_cfc_policy_of__?: Rules }`
  * (`@commonfabric/api/cfc`).
  */
-const POLICY_OF_BRAND = "__ct_cfc_policy_of__";
+export const CFC_POLICY_OF_BRAND = "__ct_cfc_policy_of__";
 
 /**
  * Whether authored type syntax names a value binding (`typeof handler`)
@@ -87,7 +87,9 @@ export function namesOnlyPolicyBindings(
     const properties = declared && (declared.flags & ts.TypeFlags.Object)
       ? checker.getPropertiesOfType(declared)
       : [];
-    if (properties.length === 1 && properties[0]!.name === POLICY_OF_BRAND) {
+    if (
+      properties.length === 1 && properties[0]!.name === CFC_POLICY_OF_BRAND
+    ) {
       return true;
     }
     for (const declaration of symbol?.declarations ?? []) {

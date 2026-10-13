@@ -67,6 +67,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { isDefaultLibrarySourceFile } from "../typescript/default-library.ts";
+import { CFC_POLICY_OF_BRAND } from "../typescript/value-annotation.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import {
   getScopeBrand,
@@ -91,6 +92,7 @@ import {
 import {
   holdsUnreadLabel,
   holdsUnreadMetadataLabel,
+  isUnboundPolicyOf,
   reportUnreadLabel,
 } from "../unread-label-diagnostics.ts";
 import { reportUnreadWriterBinding } from "../writer-binding-diagnostics.ts";
@@ -111,8 +113,6 @@ const WRITER_POLICY_ALIAS_NAMES: ReadonlySet<string> = new Set([
 /** The property `AnyOf<X>` is as a type (`@commonfabric/api/cfc`). */
 const CFC_ANY_OF_BRAND = "__ct_cfc_any_of__";
 
-/** The property `PolicyOf<Rules>` is as a type (`@commonfabric/api/cfc`). */
-const CFC_POLICY_OF_BRAND = "__ct_cfc_policy_of__";
 /**
  * What the literal reader returns for syntax it does not evaluate, so that the
  * type paired with that syntax is read in its place. `undefined` is a value it
@@ -3683,6 +3683,22 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (holdsUnreadLabel(labels)) reportUnread(index);
       return labels;
     };
+    // A confidentiality list leaves out a `PolicyOf` read with no binding.
+    // Carried, it would be a clause no exchange rule can match, holding the
+    // value closed to every reader, the ones its policy releases to included.
+    // Left out, the value keeps the labels the runtime derives for it: the
+    // argument labels a lift joins into its result, and the label a link
+    // carries from its target. A declared confidentiality list is never a
+    // value's only label, so leaving the atom out releases nothing on its
+    // own. Every other label list carries the atom as read, since fewer
+    // required or ceiling atoms would admit more; the warning names it
+    // either way.
+    const withoutUnboundPolicies = (labels: unknown): unknown =>
+      Array.isArray(labels)
+        ? labels.filter((atom) => !isUnboundPolicyOf(atom))
+        : labels;
+    const readConfidentiality = (index: number): unknown =>
+      withoutUnboundPolicies(readLabels(index));
     // The list a trusted pattern's name stands for when the policy writes no
     // `requiredEventIntegrity` of its own, checked as a written one is.
     const patternLabels = (pattern: unknown, index: number): unknown[] => {
@@ -3698,10 +3714,15 @@ export class CommonFabricFormatter implements TypeFormatter {
           return undefined;
         }
         if (holdsUnreadMetadataLabel(payload)) reportUnread(1);
-        return { ...payload };
+        return {
+          ...payload,
+          ...("confidentiality" in payload && {
+            confidentiality: withoutUnboundPolicies(payload.confidentiality),
+          }),
+        };
       }
       case "Confidential":
-        return { confidentiality: readLabels(1) };
+        return { confidentiality: readConfidentiality(1) };
       case "Integrity":
         return { integrity: readLabels(1) };
       case "AddIntegrity":

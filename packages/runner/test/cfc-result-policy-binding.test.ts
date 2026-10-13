@@ -6,6 +6,12 @@
  * annotation of the binding it holds (`readBindingAnnotation` in the schema
  * generator). The runner stores the declared label, and the policy releases
  * it.
+ *
+ * A result the transformer can read at no binding, an array literal's element
+ * or a pattern member holding the lift itself, declares no atom for the policy
+ * at all. The value stays labelled through the argument labels the runner
+ * joins into the lift's result and the links the result holds, and the policy
+ * releases what a read of it consumes.
  */
 
 import { afterEach, describe, it } from "@std/testing/bdd";
@@ -13,6 +19,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { evaluateExchangeRules, type IFCLabel } from "../src/cfc/mod.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { readProjected } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -150,4 +157,97 @@ describe("cfc-result-policy-binding", () => {
       expect((await wholeLabels(declaration!)).released).toEqual([]);
     });
   }
+
+  describe("a result read at no binding", () => {
+    /**
+     * The value a read of the result's `out` returns, with the confidentiality
+     * that read consumed evaluated against the policy with a reader's
+     * integrity (`released`) and with none (`held`), for a pattern over `a`,
+     * declared as `declaration`, returning `out` computed as `out`, with flow
+     * labels `flowLabels`.
+     */
+    const readOut = async (
+      declaration: string,
+      out: string,
+      flowLabels: "persist" | "observe",
+    ): Promise<{ value: unknown; released: unknown[]; held: unknown[] }> => {
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        cfcFlowLabels: flowLabels,
+      });
+      const compiled = await runtime.patternManager.compilePattern(
+        program(declaration, out),
+        { space },
+      );
+      const tx = runtime.edit();
+      const result = runtime.getCell<Record<string, unknown>>(
+        space,
+        `result read at no binding ${out} ${flowLabels}`,
+        compiled.resultSchema,
+        tx,
+      );
+      runtime.run(tx, compiled, { a: ["x", "y"] }, result);
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit().settled).ok).toBeDefined();
+      await result.pull();
+      await runtime.settled();
+      await storageManager.synced();
+
+      const { value, consumed } = readProjected(
+        result.key("out"),
+        (read) => read,
+      );
+      const read = runtime.edit();
+      const evaluate = (integrity: readonly ["reader"] | readonly []) => {
+        const evaluated = evaluateExchangeRules(
+          { confidentiality: [...(consumed.confidentiality ?? [])] },
+          undefined,
+          {
+            integrity,
+            modulePolicyResolver: (reference) =>
+              read.resolveCfcPolicyManifest(reference, space),
+          },
+        );
+        expect(evaluated.resolutionFailures).toEqual([]);
+        return [...(evaluated.label.confidentiality ?? [])];
+      };
+      const released = evaluate(["reader"]);
+      const held = evaluate([]);
+      read.commit();
+      return { value, released, held };
+    };
+
+    for (
+      const [shape, out, value] of [
+        ["an array literal holding the binding", "[a]", [["x", "y"]]],
+        ["the binding alone", "a", ["x", "y"]],
+      ] as const
+    ) {
+      for (
+        const [spelling, declaration] of [
+          ["a value", "a: Confidential<string[], [PolicyOf<typeof readers>]>"],
+          [
+            "a nullable value",
+            "a: Confidential<string[] | null, [PolicyOf<typeof readers>]>",
+          ],
+        ] as const
+      ) {
+        for (const flowLabels of ["persist", "observe"] as const) {
+          it(`releases a read of a lift returning ${shape} of ${spelling} to a reader, with ${flowLabels} flow labels`, async () => {
+            const read = await readOut(declaration, out, flowLabels);
+
+            expect(read.value).toEqual(value);
+            expect(read.released).toEqual([]);
+          });
+
+          it(`holds a read of a lift returning ${shape} of ${spelling} against a reader with no integrity, with ${flowLabels} flow labels`, async () => {
+            expect((await readOut(declaration, out, flowLabels)).held)
+              .toMatchObject([{ policyRefKind: "module", symbol: "readers" }]);
+          });
+        }
+      }
+    }
+  });
 });
