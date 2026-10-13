@@ -4,6 +4,8 @@ import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
 
 import { cfcSchemaEntries } from "../../src/cfc/schema-label-view.ts";
+import { decomposeSchema } from "../../src/schema-decompose.ts";
+import { registerSchemaDocument } from "../../src/schema-registry.ts";
 
 describe("schema-label-view", () => {
   describe("cfcSchemaEntries()", () => {
@@ -42,6 +44,28 @@ describe("schema-label-view", () => {
       ).toEqual([
         ["rows", "*"],
       ]);
+    });
+
+    it("does not keep a walk that lacked a referenced schema document", () => {
+      const decomposed = decomposeSchema({
+        type: "object",
+        properties: { late: { $ref: "#/$defs/LateLabeled" } },
+        $defs: {
+          LateLabeled: {
+            type: "object",
+            ifc: { confidentiality: ["schema-label-view-late"] },
+          },
+        },
+      });
+      const reference = internSchema({ $ref: decomposed.rootRef });
+
+      expect(cfcSchemaEntries(reference)).toEqual([]);
+      for (const [hash, schemaDocument] of decomposed.documents) {
+        registerSchemaDocument(hash, schemaDocument);
+      }
+      const resolved = cfcSchemaEntries(reference);
+      expect(resolved.map((entry) => entry.path)).toEqual([["late"]]);
+      expect(cfcSchemaEntries(reference)).toBe(resolved);
     });
 
     it("walks a fragment under its document afresh", () => {
