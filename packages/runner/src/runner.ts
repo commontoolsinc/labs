@@ -2424,9 +2424,10 @@ export class Runner {
    * its stored argument and names what they read, so a name-sync of that
    * instance under the same pattern would make the same requests and
    * deliver nothing more; the gate before such an instance's own start
-   * probes its owned cells, which a seed may still be owed, and skips the
-   * argument walk. Bounded like `#locallyPreparedResults`: a missing entry
-   * costs a walk, never a wrong verdict.
+   * probes its owned cells, which a seed may still be owed, taking a
+   * derived cell's record for the cell, and skips the argument walk.
+   * Bounded like `#locallyPreparedResults`: a missing entry costs a walk,
+   * or a hold on a derived cell that holds no value, never a wrong verdict.
    */
   readonly #presyncNamedInstances = new BoundedKeyMap<string, string>(
     RESULT_SHORTCUT_LIMIT,
@@ -6870,6 +6871,30 @@ export class Runner {
   }
 
   /**
+   * Whether `link` names a derived cell whose record is on this replica,
+   * probed through `readTx`: the `result` back-link setup writes onto the
+   * cell, with or without a value. A derived cell holds a value only once
+   * its computation has produced one, so a computation nothing demands, or
+   * one that yields `undefined`, leaves the record as setup wrote it, in
+   * the store as on a replica that loaded it.
+   */
+  #derivedCellRecordPresent(
+    readTx: IExtendedStorageTransaction,
+    link: NormalizedFullLink,
+  ): boolean {
+    return entityKindOfIdString(link.id) === "computed" &&
+      readTx.readOrThrow(
+          {
+            space: link.space,
+            id: link.id,
+            path: [],
+            ...(link.scope !== undefined && { scope: link.scope }),
+          },
+          { meta: ignoreReadForScheduling },
+        ) !== undefined;
+  }
+
+  /**
    * Whether a swap of `resultCell` to `pattern` would read a document this
    * replica lacks: the argument document `argumentLink` names, which the
    * swap's setup reads whole, or an owned cell the stored manifest lists —
@@ -6920,7 +6945,10 @@ export class Runner {
    * names, when a pre-sync of this runner planned it under this pattern
    * (`#presyncNamedInstances`), the argument's links are not walked: that
    * pre-sync named what the nodes read through them, and a name-sync here
-   * would ask for the same documents again.
+   * would ask for the same documents again. A derived cell such a family
+   * owns is likewise here once its record is: the pre-sync's waves have
+   * landed, so a record holding no value is what the store holds, and a
+   * name-sync would deliver it again.
    */
   #familyAbsent(
     pattern: Pattern,
@@ -6973,7 +7001,9 @@ export class Runner {
       return true;
     };
     if (!present(argumentLink)) return hold("the argument document");
-    if (this.#presyncNamedInstances.get(familyKey) !== entryKey) {
+    const presyncNamed =
+      this.#presyncNamedInstances.get(familyKey) === entryKey;
+    if (!presyncNamed) {
       if (
         this.#argumentLinksAbsent(
           argument,
@@ -6999,9 +7029,14 @@ export class Runner {
       readTx,
     );
     for (const ownedCell of owned) {
-      if (!present(ownedCell.getAsNormalizedFullLink())) {
-        return hold("an owned cell");
-      }
+      const link = ownedCell.getAsNormalizedFullLink();
+      if (present(link)) continue;
+      // A probe the budget refused read nothing, so it stays a hold.
+      if (
+        presyncNamed && !budgetSpent &&
+        this.#derivedCellRecordPresent(readTx, link)
+      ) continue;
+      return hold("an owned cell");
     }
     return false;
   }

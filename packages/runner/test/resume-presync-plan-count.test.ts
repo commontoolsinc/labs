@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { Node, Pattern } from "../src/builder/types.ts";
 import { isPattern } from "../src/builder/types.ts";
+import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { CooperativeYield } from "../src/scheduler/cooperative-yield.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -70,6 +71,41 @@ const HANDED_TREE_PROGRAM: RuntimeProgram = {
       "  rows: { value: number; badge: { label: string } }[];",
       "}>(({ items, hint }) => ({",
       "  rows: items.map((item) => row({ item, hint })),",
+      "}));",
+    ].join("\n"),
+  }],
+};
+
+// The plain tree, each row owning a derived value that never holds one: its
+// computation runs and yields `undefined`, so the row's cell stays the record
+// setup wrote, with no value, in the store and on every replica that loads
+// it.
+const VALUELESS_TREE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern } from 'commonfabric';",
+      "type Item = { n: number };",
+      "export const badge = pattern<{ item: Item }, { label: string }>(",
+      "  ({ item }) => ({ label: computed(() => `b:${item.n}`) }),",
+      ");",
+      "export const row = pattern<{ item: Item }, {",
+      "  value: number;",
+      "  note?: string;",
+      "  badge: { label: string };",
+      "}>(({ item }) => {",
+      "  const note = computed(() => (item.n > 100 ? 'large' : undefined));",
+      "  return {",
+      "    value: computed(() => item.n * 2),",
+      "    note,",
+      "    badge: badge({ item }),",
+      "  };",
+      "});",
+      "export default pattern<{ items: Item[] }, {",
+      "  rows: { value: number; note?: string; badge: { label: string } }[];",
+      "}>(({ items }) => ({",
+      "  rows: items.map((item) => row({ item })),",
       "}));",
     ].join("\n"),
   }],
@@ -282,6 +318,102 @@ describe("resume-presync-plan-count", () => {
     ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
     // The root's own name-sync planned every row and named what its nodes
     // read; a row's start finds nothing a name-sync of its own could add.
+    expect(nameSyncs).toBe(1);
+  });
+
+  it("names a nested instance's family once when a derived cell it owns holds no value", async () => {
+    const cellId = "resume-presync-plan-count-valueless-root";
+
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(
+      VALUELESS_TREE_PROGRAM,
+      { space },
+    );
+    const tx = author.edit();
+    const authored = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, authored);
+    await tx.commit().settled;
+    await authored.pull();
+    await author.settled();
+    await author.patternManager.flushCompileCacheWrites();
+    await author.storageManager.synced();
+    await author.dispose({ closeStorage: false });
+    runtimes.splice(runtimes.indexOf(author), 1);
+
+    const wrapperPattern = compiled.nodes
+      .map((node) => (node.inputs as { op?: unknown }).op)
+      .find(isPattern)!;
+    const rowPattern = wrapperPattern.nodes
+      .map(childPatternOf)
+      .find((pattern) => pattern !== undefined)!;
+
+    const resumer = replica();
+    await resumer.patternManager.compilePattern(VALUELESS_TREE_PROGRAM, {
+      space,
+    });
+    let nameSyncs = 0;
+    resumer.runner.accessForTestingOnly.dependencySyncer = (
+      resultCell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      nameSyncs += 1;
+      return sync(resultCell, pattern, inputs);
+    };
+    // Every piece the pre-sync plans: the root, and each wrapper, row and
+    // badge under it.
+    const pieces = new Set<string>();
+    resumer.runner.accessForTestingOnly.presyncPlanRecorder = (piece) => {
+      pieces.add(piece);
+    };
+    const resumed = resumer.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+    );
+    expect(await resumer.runner.start(resumed)).toBe(true);
+    await resumed.pull();
+    await resumer.settled();
+    await resumer.storageManager.synced();
+    const read = resumed.key("rows").getAsQueryResult() as {
+      value: number;
+      note?: string;
+      badge: { label: string };
+    }[];
+    expect(read.map((item) => [item.value, item.badge.label]))
+      .toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
+    expect(read.map((item) => item.note))
+      .toEqual([undefined, undefined, undefined]);
+
+    // What the store handed this replica for each row. A row is the piece
+    // the row pattern's derived cells exist under: each has its record, and
+    // one of them, the note, has no value.
+    const documents = managers[managers.length - 1].open(space).replica;
+    const rows = [...pieces]
+      .map((piece) =>
+        rowPattern.derivedInternalCells!.map((descriptor) =>
+          documents.getDocument(
+            getDerivedInternalCellLink(
+              resumer.getCellFromEntityId(space, piece),
+              descriptor,
+            ).id,
+          )
+        )
+      )
+      .filter((owned) => owned.every((document) => document !== undefined));
+    expect(rows).toHaveLength(ITEMS.length);
+    for (const owned of rows) {
+      expect(owned.filter((document) => document!.value === undefined))
+        .toHaveLength(1);
+    }
+    // No name-sync could deliver a value the store does not hold, so no
+    // row's start asks for one: the root's is the only name-sync.
     expect(nameSyncs).toBe(1);
   });
 
