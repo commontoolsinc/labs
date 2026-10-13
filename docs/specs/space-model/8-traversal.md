@@ -237,6 +237,13 @@ resolve the reference and are not conflict dependencies.
 | Array element, inline non-link object, schema has `asCell` | Boundary at element index. Emits `createObject(indexLink, undefined)`; no nested traversal for element fields. | No boundary shortcut; element object is traversed against element schema. |
 | Array element, inline non-link object or array, schema is not `asCell` | Element is given a `data:` identifier encoding a snapshot of its value (`dataUriSnapshotWithResolvedLinks`) for stable link identity during nested traversal. Nested traversal continues over the element with each link that names no document given the identifier of the document storing the element, so such a link resolves there and not inside the snapshot. | Same behavior. |
 
+A traversal whose context sets `inlineArrayItemsInPlace` is the exception to
+the last row, in either mode: it traverses the element in place, at its address
+in the document that stores it, mints no identifier, and issues no read at a
+`data:` identifier. `GraphQueryWalk` sets it for the walk a storage engine runs
+to resolve a schema query, which returns no object and whose storage holds no
+document at a `data:` identifier.
+
 ### Pointer and Redirect Details at Boundaries
 
 For a pointer whose first `asCell` entry is `"opaque"`, traversal calls the

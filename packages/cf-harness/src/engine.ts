@@ -259,6 +259,10 @@ import {
   type BrowserToolOutput,
 } from "./tools/browser.ts";
 import {
+  type CallVerbToolInput,
+  type CallVerbToolOutput,
+} from "./tools/call-verb.ts";
+import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
 } from "./tools/describe-handle.ts";
@@ -342,6 +346,7 @@ export interface BuiltinToolInputMap {
   run_pattern: RunPatternToolInput;
   read_piece_source: ReadPieceSourceToolInput;
   revise_piece: RevisePieceToolInput;
+  call_verb: CallVerbToolInput;
   assign_slug: AssignSlugToolInput;
   resolve_piece: ResolvePieceToolInput;
   describe_handle: DescribeHandleToolInput;
@@ -382,6 +387,7 @@ export interface BuiltinToolOutputMap {
   run_pattern: RunPatternToolOutput;
   read_piece_source: ReadPieceSourceToolOutput;
   revise_piece: RevisePieceToolOutput;
+  call_verb: CallVerbToolOutput;
   assign_slug: AssignSlugToolOutput;
   resolve_piece: ResolvePieceToolOutput;
   describe_handle: DescribeHandleToolOutput;
