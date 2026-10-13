@@ -816,16 +816,50 @@ const declaresWriter = (schema: JSONSchema | undefined): boolean =>
   );
 
 /**
+ * Whether `value`, a node's bindings, holds an alias to this pattern's derived
+ * internal cell `partialCause`. An alias deferred to a nested pattern names
+ * that pattern's cell, not this one's.
+ */
+const bindsDerivedCell = (value: unknown, partialCause: JSONValue): boolean => {
+  if (isAliasBinding(value)) {
+    return (value.$alias.defer ?? 0) === 0 &&
+      deepEqual(value.$alias.partialCause, partialCause);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => bindsDerivedCell(item, partialCause));
+  }
+  return isObjectNotArray(value) &&
+    Object.values(value).some((item) => bindsDerivedCell(item, partialCause));
+};
+
+/**
+ * Whether one of `pattern`'s nodes fills the derived internal cell
+ * `partialCause` names: a lift, a builtin or a sub-pattern that lists it under
+ * its `outputs`. A handler lists nothing there, so a cell that only handlers
+ * write is the pattern's own state.
+ */
+const nodeFillsDerivedCell = (
+  pattern: Pattern,
+  partialCause: JSONValue,
+): boolean =>
+  pattern.nodes.some((node) => bindsDerivedCell(node.outputs, partialCause));
+
+/**
  * The value a pattern's derived internal cell is seeded with where it holds
  * none, or `undefined` where it is seeded with nothing. A declared default is
  * the seed. A cell with no default whose schema says who may write it
- * (`declaresWriter()`) is seeded with `undefined`: the seed's envelope is what
- * stores that policy, so a cell created without a value is held to its writer
- * from its first write. A cell whose schema makes it a link (`asCell`) is
- * not: it holds a reference the node that fills it writes, and the policy it
- * describes is the referenced cell's, which that cell's own seed stores.
+ * (`declaresWriter()`) is seeded with `undefined` where the cell is the site
+ * that declares that policy: the seed's envelope is what stores it, so a cell
+ * created without a value is held to its writer from its first write. That is
+ * the pattern's own state, a cell no node fills. A cell a node fills (a
+ * builtin's result, a lift's output, a sub-pattern's result) holds what the
+ * node produces, and the writers its schema names belong to what it carries,
+ * so it is not seeded. Nor is a cell whose schema makes it a link (`asCell`):
+ * it holds a reference, and the policy it describes is the referenced cell's,
+ * which that cell's own seed stores.
  */
 const derivedCellSeed = (
+  pattern: Pattern,
   descriptor: NonNullable<Pattern["derivedInternalCells"]>[number],
 ): { readonly value: FabricValue } | undefined => {
   const schema = descriptor.schema;
@@ -835,7 +869,8 @@ const derivedCellSeed = (
       value: fabricFromConvertibleJsValue(schema.default as JSONValue),
     };
   }
-  return schema.asCell === undefined && declaresWriter(schema)
+  return schema.asCell === undefined && declaresWriter(schema) &&
+      !nodeFillsDerivedCell(pattern, descriptor.partialCause)
     ? { value: undefined }
     : undefined;
 };
@@ -3607,7 +3642,7 @@ export class Runner {
           scopeRank(derivedScope) >
             scopeRank(resultCell.getAsNormalizedFullLink().scope))
       ) {
-        const seed = derivedCellSeed(descriptor);
+        const seed = derivedCellSeed(pattern, descriptor);
         const seeded = derivedCell.getAsNormalizedFullLink();
         if (
           seed !== undefined &&
@@ -8879,7 +8914,7 @@ export class Runner {
         if (scopeRank(derivedLink.scope) <= scopeRank(resultLink.scope)) {
           continue;
         }
-        const seed = derivedCellSeed(descriptor);
+        const seed = derivedCellSeed(instance.pattern, descriptor);
         if (seed === undefined) continue;
         if (!isCurrent()) return false;
         if (options.allowReadOnly && !this.#runtime.servingPosture) {

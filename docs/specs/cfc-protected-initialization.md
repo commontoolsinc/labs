@@ -18,10 +18,16 @@ with no default whose schema says who may write it (`writeAuthorizedBy`,
 `writePolicyAnyOf` or `uiContract`, at any depth) is seeded with `undefined` the
 same way, so its envelope commits with the seed and holds the cell to its writer
 from the first write. Without that seed the document would store no policy, and
-any code holding a link to it could write it. A cell whose schema makes it a
-link (`asCell`), such as the slot a lift fills with a cell it constructs, is not
-seeded so: the node that fills it writes it, and the policy belongs to the
-constructed cell, whose own seed stores it. The reference that exposes the
+any code holding a link to it could write it. Only the pattern's own state is
+seeded so: a cell no node of the pattern fills, which its handlers write. A
+cell a node fills, such as a builtin's result, a lift's output or a
+sub-pattern's result, holds what that node produces, and the writers its schema
+names belong to the value it carries; a `wish` result's schema names the wished
+piece's writers, for one. Seeding it would store that policy as the cell's own,
+and the node's write would then have to reconcile with it. A cell whose schema
+makes it a link (`asCell`), such as the slot a lift fills with a cell it
+constructs, is not seeded either: the policy belongs to the constructed cell,
+whose own seed stores it. The reference that exposes the
 cell requires its own protection: changing that reference must not provide an
 alternative way to replace the protected value.
 
