@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   forEachSubschema,
@@ -34,6 +35,13 @@ interface IfcSchemaVisit {
   parent?: IfcSchemaVisit;
 }
 
+// The entries of each deep-frozen schema document, by the document.
+const documentEntries = new WeakMap<object, readonly CfcSchemaEntry[]>();
+
+// A visit that matches no schema, so the walk a kept document starts with
+// is told apart from a whole-document ask.
+const EMPTY_VISIT = {};
+
 /**
  * Return every `ifc` declaration in a schema at its logical value path.
  *
@@ -50,7 +58,23 @@ export const cfcSchemaEntries = (
   root: JSONSchema = schema,
   active?: IfcSchemaVisit,
   conditional = false,
-): CfcSchemaEntry[] => {
+): readonly CfcSchemaEntry[] => {
+  // A whole document's entries are a function of the document alone, and a
+  // commit asks for a candidate schema's entries once per check it makes, so
+  // a deep-frozen document's are walked once and kept by its identity. The
+  // kept array is frozen: every reader iterates it.
+  const wholeDocument = path.length === 0 && entries.length === 0 &&
+    root === schema && active === undefined && !conditional;
+  if (wholeDocument && isObjectOrArray(schema) && isDeepFrozen(schema)) {
+    const kept = documentEntries.get(schema);
+    if (kept !== undefined) return kept;
+    const walked = cfcSchemaEntries(schema, path, entries, root, {
+      root: schema,
+      schema: EMPTY_VISIT,
+    }, conditional);
+    documentEntries.set(schema, Object.freeze(walked));
+    return walked;
+  }
   if (!isSubschema(schema) || typeof schema === "boolean") {
     return entries;
   }
