@@ -127,17 +127,21 @@ The event-handler commit path classifies each commit result and acts on it
   denial, a malformed store operation, a transport error, or a handler
   `tx.abort()` is not a stale basis, so re-running cannot resolve it; the write is
   dropped and logged rather than entering the window.
-
-With server execution off, a client event's dropped write from either of the
-last two is also surfaced through the scheduler error channel, as an
-`EventCommitRefusedError` carrying the rejection as its `cause`: a send made from
-inside a handler has no commit callback, so the log would otherwise be its only
-trace. Three drops are not reported, because none loses a write: a handler's own
-`tx.abort()`, a `receipt-exists` precondition (the same invocation already
-committed), and an `origin-committed` refusal of a follow-up whose origin runs
-again and sends its own. With server execution on, a client event is the echo of
-the server's run, which reports its own outcome.
 - **`retries: false` opt-out** — dropped without retry as well; see below.
+
+With server execution off, a client event's write dropped by a permanent
+rejection or by a non-stale-basis one is also surfaced through the scheduler
+error channel, as an `EventCommitRefusedError` carrying the rejection as its
+`cause`: a send made from inside a handler has no commit callback, so the log
+would otherwise be its only trace. Three such drops are not reported, because
+none loses a write: a handler's own `tx.abort()`, a `receipt-exists`
+precondition (the same invocation already committed), and an `origin-committed`
+refusal of a follow-up whose origin runs again and sends its own. Two drops
+fall outside this report: a `retries: false` opt-out, and a deterministic
+refusal of the committed data, which takes the terminal arm, where a CFC refusal
+is reported through `reportDroppedCfcRejectedWrite` instead, as described below.
+With server execution on, a client event is the echo of the server's run, which
+reports its own outcome.
 
 ### Why only a stale basis is windowed
 
@@ -232,7 +236,10 @@ The `scheduler.event.commit` telemetry marker carries the new state:
 `retryAttempt` and `backoffMs` on a backoff retry, and `terminal`
 (`"permanent"` | `"convergence"`) when a commit reaches a terminal outcome.
 A non-converging write also logs `commit-convergence-failed` and is delivered to
-registered `scheduler.onError` handlers as a `CommitConvergenceError`.
+registered `scheduler.onError` handlers as a `CommitConvergenceError`. A client
+event's write dropped by a permanent or non-stale-basis rejection, with server
+execution off, is delivered to them as an `EventCommitRefusedError`, under the
+exceptions the model above names.
 
 ## The reactive-action path
 

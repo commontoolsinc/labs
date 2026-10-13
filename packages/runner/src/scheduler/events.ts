@@ -2872,8 +2872,8 @@ export async function dispatchQueuedEvent(state: {
             // A deterministic commit-rule refusal: run the final callback and
             // stop. No retry (would recompute the identical refused write) and no
             // handleError — the rejection is observable via the commit telemetry
-            // marker (`terminal: "rule"`), mirroring the permanent path; surfacing
-            // a scheduler error here is reserved for non-deterministic failures.
+            // marker (`terminal: "rule"`), and a CFC refusal through the dropped-
+            // write report below.
             // A CFC boundary refusal is classified terminal rather than
             // give-up, so both of the give-up path's CFC obligations have to
             // hold here too: seal the served entry's error consequence, and
