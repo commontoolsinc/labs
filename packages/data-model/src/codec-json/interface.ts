@@ -33,7 +33,9 @@ export const ENCODING_PREFIX_TAG = "fvj1:" as const;
  * such a sub-tree already has the frozenness the decode owes its caller. The
  * transient trees built on the *encode* side are not covered by this
  * invariant: they are `JSON.stringify`-ed and discarded by `encode()` and
- * never reach a caller, so none of them is frozen.
+ * never reach a caller, so the encode walk freezes none of the containers and
+ * wraps it builds. A state that a codec hands the walk may be frozen all the
+ * same, which is that codec's business.
  */
 export type JsonCodecValue =
   | null
