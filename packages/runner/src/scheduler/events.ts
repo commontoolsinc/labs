@@ -977,9 +977,11 @@ export interface SchedulerEventExecutionState {
   readonly getActionTelemetryInfo: (
     handler: EventHandler,
   ) => SchedulerActionInfo | undefined;
+  /** Reports `error`; `eventId` names the event whose handling failed. */
   readonly handleError: (
     error: Error,
     action: Action | EventHandler,
+    eventId?: string,
   ) => void;
   readonly queueExecution: () => void;
   readonly setEventPreflightTraceContext: (
@@ -1040,7 +1042,12 @@ export function preflightQueuedEventDependencies(state: {
   readonly pending: ReadonlySet<Action>;
   readonly pendingActions: Set<Action>;
   readonly eventBlockingDeps: Set<Action>;
-  readonly handleError: (error: Error, handler: EventHandler) => void;
+  /** Reports `error`; `eventId` names the event whose handling failed. */
+  readonly handleError: (
+    error: Error,
+    handler: EventHandler,
+    eventId?: string,
+  ) => void;
   readonly setEventPreflightTraceContext: (
     trace: EventPreflightTraceContext | undefined,
   ) => void;
@@ -1097,6 +1104,7 @@ export function preflightQueuedEventDependencies(state: {
       state.handleError(
         error instanceof Error ? error : new Error(String(error)),
         queuedEvent.preflightImplementation ?? handler,
+        queuedEvent.id,
       );
     } catch {
       throw error;
@@ -1414,7 +1422,8 @@ export async function processPullQueuedEventDuringExecute(
       pending: state.pending,
       pendingActions: state.pending,
       eventBlockingDeps,
-      handleError: (error, target) => state.handleError(error, target),
+      handleError: (error, target, eventId) =>
+        state.handleError(error, target, eventId),
       setEventPreflightTraceContext: (trace) => {
         state.setEventPreflightTraceContext(trace);
       },
@@ -1503,7 +1512,8 @@ export async function processPullQueuedEventDuringExecute(
     },
     getActionId: (target) => state.getActionId(target),
     getActionTelemetryInfo: (target) => state.getActionTelemetryInfo(target),
-    handleError: (error, target) => state.handleError(error, target),
+    handleError: (error, target, eventId) =>
+      state.handleError(error, target, eventId),
     queueExecution: () => state.queueExecution(),
     lineageStatus: (originTx) => state.lineageStatus(originTx),
     releaseLineageEvent: (originTx, event) =>
@@ -1530,7 +1540,12 @@ export async function dispatchQueuedEvent(state: {
   readonly getActionTelemetryInfo: (
     handler: EventHandler,
   ) => SchedulerActionInfo | undefined;
-  readonly handleError: (error: Error, action: Action) => void;
+  /** Reports `error`; `eventId` names the event whose handling failed. */
+  readonly handleError: (
+    error: Error,
+    action: Action,
+    eventId?: string,
+  ) => void;
   readonly queueExecution: () => void;
   readonly lineageStatus: (
     originTx: IExtendedStorageTransaction,
@@ -1699,7 +1714,7 @@ export async function dispatchQueuedEvent(state: {
           }
         },
         releaseLineage,
-        () => state.handleError(handlerError, action),
+        () => state.handleError(handlerError, action, queuedEvent.id),
         () =>
           reportServedEventFailure(served, {
             kind: "error",
@@ -2223,6 +2238,7 @@ export async function dispatchQueuedEvent(state: {
               elapsedMs,
             }),
             action,
+            queuedEvent.id,
           );
         };
         const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
@@ -2607,6 +2623,7 @@ export async function dispatchQueuedEvent(state: {
                 cause: error,
               }),
               action,
+              queuedEvent.id,
             );
             break;
           }

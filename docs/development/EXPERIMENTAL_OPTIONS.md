@@ -473,18 +473,20 @@ flags it adopts from the deployment it runs against.
   entry here, and a delta in the plan's live coordination block; workflow
   job topology, probes, skip placement, coverage ownership, test record
   variants, and every other document follow automatically.
-  Single-process harnesses do not
-  read the constant: a bare `new Runtime` and the `patternTest` /
-  `localDev` / `unitTest` presets have no serving host, so they resolve the
-  ambient baseline (OFF) by construction — the unit suites and `cf test`
-  run the derive-and-commit model (which is why the flip does not reach
-  the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
-  the lane-posture item the topics measurement report recorded for the
-  flip decision). `cf test` also refuses an explicit
-  `EXPERIMENTAL_SERVER_EXECUTION=true`, since it hosts no serving loop and
-  its clients' events would go unserved. A test that runs ON in one process
-  needs a serving loop beside its memory server, or the events its clients
-  append are admitted and never delivered;
+  A bare `new Runtime` and the `patternTest` / `localDev` / `unitTest`
+  presets do not read the constant: they have no serving host, so they
+  resolve the ambient baseline (OFF) by construction, and the unit suites
+  run the derive-and-commit model. A single-process harness that hosts a
+  serving loop does read it. `cf test` builds its runtimes with
+  `patternTest`, but resolves the posture itself as a deployed entry point
+  does, and hosts a serving loop beside its memory server when that is ON.
+  The integration runner sets the flag OFF for its `pattern-tests` and
+  `generated-patterns` targets, which is why the flip does not reach the
+  pattern-tests lane and its `topics/multi-user.test.tsx`, the lane-posture
+  item the topics measurement report recorded for the flip decision. A test
+  that runs ON in one process needs a serving loop beside its memory
+  server, or the events its clients append are admitted and never
+  delivered;
   `@commonfabric/runner/executor/serving-memory-server.deno` supplies one,
   in-process (`startServingMemoryServer`) or on a localhost websocket for
   `remoteClient` runtimes (`listenServingMemoryServer`), with its serving
@@ -1898,10 +1900,11 @@ they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
-LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
-deployment to ask, and do read the environment alone, through this same
-mapping. `cf test` refuses an environment that turns `serverExecution` on,
-because nothing in it serves the events its clients commit.
+LOCAL modes (`cf test`, `cf check`) run against storage of their own, have
+no deployment to ask, and do read the environment alone, through this same
+mapping. `cf test` then applies the first-party default where the
+environment leaves `serverExecution` unset, and on the ON arm hosts the
+serving loop a deployment would run.
 
 ### Browser-side (build-time defines)
 

@@ -5,10 +5,10 @@
  * The second person creates a profile and reads their chat address off their
  * manager. The first creates a profile, starts a direct chat with that address,
  * sees the room listed in their manager, and follows the link their notice
- * shows to the room's page. The second opens that page and adds the room to
- * their chats, after which each sees the other among the room's participants,
- * before either has written. The second sends a message, which the first sees
- * on the room's page; the second's manager then lists the room too. Last, the
+ * shows to the room's page. The second opens that page and sends a message,
+ * which the first sees on the room's page. Sending it joins the second to the
+ * room, so each sees the other among its participants, and the second's
+ * manager then lists the room too. Last, the
  * first opens their manager again, creates a group from the group controls of
  * that new page, and starts another chat, whose row's link opens the new room.
  * Then someone who shares a group with another person adds them to a second
@@ -119,20 +119,22 @@ describe("fabrichat-join", () => {
     await waitForSettledText(first, "#fabrichat-messages", EMPTY_ROOM_TEXT);
 
     // The second person opens the room's page, which their manager does not
-    // list yet, adds it to their chats, and the offer to do so goes away.
+    // list yet, and sends, and the first sees the message on the room's page.
     await secondShell.goto({
       frontendUrl: FRONTEND_URL,
       view: roomView,
       identity: secondIdentity,
     });
     await waitForSettledText(second, "#fabrichat-messages", EMPTY_ROOM_TEXT);
-    await clickButtonWithExactText(second, "Add to my chats");
-    await waitForUnrendered(second, "#fabrichat-add-to-chats");
+    const body = "Hello from Grace";
+    await fillCfInput(second, "#fabrichat-message", body);
+    await clickTrustedAction(second, SEND_ACTION);
+    await waitForText(second, "#fabrichat-messages", body);
+    await waitForSettledText(first, "#fabrichat-messages", body);
 
-    // Each person is among the room's participants before either has written:
-    // the first joined it by creating it, and the second by adding it. A page
-    // shows its own viewer's badge whatever the room lists, so each checks for
-    // the other.
+    // Each person is among the room's participants: the first joined it by
+    // creating it, and the second by writing in it. A page shows its own
+    // viewer's badge whatever the room lists, so each checks for the other.
     await waitForSettledText(second, "cf-profile-badge", "Ada Lovelace");
     await waitForSettledText(first, "cf-profile-badge", "Grace Hopper");
 
@@ -140,15 +142,7 @@ describe("fabrichat-join", () => {
     // nothing more happens says whether their views of it fight.
     await reportChurn(first, second, "both viewing the room");
 
-    // The second person sends, and the first sees the message on the room's
-    // page.
-    const body = "Hello from Grace";
-    await fillCfInput(second, "#fabrichat-message", body);
-    await clickTrustedAction(second, SEND_ACTION);
-    await waitForText(second, "#fabrichat-messages", body);
-    await waitForSettledText(first, "#fabrichat-messages", body);
-
-    // The second person's manager lists the room they added, under the first
+    // The second person's manager lists the room they joined, under the first
     // person's address.
     await openChatManager(secondShell, secondIdentity);
     await waitForSettledText(
@@ -203,16 +197,14 @@ describe("fabrichat-join", () => {
     const roomId = await clickCellLink(owner, groupTitle);
     const roomView = await waitForPieceSelected(owner, roomId);
 
-    // The member opens the group's page and adds it to their chats, and then
-    // sees the owner among its participants.
+    // The member opens the group's page, and sees the owner among its
+    // participants.
     await secondShell.goto({
       frontendUrl: FRONTEND_URL,
       view: roomView,
       identity: groupMemberIdentity,
     });
     await waitForSettledText(member, "#fabrichat-messages", EMPTY_ROOM_TEXT);
-    await clickButtonWithExactText(member, "Add to my chats");
-    await waitForUnrendered(member, "#fabrichat-add-to-chats");
     await waitForSettledText(member, "cf-profile-badge", "Ada Lovelace");
 
     // The owner's chip is the page's one chat start: the member's own chip
@@ -237,9 +229,9 @@ describe("fabrichat-join", () => {
     await openChatManager(secondShell, addedIdentity);
     const addedAddress = await readChatAddress(added);
 
-    // The adder creates a group with the person they will add, who adds it to
-    // their chats, which puts them on its roster, and so among the adder's
-    // people.
+    // The adder creates a group with the person they will add, who writes in
+    // it, which joins them to it: it puts them on its roster, and so among the
+    // adder's people.
     const firstTitle = "Met team";
     await gotoHome(firstShell, adderIdentity);
     await createProfileAtHome(adder, "Ada Lovelace");
@@ -256,8 +248,9 @@ describe("fabrichat-join", () => {
       identity: addedIdentity,
     });
     await waitForSettledText(added, "#fabrichat-messages", EMPTY_ROOM_TEXT);
-    await clickButtonWithExactText(added, "Add to my chats");
-    await waitForUnrendered(added, "#fabrichat-add-to-chats");
+    await fillCfInput(added, "#fabrichat-message", "Hello from Grace");
+    await clickTrustedAction(added, SEND_ACTION);
+    await waitForText(added, "#fabrichat-messages", "Hello from Grace");
 
     // The adder creates a second group, of their own alone, and opens it. Its
     // add control offers the person from their chats.
@@ -430,20 +423,6 @@ async function waitForPieceSelected(
     throw new Error("The piece view wait resolved with no view.");
   }
   return { spaceDid: view.spaceDid as DID, pieceId: view.pieceId };
-}
-
-/** Waits until every element matching `selector` is present and unrendered. */
-async function waitForUnrendered(page: Page, selector: string): Promise<void> {
-  await waitForRuntimeIdle(page);
-  await waitForCondition(
-    page,
-    (probe, target: string) => {
-      const found = probe.collect(target);
-      return found.length > 0 &&
-        found.every((element) => !probe.isRendered(element));
-    },
-    { args: [selector] },
-  );
 }
 
 /**
