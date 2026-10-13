@@ -98,6 +98,16 @@ type RequestAnswer = {
   pointer?: { id: string; space: string };
 };
 
+/**
+ * A request's receipt, read back raw: its own address, and the document and
+ * path it links to.
+ */
+type RequestReceipt = {
+  receipt: { id: string; space: string };
+  id: string;
+  path: string[];
+};
+
 /** An offer as the owner reads it. */
 type ReadOffer = {
   kind: string;
@@ -141,7 +151,8 @@ describe("private inbox across runtimes", () => {
   };
   let markedReplacementRefusals: number;
   let requested: RequestAnswer[];
-  let receipts: unknown[];
+  let receipts: RequestReceipt[];
+  let leavingAnswers: { before: unknown[]; after: unknown[] };
   let contestedRequest: RequestAnswer;
   let pointerOnlyRequest: RequestAnswer;
   let profilelessRequest: RequestAnswer;
@@ -175,6 +186,25 @@ describe("private inbox across runtimes", () => {
       path,
       profile,
     }) as RequestAnswer;
+
+  /**
+   * Has the owner's runtime send the request `requestInbox` does, and returns
+   * the receipt as `requestReceipt` reads it back.
+   */
+  const requestReceipt = async (
+    path: string[],
+    profile: (string | number)[],
+  ): Promise<RequestReceipt> =>
+    await owner.client().call("requestReceipt", {
+      path,
+      profile,
+    }) as RequestReceipt;
+
+  /** The status the receipt `receipt` reads, following the link it holds. */
+  const readReceipt = async (receipt: RequestReceipt): Promise<unknown> =>
+    await owner.client().call("readReceiptStatus", {
+      receipt: receipt.receipt,
+    });
 
   /** How many adoption refusals the owner's host has logged. */
   const adoptionRefusals = async (): Promise<number> => {
@@ -499,10 +529,11 @@ describe("private inbox across runtimes", () => {
     receipts = [];
     for (const index of [0, 1]) {
       receipts.push(
-        await owner.client().call("requestReceipt", {
-          path: ["requestingHome"],
-          profile: ["requestingHome", "profiles", index],
-        }),
+        await requestReceipt(["requestingHome"], [
+          "requestingHome",
+          "profiles",
+          index,
+        ]),
       );
     }
     const loom = await owner.link(["loomInbox", "piece"]);
@@ -524,6 +555,46 @@ describe("private inbox across runtimes", () => {
       ["requestingHome"],
       ["requestingHome", "profiles", 2],
     );
+
+    // `leavingHome`: three profiles. The first two are requested for, and
+    // once their receipts read `ensured`, the third is pointed at the
+    // loom-shaped inbox and the first leaves the list, which moves the second
+    // and third up one place.
+    for (let index = 0; index < 3; index++) {
+      await owner.send("createLeavingProfile");
+    }
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["leavingHome", "profiles"])) as unknown[])
+        .length === 3
+    );
+    const leavingReceipts: RequestReceipt[] = [];
+    for (const index of [0, 1]) {
+      leavingReceipts.push(
+        await requestReceipt(["leavingHome"], [
+          "leavingHome",
+          "profiles",
+          index,
+        ]),
+      );
+    }
+    const statuses = async () =>
+      await Promise.all(
+        leavingReceipts.map(readReceipt),
+      );
+    await harness.settleUntil(async () =>
+      (await statuses()).every((status) => status === "ensured")
+    );
+    const before = await statuses();
+    const loomLink = await owner.link(["loomInbox", "piece"]);
+    await owner.send("pointLeavingProfileAtLoom", { index: 2 });
+    await harness.settleUntil(async () =>
+      (await owner.link(["leavingHome", "profiles", 2, "inbox", "piece"]))
+        .id === loomLink.id
+    );
+    await owner.send("dropLeavingFirstProfile");
+    await harness.settleUntil(async () => (await statuses())[0] !== "ensured");
+    leavingAnswers = { before, after: await statuses() };
+
     profilelessRequest = await requestInbox(
       ["profilelessHome"],
       ["requestingHome", "profiles", 0],
@@ -862,14 +933,17 @@ describe("private inbox across runtimes", () => {
 
   it("links each request's receipt to Home's one answer for the profile, launching nothing per request", () => {
     expect(receipts).toHaveLength(2);
-    const [forFirst, forSecond] = receipts as (
-      | { id: string; path: unknown[] }
-      | undefined
-    )[];
+    const [forFirst, forSecond] = receipts;
     expect(forFirst?.id).toBeDefined();
     expect(forSecond?.id).toBe(forFirst?.id);
-    expect(forFirst?.path).toEqual(["profiles", "0"]);
-    expect(forSecond?.path).toEqual(["profiles", "1"]);
+    expect(forFirst?.path[0]).toBe("profiles");
+    expect(forSecond?.path[0]).toBe("profiles");
+    expect(forSecond?.path[1]).not.toBe(forFirst?.path[1]);
+  });
+
+  it("keeps a receipt answering for its own profile when an earlier profile leaves Home's list, and answers `unlisted` for the one that left", () => {
+    expect(leavingAnswers.before).toEqual(["ensured", "ensured"]);
+    expect(leavingAnswers.after).toEqual(["unlisted", "ensured"]);
   });
 
   it("answers `not-held` for a profile something other than Home has pointed at another inbox", async () => {

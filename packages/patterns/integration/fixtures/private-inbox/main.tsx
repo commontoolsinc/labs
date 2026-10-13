@@ -12,9 +12,10 @@
  * whose space stops letting the owner read it, which its owner replaces.
  * `olderHome` stands in for a Home of the vintage whose ensure takes no
  * refusal, and `unreadableHome` for one whose profile keeps its pointer per
- * user. `requestingHome` and `profilelessHome` are Homes whose inboxes a
- * client requests, as a loom daemon does, the second with no profiles, and a
- * profile of the first's may be of a vintage without `setInbox`. Fixture for
+ * user. `requestingHome`, `profilelessHome` and `leavingHome` are Homes whose
+ * inboxes a client requests, as a loom daemon does: a profile of the first's
+ * may be of a vintage without `setInbox`, the second has no profiles, and the
+ * third loses its first profile once its inbox is requested. Fixture for
  * `private-inbox-multi-runtime.test.ts`.
  */
 
@@ -303,6 +304,17 @@ const recordRefusalOf = handler<
 });
 
 /** Empties `profiles`. */
+/**
+ * Takes the first profile out of `profiles`, by removing its link, which
+ * leaves every other entry as it is stored.
+ */
+const dropFirstProfile = handler<
+  void,
+  { profiles: Writable<ProfileHomeOutput[]> }
+>((_event, { profiles }) => {
+  profiles.removeByValue(profiles.key(0).resolveAsCell());
+});
+
 const dropProfiles = handler<
   void,
   { profiles: Writable<ProfileHomeOutput[]> }
@@ -379,6 +391,9 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
     const defaultProfile = new Writable<DefaultProfileSlot>({}).for(
       "defaultProfileSlot",
     );
+    const requested = new Writable<Record<string, boolean>>({}).for(
+      "privateInboxRequests",
+    );
     const ensure = ensurePrivateInbox({
       privateInbox,
       retainedPrivateInboxes,
@@ -404,10 +419,12 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
       requestPrivateInbox: requestPrivateInbox({
         // deno-lint-ignore no-explicit-any
         profiles: profiles as any,
+        requested,
         answers: PrivateInboxAnswering({
           privateInbox,
           // deno-lint-ignore no-explicit-any
           profiles: profiles as any,
+          requested,
         }).answers,
         ensure,
       }),
@@ -762,6 +779,18 @@ export interface MainOutput {
 
   /** A Home with no profiles, whose inbox a client requests. */
   profilelessHome: HomeStandInOutput;
+
+  /** A Home whose first profile leaves its list once its inbox is requested. */
+  leavingHome: HomeStandInOutput;
+
+  /** Creates one of `leavingHome`'s profiles. */
+  createLeavingProfile: Stream<void>;
+
+  /** Points one of `leavingHome`'s profiles at the loom-shaped inbox. */
+  pointLeavingProfileAtLoom: Stream<PointElsewhereRequest>;
+
+  /** Takes `leavingHome`'s first profile out of its list. */
+  dropLeavingFirstProfile: Stream<void>;
 }
 
 export default pattern<MainInput, MainOutput>((
@@ -800,6 +829,7 @@ export default pattern<MainInput, MainOutput>((
   });
   const requestingHome = HomeStandIn({ label: "Requested Home" });
   const profilelessHome = HomeStandIn({ label: "Home with no profiles" });
+  const leavingHome = HomeStandIn({ label: "Home losing a profile" });
   return {
     [NAME]: "Private inbox fixture",
     [UI]: <div>private inbox fixture</div>,
@@ -822,6 +852,7 @@ export default pattern<MainInput, MainOutput>((
     olderHome,
     requestingHome,
     profilelessHome,
+    leavingHome,
     copiedOffers,
     retainedPrivateInboxes,
     privateInboxRefusal,
@@ -925,6 +956,14 @@ export default pattern<MainInput, MainOutput>((
     }),
     ensureUnreadable: unreadableHome.ensurePrivateInbox,
     createRequestingProfile: requestingHome.createProfile,
+    createLeavingProfile: leavingHome.createProfile,
+    pointLeavingProfileAtLoom: pointProfileAt({
+      profiles: leavingHome.profiles,
+      inbox: loomInbox,
+    }),
+    dropLeavingFirstProfile: dropFirstProfile({
+      profiles: leavingHome.profiles,
+    }),
     createRequestingPointerOnlyProfile: createPointerOnlyProfile({
       profiles: requestingHome.profiles,
     }),

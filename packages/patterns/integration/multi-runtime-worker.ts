@@ -1156,8 +1156,8 @@ const handlers: Record<
 
   /**
    * Sends the request `requestPrivateInbox` does, and answers with the
-   * document and path the handling's receipt holds a link to, as it stands
-   * once the send has completed, or nothing when it holds no link.
+   * receipt's address and the document and path it holds a link to, as it
+   * stands once the send has completed, or nothing when it holds no link.
    */
   async requestReceipt({ path, profile, piece }) {
     const target = await resultAt(piece);
@@ -1183,9 +1183,30 @@ const handlers: Record<
     const receipt = controller().runtime.getCellFromLink(link);
     await receipt.sync();
     const linked = parseLink(receipt.getRaw());
-    return linked === undefined
-      ? undefined
-      : { id: linked.id, path: [...linked.path] };
+    return linked === undefined ? undefined : {
+      receipt: { id: link.id, space: link.space },
+      id: linked.id,
+      path: [...linked.path],
+    };
+  },
+
+  /**
+   * Reads the status the receipt at `receipt` holds, following the link it
+   * holds, as a client of `requestPrivateInbox` reads it.
+   */
+  async readReceiptStatus({ receipt }) {
+    const { id, space } = receipt as { id: string; space: MemorySpace };
+    const cell = controller().runtime.getCellFromLink({
+      id: id as `${string}:${string}`,
+      space,
+      path: [],
+      type: "application/json",
+    } as never, {
+      type: "object",
+      properties: { status: { type: "string" } },
+    });
+    const answer = await cell.pull() as { status?: string } | undefined;
+    return answer?.status;
   },
 
   /**

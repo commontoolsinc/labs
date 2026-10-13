@@ -21,7 +21,9 @@ import {
   type CurrentPrincipal,
   currentPrincipal,
   Default,
+  entityRefToString,
   equals,
+  getEntityId,
   handler,
   isWellFormedDID,
   NAME,
@@ -727,8 +729,12 @@ export type PrivateInboxReceipt = Cell<PrivateInboxAnswer>;
  * profile without `setInbox`.
  */
 export type PrivateInboxAnswers = {
-  /** The answer for each profile in Home's list. */
-  profiles: PrivateInboxAnswer[];
+  /**
+   * The answer for each profile a request has named, by the profile's entity,
+   * as {@link profileKeyOf} keys it: `unlisted` once the profile has left
+   * Home's list.
+   */
+  profiles: Record<string, PrivateInboxAnswer>;
 
   /** The answer for a request naming no profile in Home's list. */
   unlisted: PrivateInboxAnswer;
@@ -749,9 +755,22 @@ export type AnswerTarget = {
 };
 
 /**
- * Returns Home's answer for each profile in `profiles`, in list order, given
- * the inbox Home holds; Home's request handler links a request's receipt to
- * the entry for the profile it names. An answer is `pending` only while Home
+ * The key Home files its answer for `profile` under: the entity of the
+ * profile's own result document, which no change to Home's list moves to
+ * another profile. `undefined` for a value that names no entity.
+ */
+export function profileKeyOf(profile: unknown): string | undefined {
+  const ref = getEntityId(profile);
+  return ref === undefined ? undefined : entityRefToString(ref);
+}
+
+/**
+ * Returns Home's answer for each profile `requested` names, by
+ * {@link profileKeyOf}, given the inbox Home holds and the profiles in its
+ * list; Home's request handler links a request's receipt to the entry for the
+ * profile it names. A profile no longer in `profiles` is `unlisted`, so a
+ * receipt answers for its own profile whatever else leaves the list, and ends
+ * when that profile does. Otherwise an answer is `pending` only while Home
  * is still to point the profile at the inbox it holds, so a pointer that comes
  * to name anything else is a final status:
  *
@@ -766,10 +785,19 @@ export type AnswerTarget = {
 export function privateInboxAnswersOf(
   held: Cell<PrivateInboxPiece> | undefined,
   profiles: readonly ({ inbox?: ProfileInbox } | undefined)[] | undefined,
+  requested: Readonly<Record<string, boolean>> | undefined,
 ): PrivateInboxAnswers {
   const advertised = advertisedInbox(profiles);
-  const answers = (profiles ?? []).map((profile): PrivateInboxAnswer => {
-    const pointer = profile?.inbox?.piece;
+  const listed = new Map<string, { inbox?: ProfileInbox }>();
+  for (const profile of profiles ?? []) {
+    const key = profileKeyOf(profile);
+    if (profile !== undefined && key !== undefined) listed.set(key, profile);
+  }
+  const answerFor = (
+    profile: { inbox?: ProfileInbox } | undefined,
+  ): PrivateInboxAnswer => {
+    if (profile === undefined) return { status: "unlisted" };
+    const pointer = profile.inbox?.piece;
     if (pointer === undefined) {
       return held === undefined && advertised !== undefined
         ? { status: "not-held" }
@@ -781,7 +809,11 @@ export function privateInboxAnswersOf(
     return held !== undefined && spaceOf(pointer) === spaceOf(held)
       ? { status: "pending" }
       : { status: "not-held" };
-  });
+  };
+  const answers: Record<string, PrivateInboxAnswer> = {};
+  for (const key of Object.keys(requested ?? {})) {
+    answers[key] = answerFor(listed.get(key));
+  }
   return {
     profiles: answers,
     unlisted: { status: "unlisted" },
@@ -796,6 +828,12 @@ export type PrivateInboxAnsweringInput = {
 
   /** Home's profiles, as any vintage of profile can be read. */
   profiles: PointTarget[];
+
+  /**
+   * The profiles requests have named, by {@link profileKeyOf}, which
+   * {@link requestPrivateInbox} records.
+   */
+  requested: Record<string, boolean>;
 };
 
 /** The result of {@link PrivateInboxAnswering}. */
@@ -805,41 +843,43 @@ export type PrivateInboxAnsweringOutput = {
 };
 
 /**
- * Computes Home's answers to requests for its inbox, once for all its
- * profiles. The list is read through {@link PointTarget}, which a profile of
- * any vintage satisfies.
+ * Computes Home's answers to requests for its inbox, once for all the
+ * profiles requests have named. The list is read through {@link PointTarget},
+ * which a profile of any vintage satisfies.
  */
 export const PrivateInboxAnswering = pattern<
   PrivateInboxAnsweringInput,
   PrivateInboxAnsweringOutput
->(({ privateInbox, profiles }) => ({
-  answers: computed(() => privateInboxAnswersOf(privateInbox?.piece, profiles)),
+>(({ privateInbox, profiles, requested }) => ({
+  answers: computed(() =>
+    privateInboxAnswersOf(privateInbox?.piece, profiles, requested)
+  ),
 }));
 
 /**
  * Has Home ensure its private inbox, as an event naming nothing has
  * {@link ensurePrivateInbox} do, and answers with Home's answer for the
  * profile the request names, which is `ensured` once that profile points at
- * the inbox Home holds. Home keeps
- * the inbox it holds, creates one when it holds none and no profile advertises
- * one, and points each profile in its list that points at no inbox at its
- * own; it adopts nothing, since adopting an inbox a profile advertises waits on
- * the host's vetting.
+ * the inbox Home holds. Home keeps the inbox it holds, creates one when it
+ * holds none and no profile advertises one, and points each profile in its
+ * list that points at no inbox at its own; it adopts nothing, since adopting
+ * an inbox a profile advertises waits on the host's vetting.
  *
  * The answer is this handling's result, and so its receipt, which a client
  * reads from the receipt link its send's completion carries. For a profile in
- * Home's list it is a link to that profile's entry in `answers`, which Home
- * computes once for all its profiles with {@link PrivateInboxAnswering}, so a
- * request leaves nothing running, and the entry goes on changing as Home's
- * holder and the profile's pointer do: `pending` until the profile points at
- * the inbox Home holds, then `ensured`, or a final status saying why it never
- * will. The profile is pointed in events of their own, in Home's space and
+ * Home's list it is a link to that profile's entry in `answers`, by the
+ * profile's entity, which this handler records in `requested`; Home computes
+ * an entry for every profile so recorded, with {@link PrivateInboxAnswering}.
+ * So a request leaves nothing running, and the entry goes on changing as
+ * Home's holder and the profile's pointer do: `pending` until the profile
+ * points at the inbox Home holds, then `ensured`, or a final status saying
+ * why it never will, `unlisted` among them once the profile leaves Home's
+ * list. The profile is pointed in events of their own, in Home's space and
  * then in the profile's, after this run, which is why the answer is a link
- * rather than a value. The link names the entry at the profile's position in
- * the list when the request is handled. The receipt of a request naming no
- * profile in the list links to the `unlisted` answer, and that of one naming a
- * profile without `setInbox`, which Home never points, to the `unpointable`
- * one, so every receipt is a link into Home's answers.
+ * rather than a value. The receipt of a request naming no profile in the list
+ * links to the `unlisted` answer, and that of one naming a profile without
+ * `setInbox`, which Home never points, to the `unpointable` one, so every
+ * receipt is a link into Home's answers.
  *
  * The list is bound as a value, for the reason it is in
  * {@link ensurePrivateInbox}.
@@ -848,21 +888,27 @@ export const requestPrivateInbox = handler<
   PrivateInboxRequest,
   {
     profiles: PointTarget[];
+    requested: Writable<Record<string, boolean>>;
     answers: Writable<PrivateInboxAnswers>;
     ensure: Stream<EnsurePrivateInboxEvent>;
   },
   PrivateInboxReceipt
->((event, { profiles, answers, ensure }) => {
+>((event, { profiles, requested, answers, ensure }) => {
   ensure.send({});
   const profile = event?.from;
-  const index = profile === undefined ? -1 : (profiles ?? []).findIndex(
-    (each) => each !== undefined && equals(each, profile),
-  );
-  if (index === -1) return answers.key("unlisted");
-  if (profile?.key("setInbox").get() === undefined) {
+  const listed = profile !== undefined &&
+    (profiles ?? []).some((each) =>
+      each !== undefined && equals(each, profile)
+    );
+  const key = listed ? profileKeyOf(profile.resolveAsCell()) : undefined;
+  if (profile === undefined || key === undefined) {
+    return answers.key("unlisted");
+  }
+  if (profile.key("setInbox").get() === undefined) {
     return answers.key("unpointable");
   }
-  return answers.key("profiles").key(index);
+  if (requested.get()?.[key] !== true) requested.key(key).set(true);
+  return answers.key("profiles").key(key);
 });
 
 /**

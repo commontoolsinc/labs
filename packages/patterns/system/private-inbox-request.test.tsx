@@ -12,6 +12,7 @@ import {
   action,
   assert,
   type Cell,
+  computed,
   equals,
   handler,
   pattern,
@@ -19,7 +20,7 @@ import {
   TESTS,
   Writable,
 } from "commonfabric";
-import ProfileHome, { type ProfileInbox } from "./profile-home.tsx";
+import ProfileHome from "./profile-home.tsx";
 import PrivateInbox, {
   ensurePrivateInbox,
   pointProfilesAtPrivateInbox,
@@ -31,6 +32,7 @@ import PrivateInbox, {
   type PrivateInboxReceipt,
   type PrivateInboxRefusalHolder,
   type PrivateInboxRequest,
+  profileKeyOf,
   requestPrivateInbox,
   type RetainedPrivateInboxes,
 } from "./private-inbox.tsx";
@@ -58,25 +60,6 @@ const holdInboxElsewhere = handler<
   });
 });
 
-/** Points a stand-in profile's pointer where the event says. */
-const setStandInInbox = handler<
-  { inbox?: Cell<PrivateInboxPiece> },
-  { inbox: Writable<ProfileInbox> }
->((event, { inbox }) => {
-  inbox.set(event.inbox === undefined ? {} : { piece: event.inbox });
-});
-
-/** Stands in for a profile of a vintage with a pointer and no `setInbox`. */
-const NoSetInboxProfile = pattern<
-  Record<never, never>,
-  { inbox: ProfileInbox; pointAt: Stream<{ inbox?: Cell<PrivateInboxPiece> }> }
->(() => {
-  const inbox = new Writable<ProfileInbox>({}).for("inbox");
-  // The test points it through a stream under another name, which Home does
-  // not know to send.
-  return { inbox, pointAt: setStandInInbox({ inbox }) };
-});
-
 /**
  * Stands in for Home's request for its inbox: Home's `requestPrivateInbox`
  * over a profile list and the answers Home computes for it, sending Home's
@@ -92,10 +75,16 @@ const RequestingHome = pattern<
     answers: PrivateInboxAnswers;
   }
 >(({ privateInbox, profiles }) => {
-  const { answers } = PrivateInboxAnswering({ privateInbox, profiles });
+  const requested = new Writable<Record<string, boolean>>({});
+  const { answers } = PrivateInboxAnswering({
+    privateInbox,
+    profiles,
+    requested,
+  });
   return {
     request: requestPrivateInbox({
       profiles,
+      requested,
       answers,
       ensure: ensurePrivateInbox({
         privateInbox,
@@ -109,6 +98,25 @@ const RequestingHome = pattern<
   };
 });
 
+/** The keys Home files its answers for `profiles` under, as requested. */
+function keysOf(profiles: readonly unknown[]): Record<string, boolean> {
+  const keys: Record<string, boolean> = {};
+  for (const profile of profiles) {
+    const key = profileKeyOf(profile);
+    if (key !== undefined) keys[key] = true;
+  }
+  return keys;
+}
+
+/** The status Home answers a request naming `profile` with, if any. */
+function answerOf(
+  answers: PrivateInboxAnswers | undefined,
+  profile: unknown,
+): string | undefined {
+  const key = profileKeyOf(profile);
+  return key === undefined ? undefined : answers?.profiles?.[key]?.status;
+}
+
 export default pattern(() => {
   // A Home holding no inbox, with two profiles pointing at none.
   const first = ProfileHome({ initialName: "First" });
@@ -120,30 +128,31 @@ export default pattern(() => {
     profiles: [first, second] as any,
   });
 
-  // A Home that holds an inbox it has not pointed its profiles at yet: the
-  // first is pointed by Home, the second at an inbox in another space, the
-  // third at another inbox in the space of the one Home holds, and the fourth
-  // has no `setInbox`.
+  // Home's answers for a Home that holds an inbox it has not pointed its
+  // profiles at yet, as requests for each would read them: the first is
+  // pointed by Home, the second at an inbox in another space, and the third at
+  // another inbox in the space of the one Home holds.
   const pointedByHome = ProfileHome({ initialName: "Pointed by Home" });
   const pointedElsewhere = ProfileHome({ initialName: "Pointed elsewhere" });
   const pointedNearby = ProfileHome({ initialName: "Pointed nearby" });
-  const withoutSetInbox = NoSetInboxProfile({});
   const holding = new Writable<PrivateInboxHolder>({});
   const nearby = new Writable<PrivateInboxHolder>({});
   const elsewhere = new Writable<PrivateInboxHolder>({});
   const holdInbox = holdNewInbox({ holder: holding });
   const holdNearby = holdNewInbox({ holder: nearby });
   const holdElsewhere = holdInboxElsewhere({ holder: elsewhere });
-  const holdingHome = RequestingHome({
+  const holdingAnswers = PrivateInboxAnswering({
     privateInbox: holding,
-    profiles: [
-      pointedByHome,
-      pointedElsewhere,
-      pointedNearby,
-      withoutSetInbox,
-      // deno-lint-ignore no-explicit-any
-    ] as any,
-  });
+    // deno-lint-ignore no-explicit-any
+    profiles: [pointedByHome, pointedElsewhere, pointedNearby] as any,
+    requested: computed(() =>
+      keysOf([
+        pointedByHome,
+        pointedElsewhere,
+        pointedNearby,
+      ])
+    ),
+  }).answers;
   const pointHolding = pointProfilesAtPrivateInbox({
     privateInbox: holding,
     // deno-lint-ignore no-explicit-any
@@ -178,17 +187,21 @@ export default pattern(() => {
     profiles: [],
   });
 
-  const assert_profiles_home_is_to_point_are_pending = assert(() =>
-    home.answers.profiles.length === 2 &&
-    home.answers.profiles[0]?.status === "pending" &&
-    home.answers.profiles[1]?.status === "pending"
-  );
+  // A Home whose earlier profile leaves its list once both are requested.
+  const leaving = ProfileHome({ initialName: "Leaving" });
+  const staying = ProfileHome({ initialName: "Staying" });
+  const leavingHeld = new Writable<PrivateInboxHolder>({});
+  const leavingList = new Writable<PointTarget[]>([]);
+  const leavingHome = RequestingHome({
+    privateInbox: leavingHeld,
+    profiles: leavingList,
+  });
 
-  const assert_requests_home_points_no_profile_for_have_answers_of_their_own =
-    assert(() =>
-      home.answers.unlisted.status === "unlisted" &&
-      home.answers.unpointable.status === "unpointable"
-    );
+  const assert_no_profile_is_answered_before_a_request_names_it = assert(() =>
+    Object.keys(home.answers.profiles).length === 0 &&
+    home.answers.unlisted.status === "unlisted" &&
+    home.answers.unpointable.status === "unpointable"
+  );
 
   const action_hold_the_inboxes = action(() => {
     holdInbox.send();
@@ -198,7 +211,7 @@ export default pattern(() => {
   const assert_a_held_inbox_the_profile_does_not_point_at_is_pending = assert(
     () =>
       holding.get().piece !== undefined &&
-      holdingHome.answers.profiles[0]?.status === "pending",
+      answerOf(holdingAnswers, pointedByHome) === "pending",
   );
 
   const action_point_the_profiles = action(() => {
@@ -215,15 +228,15 @@ export default pattern(() => {
     unvetted.setInbox.send({ inbox: elsewhere.get().piece?.resolveAsCell() });
   });
   const assert_the_answer_follows_the_pointer_to_the_held_inbox = assert(() =>
-    holdingHome.answers.profiles[0]?.status === "ensured" &&
+    answerOf(holdingAnswers, pointedByHome) === "ensured" &&
     equals(pointedByHome.inbox?.piece, holding.get().piece)
   );
   const assert_a_profile_another_inbox_won_is_not_held = assert(() =>
-    holdingHome.answers.profiles[1]?.status === "not-held" &&
+    answerOf(holdingAnswers, pointedElsewhere) === "not-held" &&
     equals(pointedElsewhere.inbox?.piece, elsewhere.get().piece)
   );
   const assert_another_inbox_in_the_held_inbox_space_is_pending = assert(() =>
-    holdingHome.answers.profiles[2]?.status === "pending"
+    answerOf(holdingAnswers, pointedNearby) === "pending"
   );
 
   // Two requests to the first Home, one after the other, as from two clients.
@@ -244,40 +257,60 @@ export default pattern(() => {
   const action_request_without_profiles = action(() => {
     profilelessHome.request.send({ from: lone });
   });
+  const action_list_the_leaving_home_profiles = action(() => {
+    // deno-lint-ignore no-explicit-any
+    leavingList.set([leaving, staying] as any);
+  });
+  const action_request_the_leaving_profile = action(() => {
+    leavingHome.request.send({ from: leaving });
+  });
+  const action_request_the_staying_profile = action(() => {
+    leavingHome.request.send({ from: staying });
+  });
 
   const assert_a_request_is_ensured_once_home_points_its_profile = assert(
     () =>
-      home.answers.profiles[0]?.status === "ensured" &&
+      answerOf(home.answers, first) === "ensured" &&
       held.get().piece !== undefined &&
       equals(first.inbox?.piece, held.get().piece),
   );
   const assert_two_requests_end_at_one_inbox = assert(() =>
-    home.answers.profiles[1]?.status === "ensured" &&
+    answerOf(home.answers, second) === "ensured" &&
     equals(second.inbox?.piece, first.inbox?.piece)
   );
   const assert_a_profile_advertising_another_inbox_is_not_held = assert(() =>
-    advertisingHome.answers.profiles[0]?.status === "not-held" &&
+    answerOf(advertisingHome.answers, advertising) === "not-held" &&
     unheld.get().piece === undefined
   );
   const assert_a_profile_home_will_not_point_is_not_held = assert(() =>
-    awaitingHome.answers.profiles[0]?.status === "not-held" &&
+    answerOf(awaitingHome.answers, waiting) === "not-held" &&
     awaitingVetting.get().piece === undefined &&
     waiting.inbox?.piece === undefined
   );
   const assert_a_home_without_profiles_creates_its_inbox_and_answers_none =
     assert(() =>
-      profilelessHome.answers.profiles.length === 0 &&
+      Object.keys(profilelessHome.answers.profiles).length === 0 &&
       profileless.get().piece !== undefined &&
       lone.inbox?.piece === undefined
+    );
+  const assert_both_profiles_of_the_leaving_home_are_ensured = assert(() =>
+    answerOf(leavingHome.answers, leaving) === "ensured" &&
+    answerOf(leavingHome.answers, staying) === "ensured"
+  );
+
+  const action_remove_the_earlier_profile = action(() => {
+    // deno-lint-ignore no-explicit-any
+    leavingList.set([staying] as any);
+  });
+  const assert_a_removed_profile_is_unlisted_and_the_next_keeps_its_answer =
+    assert(() =>
+      answerOf(leavingHome.answers, leaving) === "unlisted" &&
+      answerOf(leavingHome.answers, staying) === "ensured"
     );
 
   return {
     [TESTS]: [
-      { assertion: assert_profiles_home_is_to_point_are_pending },
-      {
-        assertion:
-          assert_requests_home_points_no_profile_for_have_answers_of_their_own,
-      },
+      { assertion: assert_no_profile_is_answered_before_a_request_names_it },
       { action: action_hold_the_inboxes },
       {
         assertion: assert_a_held_inbox_the_profile_does_not_point_at_is_pending,
@@ -290,6 +323,9 @@ export default pattern(() => {
       { action: action_request_second },
       { action: action_request_where_home_creates_none },
       { action: action_request_without_profiles },
+      { action: action_list_the_leaving_home_profiles },
+      { action: action_request_the_leaving_profile },
+      { action: action_request_the_staying_profile },
       { assertion: assert_a_request_is_ensured_once_home_points_its_profile },
       { assertion: assert_two_requests_end_at_one_inbox },
       { assertion: assert_a_profile_advertising_another_inbox_is_not_held },
@@ -297,6 +333,12 @@ export default pattern(() => {
       {
         assertion:
           assert_a_home_without_profiles_creates_its_inbox_and_answers_none,
+      },
+      { assertion: assert_both_profiles_of_the_leaving_home_are_ensured },
+      { action: action_remove_the_earlier_profile },
+      {
+        assertion:
+          assert_a_removed_profile_is_unlisted_and_the_next_keeps_its_answer,
       },
     ],
   };

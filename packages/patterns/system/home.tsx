@@ -402,6 +402,11 @@ const Home = pattern(
     const privateInboxReplacement = new Writable<PrivateInboxReplacementHolder>(
       {},
     ).for("privateInboxReplacement");
+    // The profiles requests for Home's inbox have named, by entity, which
+    // Home goes on answering for.
+    const privateInboxRequests = new Writable<Record<string, boolean>>({}).for(
+      "privateInboxRequests",
+    );
     // The refusal notice reads the refusal's code and time, and never its
     // `inbox`: the stored link carries the label the refused inbox's owner
     // gives its offers. The notice renders after everything else, for the
@@ -488,6 +493,7 @@ const Home = pattern(
     const privateInboxAnswering = PrivateInboxAnswering({
       privateInbox,
       profiles: profiles as any,
+      requested: privateInboxRequests,
     });
 
     return {
@@ -691,6 +697,7 @@ const Home = pattern(
       ensurePrivateInbox: ensurePrivateInboxStream,
       requestPrivateInbox: requestPrivateInbox({
         profiles: profiles as any,
+        requested: privateInboxRequests,
         answers: privateInboxAnswering.answers,
         ensure: ensurePrivateInboxStream,
       }),
