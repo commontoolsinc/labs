@@ -240,15 +240,11 @@ where the pre-sync was no longer the whole cost.
       follows the helper, would remove the component.
 - [x] The sort breaks a cycle at one of its own members: a member of a
       strongly connected component of the unplaced actions that no unplaced
-      action outside it feeds (`../specs/scheduler-v2/README.md` §7.4,
-      `packages/runner/src/scheduler/topology.ts`). The break had ranked
-      every unplaced action by in-degree, which put a render effect with
-      one unmet input ahead of a computation on a cycle of 180 with 179:
-      1,812 of the room's 1,991 breaks in one settle placed an action ahead
-      of the computation it reads. That settle now takes 179 breaks, all in
-      the one cycle. A load runs 2,177 actions where it ran 2,237, and
-      reports no action started on an argument its input had not yet
-      produced, where it reported sixty.
+      action outside it feeds, so an action that only reads from a cycle is
+      placed after what it reads (`../specs/scheduler-v2/README.md` §7.4,
+      `packages/runner/src/scheduler/topology.ts`). The thirty-row room's
+      counts are in
+      [`../history/development/performance/2026-10-12-cycle-break-room-counts.md`](../history/development/performance/2026-10-12-cycle-break-room-counts.md).
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
       the document they name, once per transaction, so the two checks a
       written path makes read the inputs about its document
