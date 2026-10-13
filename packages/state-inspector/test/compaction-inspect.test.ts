@@ -110,13 +110,30 @@ Deno.test("the commit listing names a compaction run and the payloads it hollowe
         classifyDocument({ value: 1, compaction: null } as never).compaction,
         undefined,
       );
-      // A record without `lastCommitSeq` still counts its runs.
+      // A record without a finite `lastCommitSeq` is not a record: no
+      // archive boundary is advertised that the store did not write.
       assertEquals(
         classifyDocument(
           { value: 1, compaction: { runs: [{ commitSeq: 9 }] } } as never,
         ).compaction,
-        { runs: 1, lastCommitSeq: 0 },
+        undefined,
       );
+      assertEquals(
+        classifyDocument(
+          {
+            value: 1,
+            compaction: { runs: [], lastCommitSeq: Number.NaN },
+          } as never,
+        ).compaction,
+        undefined,
+      );
+      // A compaction-session commit whose payload does not name it is not
+      // labelled as a run.
+      const sdb = space.db;
+      const planned = sdb.prepare(
+        `SELECT original FROM "commit" WHERE seq = ?`,
+      ).get<{ original: string }>(run.commitSeq)!.original;
+      assert(planned.includes(`"seq":${run.commitSeq}`));
     } finally {
       space.close();
     }

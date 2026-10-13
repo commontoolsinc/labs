@@ -1,8 +1,12 @@
 # Compacting a space's history on a host
 
-A **compaction** rewrites one space's SQLite store so that the history behind
-each selected document's head is gone from the live file and kept only in an
-archive. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
+A **compaction** rewrites one space's SQLite store: for each selected
+document, the revision rows and snapshots behind its current value are
+deleted and the oldest kept row becomes a `set` holding that value; the
+payload of every commit older than a retention window is replaced by a
+marker, except commit 1's, the commits an `op_*` row references, and the
+compaction commits' own. Every commit row stays. What is removed lives on
+only in the archive the operator takes first. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
 design and the reasons; this is the procedure, as it was rehearsed on a clone
 of the Topics space's 2026-10-09 snapshot, written for the operator who will
 run it on Estuary.
@@ -128,11 +132,13 @@ grows a reader's work with every storm.
 
 Twenty-one systemd instances `toolshed-binary@8001` through `8021` serve
 `/data/memory`; nginx routes a space's websocket to one of them by a consistent
-hash of the space DID. The Topics space hashed to port 8020 in October 2026.
-Only the owning instance is stopped: every instance can open every file, but
-the hash sends the space's clients to one, and stopping all twenty-one, as the
-staging copy does for a store it treats as shared, is the conservative choice
-if the hash cannot be confirmed.
+hash of the space DID, and the Topics space hashed to port 8020 in October
+2026. Every instance can open every file, though, and a stop of the one the
+hash names does not establish that the others have released this one — so the
+recipe stops all twenty-one before the authoritative backup and the swap, as
+the staging copy does, and starts them all after. The space is down for the
+window either way; the other spaces are down with it, which at a quiet hour
+costs less than a write landing on a file that is about to be replaced.
 
 Steps 2, 6 and 7 carry `sudo` and are the operator's to run by hand. The window
 in which the space is down is steps 2 through 7, and the backup that becomes the
@@ -154,8 +160,8 @@ sqlite3 -readonly '/data/memory/engine-v3/engine-v3/<did>.sqlite' \
 cf space compact '/data/replaced/<did>.dry-run-<date>.sqlite' \
   --documents computed: --dry-run
 
-# 2. Stop the owning instance. (sudo.) Nothing writes the space from here on.
-sudo systemctl stop toolshed-binary@8020
+# 2. Stop every instance. (sudo.) Nothing writes any space from here on.
+for p in $(seq 8001 8021); do sudo systemctl stop toolshed-binary@$p; done
 
 # 3. The authoritative backup, AFTER the stop: read-only, into a directory
 #    with room, checksummed. This is the rollback, the archive, and the source.
@@ -182,9 +188,9 @@ ls -la '<did>.sqlite'*
 sudo mv '<did>.sqlite'* /data/replaced/
 sudo install -o deploy -g deploy -m 644 '/data/replaced/<did>.compacted.sqlite' '<did>.sqlite'
 
-# 7. Start, confirm, read back. (sudo.)
-sudo systemctl start toolshed-binary@8020
-systemctl is-active toolshed-binary@8020
+# 7. Start them all, confirm, read back. (sudo.)
+for p in $(seq 8001 8021); do sudo systemctl start toolshed-binary@$p; done
+for p in $(seq 8001 8021); do systemctl is-active toolshed-binary@$p; done
 ```
 
 After the start, the two checks the staging copy document ends with: the space
@@ -204,7 +210,10 @@ damaged in the move.
 `cf inspect commits` names the compaction run's own commit and every payload
 it hollowed, in place of counting zero operations on them. The ACL document,
 where the space has one, carries a `compaction` member beside `value` with
-each run and the newest seq any removed row had; `cf inspect` labels the
-document with it. The Topics space has no ACL document, so there the
+each run that completed and the newest seq any removed row had; `cf inspect`
+labels the document with it. A run interrupted before its audit revision is
+on record only in its compaction commit, whose payload is the plan it set out
+with, and the run that resumed it reports what remained, so the commit list
+and the ACL's `runs` reconcile only once the two are read together. The Topics space has no ACL document, so there the
 compaction commit is the store's one record of the run, and the archive the
 operator took is where the history before it lives.

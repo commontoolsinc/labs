@@ -455,15 +455,14 @@ function compactionRecordOf(
   doc: EntityDocument,
 ): Classification["compaction"] | undefined {
   const record = doc.compaction;
-  if (!isObjectNotArray(record) || !Array.isArray(record.runs)) {
+  if (
+    !isObjectNotArray(record) || !Array.isArray(record.runs) ||
+    typeof record.lastCommitSeq !== "number" ||
+    !Number.isFinite(record.lastCommitSeq)
+  ) {
     return undefined;
   }
-  return {
-    runs: record.runs.length,
-    lastCommitSeq: typeof record.lastCommitSeq === "number"
-      ? record.lastCommitSeq
-      : 0,
-  };
+  return { runs: record.runs.length, lastCommitSeq: record.lastCommitSeq };
 }
 
 /**

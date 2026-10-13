@@ -130,11 +130,22 @@ export function listCommits(
         const parsed = decodeStored(r.original) as {
           operations?: unknown[];
           reads?: { confirmed?: unknown[]; pending?: unknown[] };
-          compaction?: { runId?: unknown };
+          compaction?: {
+            runId?: unknown;
+            report?: {
+              compactionCommit?: { seq?: unknown; sessionId?: unknown };
+            };
+          };
         };
+        // A run's own commit: under the compaction session, and holding a
+        // plan that names this very row. The commit's class is not read,
+        // because this reader opens stores from before the column existed.
+        const named = parsed.compaction?.report?.compactionCommit;
         if (
           r.session_id.startsWith(COMPACTION_SESSION_PREFIX) &&
-          typeof parsed.compaction?.runId === "string"
+          typeof parsed.compaction?.runId === "string" &&
+          named?.seq === r.seq && named?.sessionId === r.session_id &&
+          r.local_seq === 1
         ) {
           compactionRun = parsed.compaction.runId;
         }

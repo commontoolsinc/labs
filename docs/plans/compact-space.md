@@ -837,9 +837,10 @@ sqlite3 -readonly '/data/memory/engine-v3/engine-v3/<did>.sqlite' \
 cf space compact '/data/replaced/<did>.dry-run-<date>.sqlite' \
   --documents computed: --dry-run
 
-# 2. Stop the owning instance. The other twenty keep serving their spaces.
-#    (sudo: the operator runs this.) Nothing writes the space from here on.
-sudo systemctl stop toolshed-binary@8020
+# 2. Stop every instance. (sudo: the operator runs this.) Nothing writes any
+#    space from here on. Every instance can open every file, so stopping the
+#    one the hash names would not establish that the others have let go.
+for p in $(seq 8001 8021); do sudo systemctl stop toolshed-binary@$p; done
 
 # 3. The authoritative backup, AFTER the stop: read-only, into a directory
 #    with room, checksummed. This is the rollback, the archive, and the source.
@@ -866,17 +867,17 @@ ls -la '<did>.sqlite'*
 sudo mv '<did>.sqlite'* /data/replaced/
 sudo install -o deploy -g deploy -m 644 '/data/replaced/<did>.compacted.sqlite' '<did>.sqlite'
 
-# 7. Start, confirm, read back (§3, step 7). (sudo.)
-sudo systemctl start toolshed-binary@8020
-systemctl is-active toolshed-binary@8020
+# 7. Start them all, confirm, read back (§3, step 7). (sudo.)
+for p in $(seq 8001 8021); do sudo systemctl start toolshed-binary@$p; done
+for p in $(seq 8001 8021); do systemctl is-active toolshed-binary@$p; done
 ```
 
-Only the owning instance is stopped: every instance can open every file, but
-the hash sends the space's clients to one of them, and the storm record shows
-that one at 95% CPU while its neighbors idled. Stopping all twenty-one, as the
-staging recipe does for a store it treats as shared, is the conservative
-choice if the hash cannot be confirmed. The window in which the space is down
-is steps 2 through 7, and the backup that becomes the replacement is taken
+Every instance is stopped, as the staging recipe stops them for a store it
+treats as shared: the hash sends the space's websocket clients to one
+instance, and the storm record shows that one at 95% CPU while its neighbors
+idled, but every instance can open every file, and a stop of one does not
+establish that the others have released it. The window in which the spaces are
+down is steps 2 through 7, and the backup that becomes the replacement is taken
 inside it: a snapshot from before the stop would silently drop every commit
 accepted between the two, and verifying against it would not show the gap.
 
