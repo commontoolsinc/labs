@@ -28,6 +28,7 @@ import {
 } from "./sigil-types.ts";
 import { arrayEqual } from "./path-utils.ts";
 import type { IMemorySpaceAddress } from "./storage/interface.ts";
+import { immutableOrigin } from "./immutable-cell.ts";
 
 export { decodeJsonPointer, encodeJsonPointer };
 
@@ -268,6 +269,7 @@ export function parseLinkPrimitive(
   base?: NormalizedLink,
 ): NormalizedLink {
   if (isSigilLink(value)) {
+    if (base !== undefined) base = immutableOrigin(base);
     const link = linkRefPayload(value);
 
     // Resolve relative references

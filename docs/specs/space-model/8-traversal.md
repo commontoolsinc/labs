@@ -235,7 +235,7 @@ resolve the reference and are not conflict dependencies.
 | Object property, link value, schema has `asCell` | Follows write redirects to stable target, then creates boundary object from resolved link (`getNextCellLink` path). | Follows redirects and continues traversal into resolved target content. |
 | Array element, link value, schema has `asCell` | Resolves write redirects first, then follows one additional link step for array semantics, then emits boundary object for the resolved target link. | Performs same link resolution, then continues schema traversal into the resolved element value. |
 | Array element, inline non-link object, schema has `asCell` | Boundary at element index. Emits `createObject(indexLink, undefined)`; no nested traversal for element fields. | No boundary shortcut; element object is traversed against element schema. |
-| Array element, inline non-link object or array, schema is not `asCell` | Element is given a `data:` identifier encoding a snapshot of its value (`dataUriSnapshotWithResolvedLinks`) for stable link identity during nested traversal. Nested traversal continues over the element with each link that names no document given the identifier of the document storing the element, so such a link resolves there and not inside the snapshot. | Same behavior. |
+| Array element, inline non-link object or array, schema is not `asCell` | Element is given a compact `snapshot:` identifier naming its frozen value and source origin (`ImmutableCellStore.create`) for stable link identity during nested traversal. Nested traversal shares the frozen element and resolves relative links against the saved source document, without rewriting the element. | Same behavior. |
 
 ### Pointer and Redirect Details at Boundaries
 

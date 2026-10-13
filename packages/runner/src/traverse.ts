@@ -76,7 +76,6 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
@@ -126,6 +125,7 @@ import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
 } from "./traverse-recorder.ts";
+import { immutableCellsFor } from "./immutable-cell.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -1581,7 +1581,7 @@ export type PointerCycleTracker = CompoundCycleTracker<
  * than in the one a position is in.
  *
  * A traversal that moves a value to another address without following a
- * link, as an inline array item moves to a `data:` document of its own,
+ * link, as an inline array item moves to an immutable document of its own,
  * records that as a copy.
  */
 export interface LinkCrossingRoute {
@@ -5574,16 +5574,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc. It keeps this document's
-        // space, which is where a link inside the element resolves the
-        // references in its schema.
-        // Need to read recursively here
+        // Preserve the source dependency and space (which owns schema refs).
+        // The snapshot shares the frozen element and saves its relative-link
+        // origin, so traversal needs no link-rewriting walk here.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-        // A link inside the element that names no document takes its id from
-        // the address it is read under, which under the `data:` address is
-        // the snapshot. The walk continues over the element with each such
-        // link given the id of the document storing the element.
-        const snapshot = dataUriSnapshotWithResolvedLinks(
+        const snapshot = immutableCellsFor(this.tx).create(
           curDoc.value,
           elementLink,
         );

@@ -4,7 +4,6 @@ import {
   type FabricValue,
   hashStringOf,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";
@@ -14,6 +13,12 @@ import type {
   IReadOptions,
 } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import { portableSnapshotId, portableSnapshotLinks } from "./data-uri.ts";
+import {
+  bindImmutableCells,
+  hasInlineCellScheme,
+  immutableCellsFor,
+} from "./immutable-cell.ts";
 
 const logger = getLogger("traverse-recorder", { enabled: true, level: "info" });
 
@@ -125,6 +130,7 @@ export class TraverseCaptureRecorder {
   }
 
   #internSelector(selector: SchemaPathSelector): number {
+    selector = portableSnapshotLinks(selector) as SchemaPathSelector;
     const key = hashStringOf(selector);
     let index = this.#selectorIndex.get(key);
     if (index === undefined) {
@@ -140,6 +146,10 @@ export class TraverseCaptureRecorder {
   }
 
   #internLink(link: NormalizedFullLink): number {
+    link = portableSnapshotLinks({
+      ...link,
+      id: portableSnapshotId(link.id),
+    }) as unknown as NormalizedFullLink;
     const key = hashStringOf(link);
     let index = this.#linkIndex.get(key);
     if (index === undefined) {
@@ -175,7 +185,7 @@ export class TraverseCaptureRecorder {
     this.#invocations.push({
       address: {
         space,
-        id,
+        id: portableSnapshotId(id),
         type: type ?? "application/json",
         path: [...path],
         scope,
@@ -204,7 +214,7 @@ export class TraverseCaptureRecorder {
     address: IMemorySpaceAddress,
   ): void {
     // data: URIs carry their value in the id; replay decodes them directly.
-    if (hasDataUriScheme(address.id)) return;
+    if (hasInlineCellScheme(address.id)) return;
     const key = fixtureDocKey(address);
     if (this.#docs.has(key)) return;
     const { ok } = tx.read(
@@ -220,7 +230,7 @@ export class TraverseCaptureRecorder {
     if (ok !== undefined && ok.value !== undefined) {
       this.#docs.set(
         key,
-        cloneIfNecessary(ok.value),
+        cloneIfNecessary(portableSnapshotLinks(ok.value)),
       );
     }
   }
@@ -233,7 +243,7 @@ export class TraverseCaptureRecorder {
   wrapTx(tx: IExtendedStorageTransaction): IExtendedStorageTransaction {
     // deno-lint-ignore no-this-alias
     const recorder = this;
-    return new Proxy(tx, {
+    const wrapped = new Proxy(tx, {
       get(target, prop) {
         if (prop === "read" || prop === "readOrThrow") {
           return (address: IMemorySpaceAddress, options?: IReadOptions) => {
@@ -263,6 +273,8 @@ export class TraverseCaptureRecorder {
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
+    bindImmutableCells(wrapped, immutableCellsFor(tx));
+    return wrapped;
   }
 
   toFixture(name: string, source: string): TraverseFixture {

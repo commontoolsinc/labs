@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
+
 import { isExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
+import { deepFreeze } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  isRendererTrustedEvent,
+  markRendererTrustedEvent,
+} from "../src/cfc/ui-contract.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -16,6 +21,7 @@ import {
 } from "../src/schema-doc-config.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { immutableSnapshot } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -191,9 +197,54 @@ describe("runtime", () => {
       await storageManager.close();
     });
 
-    it("carries a link's schema inline in the id", () => {
+    it("shares already frozen input and isolates mutable input", () => {
+      const frozen = deepFreeze({ large: "x".repeat(100_000) });
+      const cell = runtime.getImmutableCell(space, frozen, undefined, tx);
+      expect(immutableSnapshot(cell.getAsNormalizedFullLink().id).value).toBe(
+        frozen,
+      );
+      expect(cell.getRaw()).toBe(frozen);
+      const input = { n: 1, frozen };
+      const copied = runtime.getImmutableCell(space, input, undefined, tx);
+      input.n = 2;
+      expect(copied.getRaw()).toEqual({ n: 1, frozen });
+      expect(copied.getRaw()!.frozen).toBe(frozen);
+      expect(() => copied.key("n").set(3)).toThrow();
+    });
+
+    it("releases snapshots when disposed while its storage remains open", async () => {
+      const owner = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const cell = owner.getImmutableCell(space, { disposalFixture: true });
+      const id = cell.getAsNormalizedFullLink().id;
+      expect(cell.getRaw()).toEqual({ disposalFixture: true });
+      await owner.dispose({ closeStorage: false });
+      expect(() => immutableSnapshot(id)).toThrow("expired");
+    });
+
+    it("does not carry renderer authority with a frozen event snapshot", () => {
+      const event = deepFreeze({
+        type: "click",
+        provenance: { origin: "dom", trusted: true },
+      });
+      markRendererTrustedEvent(event);
+      const cell = runtime.getImmutableCell(
+        space,
+        deepFreeze({ $event: event }),
+        undefined,
+        tx,
+      );
+      const held = cell.getRaw()!.$event;
+      expect(held).toEqual(event);
+      expect(isRendererTrustedEvent(held)).toBe(false);
+      expect(isRendererTrustedEvent(event)).toBe(true);
+    });
+
+    it("carries a link's schema inline in the snapshot", () => {
       // No write has stored this link, so no space holds the closure its
-      // reference-form schema names; the id carries the schema in its
+      // reference-form schema names; the snapshot carries the schema in its
       // recomposed form instead.
       const target = runtime.getCell(
         space,
@@ -213,7 +264,7 @@ describe("runtime", () => {
         { ref: link },
         undefined,
       );
-      const stored = valueFromDataUri(immutable.getAsNormalizedFullLink().id);
+      const stored = immutable.withTx(tx).getRaw()!;
       expect(parseLink(stored.ref)!.schema).toEqual(resolvedSchema(carried));
     });
 

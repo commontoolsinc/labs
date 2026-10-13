@@ -23,6 +23,7 @@ import { Runtime } from "../src/runtime.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { inlineCellValue } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -972,9 +973,9 @@ describe("data URI inlining", () => {
       return link;
     };
 
-    /** The schema of the link at `ref` in the document `id` encodes. */
-    const schemaInside = (id: string) =>
-      parseLink(valueFromDataUri(id).ref)!.schema;
+    /** The schema of the link at `ref` in the document `id` addresses. */
+    const schemaInside = (id: `${string}:${string}`) =>
+      parseLink((inlineCellValue(id) as { ref: unknown }).ref)!.schema;
 
     it("resolves on a read of a stored array element", () => {
       storedLink();

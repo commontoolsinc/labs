@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -12,6 +11,7 @@ import { type Cell, sendEvent } from "../src/cell.ts";
 import { isCellLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { hasInlineCellScheme } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("stream send data uri");
 const space = signer.did();
@@ -103,7 +103,9 @@ describe("stream-send-data-uri", () => {
 
   it("carries an inline array element as its value", async () => {
     const { element, targetId } = await inlineElement(runtime.edit());
-    expect(hasDataUriScheme(element.getAsNormalizedFullLink().id)).toBe(true);
+    expect(hasInlineCellScheme(element.getAsNormalizedFullLink().id)).toBe(
+      true,
+    );
 
     await send({ item: element });
 
@@ -116,7 +118,7 @@ describe("stream-send-data-uri", () => {
 
   it("carries an immutable cell as its value", async () => {
     const immutable = runtime.getImmutableCell(space, { count: 3 });
-    expect(hasDataUriScheme(immutable.getAsNormalizedFullLink().id)).toBe(
+    expect(hasInlineCellScheme(immutable.getAsNormalizedFullLink().id)).toBe(
       true,
     );
 

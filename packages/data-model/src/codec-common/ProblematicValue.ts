@@ -1,6 +1,8 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
+import { cloneIfNecessary } from "@/value-clone.ts";
+import { assertAcyclicFabricValue } from "@/value-acyclic.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
@@ -144,9 +146,14 @@ export class ProblematicValue extends BaseFabricInstance {
     return Object.isFrozen(this) && subIsDeepFrozen(this.state);
   }
 
-  /** @inheritDoc Not yet implemented, so `deepClone()` throws. */
-  protected [DEEP_CLONE_CORE](_frozen: boolean): ProblematicValue {
-    throw new Error("Cannot yet handle deep cloning of `ProblematicValue`.");
+  /** @inheritDoc */
+  protected [DEEP_CLONE_CORE](frozen: boolean): ProblematicValue {
+    assertAcyclicFabricValue(this.state);
+    return new ProblematicValue(
+      this.wireTypeTag,
+      cloneIfNecessary(this.state, { frozen }),
+      this.error,
+    );
   }
 
   protected [SHALLOW_UNFROZEN_CLONE](): ProblematicValue {

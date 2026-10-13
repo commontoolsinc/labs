@@ -6,10 +6,6 @@ import {
   taggedHashStringOf,
 } from "@commonfabric/data-model";
 import {
-  hasDataUriScheme,
-  valueFromDataUri,
-} from "@commonfabric/data-model/codec-data-uri";
-import {
   verifySchemaDocument,
   walkSchemaDocumentClosure,
 } from "@commonfabric/data-model-schema/schema-closure";
@@ -210,6 +206,11 @@ import {
   normalizeSyncSelector,
   watchIdForEntry,
 } from "./v2-watch.ts";
+import {
+  hasInlineCellScheme,
+  inlineCellValue,
+  isImmutableCellId,
+} from "../immutable-cell.ts";
 
 /**
  * Syncs the CFC schema document a document's `cfc.schemaHash` names and the
@@ -2577,7 +2578,7 @@ export class StorageManager implements IStorageManager {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
-    if (hasDataUriScheme(id)) {
+    if (hasInlineCellScheme(id)) {
       return false;
     }
     const instance = this.#foreignInstanceKey(scope, identity);
@@ -2856,7 +2857,7 @@ export class StorageManager implements IStorageManager {
       throw new Error("No space set");
     }
 
-    if (hasDataUriScheme(id)) {
+    if (hasInlineCellScheme(id)) {
       return this.#syncDataURICell(
         cell,
         space,
@@ -3018,7 +3019,7 @@ export class StorageManager implements IStorageManager {
     address: { space: MemorySpace; id: URI; scope?: CellScope },
     identity: ScopeKeyIdentity,
   ): Promise<void> {
-    if (hasDataUriScheme(address.id)) return;
+    if (hasInlineCellScheme(address.id)) return;
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
@@ -3176,9 +3177,12 @@ export class StorageManager implements IStorageManager {
 
   /** The memo entry for the data URI `id`, decoded and hashed on first use. */
   #dataUri(id: string): { idHash: string; value: unknown } {
+    if (isImmutableCellId(id)) {
+      return { idHash: id, value: inlineCellValue(id) };
+    }
     let entry = this.#dataUriMemo.get(id);
     if (entry === undefined) {
-      entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
+      entry = { idHash: hashStringOf(id), value: inlineCellValue(id as URI) };
       if (dataUriMemoWeight(id) <= DATA_URI_MEMO_MAX_ENTRY_WEIGHT) {
         this.#dataUriMemo.put(id, entry);
       }
@@ -3229,7 +3233,7 @@ export class StorageManager implements IStorageManager {
    * place in `schema` would cross it with: the reader's sub-schema, which the
    * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
    * through `#syncLinkTarget`, which crosses a link into a data-URI document
-   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * locally rather than sending it. `seen` holds the ancestors of the current occurrence. A served per-instance run's
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
@@ -3249,65 +3253,71 @@ export class StorageManager implements IStorageManager {
       return;
     }
     seen.add(value);
-
-    if (isPrimitiveCellLink(value)) {
-      // A position the reader declares a stream names a document that holds
-      // no value a read uses, whatever the link's own schema says of it.
-      if (ContextualFlowControl.declaresStream(schema)) return;
-      const link = parseLinkPrimitive(value, base);
-      if (link.id === undefined) return;
-      this.#syncLinkTarget(
-        { ...link, id: link.id },
-        base,
-        combineOptionalSchema(schema, link.schema),
-        promises,
-        seen,
-        identity,
-      );
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        const item = value[i];
-        const itemSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          item,
+    // A shared frozen node can occur under different schemas and origins.
+    // Guard ancestors, not all previously visited identities: each occurrence
+    // must contribute the reads its own schema requests.
+    try {
+      if (isPrimitiveCellLink(value)) {
+        // A position the reader declares a stream names a document that holds
+        // no value a read uses, whatever the link's own schema says of it.
+        if (ContextualFlowControl.declaresStream(schema)) return;
+        const link = parseLinkPrimitive(value, base);
+        if (link.id === undefined) return;
+        this.#syncLinkTarget(
+          { ...link, id: link.id },
           base,
-          itemSchema,
+          combineOptionalSchema(schema, link.schema),
           promises,
           seen,
           identity,
         );
+        return;
       }
-      return;
-    }
 
-    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
-    // held inside a `FabricInstance` reconstructed from the data URI is never
-    // found here and its target document is never synced — the later read
-    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
-    // leaf.)
-    if (isKeyableObjectOrArray(value)) {
-      for (const key of Object.keys(value)) {
-        const child = value[key];
-        if (!isObjectOrArray(child)) {
-          continue;
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const item = value[i];
+          const itemSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            item,
+            base,
+            itemSchema,
+            promises,
+            seen,
+            identity,
+          );
         }
-        const childSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [key])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          child,
-          base,
-          childSchema,
-          promises,
-          seen,
-          identity,
-        );
+        return;
       }
+
+      // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+      // held inside a `FabricInstance` reconstructed from the data URI is never
+      // found here and its target document is never synced — the later read
+      // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+      // leaf.)
+      if (isKeyableObjectOrArray(value)) {
+        for (const key of Object.keys(value)) {
+          const child = value[key];
+          if (!isObjectOrArray(child)) {
+            continue;
+          }
+          const childSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [key])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            child,
+            base,
+            childSchema,
+            promises,
+            seen,
+            identity,
+          );
+        }
+      }
+    } finally {
+      seen.delete(value);
     }
   }
 
@@ -3334,7 +3344,7 @@ export class StorageManager implements IStorageManager {
     // A handle with no declared value shape transfers only its
     // address. Loading its target requires a read through that handle.
     if (
-      !hasDataUriScheme(link.id) && link.overwrite !== "redirect" &&
+      !hasInlineCellScheme(link.id) && link.overwrite !== "redirect" &&
       isUnknownCellSchema(schema)
     ) return;
     // A link that declares a stream names a document that holds no value: a
@@ -3343,7 +3353,7 @@ export class StorageManager implements IStorageManager {
     // delivers nothing and costs a root carrying that schema per stream.
     if (ContextualFlowControl.declaresStream(schema)) return;
     const scope = normalizeCellScope(link.scope as CellScope | undefined);
-    if (hasDataUriScheme(link.id)) {
+    if (hasInlineCellScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
       let target: unknown = this.#dataUri(link.id).value;
@@ -8114,7 +8124,7 @@ export class SpaceReplica
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id) ||
+        hasInlineCellScheme(read.id) ||
         // Content-addressed documents cannot change, so their reads carry no
         // commit-time concurrency precondition.
         read.id.startsWith("cid:") ||

@@ -1,319 +1,166 @@
-# `data:` cell identifiers
+# Immutable cell identifiers
 
-A `data:` identifier is a cell identifier that carries a frozen value inside
-the identifier string itself. A cell identified this way is read by decoding
-its own identifier. There is no document stored in a space behind it, so there
-is nothing to fetch, nothing to sync, nothing to write, and no commit
-precondition to state about it.
+An immutable cell names a frozen value without a stored document behind it.
+`Runtime.getImmutableCell()` and inline array-element snapshots use compact
+`snapshot:` URIs. The runtime also reads self-contained `data:` cell URIs.
+Neither kind is an entity identifier, a write target, a replica document, or a
+commit precondition.
 
-Code in `packages/runner` branches on this distinction in many places — in the
-storage transaction, in the sync layer, in link resolution, in query traversal,
-and in the confidentiality-contract checks. This document explains what the
-distinction means, so that meeting one of those branches does not require
-reconstructing the concept from the branch itself.
+## Native snapshots
 
-## How it differs from an entity identifier
+`packages/runner/src/immutable-cell.ts` owns the native representation. An
+`ImmutableCellStore` retains a frozen `FabricValue` and, optionally, the origin
+against which links inside it resolve. The identifier contains the value's
+standard Fabric content hash and, when present, the origin's hash:
 
-An ordinary cell is named by an entity identifier: a content-derived hash
-carried under an entity URI scheme. `packages/runner/src/entity-kind.ts`
-defines the set of those schemes in `ENTITY_URI_SCHEMES` — `of:` for the
-unkinded default, and `computed:` for entities whose contents the runtime that
-minted them can re-derive. Both name a document that lives in a space, is
-fetched from a replica, participates in conflict validation, and can be written
-to.
+```text
+snapshot:<value hash>[:<origin hash>]
+```
 
-A `data:` identifier is not an entity identifier and carries no entity kind.
-`hasEntityUriScheme` returns false for it, and `entityKindOfIdString` returns
-`undefined`. Two helpers in `packages/runner/src/uri-utils.ts` treat it
-specially rather than by scheme-stripping: `toURI` accepts an already-schemed
-`data:` string as a valid URI, and `fromURI` returns the hash of the whole URI
-string rather than trying to strip a scheme off it.
+The payload and schemas are not embedded in the identifier. `cloneIfNecessary`
+uses the data model's frozen-value machinery: a validated frozen graph passes
+through by identity, a mutable container is copied and frozen, and its frozen
+children are shared. `hashStringOf` uses the existing content hash and its
+frozen-identity cache. The first hash of a fresh graph still visits its content;
+subsequent creation from that frozen graph reuses the hash. Acyclic validation
+uses the data model visitor and memoizes validated frozen roots; a frozen cycle
+is rejected before registration.
 
-The practical difference is that everything a document identifier implies —
-a replica to pull from, a sequence number, a conflict domain, a write target —
-is absent. The identifier is the content.
+Equal values and origins have equal identifiers, including across live runtimes.
+This matters because a cell's identifier can participate in derived identity.
+Object key insertion order does not affect identity. Origins do: identical raw
+relative links in different documents can denote different values.
 
-## The shape of the identifier
+Each runtime and its transactions share a store. A weak realm lookup lets link
+parsing and value expansion resolve a URI without retaining its runtime. Stores
+retain their snapshots until runtime disposal or collection; entries are not
+evicted while their IDs may still be used. Equal snapshots held by multiple
+runtimes share their frozen value, and disposing one owner does not invalidate
+another owner's snapshot. After the last owner is disposed, the identifier no
+longer resolves. These IDs are not a persistence or cross-process format.
 
-The single media type this codebase mints is
-`application/vnd.common-fabric.data`, exported as `DATA_URI_MEDIA_TYPE` from
-`packages/data-model/src/codec-data-uri.ts`. A minted identifier looks like
-this:
+This lifetime trades encoded payload strings and decoded copies for retention of
+one native frozen snapshot per distinct value and origin. A long-lived runtime
+that creates many distinct snapshots retains those values until disposal.
+
+## Relative-link origins
+
+Creating an array-element snapshot stores the source's document ID, space, and
+scope. It does not walk the value to rewrite links. The source path is omitted:
+a primitive link's path is relative to its document's value root, not to the
+array slot containing the link. Schemas remain in the frozen value.
+
+`parseLinkPrimitive` substitutes the saved origin when resolving a link beneath
+a snapshot. Nested snapshots inherit that same original origin. A relative link
+therefore keeps pointing into the source document even when the snapshot is read
+beneath its own identifier. An explicitly addressed link keeps its explicit
+fields.
+
+`Runtime.getImmutableCell()` takes data as given, without a source-document
+origin. Builder artifacts and cells are converted through the usual intake, and
+`fabricFromConvertibleJsValue` supplies the Fabric representation of JavaScript
+instances. Identity-based renderer authority is not carried into an immutable
+event snapshot. Marked events are copied using the existing data-model clone
+machinery; ordinary frozen data remains shared.
+
+Array traversal (`traverse.ts`), `resolveAsCell()` (`cell.ts`), and lazy schema
+views (`schema-view.ts`) all create native snapshots. Their read dependencies
+remain on the original mutable array element. Moving an inline element's value
+behind an immutable ID changes its addressing, not what the computation depends
+on. A link or an explicitly declared cell handle already has its own identity.
+
+## Schemas and outbound values
+
+A snapshot taken from storage retains a link's schema as given, including a
+content-addressed `cid:` reference. It is addressed in the source document's
+space, whose schema documents arrived with the source. `getImmutableCell()`
+accepts unstored input, so `inlineExternalSchemaRefsInValue` puts those link
+schemas into inline form where the schema registry can resolve them.
+
+A stored write (`normalizeAndDiff`) or a stream send (`Cell.send`) expands
+immutable links through `findAndInlineDataUriLinks`. Both `snapshot:` and the
+Fabric `data:` media type expand to their contents; nested immutable links are
+expanded in turn, including links held in schema defaults. Relative links are
+materialized against the saved origin at this boundary. An ordinary
+stored-document link stays a link. A path into an immutable value selects the
+addressed subvalue; encountering another link on that path appends the remaining
+path to it.
+
+`Cell.getRawUntyped()` also materializes relative links before handing a native
+snapshot's value to a caller. The raw value can then be written into a different
+document without changing what its links denote. Containers are copied only
+where a link is rewritten.
+
+A `FabricPrimitive` remains a leaf. At the inlining boundary, a `FabricInstance`
+supplied directly or as the entire immutable payload is refused. Below a
+payload's root, codec-mediated traversal expands links in instance state before
+a stored write. A stream send uses `refuseCarriedInstances` and refuses
+instances anywhere in the carried value.
+
+Snapshot identifiers therefore do not travel through stored values or events.
+Offline traversal capture converts native IDs and embedded snapshot links to
+portable `data:` IDs before writing a fixture. Replay compares those portable
+representations, so runtime lifetime does not affect the oracle. SQLite
+`_cf_link` columns also store a self-contained `data:` link when given an
+immutable cell: the column is a link string whose contents must survive runtime
+disposal. These explicit string boundaries pay the encoding cost.
+
+## Self-contained data URIs
+
+`packages/data-model/src/codec-data-uri.ts` implements the portable encoding:
 
 ```text
 data:application/vnd.common-fabric.data,<payload>
 ```
 
-The payload is base64url of UTF-8 text, and that text is the standard
-`data-model` JSON-embedded encoding of a `FabricValue`, which carries the
-`fvj1:` prefix tag. There are no media-type parameters: no `;charset=` and no
-`;base64`, because the payload encoding is fixed. `extractDataUriPayloadText`
-takes the surface syntax apart, returning everything between `data:` and the
-first comma verbatim as the media type. Per the URL grammar, a raw `?` or `#`
-after the comma starts a query or fragment; everything from that delimiter
-onward is ignored.
+The payload is base64url of UTF-8 text containing the `fvj1:`-tagged Fabric JSON
+encoding. The media type is `DATA_URI_MEDIA_TYPE`; there are no media-type
+parameters. `dataUriFromValue` encodes a `FabricValue`, and `valueFromDataUri`
+decodes and freezes it. It rejects other media types, malformed base64url, an
+empty payload, and untagged JSON. A raw `?` or `#` starts a query or fragment
+and is excluded from the payload.
 
-## Minting one
+`dataUriFromValueWithResolvedLinks` prepares a self-contained URI by rewriting
+primitive links against a base before encoding. Its companion
+`dataUriSnapshotWithResolvedLinks` also returns a value suitable for traversal
+under that URI. `undefinedDataLink()` uses the portable encoding for its small,
+constant undefined result. Native snapshots do not need either encoding walk.
 
-There are two mint functions, and they differ in whether they prepare the value
-first.
+## Storage and routing
 
-`dataUriFromValue(value)` in `packages/data-model/src/codec-data-uri.ts` is the
-single place the identifier's shape is assembled: scheme, media type, and
-base64url payload. It does no preparation of the value at all; callers hand it
-a ready `FabricValue`.
+The payload is always the cell's **value**, not its document. Storage readers
+synthesize the frozen `{ value: payload }` document wrapper, which lets the
+address grammar use `["value", …]` paths without allowing payload properties to
+impersonate document facets such as `cfc` or `source`. Native reads retrieve the
+frozen value directly. Portable reads decode through the attestation loader and
+use its bounded decode cache.
 
-`dataUriFromValueWithResolvedLinks(data, base?)` in
-`packages/runner/src/data-uri.ts` prepares the value first, then calls
-`dataUriFromValue`. Its preparation is a walk that rewrites each primitive cell
-link within `data` into a full sigil link, resolving relative links against
-`base`. That rewriting is what makes the resulting identifier self-contained:
-the identifiers it embeds no longer depend on where the value was minted, so
-the identifier denotes the same value wherever it is later read. The walk
-throws if `data` contains a reference cycle. It lives in the runner rather than
-in the codec because it needs the cell and link machinery, which `data-model`
-does not have.
+Two runner predicates preserve distinct routing questions:
 
-`dataUriSnapshotWithResolvedLinks(data, base?)` mints the same identifier and
-returns beside it the value to walk under that identifier. A caller that holds
-`data` and goes on to read it under the identifier it minted walks that value
-and not `data`. A link in `data` that names no document takes its identifier
-from the address it is read under. Under the minted address that is the `data:`
-identifier itself, so the link's path would be read inside the snapshot and not
-in the document that stores the link. Where `base` has an identifier, the
-returned value is `data` with each such link given that identifier; every other
-link is left as `data` holds it, schema included. Without a `base`, or with one
-that has no identifier, there is nothing to give such a link, and the returned
-value is `data` as given.
+- `hasInlineCellScheme` accepts `snapshot:` and every `data:` media type. It
+  answers whether there is a replica document to fetch, write, or validate.
+- `isInlineCellId` accepts `snapshot:` and only the Fabric `data:` media type.
+  It answers whether the runtime can expand this identifier to a value.
 
-The walk rebuilds a container only when a link under it was rewritten;
-everything else it hands back by identity, so a value carrying no link at all
-reaches `dataUriFromValue` as the objects the caller passed in. A value that
-has no fabric representation, such as a `Date` or a `Cell`, therefore reaches
-the encoder intact and is refused there, instead of arriving as a plain object
-with none of its content.
+The underlying legacy codec keeps `hasDataUriScheme` and `isFabricDataUri` for
+callers that deal only with portable IDs. A foreign `data:` media type is left
+alone by value expansion and is refused by the storage loader with
+`UnsupportedMediaTypeError`. It is never sent to a replica as a document to
+fetch. The inlining predicate and `normalizeAndDiff` agree so that a refused
+foreign media type cannot cause endless recursive expansion.
 
-Because the standard encoding canonicalizes plain-object key order, two
-runtimes holding the same value mint the same identifier regardless of the
-order in which the keys were inserted. That is the property that makes this
-content addressing rather than merely content embedding.
+Writes to either immutable scheme fail with `ReadOnlyAddressError`. Transaction
+reads and batched read tracking exclude them from commit preconditions;
+replication plans and server read sets exclude them as well. Sync walks their
+embedded links and loads the referenced ordinary documents, using the snapshot
+origin for relative links. There is no immutable document itself to sync.
 
-Representative places that mint one:
-
-- `Runtime.getImmutableCell()` in `packages/runner/src/runtime.ts` boxes a
-  caller-supplied value into a cell. It calls `dataUriFromValue` directly on
-  the result of `fabricFromConvertibleJsValue(data)`, deliberately skipping the
-  link-rewriting walk, because the data is immutable as given.
-- `undefinedDataLink()` in `packages/runner/src/link-resolution.ts` produces
-  the link that a blocked or dead-ended link chain resolves to: an identifier
-  encoding `undefined`, so the chain ends in undefined data in place.
-- `resolveAsCell()` in `packages/runner/src/cell.ts` re-roots a link whose path
-  passes through an array element. Its helper
-  `maybeConvertArrayPathToDataURILink` encodes that element's value into a
-  `data:` identifier and keeps the rest of the path. The read dependency remains
-  on that mutable inline element, because its content determines the snapshot's
-  identity. Changes to the element cause a reactive reader to resolve it again;
-  changes to another array element do not require that reader to rerun.
-- Traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
-  document for an inline array element it needs to read recursively. It
-  continues over the value `dataUriSnapshotWithResolvedLinks` returns, so a link
-  inside the element that names no document resolves against the document
-  storing the element.
-- The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
-  an array element that is an inline object, when the reader touches it. The
-  element's value is already in hand, so the identifier costs no read. Without
-  it `toCell` on such an element would name the array's INDEX, and writing that
-  link anywhere else would follow whatever landed at that index next.
-
-### A link's schema is encoded as given
-
-Neither mint function changes the schema a link carries. With
-[content-addressed schemas](../specs/content-addressed-schemas.md) a stored
-link's schema is a `cid:` reference to schema documents, and a link copied
-into a `data:` identifier keeps that reference. The identifier therefore
-depends on the value alone, and not on which schema documents the minting
-runtime happened to have at hand.
-
-A reference needs its schema documents to be read, and a `data:` document is
-stored nowhere that could hold them. The rule is that a link inside a `data:`
-document resolves its schema's references in the space carried by the address
-that names the document — the same rule, through the same gates, as a link
-inside a stored document. `schemaForSpaceCrossing` and
-`ensureExternalSchemaClosure` in `packages/runner` take that space from the
-caller, and `loadExternalSchemaDocs` in `packages/runner/src/traverse.ts` takes
-it from the document's address.
-
-That places an obligation on whoever mints one from a value holding links:
-
-- The snapshot mints above — `resolveAsCell()`, query traversal, the lazy
-  schema view — take the value out of a stored document and address the
-  result in that document's space. The space already holds every schema
-  document those links reference, because the write that stored a link
-  stored its schema documents with it.
-- `Runtime.getImmutableCell()` takes a caller's value, whose links no write
-  has stored, and a space the caller chooses. It has no space to point a
-  reference at, so it rewrites each link's schema to the inline form before
-  encoding (`inlineExternalSchemaRefsInValue` in
-  `packages/runner/src/link-utils.ts`).
-
-A value leaves a runtime for a space by one of two routes, a stored write
-(`normalizeAndDiff` and `Cell.setRaw()`) and a stream send (`Cell.send()`),
-and both pass it through `findAndInlineDataUriLinks` first, so what goes is
-the value an identifier carries, with any identifier held inside that value
-dissolved in turn. A runtime therefore does not receive a snapshot from
-another runtime through storage. A snapshot it minted names schema documents
-it already holds: its replica received them with the stored document the
-snapshot was taken from, and its schema-document registry registered them as
-they arrived or were written.
-
-One position is out of the walk's reach. A `FabricInstance` keeps its state
-behind its codec, so an identifier held there is not dissolved. The two
-routes treat an instance as each treats one written directly: a send refuses
-a value holding one, including one inside the value an identifier carries,
-and a stored write stores the instance whole, with whatever its state holds.
-
-A caller can still hand a runtime an identifier directly, built elsewhere or
-kept from an earlier session. Nothing delivers schema documents beside an
-identifier, so that caller owes the runtime the ones its links reference: a
-read through a transaction finds them only if the space in the identifier's
-address holds them, and a schema it cannot resolve is not applied.
-
-`findAndInlineDataUriLinks` and the storage manager's `data:` sync walk have
-no transaction to read a space through. Where either narrows a link's schema
-to a path below the link, it resolves the reference through the registry,
-which holds the schema documents of every snapshot the runtime minted. A
-reference the registry does not hold cannot be narrowed, and the narrowing
-throws.
-
-## Reading one
-
-`valueFromDataUri(uri)` in `packages/data-model/src/codec-data-uri.ts` extracts
-and decodes the payload. It accepts exactly the shape `dataUriFromValue`
-writes, and throws for anything else — a different media type, a payload that
-is not base64url, an empty payload, or bare JSON where the `fvj1:`-tagged
-encoding is required. The two halves are also exported separately:
-`extractDataUriPayloadText` splits the identifier and base64url-decodes it, and
-`valueFromDataUriPayloadText` decodes that text into a value. Decoded results
-are deep-frozen.
-
-`findAndInlineDataUriLinks(value)` in `packages/runner/src/data-uri.ts` works
-the other direction from minting: it walks a value looking for links whose
-identifier is a `data:` URI of this codebase's media type, and replaces each
-with the value that identifier carries. If the decoded payload has another link
-on the way to the link's path, that link is followed instead, with the
-remaining path segments appended to it. The value an identifier carries is
-walked in turn, so an identifier held inside it is replaced as well. A link
-carrying any other media type is returned as it came in, on the same footing
-as a link naming a document in a space. A `FabricInstance` handed over, or
-decoded as the whole of an identifier's value, is refused; one deeper inside
-a decoded value is returned whole, or refused as well where the caller asks
-with `refuseCarriedInstances`.
-
-### The payload is the value, not the document
-
-The payload encodes the cell's **value**. The document view that the address
-grammar requires — paths rooted at `["value", …]`, plus the document's facet
-paths — is not in the payload. It is synthesized on read, by `load()` in
-`packages/runner/src/storage/transaction/attestation.ts`, which is the one
-reader that thinks in documents. `load()` decodes the payload and wraps it as
-`{ value: <decoded> }`, frozen. Because the wrapper is built here rather than
-taken from the payload, payload content can never alias a document facet such
-as `cfc` or `source`. Results are cached by identifier, so decoding the same
-identifier repeatedly costs one parse.
-
-## The two tests, and why both exist
-
-Two predicates in `packages/data-model/src/codec-data-uri.ts` answer different
-questions, and they are used at different points of the same path. Swapping one
-for the other changes behavior.
-
-`hasDataUriScheme(id)` is the **broad** test. It examines only the scheme, so
-every media type counts and the payload is neither decoded nor validated. It
-answers the storage layer's question: is there a document to fetch at all? Any
-`data:` identifier means no, whatever the media type says.
-
-`isFabricDataUri(id)` is the **narrow** test. It accepts only
-`data:application/vnd.common-fabric.data`, the one media type this codebase
-mints. It answers a reader's question, asked immediately before decoding: is
-this mine to decode? A reader that decodes without screening does not get a
-wrong value, because `valueFromDataUri` checks the media type itself and
-throws. Screening first is what lets a reader tell "not mine" apart from
-"mine but malformed", and report each differently.
-
-The load path shows both in sequence. `loadRoot` in
-`packages/runner/src/storage/v2-transaction.ts` uses the broad test: any
-`data:` identifier is routed to the attestation loader (imported there as
-`loadInline`) instead of to `branch.replica.getDocument()`. The loader then
-applies the narrow test, and turns anything that is not this codebase's media
-type into an `UnsupportedMediaTypeError`; a payload that fails to decode
-becomes an `InvalidDataURIError`. Using the narrow test at the routing step
-instead would send, say, a `data:text/plain,…` identifier to the replica to be
-fetched as though a document existed for it, rather than reporting an
-unsupported media type. Using the broad test inside the loader instead would
-have it try to decode payloads in encodings it does not speak.
-
-The confidentiality contract code makes the same split. `eventEnvelopePayloads`
-in `packages/runner/src/cfc/ui-contract.ts` screens an event link with the
-narrow test before calling `valueFromDataUri` on it, so a `data:` link of some
-other media type simply contributes no authoring context.
-
-The inlining path uses the narrow test at two points that have to agree.
-`findAndInlineDataUriLinks` screens with it before decoding.
-`normalizeAndDiff` in `packages/runner/src/data-updating.ts` screens with it
-before re-entering itself on that call's result, which is progress only when
-the call replaced the link with the content behind it. Using the broad test at
-either point breaks the agreement. At the first, the decode throws on a media
-type it does not speak, and the throw escapes the whole walk rather than
-leaving one link alone. At the second, the re-entry repeats on a link the
-inlining call handed back unchanged, until the stack runs out. Both screening
-narrowly, a foreign media type is simply an ordinary link: a write stores it
-as one, and a read through it reports the media type as the loader's
-`UnsupportedMediaTypeError`.
-
-As a rule of thumb: the broad test belongs anywhere the question is about
-documents — fetching, syncing, writing, recording a read, stating a commit
-precondition. The narrow test belongs at the point where a payload is about to
-be decoded.
-
-## `data:` addresses are read-only
-
-Writing to a `data:` address fails with `ReadOnlyAddressError` (defined in
-`packages/runner/src/storage/transaction-errors.ts`). `writeWithinBranch` in
-`packages/runner/src/storage/v2-transaction.ts` returns that error before doing
-anything else, and every write on a `data:` address funnels through it. There
-is no way to change what such an identifier denotes: a different value is a
-different identifier.
-
-## No document, no sync, no precondition
-
-The rest of the branching follows from there.
-
-Reads are not recorded as commit preconditions. `read` and `trackReadPaths` in
-`packages/runner/src/storage/v2-transaction.ts` skip pushing a read activity
-for a `data:` identifier and skip marking the document validated, and
-`buildReads` in `packages/runner/src/storage/v2.ts` drops such reads from the
-set it assembles. The memory protocol states the same rule on the wire:
-inline `data:` document reads are local-only and must not be serialized into
-`ClientCommit.reads`, because they have no server sequence and do not
-participate in conflict validation (see
-[the memory protocol spec](../specs/memory-v2/04-protocol.md)).
-
-Nothing is pulled for one. `shouldPullDoc` in
-`packages/runner/src/storage/v2.ts` returns false, and `syncCell` routes to
-`syncDataURICell`. What that syncs is not the identifier — there is nothing to
-fetch for it — but the documents that the links embedded in its decoded
-payload point at.
-
-The traverse capture and replay fixtures skip them too: `captureDoc` in
-`packages/runner/src/traverse-recorder.ts` returns early, because replay
-decodes the identifier directly rather than replaying a stored document.
+`toURI` accepts either scheme. `fromURI` hashes the entire identifier instead of
+stripping an entity scheme. `hasEntityUriScheme` returns false and
+`entityKindOfIdString` returns undefined.
 
 ## Related documents
 
-- [Computed cell identity](../specs/computed-cell-identity.md) — the
-  `computed:` entity URI scheme, and why an entity's URI string, scheme
-  included, is its identity.
+- [Computed cell identity](../specs/computed-cell-identity.md)
 - [Identity and references](../specs/space-model/3-identity-and-references.md)
-  — entity identifiers and the sigil link format that `data:` links use.
-- [The memory protocol](../specs/memory-v2/04-protocol.md) — the wire rules,
-  including the local-only treatment of inline document reads.
+- [The memory protocol](../specs/memory-v2/04-protocol.md)

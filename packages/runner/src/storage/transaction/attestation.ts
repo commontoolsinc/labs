@@ -33,6 +33,7 @@ import type {
 } from "../interface.ts";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { toTransactionDocumentValue } from "../v2-document.ts";
+import { immutableSnapshot, isImmutableCellId } from "../../immutable-cell.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -264,6 +265,14 @@ export const resolve = (
 export const load = (
   address: Omit<IMemoryAddress, "path">,
 ): Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError> => {
+  if (isImmutableCellId(address.id)) {
+    return {
+      ok: {
+        address: { ...address, path: [] },
+        value: Object.freeze({ value: immutableSnapshot(address.id).value }),
+      },
+    };
+  }
   // Check cache first
   const cacheKey = address.id;
   const cached = dataURICache.get(cacheKey);

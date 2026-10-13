@@ -2152,6 +2152,24 @@ describe("convertible-js", () => {
         expect(Object.isFrozen(result[0])).toBe(true);
       });
 
+      it("shares frozen children beneath a mutable input without freezing the input", () => {
+        const child = deepFreeze({ items: [1, 2, 3] });
+        const input = { child, other: { n: 1 } };
+        const result = fabricFromConvertibleJsValue(input) as typeof input;
+        expect(result).not.toBe(input);
+        expect(result.child).toBe(child);
+        expect(result.other).not.toBe(input.other);
+        expect(Object.isFrozen(input.other)).toBe(false);
+        input.other.n = 2;
+        expect(result.other.n).toBe(1);
+        const mutable = fabricFromConvertibleJsValue(
+          input,
+          false,
+        ) as typeof input;
+        expect(mutable.child).not.toBe(child);
+        expect(Object.isFrozen(mutable.child)).toBe(false);
+      });
+
       it("does not freeze objects when `freeze=false`", () => {
         const result = fabricFromConvertibleJsValue(
           { a: { b: 1 } },

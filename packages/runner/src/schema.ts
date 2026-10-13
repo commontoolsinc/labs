@@ -104,6 +104,7 @@ import {
   schemaAcceptsType,
   SchemaObjectTraverser,
 } from "./traverse.ts";
+import { hasInlineCellScheme } from "./immutable-cell.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -1389,7 +1390,7 @@ export function validateAndTransform(
             },
           });
           if (
-            blocked || slot.pendingHopDoc || slot.id.startsWith("data:") ||
+            blocked || slot.pendingHopDoc || hasInlineCellScheme(slot.id) ||
             tx.readValueOrThrow(slot, {
                 nonRecursive: true,
                 meta: linkResolutionProbe,

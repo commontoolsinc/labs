@@ -319,11 +319,6 @@ export function fabricFromConvertibleJsValue(
   value: unknown,
   freeze = true,
 ): FabricValue {
-  // Identity optimization: if the value is already a deep-frozen
-  // `FabricValue`, return it without copying.
-  if (freeze && isValidDeepFrozenFabricValue(value)) {
-    return value;
-  }
   return fabricFromConvertibleJsValueInternal(
     value,
     new Map(),
@@ -340,6 +335,10 @@ function fabricFromConvertibleJsValueInternal(
   converted: Map<object, FabricValue>,
   freeze: boolean,
 ): FabricValue {
+  // Reuse validated frozen subtrees even when their parent needs conversion.
+  // The shared validator rejects frozen objects that are not Fabric values.
+  if (freeze && isValidDeepFrozenFabricValue(original)) return original;
+
   const isOriginalRecord = isObjectOrArray(original);
 
   if (isOriginalRecord && converted.has(original)) {

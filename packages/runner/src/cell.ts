@@ -129,8 +129,8 @@ import { createRef } from "./create-ref.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
-  dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
+  resolveImmutableValueLinks,
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
@@ -202,6 +202,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
+import { immutableCellsFor } from "./immutable-cell.ts";
 
 ensureNotRenderThread();
 
@@ -2185,16 +2186,9 @@ export class CellImpl<T extends FabricValue>
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
       //
-      // A `data:` link is dissolved into the value it carries, as a stored
-      // write dissolves one. An event leaves this runtime, for the stream's
-      // space and whichever runtime handles it there, and a `data:` id is
-      // good only where it was minted: a link inside one resolves its
-      // schema's references against documents this runtime holds.
-      //
-      // An event admits no `FabricInstance`. `convertCellsToLinks()` refuses
-      // one written into the event, and the dissolve refuses one inside the
-      // value a `data:` link carries, which would otherwise arrive in the
-      // event whole with any `data:` link in its state intact.
+      // Immutable links expand to contents before an event leaves the runtime.
+      // An event admits no FabricInstance, including one carried inside an
+      // immutable value whose state could itself contain a snapshot link.
       const event = findAndInlineDataUriLinks(
         convertCellsToLinks(newValue as CellLinkInput),
         { refuseCarriedInstances: true },
@@ -3885,13 +3879,12 @@ export class CellImpl<T extends FabricValue>
     const tx = this.#runtime.readTx(this.#tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
-      // A raw read still resolves links on the way to the target, and those
-      // crossings are content reads: the seam marks labeled hops.
-      resolveLink(this.#runtime, tx, this.#link, lastNode, {
-        markIfcCrossings: true,
-      }),
-      readOptions,
+    const resolved = resolveLink(this.#runtime, tx, this.#link, lastNode, {
+      markIfcCrossings: true,
+    });
+    const value = resolveImmutableValueLinks(
+      tx.readValueOrThrow(resolved, readOptions),
+      resolved.id,
     );
     // Deep-copy with desired frozenness, without unwrapping to JS form --
     // getRaw() and getRawUntyped() return fabric-layer values, not
@@ -5151,45 +5144,9 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: inlineElementSnapshotId(candidate.value, baseLink),
+    id: immutableCellsFor(tx).create(candidate.value, baseLink).id,
     path: candidate.remainingPath,
   };
-}
-
-/**
- * The snapshot ids minted for inline elements, by the element's value and
- * then by the link it was read through, which decides how its relative links
- * resolve. A stored value is a frozen object the replica holds until the
- * document changes, so one element resolved by every reader of the same
- * document version is encoded once rather than per reader: the renderer
- * resolves each element it shows several times over.
- */
-const inlineElementSnapshotIds = new WeakMap<object, Map<string, URI>>();
-
-function inlineElementSnapshotId(
-  value: FabricValue,
-  base: NormalizedFullLink,
-): URI {
-  if (!isObjectOrArray(value)) {
-    return dataUriFromValueWithResolvedLinks(value, base);
-  }
-  const baseKey = JSON.stringify([
-    base.space,
-    base.id,
-    normalizeCellScope(base.scope),
-    base.path,
-  ]);
-  let byBase = inlineElementSnapshotIds.get(value);
-  if (byBase === undefined) {
-    byBase = new Map();
-    inlineElementSnapshotIds.set(value, byBase);
-  }
-  let id = byBase.get(baseKey);
-  if (id === undefined) {
-    id = dataUriFromValueWithResolvedLinks(value, base);
-    byBase.set(baseKey, id);
-  }
-  return id;
 }
 
 /**

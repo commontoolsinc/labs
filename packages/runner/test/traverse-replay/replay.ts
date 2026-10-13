@@ -19,7 +19,10 @@ import {
   type FabricValue,
   hashStringOf,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import {
+  portableSnapshotId,
+  portableSnapshotLinks,
+} from "../../src/data-uri.ts";
 
 import { ExtendedStorageTransaction } from "../../src/storage/extended-storage-transaction.ts";
 import type {
@@ -46,6 +49,7 @@ import {
   type TraversalContext,
 } from "../../src/traverse.ts";
 import { readMaybeGzippedText } from "./gzip.ts";
+import { hasInlineCellScheme } from "../../src/immutable-cell.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
@@ -172,7 +176,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
   }
 
   load(address: BaseMemoryAddress): IAttestation | null {
-    if (hasDataUriScheme(address.id)) {
+    if (hasInlineCellScheme(address.id)) {
       // Use the canonical data-URI attestation loader so replay matches live
       // semantics (decoded JSON rooted at path [], LRU-cached).
       const { ok } = loadDataURI(address);
@@ -212,9 +216,9 @@ function wrapTxWithReadLog(
       trackReadWithoutLoad ? "t" : ""
     }${options?.meta !== undefined ? "m" : ""}`;
     log.add(
-      `${address.space}|${address.scope ?? "space"}|${compactId(address.id)}|${
-        JSON.stringify(address.path)
-      }|${flags}`,
+      `${address.space}|${address.scope ?? "space"}|${
+        compactId(portableSnapshotId(address.id))
+      }|${JSON.stringify(address.path)}|${flags}`,
     );
   };
 
@@ -388,7 +392,9 @@ export function replayFixture(
       invocationOracles.push({
         ok: rv.error === undefined,
         ...(rv.error !== undefined && { code: rv.error.code }),
-        hash: rv.ok === undefined ? "undefined" : truncatedHash(rv.ok),
+        hash: rv.ok === undefined
+          ? "undefined"
+          : truncatedHash(portableSnapshotLinks(rv.ok)),
       });
     }
   }

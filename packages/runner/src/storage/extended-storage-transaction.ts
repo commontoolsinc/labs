@@ -125,7 +125,7 @@ import {
 } from "../runtime-secret.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { CooperativeYield } from "../scheduler/cooperative-yield.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
 import { externalizeLinkSchemasInValue } from "../link-utils.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
@@ -194,6 +194,7 @@ import {
   getTransactionWriteDetails,
   getTransactionWrittenSpaces,
 } from "./transaction-inspection.ts";
+import { hasInlineCellScheme } from "../immutable-cell.ts";
 
 /**
  * The epoch position of a snapshot memo key for the current instant, which no
@@ -2763,7 +2764,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): FabricValue {
     if (!getContentAddressedSchemasConfig()) return value;
-    if (address.id.startsWith("cid:") || hasDataUriScheme(address.id)) {
+    if (address.id.startsWith("cid:") || hasInlineCellScheme(address.id)) {
       return value;
     }
     return externalizeLinkSchemasInValue(value);

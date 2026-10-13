@@ -10,7 +10,6 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { legacySpaceDid } from "@commonfabric/identity";
 import { isDID } from "@commonfabric/identity/did";
@@ -219,6 +218,8 @@ import {
 } from "./unsafe-host-trust.ts";
 import { toURI } from "./uri-utils.ts";
 import { ViewReplicationClient } from "./view-replication-client.ts";
+import { bindImmutableCells, immutableCellsFor } from "./immutable-cell.ts";
+import { isRendererTrustedEvent } from "./cfc/ui-contract.ts";
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -2177,6 +2178,7 @@ export class Runtime {
       this.#defaultFrame = pushRuntimeDefaultFrame(this);
     } catch (error) {
       this.#releaseServerExecutionEnabler();
+      immutableCellsFor(this).dispose();
       throw error;
     }
   }
@@ -2477,6 +2479,7 @@ export class Runtime {
       // Exception-safe: a rejecting teardown step must not leak the
       // process-global enabler (the reset would then never fire).
       this.#releaseServerExecutionEnabler();
+      immutableCellsFor(this).dispose();
     }
 
     // Clear the current runtime reference
@@ -2662,6 +2665,8 @@ export class Runtime {
       tx,
       this.#cfcInstrumentation,
     );
+    bindImmutableCells(wrapped, immutableCellsFor(this));
+    bindImmutableCells(tx, immutableCellsFor(this));
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
@@ -4215,7 +4220,7 @@ export class Runtime {
 
   /**
    * Makes a read-only cell whose content is `data`, carried entirely in the
-   * cell's own `data:` URI id; there is no document in a space to fetch.
+   * runtime's snapshot store behind a compact URI; there is no stored document to fetch.
    *
    * **Contract note:** `data` is an arbitrary value, deliberately NOT limited
    * to `FabricValue`. Callers pass, among other things, `Cell` objects (wish
@@ -4257,30 +4262,27 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is
-    // unwanted here (this data is immutable as given).
-    //
-    // Builder artifacts become their encodable form and cells become sigil
-    // links HERE rather than at each caller. Neither has a fabric
-    // representation, so both have to go before the value reaches
-    // `fabricFromConvertibleJsValue()`. This is the designed intake, and the
-    // callers are many: raw and JavaScript node inputs, wish candidates, schema
-    // defaults. Covering them one at a time was tried and is whack-a-mole --
-    // each site that is missed fails as a rejection at the conversion, or worse
-    // as a cleanup error that masks it.
-    //
-    // One walk covers both. A cell is a leaf to it -- what stands in for a cell
-    // is the link it names, not a container to descend into -- and an
-    // artifact's encodable form is walked in turn, so a cell inside one is
-    // reached as well.
-    // No write has stored the links in this data, so `space` holds no
-    // closure for a content-addressed reference among their schemas to name,
-    // and each link carries its schema inline (see
-    // `inlineExternalSchemaRefsInValue()`).
-    const asDataURI = dataUriFromValue(
+    // Builder artifacts and cells enter through their encodable forms. Frozen
+    // Fabric input remains shared; unstored links need inline schema closures.
+    // Renderer trust is identity-based authority, so a marked event is copied
+    // before it becomes ordinary immutable data.
+    const snapshot = immutableCellsFor(this).create(
       inlineExternalSchemaRefsInValue(
         fabricFromConvertibleJsValue(
-          flattenBuilderArtifacts(data, { replaceOther: cellAsLink }),
+          flattenBuilderArtifacts(data, {
+            isLeaf: isRendererTrustedEvent,
+            replaceOther: (value) =>
+              isRendererTrustedEvent(value)
+                ? deepFreeze(cloneIfNecessary(
+                  fabricFromConvertibleJsValue(
+                    flattenBuilderArtifacts(value, {
+                      replaceOther: cellAsLink,
+                    }),
+                  ),
+                  { frozen: false },
+                ))
+                : cellAsLink(value),
+          }),
         ),
       ),
     );
@@ -4289,7 +4291,7 @@ export class Runtime {
       {
         space,
         path: [],
-        id: asDataURI,
+        id: snapshot.id,
         schema: internCellLinkSchema(schema),
       },
       tx,

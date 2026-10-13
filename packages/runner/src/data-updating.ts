@@ -17,7 +17,7 @@ import {
   shallowFabricFromConvertibleJsObjectElseUndefined,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
+
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
@@ -103,6 +103,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
+import { isInlineCellId } from "./immutable-cell.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -688,7 +689,7 @@ export function scopedArgumentInitializationTargets(
   });
   if (
     blocked || container.pendingHopDoc || container.scope !== "space" ||
-    isFabricDataUri(container.id)
+    isInlineCellId(container.id)
   ) return [];
   // Reads which slots exist; the writes it leads to land in those slots.
   const value = tx.readValueOrThrow(container, {
@@ -724,7 +725,7 @@ export function initializeScopedArgumentSlots(
   const container = resolveLink(runtime, tx, argumentLink, "value", {
     onScopeBlocked: () => blocked = true,
   });
-  if (blocked || container.pendingHopDoc || isFabricDataUri(container.id)) {
+  if (blocked || container.pendingHopDoc || isInlineCellId(container.id)) {
     return;
   }
   const options = {
@@ -1584,7 +1585,7 @@ export function normalizeAndDiff(
   // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
   // check accepts exactly the media type that call inlines: this codec's
   // own. A `data:` URI of any other media type stores as an ordinary link.
-  if (newValueLink !== undefined && isFabricDataUri(newValueLink.id)) {
+  if (newValueLink !== undefined && isInlineCellId(newValueLink.id)) {
     return normalizeAndDiff(
       runtime,
       tx,

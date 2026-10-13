@@ -7,7 +7,6 @@ import {
   valueEqual,
   valueEqualByWalk,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import {
   canResolveScopeKey,
   type CommitPrecondition,
@@ -132,6 +131,7 @@ import {
 import { toTransactionDocumentValue } from "./v2-document.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
+import { hasInlineCellScheme } from "../immutable-cell.ts";
 
 type RootAttestation = IAttestation;
 
@@ -1700,7 +1700,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
-    if (readStatsActive && !hasDataUriScheme(address.id)) {
+    if (readStatsActive && !hasInlineCellScheme(address.id)) {
       recordDocumentRead(this, doc);
     }
     // The one place a read chooses which root it is reading. A materialized
@@ -1723,7 +1723,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     const skipCommitPrecondition = isUiInputBlindWriteTx(this);
     const { space: _, ...memoryAddress } = address;
 
-    if (!hasDataUriScheme(address.id)) {
+    if (!hasInlineCellScheme(address.id)) {
       const readActivity = {
         space: address.space,
         scope: normalizeCellScope(address.scope),
@@ -1739,13 +1739,13 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
-      if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {
+      if (!hasInlineCellScheme(address.id) && !skipCommitPrecondition) {
         doc.validated = true;
       }
       return { ok: { address, value: undefined } };
     }
 
-    if (usesLocalReads(this) && !hasDataUriScheme(address.id)) {
+    if (usesLocalReads(this) && !hasInlineCellScheme(address.id)) {
       // `patchDetails` is keyed by each write's pointer.
       const patchDetails = doc.patchDetails;
       const written = this.#readEpoch === undefined &&
@@ -1769,7 +1769,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (isMutableTransactionReadAllowed(readMeta)) {
       if (
-        !hasDataUriScheme(address.id) &&
+        !hasInlineCellScheme(address.id) &&
         !doc.validated &&
         !skipCommitPrecondition
       ) {
@@ -1810,7 +1810,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (
       !skipCommitPrecondition &&
       isInternalVerifierRead(readMeta) &&
-      !hasDataUriScheme(address.id) &&
+      !hasInlineCellScheme(address.id) &&
       // Content-addressed documents are EXEMPT from durable serving:
       // their content is identical on every layer (the replica refuses
       // a cid: doc whose content does not hash to its id), so the
@@ -1881,7 +1881,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const result = readAttestation(current, memoryAddress);
     if (
-      !hasDataUriScheme(address.id) &&
+      !hasInlineCellScheme(address.id) &&
       !doc.validated &&
       !skipCommitPrecondition
     ) {
@@ -1997,7 +1997,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
-    if (hasDataUriScheme(address.id)) return { ok: {} };
+    if (hasInlineCellScheme(address.id)) return { ok: {} };
     if (readStatsActive) recordDocumentRead(this, doc);
 
     const readMeta = options?.meta ?? EMPTY_META;
@@ -2167,7 +2167,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     value?: FabricValue,
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError> {
-    if (hasDataUriScheme(address.id)) {
+    if (hasInlineCellScheme(address.id)) {
       return { error: ReadOnlyAddressError(address).from(space) };
     }
     const isDelete = options?.delete === true;
@@ -2300,7 +2300,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   ): Result<Unit, WriteError> {
     if (
       writes.length <= 1 ||
-      writes.some(({ address }) => hasDataUriScheme(address.id))
+      writes.some(({ address }) => hasInlineCellScheme(address.id))
     ) {
       // Singleton-batch / data:URI fallback: route each write through the
       // unified single-write entry, which itself handles
@@ -3278,7 +3278,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
   ): RootAttestation {
     const type = address.type ?? DOCUMENT_MIME;
-    if (hasDataUriScheme(address.id)) {
+    if (hasInlineCellScheme(address.id)) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;

@@ -3,11 +3,11 @@
 // / `db.exec` in cell.ts) and the read/write helpers in cf-link.ts, so they
 // produce and parse BYTE-IDENTICAL sigil strings.
 //
-// This module depends only on `link-utils` + types — it has NO runtime import
-// of cell.ts (the `Cell` import below is type-only, erased at build) — so cell.ts
-// can import it without the cell.ts ↔ cf-link.ts cycle (08-open-questions #24).
+// Cell is a type-only import. Native snapshots are made portable at this
+// string boundary because SQLite rows can outlive their creating runtime.
 
 import type { Cell } from "../../cell.ts";
+import { portableSnapshotId } from "../../data-uri.ts";
 import type { NormalizedFullLink } from "../../link-types.ts";
 import {
   type CellLink,
@@ -23,7 +23,10 @@ import {
  */
 export function encodeCellToSigilString(cell: Cell<unknown>): string {
   const link: NormalizedFullLink = cell.getAsNormalizedFullLink();
-  const sigil = createSigilLinkFromParsedLink(link, { includeSchema: false });
+  const sigil = createSigilLinkFromParsedLink({
+    ...link,
+    id: portableSnapshotId(link.id),
+  }, { includeSchema: false });
   return JSON.stringify(sigil);
 }
 
