@@ -135,7 +135,8 @@ arguments or preceding-parameter defaults (§4.1). A member the bindings cannot
 read, such as an indexed access with no checker-created instantiation, remains
 unread at that member; it does not discard the enclosing object's readable
 shape. Missing required arguments and deferred conditional declarations remain
-unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers
+unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers,
+read through parentheses as other wrappers are (`resolveScopeWrapperNode()`),
 from their own payload argument without resolving the wrapper's name (the
 transformer prints a wrapper it builds as `__cfHelpers.PerUser<…>`, a name no
 scope declares), and follows CFC alias chains under their bindings (§11). A
@@ -1437,7 +1438,8 @@ Mechanics:
   a named policy alias such as `Readonly<Protected>`. An ordinary value query
   such as `Partial<typeof value>` retains the checker's utility-type semantics.
   Non-generic tuples and literal index signatures also retain authored writer
-  queries. Recursive definitions keep each writer's query origin even when
+  queries, a tuple named through a non-generic alias as much as one written in
+  place: it is read as the tuple the alias declares. Recursive definitions keep each writer's query origin even when
   handlers have identical types. An indexed access or conditional member that
   leaves a writer carrier without binding syntax, in a schema that defines a
   document, reports `cfc-write-authorized-by:unread` and explains the
