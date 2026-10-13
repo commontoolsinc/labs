@@ -221,7 +221,10 @@ describe("runHarnessJob()", () => {
       ),
       CF_HARNESS_FABRIC_API_URL: "https://toolshed.example",
       CF_HARNESS_FABRIC_SPACE: SPACE,
+      CF_HARNESS_FABRIC_FOREIGN_SPACES: "did:key:z6MkforeignSpace",
       CF_HARNESS_PATTERN_INDEX_URL: "https://index.example",
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: "disabled",
+      CF_CFC_MODE: "disabled",
     };
     const before = Object.fromEntries(
       Object.keys(set).map((key) => [key, Deno.env.get(key)]),
@@ -240,6 +243,10 @@ describe("runHarnessJob()", () => {
       expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
       expect(seen.loopOptions?.loomRetrieval).toBeUndefined();
       expect(seen.loopOptions?.loomCommands).toBeUndefined();
+      // An inherited `disabled` would let a `context` task use write tools.
+      expect(seen.loopOptions?.cfcEnforcementModeOverride).toBe(
+        "enforce-explicit",
+      );
     } finally {
       for (const [key, value] of Object.entries(before)) {
         if (value === undefined) Deno.env.delete(key);
