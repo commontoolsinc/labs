@@ -154,9 +154,9 @@ room's members by principal or by profile itself.
   whose space's root is a room.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
-  stored. A room reads it to tell whether the viewer's chats list it, without
-  this manager's own facts having been computed, before it sends
-  [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput).
+  stored. Membership checks belong to the manager's Home-space handling. A
+  room sends [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput)
+  after a successful message or reaction without reading this private catalog.
 - **`direct`** holds, for each counterpart principal, the entry of the direct
   room this user shares with them. It has at most one entry per counterpart. It
   keeps a direct room's entry even after the room is forgotten, so the
@@ -282,8 +282,8 @@ conversation from splitting.
 - `joinableByLink?: boolean` — Whether the room admits anyone who has its
   link. When true, the room's space grants every principal WRITE (the `"*"`
   wildcard) besides its members, so the room's address is all that keeps it
-  private: whoever holds it can read and write the room, and add it to their
-  chats from the room itself. Absent or false, the room admits its members
+  private: whoever holds it can read and write the room, and joins it, as one
+  of their chats, by writing in it. Absent or false, the room admits its members
   alone.
 
 Creates a group room. This is an outward act: it grants other people access.

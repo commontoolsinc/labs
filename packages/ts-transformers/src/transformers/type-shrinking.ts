@@ -1,15 +1,23 @@
 import ts from "typescript";
 import type { SchemaScope } from "@commonfabric/api";
 import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
-import { cfcCarrierProperty } from "@commonfabric/schema-generator/cfc-carrier";
+import {
+  cfcCarrierProperty,
+  isCfcCarrierMember,
+} from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
   resolvesToCommonFabricSymbol,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-brand";
+import {
+  cutsExpansion,
+  type ExpansionBudget,
+} from "@commonfabric/schema-generator/expanding-recursion";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
+  isScopeBrandMember,
   SCOPE_WRAPPER_FOR_SCOPE,
   scopeForWrapperName,
 } from "@commonfabric/schema-generator/scope-brand";
@@ -375,15 +383,42 @@ function choosePreferredShrinkCandidate(
     : nodeDriven;
 }
 
-function typeIncludesUndefined(type: ts.Type): boolean {
-  if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
-    return true;
-  }
+function typeIncludesUndefined(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const union = type as ts.UnionType;
-    return union.types.some((member) => typeIncludesUndefined(member));
+    return union.types.some((member) => typeIncludesUndefined(member, checker));
   }
-  return false;
+  const nullish = nullishMemberOf(type, checker);
+  return nullish !== undefined &&
+    (nullish.flags & ts.TypeFlags.Undefined) !== 0;
+}
+
+/**
+ * The `null`, `undefined` or `void` that `type` is: the type itself, or the
+ * one member of an intersection whose other members are carriers alone. While
+ * `T` is a type parameter, `PerUser<Confidential<T | undefined, L>>` holds its
+ * `undefined` beside the deferred `ScopeTag` and `CfcTag`, and it is that
+ * `undefined` once the tags resolve. `undefined` for any other type.
+ */
+function nullishMemberOf(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const nullish = ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+    ts.TypeFlags.Void;
+  if ((type.flags & nullish) !== 0) return type;
+  if (!type.isIntersection()) return undefined;
+  const values = type.types.filter((member) => (member.flags & nullish) !== 0);
+  return values.length === 1 &&
+      type.types.every((member) =>
+        values.includes(member) || isScopeBrandMember(member, checker) ||
+        isCfcCarrierMember(member)
+      )
+    ? values[0]
+    : undefined;
 }
 
 function isNullishType(type: ts.Type): boolean {
@@ -1164,13 +1199,11 @@ function shrinkTypeToNode(
       const nullishMembers: ts.TypeNode[] = [];
       if (type.isUnion()) {
         for (const constituent of type.types) {
-          if (
-            constituent.flags &
-            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
-          ) {
+          const nullish = nullishMemberOf(constituent, checker);
+          if (nullish) {
             nullishMembers.push(
               typeToTypeNodeWithRegistry(
-                constituent,
+                nullish,
                 { checker, factory, sourceFile, state },
                 typeRegistry,
                 TYPE_NODE_FLAGS,
@@ -1212,7 +1245,7 @@ function shrinkTypeToNode(
         sourceFile;
       propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
       isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-        (propType ? typeIncludesUndefined(propType) : false);
+        (propType ? typeIncludesUndefined(propType, checker) : false);
     } else {
       // Numeric/unknown-key accesses can be represented via index signatures
       // rather than named properties. Use the index type when available.
@@ -2831,14 +2864,28 @@ function addPrefixKeys(
   }
 }
 
-/** Whether any data position in `type`'s subtree is cell-like — the test for
- * whether a named reference must be expanded to overlay capabilities inside
- * it. Cycles end the search: a cell beyond a self-reference is not found,
- * which the caller documents as the accepted residual. */
+/**
+ * How many instantiations of one declaration, each newer than the one it is
+ * read within, the contract overlay reads one inside another before it takes
+ * the recursion for one without end (`cutsExpansion()`). The cut bounds
+ * the overlay's work and decides no capability: past it, a cell no use
+ * reaches is opaque, as reading on would make it, and a use that reaches
+ * past it carries the expansion along its path.
+ */
+const MAX_OVERLAY_NESTING = 8;
+
+/** Whether any data position in `type`'s subtree may be cell-like — the test
+ * for whether a named reference must be expanded to overlay capabilities
+ * inside it. Cycles end the search. A recursion that instantiates its
+ * declaration without end is cut where `cutsExpansion()` finds it, read
+ * inside `path` and spending `budget`, and may hold a cell past the cut, so
+ * the search takes it to; the expansion that follows ends at the same cut. */
 function typeSubtreeContainsCellLike(
   type: ts.Type,
   checker: ts.TypeChecker,
   visited: Set<ts.Type>,
+  path: ts.Type[],
+  budget: ExpansionBudget,
 ): boolean {
   if (visited.has(type)) return false;
   visited.add(type);
@@ -2850,29 +2897,31 @@ function typeSubtreeContainsCellLike(
     const kind = getCellKind(type, checker);
     return kind !== "stream" && kind !== "sqlite";
   }
+  const within = (inner: ts.Type) =>
+    typeSubtreeContainsCellLike(inner, checker, visited, path, budget);
   if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
-    return (type as ts.UnionOrIntersectionType).types.some((member) =>
-      typeSubtreeContainsCellLike(member, checker, visited)
-    );
+    return (type as ts.UnionOrIntersectionType).types.some(within);
   }
   if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  if (isArrayShapeType(type, checker)) {
-    const element = getArrayElementType(type, checker);
-    return !!element && typeSubtreeContainsCellLike(element, checker, visited);
+  if (cutsExpansion(type, path, budget, checker, MAX_OVERLAY_NESTING)) {
+    return true;
   }
-  for (const property of checker.getPropertiesOfType(type)) {
-    if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
-    const declaration = property.valueDeclaration ?? property.declarations?.[0];
-    if (!declaration) continue;
-    const propertyType = checker.getTypeOfSymbolAtLocation(
-      property,
-      declaration,
-    );
-    if (typeSubtreeContainsCellLike(propertyType, checker, visited)) {
-      return true;
+  path.push(type);
+  try {
+    if (isArrayShapeType(type, checker)) {
+      const element = getArrayElementType(type, checker);
+      return !!element && within(element);
     }
+    return checker.getPropertiesOfType(type).some((property) => {
+      if ((property.flags & ts.SymbolFlags.Method) !== 0) return false;
+      const declaration = property.valueDeclaration ??
+        property.declarations?.[0];
+      return !!declaration &&
+        within(checker.getTypeOfSymbolAtLocation(property, declaration));
+    });
+  } finally {
+    path.pop();
   }
-  return false;
 }
 
 /** The observation record the contract overlay consults, built once per
@@ -2944,7 +2993,13 @@ function contractCapabilityAt(
  * untouched, keeping its `$defs` identity and its prose. One expands only
  * when a capability inside it must change, and a self-referential type ends
  * that expansion at the cycle with the node kept as authored — the accepted
- * residual, since a literal cannot spell its own recursion.
+ * residual, since a literal cannot spell its own recursion. A recursion that
+ * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
+ * does, never meets itself. Its expansion is cut where `cutsExpansion()`
+ * finds it (`MAX_OVERLAY_NESTING`), unless a use the body makes reaches below,
+ * and the remainder is read as its instantiation with every cell in it opaque
+ * (`SchemaHint.cellsOpaque`): no use reaches those cells, so opaque is the
+ * capability each would earn.
  */
 export function overlayContractCapabilities(
   node: ts.TypeNode,
@@ -2958,7 +3013,36 @@ export function overlayContractCapabilities(
 ): ts.TypeNode {
   const observation = contractObservationFrom(summary);
   const visiting = new Set<ts.Type>();
+  const expansions: ts.Type[] = [];
+  // Shared by the expansion and every search for a cell it makes.
+  const budget: ExpansionBudget = { readingsInside: 0 };
   const expanding = new Set<ts.TypeNode>();
+
+  /** Whether a use the body makes reaches `path` or a position below it. */
+  const usedWithin = (path: readonly string[]): boolean => {
+    const key = contractPathKey(path);
+    return observation.write.has(key) || observation.read.has(key) ||
+      observation.comparable.has(key);
+  };
+
+  /**
+   * `type`, the remainder of a recursion cut at `current`, as a node read at
+   * its instantiation with every cell in it opaque; `current`, as written,
+   * where there is no state to record that reading in.
+   */
+  const opaqueRemainder = (
+    current: ts.TypeNode,
+    type: ts.Type,
+  ): ts.TypeNode => {
+    if (!state) return current;
+    const printed = typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile, state },
+      typeRegistry,
+    );
+    state.recordSchemaHint(printed, { cellsOpaque: true });
+    return printed;
+  };
 
   const walk = (
     current: ts.TypeNode,
@@ -3090,11 +3174,29 @@ export function overlayContractCapabilities(
       if (!resolvedType) return current;
       if (visiting.has(resolvedType)) return current;
       if (
-        !typeSubtreeContainsCellLike(resolvedType, checker, new Set())
+        cutsExpansion(
+          resolvedType,
+          expansions,
+          budget,
+          checker,
+          MAX_OVERLAY_NESTING,
+        ) && !usedWithin(path)
+      ) {
+        return opaqueRemainder(current, resolvedType);
+      }
+      if (
+        !typeSubtreeContainsCellLike(
+          resolvedType,
+          checker,
+          new Set(),
+          [],
+          budget,
+        )
       ) {
         return current;
       }
       visiting.add(resolvedType);
+      expansions.push(resolvedType);
       try {
         const members: ts.TypeElement[] = [];
         for (const property of checker.getPropertiesOfType(resolvedType)) {
@@ -3126,6 +3228,7 @@ export function overlayContractCapabilities(
         return factory.createTypeLiteralNode(members);
       } finally {
         visiting.delete(resolvedType);
+        expansions.pop();
       }
     }
 

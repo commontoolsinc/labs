@@ -510,6 +510,10 @@ The dry-run report, printed before any write and by `--dry-run` alone:
 - commit rows outside the retained window, how many of them an `op_*` row
   or the genesis exemption keeps, and the bytes of `original` the rest give
   up, split into commits that still own a head and commits that do not;
+- earlier runs' compaction commits, counted apart from the window whichever
+  side of its cutoff they were created on: the window is measured over client
+  commits, and a compaction commit's `created_at` is the time its run
+  inserted it;
 - invocation and authorization rows that become unreferenced (empty in the
   Topics store, where every commit's refs are null);
 - the ten instances contributing the most rows, with their head seq and op;

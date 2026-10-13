@@ -2453,11 +2453,12 @@ export function wish(
     // there, and that link persists a label entry under `[UI]/props/$cell`,
     // so on such a document `[UI]` is one of those paths.
     //
-    // The schema named is `true`, which is what the wish-state schema says
-    // at both paths. It declares nothing, so a stored claim at either path
-    // is not checked against this write; and a candidate declaring nothing
-    // is covered by whatever the document has stored, which keeps the report
-    // out of the schema merge.
+    // The schema named is `true`. The wish-state schema declares no value
+    // shape and no label at either path: `error` is `true` there, and `[UI]`
+    // is an opaque handle. `true` declares nothing, so a stored claim at
+    // either path is not checked against this write; and a candidate
+    // declaring nothing is covered by whatever the document has stored,
+    // which keeps the report out of the schema merge.
     //
     // The requirement is decided per document rather than per path. What
     // bounds the report is this transaction: it is created here, carries

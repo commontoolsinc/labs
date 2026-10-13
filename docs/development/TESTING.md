@@ -310,6 +310,21 @@ repository owns along with the ones whose order is the test.
 workflow, or a shell script writes without `--no-check`; a lane passes the flag
 to every `deno test` it builds whatever the task says.
 
+### Browser windows
+
+`ShellIntegration` launches browsers headlessly when `HEADLESS` is unset or
+empty. `HEADLESS=1` and `HEADLESS=true` also select headless mode. To watch a
+shell integration test in a visible browser, explicitly set `HEADLESS=0` or
+`HEADLESS=false`:
+
+```bash
+HEADLESS=0 deno task integration shell
+```
+
+`Browser.launch()` defaults to headless mode independently of the environment;
+its `headless` option selects a different mode. `deno-web-test` also defaults
+to headless mode, with its override in `deno-web-test.config.ts`.
+
 ### Browser tests in agent sandboxes
 
 Headless Chrome registers with AppKit and needs Launch Services and
@@ -551,11 +566,10 @@ environment-selected flags into its workers. `/api/meta`'s
 `shellServerExecutionDefine` describes a packaged shell build and can be null
 with local dev servers; it does not report the defines in the dev bundle.
 
-The `generated-patterns` and `pattern-tests` targets use in-process, emulated
-stores without a serving host. The integration runner explicitly disables
-`serverExecution` for these two harnesses while preserving the other inherited
-flags; `cf test` refuses server execution on, so the `pattern-tests` target
-would otherwise fail every file. Server-backed targets receive the supplied
+The `generated-patterns` and `pattern-tests` targets host their storage in
+process. The integration runner explicitly disables `serverExecution` for
+these two harnesses while preserving the other inherited flags, so both run
+the OFF arm in every lane. Server-backed targets receive the supplied
 server-execution setting.
 
 For view-scoped replication, run the complete default integration suite with:
@@ -582,11 +596,41 @@ too. Without it the server admits the event and nothing ever delivers it, so
 a wait on the consequence never resolves and the test hangs rather than
 failing.
 
-`cf test` hosts no serving loop: it runs a single-user test over emulated
-storage and a multi-user test against a plain memory server. It therefore
-refuses to run with `EXPERIMENTAL_SERVER_EXECUTION=true`, failing each test
-file with a message naming the missing loop, rather than run clients whose
-events nothing serves.
+`cf test` resolves the posture as a deployed entry point does, the explicit
+`EXPERIMENTAL_SERVER_EXECUTION` and else `SERVER_EXECUTION_DEFAULT_ENABLED`,
+and on the ON arm hosts the loop with the pair below: a single-user test
+connects to `startServingMemoryServer()`, whose serving runtimes fetch through
+the test's `fetchMocks`, and a multi-user test's participants to
+`listenServingMemoryServer()`, with no access list, as on the OFF arm. Each
+settle also waits until every event the runtime fired has its consequence
+back at the runtime, which `runtime.idle()` and `storageManager.synced()` do
+not cover, so an assertion after an action reads what the served handler
+wrote, and a multi-user marker is announced after it. An event a served
+handler fires on its own account is no client's, and nothing waits for it.
+A run against a caller-supplied `storageHost` is refused on the ON arm,
+since the store is the caller's and there is no memory server to host a loop
+beside.
+
+On the ON arm, most of the checks `cf test` makes of a run observe the test's
+own runtime and not the serving one: the idempotency check, read budgets,
+pattern coverage, and a pattern's `console` calls. Runtime errors are the
+exception for the events the test's runtime fired: a served run that throws
+reaches it as an `errored` outcome of the event, which the runner records as
+a runtime error marked `[served]`, under the same policy as any other —
+`allowRuntimeErrors` tolerates it, and `expectRuntimeErrors` counts it. It is
+left out when the same event's speculative run recorded an error with the
+same text, so a throw both runs hit is counted once. Logger warnings and
+errors are counted per process, and a single-user run's serving loop shares
+the test's process, so the runner tells the loop's apart by the serving
+context described below. A logger error the loop logs fails the file as a
+console error marked `[served]`, under `allowConsoleErrors`. A logger warning
+it logs is listed under the file as a serving-loop warning and fails nothing,
+since the loop warns about work it goes on to recover from, a dropped wave
+contribution among them. A performance diagnostic, a warning
+`packages/cli/lib/perf-diagnostic-logs.ts` names, is left out of that list as
+it is left out of the test's own warnings. A multi-user run's serving loop runs in the
+orchestrator, where no counts are taken. A served handler runs under the
+serving runtime's CFC posture rather than the test's.
 
 `@commonfabric/runner/executor/serving-memory-server.deno` supplies the pair:
 a memory server over a fresh non-persistent store, with an `ExecutorHost`
@@ -615,6 +659,16 @@ and `ensureSpaceRoots`, which defaults to `false` here, the switch the serving
 loop keeps for tests. `prepareStorageManager` hands the test each serving
 runtime's storage manager before the runtime is built, which is where a stub on
 one of its providers goes.
+
+The serving loop's work runs in the serving context, which the runner carries
+per async context and `inServingContext()` reports, so a test whose clients
+share the loop's realm can tell their output apart. The host enters it
+wherever the memory server or the test starts work on it: an admitted commit,
+a session opening, a lifecycle verb, and its close. The serving runtimes'
+sessions take each server frame in it, and an emulated client session takes
+each one outside it. The memory server's own work runs in the context of the
+session whose request it is handling, and a callback one side hands the other
+runs in the context of whichever side calls it.
 
 ```ts
 // Shown at module scope.

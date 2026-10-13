@@ -477,7 +477,8 @@ async function runPatternTests(
               cwd: rootDir,
               env: {
                 CF_TEST_RECORDS_DIR: "",
-                // This harness owns its emulated store and has no serving host.
+                // Pattern tests run the OFF arm in every lane, whatever the
+                // lane's own posture.
                 EXPERIMENTAL_SERVER_EXECUTION: "false",
               },
             },

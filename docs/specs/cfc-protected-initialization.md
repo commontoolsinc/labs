@@ -258,11 +258,15 @@ runtime's authorization); the piece a handler creates, its cross-space
 children included, is initialized in the handler's own transaction, and a
 served creation carries the requester's trust snapshot. A builtin that
 instantiates a pattern from a continuation of its action declines the mark
-(`attributeInitialization: false`): the piece is nobody's act. A served run
-that acts for no one keeps the serving runtime's own trust snapshot, so where
-it would attribute an initialization to a field with no `ownerPrincipal`, the
-write is refused rather than claimed for the service, as any of its writes
-carrying such a claim is.
+(`attributeInitialization: false`): the piece is nobody's act. A deferred
+piece start runs in a transaction of its own and takes the trust snapshot of
+the transaction it was deferred from, so the root a serving runtime's
+space-root ensure creates, under the snapshot of the owner it resolves, starts
+on that owner's behalf. A run under the serving runtime's own trust snapshot,
+which is what a served run that acts for no one keeps, is refused an
+initialization it would attribute, whether the claim would name the service
+or the service would become a field's owner, as any of its writes carrying
+such a claim is.
 
 In any other transaction — a runtime starting a piece it finds set up, a
 collection builtin instantiating a sub-pattern over a new entry, a source
