@@ -18,6 +18,7 @@ import { join } from "@std/path";
 
 import {
   type CfHarnessStructuredResultValidation,
+  processCfHarnessCliEnv,
   runCfHarnessCli,
   type RunCfHarnessCliDependencies,
   selectCfHarnessCliSandboxRuntime,
@@ -128,6 +129,25 @@ export interface HarnessJobSpec {
    */
   patternIndexPublish?: boolean;
 }
+
+/**
+ * The harness settings a job never takes from its environment: each grants
+ * a run a fabric session, a Loom transport or a pattern index. A job's
+ * authority is its spec, and the runner's environment is not a grant, so
+ * these are removed from whatever environment the harness is handed.
+ */
+export const HARNESS_JOB_GRANT_ENV_KEYS = [
+  "CF_HARNESS_FABRIC_API_URL",
+  "CF_HARNESS_FABRIC_IDENTITY",
+  "CF_HARNESS_FABRIC_SPACE",
+  "CF_HARNESS_SPACE_DB",
+  "CF_HARNESS_LOOM_AUTHORING_CONFIG",
+  "CF_HARNESS_LOOM_RETRIEVAL_CONFIG",
+  "CF_HARNESS_LOOM_COMMANDS_CONFIG",
+  "CF_HARNESS_PATTERN_INDEX_URL",
+  "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+  "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
+] as const;
 
 /** What a job runs with besides its spec. */
 export interface HarnessJobOptions {
@@ -321,9 +341,12 @@ export const runHarnessJob = async (
   const createInnerLoop = options.harnessDeps?.createPromptLoop ??
     ((loopOptions: CreateHarnessPromptLoopOptions) =>
       new CfHarnessPromptLoop(loopOptions));
+  const env = { ...(options.harnessDeps?.env ?? processCfHarnessCliEnv()) };
+  for (const key of HARNESS_JOB_GRANT_ENV_KEYS) delete env[key];
   const deps: RunCfHarnessCliDependencies = {
     ...options.harnessDeps,
     ...SANDBOX_SELECTION,
+    env,
     ...(spec.commandJobId !== undefined
       ? { commandJobId: spec.commandJobId }
       : {}),
