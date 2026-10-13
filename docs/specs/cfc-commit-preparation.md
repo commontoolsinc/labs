@@ -96,6 +96,75 @@ transaction is skipped so that both call sites reach the same answer about
 one — `commit()` takes none of the step for a read-only transaction — and a
 transaction that admits no writes has nothing to stamp in any case.
 
+## The prepared digest and the commit-time recheck
+
+The CFC specification's §8.10.1 (`08-10-validation-at-boundaries.md`) allows
+an implementation to split an attempt into "full verification at *prepare*
+time producing a canonical digest of the verified activity" and "a cheap
+recheck at *commit* time that the digest still matches", on four conditions.
+This runtime takes that split. This section says how it arranges the second
+condition:
+
+> any post-prepare activity in the transaction — any further read or write,
+> including metadata — invalidates the preparation: commit MUST fail or
+> re-verify from scratch
+
+**The digest.** A successful `prepareCfc()` ends by deriving the prepared
+digest from the transaction's journal as the verification left it: the reads
+that were not the verifier's own, the attempted and the applied writes, the
+ordered write log, and the decision inputs recorded beside them
+(`PreparedDigestInput` in
+[types.ts](../../packages/runner/src/cfc/types.ts)). `prepareCfc()` accepts
+no input, so no caller supplies one.
+
+**Activity after the preparation.** Activity invalidates the preparation
+where it happens, in the entry the transaction offers for it
+([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts)),
+and the invalidation records which kind it was:
+
+- a read (`read-after-prepare`);
+- a write, through whichever entry makes it: a single write and each write a
+  batch yields (`write-after-prepare`), a recorded SQLite statement
+  (`sqlite-write-after-prepare`), and a recorded mergeable op
+  (`mergeable-op-after-prepare`);
+- a decision input the transaction had not recorded, such as a write-policy
+  input or a dereference.
+
+A write invalidates whatever the storage layer goes on to do with it. The
+specification counts among the attempted writes "successful write operations
+whose final value is unchanged relative to prior state (no-op writes)"
+(§8.10.1, and §8.10.2.1 on why), and those are the writes the storage layer
+elides: a write of the value already there, and a delete that finds nothing,
+reach neither the write set nor the write log. A recorded SQLite statement
+and a mergeable op commit with the transaction and are held beside the
+journal rather than in it. The op replaces the diff of the value it covers,
+so one recorded after the preparation can change what is stored. None of
+these reaches the digest's input, so a comparison of digests at commit cannot
+tell that any of them happened, and the invalidation at the write is what
+refuses them. An empty batch yields no write and leaves the preparation
+standing.
+
+`commit()` does not prepare an invalidated transaction again. In an enforcing
+mode the ladder refuses it as relevant and not prepared, and an invalidation
+is not a verdict on the transaction's data, so the rejection carries the
+retryable `StorageTransactionAborted` name. The verification from scratch
+happens in the fresh transaction a retrying caller opens.
+
+**The recheck.** A transaction that reaches `commit()` still prepared has its
+digest compared. When the transaction's activity epoch is the one the
+preparation ended at, the digest is the prepared one. When the epoch has
+moved, the digest is derived again from the journal as it then stands, and a
+difference invalidates the preparation; outside the `observe` enforcement
+mode it also rejects the commit, as `StorageTransactionAborted` carrying
+`cfc-prepared-digest-mismatch`. What reaches that comparison is activity that
+moved the epoch without invalidating. A decision input recorded a second time
+with the content it had, such as a dereference the transaction had already
+performed, is one case: the digest binds the set of those, so it is unchanged
+and the commit is accepted. The policy snapshot and the module delegations
+are another. The `Runtime` sets each once, when it creates a transaction, so
+only a transaction no `Runtime` created can have one set after its
+preparation. That first setting changes the digest and is refused here.
+
 ## Cooperative preparation for asynchronous completions
 
 `Runtime.editWithRetry` accepts an optional owner `AbortSignal`. With one, it
@@ -198,6 +267,13 @@ the commit.
   starting value, and an authoritative write of an unchanged value, each make
   a labeled target relevant; a reverted path's derived label is replaced
   whether or not another document in its space changed.
+- [storage/prepared-digest.test.ts](../../packages/runner/test/storage/prepared-digest.test.ts)
+  — what the prepared digest binds; a write after a preparation invalidates
+  it and fails the commit through each write entry, including a batched
+  write the storage layer elides, a recorded SQLite statement, and a recorded
+  mergeable op; an empty batch leaves the preparation standing; module
+  delegations set after a preparation fail the commit on the digest
+  comparison.
 - [runtime-prepare-tx-for-commit.test.ts](../../packages/runner/test/runtime-prepare-tx-for-commit.test.ts)
   — the settled-transaction and aborted-transaction cases.
 - [cfc-flow-probe-memo.test.ts](../../packages/runner/test/cfc-flow-probe-memo.test.ts)

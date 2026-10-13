@@ -3332,6 +3332,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // so the commit falls back to the plain whole-array diff already written.
     if (this.tx.poisonMergeableOp && this.tx.recordMergeableOp) {
       this.#noteCfcActivity();
+      // An intent replaces the diff of the value it covers in the commit, and
+      // is held on the document entry, outside the journal the prepared
+      // digest is derived from. One recorded after a preparation changes what
+      // the transaction commits without changing that digest, so it
+      // invalidates the preparation here, as a write does.
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("mergeable-op-after-prepare");
+      }
       this.tx.recordMergeableOp(address, delta);
       this.#noteWrite();
     }
@@ -3352,6 +3360,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
     }
     this.#noteCfcActivity();
+    // The statement commits with the transaction and is held outside the
+    // journal the prepared digest is derived from. One recorded after a
+    // preparation is a write the verification did not cover and the digest
+    // does not bind, so it invalidates the preparation here, as a write does.
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("sqlite-write-after-prepare");
+    }
     this.tx.recordSqliteWrite(space, op);
     this.#noteWrite();
   }
@@ -3641,10 +3656,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       ) => this.#noteSystemWrite(address, value);
       // Capture the identity per yielded write, not once up front: an empty
       // batch authored nothing, so it must not record a write for the
-      // transaction's write-identity summary.
+      // transaction's write-identity summary. A preparation is invalidated on
+      // the same terms. An empty batch leaves it standing, and a write the
+      // batch yields invalidates it whatever the storage layer does with the
+      // write: one elided as equal to the value already there, or a delete
+      // that finds nothing, is an attempted write that reaches no record the
+      // prepared digest is derived from. The CFC specification's §8.10.1
+      // counts a write that leaves the value unchanged among the attempted
+      // writes, and has any write after a preparation invalidate it;
+      // `docs/specs/cfc-commit-preparation.md` covers the arrangement.
       const noteWriteIdentity = () => {
         this.#noteCfcActivity();
         this.#noteWriteIdentity();
+        if (this.#cfcState.prepare.status === "prepared") {
+          this.invalidateCfc("write-after-prepare");
+        }
       };
       const refuseMalformedSchemaMeta = (
         address: IMemorySpaceAddress,

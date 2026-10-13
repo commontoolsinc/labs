@@ -2,6 +2,8 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { table } from "@commonfabric/memory/sqlite/schema";
+import type { SqliteDbRef } from "@commonfabric/memory/v2";
 
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
@@ -276,6 +278,114 @@ describe("prepared digest transaction binding", () => {
     expect(tx.prepareCfc()).not.toBe("");
     tx.writeValuesOrThrow([{ address: address("output"), value: "two" }]);
     expect((await tx.commit().settled).error).toBeDefined();
+  });
+
+  describe("a write after a preparation", () => {
+    // Each case but the first writes once more after the preparation,
+    // through a path that leaves nothing in the prepared digest's input: the
+    // storage layer elides a write of the value already there and a delete
+    // that finds nothing, and holds a SQLite write and a mergeable op outside
+    // the journal. Comparing digests at commit cannot refuse any of them, so
+    // each has to invalidate the preparation where it happens.
+
+    const prepared = (value: number) => {
+      const tx = runtime.edit() as ExtendedStorageTransaction;
+      tx.writeValueOrThrow(address("output"), value);
+      tx.markCfcRelevant("test");
+      expect(tx.prepareCfc()).not.toBe("");
+      return tx;
+    };
+
+    const expectInvalidated = async (
+      tx: ExtendedStorageTransaction,
+      reason: string,
+    ) => {
+      const state = tx.getCfcState().prepare;
+      expect(state.status).toBe("invalidated");
+      expect(state.status === "invalidated" && state.reasons).toEqual([reason]);
+      const { error } = await tx.commit().settled;
+      expect(error?.name).toBe("StorageTransactionAborted");
+    };
+
+    it("leaves the transaction prepared, and commits it, after an empty batch", async () => {
+      const tx = prepared(1);
+      tx.writeValuesOrThrow([]);
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect((await tx.commit().settled).error).toBeUndefined();
+    });
+
+    it("invalidates the preparation and fails the commit after a batched write of the value already written", async () => {
+      const tx = prepared(1);
+      tx.writeValuesOrThrow([{ address: address("output"), value: 1 }]);
+      await expectInvalidated(tx, "write-after-prepare");
+    });
+
+    it("invalidates the preparation and fails the commit after a batched delete of an absent document", async () => {
+      const tx = prepared(1);
+      tx.writeValuesOrThrow([
+        { address: address("absent"), value: undefined, delete: true },
+      ]);
+      await expectInvalidated(tx, "write-after-prepare");
+    });
+
+    it("invalidates the preparation and fails the commit after a single write of the value already written", async () => {
+      const tx = prepared(1);
+      tx.writeValueOrThrow(address("output"), 1);
+      await expectInvalidated(tx, "write-after-prepare");
+    });
+
+    it("invalidates the preparation and fails the commit after a recorded SQLite write, and stores no row", async () => {
+      const db: SqliteDbRef = {
+        id: `of:prepared-digest-${crypto.randomUUID()}`,
+        tables: { notes: table({ id: "integer primary key", body: "text" }) },
+      };
+      const tx = prepared(1);
+      tx.recordSqliteWrite(signer.did(), {
+        op: "sqlite",
+        db,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["after"],
+      });
+      await expectInvalidated(tx, "sqlite-write-after-prepare");
+      const stored = await storage.open(signer.did()).sqliteQuery!(
+        db,
+        "SELECT body FROM notes",
+      );
+      expect(stored.rows).toEqual([]);
+    });
+
+    it("invalidates the preparation and fails the commit after a recorded mergeable op, and stores no value", async () => {
+      const tx = prepared(5);
+      tx.recordMergeableOp(address("output"), { op: "increment", by: 2 });
+      await expectInvalidated(tx, "mergeable-op-after-prepare");
+      const after = runtime.edit() as ExtendedStorageTransaction;
+      try {
+        expect(after.readValueOrThrow(address("output"))).toBeUndefined();
+      } finally {
+        after.abort();
+      }
+    });
+  });
+
+  it("fails the commit on a digest mismatch when module delegations are set after a preparation", async () => {
+    // Setting the delegations moves the activity epoch without invalidating
+    // the preparation, and the digest binds them, so the transaction reaches
+    // the comparison at commit still prepared, with a digest that differs.
+    const underlying = runtime.edit() as ExtendedStorageTransaction;
+    const tx = new ExtendedStorageTransaction(underlying.tx);
+    tx.setCfcEnforcementMode("enforce-strict");
+    tx.writeValueOrThrow(address("output"), "one");
+    tx.markCfcRelevant("test");
+    expect(tx.prepareCfc()).not.toBe("");
+    tx.setCfcModuleDelegations(
+      new Map([[signer.did(), new Map([["module-a", ["module-b"]]])]]),
+    );
+    expect(tx.getCfcState().prepare.status).toBe("prepared");
+    const { error } = await tx.commit().settled;
+    expect(error?.name).toBe("StorageTransactionAborted");
+    expect((error as { reason?: Error }).reason?.message).toBe(
+      "cfc-prepared-digest-mismatch",
+    );
   });
 
   it("holds trust and implementation snapshots immutable", () => {
