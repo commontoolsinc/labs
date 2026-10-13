@@ -11,6 +11,7 @@ import {
 } from "@commonfabric/home-schemas";
 import {
   createSession,
+  type DID,
   Identity,
   legacySpaceDid,
   type Session,
@@ -115,6 +116,10 @@ import {
   assertPieceInputPath,
   PieceInputPathError,
 } from "./piece-input-path.ts";
+import {
+  type JoinVisitDecision,
+  joinVisitedRoomOf,
+} from "./join-visited-room.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
@@ -2455,6 +2460,28 @@ export class PiecesController<T = unknown> {
       home,
       this.runtime.userIdentityDID,
       signal,
+    );
+  }
+
+  /**
+   * Tells the identity's chat manager that the identity has joined the
+   * FabriChat room whose space is `space`, when the space passes vetting, as
+   * `joinVisitedRoomOf()` says. This controller must be over the identity's
+   * Home space, and Home is brought up, created where it has no root, so a
+   * caller that must not create Home checks first that it exists.
+   *
+   * Resolves with what was decided, once any event is sent, which is before
+   * the manager has handled it. Rejects when Home cannot be brought up, or when
+   * reading what vetting needs fails other than by a refusal of access.
+   */
+  async joinVisitedRoom(space: DID): Promise<JoinVisitDecision> {
+    this.#assertHomeSpace("join a visited room");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    return await joinVisitedRoomOf(
+      this.runtime,
+      home,
+      this.runtime.userIdentityDID,
+      space,
     );
   }
 
