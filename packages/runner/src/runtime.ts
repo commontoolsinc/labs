@@ -974,10 +974,17 @@ export interface CfcRuntimeStats {
   /** Containers receiving child templates from flow persistence. */
   flowTemplateContainers: number;
 
-  /** Target verifications for which a boundary pass built its read set. */
+  /**
+   * Input-requirement verifications for which a boundary pass copied the
+   * transaction's reads. A written target takes one verification per schema
+   * that applies to it, so this counts verifications, not targets.
+   */
   inputReadViewsBuilt: number;
 
-  /** Target verifications that reused the read set a pass already held. */
+  /**
+   * Input-requirement verifications that reused the copy of the reads a
+   * boundary pass already held.
+   */
   inputReadViewsReused: number;
 
   cfcPreparedTx: number;

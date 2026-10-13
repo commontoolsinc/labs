@@ -6906,7 +6906,12 @@ type InputRead = Omit<IReadActivity, "journalIndex"> & {
 
 /** The reads an `InputReadView` holds, and what they were built from. */
 type InputReadSnapshot = {
-  rawCount: number;
+  // The transaction's records the reads were copied from, in order, and the
+  // metadata object each carried then. A record keeps its place in the
+  // transaction's list while its internal-verifier classification changes,
+  // by its metadata being replaced or changed in place.
+  sources: readonly IReadActivity[];
+  metas: readonly IReadActivity["meta"][];
   triggerCount: number;
   reads: readonly InputRead[];
   // The value path each read observes, or `undefined` for a read of one of
@@ -7044,9 +7049,12 @@ const buildGatedInputReads = (
  * `requiredIntegrity` even if its branch never re-reads that write, so they
  * join the gate when enabled, at `-Infinity`, since their invalidating
  * writes scheduled the run and so logically precede every write in the
- * attempt (doc §4). The lists are append-only, so their lengths say whether
- * a read the view has not seen arrived, and the activity list stays live so
- * a read recorded during the pass reaches the targets verified after it.
+ * attempt (doc §4). The view reads the transaction's activity again on
+ * every ask and classifies every record again, since a record's
+ * internal-verifier classification is its metadata's and can change while
+ * the record keeps its place; it copies the reads again only when a record
+ * joined or left the inputs or carries other metadata, so a read recorded
+ * or reclassified during the pass reaches the targets verified after it.
  * The resolver's generation says whether a write retired an envelope the
  * view resolved. The view is deliberately class-blind (`consumes: "all"`):
  * the gate is a screen over everything the transaction consumed, and
@@ -7082,7 +7090,8 @@ export class InputReadView {
    * Every read, each carrying a document-rooted path, as a read activity
    * does: the transaction's reads as they stand at this ask, which the
    * envelopes and the labeled set below then describe until the next ask.
-   * Counts, per ask, whether the set was built for it or reused.
+   * Counts, per ask, whether the set was copied for it or reused; a boundary
+   * pass asks once per schema it verifies a target under.
    */
   reads(): readonly InputRead[] {
     const before = this.#reads;
@@ -7168,27 +7177,33 @@ export class InputReadView {
 
   /**
    * Helper for `reads()`, which returns the snapshot the view holds while it
-   * covers every read and trigger read the transaction has recorded, and
-   * otherwise builds one. This is the one place the view reads the
-   * transaction's activity.
+   * still stands for the transaction's activity, and otherwise builds one.
+   * This is the one place the view reads that activity.
    */
   #current(): InputReadSnapshot {
     const tx = this.#tx;
     const raw = tx.getPotentiallyExternalReadActivities?.() ??
       tx.getReadActivities?.() ?? [];
-    const rawList = Array.isArray(raw) ? raw : [...raw];
+    const rawList: readonly IReadActivity[] = Array.isArray(raw)
+      ? raw
+      : [...raw];
     const triggers = triggerReadSources(tx);
     if (
-      this.#reads !== undefined && this.#reads.rawCount === rawList.length &&
-      this.#reads.triggerCount === triggers.length
+      this.#reads !== undefined &&
+      this.#reads.triggerCount === triggers.length &&
+      InputReadView.#stands(this.#reads, rawList)
     ) {
       return this.#reads;
     }
     let clockLessReads = 0;
+    const sources: IReadActivity[] = [];
+    const metas: IReadActivity["meta"][] = [];
     const reads: InputRead[] = [];
     for (const read of rawList) {
       if (isInternalVerifierRead(read.meta)) continue;
       if (read.journalIndex === undefined) clockLessReads += 1;
+      sources.push(read);
+      metas.push(read.meta);
       reads.push({ ...read, journalIndex: read.journalIndex ?? -Infinity });
     }
     for (const read of triggers) {
@@ -7201,7 +7216,8 @@ export class InputReadView {
       });
     }
     this.#reads = {
-      rawCount: rawList.length,
+      sources,
+      metas,
       triggerCount: triggers.length,
       reads,
       gatePaths: reads.map((read) => canonicalizeDocumentPath(read.path)),
@@ -7217,6 +7233,30 @@ export class InputReadView {
    */
   #held(): InputReadSnapshot {
     return this.#reads ?? this.#current();
+  }
+
+  /**
+   * Helper for `#current()`, which says whether `held` was built from
+   * exactly the records of `records` that are not the verifier's own, each
+   * with the metadata it carries now. The transaction keeps a record whose
+   * classification is not sealed so that a consumer reads its metadata
+   * again, so every record is classified on every ask, and a record that
+   * joined or left the inputs, or whose metadata object was replaced, ends
+   * the snapshot.
+   */
+  static #stands(
+    held: InputReadSnapshot,
+    records: readonly IReadActivity[],
+  ): boolean {
+    let at = 0;
+    for (const read of records) {
+      if (isInternalVerifierRead(read.meta)) continue;
+      if (held.sources[at] !== read || held.metas[at] !== read.meta) {
+        return false;
+      }
+      at += 1;
+    }
+    return at === held.sources.length;
   }
 }
 

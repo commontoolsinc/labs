@@ -9,6 +9,7 @@ import {
 } from "../../src/cfc/prepare.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
+import { internalVerifierRead } from "../../src/storage/reactivity-log.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   seedStoredEnvelope,
@@ -75,7 +76,7 @@ describe("InputReadView", () => {
     return labeled;
   };
 
-  it("is built once by a boundary pass over a commit of many targets", () => {
+  it("is built once by a boundary pass that verifies many targets", () => {
     const runtime = newRuntime();
     const tx = runtime.edit();
     try {
@@ -96,7 +97,8 @@ describe("InputReadView", () => {
         });
       }
       // Nothing above reads a labeled document, so the boundary pass runs
-      // only once the transaction is marked relevant.
+      // only once the transaction is marked relevant. No target's document
+      // stores a schema, so each is verified once, under its candidate.
       tx.markCfcRelevant();
       runtime.resetCfcStats();
       runtime.prepareTxForCommit(tx);
@@ -128,6 +130,36 @@ describe("InputReadView", () => {
             "of:second",
           ]);
           expect(view.reads()).toBe(after);
+        } finally {
+          tx.abort();
+        }
+      });
+    });
+
+    describe("reads() over a record whose metadata changes", () => {
+      it("returns the reads as each record is classified at that ask", () => {
+        // A record keeps its place in the transaction's list while its
+        // internal-verifier classification changes, so the list's length
+        // says nothing about it.
+
+        const runtime = newRuntime();
+        const tx = runtime.edit();
+        try {
+          tx.readOrThrow({ ...address("reclassified"), path: ["value"] });
+          const record = [...tx.getReadActivities!()].at(-1)!;
+          const view = new InputReadView(tx);
+          expect(view.reads().map((read) => read.id)).toEqual([
+            "of:reclassified",
+          ]);
+
+          const meta = { ...internalVerifierRead };
+          record.meta = meta;
+          expect(view.reads()).toEqual([]);
+
+          for (const key of Reflect.ownKeys(meta)) delete meta[key];
+          expect(view.reads().map((read) => read.id)).toEqual([
+            "of:reclassified",
+          ]);
         } finally {
           tx.abort();
         }
