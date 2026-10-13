@@ -288,10 +288,11 @@ export type CfcInstrumentationHooks = {
   onPreparedTx?(): void;
 
   /**
-   * One prepared digest was canonicalized and hashed (`computed`), or one
-   * use of the current activity's digest hashed nothing (`memo`): a read of
-   * a digest already hashed at this activity epoch, or a commit-time recheck
-   * that found the activity its preparation verified still standing.
+   * One prepared digest was canonicalized and hashed (`computed`), or a
+   * commit-time recheck found the activity its preparation verified still
+   * standing and hashed nothing (`memo`). A read of a digest already hashed
+   * reports nothing, except through `accessForTestingOnly.preparedDigest()`,
+   * which reports `memo`.
    */
   onPreparedDigest?(outcome: "computed" | "memo"): void;
 
@@ -369,6 +370,18 @@ type ActivitySnapshot = {
   /** Digest of `input`, absent until `#digestOf()` hashes it. */
   digest?: string;
 };
+
+/**
+ * Helper for `#buildPreparedDigestInput()`, which deep-freezes each member a
+ * snapshot record takes over from a journal record: a read's `meta`, and
+ * anything else object-valued the journal's record holds. A primitive, and a
+ * value `deepFreeze()` has frozen before, cost one check each.
+ */
+function freezeJournalMembers(members: object): void {
+  for (const key in members) {
+    deepFreeze((members as Record<string, unknown>)[key]);
+  }
+}
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
 // `Readonly<CfcTxState>` is compile-time only, so handing out the live state
@@ -2579,7 +2592,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * Once the epoch has moved, the activity is snapshotted again and the two
    * digests are computed and compared.
    */
-  #preparedActivityStands(prepared: ActivitySnapshot): boolean {
+  #preparedActivityStands(): boolean {
+    const prepared = this.#preparedSnapshot;
+    // A prepared state always has its snapshot; without one there is nothing
+    // the commit could be shown to match.
+    if (prepared === undefined) return false;
     const current = this.#activitySnapshot();
     if (current === prepared) {
       this.#cfcInstrumentation.onPreparedDigest?.("memo");
@@ -2591,10 +2608,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #buildPreparedDigestInput(): PreparedDigestInput {
     // Every record pushed here is frozen at every level, so the input is
     // immutable from the moment of construction: a digest hashed from it
-    // later is the digest of the activity as it stood here. A record's
-    // members are primitives, a path the canonical path functions froze, and
-    // a read's `meta`, so `Object.freeze()` on the record with `deepFreeze()`
-    // on the `meta` covers all of it. The records stay out of the deep-frozen
+    // later is the digest of the activity as it stood here. A record holds
+    // a path the canonical path functions froze, members built here from
+    // primitives, and the members it takes over from the journal's record,
+    // which `freezeJournalMembers()` deep-freezes, so `Object.freeze()` on
+    // the record covers the rest. The records stay out of the deep-frozen
     // cache, which nothing asks of them: entering one costs more than
     // building it, and `isDeepFrozen()` walks a record the cache lacks to the
     // same answer.
@@ -2634,8 +2652,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // explicit undefined would hash differently from absence), and the
       // record's one path.
       const { journalIndex: _raw, path, ...bare } = read;
-      // Shared with the journal's own record of the read.
-      deepFreeze(bare.meta);
+      freezeJournalMembers(bare);
       consumedReads.push(Object.freeze({
         ...bare,
         scope: normalizeCellScope(read.scope),
@@ -2646,19 +2663,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const log = this.getReactivityLog();
     const attemptedWrites: CfcRecordAddress[] = (log.attemptedWrites ?? [])
-      .map(({ path, ...address }) =>
-        Object.freeze({
+      .map(({ path, ...address }) => {
+        freezeJournalMembers(address);
+        return Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           // The reactivity log records the journal's document-rooted paths.
           ...cfcRecordPath(toDocumentPath(path)),
-        })
-      );
+        });
+      });
 
     const writes: CfcRecordAddress[] = [];
     for (const space of getTransactionWrittenSpaces(this)) {
       for (const write of this.getWriteDetails(space)) {
         const { path, ...address } = write.address;
+        freezeJournalMembers(address);
         writes.push(Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
@@ -4061,7 +4080,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
 
       if (this.#cfcState.prepare.status === "prepared") {
-        if (!this.#preparedActivityStands(this.#preparedSnapshot!)) {
+        if (!this.#preparedActivityStands()) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.#cfcState.enforcementMode !== "observe") {
             reportCfcDenial(

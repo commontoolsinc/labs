@@ -102,7 +102,7 @@ The CFC specification's §8.10.1 (`08-10-validation-at-boundaries.md`) allows
 an implementation to split an attempt into "full verification at *prepare*
 time producing a canonical digest of the verified activity" and "a cheap
 recheck at *commit* time that the digest still matches", on four conditions.
-This runtime takes that split. What follows is how it holds the three
+This runtime takes that split. What follows is how it arranges the three
 conditions that concern the digest, and when the digest is computed. The
 fourth, that the verification's own reads remain commit dependencies,
 concerns the storage commit rather than this step.
@@ -127,7 +127,9 @@ computes it when something first reads it: the string `prepareCfc()` returns,
 two snapshots to compare. A transaction prepared through `prepareForCommit()`
 and committed with the activity it prepared over reads none, so it
 canonicalizes and hashes nothing. An invalidated preparation keeps the
-snapshot it had, and its `digest` is computed the same way.
+snapshot it had, and its `digest` is computed the same way. A snapshot the
+hash refuses, such as one holding a read whose `meta` carries a value hashing
+does not accept, raises where its digest is first read.
 
 **The recheck.** Every journaled read, every write, and every change to a
 recorded decision input advances the transaction's activity epoch, and a
@@ -143,18 +145,22 @@ transaction.
 **Activity after the preparation.** A read, a single write, or a newly
 recorded decision input after the preparation invalidates it where it
 happens, so the transaction reaches commit not prepared, and an enforcing
-mode refuses it there before any digest is compared. Two kinds of activity
-reach the recheck instead. A batched write
-advances the epoch without invalidating, and the recheck refuses it by
-digest. A dereference the transaction had already performed advances the
-epoch and leaves the digest where it was, since the digest binds the set of
-dereferences, and the recheck accepts it.
+mode refuses it there before any digest is compared. Activity that advances
+the epoch without invalidating reaches the recheck instead, which decides by
+digest alone, so it refuses what the digest binds and accepts what it does
+not. A batched write (`writeValuesOrThrow()`) that changes a document is in
+the write set and the write log, and is refused. A batched write the storage
+layer elides, because the value equals what is there or the delete finds
+nothing, is recorded nowhere the digest binds, and is accepted; a single
+write of an equal value is not, since it invalidates before the storage layer
+sees it. A dereference the transaction had already performed is accepted as
+well, since the digest binds the set of dereferences.
 
 Computing the digest on first read changes when the hash runs, and neither
 what it is nor which commits the recheck accepts.
 `packages/runner/test/storage/prepared-digest.test.ts` pins both halves: a
 commit whose activity stands hashes nothing, and one whose activity moved
-hashes both snapshots and is refused.
+hashes both snapshots, and is refused where they differ.
 
 ## Cooperative preparation for asynchronous completions
 

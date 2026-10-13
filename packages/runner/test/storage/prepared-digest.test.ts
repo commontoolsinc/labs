@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 
 import { preparedDigestFor } from "../../src/cfc/canonical.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
+import { SEED_ENVELOPE_SCHEMA_HASH } from "../cfc-seed-envelope.ts";
 import {
   ExtendedStorageTransaction,
   setCfcImplementationIdentity,
@@ -13,6 +15,7 @@ import {
 } from "../../src/storage/extended-storage-transaction.ts";
 import { markReadAsAttemptedWrite } from "../../src/storage/reactivity-log.ts";
 import { Runtime } from "../../src/runtime.ts";
+import type { JSONSchema } from "../../src/builder/types.ts";
 import { runtimeWritePolicyAuthorization } from "../../src/cfc/types.ts";
 
 const signer = await Identity.fromPassphrase("prepared-digest-test");
@@ -102,9 +105,9 @@ describe("prepared digest transaction binding", () => {
   });
 
   describe("hashing on demand", () => {
-    // A transaction as the runtime configures one, with the hook that
-    // reports each request for a digest: "computed" when it hashed, "memo"
-    // when it was answered without hashing.
+    // A relevant transaction under an enforcing mode, over a bare storage
+    // transaction, with the hook that reports "computed" for each digest
+    // hashed and "memo" for a recheck that hashed none.
     const relevantTx = () => {
       const outcomes: string[] = [];
       const underlying = runtime.edit() as ExtendedStorageTransaction;
@@ -139,6 +142,55 @@ describe("prepared digest transaction binding", () => {
       expect(outcomes).toEqual([]);
       expect((await tx.commit().settled).error).toBeUndefined();
       expect(outcomes).toEqual(["memo"]);
+    });
+
+    it("hashes both snapshots and accepts when a repeated dereference moved the epoch", async () => {
+      const { tx, outcomes } = relevantTx();
+      const trace = {
+        source: address("a"),
+        target: address("b"),
+        kind: "value" as const,
+      };
+      tx.recordCfcDereferenceTrace(trace);
+      tx.prepareForCommit();
+      // The digest binds the set of dereferences, so performing one again
+      // advances the activity and leaves the digest where it was.
+      tx.recordCfcDereferenceTrace({ ...trace });
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect(outcomes).toEqual([]);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(outcomes).toEqual(["computed", "computed"]);
+    });
+
+    it("hashes no digest for a labeled write committed through the runtime", async () => {
+      // The count of `preparedDigestFor()` calls is the logger's, which the
+      // transaction does not report itself. The preparation stages the
+      // field's label map, so the sealed snapshot holds a write to the
+      // document's `cfc` member.
+      const digestsHashed = () =>
+        getTimingStatsBreakdown()["cfc"]?.["preparedDigestFor"]?.count ?? 0;
+      const schema = {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+      } as const satisfies JSONSchema;
+      const tx = runtime.edit();
+      runtime.getCell(signer.did(), "labeled", schema, tx).set({
+        secret: "s",
+      });
+      const before = digestsHashed();
+      runtime.prepareTxForCommit(tx);
+      const prepare = tx.getCfcState().prepare;
+      if (prepare.status !== "prepared") throw new Error("not prepared");
+      expect(
+        prepare.input.writes.some((write) => write.metaPath?.[0] === "cfc"),
+      ).toBe(true);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(digestsHashed() - before).toBe(0);
+      expect(prepare.digest).toBe(preparedDigestFor(prepare.input));
+      // One for the read of `digest`, one for the line above.
+      expect(digestsHashed() - before).toBe(2);
     });
 
     it("hashes both snapshots and rejects when the activity moved after preparing", async () => {
@@ -206,13 +258,52 @@ describe("prepared digest transaction binding", () => {
       }
     });
 
-    it("has no digest on a preparation that was refused or never ran", () => {
+    it("has no digest on an invalidation of a preparation that never ran", () => {
       const { tx } = relevantTx();
       try {
         tx.invalidateCfc("never prepared");
         const state = tx.getCfcState().prepare;
         expect(state.status).toBe("invalidated");
         expect((state as { digest?: string }).digest).toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("drops an earlier preparation's digest once a later one is refused", () => {
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      try {
+        tx.writeValueOrThrow(address("output"), "one");
+        expect(tx.prepareCfc()).not.toBe("");
+        // A write to a document's label map from outside the runtime's own
+        // persistence invalidates the preparation, and the gate refuses it
+        // once enforcement is on.
+        tx.writeOrThrow({
+          space: signer.did(),
+          id: "of:output",
+          type: "application/json",
+          path: ["cfc"],
+        }, {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: { version: 1, entries: [] },
+        });
+        const invalidated = tx.getCfcState().prepare;
+        expect(invalidated.status).toBe("invalidated");
+        expect((invalidated as { digest?: string }).digest).toBeDefined();
+        tx.setCfcEnforcementMode("enforce-explicit");
+        expect(tx.prepareCfc()).toBe("");
+        const refused = tx.getCfcState().prepare;
+        if (refused.status !== "invalidated") throw new Error("not refused");
+        expect(refused.reasons.join("\n")).toContain(
+          "unprivileged write to protected runtime surface",
+        );
+        expect(refused.digest).toBeUndefined();
+        tx.invalidateCfc("after the refusal");
+        const later = tx.getCfcState().prepare;
+        expect(later.status).toBe("invalidated");
+        expect((later as { digest?: string }).digest).toBeUndefined();
       } finally {
         tx.abort();
       }

@@ -1635,10 +1635,11 @@ Add `--timing-measures-out /tmp/mapped-B.json` (a distinct path per run) for
 unrounded spans and `cf:runTestPattern/step/render_N/materialize#...` boundaries.
 Use the aggregation and attribution tools in
 [profiling](debugging/profiling.md) to locate the CFC work inside each interval.
-Nested timing totals overlap: `prepareCfc` includes its derivation, and its
-digest only for a caller that reads the result of `prepareCfc()`, while a
-commit recheck whose activity moved hashes outside preparation. The spans
-measure elapsed time, not CPU attribution.
+Nested timing totals overlap: `prepareCfc` includes its derivation, and a
+digest only where `prepareCfc()` itself was called, which hashes the one it
+returns; `prepareForCommit()` hashes none, and a commit recheck whose
+activity moved hashes outside preparation. The spans measure elapsed time,
+not CPU attribution.
 
 This `cf test` probe runs on demand, outside the scheduled `deno bench` suite.
 Keep its source and step order stable across the optimizations it measures.
