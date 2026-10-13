@@ -657,6 +657,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   #cfcTrustConfigPinned = false;
 
+  /**
+   * Write-once pin for the serving identity, set on the first call (the
+   * `Runtime`'s, in `edit()`) whatever its value, so that code holding the
+   * transaction cannot name a different identity, or none, as the serving
+   * runtime's.
+   */
+  #cfcServingIdentityPinned = false;
+
   #cfcModuleDelegationsPinned = false;
 
   /**
@@ -1266,6 +1274,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.trustConfig = config === undefined
       ? undefined
       : deepFreeze(config);
+  }
+
+  /**
+   * Sets the serving runtime's own identity: the principal of the ambient
+   * trust snapshot a serving runtime gives a run with no actor. `undefined`
+   * off the serving posture. Write-once, like the trust config.
+   */
+  setCfcServingIdentity(identity: string | undefined): void {
+    if (this.#cfcServingIdentityPinned) return;
+    this.#cfcServingIdentityPinned = true;
+    this.#cfcState.servingIdentity = identity;
   }
 
   /**

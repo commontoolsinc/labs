@@ -1256,16 +1256,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     },
   },
   {
-    // Reverting labs#8713 with labs#8715 takes out the meeting binding the
-    // Loom root's contract recorded as this baseline.
-    pattern: "loom/main.tsx",
-    baselines: ["20261011T182304Z-qsqQOWTGzU00g8hJ"],
-    paths: ["result.bindMeeting"],
-    reason:
-      "labs#8713, which added the Loom root's meeting binding, is reverted with labs#8715 to restore stored writer-claim enforcement; a root rolled forward loses `bindMeeting` until both re-land",
-    record: "docs/history/loom-meeting-binding-revert-break.md",
-  },
-  {
     // A request outcome gained `delivery`, which says how `offerRoom` told a
     // member added to a room of it, and a refused one the `shared-inbox`
     // code. The recorded outcomes left extra fields open and typed `code` as
