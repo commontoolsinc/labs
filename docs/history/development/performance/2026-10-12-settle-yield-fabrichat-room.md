@@ -79,8 +79,11 @@ The room has two lists of message rows, and each `map` run is one action:
 17.6 s in the action at most, and 24.6 s preparing its commit for CFC at
 most. Preparing an iteration builds its work set and sorts it
 topologically, 17.1 s of the 18.9 s in the sort, in one synchronous call.
-The loop yielded between the two runs and again before the preparation; a
-yield cannot divide a unit.
+The loop asks for a yield before each action and nowhere else. It yielded
+between the two runs, and once more before the last small actions of that
+iteration, 9 ms before the preparation began; nothing yields between an
+iteration's last action and the next iteration's preparation. A yield
+cannot divide a unit.
 
 Neither of those two yields read a frame, although the server had answered
 the pending request long before. The client decodes an inbound frame
