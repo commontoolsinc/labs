@@ -105,7 +105,9 @@ const freshRecords = () => ({
 });
 
 export default pattern(() => {
-  const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
+  const aliceProfile = Writable.of<TestProfile | undefined>({
+    name: "Alice",
+  });
   const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
   const records = freshRecords();
   const about = { kind: "group" as const, title: "Team" };
@@ -155,6 +157,8 @@ export default pattern(() => {
       target: { value: "Never mind" },
     })
   );
+
+  const action_lose_profile = action(() => aliceProfile.set(undefined));
 
   return {
     [TESTS]: [
@@ -242,6 +246,21 @@ export default pattern(() => {
           outcomeOf(alice.messageRequests, "d-first") === "done" &&
           outcomeOf(alice.messageRequests, "e-deleted") ===
             "refused/deleted-target"
+        ),
+      },
+      // A replay of a send that took effect keeps its outcome, even arriving
+      // once the sender's profile no longer resolves, and leaves what the
+      // composer shows as it was.
+      { action: action_lose_profile },
+      {
+        action: alice.sendMessage,
+        event: typed("Hello", "s-1"),
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          outcomeOf(alice.messageRequests, "s-1") === "done" &&
+          shownRefusal(alice[UI]) === "That message was deleted."
         ),
       },
       // A viewer whose profile hasn't resolved can't send.

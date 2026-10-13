@@ -829,7 +829,9 @@ const actDone = (state: RoomActState, requestId: string): void => {
 /**
  * Records that the act `requestId` was refused, with `code` and `reason`, and
  * shows the reason to the session. Nothing else is written: a refusal leaves
- * the room's shared record as it is.
+ * the room's shared record as it is. A request already done keeps its
+ * outcome, and shows nothing: a replay of an act that took effect is not
+ * refused, whatever the state it arrives in.
  */
 const refuseAct = (
   state: RoomActState,
@@ -837,7 +839,9 @@ const refuseAct = (
   code: MessageActRefusalCode,
   reason: string,
 ): void => {
-  state.outcomes?.key(requestId).set({ status: "refused", reason, code });
+  const outcome = state.outcomes?.key(requestId);
+  if (outcome?.get()?.status === "done") return;
+  outcome?.set({ status: "refused", reason, code });
   state.refusal?.set(reason);
 };
 
