@@ -208,12 +208,15 @@ Exit: the cross-space pass costs in proportion to the links that cross.
 - [ ] The frame log on the field check shows no receive silence longer than
       the longest server operation. On the thirty-row room's reload the
       yield takes the settle's small actions out of the silence, about 28%
-      of the settle, and three units remain back to back: each of the two
-      list `map` runs with its commit preparation, and the topological
-      sort of the iteration after them
+      of the settle, and two units remain back to back: each of the two
+      list `map` runs with its commit preparation, which is two thirds of
+      the unit and 88 to 92% of the reload's commit preparation
       ([`../history/development/performance/2026-10-12-settle-yield-fabrichat-room.md`](../history/development/performance/2026-10-12-settle-yield-fabrichat-room.md)).
       A yield cannot divide a unit, and scheduler commits prepare
       synchronously (`docs/specs/cfc-commit-preparation.md`).
+- [ ] A reload has a second silence of the same order before its settle
+      begins, with one small frame sent, on both sides of the yield. What
+      holds it is not yet measured.
 - [ ] An inbound frame is decoded through an asynchronous stream, chained
       behind the frame before it, so one macrotask turn between two long
       units delivers nothing: the yields on either side of a `map` run

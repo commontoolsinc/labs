@@ -2,7 +2,7 @@
 status: historical
 created: 2026-10-12
 archived: 2026-10-12
-reason: "What a macrotask yield between the settle loop's actions did to the receive silence of a thirty-row fabrichat room's reload on a local toolshed, October 2026, and the three synchronous units that hold the silence that is left."
+reason: "What a macrotask yield between the settle loop's actions did to the receive silence of a thirty-row fabrichat room's reload on a local toolshed, October 2026, and the synchronous units that hold the silence that is left."
 ---
 
 # The settle's receive silence after a yield between actions, 2026-10-12
@@ -112,6 +112,20 @@ Commit preparation is 982 calls per reload, and the two longest are 88 to
 92% of its time on every run: 88 s in all on the first baseline run with
 the two longest at 43 s and 38 s, and a 95th percentile of 35 ms.
 
+## With the sort's cycle break on a heap
+
+`main` then gained a topological sort whose cycle break chooses from a heap
+(`6986fd8f47`). One reload of the same room with the yield merged onto it,
+at a load of 330 to 470 and 646 s of wall time: the sort is 0.6 s at most,
+the settle spans 180 s, and the settle's silence is 123 s, which is the two
+`map` runs and nothing else, 62.2 s and 57.2 s: 18.7 s and 18.4 s in the
+action, 42.0 s and 37.1 s preparing the commit. Two units remain.
+
+That run's longest silence is an earlier one, 175 s between 8 s and 183 s
+of the run with one 2 KB frame sent, before the settle begins. Each of the
+four runs above has a silence of that shape before its settle, 21 to 44 s
+with one frame sent, in both arms. It is not attributed here.
+
 ## The server
 
 Over the session the toolshed's slowest frame was handled in 10.1 s and
@@ -131,7 +145,8 @@ room's tree was committed twice.
 
 - A yield between actions takes the settle's many small actions out of
   the silence, about 28% of the settle on this room, and leaves three
-  units: two `map` runs with their commits and one sort.
+  units: two `map` runs with their commits and one sort. With the sort's
+  cycle break on a heap, the two `map` runs are what is left.
 - Per reload, two commits are 88 to 92% of all commit preparation time.
 - One event-loop turn does not deliver a compressed frame; the turns
   between long units read nothing.
