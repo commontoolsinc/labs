@@ -66,10 +66,10 @@ export interface SchemaHint {
    * Whether every cell the reading of the node reaches, outside the value of
    * another cell, is opaque, whatever capability its wrapper writes; a stream
    * or a SQLite handle keeps its brand. The contract overlay of a handler's
-   * event or state (`overlayContractCapabilities()`) marks with it the
-   * remainder past a recursion it cuts, and a node it keeps as written because
-   * it cannot read inside it, where no use the callback makes reaches the
-   * cells there.
+   * event or state (`overlayContractCapabilities()`) marks with it a node
+   * whose cells no use the callback makes reaches, in either of two places:
+   * the remainder past a recursion it cuts, and a node it keeps as written
+   * because it cannot read inside it.
    */
   readonly cellsOpaque?: true;
 }

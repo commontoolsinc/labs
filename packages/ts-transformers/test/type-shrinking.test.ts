@@ -749,6 +749,26 @@ type Box = { c: Writable<number>; v?: Identity<Writable<number> | string> };`,
       });
     }
 
+    for (
+      const [use, callback] of [
+        ["reads", "(e, { c }) => { c.set(e.get()); }"],
+        ["writes", "(e, { c }) => { e.set(c.get()); }"],
+      ] as const
+    ) {
+      it(`keeps the capability written for a scoped cell the event is, which the body ${use}, in its scope`, async () => {
+        const { event } = await eventSchema(
+          'import type { PerUser } from "commonfabric";',
+          "PerUser<Writable<number>>",
+          callback,
+        );
+
+        expect(event).toEqual({
+          type: "number",
+          asCell: [{ kind: "cell", scope: "user" }],
+        });
+      });
+    }
+
     it("keeps the capability written for a scoped cell the body reads, in its scope", async () => {
       // A known limit: the overlay does not narrow a cell inside a scope
       // wrapper, so a scoped cell the body reads keeps `cell`, not `readonly`.
@@ -819,6 +839,55 @@ type Ev = { c: Writable<number>; x: Ix };`,
       );
 
       expect(event.additionalProperties).toEqual(opaqueNumber);
+    });
+
+    it("keeps a cell an index signature types as written where the body reads it under a key it computes", async () => {
+      const { event } = await eventSchema(
+        "type Ev = { dict: { [key: string]: Writable<number> }; key: string };",
+        "Ev",
+        "(e, { c }) => { c.set(e.dict[e.key]?.get() ?? 0); }",
+      );
+      const dict = (event.properties as Record<string, Record<string, unknown>>)
+        .dict!;
+
+      expect(dict.additionalProperties).toEqual({
+        type: "number",
+        asCell: ["cell"],
+      });
+    });
+
+    it("tells a numeric key the literal declares from one only its index signature types", async () => {
+      const declaration =
+        "type Ev = { 0: Writable<number>; [key: number]: Writable<number> };";
+      const undeclared = await eventSchema(
+        declaration,
+        "Ev",
+        "(e, { c }) => { c.set(e[1]?.get() ?? 0); }",
+      );
+      const declared = await eventSchema(
+        declaration,
+        "Ev",
+        "(e, { c }) => { c.set(e[0].get()); }",
+      );
+
+      expect(undeclared.event.additionalProperties).toEqual({
+        type: "number",
+        asCell: ["cell"],
+      });
+      expect(declared.event.additionalProperties).toEqual(opaqueNumber);
+    });
+
+    it("keeps a tuple as written where the body reads the value above it under a key it computes", async () => {
+      const { event } = await eventSchema(
+        `type Ev = {
+  holder: { [key: string]: { t: [Writable<number>, string] } };
+  key: string;
+};`,
+        "Ev",
+        "(e, { c }) => { c.set(e.holder[e.key]?.t[0].get() ?? 0); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["cell"]]);
     });
 
     it("keeps a cell an index signature types as written where a use reaches an undeclared key", async () => {

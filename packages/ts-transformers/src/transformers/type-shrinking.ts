@@ -2957,6 +2957,10 @@ interface ContractObservation {
    * one. Its use of a prefix itself is: a `.get()` reads it, and a write
    * through such a key writes it. */
   readonly reachedBelow: readonly (readonly string[])[];
+
+  /** Every path a use reaches, as the summary observed it: no prefix taken,
+   * and a numeric segment as the index it names. */
+  readonly used: readonly (readonly string[])[];
 }
 
 function contractObservationFrom(
@@ -2984,6 +2988,16 @@ function contractObservationFrom(
   const reachedBelow = (summary.wildcardPaths ?? []).map(
     contractPathSegments,
   );
+  const used = [
+    summary.writePaths,
+    summary.readPaths,
+    summary.fullShapePaths,
+    summary.opaquePaths,
+    summary.comparablePaths,
+    summary.comparableCellPaths,
+    summary.identityPaths,
+    summary.identityCellPaths,
+  ].flatMap((paths) => paths ?? []);
   return {
     write,
     read,
@@ -2991,6 +3005,7 @@ function contractObservationFrom(
     exactComparableCell,
     escaped,
     reachedBelow,
+    used,
   };
 }
 
@@ -3012,6 +3027,18 @@ function usedUntracked(
     observation.reachedBelow.some((prefix) =>
       prefix.length < segments.length && startsWith(prefix)
     );
+}
+
+/**
+ * Whether `a` and `b` lie on one path from the root, one a prefix of the
+ * other, a numeric segment matching any index as `contractPathKey()` reads it.
+ */
+function onOnePath(a: readonly string[], b: readonly string[]): boolean {
+  const shared = Math.min(a.length, b.length);
+  for (let i = 0; i < shared; i++) {
+    if (contractPathKey([a[i]!]) !== contractPathKey([b[i]!])) return false;
+  }
+  return true;
 }
 
 function contractCapabilityAt(
@@ -3097,42 +3124,33 @@ export function overlayContractCapabilities(
 
   /** Whether a use the body makes reaches `path` or a position below it. */
   const usedWithin = (path: readonly string[]): boolean => {
-    // The observation holds every prefix of each path a use reaches, and
-    // every such path is below the root, so the root is used where any is.
-    if (path.length === 0) {
-      return observation.write.size > 0 || observation.read.size > 0 ||
-        observation.comparable.size > 0;
-    }
     const key = contractPathKey(path);
     return observation.write.has(key) || observation.read.has(key) ||
       observation.comparable.has(key);
   };
 
   /**
-   * Whether a use the body makes reaches a position below `path` under a key
-   * that `declared`, the property names the object at `path` declares, does
-   * not hold: a position only an index signature types.
+   * Whether a use the body makes reaches `path`: a use at it or below it, or
+   * one above it that reads the whole value there, as a key the body computes
+   * or a value it passes on whole does.
+   */
+  const reachedByUse = (path: readonly string[]): boolean =>
+    observation.used.some((used) => onOnePath(used, path));
+
+  /**
+   * Whether a use the body makes reaches a position below `path` that only an
+   * index signature types: one under a key that `declared`, the property
+   * names the object at `path` declares, does not hold, or one above or at
+   * `path` that reads the whole value there.
    */
   const usedUndeclaredWithin = (
     path: readonly string[],
     declared: ReadonlySet<string>,
-  ): boolean => {
-    const prefix = path.length === 0 ? "" : `${contractPathKey(path)}\x00`;
-    for (
-      const keys of [
-        observation.write,
-        observation.read,
-        observation.comparable,
-      ]
-    ) {
-      for (const key of keys) {
-        if (!key.startsWith(prefix)) continue;
-        const head = key.slice(prefix.length).split("\x00")[0]!;
-        if (!declared.has(head)) return true;
-      }
-    }
-    return false;
-  };
+  ): boolean =>
+    observation.used.some((used) =>
+      onOnePath(used, path) &&
+      (used.length <= path.length || !declared.has(used[path.length]!))
+    );
 
   /**
    * `type`, the remainder of a recursion cut at `current`, as a node read at
@@ -3157,15 +3175,16 @@ export function overlayContractCapabilities(
    * `current`, a node standing for `type` that the overlay keeps as written
    * because it cannot read inside it, as the overlay serves it: read with
    * every cell in it opaque (`opaqueRemainder()`) where it holds a cell-like
-   * position and no use the body makes reaches inside it, since opaque is the
-   * capability each such cell would earn; `current`, as written, otherwise.
+   * position and no use the body makes reaches it (`reachedByUse()`), since
+   * opaque is the capability each such cell would earn; `current`, as
+   * written, otherwise.
    */
   const keptAsWritten = (
     current: ts.TypeNode,
     type: ts.Type | undefined,
     path: readonly string[],
   ): ts.TypeNode =>
-    type && !usedWithin(path) &&
+    type && !reachedByUse(path) &&
       typeSubtreeContainsCellLike(type, checker, new Set(), [], budget)
       ? opaqueRemainder(current, type)
       : current;
@@ -3247,7 +3266,7 @@ export function overlayContractCapabilities(
       const declared = new Set(
         current.members.flatMap((member) => {
           const name = member.name && getPropertyNameText(member.name);
-          return name === undefined ? [] : [contractPathKey([name])];
+          return name === undefined ? [] : [name];
         }),
       );
       const members = current.members.map((member) => {
