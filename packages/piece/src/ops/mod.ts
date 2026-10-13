@@ -103,6 +103,7 @@ export {
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
+  piecePatternPointer,
   type PiecePatternRef,
   type PiecePatternSourceRef,
   type PieceSourceAction,
