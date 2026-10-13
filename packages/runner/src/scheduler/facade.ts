@@ -2640,7 +2640,7 @@ export class Scheduler {
   // Execution orchestration
   //
 
-  #handleError(error: Error, action: any) {
+  #handleError(error: Error, action: any, eventId?: string) {
     handleSchedulerError(
       {
         errorHandlers: this.#errorHandlers,
@@ -2648,6 +2648,7 @@ export class Scheduler {
       },
       error,
       action,
+      eventId,
     );
   }
 
@@ -3312,7 +3313,8 @@ export class Scheduler {
       getActionId: (target) => this.#getActionId(target),
       getActionTelemetryInfo: (target) =>
         getSchedulerActionTelemetryInfo(target),
-      handleError: (error, target) => this.#handleError(error, target),
+      handleError: (error, target, eventId) =>
+        this.#handleError(error, target, eventId),
       queueExecution: () => this.queueExecution(),
       setEventPreflightTraceContext: (trace) => {
         this.#eventPreflightTraceContext = trace;

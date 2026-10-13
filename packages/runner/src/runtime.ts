@@ -279,6 +279,13 @@ export type ErrorWithContext = Error & {
   space: MemorySpace;
   patternId: string;
   spellId: string | undefined;
+
+  /**
+   * The event whose handling failed, when the error is an event handler's.
+   * On the server-execution arm the same id names the event's intent
+   * outcome.
+   */
+  eventId?: string;
 };
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
@@ -967,6 +974,21 @@ export interface CfcRuntimeStats {
   /** Containers receiving child templates from flow persistence. */
   flowTemplateContainers: number;
 
+  /**
+   * Input-requirement verifications for which a boundary pass copied the
+   * transaction's reads. A written target takes one verification per schema
+   * that applies to it, so this counts verifications, not targets. It counts
+   * the copy of the reads alone: resolving the stored envelopes again after a
+   * write retires one is not counted.
+   */
+  inputReadViewsBuilt: number;
+
+  /**
+   * Input-requirement verifications that reused the copy of the reads a
+   * boundary pass already held.
+   */
+  inputReadViewsReused: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -1021,6 +1043,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   stagedReferenceCacheHits: 0,
   flowTemplateEntriesMinted: 0,
   flowTemplateContainers: 0,
+  inputReadViewsBuilt: 0,
+  inputReadViewsReused: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
