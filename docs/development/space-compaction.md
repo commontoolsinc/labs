@@ -78,9 +78,11 @@ deno task cf space compact ~/clones/<name>-compacted.sqlite \
 # 4. Serve the result and read it. Clone it (the clone keeps the DID; HOST
 #    pins it to loopback), start a toolshed on the workspace's port offset,
 #    open the Topics board cold, read the board and a handful of topics
-#    through cf, then check the two things this tool promises:
-#    /api/health/stats shows patchReplays flat on the cold board load, and a
-#    topic edit's transact round trip is below the storm's 180 ms.
+#    through cf, comparing cold/warm read times and the patchReplays delta
+#    with the uncompacted baseline. The computed-only selection leaves
+#    authored history, so the global replay counter can still rise.
+#    The write timings below measure engine patch commits. Measure a topic
+#    edit through the served API separately to measure its round trip.
 deno task cf space clone <did> --from ~/clones/<name>-compacted.sqlite \
   --to ~/clones/<name>-compacted
 HOST=127.0.0.1 MEMORY_DIR="file://$HOME/clones/<name>-compacted/" \

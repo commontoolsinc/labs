@@ -3,13 +3,21 @@
 // in its classification.
 
 import { assert, assertEquals } from "@std/assert";
+import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
 
+import { Database } from "@db/sqlite";
+
+import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  type CompactionReport,
+  compactStore,
+} from "@commonfabric/memory/v2/compact";
 import { applyCommit, close, open } from "@commonfabric/memory/v2/engine";
-import { compactStore } from "@commonfabric/memory/v2/compact";
 
 import { main } from "../cli.ts";
 import { openSpace } from "../db.ts";
+import { decodeStored } from "../decode.ts";
 import { classifyDocument } from "../model.ts";
 import { describeCommitPayload, listCommits } from "../queries.ts";
 import { reconstructDocument } from "../reconstruct.ts";
@@ -127,13 +135,56 @@ Deno.test("the commit listing names a compaction run and the payloads it hollowe
         ).compaction,
         undefined,
       );
-      // A compaction-session commit whose payload does not name it is not
-      // labelled as a run.
-      const sdb = space.db;
-      const planned = sdb.prepare(
+      // A compaction run's plan names the row's sequence and session, and
+      // the row starts that session at local sequence 1.
+      const planned = space.db.prepare(
         `SELECT original FROM "commit" WHERE seq = ?`,
       ).get<{ original: string }>(run.commitSeq)!.original;
-      assert(planned.includes(`"seq":${run.commitSeq}`));
+      const payload = decodeStored(planned) as {
+        compaction: { runId: string; report: CompactionReport };
+      };
+      const identity = payload.compaction.report.compactionCommit;
+      for (
+        const [name, seq, sessionId, localSeq] of [
+          ["other-sequence", run.commitSeq + 1, identity.sessionId, 1],
+          ["other-session", run.commitSeq, "compaction:other", 1],
+          ["other-local-sequence", run.commitSeq, identity.sessionId, 2],
+        ] as const
+      ) {
+        const malformedPath = `${dir}/${name}.sqlite`;
+        await Deno.copyFile(`${dir}/result.sqlite`, malformedPath);
+        const db = new Database(malformedPath);
+        try {
+          db.prepare(
+            `UPDATE "commit" SET original = ?, local_seq = ? WHERE seq = ?`,
+          ).run(
+            encodeMemoryBoundary({
+              compaction: {
+                ...payload.compaction,
+                report: {
+                  ...payload.compaction.report,
+                  compactionCommit: { ...identity, seq, sessionId },
+                },
+              },
+            }),
+            localSeq,
+            run.commitSeq,
+          );
+        } finally {
+          db.close();
+        }
+        const malformedSpace = openSpace(malformedPath);
+        try {
+          const row = listCommits(malformedSpace).find((row) =>
+            row.seq === run.commitSeq
+          );
+          expect(row).toBeDefined();
+          expect(row!.compactionRun).toBeUndefined();
+          expect(describeCommitPayload(row!)).toBe("ops=0\treads=0");
+        } finally {
+          malformedSpace.close();
+        }
+      }
     } finally {
       space.close();
     }
