@@ -68,7 +68,7 @@ const ambiguousWishShapedSchema: JSONSchema = {
     result: { anyOf: [profileViewSchema, altProfileViewSchema] },
     candidates: { type: "array", items: profileViewSchema },
     error: true,
-    [UI]: true,
+    [UI]: { type: "unknown", asCell: ["opaque"] },
   },
 } as JSONSchema;
 
