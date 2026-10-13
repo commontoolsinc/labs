@@ -95,6 +95,81 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
+/**
+ * The handlers registered for event streams, at most one per stream, each
+ * held under its stream's address: the members of a link
+ * `areNormalizedLinksSame()` compares. Registering, removing and finding a
+ * handler therefore cost the same however many streams are registered.
+ * Iteration yields the registrations in the order they were made, a handler
+ * that replaces another taking a new place at the end.
+ */
+export class EventHandlerRegistry {
+  #byStream = new Map<string, readonly [NormalizedFullLink, EventHandler]>();
+
+  /** Constructs an instance holding `registrations`, registered in order. */
+  constructor(
+    registrations: Iterable<readonly [NormalizedFullLink, EventHandler]> = [],
+  ) {
+    for (const [link, handler] of registrations) this.set(link, handler);
+  }
+
+  /** Number of streams with a handler registered. */
+  get size(): number {
+    return this.#byStream.size;
+  }
+
+  /** Returns the handler registered for the stream `link` names, if any. */
+  get(link: NormalizedFullLink): EventHandler | undefined {
+    return this.#byStream.get(streamKey(link))?.[1];
+  }
+
+  /**
+   * Returns the registration for the stream `link` names, if any: the link
+   * it was made under, and its handler.
+   */
+  registration(
+    link: NormalizedFullLink,
+  ): readonly [NormalizedFullLink, EventHandler] | undefined {
+    return this.#byStream.get(streamKey(link));
+  }
+
+  /**
+   * Registers `handler` for the stream `link` names, in place of any
+   * handler registered for it.
+   */
+  set(link: NormalizedFullLink, handler: EventHandler): void {
+    const key = streamKey(link);
+    // Removed first, so that a replacement is the newest registration.
+    this.#byStream.delete(key);
+    this.#byStream.set(key, [link, handler]);
+  }
+
+  /** Removes the registration for the stream `link` names, if any. */
+  delete(link: NormalizedFullLink): void {
+    this.#byStream.delete(streamKey(link));
+  }
+
+  /** Iterates the registrations, oldest first. */
+  [Symbol.iterator](): IterableIterator<
+    readonly [NormalizedFullLink, EventHandler]
+  > {
+    return this.#byStream.values();
+  }
+}
+
+/**
+ * The address of the stream `link` names, as a map key: its members as one
+ * JSON array, so that no two streams share a key.
+ */
+function streamKey(link: NormalizedFullLink): string {
+  return JSON.stringify([
+    link.space,
+    link.scope ?? "space",
+    link.id,
+    link.path,
+  ]);
+}
+
 const guardedImplementations = Symbol("guarded event implementations");
 
 type GuardedDispatcher = EventHandler & {
@@ -149,7 +224,7 @@ export function selectEventImplementation(
 /** Stable queued callback whose selection follows the live stream registry. */
 function createGuardedDispatcher(
   ref: NormalizedFullLink,
-  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+  eventHandlers: EventHandlerRegistry,
 ): GuardedDispatcher {
   const dispatcher: GuardedDispatcher = Object.assign(
     (tx: IExtendedStorageTransaction, event: unknown) => {
@@ -165,7 +240,7 @@ function createGuardedDispatcher(
     {
       [guardedImplementations]: {
         implementations: new Map<string, { handler: EventHandler }>(),
-        current: () => findEventHandler(eventHandlers, ref),
+        current: () => eventHandlers.get(ref),
       },
     },
   );
@@ -348,7 +423,7 @@ export interface EventDependencyPreflightResult {
 
 export interface SchedulerEventQueueState {
   readonly runtime: Runtime;
-  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistry;
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
   readonly loadPieceForEvent?: (
@@ -514,14 +589,6 @@ export function deferLaterSameSpaceServedEvents(
   }
 }
 
-function findEventHandler(
-  handlers: readonly [NormalizedFullLink, EventHandler][],
-  eventLink: NormalizedFullLink,
-): EventHandler | undefined {
-  return handlers.find(([link]) => areNormalizedLinksSame(link, eventLink))
-    ?.[1];
-}
-
 // Source of QueuedEvent.enqueueSeq stamps. Process-global monotonicity is a
 // superset of the per-queue monotonicity the ordered requeue insert needs.
 let nextEnqueueSeq = 1;
@@ -637,7 +704,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   // ingress caller's opaque idempotency key is bound to its stream earlier,
   // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
-  const handler = findEventHandler(state.eventHandlers, args.eventLink);
+  const handler = state.eventHandlers.get(args.eventLink);
 
   if (handler) {
     // W4: bound the per-(stream, handler) in-queue backlog. Below the cap,
@@ -793,10 +860,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           !state.eventQueue.includes(queuedEvent)
         ) return;
 
-        const loadedHandler = findEventHandler(
-          state.eventHandlers,
-          args.eventLink,
-        );
+        const loadedHandler = state.eventHandlers.get(args.eventLink);
         if (loadedHandler) {
           queuedEvent.handler = loadedHandler;
           queuedEvent.action = (tx) => loadedHandler(tx, args.event);
@@ -896,8 +960,15 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   }
 }
 
+/**
+ * Registers `args.handler` for the stream `args.ref` names and returns the
+ * cancel that removes it. A handler carrying an implementation selection
+ * joins the stream's guarded dispatcher, which chooses among the
+ * implementations registered under it at dispatch. Any other handler takes
+ * the stream over, in place of whatever was registered for it.
+ */
 export function addSchedulerEventHandler(state: {
-  readonly eventHandlers: [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistry;
 }, args: {
   readonly handler: EventHandler;
   readonly ref: NormalizedFullLink;
@@ -909,18 +980,12 @@ export function addSchedulerEventHandler(state: {
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
   }
-  const existingIndex = state.eventHandlers.findIndex(([existing]) =>
-    areNormalizedLinksSame(existing, args.ref)
-  );
-  const existing = state.eventHandlers[existingIndex]?.[1];
+  const existing = state.eventHandlers.get(args.ref);
   if (args.handler.implementationSelection !== undefined) {
     const dispatcher = existing && isGuardedDispatcher(existing)
       ? existing
       : createGuardedDispatcher(args.ref, state.eventHandlers);
-    if (dispatcher !== existing) {
-      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
-      state.eventHandlers.push([args.ref, dispatcher]);
-    }
+    if (dispatcher !== existing) state.eventHandlers.set(args.ref, dispatcher);
     const key = args.handler.implementationSelection.key;
     const registration = { handler: args.handler };
     dispatcher[guardedImplementations].implementations.set(key, registration);
@@ -928,30 +993,31 @@ export function addSchedulerEventHandler(state: {
       const { implementations } = dispatcher[guardedImplementations];
       if (implementations.get(key) !== registration) return;
       implementations.delete(key);
-      if (implementations.size === 0) {
-        const index = state.eventHandlers.findIndex(([, h]) =>
-          h === dispatcher
-        );
-        if (index !== -1) state.eventHandlers.splice(index, 1);
+      if (
+        implementations.size === 0 &&
+        state.eventHandlers.get(args.ref) === dispatcher
+      ) {
+        state.eventHandlers.delete(args.ref);
       }
     };
   }
-  if (existingIndex !== -1) {
-    if (existing && isGuardedDispatcher(existing)) {
+  if (existing !== undefined) {
+    if (isGuardedDispatcher(existing)) {
       existing[guardedImplementations].implementations.clear();
     }
-    state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
       { linkId: args.ref.id },
     ]);
   }
-  state.eventHandlers.push([args.ref, args.handler]);
+  state.eventHandlers.set(args.ref, args.handler);
   return () => {
-    const index = state.eventHandlers.findIndex(([r, h]) =>
-      r === args.ref && h === args.handler
-    );
-    if (index !== -1) state.eventHandlers.splice(index, 1);
+    // Only the registration this call made: one a later call made for the
+    // same stream stays, whichever handler it carries.
+    const registered = state.eventHandlers.registration(args.ref);
+    if (registered?.[0] === args.ref && registered[1] === args.handler) {
+      state.eventHandlers.delete(args.ref);
+    }
   };
 }
 
