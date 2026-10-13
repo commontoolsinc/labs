@@ -197,6 +197,28 @@ describe("v2-watch", () => {
       });
     });
 
+    it("builds a persisted closure's reference again once the registry has cleared", () => {
+      // The forms kept for a decomposition are externalized forms, and every
+      // retainer of those drops them when the registry clears.
+      setContentAddressedSchemasConfig(true);
+      const release = acquireSchemaRegistryLease();
+      const selector = normalizeSyncSelector({
+        path: ["value"],
+        schema: {
+          type: "object",
+          title: "kept-until-clear",
+          properties: { leaf: { type: "string" } },
+        },
+      });
+      const first = externalizeSyncSelector(selector, () => true);
+      release();
+
+      const hashedBefore = getContainersHashedForTestingOnly();
+      expect(externalizeSyncSelector(selector, () => true)).toBe(first);
+      // One container: the reference, built and interned anew.
+      expect(getContainersHashedForTestingOnly() - hashedBefore).toBe(1);
+    });
+
     it("propagates a failing persistence probe instead of reading it as a refusal", () => {
       setContentAddressedSchemasConfig(true);
       expect(() =>

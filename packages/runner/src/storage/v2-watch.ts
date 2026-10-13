@@ -31,6 +31,7 @@ import {
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
   lookupSchemaDocument,
+  onSchemaRegistryClear,
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
@@ -92,9 +93,14 @@ type ExternalizedForms = { reference?: JSONSchema; inline?: JSONSchema };
  * The externalized forms of each decomposition, by the decomposition. A
  * decomposition `decomposeSchema()` keeps is handed out again for the same
  * schema, so every sync of one schema reads its forms here; one it does not
- * keep is a new object per call, and builds its form again.
+ * keep is a new object per call, and builds its form again. The forms are
+ * dropped when the schema registry clears, as every retainer of externalized
+ * forms drops them: a reference dies with the registry epoch that minted it.
  */
-const externalizedForms = new WeakMap<DecomposedSchema, ExternalizedForms>();
+let externalizedForms = new WeakMap<DecomposedSchema, ExternalizedForms>();
+onSchemaRegistryClear(() => {
+  externalizedForms = new WeakMap();
+});
 
 /** Helper for the two form readers, which returns `decomposed`'s entry. */
 const externalizedFormsOf = (
