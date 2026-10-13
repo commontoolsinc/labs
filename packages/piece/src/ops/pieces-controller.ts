@@ -969,10 +969,16 @@ export class PiecesController<T = unknown> {
    * In view-scoped mode, the narrow root watch demands server execution;
    * mounted renderers own local graph registration and deeper replication.
    *
-   * An open that reconciles resolves once a piece that is already running
-   * runs the pattern its pointer names, as {@link openPiece} does, whether
-   * or not the open also starts it. As after any start, the piece's
-   * computations run when something demands their results.
+   * An open that reconciles waits, as {@link openPiece} does, for a piece
+   * that is already running to be re-instantiated on the pattern its pointer
+   * moved to, whether or not the open also starts it. The wait covers the
+   * move this open's own reconcile made and any earlier move the piece's
+   * pattern watcher has observed. It does not cover a move committed
+   * elsewhere that the watcher has yet to observe, a re-instantiation that
+   * fails, or one that follows a serving wave's settlement, so in those cases
+   * this resolves with the outgoing pattern's graph still running. As after
+   * any start, the piece's computations run when something demands their
+   * results.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
