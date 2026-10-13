@@ -293,7 +293,11 @@ ambient-state one.
   callback reads that outcome rather than the echo's: where the echo's
   own transaction failed — an echo that withdrew (speculation.md §2), or
   one whose commit was refused — the transaction it is handed reports
-  done once the handling consequenced. A sender
+  done once the handling consequenced. A delivery that fails instead
+  reports `status: "error"` with an `EventDeliveryError` whose `kind`
+  names the failure (`append-refused`, or the §5 outcome: `errored` when
+  the handler threw, `refused`, `dropped`, `needs-attention`) and whose
+  `reason` carries the outcome's words. A sender
   that needs only its own act on the record takes the send's
   `onAppended` hook, which settles when the append is durable and
   carries the delivery outcome; the commit callback keeps the coupling
@@ -750,7 +754,9 @@ loop's duty).
   cannot be loaded — does not wait. Every client drop on this path
   reaches the scheduler error channel as an `EventDroppedError` as
   well as settling the commit callback, since a send made from inside
-  a handler has no callback to settle. A runtime being disposed ends
+  a handler has no callback to settle; its `pieceStartReason` names
+  why the last start did not start the piece, the verdict's own
+  reason or `start-failed` for a start that threw. A runtime being disposed ends
   every such wait, settling the event as dropped. With server
   execution on, such an event is the echo of a run the server makes
   and reports on itself, so it neither waits nor reports its drop.

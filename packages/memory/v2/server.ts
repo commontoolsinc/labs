@@ -1268,6 +1268,11 @@ class Connection {
     this.#server.forgetAdmissionWaits(this.id, principal);
   }
 
+  /** Whether this connection has closed. */
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   /** Whether this connection is bound to a verified Mode A context. */
   get routed(): boolean {
     return this.#routedOwns !== undefined;
@@ -5017,20 +5022,47 @@ export class Server {
           ),
         );
       }
+      // Admission awaited, and the connection may have closed meanwhile: its
+      // sessions were detached at the close, so one opened now would be held
+      // by a connection that is gone, and never expire.
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during admission"),
+        );
+      }
       const priorOwner = message.session.sessionId === undefined
         ? undefined
         : this.#sessions.get(message.space, message.session.sessionId)
           ?.ownerConnectionId;
-      const opened = this.#sessions.open(
-        message.space,
-        message.session,
-        Engine.serverSeq(engine),
-        connection.id,
-        principal,
-        actingPrincipal,
-        connection.routed,
-        connection.elidedVerdicts,
-      );
+      let opened: ReturnType<SessionRegistry["open"]>;
+      try {
+        opened = this.#sessions.open(
+          message.space,
+          message.session,
+          Engine.serverSeq(engine),
+          connection.id,
+          principal,
+          actingPrincipal,
+          connection.routed,
+          connection.elidedVerdicts,
+        );
+      } catch (error) {
+        // The client ends a session refused here as taken over, and logs
+        // nothing that says which resume was refused.
+        if (error instanceof Error && error.name === "SessionRevokedError") {
+          // Quoted: the id, the space and the message (which repeats the id)
+          // are the peer's text, and a line break in one would read as a log
+          // record of its own.
+          console.warn(
+            `[memory-session] refused to resume session ` +
+              `${JSON.stringify(message.session.sessionId)} on ` +
+              `${JSON.stringify(message.space)} for connection ` +
+              `${connection.id}: ${JSON.stringify(error.message)}`,
+          );
+        }
+        throw error;
+      }
       if (connection.routed) {
         if (priorOwner !== connection.id) {
           this.#sessions.clearRoutedInterests(message.space, opened.sessionId);
@@ -5041,6 +5073,12 @@ export class Server {
           connection.allowsRoutedSession(message.space, opened.sessionId);
       }
       if (opened.revokedConnectionId !== undefined) {
+        console.warn(
+          `[memory-session] session ${JSON.stringify(opened.sessionId)} on ` +
+            `${JSON.stringify(message.space)} moved from connection ` +
+            `${opened.revokedConnectionId} to ${connection.id}, which ` +
+            "revokes it there as taken over",
+        );
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
           message.space,
           opened.sessionId,
@@ -10039,6 +10077,12 @@ export const parseClientMessage = (
         sessionToken: typeof parsed.session.sessionToken === "string"
           ? parsed.session.sessionToken
           : undefined,
+        ...(typeof parsed.session.resumeKey === "string"
+          ? { resumeKey: parsed.session.resumeKey }
+          : {}),
+        ...(Number.isSafeInteger(parsed.session.resumeAttempt)
+          ? { resumeAttempt: parsed.session.resumeAttempt as number }
+          : {}),
         // The delegated READ binding (OW31): parsed as the LITERAL
         // marker only — any other string reaches openSession's
         // unknown-value refusal rather than being silently dropped.

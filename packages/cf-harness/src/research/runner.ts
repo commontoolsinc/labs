@@ -63,7 +63,10 @@ import {
   patternIndexDeclaredType,
   patternIndexImportHint,
 } from "../tools/search-patterns.ts";
-import { parseStructuredResultJson } from "../structured-result.ts";
+import {
+  parseStructuredResultJson,
+  validateStructuredResultValue,
+} from "../structured-result.ts";
 import {
   admitResearchResult,
   type RawResearchResult,
@@ -558,7 +561,7 @@ const systemPrompt = (
     ],
     "Distinguish available inputs, the requirements of one candidate, and missing user data. A candidate's SQLite or connector contract is specific to that candidate, not a universal task prerequisite. No current mailbox handle means mail is not yet given, not that permitted discovery cannot find it; local-only apps need no external handle.",
     "Check documentTitle and headingPath before applying a snippet. Iframe React guest code and ordinary commonfabric patterns use different execution environments. A React JSX pragma or React import belongs to an iframe guest, never add it to an ordinary compiled CF pattern. Use the relevant canonical guide sections for the execution environment. Search matching passages or list an outline to choose what to read; read larger sections when their context matters.",
-    "On your final turn, make no tool calls and return only JSON matching this schema:",
+    "On your final turn, make no tool calls and return only JSON that is an instance of this schema, not the schema itself:",
     JSON.stringify(researchResultSchema(purpose)),
   ].join("\n");
 
@@ -1076,13 +1079,51 @@ const readDocSection = (
   };
 };
 
-/** What `JSON.parse` says is wrong with `text`, or `undefined` when it parses. */
-const jsonSyntaxError = (text: string): string | undefined => {
+/** Why a final answer earns a repair turn, in the words of the check it failed. */
+interface FinalAnswerComplaint {
+  /** The repair turn's name, as its instruction and withheld-tool errors say it. */
+  turnName: string;
+
+  /** What is wrong with the answer, addressed to the model. */
+  problem: string;
+
+  /** The check's own complaint, quoted. */
+  report: string;
+}
+
+/**
+ * What is wrong with `text` as a final answer: the parser's complaint when it
+ * is not JSON, else the schema validator's when scoped admission would refuse
+ * its shape, or `undefined` when neither check fails.
+ */
+const finalAnswerComplaint = (
+  text: string,
+  purpose: HarnessResearchPurpose | undefined,
+): FinalAnswerComplaint | undefined => {
+  let value: unknown;
   try {
-    JSON.parse(text.trim());
+    value = JSON.parse(text.trim());
+  } catch (error) {
+    return {
+      turnName: "JSON repair",
+      problem: "Your final answer was not valid JSON.",
+      report: `The parser reported: ${errorMessage(error)}`,
+    };
+  }
+  if (purpose === undefined) return undefined;
+  try {
+    validateStructuredResultValue({
+      schema: researchResultSchema(purpose),
+      value,
+    });
     return undefined;
   } catch (error) {
-    return errorMessage(error);
+    return {
+      turnName: "schema repair",
+      problem:
+        "Your final answer was JSON but not an instance of the schema: give the values the schema describes, not the schema itself.",
+      report: `The validator reported: ${errorMessage(error)}`,
+    };
   }
 };
 
@@ -1571,16 +1612,20 @@ async (request) => {
       }
       return repairCalls.length === 0 ? repaired.assistant.content : undefined;
     };
-    // A final answer that is not JSON gets one re-ask while the budget has a
-    // turn for it, quoting only the parser's own complaint. What comes back
-    // is parsed as strictly as the first answer, and failing again fails the
-    // call as it would have without the re-ask.
+    // A final answer that is not JSON, or whose shape scoped admission would
+    // refuse, gets one re-ask while the budget has a turn for it, quoting only
+    // the failed check's own complaint. What comes back is parsed and admitted
+    // as strictly as the first answer, and failing again fails the call as it
+    // would have without the re-ask.
     let finalText = finalAssistant.content;
-    const syntaxError = jsonSyntaxError(finalText);
-    if (syntaxError !== undefined && modelTurns < budget.modelTurns) {
-      finalText = await repairTurn("JSON repair", [
-        "JSON repair turn: private tools are withheld. Your final answer was not valid JSON.",
-        `The parser reported: ${syntaxError}`,
+    const complaint = finalAnswerComplaint(finalText, request.purpose);
+    if (complaint !== undefined && modelTurns < budget.modelTurns) {
+      const { turnName, problem, report } = complaint;
+      finalText = await repairTurn(turnName, [
+        `${turnName[0].toUpperCase()}${
+          turnName.slice(1)
+        } turn: private tools are withheld. ${problem}`,
+        report,
         "Return the entire final JSON again, matching the schema, with nothing before or after it.",
         `This is model turn ${modelTurns + 1} of ${budget.modelTurns}.`,
       ]) ?? "";
