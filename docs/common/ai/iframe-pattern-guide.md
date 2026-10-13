@@ -400,13 +400,29 @@ deno task cf check packages/patterns/quick-notes/main.tsx --no-run
 If the pattern is intentionally outside the repository, pass its directory as
 `--root`; otherwise the CLI uses the repository as its source boundary.
 
-Launch a repository pattern against local servers from the repository root:
+Launch a repository pattern against local servers from the repository root.
+Start the servers first:
 
 ```bash
 ./scripts/start-local-dev.sh
+```
+
+The script serves on ports 8000 and 5173 and fails when either is taken, which
+is the usual case when another checkout has servers running. Start it with
+`--port-offset=<n>` then. Continue only once it reports that both servers
+started, and use the `Toolshed:` address it prints,
+`http://localhost:<8000 + n>`, as `CF_API_URL` below: a `cf` command pointed at
+port 8000 would deploy to the other checkout's server.
+[`LOCAL_DEV_SERVERS.md`](../../development/LOCAL_DEV_SERVERS.md) covers the
+scripts.
+
+Then mint a key, create a space, and create the piece in it:
+
+```bash
 mkdir -p .cf
 test -e .cf/iframe-pattern.key || \
   deno task cf id new > .cf/iframe-pattern.key
+# The Toolshed address that start-local-dev.sh printed.
 export CF_API_URL=http://localhost:8000
 export CF_IDENTITY=.cf/iframe-pattern.key
 export CF_SPACE="$(deno task cf space create --label "Iframe quick notes")"
@@ -422,14 +438,6 @@ another space, and a second `cf piece new` leaves the slug with the first
 piece. `cf piece new` prints the page address under `Open in browser`, which is
 `$CF_API_URL/$CF_SPACE/quick-notes`. It also prints the `cf piece setsrc`
 command that updates the piece after a source change.
-
-`start-local-dev.sh` serves on port 8000 and fails when that port or the
-shell's is taken, which is the usual case when another checkout has servers
-running. Start it with `--port-offset=<n>` then, and set `CF_API_URL` to the
-toolshed address it prints, `http://localhost:<8000 + n>`; a `cf` command left
-on port 8000 would deploy to the other checkout's server.
-[`LOCAL_DEV_SERVERS.md`](../../development/LOCAL_DEV_SERVERS.md) covers the
-scripts.
 
 Open the page address. A browser that has not signed in is shown the shell's
 login. Sign it in with the key the CLI used: choose **Register**, which a
@@ -447,7 +455,8 @@ Take that route only when the tool driving the browser cannot choose a file, or
 for the second identity the multi-user checks below need. The principal the
 error names is the browser's DID, which
 `globalThis.app.state().identity.did()` also returns in the page's console.
-Grant it access with the CLI key, then reload the page:
+Grant it access with the CLI key, in a shell that has the three exports above,
+then reload the page:
 
 ```bash
 deno task cf acl set <browser DID> WRITE
