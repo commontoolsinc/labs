@@ -252,6 +252,73 @@ describe("v2-transaction", () => {
       });
     });
 
+    it("sends an `increment` alone for a counter at a key inside the array index range", async () => {
+      // The increment is the whole of the write. A `replace` beside it would
+      // carry the number this session computed, and undo what the op is for.
+
+      const writer = connect();
+      await commit(
+        writer,
+        "counter",
+        (cell) => cell.set({ counts: { "5": 1 } }),
+      );
+
+      const sent = await commit(
+        writer,
+        "counter",
+        (cell) => cell.key("counts").key("5").increment(1),
+      );
+
+      expect(sent).toEqual(["increment /value/counts/5"]);
+      expect(await storedValue("counter")).toStrictEqual({
+        counts: { "5": 2 },
+      });
+    });
+
+    it("sends an `append` alone for the first push to a list at a key inside the array index range", async () => {
+      const writer = connect();
+      await commit(writer, "pushed", (cell) => cell.set({ lists: {} }));
+
+      const sent = await commit(
+        writer,
+        "pushed",
+        (cell) => cell.key("lists").key("5").push("b"),
+      );
+
+      expect(sent).toEqual(["append /value/lists/5"]);
+      expect(await storedValue("pushed")).toStrictEqual({
+        lists: { "5": ["b"] },
+      });
+    });
+
+    it("counts both of two sessions' increments of a counter at a key inside the array index range", async () => {
+      const first = connect();
+      const second = connect();
+      await commit(
+        first,
+        "counted",
+        (cell) => cell.set({ counts: { "5": 1 } }),
+      );
+      await second.runtime.getCell<FabricValue>(space, "counted").sync();
+
+      await Promise.all([
+        commit(
+          first,
+          "counted",
+          (cell) => cell.key("counts").key("5").increment(1),
+        ),
+        commit(
+          second,
+          "counted",
+          (cell) => cell.key("counts").key("5").increment(1),
+        ),
+      ]);
+
+      expect(await storedValue("counted")).toStrictEqual({
+        counts: { "5": 3 },
+      });
+    });
+
     it("commits a key far past the array index range written beneath a key the record lacks", async () => {
       const writer = connect();
       await commit(writer, "created", (cell) => cell.set({}));
