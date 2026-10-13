@@ -37,7 +37,12 @@ function eventKey(id: string): string {
 // A piece-start outcome for the `loadPieceForEvent` seam, carrying only what
 // these cases turn on: a started piece has its pattern graph installed.
 function pieceLoadVerdict(started: boolean): EnsurePieceVerdict {
-  return { started, graphIsInstalled: () => started, observedDocIds: [] };
+  return {
+    started,
+    graphIsInstalled: () => started,
+    observedDocIds: [],
+    observedDocs: [],
+  };
 }
 
 describe("scheduler event identity", () => {
@@ -212,6 +217,9 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
+      pieceStartWaitsEnded: () => false,
     }, {
       eventLink,
       event: { value: 1 },
@@ -287,7 +295,10 @@ describe("scheduler event identity", () => {
     } as unknown as IExtendedStorageTransaction;
 
     queueSchedulerEvent({
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
+      runtime: {
+        edit: () => droppedTx,
+        experimental: {},
+      } as unknown as Runtime,
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
@@ -295,6 +306,9 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
+      pieceStartWaitsEnded: () => false,
     }, {
       eventLink,
       event: "payload",
@@ -322,7 +336,10 @@ describe("scheduler event identity", () => {
       status: () => ({ status: "error" }),
     } as unknown as IExtendedStorageTransaction;
     const state = {
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
+      runtime: {
+        edit: () => droppedTx,
+        experimental: {},
+      } as unknown as Runtime,
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
@@ -330,6 +347,9 @@ describe("scheduler event identity", () => {
       queueExecution: () => {},
       recordLineageEvent: () => {},
       releaseLineageEvent: () => {},
+      pieceStartWaits: new Set<QueuedEvent>(),
+      handleError: () => {},
+      pieceStartWaitsEnded: () => false,
     };
 
     queueSchedulerEvent(state, {
@@ -384,7 +404,10 @@ describe("scheduler event identity", () => {
       const lt1Link: NormalizedFullLink = { ...eventLink, id: "of:lt1-stream" };
       const handler = () => {};
       const state = {
-        runtime: { edit: () => droppedTx } as unknown as Runtime,
+        runtime: {
+          edit: () => droppedTx,
+          experimental: {},
+        } as unknown as Runtime,
         // No handler for the HEAD's link — it takes the piece-load path;
         // the three later arrivals are all ready-queued.
         eventHandlers: [
@@ -398,6 +421,9 @@ describe("scheduler event identity", () => {
         queueExecution: () => {},
         recordLineageEvent: () => {},
         releaseLineageEvent: () => {},
+        pieceStartWaits: new Set<QueuedEvent>(),
+        handleError: () => {},
+        pieceStartWaitsEnded: () => false,
       };
       queueSchedulerEvent(state, {
         eventLink,
