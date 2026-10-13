@@ -460,7 +460,17 @@ recursive event type — stays the reference it is. A named reference whose
 subtree holds no cell-like position passes through untouched; one
 expands only when a capability inside it must change, and a self-referential
 type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. Observed
+accepted residual, since a literal cannot spell its own recursion. A recursion
+that instantiates its declaration without end, as `Nest<T[]>` inside
+`Nest<T>` does, never meets its own type again. The schema generator's
+`cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
+`MAX_OVERLAY_NESTING`, or once the overlay has spent its budget of readings
+made inside such a recursion, which bounds one that branches: the search for a cell-like position takes the remainder
+past the cut to hold one, and the expansion stops there unless a use the body
+makes reaches below. The remainder is printed from its instantiation and marked
+`SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
+cell no use reaches earns; a finite chain deeper than the cut reads the same as
+reading it to its end would. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
