@@ -49,6 +49,7 @@ const buildOpen = async (
     sessionId?: string;
     seenSeq?: number;
     sessionToken?: string;
+    resumeKey?: string;
     genesisRoot?: FabricValue;
     spaceKind?: string;
   } = {},
@@ -200,6 +201,40 @@ describe("verifySessionOpenAuthorization", () => {
     };
     await assertRejects(
       () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "authorization mismatch",
+    );
+  });
+
+  it("rejects a resume key added, changed or dropped outside the signed invocation", async () => {
+    const resume = {
+      sessionId: "session:resume",
+      seenSeq: 7,
+      sessionToken: "token:signed",
+    };
+    const msg = await buildOpen(signedFields(), alice, {
+      ...resume,
+      resumeKey: "key:signed",
+    });
+    assertEquals(
+      await verifySessionOpenAuthorization(msg, verifyOptions()),
+      alice.did(),
+    );
+    for (const session of [{ ...resume, resumeKey: "key:tampered" }, resume]) {
+      await assertRejects(
+        () =>
+          verifySessionOpenAuthorization({ ...msg, session }, verifyOptions()),
+        Error,
+        "authorization mismatch",
+      );
+    }
+    const unkeyed = await buildOpen(signedFields(), alice, resume);
+    await assertRejects(
+      () =>
+        verifySessionOpenAuthorization(
+          { ...unkeyed, session: { ...resume, resumeKey: "key:injected" } },
+          verifyOptions(),
+        ),
       Error,
       "authorization mismatch",
     );
