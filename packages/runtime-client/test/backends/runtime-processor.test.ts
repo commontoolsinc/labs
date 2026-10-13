@@ -21,7 +21,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Identity, legacySpaceDid } from "@commonfabric/identity";
+import { type DID, Identity, legacySpaceDid } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -4730,6 +4730,50 @@ describe("runtime-processor", () => {
         expect(response.cell).toBeDefined();
         expect(worker.rootEnsures()).toBe(1);
         expect(housekeeping.starts()[0]).toBe(1);
+      });
+    });
+
+    describe("joining a visited room", () => {
+      const ROOM_SPACE = "did:key:z6Mk-home-worker-visited-room" as DID;
+
+      it("asks Home's controller to join the room, and answers with its decision", async () => {
+        await using worker = await homeWorker([]);
+        using _housekeeping = stubHousekeeping();
+        using join = stub(
+          PiecesController.prototype,
+          "joinVisitedRoom",
+          () => Promise.resolve("sent" as const),
+        );
+
+        // Routed as a client's request is, through `handleRequest()`.
+        const response = await worker.processor.handleRequest({
+          type: RequestType.JoinVisitedRoom,
+          space: ROOM_SPACE,
+        });
+
+        expect(response).toStrictEqual({ decision: "sent" });
+        expect(join.calls.map(({ args }) => args)).toEqual([[ROOM_SPACE]]);
+      });
+
+      it("creates nothing, joins nothing, and decides nothing where Home has no root", async () => {
+        await using worker = await homeWorker([]);
+        using housekeeping = stubHousekeeping();
+        using join = stub(
+          PiecesController.prototype,
+          "joinVisitedRoom",
+          () => Promise.resolve("sent" as const),
+        );
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor.handleJoinVisitedRoom({
+          type: RequestType.JoinVisitedRoom,
+          space: ROOM_SPACE,
+        });
+
+        expect(response).toStrictEqual({});
+        expect(join.calls.length).toBe(0);
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
       });
     });
   });

@@ -10,12 +10,9 @@
 
 import type { DID } from "@commonfabric/identity";
 import { isWellFormedDID } from "@commonfabric/identity/did";
-import { hasConcreteOwner, isACL } from "@commonfabric/memory/acl";
 import {
-  ACLManager,
   type Cancel,
   type Cell,
-  inSpaceRootCause,
   isCell,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -25,12 +22,15 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { inboxPieceLinkSchema } from "./private-inbox.ts";
-import { accessRefused } from "./space-access.ts";
+import { isWriter, type SpaceRefusal, vetSpace } from "./space-vetting.ts";
 
 const logger = getLogger("piece.share-intake");
 
 /** The `kind` of the offers a loom daemon admits, which this intake skips. */
 export const LOOM_OFFER_KIND = "loom";
+
+/** The kind of space a standalone FabriChat room's own space declares. */
+export const CHAT_ROOM_SPACE_KIND = "fabrichat-room";
 
 /**
  * The kinds of offer the intake admits, each a kind of space, as
@@ -44,7 +44,7 @@ export const LOOM_OFFER_KIND = "loom";
  *   the room.
  */
 export const ADMITTED_SPACE_KINDS: ReadonlySet<string> = new Set([
-  "fabrichat-room",
+  CHAT_ROOM_SPACE_KIND,
 ]);
 
 /** Why an offer is not registered. */
@@ -53,11 +53,7 @@ export type OfferRefusal =
   | "offer-kind-unknown"
   | "offer-foreign-host"
   | "sender-not-member"
-  | "recipient-access-refused"
-  | "space-kind-undeclared"
-  | "space-kind-mismatch"
-  | "space-root-missing"
-  | "space-root-misplaced";
+  | SpaceRefusal;
 
 /**
  * What an instance decided about an offer: `sent` to Home's
@@ -581,49 +577,13 @@ export class ShareIntake {
   ): Promise<OfferRefusal | Cell<unknown>> {
     if (!ADMITTED_SPACE_KINDS.has(offer.kind)) return "offer-kind-unknown";
     if (offer.host !== this.#host) return "offer-foreign-host";
-    const runtime = this.#runtime;
-    let stored;
-    let root;
-    try {
-      stored = await new ACLManager(runtime, offer.space).getStored();
-      root = await runtime.getSpaceCell(offer.space).key("defaultPattern")
-        .pull();
-    } catch (error) {
-      if (accessRefused(runtime, offer.space)) {
-        return "recipient-access-refused";
-      }
-      throw error;
-    }
-    if (accessRefused(runtime, offer.space)) return "recipient-access-refused";
-    // An access list that is malformed or names no concrete owner grants
-    // nobody anything.
-    const acl = isACL(stored) && hasConcreteOwner(stored) ? stored : undefined;
-    if (!isWriter(acl?.[offer.from])) return "sender-not-member";
-    if (!isWriter(acl?.[this.#identity] ?? acl?.["*"])) {
-      return "recipient-access-refused";
-    }
-    // An access list naming a concrete owner was written by the space's
-    // genesis commit or after it, so the kind read here is the one the space
-    // keeps.
-    const kind = await runtime.spaceKind(offer.space);
-    if (kind === undefined) return "space-kind-undeclared";
-    if (kind !== offer.kind) return "space-kind-mismatch";
-    // When the pointer reaches no document of the space, this read returns
-    // the space cell's own `defaultPattern` key, so the path check is what
-    // refuses a pointer into another space. The space check covers a read that
-    // follows such a pointer; no test reaches it, since this read does not.
-    if (
-      !isCell(root) || root.space !== offer.space ||
-      root.getAsNormalizedFullLink().path.length !== 0
-    ) return "space-root-missing";
-    if (
-      !root.equalLinks(
-        runtime.getCell(offer.space, inSpaceRootCause(offer.space)),
-      )
-    ) {
-      return "space-root-misplaced";
-    }
-    return root;
+    return await vetSpace(
+      this.#runtime,
+      offer.space,
+      this.#identity,
+      offer.kind,
+      (acl) => isWriter(acl?.[offer.from]) ? undefined : "sender-not-member",
+    );
   }
 }
 
@@ -744,9 +704,4 @@ function originOf(value: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** Whether an access-list grant lets its holder write. */
-function isWriter(grant: unknown): boolean {
-  return grant === "WRITE" || grant === "OWNER";
 }
