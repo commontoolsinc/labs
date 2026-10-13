@@ -293,7 +293,11 @@ ambient-state one.
   callback reads that outcome rather than the echo's: where the echo's
   own transaction failed — an echo that withdrew (speculation.md §2), or
   one whose commit was refused — the transaction it is handed reports
-  done once the handling consequenced. A sender
+  done once the handling consequenced. A delivery that fails instead
+  reports `status: "error"` with an `EventDeliveryError` whose `kind`
+  names the failure (`append-refused`, or the §5 outcome: `errored` when
+  the handler threw, `refused`, `dropped`, `needs-attention`) and whose
+  `reason` carries the outcome's words. A sender
   that needs only its own act on the record takes the send's
   `onAppended` hook, which settles when the append is durable and
   carries the delivery outcome; the commit callback keeps the coupling
