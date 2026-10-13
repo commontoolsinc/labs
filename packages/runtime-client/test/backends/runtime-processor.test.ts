@@ -4745,7 +4745,8 @@ describe("runtime-processor", () => {
           () => Promise.resolve("sent" as const),
         );
 
-        const response = await worker.processor.handleJoinVisitedRoom({
+        // Routed as a client's request is, through `handleRequest()`.
+        const response = await worker.processor.handleRequest({
           type: RequestType.JoinVisitedRoom,
           space: ROOM_SPACE,
         });

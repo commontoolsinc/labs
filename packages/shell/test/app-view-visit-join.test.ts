@@ -18,9 +18,14 @@ const SECOND_SPACE = "did:key:z6Mk-shell-visit-join-second" as DID;
  * A runtime that answers the space's root with a piece, and records in `log`
  * each request to idle, each to bring Home up, and each to join a visited
  * room, with its space. Each join is answered by the next of `answers`, a
- * thrown error rejecting the request, and by `sent` once they run out.
+ * thrown error rejecting the request, and by `sent` once they run out. The
+ * runtime's signal is `controller`'s.
  */
-function stubRuntime(log: string[], answers: (string | Error)[] = []) {
+function stubRuntime(
+  log: string[],
+  answers: (string | Error)[] = [],
+  controller = new AbortController(),
+) {
   const client = {
     idle: () => {
       log.push("idle");
@@ -39,7 +44,7 @@ function stubRuntime(log: string[], answers: (string | Error)[] = []) {
     },
   };
   return {
-    signal: new AbortController().signal,
+    signal: controller.signal,
     getSpaceRootPattern: () => Promise.resolve({ id: () => "root" }),
     runtime: () => client,
   };
@@ -144,6 +149,73 @@ describe("XAppView visit join", () => {
         joins: [`join ${FIRST_SPACE}`, `join ${FIRST_SPACE}`],
         errors: 1,
       });
+    } finally {
+      error.restore();
+      restore();
+    }
+  });
+
+  it("asks nothing of a runtime torn down while the view settles", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const controller = new AbortController();
+      const runtime = stubRuntime(log, [], controller);
+      // The runtime is torn down while the view settles.
+      runtime.runtime().idle = () => {
+        log.push("idle");
+        controller.abort();
+        return Promise.resolve();
+      };
+      const view = new XAppView();
+      view.app = { view: { spaceDid: FIRST_SPACE } } as never;
+      view.space = FIRST_SPACE;
+      view.rt = runtime as never;
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      expect(log.filter((entry) => entry.startsWith("join "))).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reports nothing, and asks nothing more, when a join fails once its runtime is torn down", async () => {
+    const restore = installBrowserGlobals(PAGE_HREF);
+    const error = stub(console, "error", () => {});
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const log: string[] = [];
+      const controller = new AbortController();
+      const runtime = stubRuntime(log, [], controller);
+      // The join fails because its runtime was torn down under it.
+      runtime.runtime().joinVisitedRoom = (space: DID) => {
+        log.push(`join ${space}`);
+        controller.abort();
+        return Promise.reject(new Error("the runtime is gone"));
+      };
+      const view = new XAppView();
+      view.app = { view: { spaceDid: FIRST_SPACE } } as never;
+      view.space = FIRST_SPACE;
+      view.rt = runtime as never;
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._patterns.run();
+      await view._patterns.taskComplete;
+      view.updated(new Map());
+      await view.visitJoin;
+      view.updated(new Map());
+      await view.visitJoin;
+
+      expect({
+        joins: log.filter((entry) => entry.startsWith("join ")),
+        errors: error.calls.length,
+      }).toEqual({ joins: [`join ${FIRST_SPACE}`], errors: 0 });
     } finally {
       error.restore();
       restore();
