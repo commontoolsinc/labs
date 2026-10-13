@@ -1208,8 +1208,9 @@ const compactDependencyGroup = <
 
 /**
  * The most reads one dependency group — one document at one basis — may
- * carry on a commit. Past it, `coarsenWideDependencyGroup` replaces the
- * group's reads with one recursive read at their common prefix.
+ * carry on the wire. Past it, `coarsenCommitReads` replaces the group's
+ * reads with one recursive read at their common prefix, and a shallow read
+ * there beside it when the group held one.
  *
  * A commit names every path a transaction read (03-commit-model.md §3.4),
  * one `ConfirmedRead` or `PendingRead` per path, and the server refuses a
@@ -1218,19 +1219,30 @@ const compactDependencyGroup = <
  * every document its program touches, and on a board of nine hundred
  * members that was 58 paths on each member's document: 139,441 reads over
  * 40,095 documents, a 17 MB message, refused. The lossless compaction
- * above cannot fold those, since the members' container was not read in
- * full. One recursive read at the paths' common prefix is a strictly
- * coarser precondition — `patchOverlapsRead` matches a touched leaf and a
- * read path by prefix in either direction, so whatever overlapped any read
- * under the prefix overlaps the prefix, and a shallow read's
- * ancestor-touch rule is covered the same way — at the cost of conflicting
- * with disjoint writes to the same document, which a commit that read it
- * fifty ways over was not going to avoid for long either.
+ * (`compactCommitReads`) cannot fold those, since the members' container
+ * was not read in full.
+ *
+ * Applied to the OUTGOING message only. The replica keeps the lossless
+ * set for everything it decides locally — a pending layer's `read` flag,
+ * and `intendedSplicePaths`, which takes a recursive read at an array's
+ * ancestor as the transaction having read that array; a prefix read minted
+ * here would claim splices on arrays the transaction never read.
+ *
+ * The coarser set is a stronger precondition. The engine's
+ * `patchOverlapsRead` matches a touched leaf and a recursive read's path by
+ * prefix in either direction, so whatever overlapped a read under the
+ * prefix overlaps the prefix. A shallow read's rule is different — a
+ * touched path at or ABOVE the read, with a key add/remove injecting its
+ * parent, so an indexed removal at `list/0` is matched by a shallow read
+ * under `list/1` through the injected `list` — which a recursive read at
+ * `list/1` never sees; so a group that held any shallow read keeps a
+ * shallow read at the prefix beside the recursive one. The cost is
+ * conflicting with disjoint writes to the same document, and a retry.
  */
 const MAX_READS_PER_DEPENDENCY_GROUP = 16;
 
 const commonDocumentPathPrefix = (
-  paths: readonly DocumentPath[],
+  paths: readonly (readonly string[])[],
 ): DocumentPath => {
   let prefix: readonly string[] = paths[0] ?? [];
   for (const path of paths) {
@@ -1247,22 +1259,68 @@ const commonDocumentPathPrefix = (
   return toDocumentPath([...prefix]);
 };
 
-/**
- * Replaces the reads `compacted` holds from index `start` on — one
- * dependency group's — with a single recursive read at their common path
- * prefix when there are more than `MAX_READS_PER_DEPENDENCY_GROUP` of
- * them. The group's admission fields (`seq`, or `localSeq` and
- * `basisSeq`) are shared by construction, so the one read keeps them.
- */
-const coarsenWideDependencyGroup = <
-  Read extends ConfirmedCommitRead | PendingCommitRead,
->(compacted: Read[], start: number): void => {
-  if (compacted.length - start <= MAX_READS_PER_DEPENDENCY_GROUP) return;
-  const group = compacted.slice(start);
+type WireRead =
+  | ClientCommit["reads"]["confirmed"][number]
+  | ClientCommit["reads"]["pending"][number];
+
+const commitReadDependencyKey = (read: WireRead): string =>
+  "seq" in read
+    ? `confirmed:${normalizeCellScope(read.scope)}:${read.id}:${read.seq}`
+    : `pending:${normalizeCellScope(read.scope)}:${read.id}:${
+      localSeqKey(read.localSeq)
+    }:${read.basisSeq}`;
+
+const coarsenWideReadGroup = <Read extends WireRead>(
+  group: readonly Read[],
+): Read[] => {
+  if (group.length <= MAX_READS_PER_DEPENDENCY_GROUP) return [...group];
   const prefix = commonDocumentPathPrefix(group.map((read) => read.path));
   const { nonRecursive: _shallow, ...statement } = group[0];
-  compacted.length = start;
-  compacted.push({ ...statement, path: prefix } as Read);
+  const coarsened: Read[] = [];
+  if (group.some((read) => read.nonRecursive === true)) {
+    coarsened.push({ ...statement, path: prefix, nonRecursive: true } as Read);
+  }
+  coarsened.push({ ...statement, path: prefix } as Read);
+  return coarsened;
+};
+
+/**
+ * The commit's reads as the wire carries them: each dependency group past
+ * `MAX_READS_PER_DEPENDENCY_GROUP` coarsened to its prefix. Returns the
+ * input itself when nothing coarsens, so a caller can tell.
+ */
+export const coarsenCommitReads = (
+  reads: ClientCommit["reads"],
+): ClientCommit["reads"] => {
+  const coarsen = <Read extends WireRead>(list: Read[]): Read[] => {
+    const grouped = new Map<string, Read[]>();
+    for (const read of list) {
+      const key = commitReadDependencyKey(read);
+      const group = grouped.get(key);
+      if (group === undefined) grouped.set(key, [read]);
+      else group.push(read);
+    }
+    if (
+      [...grouped.values()].every((g) =>
+        g.length <= MAX_READS_PER_DEPENDENCY_GROUP
+      )
+    ) {
+      return list;
+    }
+    return [...grouped.values()].flatMap((group) =>
+      coarsenWideReadGroup(group)
+    );
+  };
+  const confirmed = coarsen(reads.confirmed);
+  const pending = coarsen(reads.pending);
+  return confirmed === reads.confirmed && pending === reads.pending
+    ? reads
+    : { confirmed, pending };
+};
+
+const coarsenCommitForWire = (commit: ClientCommit): ClientCommit => {
+  const reads = coarsenCommitReads(commit.reads);
+  return reads === commit.reads ? commit : { ...commit, reads };
 };
 
 const compactCommitReads = <
@@ -1307,9 +1365,7 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
-    const start = compacted.length;
     compactDependencyGroup(group, observedDocument(group[0]), compacted);
-    coarsenWideDependencyGroup(compacted, start);
   }
 
   return compacted.toSorted((left, right) => {
@@ -7688,7 +7744,7 @@ export class SpaceReplica
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
           const applied = await session.transact(
-            wireCommit,
+            coarsenCommitForWire(wireCommit),
             () => this.#markRouteWriteIssued(routeSources),
           );
           const settled = this.#settleAccept(
