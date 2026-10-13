@@ -117,8 +117,9 @@ deno task cf space verify ~/clones/profile-root --expect-migration
 Then compare the clone's pristine and working fingerprints entity by entity, as
 "Checking authored content" in that procedure shows. An inspection writes
 nothing. A repair writes the space cell, whose `defaultPattern` now links the
-profile, adding it where the space had none, and one empty content-addressed
-document beside it; any other changed entity means stop.
+profile, adding it where the space had none. Where that write gives the space
+cell its first label, it also writes one empty content-addressed document beside
+it; any other changed entity means stop.
 
 ### A person's own profiles
 

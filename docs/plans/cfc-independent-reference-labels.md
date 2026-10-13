@@ -166,6 +166,26 @@ Implemented. What the later stages depend on it leaving behind:
   coordinator slots change little; a single link written by a handler newly
   carries the handler's join on pointer reads, which is the §8.2.3 precision
   the contract asks for.
+- A cell's stored label view, `cfcLabelViewForCell` and its fail-closed forms
+  in `cfc/label-view.ts`, follows the links the cell's path lands on or
+  crosses to the document holding the value. It joins the labels the cell's
+  own document stores at the path with the reference restrictions of each
+  slot followed in another document and the labels stored with the value.
+  With nothing of a target copied to a slot, that is where a boundary that
+  asks a cell for its labels finds the labels of a value a reference
+  forwards: the sqlite write ceiling, the LLM observation ceiling and the
+  harness's result writer among them. Links below the cell's path are
+  references in the value, and the view reports their slots' own labels.
+- A link to a document that stores no label is written like any other. The
+  "missing link source metadata" refusal existed because the slot had to copy
+  the source's label, and it goes with the copy. Two patterns had documented
+  it as a property of their participant rosters, the Loom root and the
+  default app: a roster now links a bare document as it links a labeled
+  profile. Both describe a roster entry as a claim, which does not say that
+  the profile's principal holds access, and the Loom's consumers keep only
+  the entries whose profile names a principal with access. A roster that
+  should refuse a document outright states that as a `requiredIntegrity`
+  floor on its items.
 - The live documents that describe the copy are rewritten:
   `docs/specs/cfc-cross-space-integrity.md` (its premise that a reference
   carries the label across a space boundary becomes: a reference carries its
