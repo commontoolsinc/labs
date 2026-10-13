@@ -1937,13 +1937,13 @@ const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
  *   an absent event.
  *
  * Validation is the same composition the CLI's pre-dispatch gate applies
- * (`verbInputSchemaError`, packages/cli/lib/callable.ts): `required` lists are
- * relaxed for defaulted properties first (the runtime fills a present object's
- * missing defaulted properties before checking `required`, so judging the
- * unrelaxed schema would refuse payloads the verb accepts), then
- * `validateSchemaValue` judges the payload. Cell links inside the payload are
- * accepted opaquely: a link's target cannot be read here, and its schema check
- * belongs to the handler's own reactive reads — the same deferral the
+ * (`verbInputSchemaError`, packages/piece/src/verb-input.ts): `required`
+ * lists are relaxed for defaulted properties first (the runtime fills a
+ * present object's missing defaulted properties before checking `required`,
+ * so judging the unrelaxed schema would refuse payloads the verb accepts),
+ * then `validateSchemaValue` judges the payload. Cell links inside the payload
+ * are accepted opaquely: a link's target cannot be read here, and its schema
+ * check belongs to the handler's own reactive reads — the same deferral the
  * pattern-argument validator applies to unresolvable links. A link VALUE passes
  * unjudged; an undeclared KEY still rejects.
  *
