@@ -100,6 +100,12 @@ counts their three child templates (`shape`, `value`, and `followRef`). These
 counters measure work before final entry coalescing; they do not count distinct
 persisted entries.
 
+`inputReadViewsBuilt` and `inputReadViewsReused` count the target verifications
+of a boundary pass by whether the pass built its view of the transaction's reads
+for that verification or reused the one it held. A pass builds the view again
+only when the transaction has recorded a read since, so a commit of many targets
+counts one build and a reuse for each further verification.
+
 ## Parsing untrusted CFC labels
 
 `parseIfcLabel` from `@commonfabric/runner/cfc` is the public boundary for a

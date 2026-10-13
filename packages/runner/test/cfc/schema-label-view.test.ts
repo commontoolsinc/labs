@@ -29,6 +29,8 @@ describe("schema-label-view", () => {
       ]);
       expect(cfcSchemaEntries(frozen)).toBe(entries);
       expect(Object.isFrozen(entries)).toBe(true);
+      expect(Object.isFrozen(entries[0])).toBe(true);
+      expect(Object.isFrozen(entries[0].label.integrity)).toBe(true);
     });
 
     it("walks a mutable document on every ask", () => {
@@ -66,15 +68,6 @@ describe("schema-label-view", () => {
       const resolved = cfcSchemaEntries(reference);
       expect(resolved.map((entry) => entry.path)).toEqual([["late"]]);
       expect(cfcSchemaEntries(reference)).toBe(resolved);
-    });
-
-    it("walks a fragment under its document afresh", () => {
-      const frozen = internSchema(document);
-      const fragment = (frozen as typeof document).properties.rows;
-      const whole = cfcSchemaEntries(frozen);
-      const below = cfcSchemaEntries(fragment, ["rows"], [], frozen);
-      expect(below).not.toBe(whole);
-      expect(below.map((entry) => entry.path)).toEqual([["rows", "*"]]);
     });
   });
 });

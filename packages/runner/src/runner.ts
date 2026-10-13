@@ -2190,13 +2190,13 @@ type PieceVariantRegistration = {
 /**
  * A pattern's authored argument schema as a deep-frozen, interned schema of
  * the same content. The binding walk narrows this schema at every slot it
- * binds, and a narrowing is kept only for a deep-frozen schema; a loaded
- * pattern's is the parsed object as it came off the wire, so every narrowing
- * walked its definitions again. The copy is made once per schema object and
- * stands in wherever the walk reads the authored declarations. It is a
- * clone, not the pattern's own object frozen in place: the pattern holds
- * that object, and freezing it would change what its other holders may do
- * with it.
+ * binds, and `schemaAtPath` keeps a narrowing only for a deep-frozen schema.
+ * A loaded pattern's is the parsed object as it came off the wire, which is
+ * not frozen, so narrowing it directly walks its definitions at every slot.
+ * The copy is made once per schema object and stands in wherever the walk
+ * reads the authored declarations. It is a clone, not the pattern's own
+ * object frozen in place: the pattern holds that object, and freezing it
+ * would change what its other holders may do with it.
  */
 const internedArgumentSchemaOf = (pattern: Pattern): JSONSchema => {
   const authored = pattern.argumentSchema;

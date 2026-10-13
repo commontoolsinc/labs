@@ -7093,15 +7093,9 @@ export class InputReadView {
     return current.reads;
   }
 
-  // The reads the last ask saw, or the transaction's reads where nothing has
-  // asked yet.
-  #held(): InputReadSnapshot {
-    return this.#reads ?? this.#current();
-  }
-
-  /** How many of the reads lack a clock position. */
+  /** How many of the reads the last `reads()` saw lack a clock position. */
   clockLessReads(): number {
-    return this.#current().clockLessReads;
+    return this.#held().clockLessReads;
   }
 
   /**
@@ -7172,6 +7166,12 @@ export class InputReadView {
     return this.#gated.gatedReads;
   }
 
+  /**
+   * Helper for `reads()`, which returns the snapshot the view holds while it
+   * covers every read and trigger read the transaction has recorded, and
+   * otherwise builds one. This is the one place the view reads the
+   * transaction's activity.
+   */
   #current(): InputReadSnapshot {
     const tx = this.#tx;
     const raw = tx.getPotentiallyExternalReadActivities?.() ??
@@ -7208,6 +7208,15 @@ export class InputReadView {
       clockLessReads,
     };
     return this.#reads;
+  }
+
+  /**
+   * Helper for the members that describe the reads, which returns the
+   * snapshot the last `reads()` saw without reading the transaction's
+   * activity again, or builds the first one where nothing has asked yet.
+   */
+  #held(): InputReadSnapshot {
+    return this.#reads ?? this.#current();
   }
 }
 
@@ -7253,63 +7262,30 @@ const verifyInputRequirements = (
   // label was left un-rewritten, so the attempt after the referenced document
   // syncs can fit, and tagging it terminal would strand that write.
 ): { reason: string; verdict: boolean } | undefined => {
-  // The labeled reads the per-entry checks below quantify over, each carrying
-  // its activity-clock position. Distinct from the egress side's consumed set
-  // (collectConsumedLabel), which stays transaction-global — a sink request
-  // records no per-write provenance, so the whole consumed set is the sound
-  // over-approximation there (doc §7.4). Deliberately class-blind
-  // (`consumes: "all"`): the gate is a screen over everything the tx
-  // consumed, and over-inclusive quantification is the fail-safe direction
-  // for it; per-class narrowing of consumers is C4.
-  //
-  // Provenance-only reads are NOT filtered here (unlike before D4): the S7
-  // exemption is applied per entry, inside that entry's prefix.
-  // Stage-0 measurement: read activities lacking a clock position (counted
-  // below only while a hook collects; the enforcement path pays a
-  // short-circuited presence check per read, nothing else).
-  //
-  // The stored envelope of each read's document is resolved here, ahead of
-  // the label: `storedMetadataFor` refuses an envelope this build cannot
-  // interpret, by version or by shape, and a transaction that consumed such
-  // a document fails closed whether or not anything asks what its label
-  // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. Resolutions remain valid until the
-  // transaction writes the document. The activity list stays live so newly
-  // recorded reads remain visible to later targets.
-  // The view is the boundary pass's, shared by every target it verifies
-  // (`InputReadView`): the reads, the stored envelope behind each, and the
-  // labeled set a protected entry quantifies over. The ask fixes the reads
-  // this verification describes.
+  // The reads this verification quantifies over are the boundary pass's
+  // view (`InputReadView`), shared by every target the pass verifies. The
+  // ask fixes the reads that the envelopes and the labeled set below
+  // describe.
   inputReads.reads();
   // Candidate-read inspection is an extension seam and may expose writes made
   // while producing the current view. Refresh after that inspection so every
   // envelope resolution observes those writes.
   metadataResolver.refresh();
   const schemaEntries = cfcSchemaEntries(schema);
-  const needsReadLabels = provenance !== undefined ||
-    schemaEntries.some(({ schema: entrySchema }) => {
-      const ifc = isObjectOrArray(entrySchema) ? entrySchema.ifc : undefined;
-      return (ifc?.requiredIntegrity?.length ?? 0) > 0 ||
-        ifc?.maxConfidentiality !== undefined;
-    });
   // The stored envelope of each read's document is resolved here, ahead of
   // the label: `storedMetadataFor` refuses an envelope this build cannot
   // interpret, by version or by shape, and a transaction that consumed such
   // a document fails closed whether or not anything asks what its label
   // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. Resolutions remain valid until the
-  // transaction writes the document.
+  // whether the measurement dial is on.
   inputReads.sourceMetadata(metadataResolver);
   if (provenance !== undefined) {
     provenance.clockLessReads = inputReads.clockLessReads();
   }
-  // Resolving one read's label joins every entry of that document's stored
-  // label map that bears on the read path, so the whole set costs the
-  // transaction's read count times those maps' sizes. Only a schema entry
-  // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
-  // so the set is assembled on first ask.
+  // Only the measurement dial, and a schema entry that declares
+  // `requiredIntegrity` or `maxConfidentiality` and applies to an attempted
+  // write, read the labeled set, so it is resolved where one of them asks.
   const gatedReadsOf = () => inputReads.gatedReads(metadataResolver);
-  if (needsReadLabels) gatedReadsOf();
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
