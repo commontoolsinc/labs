@@ -4,8 +4,9 @@
  * form each message's `authorProfile` takes, the principal it attests, and
  * the reader's access; and what the reader may do to each message. Each
  * person reaches their profile through a link of its own, as a `#profile`
- * wish's result is, so the view's profile is the profile itself only where
- * the room resolves it.
+ * wish's result is. Reading through the runtime follows that link either way,
+ * so what this checks is the document each link names, not the stored form
+ * of the link.
  */
 import {
   action,
@@ -165,7 +166,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       { label: "alice-sent" },
       { await: "bob-sent" },
       // The view's profile names the document her message's `authorProfile`
-      // names, and not the pointer she reaches it through.
+      // names, and not the pointer she reaches it through, as read.
       {
         assertion: assert(() =>
           sameEntity(
