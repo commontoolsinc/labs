@@ -1909,13 +1909,26 @@ only if it makes it.
 
 **A cell write keeps shared references within that write, and no further.**
 The runtime's write path (`Cell.set()` and the collection operations) stores a
-value holding the same object at two positions as one shared cell: the later
-position is stored as a link to the earlier one, so a later write through
-either position is read at both, across sessions. What is shared is the
-stored cell, not the JavaScript object written: the object itself is left as
-it was. The sharing reaches only as far as one write. The same object written
-by two writes — two `set()` calls, even in one transaction, two handlers, or
-two cells — is stored as two independent values.
+plain JavaScript object or array that appears at two positions of one written
+value once: each later occurrence is stored as a link to the first (a repeated
+array element is moved into a document of its own, which every occurrence
+links to). The link is stored, so the sharing outlives the write and holds
+across sessions:
+
+- A write inside the shared value, such as a push or a `set()` at a path below
+  either position, is read at both positions.
+- Replacing a position whole with `set()` writes at that position. A position
+  that holds the link has the link replaced, and stops sharing. A position the
+  link names takes the new value, and every link to it reads that value.
+
+What is shared is the stored value, not the JavaScript object written: the
+object itself is left as it was. The sharing reaches only as far as one write.
+The same plain object written by two writes (two `set()` calls, even in one
+transaction, two handlers, or two cells) is stored as two independent values.
+A reference is different, because the reference is what is written: a `Cell`
+or link written at two positions names its target at both, however many writes
+put it there, and a position holding a write-redirect link passes a `set()` on
+to its target rather than replacing the link.
 
 Cycles *across* documents are a separate matter, and are supported whatever an
 engine does within one. They are written as explicit links (`FabricInstance`s
