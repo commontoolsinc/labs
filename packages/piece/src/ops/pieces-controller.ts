@@ -2553,15 +2553,24 @@ export class PiecesController<T = unknown> {
    * within the wave's cycle cannot wait for, and this resolves with the
    * outgoing pattern's graph still running.
    *
+   * With `reconcile: false`, an existing root starts on the pattern it holds,
+   * through the same repairs a start makes — a stale setup is re-staged, and a
+   * root that cannot start rolls forward to its system source — and its origin
+   * is not consulted. That is for a caller that needs the root running rather
+   * than current, such as one registering a piece through the root's
+   * `addPiece` stream; the opens that show the root follow its origin.
+   *
    * @returns The default pattern piece, either existing or newly created
    */
-  async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
+  async ensureDefaultPattern(
+    { reconcile = true }: { reconcile?: boolean } = {},
+  ): Promise<PieceController<NameSchema>> {
     // Fast path: resolve the existing root WITHOUT starting it, so opening it
     // can follow its origin before bootstrap tries to load an identity that
     // origin has already replaced.
     const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
-      return await this.#startEnsuredDefaultPattern(existingPattern, true);
+      return await this.#startEnsuredDefaultPattern(existingPattern, reconcile);
     }
 
     // Determine which pattern to use based on space type
@@ -2623,11 +2632,11 @@ export class PiecesController<T = unknown> {
 
     // A root created by this successful attempt was compiled from the current
     // source immediately above. If another writer won the race, treat the
-    // discovered root like every other persisted root and reconcile it before
-    // start.
+    // discovered root like every other persisted root: reconcile it before
+    // start, unless the caller asked for no reconciliation.
     return await this.#startEnsuredDefaultPattern(
       finalPattern,
-      !createdByThisCall,
+      reconcile && !createdByThisCall,
     );
   }
 

@@ -383,6 +383,28 @@ describe("opening a space root", () => {
     expect(after).toBe(await identityForSource(SOURCE_V1));
   });
 
+  it("starts an existing root on the pattern it holds without asking its origin, given `reconcile: false`", async () => {
+    await setup();
+    const created = await controller.ensureDefaultPattern();
+    const idV1 = getPatternIdentityRef(created.getCell())?.identity;
+    stub.setSource(SOURCE_V2);
+    const identityFetches = stub.identityFetches();
+    const sourceFetches = stub.sourceFetches();
+
+    const kept = await controller.ensureDefaultPattern({ reconcile: false });
+    await runtime.sourceReconciler.idle();
+
+    expect(getPatternIdentityRef(kept.getCell())?.identity).toBe(idV1);
+    expect(stub.identityFetches()).toBe(identityFetches);
+    expect(stub.sourceFetches()).toBe(sourceFetches);
+
+    // The same root, opened with the default, follows its origin.
+    const followed = await controller.ensureDefaultPattern();
+    expect(getPatternIdentityRef(followed.getCell())?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+  });
+
   it("stops an update when disposal follows the current-pattern probe", async () => {
     await setup();
     const piece = await controller.ensureDefaultPattern();
@@ -805,6 +827,35 @@ describe("opening a space root", () => {
     stub.setSource(SOURCE_V2);
 
     const updated = await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    expect(JSON.stringify(updated.getCell().getAsLink())).toBe(rootLinkBefore);
+    expect(getPatternIdentityRef(updated.getCell())?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
+  });
+
+  it("rolls an unloadable stale root forward to its system source even given `reconcile: false`", async () => {
+    await setup();
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const rootLinkBefore = JSON.stringify(root.getAsLink());
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-stale-root"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { identity: staleIdentity, symbol: "removed-export" },
+        rawMetaWriteAuthorization,
+      );
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    const updated = await controller.ensureDefaultPattern({ reconcile: false });
     await runtime.idle();
 
     expect(JSON.stringify(updated.getCell().getAsLink())).toBe(rootLinkBefore);
