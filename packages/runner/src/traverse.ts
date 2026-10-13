@@ -60,6 +60,7 @@ import {
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import { schemaTypesAreDisjoint } from "./schema-type-disjointness.ts";
 import type {
   CellScope,
   JSONObject,
@@ -3559,29 +3560,6 @@ export function combineSchemaForLink(
     _combineLinkSchemaCache,
     key,
     schemaWithProperties(parentSchema, { default: linkDefault }),
-  );
-}
-
-function schemaTypesAreDisjoint(
-  parentType: JSONSchemaObj["type"],
-  linkType: JSONSchemaObj["type"],
-): boolean {
-  if (parentType === undefined || linkType === undefined) return false;
-
-  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
-  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
-    return false;
-  }
-
-  return !parentTypes.some((parent) =>
-    linkTypes.some((link) =>
-      parent === link ||
-      (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number") ||
-      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
-      (link === "object" && isFabricPrimitiveSchemaType(parent))
-    )
   );
 }
 
