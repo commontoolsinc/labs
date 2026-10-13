@@ -127,6 +127,16 @@ The event-handler commit path classifies each commit result and acts on it
   denial, a malformed store operation, a transport error, or a handler
   `tx.abort()` is not a stale basis, so re-running cannot resolve it; the write is
   dropped and logged rather than entering the window.
+
+With server execution off, a client event's dropped write from either of the
+last two is also surfaced through the scheduler error channel, as an
+`EventCommitRefusedError` carrying the rejection as its `cause`: a send made from
+inside a handler has no commit callback, so the log would otherwise be its only
+trace. Three drops are not reported, because none loses a write: a handler's own
+`tx.abort()`, a `receipt-exists` precondition (the same invocation already
+committed), and an `origin-committed` refusal of a follow-up whose origin runs
+again and sends its own. With server execution on, a client event is the echo of
+the server's run, which reports its own outcome.
 - **`retries: false` opt-out** — dropped without retry as well; see below.
 
 ### Why only a stale basis is windowed

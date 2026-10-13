@@ -449,6 +449,9 @@ describe("scheduler-event-piece-start", () => {
     expect((errors[0] as EventDroppedError).attempts).toBe(
       EVENT_DEFERRAL_DROP_THRESHOLD + 1,
     );
+    expect((errors[0] as EventDroppedError).pieceStartReason).toBe(
+      "no-pattern-meta",
+    );
   });
 
   it("reports an `EventDroppedError` once the retry window ends with nothing re-arming the wait", async () => {
@@ -513,6 +516,54 @@ describe("scheduler-event-piece-start", () => {
     expect(errors.length).toBe(1);
     expect(errors[0]).toBeInstanceOf(EventDroppedError);
     expect(errors[0].message).toContain("failed: boom");
+    expect((errors[0] as EventDroppedError).pieceStartReason).toBe(
+      "start-failed",
+    );
+  });
+
+  it("names the start verdict's reason on an `EventDroppedError`", async () => {
+    setLoadPieceForEvent(runtimeA, () =>
+      Promise.resolve({
+        started: false,
+        reason: "pattern-unloadable",
+        root: { space, id: "of:unloadable", scope: "space" },
+        observedDocIds: ["of:unloadable"],
+        observedDocs: [{ space, id: "of:unloadable", scope: "space" }],
+      }));
+
+    const status = await send(
+      runtimeA,
+      streamLink(runtimeA, "unloadable"),
+      "queued",
+    );
+
+    expect(status).toBe("error");
+    expect(errors.length).toBe(1);
+    const dropped = errors[0] as EventDroppedError;
+    expect(dropped.pieceStartReason).toBe("pattern-unloadable");
+    expect(dropped.message).toContain(
+      "could not be started (pattern-unloadable)",
+    );
+  });
+
+  it("names `start-failed` for a start whose verdict gives no reason", async () => {
+    // The start walk collapses a start that threw into a verdict with none.
+    setLoadPieceForEvent(
+      runtimeA,
+      () =>
+        Promise.resolve({
+          started: false,
+          observedDocIds: [],
+          observedDocs: [],
+        }),
+    );
+
+    await send(runtimeA, streamLink(runtimeA, "no-reason"), "queued");
+
+    expect(errors.length).toBe(1);
+    expect((errors[0] as EventDroppedError).pieceStartReason).toBe(
+      "start-failed",
+    );
   });
 
   it("drops a send whose piece cannot be started at once, reporting nothing, when server execution is on", async () => {

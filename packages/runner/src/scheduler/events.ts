@@ -54,6 +54,7 @@ import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
   computeBackoffDelayMs,
+  EventCommitRefusedError,
   EventDroppedError,
   EventHandlerNotRunError,
   HANDLER_NOT_RUN_BACKOFF_LIMIT,
@@ -501,12 +502,18 @@ function dropUndeliverableClientEvent(
   event: QueuedEvent,
   reason: string,
   attempts: number,
+  pieceStartReason?: string,
 ): void {
   if (event.finalOutcomeNotified) return;
   dropQueuedEvent(state, event, reason);
   if (!clientDeliversItsEvents(state)) return;
   state.handleError(
-    new EventDroppedError({ streamId: event.eventLink.id, reason, attempts }),
+    new EventDroppedError({
+      streamId: event.eventLink.id,
+      reason,
+      attempts,
+      ...(pieceStartReason !== undefined ? { pieceStartReason } : {}),
+    }),
     event.handler,
   );
 }
@@ -1064,9 +1071,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           // loop's bounded deferral budget — a condition that outlasts the
           // budget hardens into §5's drop notice rather than wedging the
           // stream. A client event waits as described above.
+          // A verdict that did not start the piece and names no reason is
+          // one whose start threw, which the start walk logs and collapses.
+          const pieceStartReason = verdict.started
+            ? undefined
+            : verdict.reason ?? "start-failed";
           const pieceState = verdict.started
             ? "has no pattern graph installed"
-            : "could not be started";
+            : `could not be started (${pieceStartReason})`;
           const reason = `Event dropped: no handler registered for ` +
             `${args.eventLink.id} and its piece ${pieceState}`;
           if (queuedEvent.served !== undefined) {
@@ -1087,7 +1099,13 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             !clientDeliversItsEvents(state) ||
             !pieceMayStillStart(state, verdict, args.eventLink)
           ) {
-            dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
+            dropUndeliverableClientEvent(
+              state,
+              queuedEvent,
+              reason,
+              attempts,
+              pieceStartReason,
+            );
             return;
           }
           deadline ??= performance.now() +
@@ -1132,7 +1150,13 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             error instanceof Error ? error.message : String(error)
           }`;
         if (queuedEvent.served === undefined) {
-          dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
+          dropUndeliverableClientEvent(
+            state,
+            queuedEvent,
+            reason,
+            attempts,
+            "start-failed",
+          );
           return;
         }
         dropQueuedEvent(state, queuedEvent, reason, "deferred");
@@ -2749,6 +2773,26 @@ export async function dispatchQueuedEvent(state: {
             },
           });
         };
+        // With server execution off, a client event's refused commit is the
+        // only record of the write it drops, and a send made from inside a
+        // handler has no commit callback to carry it, so the refusal goes to
+        // the error channel. An explicit handler abort is the handler's own
+        // choice, and a lost receipt race means the same invocation already
+        // committed, so neither is reported.
+        const reportRefusedClientCommit = (
+          rejection: "non-retryable" | "permanent",
+        ): void => {
+          if (served !== undefined || !clientDeliversItsEvents(state)) return;
+          if (isExplicitTransactionAbort(error)) return;
+          state.handleError(
+            new EventCommitRefusedError({
+              handlerId,
+              rejection,
+              cause: error,
+            }),
+            action,
+          );
+        };
         const sealExplicitHandlerAbort = (): void => {
           if (served === undefined || !isExplicitTransactionAbort(error)) {
             return;
@@ -2807,6 +2851,9 @@ export async function dispatchQueuedEvent(state: {
                   "retry (retries: false); dropping the write",
               { error, handlerId },
             );
+            if (disposition.reason === "non-retryable") {
+              reportRefusedClientCommit("non-retryable");
+            }
             break;
           case "backoff":
             logger.debug(
@@ -2880,6 +2927,9 @@ export async function dispatchQueuedEvent(state: {
               "Event handler commit permanently rejected; not retrying",
               { error, handlerId, permanentRejection },
             );
+            if (permanentRejection !== "receipt-exists") {
+              reportRefusedClientCommit("permanent");
+            }
             break;
           case "convergence-failed": {
             runFinalCommitCallback();

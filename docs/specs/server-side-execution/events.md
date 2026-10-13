@@ -750,7 +750,9 @@ loop's duty).
   cannot be loaded — does not wait. Every client drop on this path
   reaches the scheduler error channel as an `EventDroppedError` as
   well as settling the commit callback, since a send made from inside
-  a handler has no callback to settle. A runtime being disposed ends
+  a handler has no callback to settle; its `pieceStartReason` names
+  why the last start did not start the piece, the verdict's own
+  reason or `start-failed` for a start that threw. A runtime being disposed ends
   every such wait, settling the event as dropped. With server
   execution on, such an event is the echo of a run the server makes
   and reports on itself, so it neither waits nor reports its drop.
