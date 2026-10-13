@@ -245,7 +245,6 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     composer: Writable.of<ComposerState>({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
-    openThreadKey: "",
     cannotWrite: false,
     isOwner: false,
     messages: setup.messages,

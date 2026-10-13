@@ -116,8 +116,9 @@ export interface FabriChatMessageRowInput {
 
   /**
    * Whether the row belongs to the open thread's list rather than the main
-   * conversation's. Every message has a row in each list, shown only where
-   * the message belongs.
+   * conversation's. Every message has a row in the main conversation's list,
+   * shown only where the message belongs there. The thread's list holds a row
+   * only for a message of the session's open thread, and shows each one.
    */
   inThread: boolean;
 
@@ -132,12 +133,6 @@ export interface FabriChatMessageRowInput {
    * room derives them from its messages. The row reads its own message's.
    */
   places: ReadonlyCell<Record<string, ViewPlace>>;
-
-  /**
-   * The key of the root of the thread the session has open; `""` while it has
-   * none open.
-   */
-  openThreadKey: PerSession<string>;
 
   /** Whether the viewer can't send, edit, delete, or react in the room. */
   cannotWrite: boolean;
@@ -224,7 +219,6 @@ export const FabriChatMessageRow = pattern<
     kind,
     composer,
     places,
-    openThreadKey,
     cannotWrite,
     isOwner,
     messages,
@@ -293,30 +287,17 @@ export const FabriChatMessageRow = pattern<
     const reply = message.get()?.replyTo;
     return reply?.shownIn === "main" ? bodyText(reply.message.get()) : "";
   });
-  // Where the views show the message, and under which key. The room derives
-  // every message's place at once, from its messages alone, so whichever
-  // runtime runs the room computes them for every viewer. The row reads its
-  // own, and runs again only when that one changes.
+  // Where the views show the message. The room derives every message's place
+  // at once, from its messages alone, so whichever runtime runs the room
+  // computes them for every viewer. The row reads its own, and runs again
+  // only when that one changes.
   const place = computed(() => {
     const key = viewKeyOf(message);
     const own = key === undefined ? undefined : places.key(key).get();
-    return {
-      key: key ?? "",
-      inMain: own?.inMain === true,
-      replies: own?.replies ?? 0,
-      thread: own?.thread ?? "",
-    };
+    return { inMain: own?.inMain === true, replies: own?.replies ?? 0 };
   });
   const mainRowDisplay = computed((): ChatDisplay =>
     place.inMain ? "block" : "none"
-  );
-  // Whether the message is in the session's open thread, as its root or as a
-  // reply in it, which only the session's own runtime computes.
-  const threadRowDisplay = computed((): ChatDisplay =>
-    openThreadKey &&
-      (place.key === openThreadKey || place.thread === openThreadKey)
-      ? "block"
-      : "none"
   );
   const threadLabel = computed(() =>
     place.replies === 1 ? "1 reply" : `${place.replies} replies`
@@ -403,11 +384,12 @@ export const FabriChatMessageRow = pattern<
     [UI]: (
       // A row of the main conversation takes its display from shared state
       // alone, never the session's, or a viewer whose runtime only renders
-      // the room would have the row hidden for good. A thread row's display
-      // is the session's, and stays hidden until the session runs the room.
+      // the room would have the row hidden for good. A thread row is built
+      // only for a message of the session's open thread, so it is shown
+      // wherever it exists.
       <div
         hidden
-        style={{ display: inThread ? threadRowDisplay : mainRowDisplay }}
+        style={{ display: inThread ? "block" : mainRowDisplay }}
       >
         <cf-hover-reveal revealed={pickerOpen}>
           <div
