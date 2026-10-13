@@ -1767,9 +1767,10 @@ type BoundNodeIO = {
 
 /**
  * What binding a javascript, passthrough or raw node produces before
- * anything is read through a transaction. `Runner.#nodeIOBindings` holds one
- * per node, result cell and argument link, and every plan of that node takes
- * its members from it, so no holder changes them.
+ * anything is read through a transaction. `Runner.#nodeIOBindings` holds the
+ * one a pre-sync computes for a node, result cell and argument link until
+ * the node's instantiation takes it, and every plan made meanwhile takes its
+ * members from that one, so no holder changes them.
  */
 type NodeIOBinding = {
   inputs: FabricExecValue;

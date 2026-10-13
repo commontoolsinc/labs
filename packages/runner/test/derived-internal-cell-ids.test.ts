@@ -160,6 +160,20 @@ describe("derived-internal-cell-ids", () => {
       expect(mints()).toBe(2);
     });
 
+    it("hashes each time for a partial cause that is no JSON value", () => {
+      // A cause outside the declared type is derived as `createRef` derives
+      // it, and no id is kept for it.
+
+      const { ids, mints } = counted();
+      const partialCause = undefined as unknown as JSONValue;
+      const one = ids.idFor(first, partialCause);
+      const other = ids.idFor(first, partialCause);
+
+      expect(one.toString()).toBe(derived(first, partialCause));
+      expect(other.toString()).toBe(one.toString());
+      expect(mints()).toBe(2);
+    });
+
     it("hashes again for an id past its capacity", () => {
       const { ids, mints } = counted(1);
       ids.idFor(first, "a");

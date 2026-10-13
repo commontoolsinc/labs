@@ -298,8 +298,47 @@ where the pre-sync was no longer the whole cost.
       thirty-row room.
 - [ ] The first-run commit of a hundred-row room is one transaction, and
       at 24.7 MB it stood for more slots than the server admits.
-- [ ] Each plan's inputs document is still minted per plan; the memo
-      removes the repeat hashing and decoding, not the minting.
+- [x] A node's bindings, and the inputs document minted from them, are
+      computed by the pre-sync and taken by the node's instantiation
+      (`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`).
+      Binding reads nothing through a transaction, so the held part is keyed
+      by what it is computed from: the node, its pattern, the result cell's
+      link and the argument link. What the bound outputs redirect to is
+      still read through the planning transaction on every plan, so an
+      action's transaction records the reads it did before and an
+      instantiation writes what it did before. A reload of the thirty-row
+      room made 9,528 plans and computed 9,528 bindings; it now computes
+      3,111, none of them at instantiation, and holds 69 MB of bindings at
+      its peak and none once the tree is running. The 1,823 further calls
+      the planner made to itself for nodes whose module is a registry
+      reference bound nothing, and are gone with the loop that resolves the
+      reference first.
+- [x] A runtime keeps the id of each derived internal cell it has hashed
+      (`DerivedInternalCellIds`,
+      `packages/runner/src/derived-internal-cell-ids.ts`). Every action
+      whose scheduler summary is complete lists its pattern's derived cells,
+      so a row of 49 nodes hashed each of its cells' ids once per such
+      action: the reload hashed 114,694 ids for 3,167 cells.
+- [x] The scheduler holds event handlers by the address of their stream
+      (`EventHandlerRegistry`, `packages/runner/src/scheduler/events.ts`),
+      where a registration and a dispatch each compared the link of every
+      handler registered. The reload registers 1,154.
+- [x] Measured as process CPU time on a Deno reload of the thirty-row room,
+      main against the three changes above, two runs of each side by side:
+      the two `messages.map` actions from 8.4 to 5.0 s, node plans at
+      instantiation from 3.1 to 0.4 s and in the pre-sync from 13.8 to
+      6.2 s, derived cell ids from 2.1 to 0.4 s, handler registration from
+      0.18 to 0.01 s, and the whole render from 75.8 to 66.8 s.
+- [ ] Every plan still resolves its outputs' redirect chains: 9,528
+      resolutions on the reload for 3,100 nodes. The 3,100 an instantiation
+      makes belong in the action's transaction. The pre-sync makes the other
+      6,428 in read-only transactions it discards, across three passes over
+      the same nodes, and could make each once.
+- [ ] Past the bound on held bindings the pre-sync's earliest bindings are
+      dropped before their instantiation asks for them. The bound is 256 MB
+      of inputs documents and the thirty-row room holds 69 MB, so a room of
+      about a hundred rows is at it: an inputs document carries the schema
+      of every link it holds inline, and averages 22 KB on that room.
 
 Exit: a room of a hundred rows opens in the browser.
 

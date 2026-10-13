@@ -75,8 +75,7 @@ loads its own reads registered. Computations have no such park.
 
 ### One plan per node
 
-`#nodePlan(tx, node, resultCell, pattern, moduleRefName?, argumentLink?)`
-returns:
+`#nodePlan(tx, node, resultCell, pattern, argumentLink?)` returns:
 
 - `inputsCell`, the immutable cell built from the bound input bindings, which
   the node reads its argument from;
@@ -91,12 +90,32 @@ returns:
 - for a pattern node, `childResultCell` under the child's result schema and
   the bound child pattern, derived as `#instantiatePatternNode` derives them.
 
-Instantiation consumes the plan: `#bindNodeIO`, `#buildRawNodeInputs`, the
-passthrough node, and `#instantiatePatternNode` each take their bound values
-from it instead of binding on their own. The pre-sync consumes the same plan.
+Instantiation consumes the plan: the JavaScript, raw, passthrough and pattern
+node instantiations each take their bound values from it instead of binding
+on their own. The pre-sync consumes the same plan.
 Whatever a node reads at run time, it reads through `inputsCell` under
 `readSchema`, so a pre-sync that walks exactly that pair pulls exactly the
 run's read set and nothing the authored schema reaches beyond it.
+
+A plan has two parts, and the runner computes them differently. Binding the
+node's inputs and outputs to the piece's argument and result documents, and
+building `inputsCell` from the bound inputs, reads nothing through a
+transaction: the result is a function of the node, its pattern's manifest and
+argument schema, the result cell's link and the argument link. The runner
+holds that part by those four from the plan a pre-sync makes of a node until
+the plan its instantiation makes takes it (`NodeBindingMemo`,
+`packages/runner/src/node-binding-memo.ts`), so the two plans share one
+binding, a running node's bindings are held by the node alone, and a pattern
+node's bound child is the same pattern object in both plans, under which the
+child's own nodes are found again. A binding against a stand-in argument is
+not held: the instance it belongs to is instantiated against the argument
+document its setup writes.
+
+Resolving what the bound outputs redirect to (`writes`, a raw node's resolved
+output spot, a pattern node's `childResultCell`) reads link slots through the
+caller's transaction, and every plan does that for itself: the reads belong
+in the log of the transaction the plan is made in, an action's among them,
+and a redirect written since the last plan has to be followed.
 
 ### The pre-sync syncs each plan under its schema
 
