@@ -43,7 +43,7 @@ during that implementation are archived at
 
 ## Last Updated
 
-2026-08-27
+2026-10-12
 
 ## Motivation
 
@@ -389,6 +389,11 @@ pattern's setup has settled, so that a withdrawn setup leaves the old graph in
 place, and a wave settles after the cycle that sealed into it has ended. A call
 made within that cycle cannot wait for the settlement, so on such a runtime
 `ensureDefaultPattern` returns with the old pattern's graph still running.
+On a client runtime the watcher re-instantiates only once the setup it stages
+for the new pattern has committed, and a refused setup leaves the old pattern
+running under the moved pointer. Until the piece settles on one of the two, an
+event for its streams waits, and then runs the handler of the pattern it
+settled on.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
@@ -398,6 +403,29 @@ made within that cycle cannot wait for the settlement, so on such a runtime
   must exercise representative prior state and verify that the proposed source
   still reads and preserves it. The deployment runtime does not try to infer
   stable-key or stable-cause compatibility.
+
+Opening any other piece that is already running waits the same way, through
+the same `patternPointerFollowed()`, for two kinds of pointer move. `openPiece`,
+and a `getPieceCell` that reconciles, wait for the move their own reconcile
+made, and for any earlier move the piece's watcher has already observed. They
+wait after the reconcile, and again after the start where the open starts the
+piece, since a start that was in flight before the pointer moved can
+instantiate the outgoing pattern.
+
+The watcher observes a move in a scheduler pass. An open whose reconcile moved
+the pointer therefore waits for the runtime to go idle first. An open that
+moved nothing does not, because that wait lasts until every piece in the
+runtime is quiescent. Such an open does not wait for a move committed
+elsewhere that the watcher has yet to observe.
+
+The wait is for the opened piece's watcher alone, and lasts as long as that
+watcher takes. For a pointer another replica moved to a pattern this runtime
+has not compiled, that includes loading the pattern, which starting the same
+piece would wait for if it were not running. A re-instantiation that fails is
+logged and leaves the piece on the pattern it was running, and the open
+resolves all the same. On a runtime that seals its writes into a serving wave
+the re-instantiation follows the wave's settlement, which the wait does not
+cover.
 
 An automatic update from a `system:` origin runs no structural comparison,
 because the release gate below is a better check than the runtime could make
