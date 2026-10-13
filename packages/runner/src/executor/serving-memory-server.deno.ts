@@ -87,6 +87,16 @@ export type ServingMemoryServerOptions =
     ];
 
     /**
+     * The serving runtimes' outbound `fetch`, as `servingRuntimeFactory()`
+     * takes it. A test that stubs its own runtime's `fetch` passes the same
+     * stub here, since a served handler's fetches go through this one.
+     */
+    fetch?: ServingRuntimeFactoryOptions["fetch"];
+
+    /** As `servingRuntimeFactory()` takes it. */
+    moduleByteCache?: ServingRuntimeFactoryOptions["moduleByteCache"];
+
+    /**
      * Whether each served space gets its default pattern on activation.
      * Default: `false`, which is the switch the serving loop keeps for tests;
      * a deployment always ensures them.
@@ -201,6 +211,8 @@ function attachServingLoop(params: {
     serviceIdentity: _serviceIdentity,
     experimental,
     prepareStorageManager,
+    fetch,
+    moduleByteCache,
     ensureSpaceRoots = false,
     ...hostOptions
   } = params.options;
@@ -215,6 +227,8 @@ function attachServingLoop(params: {
       apiUrl: params.apiUrl,
       experimental,
       prepareStorageManager,
+      ...(fetch !== undefined ? { fetch } : {}),
+      ...(moduleByteCache !== undefined ? { moduleByteCache } : {}),
     }),
   });
   let closed: Promise<void> | undefined;

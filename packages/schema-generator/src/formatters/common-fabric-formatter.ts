@@ -1722,7 +1722,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
-    let childContext = context;
+    let childContext = this.#cellValueContext(context);
     const hintsNode = context.typeNode ?? context.hintsNode;
     if (context.schemaHints && hintsNode) {
       const hint = context.schemaHints.get(hintsNode);
@@ -1730,9 +1730,9 @@ export class CommonFabricFormatter implements TypeFormatter {
         const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
-          context,
+          childContext,
         );
-        childContext = { ...context, arrayItemsOverride: itemsOverride };
+        childContext = { ...childContext, arrayItemsOverride: itemsOverride };
       }
     }
 
@@ -1794,7 +1794,10 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    return this.#applyWrapperSemantics(innerSchema, wrapperKind);
+    return this.#applyWrapperSemantics(
+      innerSchema,
+      this.#cellKind(wrapperKind, context),
+    );
   }
 
   /**
@@ -2287,7 +2290,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Check for schema hints on the current typeNode and propagate to child context.
     // This allows identity-only/property-only array access patterns to avoid
     // materializing full item schemas while preserving the wrapper on the array.
-    let childContext = context;
+    let childContext = this.#cellValueContext(context);
     const hintsNode = context.typeNode ?? context.hintsNode;
     if (context.schemaHints && hintsNode) {
       const hint = context.schemaHints.get(hintsNode);
@@ -2301,9 +2304,9 @@ export class CommonFabricFormatter implements TypeFormatter {
         const itemsOverride = this.#createArrayItemsOverride(
           innerType,
           innerTypeNode,
-          context,
+          childContext,
         );
-        childContext = { ...context, arrayItemsOverride: itemsOverride };
+        childContext = { ...childContext, arrayItemsOverride: itemsOverride };
       }
     }
 
@@ -2342,7 +2345,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
-    return this.#applyWrapperSemantics(innerSchema, wrapperKind);
+    return this.#applyWrapperSemantics(
+      innerSchema,
+      this.#cellKind(wrapperKind, context),
+    );
   }
 
   #createArrayItemsOverride(
@@ -4821,6 +4827,28 @@ export class CommonFabricFormatter implements TypeFormatter {
    */
   #isUndefinedType(type: ts.Type): boolean {
     return (type.flags & ts.TypeFlags.Undefined) !== 0;
+  }
+
+  /**
+   * `wrapperKind`, the kind of a cell a reading reaches, as its schema
+   * declares it: opaque where the reading's cells are
+   * (`GenerationContext.cellsOpaque`), unless its brand is authoritative, as a
+   * stream's or a SQLite handle's is (`isCellCapabilityKind()`).
+   */
+  #cellKind(wrapperKind: WrapperKind, context: GenerationContext): WrapperKind {
+    return context.cellsOpaque && isCellCapabilityKind(wrapperKind)
+      ? "OpaqueCell"
+      : wrapperKind;
+  }
+
+  /**
+   * `context` for reading the value a cell holds: the reading's cells being
+   * opaque (`GenerationContext.cellsOpaque`) reaches the cells it reads, not
+   * those inside one, as the contract overlay narrows a cell's capability and
+   * leaves its value as written.
+   */
+  #cellValueContext(context: GenerationContext): GenerationContext {
+    return context.cellsOpaque ? { ...context, cellsOpaque: false } : context;
   }
 
   /**
