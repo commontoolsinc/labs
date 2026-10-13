@@ -865,6 +865,58 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
   });
 
+  it("follows a custom origin when the pattern a root holds cannot load, given `reconcile: false`", async () => {
+    await setup();
+    // A root born from the custom app Home config names for new space roots.
+    const homeSpaceCell = runtime.getHomeSpaceCell();
+    await homeSpaceCell.sync();
+    const homeRoot = runtime.getCell(
+      runtime.userIdentityDID,
+      "home-root-config",
+    );
+    const { error: configError } = await runtime.editWithRetry((tx) => {
+      homeRoot.withTx(tx).set({ defaultAppUrl: CUSTOM_APP_URL });
+      // deno-lint-ignore no-explicit-any
+      (homeSpaceCell.withTx(tx) as any).key("defaultPattern").set(homeRoot);
+    });
+    expect(configError).toBeUndefined();
+    await runtime.idle();
+    stub.setCustomSource(patternSource("custom-v1"));
+    await controller.recreateDefaultPattern();
+    const root = (await controller.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBe(CUSTOM_APP_SOURCE);
+    const rootLinkBefore = JSON.stringify(root.getAsLink());
+
+    // Its pinned pattern can no longer load, and its origin serves a newer one.
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-custom-root"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { identity: staleIdentity, symbol: "default" },
+        rawMetaWriteAuthorization,
+      );
+    });
+    expect(error).toBeUndefined();
+    const customV2 = patternSource("custom-v2");
+    stub.setCustomSource(customV2);
+
+    const recovered = await controller.ensureDefaultPattern({
+      reconcile: false,
+    });
+    await runtime.idle();
+
+    expect(JSON.stringify(recovered.getCell().getAsLink())).toBe(
+      rootLinkBefore,
+    );
+    expect(getPatternSource(recovered.getCell())).toBe(CUSTOM_APP_SOURCE);
+    expect(getPatternIdentityRef(recovered.getCell())?.identity).toBe(
+      await identityForSource(customV2, {}, CUSTOM_APP_URL),
+    );
+  });
+
   it("heals a legacy keyless default root without recording the keyless identity as displaced", async () => {
     await setup();
     const piece = await controller.ensureDefaultPattern();

@@ -1851,9 +1851,10 @@ export async function newPiece(
   // Otherwise registration delivers into the root's `addPiece` stream, which
   // needs the root to exist and to run here, though not to be current. So an
   // absent root is created, and an existing one is started on the pattern it
-  // holds, through the repairs its start makes, before the piece exists; its
-  // origin is left to the opens that follow it, such as `cf piece ls`. Fail
-  // here with the cause if the root cannot be created or started.
+  // holds, before the piece exists. Its origin is followed only if that
+  // pattern cannot load, and otherwise left to the opens that follow it, such
+  // as `cf piece ls`. Fail here with the cause if the root cannot be created
+  // or started.
   const served = servesLifecycleVerbs(pieces);
   try {
     if (!served) {
@@ -1975,10 +1976,11 @@ export async function newPiece(
     }
   }
 
-  // Explicitly add the piece to the space's registry.
+  // Explicitly add the piece to the space's registry, through the root the
+  // ensure above started, without following its origin.
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
-    () => pieces.add([piece.getCell()]),
+    () => pieces.add([piece.getCell()], { reconcile: false }),
   );
 
   return piece.id;
@@ -2549,9 +2551,9 @@ async function tryResolveLivePieceToolCallable(
  *
  * `newPiece()` ensures the root because its registration needs an existing
  * default pattern and leaves the created piece unregistered if none exists.
- * That ensure creates an absent root and starts an existing one through the
- * repairs its start makes, before the piece is created; it does not follow the
- * root's origin.
+ * That ensure creates an absent root and starts an existing one on the pattern
+ * it holds, before the piece is created, following the root's origin only if
+ * that pattern cannot load.
  *
  * Discovery (`verbs`, `describe`) only reads the addressed piece's stored
  * callable surface and pattern metadata. It neither starts the piece nor asks

@@ -869,10 +869,19 @@ export class PiecesController<T = unknown> {
     });
   }
 
-  async add(newPieces: Cell<unknown>[]): Promise<void> {
+  /**
+   * Registers `newPieces` in the space's piece list by sending each into the
+   * root's `addPiece` stream, starting the root first. The root follows its
+   * origin before it starts unless `reconcile` is `false`, which starts it on
+   * the pattern it holds, as {@link ensureDefaultPattern} does given the same.
+   */
+  async add(
+    newPieces: Cell<unknown>[],
+    { reconcile = true }: { reconcile?: boolean } = {},
+  ): Promise<void> {
     const defaultPattern = await timePiecePhase(
       "add.getDefaultPattern",
-      () => this.getDefaultPattern(true),
+      () => this.getDefaultPattern({ reconcile, start: true }),
     );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
@@ -2554,11 +2563,11 @@ export class PiecesController<T = unknown> {
    * outgoing pattern's graph still running.
    *
    * With `reconcile: false`, an existing root starts on the pattern it holds,
-   * through the same repairs a start makes — a stale setup is re-staged, and a
-   * root that cannot start rolls forward to its system source — and its origin
-   * is not consulted. That is for a caller that needs the root running rather
-   * than current, such as one registering a piece through the root's
-   * `addPiece` stream; the opens that show the root follow its origin.
+   * and its origin is consulted only if that pattern cannot load: then the
+   * root is opened the default way, following its origin before it starts.
+   * That is for a caller that needs the root running rather than current, such
+   * as one registering a piece through the root's `addPiece` stream; the opens
+   * that show the root follow its origin.
    *
    * @returns The default pattern piece, either existing or newly created
    */
@@ -2641,9 +2650,11 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * `reconcileBeforeStart` is false only for a root this call just created
-   * from its source: following that origin again would fetch the route to
-   * learn what was compiled from it moments ago.
+   * `reconcileBeforeStart` is false for a root this call just created from its
+   * source, where following that origin again would fetch the route to learn
+   * what was compiled from it moments ago, and for a caller that asked for no
+   * reconciliation. A root started that way whose pattern cannot load is
+   * opened again with reconciliation.
    */
   async #startEnsuredDefaultPattern(
     root: Cell<NameSchema>,
@@ -2732,6 +2743,12 @@ export class PiecesController<T = unknown> {
         throw startError;
       }
       if (pattern === undefined) {
+        // A start that skipped the root's origin opens it the default way
+        // instead, following that origin before starting it, so the origin
+        // has its chance before any repair below.
+        if (!reconcileBeforeStart) {
+          return await this.#startEnsuredDefaultPattern(rootToStart, true);
+        }
         // The pattern is not merely unrunnable, it is unreachable through every
         // supported recovery path, so re-running its setup cannot help. A root
         // that records no origin has nothing else to fall back on and its space
