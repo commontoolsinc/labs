@@ -204,6 +204,18 @@ describe("requestPrivateInboxOf()", () => {
     expect(await request.outcome).toEqual({ status: "abandoned" });
   });
 
+  it("returns `abandoned`, sending nothing, when the signal has already aborted", async () => {
+    const profile = await documentIn(identity.did(), {});
+    const controller = new AbortController();
+    controller.abort();
+
+    expect(
+      await requestPrivateInboxOf(runtime, home, profile, controller.signal),
+    ).toEqual({ status: "abandoned" });
+    await runtime.idle();
+    expect(await home.key("named" as never).pull()).toEqual({});
+  });
+
   it("rejects when Home's handling of the request fails", async () => {
     const profile = await documentIn(identity.did(), {});
     await setHome("failRequest", true);

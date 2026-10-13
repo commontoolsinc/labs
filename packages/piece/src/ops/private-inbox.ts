@@ -188,8 +188,10 @@ const answerSchema = {
  * the receipt, through the link, and settles on the first answer that is not
  * `pending`; for `ensured`, it then reads the inbox from the profile's pointer,
  * waiting for this runtime's view of it to name one. Returns `unavailable`,
- * sending nothing, for a Home without the stream, and `abandoned`, once
- * `signal` aborts, while it waits.
+ * sending nothing, for a Home without the stream, and `abandoned` once
+ * `signal` aborts: sending nothing when it has aborted already, and otherwise
+ * at whatever point it is waiting, Home's handling of a request already sent
+ * going on regardless.
  *
  * @throws When the send fails, when Home's handling of it fails or writes no
  *   receipt, or when Home answers with a status this host does not know.
@@ -202,7 +204,8 @@ export async function requestPrivateInboxOf(
 ): Promise<PrivateInboxRequestOutcome> {
   const request = home.key("requestPrivateInbox");
   if (request.getRaw() === undefined) return { status: "unavailable" };
-  const receipt = await new Promise<NormalizedFullLink>((resolve, reject) =>
+  if (signal?.aborted) return { status: "abandoned" };
+  const handled = new Promise<NormalizedFullLink>((resolve, reject) =>
     sendEvent(request, { from: profile }, (tx) => {
       const status = tx.status();
       if (status.status === "error") {
@@ -212,6 +215,8 @@ export async function requestPrivateInboxOf(
       } else resolve(tx.handlingReceiptLink);
     })
   );
+  const receipt = await untilAborted(handled, signal);
+  if (receipt === undefined) return { status: "abandoned" };
   const status = await firstPicked(
     runtime.getCellFromLink(receipt, answerSchema),
     (answer) =>
@@ -240,6 +245,23 @@ export async function requestPrivateInboxOf(
     default:
       throw new Error(debugStr`Home answered the request with $quote${status}`);
   }
+}
+
+/**
+ * Helper for {@link requestPrivateInboxOf}, which resolves as `promise` does,
+ * or with `undefined` once `signal` aborts, whichever comes first.
+ */
+function untilAborted<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T | undefined> {
+  if (signal === undefined) return promise;
+  const { promise: aborted, resolve } = Promise.withResolvers<undefined>();
+  const abandon = () => resolve(undefined);
+  signal.addEventListener("abort", abandon);
+  return Promise.race([promise, aborted]).finally(() =>
+    signal.removeEventListener("abort", abandon)
+  );
 }
 
 /**

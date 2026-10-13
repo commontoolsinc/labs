@@ -36,12 +36,13 @@ pointer is left as it is.
 
 ## Creating or adopting it
 
-An identity has one inbox, and Home is what creates it. A client that would
+An identity has one inbox. Home creates it, or adopts one a profile already
+advertises, such as one a loom daemon created, if the inbox is usable, and
+nothing replaces a pointer that names a different inbox. A client that would
 otherwise create an inbox of its own, as a loom daemon does, asks Home for it
-through Home's `requestPrivateInbox` stream when Home has that stream, and
-adopts the inbox Home answers with, as "Requesting it" says. Home adopts an
-inbox a profile already advertises, such as one a loom daemon created, if the
-inbox is usable, and nothing replaces a pointer that names a different inbox.
+instead through Home's `requestPrivateInbox` stream when Home has that stream,
+and adopts the inbox the profile it names then points at, as "Requesting it"
+says.
 
 A loom daemon that creates a share inbox of its own and points a profile at it,
 because Home has no such stream or because the daemon does not ask, races Home
