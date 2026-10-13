@@ -21,7 +21,7 @@ const eventSchema = {
   },
 } as const satisfies JSONSchema;
 
-describe("stream cell sync", () => {
+describe("stream-cell-sync", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

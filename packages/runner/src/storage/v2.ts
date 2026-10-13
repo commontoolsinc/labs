@@ -2885,9 +2885,9 @@ export class StorageManager implements IStorageManager {
     // A cell declared a stream is loaded whole. Its document holds no value a
     // read uses, so a selector carrying the event schema would ask the store
     // to walk a shape that is never there, at the cost of a root carrying
-    // that schema per stream. What such a load is for, the document's record
-    // for a meta write to retry a conflict against or for the resume gate to
-    // probe, the whole document brings.
+    // that schema per stream. A load of such a cell serves a meta write,
+    // which retries a conflict against the document's record, or the resume
+    // gate, which probes that record, and the whole document carries it.
     const selectorSchema = ContextualFlowControl.declaresStream(schema)
       ? false
       : schema ?? false;
