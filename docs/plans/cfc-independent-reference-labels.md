@@ -75,8 +75,9 @@ once copied away from their origin, are what stage 1 removes.
 
 ## What a link slot persists after this plan
 
-At most two entries at the slot, both of the pointer class, and nothing
-beneath it:
+A link write persists at most two entries at the slot, both of the pointer
+class, and nothing beneath it. A writer's value stamp can stand at the slot
+beside them, in the one case the paragraph after the list names:
 
 - The link entry, `origin: "link"`, holding what the reference declares and
   carries: the link schema's declared confidentiality, the acquisition
@@ -377,6 +378,16 @@ bound the exponential growth of staged-reference diamonds. The growth is the
 copy; with stage 1 a diamond's map holds one entry per reference. Archive that
 plan to `docs/history/plans/` as superseded once the diamond probe confirms the
 bound, with the measurement linked from the archive note.
+
+The sqlite builtin holds two arrangements that the refusal of a link to an
+unlabeled document made necessary, in `builtins/sqlite-builtins.ts` and
+`docs/specs/sqlite-builtin/06-cfc.md`. A row that holds a link column
+declares no existence label, so that the links beneath its root would not
+meet the refusal; its existence therefore lacks the join of its column
+labels, and it should declare that join as every other row does. A row with
+no label of its own declares an empty one into a labeled store, so that a
+re-link of the standing row would find a declaration; nothing reads it, and
+it goes.
 
 ## Legacy data
 
