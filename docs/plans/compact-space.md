@@ -840,6 +840,12 @@ retention, since the history being removed is theirs
 df -h /data
 ls -la /data/memory/engine-v3/engine-v3/ | grep '<did>'
 curl -s localhost:8020/api/health/stats | grep -c '<did>'
+#    And the release every instance runs: its gitSha must descend from the
+#    basis guard's merge (stage 2, 174fc11ad2), or the engine that reopens
+#    the result takes a compacted basis for an absence. The rehearsal on a
+#    checkout proves nothing about this; deploy first where it fails
+#    (the runbook's preflight has the ancestry test).
+for p in $(seq 8001 8021); do printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'; done
 
 # 1. Dry run against a LIVE snapshot, with the instance still serving, and
 #    compare with the clone rehearsal's report. This snapshot is for the

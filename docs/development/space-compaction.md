@@ -2,16 +2,19 @@
 
 A **compaction** rewrites one space's SQLite store: for each selected
 document, the revision rows and snapshots behind its current value are
-deleted and the oldest kept row becomes a `set` holding that value; the
-payload of every commit older than a retention window is replaced by a
-marker, except commit 1's, the commits an `op_*` row references, and the
-compaction commits' own. Every commit row stays. The compacted file keeps
-none of what was removed; it lives on in the archive the operator takes
-first, and, until the operator retires it, in the original file the swap
-moves aside for rollback. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
-design and the reasons; this is the procedure, as it was rehearsed on a clone
-of the Topics space's 2026-10-09 snapshot, written for the operator who will
-run it on Estuary.
+deleted and the oldest kept row becomes its base, attributed to the
+compaction commit: a `patch` is rewritten as a `set` holding that value, a
+`set` or a `delete` keeps its operation, so a deleted document stays
+deleted; the payload of every commit older than a retention window is
+replaced by a marker, except commit 1's, the commits an `op_*` row
+references, and the compaction commits' own. Every commit row stays. The
+compacted file keeps none of what was removed; it lives on in the archive the
+operator takes first, and, until the operator retires it, in the original
+file the swap moves aside for rollback.
+[`docs/plans/compact-space.md`](../plans/compact-space.md) is the design and
+the reasons; this is the procedure, as it was rehearsed on a clone of the
+Topics space's 2026-10-09 snapshot, written for the operator who will run it
+on Estuary.
 
 Two neighbors:
 
@@ -44,6 +47,35 @@ says what the space shows afterward.
 The clone rehearsal below has passed, on a snapshot of the space taken within
 the last few days, with the flag set the host run will use. The rehearsal's
 dry-run report is at hand to compare with the host's.
+
+The release every serving instance runs includes the compacted-basis guard
+(stage 2 of the plan, [labs#8643](https://github.com/commonfabric/labs/pull/8643),
+merged as `174fc11ad2`), and the host's `cf` has `cf space compact` (stage 4,
+[labs#8722](https://github.com/commonfabric/labs/pull/8722), `08a6c667dc`).
+Neither the rehearsal nor `--verify` establishes either: both run a checkout
+on a laptop, and Estuary runs whatever ref was last deployed to it, which is
+not main. An engine without the guard reopens the result without complaint,
+since the schema is unchanged, and takes a basis the compaction removed for a
+genuine absence, accepting a stale write through the identity exemption. The
+check is each instance's `/api/meta`, whose `gitSha` names its release; a
+release is current enough when the guard's merge commit is its ancestor:
+
+```bash
+# On the host: every instance names its release. Expect one sha, 21 times;
+# an instance that answers nothing or another sha is checked on its own.
+for p in $(seq 8001 8021); do
+  printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'
+done
+cf space compact --help    # on the host: an older cf has no such command
+# On a checkout with main fetched, for each sha the instances named:
+git merge-base --is-ancestor 174fc11ad208692c68337ee93732dea252811fa8 <gitSha> && echo guard-present
+```
+
+A release that fails the test is deployed first, through the `deploy-estuary`
+workflow ([`deploying.md`](deploying.md)), which ships one commit's toolshed
+and `cf` binaries together, and the check is run again after it. The ref
+deployed on 2026-10-13, `2de2c1095bf0`, carried stages 1 through 3 and not
+stage 4, so for the first host run this deploy is step zero.
 
 ## The rehearsal
 
@@ -168,10 +200,13 @@ drop every commit accepted between the two, and verifying against it would not
 show the gap.
 
 ```bash
-# 0. Space, disk, and which instance owns it. Do not trust the record; check.
+# 0. Space, disk, which instance owns it, and the release each instance runs
+#    (the guard check above, again: a deploy between the preflight and the
+#    window would move it). Do not trust the record; check.
 df -h /data
 ls -la /data/memory/engine-v3/engine-v3/ | grep '<did>'
 curl -s localhost:8020/api/health/stats | grep -c '<did>'
+for p in $(seq 8001 8021); do printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'; done
 
 # 1. Dry run against a LIVE snapshot, with the instance still serving, and
 #    compare with the clone rehearsal's report. This snapshot is for the
@@ -219,12 +254,40 @@ is listed, and a read through the API returns the content.
 
 ## Rolling back
 
-The procedure never deletes the original: it is moved aside with its `-wal`
-and `-shm` companions, and the result is installed under its name. Rolling
-back is moving the result out and the original back, then starting every
-instance and confirming each is active, as step 7 does. Write the commands
-down before anything is stopped. The backup is a second copy of the same
-pre-compaction state should the original be damaged in the move.
+The procedure never deletes the original: step 6 moves it aside with its
+`-wal` and `-shm` companions into `/data/replaced/`, and installs the result
+under its name. Rolling back is the swap in reverse, and once step 7 has run
+it begins with the stop again: every instance has the result open and may be
+writing it, and by then the result has companions of its own. A file moved
+out from under an open database replaces nothing, since the instances keep
+the old inode, and a `-wal` left beside a restored original would be replayed
+into it on the next open. Write these commands down before anything is
+stopped. The backup is a second copy of the same pre-compaction state should
+the original be damaged in the move.
+
+```bash
+# 1. Stop every instance and confirm each has stopped. (sudo.)
+for p in $(seq 8001 8021); do sudo systemctl stop toolshed-binary@$p; done
+for p in $(seq 8001 8021); do systemctl is-active toolshed-binary@$p; done   # 21 lines: inactive
+
+# 2. Move the result OUT, with the companions it grew, together, to a place
+#    whose names cannot collide with the original's in /data/replaced/.
+cd /data/memory/engine-v3/engine-v3/
+sudo mkdir -p /data/replaced/rolled-back
+sudo mv '<did>.sqlite'* /data/replaced/rolled-back/
+
+# 3. Move the original back with its companions. The glob matches the
+#    original and its companions only: the backup, result and dry-run files
+#    are named <did>.<what>.sqlite. Nothing of the result's is left beside it.
+sudo mv /data/replaced/'<did>.sqlite'* .
+ls -la '<did>.sqlite'*
+
+# 4. Start them all, confirm, read back, as step 7 does. (sudo.)
+for p in $(seq 8001 8021); do sudo systemctl start toolshed-binary@$p; done
+for p in $(seq 8001 8021); do systemctl is-active toolshed-binary@$p; done
+```
+
+Before step 7 has run, step 1 already holds and the rest is the same.
 
 ## What the store shows afterward
 
