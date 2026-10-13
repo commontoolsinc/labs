@@ -8,6 +8,7 @@ import {
   CrossStageState,
   TransformationContext,
 } from "../src/core/mod.ts";
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import {
   applyCapabilityDefaultsToTypeNode,
   applyShrinkAndWrap,
@@ -20,7 +21,9 @@ import {
   printTypeNode,
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
-import { collect, parseModule } from "./transformed-ast.ts";
+import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { callSchemas, collect, parseModule } from "./transformed-ast.ts";
+import { transformFiles } from "./utils.ts";
 
 //
 // Structural inspection of printed type nodes.
@@ -249,6 +252,723 @@ describe("overlayContractCapabilities()", () => {
     );
 
     expect(result).toBe(alias.type);
+  });
+
+  /**
+   * The event schema of the one handler, with `event` for its event type, in
+   * a module declaring `declaration`, whose callback is `callback`; and the
+   * diagnostics compiling it reports, type-checked first where `typeCheck`
+   * is set.
+   */
+  async function eventSchema(
+    declaration: string,
+    event: string,
+    callback: string,
+    typeCheck = true,
+  ): Promise<{
+    event: Record<string, unknown>;
+    reported: { type: string; severity: string }[];
+  }> {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const files = await transformFiles({
+      "/main.tsx": `/// <cts-enable />
+import { handler, pattern, Writable } from "commonfabric";
+${declaration}
+const h = handler<${event}, { c: Writable<number> }>(${callback});
+export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
+    }, {
+      types: COMMONFABRIC_TYPES,
+      typeCheck,
+      pipelineDiagnostics: diagnostics,
+    });
+    const [schema] = callSchemas(parseModule(files["/main.tsx"]!), "handler");
+    return {
+      event: schema!,
+      reported: diagnostics.map(({ type, severity }) => ({ type, severity })),
+    };
+  }
+
+  /** Every `asCell` entry list in `schema`, in reading order. */
+  function capabilitiesOf(schema: unknown): unknown[] {
+    if (Array.isArray(schema)) return schema.flatMap(capabilitiesOf);
+    if (typeof schema !== "object" || schema === null) return [];
+    const { asCell, ...rest } = schema as Record<string, unknown>;
+    return [
+      ...(asCell === undefined ? [] : [asCell]),
+      ...Object.values(rest).flatMap(capabilitiesOf),
+    ];
+  }
+
+  it("reports nothing unread for an event holding arrays of objects nested nine deep", async () => {
+    // Compiled with no type check first, as `cf` deploys a pattern unless
+    // asked to check it, the checker instantiates the arrays as the reading
+    // meets them, each after the one enclosing it, and they nest deeper than
+    // a recursion is cut at. An array no alias writes is not counted: only a
+    // declaration, or an alias's own tuple or array, recurses without end.
+
+    const keys = ["r", "s", "t", "u", "w", "x", "y", "z", "q"];
+    const deep = `${keys.map((key) => `{ ${key}: `).join("")}string${
+      " }[]".repeat(keys.length)
+    }`;
+    const { event, reported } = await eventSchema(
+      `type Ev = { c: Writable<number>; d: { r: ${deep} } };`,
+      "Ev",
+      "(e, { c }) => { c.set(e.c.get()); }",
+      false,
+    );
+
+    expect(event.type).toBe("object");
+    expect(reported).toEqual([]);
+  });
+
+  it("overlays the capability the callback earns on a cell a generic event alias holds under arrays of objects nested nine deep", async () => {
+    // Compiled with no type check first, the nested arrays are each
+    // instantiated after the one enclosing it, but the search for a cell does
+    // not count an array no alias writes, so it finds the cell nine arrays
+    // in, and the reference expands to overlay it.
+
+    const deep = `${"{ a: ".repeat(9)}Writable<number>${" }[]".repeat(9)}`;
+    const { event } = await eventSchema(
+      `type Box<T> = { v: T; d: ${deep} };`,
+      "Box<string>",
+      "(e, { c }) => { c.set(e.v.length); }",
+      false,
+    );
+    let level = (event.properties as Record<string, Record<string, unknown>>)
+      .d!;
+    for (let depth = 0; depth < 9; depth++) {
+      const items = level.items as Record<string, unknown>;
+      level = (items.properties as Record<string, Record<string, unknown>>).a!;
+    }
+
+    expect(level.asCell).toEqual(["opaque"]);
+  });
+
+  describe("an event alias that instantiates itself without end", () => {
+    // Each `Nest<T[]>` is a new type, so neither the search for a cell nor
+    // the expansion of a reference meets one it has read, and both end where
+    // `cutsExpansion()` cuts the recursion. Every cell past the cut is
+    // opaque.
+
+    for (
+      const [shape, declaration, event] of [
+        [
+          "an object",
+          "type Nest<T> = { v: T; inner?: Nest<T[]> };",
+          "Nest<string>",
+        ],
+        ["a tuple", "type Tup<T> = [T, Tup<T[]>?];", "Tup<string>"],
+      ] as const
+    ) {
+      it(`reports what an event alias of ${shape} holding no cell leaves unread past the cut`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          "(e, { c }) => { c.set(e ? 1 : 0); }",
+        );
+
+        expect(schema).toBeDefined();
+        expect(reported.length).toBeGreaterThan(0);
+        for (const diagnostic of reported) {
+          expect(diagnostic).toEqual({
+            type: "schema-type:unread",
+            severity: "warning",
+          });
+        }
+      });
+    }
+
+    it("gives a cell the event holds the capability the callback earns, and every other cell, past the cut too, opaque", async () => {
+      const { event, reported } = await eventSchema(
+        "type Nest<T> = { c: Writable<number>; v: T; children: Nest<T[]>[] };",
+        "Nest<string>",
+        "(e, { c }) => { c.set(e.c.get()); }",
+      );
+      const properties = event.properties as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const child = (properties.children!.items as Record<string, unknown>)
+        .properties as Record<string, Record<string, unknown>>;
+
+      expect(properties.c!.asCell).toEqual(["readonly"]);
+      expect(child.c!.asCell).toEqual(["opaque"]);
+      expect(
+        capabilitiesOf(event).filter((capability) =>
+          JSON.stringify(capability) !== '["opaque"]'
+        ),
+      ).toEqual([["readonly"]]);
+      for (const diagnostic of reported) {
+        expect(diagnostic).toEqual({
+          type: "schema-type:unread",
+          severity: "warning",
+        });
+      }
+    });
+  });
+
+  describe("an event holding a finite chain of one declaration deeper than the cut", () => {
+    // Each level of these chains is a newer instantiation of one declaration,
+    // as in a recursion without end, so the overlay's cut takes them for one.
+    // Past the cut, every cell is opaque, the capability a cell no use reaches
+    // earns, as reading each chain to its end would give it.
+
+    /** `Chain<[1, …]>`, `length` ones long. */
+    const chainOf = (length: number) =>
+      `Chain<[${Array.from({ length }, () => "1").join(", ")}]>`;
+    const chain =
+      `type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { value: string; next: Chain<R> }
+  : { c: Writable<number> };`;
+
+    it("gives the cell at the end of a chain twelve long the `opaque` capability", async () => {
+      const { event, reported } = await eventSchema(
+        chain,
+        chainOf(12),
+        "(e, { c }) => { c.set(e ? 1 : 0); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["opaque"]]);
+      expect(reported).toEqual([]);
+    });
+
+    it("gives the cell at the end of a chain twelve long, read past the cut, the `readonly` capability the callback earns", async () => {
+      // A use that reaches past the cut carries the expansion along its path.
+
+      const { event } = await eventSchema(
+        chain,
+        chainOf(12),
+        `(e, { c }) => { c.set(e${".next".repeat(12)}.c.get()); }`,
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["readonly"]]);
+    });
+
+    it("defines every type a recursive cell value past the cut refers to", async () => {
+      // Past the cut, `Inner` is read with its cells opaque, and the value of
+      // its `self` cell as written. Each reading refers to the definition of
+      // its own, so its recursion refers to one the schema holds.
+
+      const { event } = await eventSchema(
+        `interface Inner { c: Writable<number>; self: Writable<Inner> }
+type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { next: Chain<R> }
+  : { inner: Inner };`,
+        chainOf(12),
+        "(e, { c }) => { c.set(e ? 1 : 0); }",
+      );
+      const referenced = [
+        ...JSON.stringify(event).matchAll(/"#\/\$defs\/([^"]+)"/g),
+      ].map(([, name]) => name);
+
+      expect(new Set(referenced)).toEqual(new Set(["Inner:opaque", "Inner"]));
+      expect(Object.keys(event.$defs as object).sort()).toEqual(
+        ["Inner", "Inner:opaque"],
+      );
+    });
+
+    for (const deepFirst of [true, false]) {
+      it(
+        `gives \`opaque\` to the cells of a deep and a shallow chain, ${
+          deepFirst ? "the deep one" : "the shallow one"
+        } declared first`,
+        async () => {
+          // Cutting the deep chain leaves its search incomplete, which no
+          // reading of the shallow chain may take for a search that found no
+          // cell.
+
+          const members = [`deep: ${chainOf(12)};`, `shallow: ${chainOf(5)};`];
+          const { event } = await eventSchema(
+            `${chain}
+type Ev<T> = { v: T; ${
+              (deepFirst ? members : [...members].reverse()).join(" ")
+            } };`,
+            "Ev<string>",
+            "(e, { c }) => { c.set(e.v.length); }",
+          );
+
+          expect(capabilitiesOf(event)).toEqual([["opaque"], ["opaque"]]);
+        },
+      );
+    }
+
+    it("gives a cell read through a short chain `readonly`, and the cell at the end of a chain that grows to it past the cut `opaque`", async () => {
+      const { event } = await eventSchema(
+        `type Step<N extends unknown[]> = N["length"] extends 9
+  ? { c: Writable<number> }
+  : { deep: Step<[...N, 1]> };
+type Ev<T> = { near: Step<[1, 1, 1, 1, 1, 1, 1]>; far: Step<[]>; v: T };`,
+        "Ev<string>",
+        "(e, { c }) => { c.set(e.near.deep.deep.c.get()); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["readonly"], ["opaque"]]);
+    });
+  });
+
+  describe("a reference to a generic declaration", () => {
+    // The reference's type is the declaration instantiated with the
+    // reference's arguments, and the overlay reads that type, not the nodes
+    // the declaration writes in its own type parameters.
+
+    it("reads a member written as the alias's type parameter as the argument the reference gives", async () => {
+      const { event, reported } = await eventSchema(
+        "type Box<T> = { c: Writable<number>; v: T };",
+        "Box<string>",
+        "(e, { c }) => { c.set(e.c.get()); }",
+      );
+
+      expect(event).toEqual({
+        type: "object",
+        properties: {
+          c: { type: "number", asCell: ["readonly"] },
+          v: { type: "string" },
+        },
+        required: ["c", "v"],
+      });
+      expect(reported).toEqual([]);
+    });
+
+    it("overlays the capability the callback earns on a cell the reference gives as an argument", async () => {
+      const { event, reported } = await eventSchema(
+        "type Pair<T> = { v: T };",
+        "Pair<Writable<number>>",
+        "(e, { c }) => { c.set(e.v.get()); }",
+      );
+
+      expect(event).toEqual({
+        type: "object",
+        properties: { v: { type: "number", asCell: ["readonly"] } },
+        required: ["v"],
+      });
+      expect(reported).toEqual([]);
+    });
+
+    for (
+      const [shape, declaration, event, written] of [
+        [
+          "a generic interface",
+          "interface Box<T> { c: Writable<number>; v: T }",
+          "Box<string>",
+          "interface Box { c: Writable<number>; v: string }",
+        ],
+        [
+          "an interface extending a generic one",
+          `interface Base<T> { v: T }
+interface Box extends Base<string> { c: Writable<number> }`,
+          "Box",
+          "interface Box { c: Writable<number>; v: string }",
+        ],
+        [
+          "a cell written around the type parameter",
+          "type Box<T> = { c: Writable<T>; v: T[] };",
+          "Box<number>",
+          "type Box = { c: Writable<number>; v: number[] };",
+        ],
+        [
+          "an optional member",
+          "type Box<T> = { c: Writable<number>; v?: T };",
+          "Box<string | null>",
+          "type Box = { c: Writable<number>; v?: string | null };",
+        ],
+        [
+          "a generic alias the member instantiates in turn",
+          `type Inner<U> = { w: Writable<U> };
+type Box<T> = { c: Writable<number>; i: Inner<T> };`,
+          "Box<string>",
+          "type Box = { c: Writable<number>; i: { w: Writable<string> } };",
+        ],
+        [
+          "a mapped type",
+          "type Box<T> = { [K in keyof T]: Writable<T[K]> };",
+          "Box<{ c: number; v: string }>",
+          "type Box = { c: Writable<number>; v: Writable<string> };",
+        ],
+        [
+          "a mapped type that makes members optional",
+          "type Ev = { c: Writable<number>; v: string };",
+          "Partial<Ev>",
+          "type Box = { c?: Writable<number>; v?: string };",
+        ],
+        [
+          "an index signature",
+          "type Box<T> = { c: Writable<number>; [key: string]: T | Writable<number> };",
+          "Box<string>",
+          "type Box = { c: Writable<number>; [key: string]: string | Writable<number> };",
+        ],
+        [
+          "an alias of a cell",
+          `type Ref<T> = Writable<T>;
+type Box = { c: Writable<number>; r: Ref<string> };`,
+          "Box",
+          "type Box = { c: Writable<number>; r: Writable<string> };",
+        ],
+        [
+          "an alias of an array",
+          `type List<T> = T[];
+type Box = { c: Writable<number>; l: List<Writable<string>> };`,
+          "Box",
+          "type Box = { c: Writable<number>; l: Writable<string>[] };",
+        ],
+      ] as const
+    ) {
+      it(`gives ${shape} the event schema of the same type written out`, async () => {
+        const callback = event === "Partial<Ev>"
+          ? "(e, { c }) => { c.set(e.c?.get() ?? 0); }"
+          : "(e, { c }) => { c.set(e.c.get()); }";
+        const generic = await eventSchema(declaration, event, callback);
+        const plain = await eventSchema(written, "Box", callback);
+
+        expect(capabilitiesOf(plain.event)).toContainEqual(["readonly"]);
+        expect(generic.event).toEqual(plain.event);
+        expect(generic.reported).toEqual(plain.reported);
+      });
+    }
+
+    for (
+      const [shape, argument, written] of [
+        ["an object", "{ name: string }", "{ name: string }"],
+        ["an array", "string[]", "string[]"],
+      ] as const
+    ) {
+      it(`marks ${shape} the reference gives as an argument \`comparable\` where the callback only compares its identity, as written out`, async () => {
+        const callback = "(e, { c }) => { c.set(equals(e.v, e.v) ? 1 : 0); }";
+        const generic = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box<T> = { c: Writable<number>; v: T };`,
+          `Box<${argument}>`,
+          callback,
+        );
+        const plain = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box = { c: Writable<number>; v: ${written} };`,
+          "Box",
+          callback,
+        );
+        const v = (schema: Record<string, unknown>) =>
+          (schema.properties as Record<string, Record<string, unknown>>).v!;
+
+        expect(v(plain.event).asCell).toEqual(["comparable"]);
+        expect(generic.event).toEqual(plain.event);
+      });
+    }
+
+    it("reads an optional member whose generic alias denotes a union of several members without the `undefined` its `?` adds", async () => {
+      const callback = "(e, { c }) => { c.set(e.c.get()); }";
+      const generic = await eventSchema(
+        `type Identity<T> = T;
+type Box = { c: Writable<number>; v?: Identity<Writable<number> | string> };`,
+        "Box",
+        callback,
+      );
+      const plain = await eventSchema(
+        "type Box = { c: Writable<number>; v?: Writable<number> | string };",
+        "Box",
+        callback,
+      );
+      const alternatives = (schema: Record<string, unknown>) =>
+        (schema.properties as Record<string, Record<string, unknown>>).v!
+          .anyOf as unknown[];
+
+      expect(alternatives(generic.event)).toHaveLength(2);
+      expect(alternatives(generic.event)).toEqual(
+        expect.arrayContaining(alternatives(plain.event)),
+      );
+    });
+
+    it("reads a reference to a generic union alias as the union, overlaying the cell in a member", async () => {
+      const { event } = await eventSchema(
+        "type Maybe<T> = T | undefined;",
+        "Maybe<{ c: Writable<number> }>",
+        "(e, { c }) => { c.set(e?.c.get() ?? 0); }",
+      );
+
+      expect(event.anyOf).toHaveLength(2);
+      expect(event.anyOf).toEqual(expect.arrayContaining([
+        { type: "undefined" },
+        {
+          type: "object",
+          properties: { c: { type: "number", asCell: ["readonly"] } },
+          required: ["c"],
+        },
+      ]));
+    });
+
+    it("keeps a reference to a generic tuple alias as written, as a tuple written out is", async () => {
+      const generic = await eventSchema(
+        "type Tup<T> = [Writable<number>, T];",
+        "Tup<string>",
+        "(e, { c }) => { c.set(e[0].get()); }",
+      );
+      const plain = await eventSchema(
+        "type Tup = [Writable<number>, string];",
+        "Tup",
+        "(e, { c }) => { c.set(e[0].get()); }",
+      );
+      const items = (schema: Record<string, unknown>) =>
+        (schema.items as Record<string, unknown>).anyOf;
+
+      expect(generic.event.type).toBe("array");
+      expect(items(generic.event)).toHaveLength(2);
+      expect(items(generic.event)).toEqual(
+        expect.arrayContaining(items(plain.event) as unknown[]),
+      );
+    });
+  });
+
+  describe("a scoped cell", () => {
+    // Only the scope wrapper names the scope, so the overlay does not rebuild
+    // the cell inside it, and the cell keeps the capability written for it.
+
+    for (
+      const [spelling, declaration, event] of [
+        [
+          "written out",
+          "type Ev = { c: Writable<number>; s: PerUser<Writable<number>> };",
+          "Ev",
+        ],
+        [
+          "given as a generic alias's argument",
+          "type Box<T> = { c: Writable<number>; s: T };",
+          "Box<PerUser<Writable<number>>>",
+        ],
+      ] as const
+    ) {
+      it(`keeps a scoped cell ${spelling} as written, with its scope`, async () => {
+        const { event: schema } = await eventSchema(
+          `import type { PerUser } from "commonfabric";\n${declaration}`,
+          event,
+          "(e, { c }) => { c.set(e.c.get()); }",
+        );
+
+        expect(schema.properties).toEqual({
+          c: { type: "number", asCell: ["readonly"] },
+          s: { type: "number", asCell: [{ kind: "cell", scope: "user" }] },
+        });
+      });
+    }
+  });
+
+  it("reads an optional member at its type without the `undefined` its `?` adds", async () => {
+    const callback = "(e, { c }) => { c.set(e.c.get()); }";
+    const { event } = await eventSchema(
+      `interface Reply { message: Writable<number>; shownIn: string }
+interface Ev { c: Writable<number>; r?: Reply }`,
+      "Ev",
+      callback,
+    );
+    const written = await eventSchema(
+      `type Ev = {
+  c: Writable<number>;
+  r?: { message: Writable<number>; shownIn: string };
+};`,
+      "Ev",
+      callback,
+    );
+
+    expect((event.properties as Record<string, unknown>).r).toEqual({
+      type: "object",
+      properties: {
+        message: { type: "number", asCell: ["opaque"] },
+        shownIn: { type: "string" },
+      },
+      required: ["message", "shownIn"],
+    });
+    expect(event).toEqual(written.event);
+  });
+
+  describe("a cell the callback uses in a way its summary does not record", () => {
+    // A use the capability analysis does not follow member by member gives no
+    // capability narrower than the one written to show sufficient, so a cell
+    // it reaches keeps the one written, and a cell it does not reach still
+    // earns its own.
+
+    const cell = (asCell: string) => ({ type: "number", asCell: [asCell] });
+    for (
+      const [use, declaration, event, callback, expected] of [
+        [
+          "a rest element of an object destructuring",
+          `import type { ReadonlyCell } from "commonfabric";
+type Ev = { a: Writable<number>; b: ReadonlyCell<number> };`,
+          "Ev",
+          "(e, { c }) => { const { ...rest } = e; c.set(rest.a.get()); }",
+          {
+            type: "object",
+            properties: { a: cell("cell"), b: cell("readonly") },
+            required: ["a", "b"],
+          },
+        ],
+        [
+          "an array destructuring",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "(e, { c }) => { const [, b] = e; c.set(b!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "an array destructuring of the parameter",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "([a], { c }) => { c.set(a!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "a key that can name any element",
+          "type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(e.list[c.get()]!.v.get()); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
+          "a helper with no summary, handed the cell",
+          `declare function keep(value: unknown): boolean;
+type Ev = { x: Writable<number>; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { if (keep(e.x)) c.set(1); }",
+          {
+            type: "object",
+            properties: { x: cell("cell"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+        [
+          "a key that can name any element, in a helper",
+          `function pick(list: readonly { v: Writable<number> }[], i: number): number {
+  return list[i]!.v.get();
+}
+type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { c.set(pick(e.list, c.get())); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
+          "a traversal of the cell's value alone",
+          "type Ev = { x: Writable<number>; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(JSON.stringify(e.x.get()).length); }",
+          {
+            type: "object",
+            properties: { x: cell("readonly"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+      ] as const
+    ) {
+      it(`gives each cell what ${use} lets the callback do`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          callback,
+        );
+
+        expect(schema).toEqual(expected);
+        expect(reported).toEqual([]);
+      });
+    }
+
+    describe("past the cut of a recursion", () => {
+      // The untracked use reaches cells past the depth where the overlay cuts
+      // a recursion and reads its remainder opaque; they keep the capability
+      // written for them all the same, and the untouched sibling does not.
+
+      const chain = (length: number) =>
+        `type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { next: Chain<R> }
+  : { v: Writable<number> };
+type Deep = Chain<[${Array.from({ length }, () => "1").join(", ")}]>;`;
+      const nexts = (length: number) => ".next".repeat(length);
+      for (
+        const [use, declaration, callback] of [
+          [
+            "a key that can name any element, twelve levels above the cell",
+            `${chain(12)}
+type Ev = { list: Deep[]; other: Writable<number> };`,
+            `(e, { c }) => { c.set(e.list[c.get()]!${nexts(12)}.v.get()); }`,
+          ],
+          [
+            "a helper with no summary, handed a value twelve levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(12)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a helper with no summary, handed a value four levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(4)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a rest element twelve levels down",
+            `${chain(13)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            `(e, { c }) => { const { ...rest } = e.x${
+              nexts(12)
+            }; c.set(rest.next.v.get()); }`,
+          ],
+        ] as const
+      ) {
+        it(`keeps the cell ${use} reaches as written`, async () => {
+          const { event: schema, reported } = await eventSchema(
+            declaration,
+            "Ev",
+            callback,
+          );
+
+          expect((schema.properties as Record<string, unknown>).other).toEqual(
+            cell("opaque"),
+          );
+          expect(
+            capabilitiesOf(schema).map((capability) =>
+              JSON.stringify(capability)
+            ).sort(),
+          ).toEqual(['["cell"]', '["opaque"]']);
+          expect(reported).toEqual([]);
+        });
+      }
+    });
+
+    it("keeps a cell beside one handed on under the empty key opaque", async () => {
+      const { event: schema } = await eventSchema(
+        `declare function keep(value: unknown): boolean;
+type Ev = { "": Writable<number>; other: Writable<number> };`,
+        "Ev",
+        '(e, { c }) => { if (keep(e[""])) c.set(1); }',
+      );
+
+      expect((schema.properties as Record<string, unknown>).other).toEqual(
+        cell("opaque"),
+      );
+    });
   });
 });
 
@@ -1031,6 +1751,7 @@ Deno.test("applyShrinkAndWrap descends identity paths through named interface re
 
   const result = applyShrinkAndWrap(
     createParamSummary({
+      readPaths: [["inner", "drop"], ["other"]],
       identityPaths: [["inner", "keep"]],
       identityCellPaths: [["inner", "keep"]],
     }),
@@ -1045,7 +1766,7 @@ Deno.test("applyShrinkAndWrap descends identity paths through named interface re
   const { props: members } = shrunkProps(result, sourceFile);
   // The reference resolves to declared members, recurses into `inner`, and
   // wraps the `keep` leaf. Identity-path application transforms the targeted
-  // leaf in place and leaves the surrounding structure intact.
+  // leaf in place and leaves the members the summary reads intact.
   assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
   assertEquals(members.get("drop")?.type, "number");
   assertEquals(members.get("other")?.type, "string");
@@ -1066,6 +1787,7 @@ Deno.test("applyShrinkAndWrap rebuilds inline literals when a nested identity le
 
   const result = applyShrinkAndWrap(
     createParamSummary({
+      readPaths: [["inner", "drop"], ["other"]],
       identityPaths: [["inner", "keep"]],
       identityCellPaths: [["inner", "keep"]],
     }),
@@ -1095,6 +1817,7 @@ Deno.test("applyShrinkAndWrap returns an inline literal unchanged when a nested 
 
   const result = applyShrinkAndWrap(
     createParamSummary({
+      readPaths: [["a", "x"], ["b"]],
       identityPaths: [["a", "missing"]],
     }),
     alias.type,
@@ -1110,6 +1833,40 @@ Deno.test("applyShrinkAndWrap returns an inline literal unchanged when a nested 
   assertEquals(members.get("x")?.type, "string");
   assertEquals(members.get("b")?.type, "string");
   assertEquals(hasQualifiedRef(node, "__cfHelpers", "OpaqueCell"), false);
+});
+
+Deno.test("applyShrinkAndWrap prunes members no path reaches when every path is an identity path", () => {
+  const { sourceFile, checker } = createProgram(`
+    declare namespace __cfHelpers {
+      export type OpaqueCell<T> = { readonly opaque?: T };
+    }
+    type Input = {
+      inner: { keep: string; drop: number };
+      other: string;
+    };
+  `);
+  const alias = findTypeAlias(sourceFile, "Input");
+  const baseType = checker.getTypeAtLocation(alias.type);
+
+  const result = applyShrinkAndWrap(
+    createParamSummary({
+      identityPaths: [["inner", "keep"]],
+      identityCellPaths: [["inner", "keep"]],
+    }),
+    alias.type,
+    baseType,
+    false,
+    checker,
+    sourceFile,
+    ts.factory,
+  );
+
+  const { props: members } = shrunkProps(result, sourceFile);
+  // Only `inner.keep` is used, and only for its identity: it is narrowed, and
+  // the members no path reaches are pruned as any shrink prunes them.
+  assertEquals(members.get("keep")?.type, "__cfHelpers.OpaqueCell<unknown>");
+  assertEquals(members.has("drop"), false);
+  assertEquals(members.has("other"), false);
 });
 
 Deno.test("applyShrinkAndWrap leaves array elements untouched when an identity item path does not resolve", () => {
@@ -1152,6 +1909,7 @@ Deno.test("applyShrinkAndWrap descends identity item paths through readonly arra
 
   const result = applyShrinkAndWrap(
     createParamSummary({
+      readPaths: [["0", "drop"]],
       identityPaths: [["0", "keep"]],
       identityCellPaths: [["0", "keep"]],
     }),

@@ -62,6 +62,24 @@ export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
 export const NAME_SEPARATOR = " > ";
 
 /**
+ * The names of every test enclosing the test a name identifies, outermost
+ * first: `"a > b > c"` is inside `"a"` and `"a > b"`. Each separator is a
+ * place the name may be cut, overlapping ones included, so a step of a
+ * test named `"a >"`, which reports as `"a > > b"`, is inside `"a >"`.
+ */
+export function enclosingNames(name: string): string[] {
+  const names: string[] = [];
+  for (
+    let at = name.indexOf(NAME_SEPARATOR);
+    at >= 0;
+    at = name.indexOf(NAME_SEPARATOR, at + 1)
+  ) {
+    names.push(name.slice(0, at));
+  }
+  return names;
+}
+
+/**
  * A name map as it travels: where the test process ran, and a registered
  * name against the repository-relative file it came from. The names are
  * what `Deno.test` was called with, and, for a file written with
@@ -186,17 +204,11 @@ export function fileForName(
   name: string,
   names: ReadonlyMap<string, string>,
 ): string | undefined {
-  const exact = names.get(name);
-  if (exact !== undefined) return exact;
-  let best: string | undefined;
-  let bestLength = -1;
-  for (const [registered, file] of names) {
-    if (registered.length <= bestLength) continue;
-    if (!name.startsWith(registered + NAME_SEPARATOR)) continue;
-    best = file;
-    bestLength = registered.length;
+  for (const registered of [...enclosingNames(name), name].reverse()) {
+    const file = names.get(registered);
+    if (file !== undefined) return file;
   }
-  return best;
+  return undefined;
 }
 
 /** Whether an entry of a map is one a read scoped to `ranIn` takes. */
@@ -233,6 +245,56 @@ export async function readNameMaps(
   const ranIn = options.ranIn?.replace(/\/$/, "");
   const names = new Map<string, string>();
   const ambiguous = new Set<string>();
+  for (const map of await nameMapsIn(spool)) {
+    for (const [name, file] of Object.entries(map.names)) {
+      if (typeof file !== "string" || file.length === 0) continue;
+      if (!inScope(map.dir, file, ranIn)) continue;
+      const known = names.get(name);
+      if (known === undefined) {
+        names.set(name, file);
+        continue;
+      }
+      if (known !== file) ambiguous.add(name);
+    }
+  }
+  for (const name of ambiguous) names.delete(name);
+  return names;
+}
+
+/**
+ * The names each test file registered, by repository-relative file, from
+ * every name map a spool holds. A test process writes a file's names once
+ * the file's module has registered them, before any of its tests run, so
+ * a file named here is one whose process got that far, and the names
+ * under it are every name that process registered: each `Deno.test`, and
+ * each leaf's whole chain where the bdd re-export recorded leaves. A file
+ * whose process registered nothing, or stopped before its module had
+ * loaded, is not named, and nothing here says what it holds.
+ *
+ * A name two files both registered stays under each of them. Which file
+ * holds a test is not the question this answers, so nothing is ambiguous.
+ */
+export async function readRegistrations(
+  spool: string,
+): Promise<Map<string, Set<string>>> {
+  const registered = new Map<string, Set<string>>();
+  for (const map of await nameMapsIn(spool)) {
+    for (const [name, file] of Object.entries(map.names)) {
+      if (typeof file !== "string" || file.length === 0) continue;
+      const names = registered.get(file);
+      if (names === undefined) registered.set(file, new Set([name]));
+      else names.add(name);
+    }
+  }
+  return registered;
+}
+
+/**
+ * Every name map a spool holds, in the order of their names. One that
+ * cannot be read or is not a map is left out: a name map is metadata, and
+ * its absence costs what its reader would have learned from it.
+ */
+async function nameMapsIn(spool: string): Promise<ParsedNameMap[]> {
   let entries: string[] = [];
   try {
     for await (const entry of Deno.readDir(spool)) {
@@ -247,6 +309,7 @@ export async function readNameMaps(
     entries = [];
   }
   entries.sort();
+  const maps: ParsedNameMap[] = [];
   for (const entry of entries) {
     let parsed: unknown;
     try {
@@ -255,20 +318,9 @@ export async function readNameMaps(
       continue;
     }
     const map = asNameMap(parsed);
-    if (map === undefined) continue;
-    for (const [name, file] of Object.entries(map.names)) {
-      if (typeof file !== "string" || file.length === 0) continue;
-      if (!inScope(map.dir, file, ranIn)) continue;
-      const known = names.get(name);
-      if (known === undefined) {
-        names.set(name, file);
-        continue;
-      }
-      if (known !== file) ambiguous.add(name);
-    }
+    if (map !== undefined) maps.push(map);
   }
-  for (const name of ambiguous) names.delete(name);
-  return names;
+  return maps;
 }
 
 /** Serializes a skip list for the file the environment points at. */
@@ -304,12 +356,20 @@ export function parseSkipList(text: string): SkipList | undefined {
 /** What one test process captured, and what it was told not to run. */
 export interface RegistrationCapture {
   /** The file each registered name came from, repository-relative. */
-  names: Map<string, string>;
+  readonly names: ReadonlyMap<string, string>;
+
+  /**
+   * Notes that `name` was registered from `file`, and writes it into the
+   * spool once the code registering it has run, before any test does. A
+   * test run that is interrupted ends without unloading, and the names
+   * its report needs are in the spool already.
+   */
+  attribute(name: string, file: string): void;
 
   /** Whether a name registered from a file is on the skip list. */
   skipped(file: string | undefined, name: string): boolean;
 
-  /** Writes the captured name map into the spool. */
+  /** Writes the names noted since the last write into the spool. */
   flush(): void;
 }
 
@@ -330,9 +390,10 @@ export function activeCapture(): RegistrationCapture | undefined {
 
 /**
  * Wraps `Deno.test` so that every registration is attributed to its file
- * and checked against the skip list, and arranges for the captured map to
- * reach the spool when the process unloads. Returns undefined when there
- * was nothing to do and `Deno.test` was left alone.
+ * and checked against the skip list, and arranges for the captured names
+ * to reach the spool as they are registered and when the process unloads.
+ * Returns undefined when there was nothing to do and `Deno.test` was left
+ * alone.
  *
  * Called from a `--preload` module, so it runs before any test module and
  * needs nothing from the test files. Installing twice is a no-op: a
@@ -405,8 +466,9 @@ export interface CaptureOptions {
 
   /**
    * The repository-relative directory the map says it was written in, as
-   * it stood when the capture was built. `flush` runs at process unload,
-   * by which time a test may have changed the working directory.
+   * it stood when the capture was built. `flush` runs as each test file
+   * registers its tests, by which time a test of an earlier file may have
+   * changed the working directory.
    */
   dir?: string;
 }
@@ -425,18 +487,32 @@ export function buildCapture(
 } {
   const { dir, skips, spool } = options;
   const names = new Map<string, string>();
+  // What the next write carries. Each write is a map of its own, and a
+  // reader merges every map the spool holds.
+  let unwritten = new Map<string, string>();
+  let writing = false;
 
   const capture: RegistrationCapture = {
     names,
+    attribute: (name, file) => {
+      names.set(name, file);
+      unwritten.set(name, file);
+      if (writing) return;
+      writing = true;
+      queueMicrotask(() => {
+        writing = false;
+        capture.flush();
+      });
+    },
     skipped: (file, name) => {
       if (skips === undefined || file === undefined) return false;
       return skips[file]?.includes(name) ?? false;
     },
     flush: () => {
-      if (spool === undefined || names.size === 0) return;
+      if (spool === undefined || unwritten.size === 0) return;
       const map: NameMap = {
         ...(dir === undefined ? {} : { dir }),
-        names: Object.fromEntries(names),
+        names: Object.fromEntries(unwritten),
       };
       try {
         Deno.mkdirSync(spool, { recursive: true });
@@ -451,7 +527,9 @@ export function buildCapture(
           ),
           JSON.stringify(map),
         );
+        unwritten = new Map();
       } catch (error) {
+        // The names stay unwritten, and the next write carries them.
         console.warn(`test records: cannot write a name map: ${error}`);
       }
     },
@@ -473,7 +551,7 @@ export function buildCapture(
       return;
     }
     const file = runningFile();
-    if (file !== undefined) names.set(definition.name, file);
+    if (file !== undefined) capture.attribute(definition.name, file);
     if (capture.skipped(file, definition.name)) {
       through({ ...definition, ...extra, ignore: true });
       return;

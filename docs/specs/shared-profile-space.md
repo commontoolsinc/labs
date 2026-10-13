@@ -165,19 +165,21 @@ neither. `root: true` makes the profile the space's root: the space's genesis
 commit reserves the root's address, and the commit placing the profile links it
 there as the space cell's `defaultPattern`, so a host holding only the space's
 DID reaches the profile. A profile space whose genesis reserved no root has no
-profile as its root, and is reached only through a link to its profile. The
-display name is independent of the space identity: it flows to
+profile as its root until `cf profile repair-root`, run by an operator or the
+person, links its profile there, and is reached only via a link to its profile
+until then. The display name is independent of the space identity: it flows to
 `initialName`, which the profile shows until a name is stored in the profile's
 `name` cell, and into that cell itself at creation. The cell is initialized
 statically so it keeps its identity — and the name saved in it — across
 releases of the profile pattern; the create handler
-queues a second step (`seedProfileName` in `profile-create.tsx`, addressed by
-the new entry's position in `profiles`) that stores the creation name through
-`setName`, the cell's owner-protected writer, once the profile's docs have
-loaded, so `#profile` readers find the name in storage without running the
-profile. A profile renamed under an earlier release, whose `name` cell was
-derived from `initialName`, loses that saved name once, at its first release
-under the static initializer, and keeps every name saved after. The home default
+queues a second step (`seedProfileName` in `profile-create.tsx`, handed a link
+to the new profile rather than reading `profiles`) that stores the creation
+name through `setName`, the cell's owner-protected writer, once the profile's
+docs have loaded, so `#profile` readers find the name in storage without
+running the profile. The step fails loudly when its profile does not resolve.
+A profile renamed under an earlier release, whose `name` cell was derived from
+`initialName`, loses that saved name once, at its first release under the
+static initializer, and keeps every name saved after. The home default
 pattern's `profile` link is the durable source of truth after creation, and
 runtime-only `.inSpace` annotations are rewritten to the resolved DID during
 post-run.

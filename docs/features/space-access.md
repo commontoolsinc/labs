@@ -105,6 +105,11 @@ and the replica has no local basis for the list. A confirmed absent list remains
 `undefined` without withdrawing the handler. Reactive computations rerun when
 the list arrives through their ordinary read dependencies.
 
+The withdrawal also discards follow-up events queued by that attempt. When the
+handler is eligible to rerun, those discarded follow-ups produce no drop warning:
+the successful attempt sends its own. A one-shot client event that opted out of
+retrying retains the warning because no later attempt replaces its follow-ups.
+
 A `target` of `undefined` is a target not known yet, and returns `undefined`. A
 computation that takes its target by value, rather than as a cell, reads
 `undefined` for it while the value it names cannot be read, which is exactly

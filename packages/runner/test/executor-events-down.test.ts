@@ -44,7 +44,8 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Cell, sendEvent } from "../src/cell.ts";
+import { type Cell, EventDeliveryError, sendEvent } from "../src/cell.ts";
+import { handlingCommittedBy } from "../src/handling-commit.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -2622,6 +2623,57 @@ describe("Phase 3 events-down (serving side)", () => {
     );
     expect(carryingBatch).toBeDefined();
     expect(JSON.stringify(carryingBatch!.operations)).toContain(link!.id);
+    cancelDemand();
+  });
+
+  it("returns the serving commit's sequence from handlingCommittedBy for a served handling, whose echo transaction committed nothing", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
+      arg: "handling-seq-arg",
+      result: "handling-seq-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const fired = fireVerb(result, "probe", { n: 7 }, "handling-seq-1");
+    await clientRuntime.idle();
+    await fired.reached(1);
+    expect(fired.entries[0].status).not.toBe("error");
+
+    const tx = fired.entries[0].tx;
+    const link = tx.handlingReceiptLink!;
+    expect(tx.committedSeq?.(link.space)).toBeUndefined();
+    const writers = commitsWriting(engine, link.id);
+    expect(writers.length).toBe(1);
+    expect(await handlingCommittedBy(clientRuntime, tx)).toBe(writers[0].seq);
+    cancelDemand();
+  });
+
+  it("reports a served handler's throw to its sender as an EventDeliveryError of kind `errored`, carrying the handler's words", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const { result } = await standUp(clientRuntime, THROW_PATTERN, {
+      arg: "delivery-error-arg",
+      result: "delivery-error-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const fired = fireVerb(result, "explode", {}, "delivery-error-1");
+    await clientRuntime.idle();
+    await fired.reached(1);
+    const status = fired.entries[0].tx.status();
+    expect(status.status).toBe("error");
+    const error = status.status === "error" ? status.error : undefined;
+    expect(error).toBeInstanceOf(EventDeliveryError);
+    if (!(error instanceof EventDeliveryError)) return;
+    expect(error.kind).toBe("errored");
+    expect(error.reason).toContain("handler exploded deliberately");
+    expect(error.message).toBe(`event handling errored: ${error.reason}`);
     cancelDemand();
   });
 

@@ -14,8 +14,8 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
 
 - The contract's own records: `about`, its messages, and `recentActivity` with
   its next `seq` and `recentActivityExpiredThrough`. The messages are a list
-  ordered by `sentAt`. Each message links its reactions as separately
-  authored documents, projected as a list in the contract.
+  ordered by `sentAt`. Each message's reactions are a keyed collection,
+  projected as a list in the contract.
 - The request memory: the requests the room has acted on, by sender and
   `requestId` (see [writers](#writers)).
 - The times the room has used, so it can make each new one unique, each kept
@@ -29,14 +29,23 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
 root lists when the room is not that root (`wish({ query: "#default" })`), and
 the messages' authors, keyed by profile cell. A room with `about`, which only a
 manager creates, is its space's root, and reads only its own roster: its
-`#default` is itself. `messages` (its `count`, `oldestAt`, `newestAt`, and
+`#default` is itself. `roster` is computed from those who joined alone.
+`messages` (its `count`, `oldestAt`, `newestAt`, and
 `latest`) is computed from the messages, and `canSend` from the reader's access
 and profile, when they're read. Neither is stored.
 
-The one `PerSession` value in the contract is `messages.windows`, the session's
-windows, kept as a `PerSession` keyed collection. It comes into being with the
-session's first `openWindow`, so a session that only reads, as a READ member's
-does, has none.
+`participantEntries` is computed from `participants`, reading the
+`represents-principal` label on each profile with `principalOf()`, and
+`participantPrincipals` is computed from those entries. A profile lives in its
+owner's own space, so a reader that space refuses reads no principal from it.
+Both are derived per session, so each session reads instances of its own,
+derived under its own access.
+
+The `PerSession` values in the contract are `messages.windows`, the session's
+windows, kept as a `PerSession` keyed collection, `participantEntries`, and
+`participantPrincipals`.
+The windows come into being with the session's first `openWindow`, so a session
+that only reads, as a READ member's does, has none.
 
 The room's `[UI]` keeps its composer's state, the draft and the reply being
 composed, as a `PerSession` value of its own, so two placements of the same room
@@ -69,15 +78,24 @@ room's own composer builds a send's `{ version: { body, sentAt }, replyTo? }`
 from the text the person submitted, which its handler reads as `target.value`,
 and the composer event's time as the proposed `sentAt`.
 
+A successful message or reaction in a room that is its space's root sends
+`joinRoom` to the viewer's manager, when one is available. The manager's
+separate event checks its private Home catalog and lists or restores the room;
+joining an already listed room without a `requestId` changes nothing. Room
+write handlers hold the manager's stream but read no catalog, so the catalog's
+confidentiality stays out of the transaction that stores shared messages and
+reactions. A social space's embedded chat sends no join: the space's own
+membership already governs that conversation.
+
 Every handler in the table first checks its event's sender and `requestId`
 against a keyed collection of the requests the room has acted on, and does
 nothing for one it finds. It records the request there in the same transaction
-as its effect, and retains that identity for the room's lifetime. The collection
-keeps a request even after its message is obliterated: it says only that the
-sender made a request, not what,
-and without it a late redelivery of the original send would send the message
-again. The two bounds of its window for proposed times are constants of the
-pattern, documented beside it.
+as its effect. The collection retains each request for the room's lifetime,
+including after its message is obliterated: it says only that the sender made a
+request, not what. The runtime supplies no finite maximum redelivery delay, so
+expiring a request could admit a repeated edit or reaction. The two bounds of
+its window for proposed times are constants of the pattern, documented beside
+it.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` moves the current version into `earlierVersions` before recording
@@ -105,11 +123,15 @@ the opposite of what the person meant. `commitSendReaction` and
 `commitDeleteReaction` each change nothing when the reaction is already as
 asked.
 
-`commitSendReaction` finds a reaction by its reactor profile and emoji, and
-changes nothing when that pair is already present. Its transaction reads the
-message's reaction list before appending, so concurrent attempts conflict and
-re-evaluate against the committed list. Each reaction is a separately authored
-document; editing a message preserves its reaction references.
+`commitSendReaction` keeps each reaction at an address within its message
+derived from its reactor's profile and its emoji. One person's one reaction to
+one message has a single address in every session, which is how the room meets
+[`ChatReaction`](ChatReaction.md#uniqueness)'s uniqueness rule without reading
+the list. The reactions are a separately authorized part of the message:
+`commitSend` and `commitEdit` can't write them, and the reaction handlers can
+write nothing else (see [`ChatMessage`](ChatMessage.md#who-wrote-what)). Whether
+the runtime's write policies can split one document this way is a prerequisite
+to check.
 
 `about.record` is stored as `AuthoredByCurrentUser`, written once by the handler
 that creates the room, so it is labeled with its creator, and `about` links it.
@@ -161,11 +183,20 @@ the room is created from the same settings the handlers read.
   ([custom space roots](../../features/custom-space-roots.md)), and declares
   the space's kind ([space kinds](../../features/space-kinds.md)).
 - **Per-session state written by a handler.** `windows` is a `PerSession` cell
-  linked from the room's `PerSpace` message list. The runtime selects the
-  originating session's instance for handler writes, including served events.
-- **Separately authorized records.** Message and reaction documents retain
-  their own labels and writer policies through cell references.
-- **Unbounded redelivery.** The runtime establishes no finite upper bound on
-  event redelivery. Request identities and used times remain for the room's
-  lifetime, including after obliteration. Expiring them after the proposed-time
-  window would allow a delayed deletion or reaction to execute again.
+  linked from the room's `PerSpace` message list, a nesting the scoped-cell
+  design provides across a `Cell` boundary (see [scoped cell
+  instances](../scoped-cell-instances.md)). `openWindow`'s handler has to write
+  the instance belonging to the session that sent the event, including when the
+  handler runs somewhere other than that session's client. The scoped handler
+  context selects that instance; multi-session tests exercise its isolation.
+- **A write policy split within one document.** A message's reactions are
+  written only by the reaction handlers (and obliteration), and the rest of the
+  message only by the message handlers (see
+  [`ChatMessage`](ChatMessage.md#who-wrote-what)). Reactions live in separate
+  authored documents and a separately authorized list linked from the message,
+  so each writer policy has its own document boundary.
+- **A finite redelivery bound.** A client can append an event queued while it
+  was offline, and a served handler can run an incomplete event again. Neither
+  path establishes a maximum delay. The room retains request identities and
+  reserved times for its lifetime; a finite retention policy needs a runtime
+  guarantee covering both paths.

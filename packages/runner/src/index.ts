@@ -6,14 +6,17 @@ export {
 export { parseExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 export { lookupSchemaDocument } from "./schema-registry.ts";
 export { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
-export { Runtime } from "./runtime.ts";
+export { FOREIGN_HOST_LIMIT, Runtime } from "./runtime.ts";
 export { ensurePieceRunningVerdict } from "./ensure-piece-running.ts";
+export { type ConfirmedRead, readConfirmed } from "./confirmed-read.ts";
+export { handlingCommittedBy } from "./handling-commit.ts";
 export { ensureSESLockdown } from "./sandbox/ses-runtime.ts";
 export {
   fabricAuthorityMatchesSpaceHost,
   type FabricSpaceHostOptions,
   isLoopbackHostname,
   normalizeSpaceHost,
+  readMemoryUrl,
   spaceHostFromFabricAuthority,
   type SpaceHostRefusalReason,
   type SpaceHostRegistration,
@@ -36,12 +39,10 @@ export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
   type CfcPosture,
-  type DeployedClientExperimentalParams,
   type EnvReader,
   EXPERIMENTAL_ENV_VARS,
   EXPERIMENTAL_FLAG_AUTHORITY,
   type ExperimentalFlagAuthority,
-  experimentalOptionsForDeployedClient,
   experimentalOptionsFromEnv,
   MAX_ENFORCEMENT_CFC_OPTIONS,
   MAX_ENFORCEMENT_SINK_CEILINGS,
@@ -58,6 +59,12 @@ export {
   type UnitTestPresetParams,
   withServerExecutionDefault,
 } from "./runtime-presets.ts";
+export {
+  type DeployedClientParams,
+  type DeployedClientSettings,
+  memoryHostNote,
+  settingsForDeployedClient,
+} from "./deployment-meta.ts";
 export type {
   UnsafeHostTrust,
   UnsafeHostTrustOptions,
@@ -127,6 +134,8 @@ export {
   cellTx,
   convertCellsToLinks,
   encodeSqliteParams,
+  EventDeliveryError,
+  type EventDeliveryFailure,
   exportCell,
   hostValueOf,
   isCell,
@@ -336,6 +345,7 @@ export {
   WebhookConfigSchema,
 } from "./builder/types.ts";
 export { createNodeFactory } from "./builder/module.ts";
+export { attestedPrincipalsAt } from "./builder/principal-of.ts";
 export { reactive as cell } from "./builder/reactive.ts";
 export {
   CFC_ATOM_TYPE,
@@ -430,6 +440,7 @@ export {
 export { schemaPathSelection } from "./schema-path.ts";
 export {
   acceptsOpaqueCellOrUnresolvedLink,
+  materializeStoredValueForValidation,
   overlayUnreadableLinkPlaceholders,
   storedArgumentValidationIssue,
 } from "./stored-argument-validation.ts";

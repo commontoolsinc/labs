@@ -127,7 +127,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
 
   describe(): SandboxRuntimeDescription {
     return {
-      kind: "docker-runsc-cfc",
+      kind: "runsc-cfc",
       defaultWorkingDirectory: this.defaultWorkingDirectory(),
       cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
     };
@@ -3133,8 +3133,8 @@ describe("CfHarnessPromptLoop opening research", () => {
 class CwdEscapeSandboxRuntime extends FakeSandboxRuntime {
   override resolvePath(path: string, cwd?: string): string {
     if (!this.isPathWithinWorkspace(path)) {
-      // Mirrors docker-runsc.ts: the typed escape whose message carries a host
-      // root label that must NOT reach the model.
+      // Mirrors the sandbox driver: the typed escape whose message carries a
+      // host root label that must NOT reach the model.
       throw new SandboxPathEscapeError(
         path,
         `path escapes allowed sandbox roots: ${path}`,
@@ -4520,6 +4520,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "assign_slug",
       "resolve_piece",
       "describe_handle",
+      "call_verb",
       "finish_task",
       "research",
     ],
@@ -4722,6 +4723,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "assign_slug",
       "resolve_piece",
       "describe_handle",
+      "call_verb",
       "finish_task",
       "search_patterns",
       "record_feedback",
@@ -11372,4 +11374,141 @@ describe("CfHarnessPromptLoop budget finalization", () => {
       runtime.shellRequests.filter((r) => r.command.includes("touch unsafe")),
     ).toHaveLength(0);
   });
+});
+
+describe("CfHarnessPromptLoop turn budget warning", () => {
+  const bashTurnsThenAnswer = (
+    answerOnTurn: number,
+    requests: HarnessModelTurnRequest[],
+  ): HarnessModelClient => ({
+    providerId: "openai-compatible-gateway",
+    complete: (request) => {
+      requests.push(structuredClone({ ...request, onAttempt: undefined }));
+      return Promise.resolve({
+        assistant: requests.length === answerOnTurn
+          ? { role: "assistant", content: "Done." }
+          : {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: `call-${requests.length}`,
+              type: "function",
+              function: {
+                name: "bash",
+                arguments: JSON.stringify({ command: "echo evidence" }),
+              },
+            }],
+          },
+      });
+    },
+  });
+
+  it("warns a strict run once, two turns before its last, and keeps its tools", async () => {
+    const requests: HarnessModelTurnRequest[] = [];
+    const budgetMessages: string[] = [];
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        model: "gpt-test",
+      }),
+      maxModelTurns: 5,
+      modelClient: bashTurnsThenAnswer(5, requests),
+    });
+
+    const result = await loop.runPrompt({
+      prompt: "Collect the evidence.",
+      onTranscriptEvent: ({ message }) => {
+        if (
+          message.role === "user" &&
+          message.content.startsWith("Host turn budget:")
+        ) {
+          budgetMessages.push(message.content);
+        }
+      },
+    });
+
+    expect(budgetMessages).toHaveLength(1);
+    expect(budgetMessages[0]).toContain("two model turns remain");
+    expect(budgetMessages[0]).not.toContain("submit_result");
+    expect(requests).toHaveLength(5);
+    expect(requests[2]?.transcript.at(-1)?.content).toBe(budgetMessages[0]);
+    expect(requests[1]?.transcript.at(-1)?.content).not.toBe(
+      budgetMessages[0],
+    );
+    expect(requests.at(-1)?.tools.length).toBeGreaterThan(0);
+    expect(result.finalAssistantText).toBe("Done.");
+    expect(result.runState.terminalReason).toBe("assistant_completed");
+    expect(
+      result.transcript.some((message) =>
+        message.content.startsWith("Host turn budget:")
+      ),
+    ).toBe(false);
+  });
+
+  it("tells a strict run returning a structured result to call `submit_result` before its last turn", async () => {
+    const requests: HarnessModelTurnRequest[] = [];
+    const root = await Deno.makeTempDir();
+    try {
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          model: "gpt-test",
+          structuredResult: {
+            schema: { type: "object" },
+            path: join(root, "result.json"),
+          },
+        }),
+        maxModelTurns: 3,
+        modelClient: bashTurnsThenAnswer(3, requests),
+      });
+
+      await loop.runPrompt({ prompt: "Collect the evidence." });
+
+      expect(requests[0]?.transcript.at(-1)?.content).toContain(
+        "Call submit_result on the next turn; an accepted result ends the run.",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("still fails a strict run that ends without a final response after the warning", async () => {
+    const requests: HarnessModelTurnRequest[] = [];
+    const loop = new CfHarnessPromptLoop({
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        model: "gpt-test",
+      }),
+      maxModelTurns: 4,
+      modelClient: bashTurnsThenAnswer(Number.POSITIVE_INFINITY, requests),
+    });
+
+    await expect(loop.runPrompt({ prompt: "Collect the evidence." }))
+      .rejects.toThrow("exceeded max model turns (4)");
+    expect(
+      requests[1]?.transcript.at(-1)?.content.startsWith("Host turn budget:"),
+    ).toBe(true);
+  });
+
+  for (const cap of [1, 2]) {
+    it(`sends no warning to a strict run of ${cap} turns`, async () => {
+      const requests: HarnessModelTurnRequest[] = [];
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          model: "gpt-test",
+        }),
+        maxModelTurns: cap,
+        modelClient: bashTurnsThenAnswer(cap, requests),
+      });
+
+      await loop.runPrompt({ prompt: "Collect the evidence." });
+
+      expect(
+        requests.flatMap((request) => request.transcript).some((message) =>
+          message.content.startsWith("Host turn budget:")
+        ),
+      ).toBe(false);
+    });
+  }
 });

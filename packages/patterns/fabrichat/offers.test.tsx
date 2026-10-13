@@ -2,17 +2,17 @@
  * Offering a new FabriChat room through a member's share inbox. Bob starts a
  * direct chat with Alice from her participant chip, whose click names her
  * profile, which points at her private inbox; the room is offered there, in
- * the envelope a share inbox takes, and a notice is queued for her all the
- * same. A request naming a profile other than the counterpart's is refused.
- * Each person writes their own profile here, so its label names them, as a
- * Fabric profile's does.
+ * the envelope a share inbox takes, and she is added to its participants,
+ * with no notice queued for her. A request naming a profile other than the
+ * counterpart's is refused. Each person writes their own profile here, so its
+ * label names them, as a Fabric profile's does.
  */
 import {
   action,
   assert,
   type Cell,
   currentPrincipal,
-  FabricEpochNsec,
+  equals,
   handler,
   isWellFormedDID,
   multiUserTest,
@@ -31,12 +31,14 @@ import PrivateInbox, {
 import type { ShareInboxPiece } from "../system/profile-home.tsx";
 import { FabriChatManagerCore } from "./manager.tsx";
 import {
-  FabriChatRoom,
-  type StoredActivity,
-  type StoredMemory,
-  type StoredMessage,
-} from "./room.tsx";
-import { CHAT_POLICY } from "./records.ts";
+  type ActivityCounters,
+  type MessagesValue,
+  type ReactionList,
+  type RequestMemo,
+  type SentActivity,
+  type UsedTime,
+} from "./room-records.tsx";
+import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
@@ -47,9 +49,11 @@ import {
   type ChatManagerNotice,
   type ChatManagerProfile,
   type ChatRequestOutcome,
+  type ChatRoomLink,
+  type ProfileCell,
 } from "./schemas.tsx";
 
-type RoomArg = Parameters<typeof FabriChatRoom>[0];
+type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
 type ManagerArg = Parameters<typeof FabriChatManagerCore>[0];
 
 /** An empty shared-space catalog, as a manager lists its rooms from. */
@@ -65,6 +69,8 @@ const profileGesture = { surface: PROFILE_SURFACE, action: PROFILE_ACTION };
 
 const sendGesture = { surface: CHAT_SEND_SURFACE, action: CHAT_SEND_ACTION };
 const startGesture = { surface: CHAT_START_SURFACE, action: CHAT_START_ACTION };
+
+const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 /**
  * A person's own profile, labeled with the principal who wrote it, which only
@@ -145,6 +151,9 @@ function profileOf(profile: unknown): unknown {
   return profile;
 }
 
+/** A room, as the test reads it: a link, and its participants. */
+type HeldRoom = ChatRoomLink & { participants?: ProfileCell[] };
+
 /** Whether `value` is an origin written as its own canonical origin. */
 const isOrigin = (value: string): boolean => {
   try {
@@ -156,9 +165,12 @@ const isOrigin = (value: string): boolean => {
 
 /** The room's records, which every participant's room shares. */
 interface Records {
-  messages: Writable<StoredMessage[]>;
-  memory: Writable<StoredMemory>;
-  activity: Writable<StoredActivity[]>;
+  messages: Writable<MessagesValue>;
+  reactionLists: Writable<ReactionList[]>;
+  requests: Writable<RequestMemo[]>;
+  usedTimes: Writable<UsedTime[]>;
+  activity: Writable<SentActivity[]>;
+  counters: Writable<ActivityCounters[]>;
 }
 
 /** What every session receives from the setup. */
@@ -174,15 +186,12 @@ interface Setup {
 
 export const setup = pattern(() => ({
   records: {
-    messages: Writable.of<StoredMessage[]>([]),
-    memory: Writable.of<StoredMemory>({
-      requests: {},
-      authors: {},
-      usedTimes: {},
-      nextSeq: 1,
-      expiredThrough: 0,
-    }),
-    activity: Writable.of<StoredActivity[]>([]),
+    messages: Writable.of<MessagesValue>([] as MessagesValue),
+    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
+    requests: Writable.of<RequestMemo[]>([]),
+    usedTimes: Writable.of<UsedTime[]>([]),
+    activity: Writable.of<SentActivity[]>([]),
+    counters: Writable.of<ActivityCounters[]>([]),
   },
   aliceDid: Writable.of<string>(""),
   bobDid: Writable.of<string>(""),
@@ -203,33 +212,24 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const action_note_principal = action(() =>
     setup.aliceDid.set(currentPrincipal() ?? "")
   );
-  const sentAt = Writable.of(new FabricEpochNsec(0n));
-  const captureTime = action(() =>
-    sentAt.set(new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n))
-  );
-  const room = FabriChatRoom({
+  const room = FabriChatRoomCore({
     myProfile: profile,
-    about: {
-      kind: "group" as const,
-      createdAt: new FabricEpochNsec(0n),
-      policy: Writable.of(CHAT_POLICY),
-    },
-    records: setup.records.messages,
-    memory: setup.records.memory,
+    about: { kind: "group" as const },
+    messages: setup.records.messages,
+    reactionLists: setup.records.reactionLists,
+    requests: setup.records.requests,
+    usedTimes: setup.records.usedTimes,
     activity: setup.records.activity,
+    counters: setup.records.counters,
   } as RoomArg);
 
   return {
     [TESTS]: [
       { action: writeProfile, event: {}, trustedUi: profileGesture },
       { action: action_note_principal },
-      { action: captureTime },
       {
-        action: room.sendMessage,
-        event: {
-          requestId: "alice-message",
-          version: { body: "Hello from Alice", sentAt },
-        },
+        action: room.composerSend,
+        event: typed("Hello from Alice"),
         trustedUi: sendGesture,
       },
       // Nothing is offered yet.
@@ -282,6 +282,12 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     setup.records.messages.key(0).key("authorProfile"),
   );
   const ownProfile = profileOf(profile);
+  const held = Writable.of<{ room?: Cell<HeldRoom> }>({});
+  const action_hold = action(() =>
+    held.key("room").set(
+      requests.key("d-alice").key("entry").key("room").resolveAsCell(),
+    )
+  );
 
   return {
     [TESTS]: [
@@ -317,14 +323,26 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         },
         trustedUi: startGesture,
       },
-      // The room is created, and a notice is queued for Alice as well.
+      // The room is created, and offered to Alice, so no notice is queued
+      // for her.
       {
         assertion: assert(() =>
           setup.aliceDid.get() !== "" && manager.rooms.length === 1 &&
           manager.rooms[0]?.counterpart === setup.aliceDid.get() &&
-          notices.get().length === 1 &&
-          notices.get()[0]?.recipient === setup.aliceDid.get()
+          notices.get().length === 0
         ),
+      },
+      // Bob added her to the room's participants, beside himself, without a
+      // step of her own.
+      { action: action_hold },
+      {
+        assertion: assert(() => {
+          const participants = held.key("room").get()?.get()?.participants ??
+            [];
+          return participants.length === 2 &&
+            participants.some((known) => equals(known, aliceProfile)) &&
+            participants.some((known) => equals(known, profile));
+        }),
       },
       { label: "bob-done" },
     ],

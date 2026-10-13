@@ -77,7 +77,7 @@ const NO_BACKING = {
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
     return {
-      kind: "docker-runsc-cfc",
+      kind: "runsc-cfc",
       defaultWorkingDirectory: this.defaultWorkingDirectory(),
       cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
     };
@@ -141,12 +141,10 @@ const finalTurn = (content: string) => ({
 const scriptedFetch = (
   payloads: readonly unknown[],
   requestCount: { value: number },
-  offeredTools: string[][] = [],
+  requests: ReturnType<typeof chatViewOfRequest>[] = [],
 ): typeof fetch =>
 async (_input, init) => {
-  offeredTools.push(
-    chatViewOfRequest(JSON.parse(String(init?.body ?? "{}"))).tools,
-  );
+  requests.push(chatViewOfRequest(JSON.parse(String(init?.body ?? "{}"))));
   const payload = payloads[requestCount.value];
   requestCount.value += 1;
   if (payload === undefined) {
@@ -184,9 +182,14 @@ describe("submit_result", () => {
   const run = async (
     runId: string,
     turns: readonly unknown[],
-    options: { schema?: boolean; allowedToolIds?: string[] } = {},
+    options: {
+      schema?: boolean;
+      allowedToolIds?: string[];
+      maxModelTurns?: number;
+      finalizeOnTurnLimit?: boolean;
+    } = {},
   ) => {
-    const offeredTools: string[][] = [];
+    const requests: ReturnType<typeof chatViewOfRequest>[] = [];
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
@@ -202,17 +205,42 @@ describe("submit_result", () => {
         // deno-lint-ignore no-explicit-any
         ? { allowedToolIds: options.allowedToolIds as any }
         : {}),
-      fetchFn: scriptedFetch(turns, { value: 0 }, offeredTools),
+      ...(options.maxModelTurns !== undefined
+        ? { maxModelTurns: options.maxModelTurns }
+        : {}),
+      ...(options.finalizeOnTurnLimit !== undefined
+        ? { finalizeOnTurnLimit: options.finalizeOnTurnLimit }
+        : {}),
+      fetchFn: scriptedFetch(turns, { value: 0 }, requests),
     });
     const result = await loop.runPrompt({
       prompt: "Recommend a book.",
       promptSlotBinding: contextPromptSlotBinding,
     });
-    return { result, offeredTools, engine };
+    const offeredTools = requests.map((request) => request.tools);
+    return { result, requests, offeredTools, engine };
   };
 
   const submit = (id: string, result: unknown) =>
     toolCallTurn(id, "submit_result", JSON.stringify({ result }));
+
+  /** One `submit_result` call, as an assistant turn carries it. */
+  const submitCall = (id: string, result: unknown) => ({
+    id,
+    type: "function",
+    function: { name: "submit_result", arguments: JSON.stringify({ result }) },
+  });
+
+  /** An assistant turn writing `content` beside `calls`. */
+  const submitting = (
+    content: string,
+    ...calls: ReturnType<typeof submitCall>[]
+  ) => ({
+    choices: [{
+      index: 0,
+      message: { role: "assistant", content, tool_calls: calls },
+    }],
+  });
 
   it("is withheld from a run that configures no structured-result schema", async () => {
     expect(withheldToolIds(NO_BACKING).has("submit_result")).toBe(true);
@@ -294,6 +322,115 @@ describe("submit_result", () => {
     });
   });
 
+  it("completes the run on an accepted submission and asks the model for no further turn", async () => {
+    // The turn queued after the submission is the empty one a model gives
+    // when it has nothing left to say, which the run used to fail on.
+    const { result, offeredTools } = await run("run-ends-on-result", [
+      submit("call-1", { answer: "Hyperion" }),
+      finalTurn(""),
+    ]);
+
+    expect(offeredTools).toHaveLength(1);
+    expect(result.runState.status).toBe("completed");
+    expect(result.runState.terminalReason).toBe("assistant_completed");
+    expect(result.runState.failureRecords ?? []).toEqual([]);
+    expect(result.finalAssistantText).toBe("");
+    expect(JSON.parse(await Deno.readTextFile(resultPath))).toEqual({
+      answer: "Hyperion",
+    });
+  });
+
+  it("completes with the accepted submission where a further model turn would fail", async () => {
+    // The script holds no turn after the submission, so asking the provider
+    // for one throws.
+    const { result, offeredTools } = await run("run-result-then-failure", [
+      submit("call-1", { answer: "Hyperion" }),
+    ]);
+
+    expect(offeredTools).toHaveLength(1);
+    expect(result.runState.status).toBe("completed");
+    expect(JSON.parse(await Deno.readTextFile(resultPath))).toEqual({
+      answer: "Hyperion",
+    });
+  });
+
+  it("returns the words written beside an accepted submission as the final answer", async () => {
+    const { result } = await run("run-result-with-words", [
+      submitting(
+        "Hyperion it is.",
+        submitCall("call-1", { answer: "Hyperion" }),
+      ),
+    ]);
+
+    expect(result.finalAssistantText).toBe("Hyperion it is.");
+    expect(result.modelTurns).toBe(1);
+  });
+
+  it("answers a first blank turn with a notice and completes on the submission after it", async () => {
+    const { result, requests } = await run("run-blank-then-submit", [
+      finalTurn(""),
+      submit("call-1", { answer: "Hyperion" }),
+    ]);
+
+    expect(requests).toHaveLength(2);
+    expect(result.runState.status).toBe("completed");
+    expect(requests[1].messages.at(-1)).toMatchObject({
+      role: "user",
+      content:
+        "Host completion check: the last turn carried no words and no tool call. Call submit_result with the answer, or with why it cannot be given.",
+    });
+    expect(JSON.parse(await Deno.readTextFile(resultPath))).toEqual({
+      answer: "Hyperion",
+    });
+  });
+
+  it("fails the run on a second blank turn", async () => {
+    await expect(
+      run("run-blank-twice", [finalTurn(""), finalTurn(" \n")]),
+    ).rejects.toMatchObject({
+      name: "HarnessControlError",
+      code: "provider-unavailable",
+      message:
+        "The model returned an empty assistant response with no tool calls",
+    });
+  });
+
+  it("fails a blank turn at once where the turn after it is the reserved final one", async () => {
+    // The finalizing turn offers no tools, so a notice to call submit_result
+    // would ask for what that turn cannot do.
+    await expect(
+      run("run-blank-before-final", [finalTurn(""), finalTurn("Partial.")], {
+        maxModelTurns: 2,
+        finalizeOnTurnLimit: true,
+      }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("fails a blank turn at once where it is the last turn of the budget", async () => {
+    await expect(
+      run("run-blank-last-turn", [finalTurn("")], { maxModelTurns: 1 }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("fails a blank turn at once where the run takes no result", async () => {
+    await expect(
+      run("run-blank-no-schema", [finalTurn(""), finalTurn("Done.")], {
+        schema: false,
+      }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("gives the model another turn after a refused submission", async () => {
+    const { result, offeredTools } = await run("run-refused-continues", [
+      submit("call-1", { answer: 7 }),
+      finalTurn("I could not form the result."),
+    ]);
+
+    expect(offeredTools).toHaveLength(2);
+    expect(result.finalAssistantText).toBe("I could not form the result.");
+    await expect(Deno.stat(resultPath)).rejects.toThrow(Deno.errors.NotFound);
+  });
+
   it("leaves no file behind a submission that was only ever invalid", async () => {
     await run("run-only-invalid", [
       submit("call-1", { wrong: true }),
@@ -303,11 +440,13 @@ describe("submit_result", () => {
     await expect(Deno.stat(resultPath)).rejects.toThrow(Deno.errors.NotFound);
   });
 
-  it("replaces an earlier submission with a later valid one", async () => {
+  it("replaces an earlier submission with a later valid one in the same turn", async () => {
     const { result } = await run("run-replace", [
-      submit("call-1", { answer: "Hyperion" }),
-      submit("call-2", { answer: "Ubik" }),
-      finalTurn("Done."),
+      submitting(
+        "",
+        submitCall("call-1", { answer: "Hyperion" }),
+        submitCall("call-2", { answer: "Ubik" }),
+      ),
     ]);
 
     expect(toolOutputs(result.transcript)[1]).toMatchObject({

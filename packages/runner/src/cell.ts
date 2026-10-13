@@ -200,6 +200,7 @@ import {
   mergeableOpRead,
   writeDestinationRead,
 } from "./storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
 ensureNotRenderThread();
@@ -621,26 +622,60 @@ export type StreamSendOptions = {
 // import runner internals — can produce an array the send path accepts.
 const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
 
+/** How a sent event's delivery failed: its append was refused, or its
+ * served handling ended without committing (events.md §5) — the handler
+ * threw (`errored`), admission refused it (`refused`), it was dropped, or it
+ * needs attention. */
+export type EventDeliveryFailure =
+  | "append-refused"
+  | "errored"
+  | "refused"
+  | "dropped"
+  | "needs-attention";
+
+/** The error a sender's commit callback reads from `tx.status()` when the
+ * durable-ack coupling reports a failed delivery: `kind` says which failure
+ * and `reason` carries the outcome's own words, so a caller can tell a
+ * handler that refused the event (`errored`, `refused`) from one that never
+ * ran without reading the message. */
+export class EventDeliveryError extends Error {
+  #kind: EventDeliveryFailure;
+  #reason: string;
+
+  constructor(kind: EventDeliveryFailure, reason: string) {
+    super(
+      kind === "append-refused"
+        ? `event append refused: ${reason}`
+        : `event handling ${kind}: ${reason}`,
+    );
+    this.name = "EventDeliveryError";
+    this.#kind = kind;
+    this.#reason = reason;
+  }
+
+  get kind(): EventDeliveryFailure {
+    return this.#kind;
+  }
+
+  get reason(): string {
+    return this.#reason;
+  }
+}
+
 /** An error-status VIEW of a transaction (the durable-ack coupling;
  * verdict blocker, 2026-08-12): everything passes through except
- * `status()`, which reports the append/consequence failure — so a
- * caller that reads the settle callback's tx as the durable
- * acknowledgment (the CLI verb dispatch's verb-contract Settlement
- * read) sees the authoritative failure instead of the speculative
- * echo's local state. */
+ * `status()`, which reports the append/consequence failure as `error` — so
+ * a caller that reads the settle callback's tx as the durable
+ * acknowledgment (the CLI verb dispatch's verb-contract Settlement read)
+ * sees the authoritative failure instead of the speculative echo's local
+ * state. */
 const errorStatusTxView = (
   tx: IExtendedStorageTransaction,
-  message: string,
+  error: EventDeliveryError,
 ): IExtendedStorageTransaction => {
   const status = () => {
     const real = tx.status();
-    return {
-      ...real,
-      status: "error" as const,
-      error: Object.assign(new Error(message), {
-        name: "EventDeliveryError",
-      }),
-    };
+    return { ...real, status: "error" as const, error };
   };
   return new Proxy(tx, {
     get(target, prop, receiver) {
@@ -781,7 +816,6 @@ declare module "@commonfabric/api" {
     getAsLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: MemorySpace;
         includeSchema?: boolean;
         keepAsCell?: KeepAsCell;
       },
@@ -789,7 +823,6 @@ declare module "@commonfabric/api" {
     getAsWriteRedirectLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: MemorySpace;
         includeSchema?: boolean;
         keepAsCell?: KeepAsCell;
       },
@@ -1269,8 +1302,11 @@ interface CauseContainer {
 
 /**
  * What `exportCell()` returns: a cell's metadata, for building a pattern. If
- * the cell has a link, it is included as `external`. `kind` is the cell's kind,
- * which is what tells a stream from a value cell.
+ * the cell has a link, it is included as `external`, naming the cell's space:
+ * the pattern can write it into a document of another space, such as the
+ * argument of an `inSpace()` child, and a link that names no space resolves in
+ * the space of the document holding it. `kind` is the cell's kind, which is
+ * what tells a stream from a value cell.
  */
 export type CellExport = {
   cell: OpaqueCell<any>;
@@ -1821,6 +1857,10 @@ export class CellImpl<T extends FabricValue>
    * `awaitDurability: true` keeps the read demanded through the runtime-wide
    * commit-aware barrier, including producers installed by pending commits.
    *
+   * Rejects with a terminal connection or takeover error in any space the read
+   * reaches, including when its replica still holds a cached value. Authorization
+   * denials retain their absent-value semantics and per-space access report.
+   *
    * @returns The cell's reactive value after the selected readiness barrier.
    */
   pull(options: { awaitDurability?: boolean } = {}): Promise<Readonly<T>> {
@@ -1836,8 +1876,9 @@ export class CellImpl<T extends FabricValue>
       // a real network it does not, and pull() resolved from held,
       // not-yet-loaded state (measured: a same-id retry's receipt readback
       // returned undefined against a remote host while identical calls
-      // passed against a local toolshed). Failures are swallowed like
-      // link-resolution's kicks: the read still resolves from the replica.
+      // passed against a local toolshed). Load failures are swallowed like
+      // link-resolution's kicks. Ordinary load failures resolve from the
+      // replica; the terminal session check below rejects terminal failures.
       this.#runtime.storageManager.trackUntilSettled(
         this.#startLoad().catch(() => {}),
       );
@@ -1855,15 +1896,25 @@ export class CellImpl<T extends FabricValue>
         ? this.#runtime.scheduler.idleWithPendingCommits()
         : this.#runtime.scheduler.idle();
 
+    let readSpaces = new Set<MemorySpace>([this.space]);
     return new Promise((resolve, reject) => {
       const action: Action = (tx) => {
-        // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
+        try {
+          // Read the value inside the effect - this ensures dependencies are pulled
+          const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
 
-        // If no schema or TrueSchema, traverse the result to register all
-        // nested values as read dependencies.
-        if (needsTraversal && value !== undefined && value !== null) {
-          deepTraverse(value);
+          // If no schema or TrueSchema, traverse the result to register all
+          // nested values as read dependencies.
+          if (needsTraversal && value !== undefined && value !== null) {
+            deepTraverse(value);
+          }
+        } finally {
+          // Schemaless traversal can add reads in other spaces. Each effect
+          // run replaces the set so obsolete dependencies do not fail the pull.
+          readSpaces = new Set<MemorySpace>([this.space]);
+          for (const { space } of getTransactionReadActivities(tx)) {
+            readSpaces.add(space);
+          }
         }
       };
       // Name the action for debugging
@@ -1923,6 +1974,15 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
+        for (const space of readSpaces) {
+          const sessionError = this.#runtime.storageManager.spaceSessionError?.(
+            space,
+          );
+          if (
+            sessionError !== undefined &&
+            sessionError.name !== "AuthorizationError"
+          ) throw sessionError;
+        }
         return validateAndTransform(this.#runtime, undefined, this.#viewRef);
       };
       ready().then(resolve, reject);
@@ -2300,7 +2360,10 @@ export class CellImpl<T extends FabricValue>
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event append refused: ${delivery.refused}`,
+                    new EventDeliveryError(
+                      "append-refused",
+                      delivery.refused,
+                    ),
                   ));
                   return;
                 }
@@ -2315,9 +2378,10 @@ export class CellImpl<T extends FabricValue>
                 ) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event handling ${consequence.kind}: ${
-                      consequence.reason ?? consequence.kind
-                    }`,
+                    new EventDeliveryError(
+                      consequence.kind,
+                      consequence.reason ?? consequence.kind,
+                    ),
                   ));
                   return;
                 }
@@ -3792,7 +3856,6 @@ export class CellImpl<T extends FabricValue>
   getAsLink(
     options?: {
       base?: Cell<any>;
-      baseSpace?: MemorySpace;
       includeSchema?: boolean;
       keepAsCell?: KeepAsCell;
     },
@@ -3806,7 +3869,6 @@ export class CellImpl<T extends FabricValue>
   getAsWriteRedirectLink(
     options?: {
       base?: Cell<any>;
-      baseSpace?: MemorySpace;
       includeSchema?: boolean;
       keepAsCell?: KeepAsCell;
     },
@@ -4049,10 +4111,7 @@ export class CellImpl<T extends FabricValue>
       kind: this.#kind,
       name: this.#causeContainer.cause,
       external: this.#_link.id
-        ? this.getAsWriteRedirectLink({
-          baseSpace: this.#frame.space,
-          includeSchema: true,
-        })
+        ? this.getAsWriteRedirectLink({ includeSchema: true })
         : undefined,
     };
   }
@@ -5118,9 +5177,45 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
+    id: inlineElementSnapshotId(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
+}
+
+/**
+ * The snapshot ids minted for inline elements, by the element's value and
+ * then by the link it was read through, which decides how its relative links
+ * resolve. A stored value is a frozen object the replica holds until the
+ * document changes, so one element resolved by every reader of the same
+ * document version is encoded once rather than per reader: the renderer
+ * resolves each element it shows several times over.
+ */
+const inlineElementSnapshotIds = new WeakMap<object, Map<string, URI>>();
+
+function inlineElementSnapshotId(
+  value: FabricValue,
+  base: NormalizedFullLink,
+): URI {
+  if (!isObjectOrArray(value)) {
+    return dataUriFromValueWithResolvedLinks(value, base);
+  }
+  const baseKey = JSON.stringify([
+    base.space,
+    base.id,
+    normalizeCellScope(base.scope),
+    base.path,
+  ]);
+  let byBase = inlineElementSnapshotIds.get(value);
+  if (byBase === undefined) {
+    byBase = new Map();
+    inlineElementSnapshotIds.set(value, byBase);
+  }
+  let id = byBase.get(baseKey);
+  if (id === undefined) {
+    id = dataUriFromValueWithResolvedLinks(value, base);
+    byBase.set(baseKey, id);
+  }
+  return id;
 }
 
 /**

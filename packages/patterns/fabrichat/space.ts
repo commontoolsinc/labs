@@ -1,7 +1,7 @@
 /** The Loom root's link to its space conversation. */
 
 import type { Cell, Stream, UI, VNode } from "commonfabric";
-import type { ChatRoomOutput } from "./schemas.tsx";
+import type { ChatRoomOutput } from "./room.tsx";
 
 /** A room reference retains both its protocol and reviewed rendering. */
 export type SpaceChatRoom = ChatRoomOutput & { [UI]: VNode };

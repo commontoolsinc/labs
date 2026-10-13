@@ -17,6 +17,7 @@ import type {
   PresenceRecord,
 } from "@commonfabric/memory/v2";
 import type { PresenceEvent } from "@commonfabric/memory/v2/client";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
   ActionRunTraceEntry,
@@ -86,6 +87,7 @@ import {
 import { assertNoKeyMaterial } from "./shared/key-material.ts";
 import {
   type EveryFieldOf,
+  normalizeMemoryUrl,
   normalizeOrigin,
   normalizeSpaceHostMap,
 } from "./shared/security-context.ts";
@@ -109,9 +111,16 @@ export interface RuntimeClientPageSettings {
 
 export interface RuntimeClientOptions
   extends
-    Omit<InitializationData, "apiUrl" | "identity">,
+    Omit<InitializationData, "apiUrl" | "memoryUrl" | "identity">,
     RuntimeClientPageSettings {
   apiUrl: URL;
+
+  /**
+   * The default storage host, where it is not `apiUrl`
+   * ({@link InitializationData.memoryUrl}).
+   */
+  memoryUrl?: URL;
+
   identity: Identity;
 }
 
@@ -138,11 +147,14 @@ export interface RuntimeClientOptions
 export interface RuntimeAttachOptions extends
   Omit<
     RuntimeSecurityContext,
-    "apiUrl" | "spaceHostMap" | "identity"
+    "apiUrl" | "memoryUrl" | "spaceHostMap" | "identity"
   >,
   RuntimeClientPageSettings {
   /** The backend this client believes the runtime reads from. */
   apiUrl: URL;
+
+  /** The default storage host this client believes the runtime opens. */
+  memoryUrl?: URL;
 
   /** The per-space hosts this client believes the runtime resolves against. */
   spaceHostMap?: Record<string, string>;
@@ -185,6 +197,7 @@ export function attachOptionsFrom(
 ): RuntimeAttachOptions {
   return {
     apiUrl: options.apiUrl,
+    memoryUrl: options.memoryUrl,
     spaceHostMap: options.spaceHostMap,
     identity: options.identity.did(),
     spaceDid: options.spaceDid,
@@ -829,6 +842,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       // that agreeing on a backend does not depend on agreeing on how to spell
       // one.
       apiUrl: normalizeOrigin(options.apiUrl.toString()),
+      memoryUrl: normalizeMemoryUrl(
+        options.memoryUrl?.toString(),
+        options.apiUrl.toString(),
+      ),
       spaceHostMap: normalizeSpaceHostMap(options.spaceHostMap),
       spaceDid: options.spaceDid,
       experimental: options.experimental,
@@ -865,6 +882,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     // it. `initialize()` checks the values.
     const data = {
       apiUrl: options.apiUrl.toString(),
+      memoryUrl: options.memoryUrl?.toString(),
       spaceHostMap: options.spaceHostMap,
       identity: options.identity.keyPair,
       spaceDid: options.spaceDid,
@@ -925,15 +943,53 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Ensure the home space's default pattern is running and return a CellHandle to it.
-   * This starts the pattern if needed and waits for it to be ready.
+   * This starts the pattern if needed and waits for it to be ready, creating
+   * Home where it has no root. Bringing Home up also starts the worker's
+   * once-per-worker housekeeping over Home, as `getSpaceRootPattern()` says,
+   * without waiting for it.
+   *
+   * With `existingOnly` true, Home is brought up only where it already
+   * exists, its root recording the pattern it runs. Where it does not, as
+   * while another writer is still creating it, nothing is created or started,
+   * and this returns `undefined`.
    */
-  async ensureHomePatternRunning(): Promise<CellHandle<unknown>> {
+  ensureHomePatternRunning(): Promise<CellHandle<unknown>>;
+  ensureHomePatternRunning(
+    options: { existingOnly?: boolean },
+  ): Promise<CellHandle<unknown> | undefined>;
+  async ensureHomePatternRunning(
+    options: { existingOnly?: boolean } = {},
+  ): Promise<CellHandle<unknown> | undefined> {
     const response = await this.#conn.request<
       RequestType.EnsureHomePatternRunning
     >({
       type: RequestType.EnsureHomePatternRunning,
+      ...(options.existingOnly ? { existingOnly: true } : {}),
     });
+    if (response.cell === undefined) {
+      if (options.existingOnly) return undefined;
+      throw new Error("Home's root is missing from the worker's response.");
+    }
     return new CellHandle(this, response.cell);
+  }
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * whose space is `space`, when the space passes vetting as a FabriChat room
+   * the user can write to, whose root is the room. The manager makes the room
+   * one of the user's chats, lists a forgotten one again, and records nothing
+   * for one their chats list already. Home is never created for it.
+   *
+   * Resolves with what was decided, once any event is sent, which is before
+   * the manager has handled it: `sent`, `no-chat-manager`, or the reason
+   * vetting refused the space; `undefined` where the user has no Home.
+   */
+  async joinVisitedRoom(space: DID): Promise<JoinVisitDecision | undefined> {
+    const response = await this.#conn.request<RequestType.JoinVisitedRoom>({
+      type: RequestType.JoinVisitedRoom,
+      space,
+    });
+    return response.decision;
   }
 
   /**
@@ -1050,6 +1106,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Opening a space with `start` true creates its root when it has none and
    * this runtime's identity owns the space. Reading with `start` false never
    * creates one, and neither does any other principal's open.
+   *
+   * Opening the root of this runtime's identity's own Home with `start` true
+   * also starts the worker's once-per-worker housekeeping over Home, as
+   * `ensureHomePatternRunning()` and `createSpace()` do: the adoption of
+   * legacy space entries, the private inbox ensure and the share intake. It
+   * returns without waiting for any of them.
    */
   async getSpaceRootPattern(
     space: DID,
@@ -1360,8 +1422,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * return the reason along with a refusal. `known-different-host` carries the
    * host the space is routed to. `default-route-in-use` is about this session alone:
    * the space issued a stateful operation through the default host, and a
-   * runtime created later can still take the hint. Callers must not mount the
-   * space under this hint unless `accepted` is true.
+   * runtime created later can still take the hint. Under a memory URL a hint
+   * naming another deployment's origin is decided once the runtime has read
+   * where that deployment serves Memory, which this request waits for;
+   * `foreign-host-unread` says that could not be learned, and holds for the
+   * runtime's lifetime. Callers must not mount the space under this hint
+   * unless `accepted` is true.
    */
   async registerSpaceHostDetailed(
     space: DID,

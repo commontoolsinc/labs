@@ -24,7 +24,8 @@ import {
   CommonFabricFormatter,
   lowersFromReferenceArguments,
   resolveScopeWrapperNode,
-  scopeOfAliasChain,
+  scopeOfScopeWrapper,
+  scopeOfWrittenScopedUnion,
   scopesCellHandle,
 } from "./formatters/common-fabric-formatter.ts";
 import { NativeTypeFormatter } from "./formatters/native-type-formatter.ts";
@@ -47,6 +48,11 @@ import {
   unwrapTypeParentheses,
 } from "./typescript/type-node.ts";
 import { resolveWriterBinding } from "./typescript/writer-binding.ts";
+import {
+  cutsExpansion,
+  exhaustsBudget,
+  isDeferredReference,
+} from "./typescript/expanding-recursion.ts";
 import { getCellWrapperInfo } from "./typescript/cell-brand.ts";
 import {
   bindWrittenArgument,
@@ -61,8 +67,6 @@ import {
   instantiatedPropertyType,
   instantiatedValueType,
   resolveWrapperNode,
-  safeGetIndexTypeOfType,
-  safeGetTypeOfSymbolAtLocation,
   soleNonNullishMember,
   type TypeWithInternals,
 } from "./type-utils.ts";
@@ -79,6 +83,7 @@ import {
   holdsIfcLabels,
   joinMemberIfcLabels,
   labeledValueMember,
+  settlePoliciesReadInPart,
   stateReferencedIfcLabels,
   withIfcLabels,
 } from "./ifc-labels.ts";
@@ -1290,10 +1295,15 @@ export class SchemaGenerator {
       options?.printedFrom,
     );
     if (readInPlace) {
+      // A print whose annotation names a value binding is read as that
+      // annotation spells it, as a member's is (`formatChildType()`).
+      const spelledBy = typeNode && schemaHints?.get(typeNode)?.spelledBy;
+      const spelling = spelledBy &&
+        this.#spelling(readInPlace, spelledBy, checker);
       return this.#generateSchemaInternal(
         readInPlace,
         checker,
-        undefined,
+        spelling,
         typeRegistry,
         options,
         schemaHints,
@@ -1302,18 +1312,14 @@ export class SchemaGenerator {
       );
     }
 
-    // Create unified context with all state
-    const cycles = this.#getCycles(type, checker);
-
     // A guess a wrapper recovers never reaches this list, so what arrives here
     // is what the finished schema accepts without having read it.
     const unread: ts.TypeNode[] = [];
 
+    // Create unified context with all state
     let context: GenerationContext = {
       // Immutable context
       typeChecker: checker,
-      cyclicTypes: cycles.types,
-      cyclicNames: cycles.names,
 
       // Accumulating state
       definitions: {},
@@ -1323,6 +1329,8 @@ export class SchemaGenerator {
 
       // Stack state
       definitionStack: new Set(),
+      expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
 
       // Optional context
@@ -1337,6 +1345,7 @@ export class SchemaGenerator {
       }),
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
+      ...(options?.declaresNoScope && { declaresNoScope: true }),
       ...(options?.writerIdentityForSourceFile && {
         writerIdentityForSourceFile: options.writerIdentityForSourceFile,
       }),
@@ -1345,9 +1354,17 @@ export class SchemaGenerator {
         isDefaultLibrarySourceFile: options.isDefaultLibrarySourceFile,
       }),
       ...(options?.printedFrom && { printedFrom: options.printedFrom }),
+      ...(options?.definesDocument && { definesDocument: true }),
+      ...(options?.rootWriterSupplied && typeNode &&
+        { rootWriterSuppliedAt: typeNode }),
       ...(schemaHints && { schemaHints }),
     };
     context = this.#withGenericBindings(type, context);
+    // A print read as the annotation that spells it keeps the print's own
+    // hints, as a member does (`formatChildType()`).
+    const hintContext = typeNode && hintsNode
+      ? { ...context, typeNode: hintsNode }
+      : context;
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: MutableJSONSchema;
@@ -1359,13 +1376,13 @@ export class SchemaGenerator {
         checker,
         context,
       );
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
       // Build final schema with $schema and $defs
       result = this.#buildFinalSchemaForSynthetic(schema, context);
     } else {
       // Use type-based analysis (normal path)
       schema = this.#formatType(type, context, true);
-      schema = this.#applyNodeSchemaHints(schema, context);
+      schema = this.#applyNodeSchemaHints(schema, hintContext);
 
       // Attach root-level description from JSDoc if available
       schema = this.#attachRootDescription(schema, type, context);
@@ -1376,6 +1393,7 @@ export class SchemaGenerator {
 
     if (unread.length > 0) reportUnreadTypes(context, unread);
 
+    settlePoliciesReadInPart(result);
     stateReferencedIfcLabels(result);
     assertScopeDeclarationsAreReachable(result);
     return result;
@@ -1428,6 +1446,20 @@ export class SchemaGenerator {
     typeNode?: ts.TypeNode,
     instantiatedAs?: ts.Type,
   ): MutableJSONSchema {
+    // Data its document holds itself defines that document, however the
+    // schema around it reads (`SchemaHint.definesDocument`).
+    if (
+      typeNode && !context.definesDocument &&
+      context.schemaHints?.get(typeNode)?.definesDocument
+    ) {
+      context = { ...context, definesDocument: true, documentWithinView: true };
+    }
+    if (
+      typeNode && !context.cellsOpaque &&
+      context.schemaHints?.get(typeNode)?.cellsOpaque
+    ) {
+      context = { ...context, cellsOpaque: true };
+    }
     // A bound type parameter reads as its argument: its node where it has one,
     // under the bindings of the place it is written, and its type where it
     // does not. A `Default` around one is read as the wrapper, whose value
@@ -1531,9 +1563,12 @@ export class SchemaGenerator {
     // Read for its labels alone, a type no CFC wrapper holds is a payload, and
     // is not formatted. A union or an intersection is formatted from its
     // members, which can attach their labels to it: an expanded `Default`
-    // holds its value as a member.
+    // holds its value as a member. `null` and `undefined` are formatted, as
+    // what tells a value that may be missing apart from its value member
+    // (`labeledValueMember()`).
     if (
       context.labelsOnly && !readType.isUnionOrIntersection() &&
+      (readType.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) === 0 &&
       !this.#commonFabricFormatter.supportsType(readType, childContext)
     ) {
       return {};
@@ -1919,15 +1954,16 @@ export class SchemaGenerator {
     type: ts.Type,
     context: GenerationContext,
   ): MutableJSONSchema {
-    const checker = context.typeChecker;
-    const aliasScope = scopeOfAliasChain(type, checker);
-    const key =
+    const aliasScope = scopeOfScopeWrapper(type, context.typeChecker);
+    const key = this.#definitionKey(
       (aliasScope === undefined
         ? this.#namedReadingKey(type, context)
-        : undefined) ?? this.#ensureSyntheticName(type, context);
+        : undefined) ?? this.#ensureSyntheticName(type, context),
+      context,
+    );
     context.inProgressNames.add(key);
     context.emittedRefs.add(key);
-    return aliasScope === undefined
+    return aliasScope === undefined || context.declaresNoScope
       ? { "$ref": `#/$defs/${key}` }
       : { "$ref": `#/$defs/${key}`, scope: aliasScope };
   }
@@ -2212,6 +2248,31 @@ export class SchemaGenerator {
         )
       ? alias.name
       : key;
+  }
+
+  /**
+   * The name a reading of a type named `name` is stored under in `$defs`: the
+   * name with the reading's variant (`#readingVariant()`), whose `:` no
+   * TypeScript name holds, so no type's name can take it.
+   */
+  #definitionKey(name: string, context: GenerationContext): string {
+    return `${name}${this.#readingVariant(context)}`;
+  }
+
+  /**
+   * What sets a reading apart from other readings of the same type, as a
+   * suffix of the names it stores definitions under (`#definitionKey()`) and
+   * of its cycle identity (`#formatType()`), or `""`: a reading that defines a
+   * document inside a schema that views others
+   * (`GenerationContext.documentWithinView`), since the view's reading of the
+   * same type leaves out a writer it cannot read; and a reading whose cells
+   * are opaque (`GenerationContext.cellsOpaque`). Neither variant's reading is
+   * the other's, so one met inside the other is no cycle of it.
+   */
+  #readingVariant(context: GenerationContext): string {
+    return `${context.documentWithinView ? ":document" : ""}${
+      context.cellsOpaque ? ":opaque" : ""
+    }`;
   }
 
   /**
@@ -2568,7 +2629,7 @@ export class SchemaGenerator {
     // schema, the only place the write path reads it. A recursive one is
     // written once under `$defs` without its scope, and each reference to it
     // carries the scope instead.
-    const aliasScope = scopeOfAliasChain(type, context.typeChecker);
+    const aliasScope = scopeOfScopeWrapper(type, context.typeChecker);
     const isScopeWrapperAlias = aliasScope !== undefined;
     // One around a cell caps the handle and is itself a wrapper: it is not a
     // cycle's entry, so a cycle through it is found at the cell's value and
@@ -2586,6 +2647,8 @@ export class SchemaGenerator {
       const synthetic = this.#anonymousName(type, context);
       if (synthetic) namedKey = synthetic;
     }
+    const readingName = namedKey;
+    if (namedKey) namedKey = this.#definitionKey(namedKey, context);
 
     // Check if this type is already being built or exists
     if (namedKey) {
@@ -2602,7 +2665,7 @@ export class SchemaGenerator {
       if (key !== undefined) {
         this.#boundAnonymousNames.set(
           `${this.#bindingId(this.#bindingType(type, context))}|${key}`,
-          namedKey,
+          readingName!,
         );
       }
       // Start building this named type; we'll store the result below
@@ -2617,20 +2680,27 @@ export class SchemaGenerator {
     // found at the wrapper's value instead, where it can be. A type read under
     // type parameter bindings is that type together with them, as its
     // definition's name is (`#bindingKey()`), so the same declared type read
-    // under other bindings inside it is no cycle.
+    // under other bindings inside it is no cycle, and so is a reading of
+    // another variant (`#readingVariant()`).
     const bound = context.boundTypeParameters;
     const bindingKey = this.#bindingKey(context);
     const bindingType = this.#bindingType(type, context);
+    const variant = this.#readingVariant(context);
     const stackKey = bindingKey === undefined
-      ? type
-      : `${this.#bindingId(bindingType)}|${bindingKey}`;
-    // `never` holds no type, so it is never met inside itself and is not a
-    // cycle's entry. A wrapper the checker reduces to it, as it reduces
-    // `PerUser<never>` (`never & brand` is `never`), has `never` both for its
-    // own type and for its payload's, and the payload read inside it is the
-    // value it wraps, not its recursion.
-    const tracksCycle = !scopesHandle && !isWrapperContext &&
-      (type.flags & ts.TypeFlags.Never) === 0;
+      ? variant === "" ? type : `${variant}|${this.#bindingId(type)}`
+      : `${variant}${this.#bindingId(bindingType)}|${bindingKey}`;
+    // `never`, `null` and `undefined` hold no type, and `unknown` and `any`
+    // hold any, so none is met inside itself, and none is a cycle's entry. A
+    // wrapper the checker reduces to one, as it reduces `PerUser<never>`
+    // (`never & brand` is `never`) and `PerUser<null>` (`Scoped` keeps `null`
+    // outside its brand), has it both for its own type and for its payload's,
+    // and the payload read inside it is the value it wraps, not its recursion.
+    // So does a scope wrapper read from its node alone, which is read at
+    // `unknown` (`#analyzeTypeNodeStructure()`), around `unknown`.
+    const holdsNoType = (type.flags &
+      (ts.TypeFlags.Never | ts.TypeFlags.Null | ts.TypeFlags.Undefined |
+        ts.TypeFlags.Unknown | ts.TypeFlags.Any)) !== 0;
+    const tracksCycle = !scopesHandle && !isWrapperContext && !holdsNoType;
     // The same type read inside itself with the same arguments written for
     // it, each read under deeper bindings, is either a nesting its author
     // wrote out, `Pair<Pair<string>>`, or a recursion that instantiates it
@@ -2671,19 +2741,68 @@ export class SchemaGenerator {
       // and naming it would name the type for every schema this generator
       // writes afterwards.
       if (context.labelsOnly) return {};
-      const syntheticKey = this.#ensureSyntheticName(type, context);
+      const syntheticKey = this.#definitionKey(
+        this.#ensureSyntheticName(type, context),
+        context,
+      );
       context.inProgressNames.add(syntheticKey);
       context.emittedRefs.add(syntheticKey);
-      return aliasScope === undefined
+      return aliasScope === undefined || context.declaresNoScope
         ? { "$ref": `#/$defs/${syntheticKey}` }
         : { "$ref": `#/$defs/${syntheticKey}`, scope: aliasScope };
+    }
+
+    // Where the shape does not end a recursion that instantiates its
+    // declaration without end, the types the reading is within do
+    // (`cutsExpansion()`), and cut it as the shape cuts one. A reading
+    // under no bindings has no shape, as `Nest<T>` read at a type parameter no
+    // binding names has none. An alias that recurses through the tuple or
+    // array it writes, `type Tup<T> = [T, Tup<T[]>?]`, is read under bindings
+    // by its instantiation, whose arguments differ at each level, so its shape
+    // never repeats (`isDeferredReference()`). A reading inside its own shape
+    // spends the budget an expanding one spends (`exhaustsBudget()`): a
+    // declaration that recurses through more than one of its members reaches
+    // the shape's bound along every path, which is exponentially many
+    // readings.
+    const expands = tracksCycle &&
+      (bound === undefined || isDeferredReference(type));
+    const withinOwnShape = shapeKey !== undefined && shapeKey !== `${shape}|0`;
+    if (
+      expands
+        ? cutsExpansion(
+          type,
+          context.expandingPath,
+          context.expansionBudget,
+          context.typeChecker,
+        )
+        : tracksCycle && withinOwnShape &&
+          exhaustsBudget(context.expansionBudget)
+    ) {
+      const unread = context.uninterpretedTypeNodes;
+      // `IgnoreErrors` prints any type, as `readAliasChain()` prints one.
+      const node = context.typeNode ??
+        (expands
+          ? context.typeChecker.typeToTypeNode(
+            type,
+            undefined,
+            ts.NodeBuilderFlags.IgnoreErrors,
+          )
+          : bound?.declaredNode);
+      if (unread && node && !unread.includes(node)) unread.push(node);
+      return {};
     }
 
     // Push current type onto the stack
     if (tracksCycle) context.definitionStack.add(stackKey);
     const pushedShape = tracksCycle ? shapeKey : undefined;
     if (pushedShape !== undefined) context.definitionStack.add(pushedShape);
+    let pushedExpanding = expands;
+    if (pushedExpanding) context.expandingPath.push(type);
     const pop = () => {
+      if (pushedExpanding) {
+        context.expandingPath.pop();
+        pushedExpanding = false;
+      }
       if (tracksCycle) context.definitionStack.delete(stackKey);
       if (pushedShape !== undefined) {
         context.definitionStack.delete(pushedShape);
@@ -2707,8 +2826,11 @@ export class SchemaGenerator {
         // We already computed namedKey above with wrapper checks, so reuse it.
         // Only look up synthetic names if namedKey wasn't already set and we're
         // not in a wrapper context (to avoid storing wrapper results).
+        const anonymousName = isWrapperContext
+          ? undefined
+          : this.#anonymousName(type, context);
         const keyForDef = namedKey ??
-          (isWrapperContext ? undefined : this.#anonymousName(type, context));
+          (anonymousName && this.#definitionKey(anonymousName, context));
         if (keyForDef) {
           const scopeOnReference = aliasScope !== undefined &&
               isObjectOrArray(result) && result.scope === aliasScope
@@ -2780,7 +2902,15 @@ export class SchemaGenerator {
       if (!definitions[namedKey]) {
         definitions[namedKey] = schema;
       }
-      base = { $ref: `#/$defs/${namedKey}` };
+      // A recursive scope wrapper's definition is stored without its scope,
+      // which each reference to it carries instead (`#formatType()`), the
+      // root's among them.
+      const scope = isObjectOrArray(schema) ? schema.scope : undefined;
+      const definition = definitions[namedKey];
+      base = scope !== undefined && isObjectOrArray(definition) &&
+          definition.scope === undefined
+        ? { $ref: `#/$defs/${namedKey}`, scope }
+        : { $ref: `#/$defs/${namedKey}` };
     } else {
       base = schema;
     }
@@ -2877,6 +3007,8 @@ export class SchemaGenerator {
       definitions: {},
       emittedRefs: new Set(),
       definitionStack: new Set(),
+      expandingPath: [],
+      expansionBudget: { readingsInside: 0 },
       inProgressNames: new Set(),
     });
   }
@@ -2901,7 +3033,7 @@ export class SchemaGenerator {
     }) &&
       detectWrapperViaNode(node, context.typeChecker) === undefined &&
       resolveScopeWrapperNode(node) === undefined &&
-      scopeOfAliasChain(type, context.typeChecker) === undefined;
+      scopeOfScopeWrapper(type, context.typeChecker) === undefined;
   }
 
   /**
@@ -2995,6 +3127,21 @@ export class SchemaGenerator {
           checker.getTypeFromTypeNode(typeNode) === values[0]
         ? typeNode
         : memberNode(values[0]!);
+      // A node no member is paired through, as a reference to a generic alias
+      // whose body is the union, is read whole, and the value has the labels
+      // formatting attaches to its member. A cell's are its value's, read at
+      // the value's node, as above.
+      if (
+        !valueNode && typeNode &&
+        getCellWrapperInfo(values[0]!, checker) === undefined
+      ) {
+        const whole = this.formatChildType(type, context, typeNode);
+        const labels = declaredIfcLabels(
+          labeledValueMember(whole, context.definitions) ?? whole,
+          context.definitions,
+        );
+        if (labels) return labels;
+      }
       return this.#labelsOf(values[0]!, valueNode, context, reading);
     }
     const whole = this.formatChildType(type, context, typeNode);
@@ -3013,81 +3160,6 @@ export class SchemaGenerator {
           ];
       }),
     );
-  }
-
-  /**
-   * Detect cycles in the type graph
-   */
-  #getCycles(
-    type: ts.Type,
-    checker?: ts.TypeChecker,
-  ): { types: Set<ts.Type>; names: Set<string> } {
-    // Identity and name-based DFS cycle detection
-    const visiting = new Set<ts.Type>();
-    const stack: ts.Type[] = [];
-    const cycles = new Set<ts.Type>();
-    const cycleNames = new Set<string>();
-
-    const visit = (t: ts.Type) => {
-      if (visiting.has(t)) {
-        // Mark all nodes from the first occurrence of t on the stack to the end
-        const idx = stack.lastIndexOf(t);
-        if (idx >= 0) {
-          for (let i = idx; i < stack.length; i++) {
-            const tt = stack[i]!;
-            cycles.add(tt);
-            const nk = getNamedTypeKey(tt);
-            if (nk) cycleNames.add(nk);
-          }
-        } else {
-          cycles.add(t);
-          const nk = getNamedTypeKey(t);
-          if (nk) cycleNames.add(nk);
-        }
-        return;
-      }
-      visiting.add(t);
-      stack.push(t);
-
-      const flags = t.flags;
-      try {
-        if (flags & ts.TypeFlags.Union) {
-          const ut = t as ts.UnionType;
-          for (const mt of ut.types) {
-            visit(mt);
-          }
-        } else if (flags & ts.TypeFlags.Object) {
-          // Traverse properties
-          if (checker) {
-            for (const prop of checker.getPropertiesOfType(t)) {
-              const location: ts.Node = prop.valueDeclaration ??
-                (prop.declarations?.[0] as ts.Declaration);
-              const pt = safeGetTypeOfSymbolAtLocation(
-                checker,
-                prop,
-                location,
-                "cycle detection property",
-              );
-              if (pt) visit(pt);
-            }
-            // Traverse numeric index (arrays/tuples)
-            const idx = safeGetIndexTypeOfType(
-              checker,
-              t,
-              ts.IndexKind.Number,
-              "cycle detection numeric index",
-            );
-            if (idx) visit(idx);
-          }
-        }
-      } finally {
-        stack.pop();
-        visiting.delete(t);
-      }
-    };
-
-    if (checker) visit(type);
-    return { types: cycles, names: cycleNames };
   }
 
   /**
@@ -3209,7 +3281,7 @@ export class SchemaGenerator {
       for (const member of typeNode.members) {
         if (ts.isPropertySignature(member) && member.name && member.type) {
           const propName = getPropertyNameText(member.name, checker);
-          if (!propName) {
+          if (propName === undefined) {
             // A computed brand such as `[DEFAULT_MARKER]` can carry metadata
             // that only the resolved type retains. A wrapper with that type
             // must know this node's members were not fully interpreted.
@@ -3400,6 +3472,20 @@ export class SchemaGenerator {
     // explicitly. Keyword types (string, number, boolean, undefined, null) are
     // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
+      // One scope's wrappers beside `null` or `undefined`, `PerUser<A> | null`,
+      // are the wrapper around their payloads, `PerUser<A | null>`, which the
+      // scope wrapper formatter reads from the union's type, at the payloads
+      // written in it.
+      const scoped = scopeOfWrittenScopedUnion(typeNode, checker) !== undefined
+        ? typeRegistry?.get(typeNode) ?? checker.getTypeFromTypeNode(typeNode)
+        : undefined;
+      const scopedContext = { ...context, typeNode };
+      if (
+        scoped &&
+        this.#commonFabricFormatter.supportsType(scoped, scopedContext)
+      ) {
+        return this.#commonFabricFormatter.formatType(scoped, scopedContext);
+      }
       const defaultUnion = this.#unionFormatter.formatDefaultUnion(
         typeNode,
         context,
@@ -4067,61 +4153,103 @@ export class SchemaGenerator {
    */
   #holdsWriterQuery(node: ts.TypeNode, context: GenerationContext): boolean {
     const checker = context.typeChecker;
-    const active = new Set<ts.Node>();
+    // The nodes on the walk's current path, each with its depth. A node on
+    // the path is not read again inside itself.
+    const active = new Map<ts.Node, number>();
+    // The least depth among the nodes on the path that the read in progress
+    // stopped at. A read that stopped at a node above its own has not covered
+    // everything its node reaches.
+    let stoppedAt = Infinity;
+    // Nodes found to reach no writer query, by a read under no bindings that
+    // stopped at no node above its own. The result of such a read depends on
+    // the node alone, so the walk reads each of these nodes once, however many
+    // paths reach it. The number of paths to a declaration grows exponentially
+    // with the depth of the references that lead to it. A read inside a
+    // writer's argument looks for a query that a read outside one passes over,
+    // so each has its own set.
+    const clearedOutsideWriter = new Set<ts.Node>();
+    const clearedInWriter = new Set<ts.Node>();
+    const read = (
+      node: ts.Node,
+      at: GenerationContext,
+      writer: boolean,
+    ): boolean => {
+      if (writer && ts.isTypeQueryNode(node)) return true;
+      if (ts.isTypeReferenceNode(node)) {
+        const parameter = typeParameterOfReference(node, checker);
+        const argument = parameter &&
+          at.boundTypeParameters?.arguments.get(parameter);
+        if (argument?.node) {
+          const { boundTypeParameters: _, ...unbound } = at;
+          return visit(argument.node, {
+            ...unbound,
+            ...(argument.bound && { boundTypeParameters: argument.bound }),
+          }, writer);
+        }
+        const name = ts.isIdentifier(node.typeName)
+          ? node.typeName
+          : node.typeName.right;
+        const symbol = this.#resolveTypeName(node, name, checker, at);
+        if (symbol?.name === "WriteAuthorizedBy") {
+          const binding = node.typeArguments?.[1];
+          if (binding && visit(binding, at, true)) return true;
+        }
+        const bound = this.#referenceBindings(node, at);
+        for (const declaration of symbol?.declarations ?? []) {
+          if (isDefaultLibrarySourceFile(declaration.getSourceFile(), at)) {
+            continue;
+          }
+          if (
+            ts.isTypeAliasDeclaration(declaration) ||
+            ts.isInterfaceDeclaration(declaration) ||
+            ts.isClassDeclaration(declaration)
+          ) {
+            if (
+              visit(
+                declaration,
+                { ...at, boundTypeParameters: bound },
+                writer,
+              )
+            ) return true;
+          }
+        }
+      }
+      return ts.forEachChild(
+        node,
+        (child) => visit(child, at, writer) || undefined,
+      ) ?? false;
+    };
     const visit = (
       node: ts.Node,
       at: GenerationContext,
       writer = false,
     ): boolean => {
-      if (active.has(node)) return false;
-      active.add(node);
+      const onPath = active.get(node);
+      if (onPath !== undefined) {
+        stoppedAt = Math.min(stoppedAt, onPath);
+        return false;
+      }
+      const underNoBindings = !at.boundTypeParameters?.arguments.size;
+      const cleared = writer ? clearedInWriter : clearedOutsideWriter;
+      if (underNoBindings && cleared.has(node)) return false;
+      const depth = active.size;
+      const stoppedOutside = stoppedAt;
+      stoppedAt = Infinity;
+      active.set(node, depth);
       try {
-        if (writer && ts.isTypeQueryNode(node)) return true;
-        if (ts.isTypeReferenceNode(node)) {
-          const parameter = typeParameterOfReference(node, checker);
-          const argument = parameter &&
-            at.boundTypeParameters?.arguments.get(parameter);
-          if (argument?.node) {
-            const { boundTypeParameters: _, ...unbound } = at;
-            return visit(argument.node, {
-              ...unbound,
-              ...(argument.bound && { boundTypeParameters: argument.bound }),
-            }, writer);
-          }
-          const name = ts.isIdentifier(node.typeName)
-            ? node.typeName
-            : node.typeName.right;
-          const symbol = this.#resolveTypeName(node, name, checker, at);
-          if (symbol?.name === "WriteAuthorizedBy") {
-            const binding = node.typeArguments?.[1];
-            if (binding && visit(binding, at, true)) return true;
-          }
-          const bound = this.#referenceBindings(node, at);
-          for (const declaration of symbol?.declarations ?? []) {
-            if (isDefaultLibrarySourceFile(declaration.getSourceFile(), at)) {
-              continue;
-            }
-            if (
-              ts.isTypeAliasDeclaration(declaration) ||
-              ts.isInterfaceDeclaration(declaration) ||
-              ts.isClassDeclaration(declaration)
-            ) {
-              if (
-                visit(
-                  declaration,
-                  { ...at, boundTypeParameters: bound },
-                  writer,
-                )
-              ) return true;
-            }
-          }
+        const found = read(node, at, writer);
+        if (!found && underNoBindings && stoppedAt >= depth) {
+          cleared.add(node);
         }
-        return ts.forEachChild(
-          node,
-          (child) => visit(child, at, writer) || undefined,
-        ) ?? false;
+        return found;
       } finally {
         active.delete(node);
+        // A stop at this node or below it closes a cycle inside this read,
+        // which leaves the reads around it complete.
+        stoppedAt = Math.min(
+          stoppedOutside,
+          stoppedAt < depth ? stoppedAt : Infinity,
+        );
       }
     };
     return visit(node, context);

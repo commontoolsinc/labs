@@ -6,14 +6,28 @@ import {
   action,
   type AddIntegrity,
   assert,
-  FabricEpochNsec,
+  type Cell,
   pattern,
   TESTS,
   Writable,
 } from "commonfabric";
-import { testRoomAbout, testRoomStorage } from "./room-test-fixture.ts";
-import { FabriChatRoom } from "./room.tsx";
-import { type ChatProfile, type ChatRoomLink } from "./schemas.tsx";
+import {
+  type ActivityCounters,
+  type MessagesValue,
+  type ReactionList,
+  type RequestMemo,
+  type SentActivity,
+  type UsedTime,
+} from "./room-records.tsx";
+import { FabriChatRoomCore } from "./room.tsx";
+import {
+  CHAT_SEND_ACTION,
+  CHAT_SEND_SURFACE,
+  type ChatProfile,
+  type ChatRoomLink,
+} from "./schemas.tsx";
+
+type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
 
 // A labeled stand-in for a viewer's `#profile`.
 type TestProfile = AddIntegrity<
@@ -27,41 +41,37 @@ interface HeldLink {
 }
 
 const sendGesture = {
-  surface: "ChatSendSurface",
-  action: "ChatSend",
+  surface: CHAT_SEND_SURFACE,
+  action: CHAT_SEND_ACTION,
 };
 
+const typed = (text: string) => ({ type: "click", target: { value: text } });
+
 /** What the room held in `held` says of its messages through the link. */
-const linkedMessages = (held: Writable<HeldLink>): string => {
+const linkedMessages = (held: Cell<HeldLink>): string => {
   const messages = held.key("room").get()?.get()?.messages;
   return `count:${messages?.count ?? "none"} ` +
     `newestAt:${messages?.newestAt === undefined ? "none" : "set"}`;
 };
 
 export default pattern(() => {
-  const version = new Writable({
-    body: "Hello",
-    sentAt: new FabricEpochNsec(0n),
-  });
-  const initializeVersion = action(() =>
-    version.key("sentAt").set(
-      new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-    )
-  );
-  const description = testRoomAbout({ kind: "group", standalone: false });
+  const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
-  const alice = FabriChatRoom({
+  const alice = FabriChatRoomCore({
     myProfile: aliceProfile,
-    about: description.about,
-    ...testRoomStorage({}),
-  });
+    about: { kind: "group" as const },
+    messages,
+    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
+    requests: Writable.of<RequestMemo[]>([]),
+    usedTimes: Writable.of<UsedTime[]>([]),
+    activity: Writable.of<SentActivity[]>([]),
+    counters: Writable.of<ActivityCounters[]>([]),
+  } as RoomArg);
   const held = Writable.of<HeldLink>({});
   const action_hold_link = action(() => held.key("room").set(alice));
 
   return {
     [TESTS]: [
-      { action: description.initialize },
-      { action: initializeVersion },
       { action: action_hold_link },
       {
         assertion: assert(() =>
@@ -69,8 +79,8 @@ export default pattern(() => {
         ),
       },
       {
-        action: alice.sendMessage,
-        event: { requestId: "first", version },
+        action: alice.composerSend,
+        event: typed("Hello"),
         trustedUi: sendGesture,
       },
       {

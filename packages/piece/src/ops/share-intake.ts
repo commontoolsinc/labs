@@ -2,19 +2,17 @@
  * The host's share intake: it follows the offers in the private inboxes Home
  * holds and retains, vets each one as the owner, and registers each offer that
  * passes in Home's shared-space catalog through Home's `registerSharedSpace`
- * stream. Vetting reads the offered space's access list, the kind it declares,
- * and its root, which a Home handler cannot do;
- * `docs/features/private-inbox.md` describes the whole arrangement.
+ * stream, then has Home's chat manager accept each room it newly registers.
+ * Vetting reads the offered space's access list, the kind it declares, and its
+ * root, which a Home handler cannot do; `docs/features/private-inbox.md`
+ * describes the whole arrangement.
  */
 
 import type { DID } from "@commonfabric/identity";
 import { isWellFormedDID } from "@commonfabric/identity/did";
-import { hasConcreteOwner, isACL } from "@commonfabric/memory/acl";
 import {
-  ACLManager,
   type Cancel,
   type Cell,
-  inSpaceRootCause,
   isCell,
   type NormalizedFullLink,
   normalizeSpaceHost,
@@ -24,12 +22,15 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import { inboxPieceLinkSchema } from "./private-inbox.ts";
-import { accessRefused } from "./space-access.ts";
+import { isWriter, type SpaceRefusal, vetSpace } from "./space-vetting.ts";
 
 const logger = getLogger("piece.share-intake");
 
 /** The `kind` of the offers a loom daemon admits, which this intake skips. */
 export const LOOM_OFFER_KIND = "loom";
+
+/** The kind of space a standalone FabriChat room's own space declares. */
+export const CHAT_ROOM_SPACE_KIND = "fabrichat-room";
 
 /**
  * The kinds of offer the intake admits, each a kind of space, as
@@ -43,7 +44,7 @@ export const LOOM_OFFER_KIND = "loom";
  *   the room.
  */
 export const ADMITTED_SPACE_KINDS: ReadonlySet<string> = new Set([
-  "fabrichat-room",
+  CHAT_ROOM_SPACE_KIND,
 ]);
 
 /** Why an offer is not registered. */
@@ -52,11 +53,7 @@ export type OfferRefusal =
   | "offer-kind-unknown"
   | "offer-foreign-host"
   | "sender-not-member"
-  | "recipient-access-refused"
-  | "space-kind-undeclared"
-  | "space-kind-mismatch"
-  | "space-root-missing"
-  | "space-root-misplaced";
+  | SpaceRefusal;
 
 /**
  * What an instance decided about an offer: `sent` to Home's
@@ -164,6 +161,12 @@ export function startShareIntakeOf(
  * Registration is Home's handler's, so an offer already registered under
  * another sender or `id` leaves the entry as it is, archived or not, and adds
  * a receipt for this offer.
+ *
+ * Once Home's handler returns `registered`, a new entry, the intake sends the
+ * space's root to Home's `chatManager.accept`, when Home has one, with
+ * `keepArchived` set, so that the manager records the room as an acceptance
+ * from the room itself would, and an entry archived since it was registered
+ * stays archived. An entry already there gets no acceptance.
  */
 export class ShareIntake {
   #runtime: Runtime;
@@ -253,6 +256,17 @@ export class ShareIntake {
   async idle(): Promise<void> {
     await this.#drained;
     await Promise.all(this.#pending);
+  }
+
+  /**
+   * Whether {@link idle} has nothing to wait for right now: no change is
+   * being taken up and no registration is awaiting its handling. A caller
+   * that awaits `idle()` and then something else checks this afterwards,
+   * since a change arriving during the second wait is one the first had
+   * stopped watching.
+   */
+  isIdle(): boolean {
+    return !this.#draining && this.#pending.size === 0;
   }
 
   /** Stops following the inboxes; an offer being vetted is not sent. */
@@ -426,10 +440,13 @@ export class ShareIntake {
     }
     const offer = wellFormedOffer(raw);
     let refusal: OfferRefusal | undefined;
+    let root: Cell<unknown> | undefined;
     try {
-      refusal = offer === undefined
+      const vetted = offer === undefined
         ? "offer-malformed"
         : await this.#refusalOf(offer);
+      if (isCell(vetted)) root = vetted;
+      else refusal = vetted;
     } catch (error) {
       if (this.#halted) return;
       logger.warn("vetting-failed", () => [
@@ -455,7 +472,9 @@ export class ShareIntake {
     // for it however soon the send settles.
     const handled = Promise.withResolvers<NormalizedFullLink | undefined>();
     const pending = handled.promise.then((link) =>
-      link === undefined ? undefined : this.#reportConflict(row, receipt, link)
+      link === undefined
+        ? undefined
+        : this.#afterRegistration(row, receipt, link, root)
     );
     try {
       sendEvent(
@@ -504,14 +523,18 @@ export class ShareIntake {
   }
 
   /**
-   * Logs, once for the row keyed `row`, a `conflict` that Home's handler
-   * returned in the receipt at `link`. A receipt that cannot be read is left
-   * unreported, since the handling it describes has committed either way.
+   * Acts on the result of Home's handling of the row keyed `row`, in the
+   * receipt at `link`: has Home's chat manager accept `root`, the vetted root
+   * of the row's space, when the handler registered a new entry, and logs,
+   * once for the row, a `conflict` the handler returned. A receipt that cannot
+   * be read is left unreported, and leads to no acceptance, since the handling
+   * it describes has committed either way.
    */
-  async #reportConflict(
+  async #afterRegistration(
     row: string,
     receipt: string,
     link: NormalizedFullLink,
+    root: Cell<unknown> | undefined,
   ): Promise<void> {
     let result: unknown;
     try {
@@ -519,10 +542,21 @@ export class ShareIntake {
     } catch {
       return;
     }
-    if (
-      this.#halted || !isObjectNotArray(result) ||
-      result.status !== "conflict"
-    ) return;
+    if (this.#halted || !isObjectNotArray(result)) return;
+    if (result.status === "registered" && root !== undefined) {
+      const accept = this.#home.key("chatManager").key("accept");
+      if (accept.getRaw() !== undefined) {
+        try {
+          sendEvent(accept, { room: root, keepArchived: true });
+        } catch (error) {
+          logger.warn("accept-failed", () => [
+            `Sending the chat manager the offer ${receipt}:`,
+            error,
+          ]);
+        }
+      }
+    }
+    if (result.status !== "conflict") return;
     const reason = result.reason;
     this.#logOnce(`conflict:${row}`, () => {
       logger.warn("registration-conflict", () => [
@@ -532,58 +566,24 @@ export class ShareIntake {
   }
 
   /**
-   * Why `offer` is not registered, or `undefined` when it is, as
+   * Why `offer` is not registered, or, when it is, its space's root, as
    * {@link ShareIntake} lists the checks.
    *
    * @throws When reading the space's access list or root fails other than by
    *   a refusal of access, or when the host cannot tell the space's kind.
    */
-  async #refusalOf(offer: VettableOffer): Promise<OfferRefusal | undefined> {
+  async #refusalOf(
+    offer: VettableOffer,
+  ): Promise<OfferRefusal | Cell<unknown>> {
     if (!ADMITTED_SPACE_KINDS.has(offer.kind)) return "offer-kind-unknown";
     if (offer.host !== this.#host) return "offer-foreign-host";
-    const runtime = this.#runtime;
-    let stored;
-    let root;
-    try {
-      stored = await new ACLManager(runtime, offer.space).getStored();
-      root = await runtime.getSpaceCell(offer.space).key("defaultPattern")
-        .pull();
-    } catch (error) {
-      if (accessRefused(runtime, offer.space)) {
-        return "recipient-access-refused";
-      }
-      throw error;
-    }
-    if (accessRefused(runtime, offer.space)) return "recipient-access-refused";
-    // An access list that is malformed or names no concrete owner grants
-    // nobody anything.
-    const acl = isACL(stored) && hasConcreteOwner(stored) ? stored : undefined;
-    if (!isWriter(acl?.[offer.from])) return "sender-not-member";
-    if (!isWriter(acl?.[this.#identity] ?? acl?.["*"])) {
-      return "recipient-access-refused";
-    }
-    // An access list naming a concrete owner was written by the space's
-    // genesis commit or after it, so the kind read here is the one the space
-    // keeps.
-    const kind = await runtime.spaceKind(offer.space);
-    if (kind === undefined) return "space-kind-undeclared";
-    if (kind !== offer.kind) return "space-kind-mismatch";
-    // When the pointer reaches no document of the space, this read returns
-    // the space cell's own `defaultPattern` key, so the path check is what
-    // refuses a pointer into another space. The space check covers a read that
-    // follows such a pointer; no test reaches it, since this read does not.
-    if (
-      !isCell(root) || root.space !== offer.space ||
-      root.getAsNormalizedFullLink().path.length !== 0
-    ) return "space-root-missing";
-    if (
-      !root.equalLinks(
-        runtime.getCell(offer.space, inSpaceRootCause(offer.space)),
-      )
-    ) {
-      return "space-root-misplaced";
-    }
-    return undefined;
+    return await vetSpace(
+      this.#runtime,
+      offer.space,
+      this.#identity,
+      offer.kind,
+      (acl) => isWriter(acl?.[offer.from]) ? undefined : "sender-not-member",
+    );
   }
 }
 
@@ -704,9 +704,4 @@ function originOf(value: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** Whether an access-list grant lets its holder write. */
-function isWriter(grant: unknown): boolean {
-  return grant === "WRITE" || grant === "OWNER";
 }

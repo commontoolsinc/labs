@@ -32,6 +32,9 @@ describe("PiecesController.getPieceCell", () => {
       // Opening a piece follows its origin before starting it; this one
       // records none.
       sourceReconciler: { reconcile: () => Promise.resolve("detached") },
+      // An open waits for the pattern watcher of a piece that is already
+      // running; this one is not.
+      runner: { isRunning: () => false },
       start: () => {
         startSawSyncedPiece = pieceSynced;
         return Promise.resolve(true);

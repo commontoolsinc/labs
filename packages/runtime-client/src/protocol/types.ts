@@ -11,6 +11,7 @@ import type {
 } from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import type {
   ApplyOpResolution,
   DeliveryAttention,
@@ -272,6 +273,13 @@ export enum RequestType {
    * directly would skip that repair, and nothing else performs it.
    */
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * whose space the request names, once the space passes vetting, answering
+   * with what was decided. Home is never created for it.
+   */
+  JoinVisitedRoom = "runtime:joinVisitedRoom",
 
   /**
    * Waits for reactive quiescence *and* for every issued commit to be durable.
@@ -780,17 +788,32 @@ export type BaseRequest = {
  */
 export type InitializationData = {
   /**
-   * The backend server, and the default host for any space `spaceHostMap`
-   * does not list.
+   * The backend server. It serves the HTTP APIs, patterns, LLM requests and
+   * the health check, and is the default storage host when `memoryUrl` is
+   * absent.
    */
   apiUrl: string;
 
   /**
+   * The default storage host, as an HTTP or HTTPS origin: where the Memory
+   * WebSocket opens for any space `spaceHostMap` does not list. A deployment
+   * whose Memory service has its own hostname, such as a memory router,
+   * publishes it (the toolshed's `MEMORY_PUBLIC_URL`), and the shell passes
+   * on what its page or its API URL's `/api/meta` says. Absent, the default
+   * storage host is `apiUrl`, byte-identical to the single-host behavior.
+   * Only Memory moves: everything else stays on `apiUrl`, and while it is set
+   * a host hint cannot move a space's Memory off it
+   * (`Runtime.registerSpaceHostDetailed`). Fixed for the connection's
+   * lifetime.
+   */
+  memoryUrl?: string;
+
+  /**
    * Per-space storage hosts, by space DID, as HTTP or HTTPS origins. A listed
-   * space resolves against its own host instead of `apiUrl`; an absent map or
-   * an absent entry falls back to `apiUrl`, byte-identical to the single-host
-   * behavior. A plain record, since no function crosses the worker boundary.
-   * Fixed for the connection's lifetime.
+   * space resolves against its own host instead of the default storage host
+   * (`memoryUrl`, else `apiUrl`); an absent map or an absent entry falls back
+   * to that host. A plain record, since no function crosses the worker
+   * boundary. Fixed for the connection's lifetime.
    */
   spaceHostMap?: Record<string, string>;
 
@@ -1036,12 +1059,13 @@ export type InitializeRequest = BaseRequest & {
  * Every other field is the initialization field of the same name, so what an
  * attach asserts and what initialization declared compare directly.
  *
- * `apiUrl` and `spaceHostMap` are here as posture rather than as routing: a
- * document believing it reads from a different backend than the runtime does
- * is as wrong about what it is joined to as one believing a different
- * enforcement mode, and the reads would silently go to the runtime's hosts.
- * Both are normalized before they are stored or asserted, so two spellings of
- * one origin are one posture.
+ * `apiUrl`, `memoryUrl` and `spaceHostMap` are here as posture rather than as
+ * routing: a document believing it reads from a different backend than the
+ * runtime does is as wrong about what it is joined to as one believing a
+ * different enforcement mode, and the reads would silently go to the runtime's
+ * hosts. All three are normalized before they are stored or asserted, so two
+ * spellings of one origin are one posture, and a `memoryUrl` naming
+ * `apiUrl`'s own origin is the same posture as none.
  *
  * **Every field here holds plain JSON-shaped values only.** They are compared
  * with `deepEqual`, except `cfcTrustConfig`, which is compared by the digest
@@ -1059,6 +1083,7 @@ export type RuntimeSecurityContext =
   & Pick<
     InitializationData,
     | "apiUrl"
+    | "memoryUrl"
     | "spaceHostMap"
     | "spaceDid"
     | "experimental"
@@ -1850,12 +1875,25 @@ export type GetHomeSpaceCellRequest = BaseRequest & {
   type: RequestType.GetHomeSpaceCell;
 };
 
-/**
- * The {@link RequestType.EnsureHomePatternRunning} request, which carries no
- * payload.
- */
+/** The {@link RequestType.EnsureHomePatternRunning} request. */
 export type EnsureHomePatternRunningRequest = BaseRequest & {
   type: RequestType.EnsureHomePatternRunning;
+
+  /**
+   * Whether to bring Home up only where it already exists: where Home's root
+   * records the pattern it runs. Where it does not, the request creates
+   * nothing and starts nothing. Defaults to `false`, which creates Home where
+   * it has no root.
+   */
+  existingOnly?: boolean;
+};
+
+/** The {@link RequestType.JoinVisitedRoom} request. */
+export type JoinVisitedRoomRequest = BaseRequest & {
+  type: RequestType.JoinVisitedRoom;
+
+  /** The space of the room the user visited. */
+  space: DID;
 };
 
 /** The {@link RequestType.Idle} request, which carries no payload. */
@@ -3331,6 +3369,7 @@ export type IPCClientRequest =
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
+  | JoinVisitedRoomRequest
   | ListEventAttentionRequest
   | ResolveEventAttentionRequest
   | GetGraphSnapshotRequest
@@ -3591,6 +3630,27 @@ export type CellResponse = {
    * The cell in question.
    */
   cell: CellRef;
+};
+
+/**
+ * A reference to the user's Home, which a request that brings Home up only
+ * where it exists lacks where it does not.
+ */
+export type HomePatternResponse = {
+  /**
+   * Home's root, absent where the request brought nothing up.
+   */
+  cell?: CellRef;
+};
+
+/**
+ * What a {@link RequestType.JoinVisitedRoom} request came to, absent where the
+ * user has no Home: `sent` to the chat manager, `no-chat-manager` for a Home
+ * whose chat manager has no `joinRoom`, or the reason vetting refused the
+ * space.
+ */
+export type JoinVisitedRoomResponse = {
+  decision?: JoinVisitDecision;
 };
 
 /**
@@ -4090,6 +4150,8 @@ export type RemoteResponse =
   | CellValueResponse
   | CellGetResponse
   | CellResponse
+  | HomePatternResponse
+  | JoinVisitedRoomResponse
   | CfcLabelViewResponse
   | CellFieldsResponse
   | SnapshotSharePreview
@@ -4179,7 +4241,11 @@ export type Commands = {
   };
   [RequestType.EnsureHomePatternRunning]: {
     request: EnsureHomePatternRunningRequest;
-    response: CellResponse;
+    response: HomePatternResponse;
+  };
+  [RequestType.JoinVisitedRoom]: {
+    request: JoinVisitedRoomRequest;
+    response: JoinVisitedRoomResponse;
   };
   [RequestType.Idle]: {
     request: IdleRequest;

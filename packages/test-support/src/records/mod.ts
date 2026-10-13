@@ -78,6 +78,7 @@ export {
   activeCapture,
   asDefinition,
   buildCapture,
+  enclosingNames,
   fileForName,
   installRegistrationCapture,
   NAME_MAP_PREFIX,
@@ -85,6 +86,7 @@ export {
   NAME_SEPARATOR,
   parseSkipList,
   readNameMaps,
+  readRegistrations,
   repositoryPathOf,
   repositoryRootOf,
   serializeSkipList,
@@ -98,11 +100,11 @@ export {
 } from "./preload-path.ts";
 export type { RecordingPaths } from "./preload-path.ts";
 export {
-  dropContainerCases,
   ingestJUnit,
   isRelativeSourcePath,
   JUnitParseError,
   parseJUnit,
+  recordedCases,
 } from "./junit.ts";
 export type { IngestJUnitOptions, JUnitCase } from "./junit.ts";
 export {

@@ -162,10 +162,13 @@ describe("memory v2 flags", () => {
       viewScopedReplicationV1: false,
       sessionReadCeiling: true,
       presenceV1: true,
+      sessionReportV1: true,
       sessionClose: true,
       connectionAuth: true,
       admissionNotice: true,
+      elidedVerdicts: true,
       routedAuthV1: false,
+      syncCrossingsV1: true,
       syncSchemaTableV2: false,
     });
 
@@ -194,10 +197,13 @@ describe("memory v2 flags", () => {
       viewScopedReplicationV1: false,
       sessionReadCeiling: true,
       presenceV1: true,
+      sessionReportV1: true,
       sessionClose: true,
       connectionAuth: true,
       admissionNotice: true,
+      elidedVerdicts: true,
       routedAuthV1: false,
+      syncCrossingsV1: true,
       syncSchemaTableV2: true,
     });
 
@@ -228,10 +234,13 @@ describe("memory v2 flags", () => {
         viewScopedReplicationV1: true,
         sessionReadCeiling: true,
         presenceV1: true,
+        sessionReportV1: true,
         sessionClose: true,
         connectionAuth: true,
         admissionNotice: true,
+        elidedVerdicts: true,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
       {
         modernCellRep: true,
@@ -256,10 +265,13 @@ describe("memory v2 flags", () => {
         // server itself, and one carrying none connects as before.
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     ));
   });
@@ -362,10 +374,13 @@ describe("parseMemoryProtocolFlags", () => {
       viewScopedReplicationV1: false,
       sessionReadCeiling: false,
       presenceV1: false,
+      sessionReportV1: false,
       sessionClose: false,
       connectionAuth: false,
       admissionNotice: false,
+      elidedVerdicts: false,
       routedAuthV1: false,
+      syncCrossingsV1: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       genesisRoot: false,
@@ -387,10 +402,13 @@ describe("parseMemoryProtocolFlags", () => {
       viewScopedReplicationV1: false,
       sessionReadCeiling: false,
       presenceV1: false,
+      sessionReportV1: false,
       sessionClose: false,
       connectionAuth: false,
       admissionNotice: false,
+      elidedVerdicts: false,
       routedAuthV1: false,
+      syncCrossingsV1: false,
     });
   });
 
@@ -419,10 +437,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -445,6 +466,19 @@ describe("parseMemoryProtocolFlags", () => {
     );
   });
 
+  it("accepts the syncCrossingsV1 capability key", () => {
+    assertEquals(parseMemoryProtocolFlags({})?.syncCrossingsV1, false);
+    assertEquals(
+      parseMemoryProtocolFlags({ syncCrossingsV1: true })?.syncCrossingsV1,
+      true,
+    );
+    assertEquals(parseMemoryProtocolFlags({ syncCrossingsV1: "true" }), null);
+    assertEquals(
+      wireMemoryProtocolFlags(getMemoryProtocolFlags()).syncCrossingsV1,
+      true,
+    );
+  });
+
   it("accepts the canonical syncSchemaTableV2 key", () => {
     assertEquals(
       parseMemoryProtocolFlags({
@@ -463,10 +497,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
         sqliteCommitRowLabelEval: false,
         sqliteQueryReader: false,
         pendingReadStacks: false,
@@ -501,10 +538,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -534,10 +574,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -575,10 +618,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -609,10 +655,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -640,10 +689,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -657,10 +709,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       }),
       {
         genesisRoot: false,
@@ -682,10 +737,13 @@ describe("parseMemoryProtocolFlags", () => {
         viewScopedReplicationV1: false,
         sessionReadCeiling: false,
         presenceV1: false,
+        sessionReportV1: false,
         sessionClose: false,
         connectionAuth: false,
         admissionNotice: false,
+        elidedVerdicts: false,
         routedAuthV1: false,
+        syncCrossingsV1: false,
       },
     );
   });
@@ -697,6 +755,15 @@ describe("parseMemoryProtocolFlags", () => {
     );
     assertEquals(parseMemoryProtocolFlags({})?.admissionNotice, false);
     assertEquals(parseMemoryProtocolFlags({ admissionNotice: "true" }), null);
+  });
+
+  it("accepts the sessionReportV1 capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ sessionReportV1: true })?.sessionReportV1,
+      true,
+    );
+    assertEquals(parseMemoryProtocolFlags({})?.sessionReportV1, false);
+    assertEquals(parseMemoryProtocolFlags({ sessionReportV1: "true" }), null);
   });
 
   it("rejects values that are not a recognizable flags shape", () => {

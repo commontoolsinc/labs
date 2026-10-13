@@ -1,111 +1,141 @@
-/** Room controls appear when their edit or reply session state calls for them. */
+/**
+ * A room's elements shown or hidden by a prop start out hidden: each carries
+ * a static `hidden`, so it stays out of view while its display computed has
+ * no value, and that computed shows it once it has one, with a concrete
+ * display.
+ */
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import {
-  action,
-  assert,
-  FabricEpochNsec,
-  handler,
-  pattern,
-  type RepresentsCurrentUser,
-  TESTS,
-  type TrustedActionWrite,
-  UI,
-  Writable,
-} from "commonfabric";
-import { clickButton, findNodeByProp, hasText } from "../test/vnode-helpers.ts";
-import { testRoomAbout, testRoomStorage } from "./room-test-fixture.ts";
-import { FabriChatRoom } from "./room.tsx";
-import type { ChatProfile } from "./schemas.tsx";
+  clickButton,
+  findNode,
+  findNodeByProp,
+  hasText,
+  isButton,
+  propValue,
+  readValue,
+} from "../test/vnode-helpers.ts";
+import {
+  type ActivityCounters,
+  type MessagesValue,
+  type ReactionList,
+  type RequestMemo,
+  type SentActivity,
+  type UsedTime,
+} from "./room-records.tsx";
+import { FabriChatRoomCore } from "./room.tsx";
+import { profileGesture, testRoomProfile } from "./room-test-fixture.ts";
+import {
+  CHAT_EDIT_SURFACE,
+  CHAT_REACT_SURFACE,
+  CHAT_SEND_ACTION,
+  CHAT_SEND_SURFACE,
+} from "./schemas.tsx";
 
-/** Whether an edit form is present in the rendered room. */
-const hasEditForm = (root: unknown): boolean =>
-  findNodeByProp(root, "data-ui-pattern", "ChatEditSurface") !== undefined;
+type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
 
-/** A profile whose label identifies the person operating the room controls. */
-type OwnProfile = RepresentsCurrentUser<
-  TrustedActionWrite<
-    ChatProfile,
-    typeof writeProfile,
-    "FabriChatTestWriteProfile",
-    "FabriChatTestProfileSurface"
-  >
->;
+const sendGesture = {
+  surface: CHAT_SEND_SURFACE,
+  action: CHAT_SEND_ACTION,
+};
 
-/** The profile initialized by its owner's gesture. */
-interface ProfileState {
-  profile: Writable<OwnProfile>;
-}
+const typed = (text: string) => ({ type: "click", target: { value: text } });
 
-/** Attests the profile used to select the sender's edit controls. */
-const writeProfile = handler<void, ProfileState>((_, { profile }) => {
-  profile.set({ name: "Alice" } as OwnProfile);
-});
+/** What `node` has as its display, as its `style` names it. */
+const displayOf = (node: unknown) =>
+  readValue(
+    (propValue(node, "style") as { display?: unknown } | undefined)?.display,
+  );
+
+/**
+ * The display of the first node under `root` that `accept` admits and that
+ * carries `hidden`; `missing` when there is none.
+ */
+const hiddenNodeDisplay = (
+  root: unknown,
+  accept: (node: unknown) => boolean,
+) => {
+  const node = findNode(
+    root,
+    (each) => propValue(each, "hidden") === true && accept(each),
+  );
+  return node === undefined ? "missing" : displayOf(node);
+};
+
+/** The first message's edit form under `root`, the main conversation's. */
+const editForm = (root: unknown) =>
+  findNodeByProp(root, "data-ui-pattern", CHAT_EDIT_SURFACE);
 
 export default pattern(() => {
-  const profile = new Writable<OwnProfile>();
-  const version = new Writable({
-    body: "Hello",
-    sentAt: new FabricEpochNsec(0n),
-  });
-  const initializeVersion = action(() =>
-    version.key("sentAt").set(
-      new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-    )
-  );
-  const description = testRoomAbout({ kind: "group", standalone: false });
-  const room = FabriChatRoom({
-    myProfile: profile,
-    about: description.about,
-    ...testRoomStorage({}),
-  });
+  const messages = Writable.of<MessagesValue>([] as MessagesValue);
+  const ownProfile = testRoomProfile({});
+  const aliceProfile = ownProfile.profile;
+  const alice = FabriChatRoomCore({
+    myProfile: aliceProfile,
+    about: { kind: "group" as const },
+    messages,
+    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
+    requests: Writable.of<RequestMemo[]>([]),
+    usedTimes: Writable.of<UsedTime[]>([]),
+    activity: Writable.of<SentActivity[]>([]),
+    counters: Writable.of<ActivityCounters[]>([]),
+  } as RoomArg);
+
   return {
     [TESTS]: [
+      { action: ownProfile.initialize, trustedUi: profileGesture },
       {
-        action: writeProfile({ profile }),
-        trustedUi: {
-          surface: "FabriChatTestProfileSurface",
-          action: "FabriChatTestWriteProfile",
-        },
+        action: alice.composerSend,
+        event: typed("Hello"),
+        trustedUi: sendGesture,
       },
-      { action: description.initialize },
-      { action: initializeVersion },
-      { render: room[UI] },
       {
         assertion: assert(() =>
-          !hasEditForm(room[UI]) && !hasText(room[UI], "Replying to a message")
+          propValue(editForm(alice[UI]), "hidden") === true
         ),
       },
-      {
-        action: room.sendMessage,
-        event: { requestId: "first", version },
-        trustedUi: { surface: "ChatSendSurface", action: "ChatSend" },
-      },
-      { render: room[UI] },
+      { assertion: assert(() => displayOf(editForm(alice[UI])) === "none") },
+      // The message's row, in the main conversation.
       {
         assertion: assert(() =>
-          hasText(room[UI], "Hello") && hasText(room[UI], "Edit") &&
-          !hasEditForm(room[UI])
+          hiddenNodeDisplay(alice[UI], (node) => hasText(node, "Hello")) ===
+            "block"
         ),
       },
-      { action: action(() => clickButton(room[UI], "Edit")) },
-      { render: room[UI] },
-      { assertion: assert(() => hasEditForm(room[UI])) },
-      { action: action(() => clickButton(room[UI], "Edit")) },
-      { render: room[UI] },
-      { assertion: assert(() => !hasEditForm(room[UI])) },
-      { action: action(() => clickButton(room[UI], "Reply")) },
-      { render: room[UI] },
+      // The viewer's own message offers its edit control.
       {
         assertion: assert(() =>
-          hasText(room[UI], "Replying to a message") &&
-          hasText(room[UI], "Placement: thread")
+          hiddenNodeDisplay(alice[UI], isButton("Edit")) === "inline-flex"
         ),
       },
-      { action: action(() => clickButton(room[UI], "Conversation only")) },
-      { render: room[UI] },
-      { assertion: assert(() => hasText(room[UI], "Placement: main")) },
-      { action: action(() => clickButton(room[UI], "Cancel reply")) },
-      { render: room[UI] },
-      { assertion: assert(() => !hasText(room[UI], "Replying to a message")) },
+      { action: action(() => clickButton(alice[UI], "Reply")) },
+      {
+        assertion: assert(() =>
+          hiddenNodeDisplay(
+            alice[UI],
+            (node) => hasText(node, "Replying to:"),
+          ) === "flex"
+        ),
+      },
+      { action: action(() => clickButton(alice[UI], "☺+")) },
+      {
+        assertion: assert(() =>
+          hiddenNodeDisplay(
+            alice[UI],
+            (node) => propValue(node, "data-ui-pattern") === CHAT_REACT_SURFACE,
+          ) === "flex"
+        ),
+      },
+      { action: action(() => clickButton(alice[UI], "Thread")) },
+      {
+        assertion: assert(() =>
+          hiddenNodeDisplay(
+            alice[UI],
+            (node) => propValue(node, "id") === "fabrichat-thread",
+          ) === "flex"
+        ),
+      },
+      { action: action(() => clickButton(alice[UI], "Edit")) },
+      { assertion: assert(() => displayOf(editForm(alice[UI])) === "block") },
     ],
   };
 });

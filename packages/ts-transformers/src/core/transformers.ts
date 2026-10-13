@@ -37,6 +37,33 @@ export type SchemaHint = {
    * names a value binding that the print cannot spell.
    */
   readonly spelledBy?: ts.TypeNode;
+
+  /**
+   * Set on a lift's result type where it is printed from the callback's
+   * inferred return type, with no return type its author wrote. The schema it
+   * names declares no scope: the runtime stores a lift's result at the
+   * narrowest scope its callback reads, and a type inferred through `??` or a
+   * union keeps or drops a scope wrapper by how TypeScript reduces it, so it
+   * says nothing the reads do not.
+   */
+  readonly declaresNoScope?: true;
+
+  /**
+   * Whether the value the node describes is data its schema's document holds
+   * itself rather than a view of another document, as a fresh value a
+   * pattern's inferred result returns is. Schema generation reads it as
+   * defining a document (`SchemaGenerationOptions.definesDocument`).
+   */
+  readonly definesDocument?: true;
+
+  /**
+   * Set on the remainder of a recursion the contract overlay of a handler's
+   * event or state cuts (`overlayContractCapabilities()`): every cell its
+   * reading reaches, outside the value of another cell, is opaque, since no
+   * use the body makes reaches it. Schema generation reads it as
+   * `SchemaHint.cellsOpaque`.
+   */
+  readonly cellsOpaque?: true;
 };
 
 export type ReactiveCapability =
@@ -58,8 +85,25 @@ export type CapabilityParamSummary = {
   readonly fullShapePaths?: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
   readonly opaquePaths?: readonly (readonly string[])[];
+
+  /**
+   * Paths whose whole value left the function: returned to a caller, put in a
+   * collection, or handed to a callee with no summary. Whatever received it
+   * may read anything beneath, so no path at or below one is identity-only,
+   * here or in a caller that passed the value in.
+   */
+  readonly escapedPaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
+  /**
+   * The static path prefixes below which the body reaches members this
+   * analysis does not name one by one: a wildcard's, and a read through a key
+   * that can name any member. `[]` is the whole parameter. A position below
+   * one may be used in any way the analysis did not record; the use of a
+   * prefix itself is recorded with the other paths.
+   */
+  readonly wildcardPaths?: readonly (readonly string[])[];
 
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`

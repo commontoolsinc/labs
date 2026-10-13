@@ -84,6 +84,7 @@ import {
   PatternCoverageCollector,
   popFrame,
   pushFrame,
+  readMemoryUrl,
   resolveExternalRootRefForStructure,
   resolveSlugReference,
   resolveSlugTargetInPiece,
@@ -226,10 +227,13 @@ import {
   type GetTriggerTraceRequest,
   type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
+  type HomePatternResponse,
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
   isCellRef,
+  type JoinVisitedRoomRequest,
+  type JoinVisitedRoomResponse,
   type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -318,6 +322,7 @@ import {
 import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
   type EveryFieldOf,
+  normalizeMemoryUrl,
   normalizeOrigin,
   normalizeSpaceHostMap,
   securityContextDifferences,
@@ -510,12 +515,14 @@ export function assertServerExecutionPostureAgreement(
  * Maps host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params. The shared first-party posture (CFC pins, patternEnvironment from
  * apiUrl) lives in the preset; this function carries only what the host
- * actually decided. Exported for testing.
+ * actually decided. `memoryHost` is the host `storageManager` was opened on,
+ * which the caller has already read from `data`. Exported for testing.
  */
 export function browserWorkerParamsFromInitializationData(
   data: InitializationData,
   storageManager: RuntimeOptions["storageManager"],
   telemetry: RuntimeTelemetry,
+  memoryHost: URL,
 ): BrowserWorkerPresetParams {
   return {
     apiUrl: new URL(data.apiUrl),
@@ -527,6 +534,9 @@ export function browserWorkerParamsFromInitializationData(
     ...(data.spaceHostMap !== undefined
       ? { spaceHostMap: data.spaceHostMap }
       : {}),
+    // The runtime holds the host the storage manager was opened on, so that
+    // a host hint cannot move a space's Memory off a memory URL.
+    memoryHost,
     ...(data.cfcEnforcementMode !== undefined
       ? { cfcEnforcementMode: data.cfcEnforcementMode }
       : {}),
@@ -819,11 +829,13 @@ export function mountErrorSink(
 
 /**
  * The security posture a worker's runtime runs under, read off the payload it
- * was initialized from. The backend and the per-space host map are normalized
- * here, so an attach that spells the same backend another way agrees. The
- * render policy and the render ceiling are recorded as the payload spelled
- * them, while the processor applies a normalized form of each, so two
- * spellings of one render posture refuse each other.
+ * was initialized from. The backend, the memory URL and the per-space host map
+ * are normalized here, so an attach that spells the same backend another way
+ * agrees, and one that names no memory URL agrees with a runtime whose memory
+ * URL is the backend's own origin. The render policy and the render ceiling
+ * are recorded as the payload spelled them, while the processor applies a
+ * normalized form of each, so two spellings of one render posture refuse each
+ * other.
  *
  * Every field the context declares is named, held by the `satisfies` clause.
  * What is recorded here is what an attach is compared against, so a field this
@@ -836,6 +848,7 @@ export function securityContextFrom(
   return {
     identity,
     apiUrl: normalizeOrigin(data.apiUrl),
+    memoryUrl: normalizeMemoryUrl(data.memoryUrl, data.apiUrl),
     spaceHostMap: normalizeSpaceHostMap(data.spaceHostMap),
     spaceDid: data.spaceDid,
     experimental: data.experimental,
@@ -874,6 +887,22 @@ function unreachableHostMessage(data: InitializationData): string {
   const quoted = [...spaceHosts].map((host) => `"${host}"`).join(", ");
   return `Could not connect to "${data.apiUrl}"` +
     (spaceHosts.size > 0 ? ` or to a space host (${quoted})` : "");
+}
+
+/**
+ * The host Memory opens on for a space `spaceHostMap` does not list:
+ * `memoryUrl` where the payload names one, else the backend itself. An empty
+ * `memoryUrl` names none. The memory URL is held to the rule a space host is,
+ * an HTTP or HTTPS origin, since storage uses it the same way.
+ *
+ * @throws If `memoryUrl` is not an HTTP or HTTPS origin, naming the value.
+ */
+function defaultStorageHost(data: InitializationData, apiUrl: URL): URL {
+  const read = readMemoryUrl(data.memoryUrl, apiUrl);
+  if ("refused" in read) {
+    throw new Error(`Invalid memoryUrl "${data.memoryUrl}": ${read.refused}`);
+  }
+  return read.memoryUrl ?? apiUrl;
 }
 
 /** Builds the refusal for a detached client's or a disposed runtime's seal. */
@@ -1088,8 +1117,9 @@ export class RuntimeProcessor {
    * The runtime and home context this processor was built over, the tables
    * it keeps by space, by client, and by session, the disposed flag, the
    * render policy and ceiling a mount inherits, the boot-time health check's
-   * verdict and whether `initialize()` waited for it, the private inbox ensure
-   * in flight, and the per-space context step, which a test drives directly.
+   * verdict and whether `initialize()` waited for it, the adoption, private
+   * inbox ensure and share intake the worker's housekeeping over Home
+   * started, and the per-space context step, which a test drives directly.
    */
   get accessForTestingOnly(): {
     runtime: Runtime;
@@ -1119,8 +1149,9 @@ export class RuntimeProcessor {
     readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
     readonly health: Promise<boolean>;
     readonly awaitedHealth: boolean;
-    readonly privateInboxEnsured: Promise<void> | undefined;
-    readonly shareIntake: Promise<ShareIntake | undefined> | undefined;
+    legacySpacesAdopted: Promise<void> | undefined;
+    privateInboxEnsured: Promise<void> | undefined;
+    shareIntake: Promise<ShareIntake | undefined> | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
     // deno-lint-ignore no-this-alias
@@ -1138,11 +1169,23 @@ export class RuntimeProcessor {
       get awaitedHealth() {
         return outerThis.#awaitedHealth;
       },
+      get legacySpacesAdopted() {
+        return outerThis.#legacySpacesAdopted;
+      },
+      set legacySpacesAdopted(value) {
+        outerThis.#legacySpacesAdopted = value;
+      },
       get privateInboxEnsured() {
         return outerThis.#privateInboxEnsured;
       },
+      set privateInboxEnsured(value) {
+        outerThis.#privateInboxEnsured = value;
+      },
       get shareIntake() {
         return outerThis.#shareIntake;
+      },
+      set shareIntake(value) {
+        outerThis.#shareIntake = value;
       },
       cc: this.#cc,
       spaces: this.#spaces,
@@ -1207,9 +1250,23 @@ export class RuntimeProcessor {
    * toolshed as the machine that wrote the row sees it, so it is no route for a
    * page that reached the toolshed by another name — and a browser refuses the
    * `ws://` socket it implies from an `https` page. When the entry is loopback
-   * and this runtime's `apiUrl` is not, the space stays on `apiUrl`, and the
-   * row retires any earlier row for that space. A page that did reach loopback
-   * registers it as usual.
+   * and this runtime's `apiUrl` is not, the space stays on the default hosts
+   * (Memory on `memoryUrl`, else `apiUrl`; everything else on `apiUrl`), and
+   * the row retires any earlier row for that space. A page that did reach
+   * loopback registers it as usual. `apiUrl` decides because the entry would
+   * carry the space's HTTP work as well as its Memory, and `apiUrl` is where
+   * this page reached that work.
+   *
+   * Under a memory URL the runtime decides each remaining entry
+   * (`Runtime.resolveSpaceHost`): one naming `apiUrl`'s origin or the memory
+   * URL is the default route and is accepted without being recorded, which
+   * also retires an earlier row for the space, since only the last row per
+   * space is offered; one naming another deployment's origin is registered
+   * once the runtime has read where that deployment serves Memory, which is
+   * why each entry is registered asynchronously. An origin whose memory host
+   * could not be learned, or past the origins the runtime keeps, leaves its
+   * spaces on no route; the runtime warns about the origin once, so the rows
+   * are not warned about here.
    *
    * ORDERING CONTRACT for embedders: push a newly learned hint through the
    * RegisterSpaceHost IPC before relying on that space, and proceed only when
@@ -1258,8 +1315,9 @@ export class RuntimeProcessor {
               // A loopback entry names the toolshed from the machine that
               // wrote it, so a page served from anywhere else cannot reach it
               // — and a browser on an https page refuses the ws:// socket it
-              // implies. Leave those spaces on the URL this runtime already
-              // reached its toolshed at.
+              // implies. Leave those spaces on the hosts this runtime already
+              // reached: Memory on the default storage host, the rest on
+              // `apiUrl`.
               if (
                 isLoopbackHostname(host.hostname) &&
                 !isLoopbackHostname(this.#runtime.apiUrl.hostname)
@@ -1267,9 +1325,15 @@ export class RuntimeProcessor {
                 const key = `${entry.did}|${host.toString()}`;
                 if (!this.#siteTableWarned.has(key)) {
                   this.#siteTableWarned.add(key);
+                  const api = this.#runtime.apiUrl.toString();
+                  const memory = this.#runtime.memoryUrl?.toString();
                   console.debug(
                     `[RuntimeProcessor] Ignoring loopback site-table entry for ${entry.did} ` +
-                      `(${host.toString()}); using ${this.#runtime.apiUrl.toString()}`,
+                      `(${host.toString()}); using ${
+                        memory === undefined
+                          ? api
+                          : `${memory} for Memory and ${api} otherwise`
+                      }`,
                   );
                 }
                 // The table is last-row-wins, so this row also retires an
@@ -1284,35 +1348,7 @@ export class RuntimeProcessor {
               });
             }
             for (const entry of latestEntries.values()) {
-              try {
-                const accepted = this.#runtime.registerSpaceHost(
-                  entry.did,
-                  entry.host,
-                );
-                // Warn once per rejected fact. A seeded route or an earlier
-                // accepted hint can fix a different host.
-                if (!accepted) {
-                  const key = `${entry.did}|${entry.host}`;
-                  const effective = this.#runtime.hostForSpace(
-                    entry.did,
-                  ).toString();
-                  if (
-                    effective !== new URL(entry.host).toString() &&
-                    !this.#siteTableWarned.has(key)
-                  ) {
-                    this.#siteTableWarned.add(key);
-                    console.warn(
-                      `[RuntimeProcessor] Site-table hint for ${entry.did} not in effect ` +
-                        `(explicit space route already fixed); using ${effective}`,
-                    );
-                  }
-                }
-              } catch (error) {
-                console.warn(
-                  `[RuntimeProcessor] Ignoring invalid site-table entry for ${entry.did}:`,
-                  error instanceof Error ? error.message : error,
-                );
-              }
+              this.#registerSiteTableEntry(entry.did, entry.host);
             }
           },
         );
@@ -1328,6 +1364,44 @@ export class RuntimeProcessor {
         error instanceof Error ? error.message : error,
       );
     }
+  }
+
+  /**
+   * Registers one site-table row through `Runtime.resolveSpaceHost`, which
+   * may first read where the row's origin serves Memory, and warns once per
+   * row the runtime refuses for a route already fixed. The rows a foreign
+   * origin's unread or unkept memory host refuses are the runtime's to warn
+   * about, once per origin, and are not repeated here. A row the sink offers
+   * again while its read is in flight shares the read.
+   */
+  #registerSiteTableEntry(did: DID, host: string): void {
+    this.#runtime.resolveSpaceHost(did, host).then(
+      (registration) => {
+        if (registration.accepted) return;
+        if (
+          registration.reason === "foreign-host-unread" ||
+          registration.reason === "foreign-host-limit"
+        ) return;
+        // Warn once per rejected fact. A seeded route or an earlier
+        // accepted hint can fix a different host.
+        const key = `${did}|${host}`;
+        if (this.#siteTableWarned.has(key)) return;
+        const effective = this.#runtime.hostForSpace(did).toString();
+        if (effective !== host) {
+          this.#siteTableWarned.add(key);
+          console.warn(
+            `[RuntimeProcessor] Site-table hint for ${did} not in effect ` +
+              `(explicit space route already fixed); using ${effective}`,
+          );
+        }
+      },
+      (error: unknown) => {
+        console.warn(
+          `[RuntimeProcessor] Ignoring invalid site-table entry for ${did}:`,
+          error instanceof Error ? error.message : error,
+        );
+      },
+    );
   }
 
   /**
@@ -2701,13 +2775,18 @@ export class RuntimeProcessor {
   /**
    * Ensure the home space's default pattern is running and return a CellRef to it.
    * This is needed for favorites operations which require the pattern to be active.
-   * Creates the home pattern if it doesn't exist yet.
+   * Creates the home pattern if it doesn't exist yet, unless the request is
+   * `existingOnly`: then a Home whose root records no pattern it runs, as one
+   * still being created does not, is left alone, and the response holds no
+   * cell. Either way, bringing Home up starts the worker's housekeeping over
+   * it, as `#startHomeHousekeeping()` says.
    */
   async handleEnsureHomePatternRunning(
-    _request: EnsureHomePatternRunningRequest,
-  ): Promise<CellResponse> {
+    request: EnsureHomePatternRunningRequest,
+  ): Promise<HomePatternResponse> {
     const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
+    if (request.existingOnly && !(await this.#homeExists())) return {};
 
     // Always the PiecesController path: ensureDefaultPattern() follows the
     // root's origin and carries the cold-start setup repair that heals an aged
@@ -2719,21 +2798,53 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Ensures the user's Home pattern is running and returns its result cell.
-   * The first time in this worker, it also adopts the Home space list's
-   * name-only entries (see `PiecesController.adoptLegacySpaces`), and starts
-   * Home's ensure of the user's private inbox (see
-   * `PiecesController.ensurePrivateInbox`) and the share intake over Home's
-   * inboxes (see `PiecesController.startShareIntake`) without waiting for
-   * either.
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * whose space `request` names, when the space passes vetting, as
+   * `PiecesController.joinVisitedRoom` says, and answers with what was
+   * decided. A user with no Home gets nothing done and no decision: Home is
+   * never created for it, and an existing Home is brought up as any other
+   * bring-up does.
+   */
+  async handleJoinVisitedRoom(
+    request: JoinVisitedRoomRequest,
+  ): Promise<JoinVisitedRoomResponse> {
+    if (!(await this.#homeExists())) return {};
+    await this.#ensureHomePattern();
+    const decision = await this.#homeController().joinVisitedRoom(
+      request.space,
+    );
+    return { decision };
+  }
+
+  /**
+   * Ensures the user's Home pattern is running and returns its result cell,
+   * once the worker's housekeeping over Home has adopted the Home space
+   * list's name-only entries, as `#startHomeHousekeeping()` says.
    */
   async #ensureHomePattern(): Promise<Cell<unknown>> {
     const homeCC = this.#homeController();
     await homeCC.synced();
     const home = (await homeCC.ensureDefaultPattern()).getCell();
+    await this.#startHomeHousekeeping(homeCC);
+    return home;
+  }
+
+  /**
+   * Helper for bringing up the user's Home pattern, which the first time in
+   * this worker adopts the Home space list's name-only entries (see
+   * `PiecesController.adoptLegacySpaces`), and then starts Home's ensure of
+   * the user's private inbox (see `PiecesController.ensurePrivateInbox`) and
+   * the share intake over Home's inboxes (see
+   * `PiecesController.startShareIntake`) without waiting for either. A later
+   * bring-up shares the run already made, and repeats only a step that
+   * failed. `homeCC` is a controller over the identity's Home space.
+   *
+   * Resolves once the adoption has settled, and never rejects.
+   */
+  async #startHomeHousekeeping(homeCC: PiecesController): Promise<void> {
     // Adoption is housekeeping over the Home pattern the user already has; a
-    // failure is reported and tried again on the next ensure, and never keeps
-    // Home from opening.
+    // failure is reported and tried again at the next bring-up of Home, and
+    // never keeps Home from opening.
     this.#legacySpacesAdopted ??= homeCC.adoptLegacySpaces().catch((error) => {
       this.#legacySpacesAdopted = undefined;
       console.warn("[RuntimeProcessor] Adopting legacy Home spaces:", error);
@@ -2742,7 +2853,7 @@ export class RuntimeProcessor {
     // The ensure reads every profile's pointer and loads inbox documents in
     // other spaces, so Home opens without waiting for it. A failure is
     // reported unless the processor has been disposed, as `dispose()` says,
-    // and the next ensure of Home in this worker starts it again.
+    // and the next bring-up of Home in this worker starts it again.
     this.#privateInboxEnsured ??= homeCC.ensurePrivateInbox(
       this.#disposal.signal,
     ).catch(
@@ -2754,7 +2865,7 @@ export class RuntimeProcessor {
     );
     // The intake follows Home's inboxes until disposal aborts its signal. A
     // failure to start it is reported unless the processor has been disposed,
-    // and the next ensure of Home in this worker starts it again.
+    // and the next bring-up of Home in this worker starts it again.
     this.#shareIntake ??= homeCC.startShareIntake(this.#disposal.signal).catch(
       (error) => {
         this.#shareIntake = undefined;
@@ -2764,7 +2875,17 @@ export class RuntimeProcessor {
         return undefined;
       },
     );
-    return home;
+  }
+
+  /**
+   * Whether the user's Home exists: its space links a root, and that root
+   * records the pattern it runs. A root another writer is still creating can
+   * be linked before it records its pattern, and starting it then fails, so
+   * it does not count.
+   */
+  async #homeExists(): Promise<boolean> {
+    const root = await this.#homeController().getDefaultPattern(false);
+    return root !== undefined && getPatternIdentityRef(root) !== undefined;
   }
 
   /** A controller over the user's Home space. */
@@ -2784,7 +2905,40 @@ export class RuntimeProcessor {
     // the storage manager, covering event handlers, direct cell IPC writes,
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
-    await this.#runtime.scheduler.idleWithPendingCommits();
+    //
+    // It also takes in the housekeeping a bring-up of Home has started, which
+    // goes on loading and sending to Home after the bring-up has answered.
+    // That work issues scheduler work, and scheduler work can hand the share
+    // intake more to take up, so the two are awaited until both hold at once.
+    for (;;) {
+      const intake = await this.#homeHousekeepingIdle();
+      await this.#runtime.scheduler.idleWithPendingCommits();
+      if (
+        (intake === undefined || intake.isIdle()) &&
+        this.#runtime.scheduler.isIdleWithPendingCommits()
+      ) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Helper for `handleIdle()`, which waits for the housekeeping over Home that
+   * `#startHomeHousekeeping()` has started in this worker: the adoption of the
+   * Home space list's name-only entries, the private inbox ensure, the start
+   * of the share intake, and the intake taking up every change it has been
+   * told of. Returns the intake, when one is running. Never rejects: each step
+   * is held as a promise that does not, and a failure of the intake's own wait
+   * is reported rather than passed on.
+   */
+  async #homeHousekeepingIdle(): Promise<ShareIntake | undefined> {
+    await this.#legacySpacesAdopted;
+    await this.#privateInboxEnsured;
+    const intake = await this.#shareIntake;
+    await intake?.idle().catch((error) => {
+      console.warn("[RuntimeProcessor] Waiting for the share intake:", error);
+    });
+    return intake;
   }
 
   async handleListEventAttention(
@@ -2932,7 +3086,11 @@ export class RuntimeProcessor {
    * no root unless the request opens it (`start` true) and this runtime's
    * identity owns the space, in which case the root is created. A read never
    * writes, and a principal other than the owner never puts a root in
-   * someone else's space.
+   * someone else's space. Opening the root of this runtime's identity's own
+   * Home also starts the worker's housekeeping over Home, as
+   * `handleEnsureHomePatternRunning()` does: the adoption of legacy space
+   * entries, the private inbox ensure and the share intake, each once per
+   * worker. It returns without waiting for any of them.
    *
    * @throws The server's refusal when this runtime's identity may not read
    *   the space, whether or not a root is still held from before.
@@ -2967,6 +3125,12 @@ export class RuntimeProcessor {
       return {};
     }
     const piece = await cc.ensureDefaultPattern();
+    if (request.space === this.#runtime.userIdentityDID) {
+      // Starting Home's root brings Home up, so it starts the worker's
+      // housekeeping over Home as any other bring-up does, and the root is
+      // returned without waiting for any of it.
+      void this.#startHomeHousekeeping(cc);
+    }
     return {
       piece: createPieceRef(piece.getCell()),
     };
@@ -3421,19 +3585,28 @@ export class RuntimeProcessor {
     );
   }
 
-  handleRegisterSpaceHost(
+  /**
+   * Registers a host hint through `Runtime.resolveSpaceHost`, so that under
+   * a memory URL a hint naming another deployment is decided once that
+   * deployment's memory host has been read, and the caller learns the
+   * verdict that read settled rather than that the read is pending.
+   */
+  async handleRegisterSpaceHost(
     request: RegisterSpaceHostRequest,
-  ): BooleanResponse {
-    return {
-      value: this.#runtime.registerSpaceHost(request.space, request.host),
-    };
+  ): Promise<BooleanResponse> {
+    const registration = await this.#runtime.resolveSpaceHost(
+      request.space,
+      request.host,
+    );
+    return { value: registration.accepted };
   }
 
-  handleRegisterSpaceHostDetailed(
+  /** See {@link handleRegisterSpaceHost}. */
+  async handleRegisterSpaceHostDetailed(
     request: RegisterSpaceHostDetailedRequest,
-  ): SpaceHostRegistrationResponse {
+  ): Promise<SpaceHostRegistrationResponse> {
     return {
-      registration: this.#runtime.registerSpaceHostDetailed(
+      registration: await this.#runtime.resolveSpaceHost(
         request.space,
         request.host,
       ),
@@ -3792,6 +3965,8 @@ export class RuntimeProcessor {
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:
         return await this.handleEnsureHomePatternRunning(request);
+      case RequestType.JoinVisitedRoom:
+        return await this.handleJoinVisitedRoom(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.ListEventAttention:
@@ -3843,9 +4018,9 @@ export class RuntimeProcessor {
       case RequestType.CreateSpace:
         return await this.handleCreateSpace(request);
       case RequestType.RegisterSpaceHost:
-        return this.handleRegisterSpaceHost(request);
+        return await this.handleRegisterSpaceHost(request);
       case RequestType.RegisterSpaceHostDetailed:
-        return this.handleRegisterSpaceHostDetailed(request);
+        return await this.handleRegisterSpaceHostDetailed(request);
       case RequestType.RetrySpaceAccess:
         return await this.handleRetrySpaceAccess(request);
       case RequestType.GetGraphSnapshot:
@@ -4214,6 +4389,9 @@ export class RuntimeProcessor {
     clients: () => Iterable<WorkerClient> = () => [ownerClient],
   ): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
+    // Memory alone moves to the memory URL. LLM requests, patterns and the
+    // health check below stay on `apiUrl`.
+    const memoryHost = defaultStorageHost(data, apiUrlObj);
     const identity = await Identity.fromKeyPair(
       data.identity,
     );
@@ -4230,7 +4408,7 @@ export class RuntimeProcessor {
 
     const storageManager = StorageManager.open({
       as: identity,
-      memoryHost: apiUrlObj,
+      memoryHost,
       spaceHostMap: data.spaceHostMap,
       // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
       // watch-refresh round trips up to a bounded window. Off unless the host
@@ -4262,6 +4440,7 @@ export class RuntimeProcessor {
         data,
         storageManager,
         telemetry,
+        memoryHost,
       ),
       consoleHandler: ({ metadata, method, args }) => {
         postToClient({
@@ -4312,6 +4491,10 @@ export class RuntimeProcessor {
     // it: storage reconnects with its own backoff, and a host that stays
     // unreachable is reported below. The check cannot reject on its own; a
     // rejection is treated as an unreachable host all the same.
+    //
+    // `memoryUrl` is not checked. The check asks each host for `/_health`,
+    // which a memory router does not serve, and the Memory socket reconnects
+    // to that host with the same backoff as to any other.
     const health = runtime.healthCheck().then(
       (healthy) => healthy,
       () => false,

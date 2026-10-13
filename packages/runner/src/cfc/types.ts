@@ -6,6 +6,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { Metadata } from "../storage/interface.ts";
+import type { ConsumedLocation } from "./access-integrity.ts";
 import type { CfcConfClause } from "./clause.ts";
 import type {
   CfcLabelView,
@@ -846,13 +847,22 @@ export type CfcAssertedValueRoot = {
  * A content observation made outside durable Fabric storage and admitted by
  * the runtime through a prepared, aborted write transaction. Both labels are
  * canonical runtime products: `flow` carries the effective content label whose
- * hereditary integrity the final flow fold meets, while `consumed` carries the
- * egress guard pool.
+ * hereditary integrity the final flow fold meets, while `consumed` carries
+ * what the content's reads consumed, and `locations` the locations they
+ * consumed it at, which the release gates evaluate exchange rules over.
  */
 export type CfcExternalContentObservation = {
   readonly source: CfcAddress;
   readonly flow: IFCLabel;
   readonly consumed: IFCLabel;
+
+  /**
+   * The labeled locations the content's reads consumed, which the release
+   * gates evaluate exchange rules over (`access-integrity.ts`). A clause of
+   * `consumed` no location holds is evaluated as read, with no evidence.
+   */
+  readonly locations: readonly ConsumedLocation[];
+
   readonly labeledSpaces: readonly MemorySpace[];
   readonly sources: readonly {
     readonly atom: CfcConfClause;
@@ -895,6 +905,14 @@ export type PostCommitSideEffect = {
   abandon?(error: unknown): void;
 };
 
+/**
+ * Where a transaction's boundary verification stands. `prepared` holds the
+ * activity the verification ran over as `input`, frozen, and `digest` is the
+ * digest of that input. `invalidated` keeps the digest of the preparation it
+ * invalidated, when there was one. A transaction computes a digest when one
+ * is first read, so reading `digest` canonicalizes and hashes the input and
+ * copying a state reads it.
+ */
 export type CfcPrepareState =
   | { status: "unprepared" }
   | { status: "prepared"; digest: string; input: PreparedDigestInput }
@@ -1160,6 +1178,12 @@ export type CfcTxState = {
   // closed). Config identity is covered by TrustSnapshot.revision, not a
   // separate digest input.
   trustConfig?: CfcTrustConfig;
+  // The serving runtime's own identity, set once by the Runtime at tx
+  // creation on the serving posture and absent everywhere else. A trust
+  // snapshot naming it is the runtime's ambient one, which no
+  // current-principal claim or owner binding may resolve to unless a run is
+  // stamped as acting for that identity.
+  servingIdentity?: string;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything
@@ -1206,4 +1230,6 @@ export type CfcPreparationWork =
   | "stagedReferenceDerivations"
   | "stagedReferenceCacheHits"
   | "flowTemplateEntriesMinted"
-  | "flowTemplateContainers";
+  | "flowTemplateContainers"
+  | "inputReadViewsBuilt"
+  | "inputReadViewsReused";

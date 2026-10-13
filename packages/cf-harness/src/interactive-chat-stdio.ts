@@ -138,7 +138,7 @@ Options:
   --chat-max-in-memory-events <count>  Retain at most count events in memory
   --host-mount <spec>                  Extra host bind mount, same grammar as the batch CLI
                                        (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
-  --max-model-turns <count>            Model turns allowed per user message (default 8)
+  --max-model-turns <count>            Model turns allowed per user message (default 32)
   --loom-authoring-config <path>       Absolute host-owned JSON file backing Loom tools
   --fabric-api-url <url>              Fabric API URL for held Pattern Instance handles
   --fabric-identity <path>            Host PKCS#8 identity keyfile, relative to the caller's cwd
@@ -150,22 +150,26 @@ Options:
   --help                              Print this help text to stderr
 
 Environment:
-  CF_HARNESS_SANDBOX_RUNTIME           docker | runsc. Unset, macOS (Apple silicon only)
-                                       runs runsc from the native cfc-vm store
+  CF_HARNESS_SANDBOX_RUNTIME           runsc. Unset, macOS (Apple silicon only) runs
+                                       runsc from the native cfc-vm store
                                        (CFC_VM_HOME, or ~/Library/Application
-                                       Support/cfc-vm), Linux runs it from the store
-                                       under ~/.local/share/runsc-cfc, rootless for a
-                                       process that is not root (the host must allow
-                                       unprivileged user namespaces; a refusal names
-                                       the sysctl -w to run), with pasta (passt)
-                                       giving it egress and the host. That network
-                                       needs pasta and setpriv on PATH, and unshare
-                                       too for root, which
-                                       CF_HARNESS_DOCKER_NETWORK_MODE=none or host
-                                       does not need. Each refuses to start where its
-                                       store is not set up; every other platform runs
-                                       docker. The local Loom
-                                       host refuses to start with it unset
+                                       Support/cfc-vm), and Linux runs it from the
+                                       store under ~/.local/share/runsc-cfc, rootless
+                                       for a process that is not root (the host must
+                                       allow unprivileged user namespaces; a refusal
+                                       names the sysctl -w to run), with Linux's own
+                                       default network, pasta's (passt), giving it
+                                       egress and the host. That network needs pasta
+                                       and setpriv on PATH, and unshare too for root,
+                                       which CF_HARNESS_DOCKER_NETWORK_MODE=none or
+                                       host does not need. Each refuses to start
+                                       where its store is not set up; every other
+                                       platform refuses. With no CFC policy
+                                       named, macOS takes ~/.local/share/runsc-cfc/
+                                       cfc-policy.json where it is there, else its
+                                       store's own; on Linux that file is the store's
+                                       own, looked for once. The local Loom host
+                                       refuses to start with it unset
   CF_HARNESS_LOOM_AUTHORING_CONFIG     Default host authoring configuration file
   CF_HARNESS_FABRIC_API_URL            Default value for --fabric-api-url
   CF_HARNESS_FABRIC_IDENTITY           Default value for --fabric-identity

@@ -18,6 +18,11 @@
  * which identities inside a unit are skipped — is the same code, so the
  * two runs cannot come to different answers about the same tree.
  *
+ * Once its plan has run and its verdict is settled, a lane of the full run
+ * also runs again the units holding a test that failed every time, and
+ * ships what those reruns record. That is evidence for the publisher, and
+ * it changes neither the plan nor the verdict.
+ *
  * `main` cannot fix its number of lanes ahead of time the way a pull
  * request does, because the number depends on how much work there is and
  * the job matrix has to exist before anything starts. So one job asks
@@ -38,8 +43,12 @@
 import { exists } from "@std/fs";
 import * as path from "@std/path";
 import {
+  enclosingNames,
   FragmentWriter,
+  NAME_SEPARATOR,
+  readRegistrations,
   recordsDir,
+  type TestIdentity,
   testIdentityKey,
   type TestRecord,
 } from "@commonfabric/test-support/records";
@@ -109,8 +118,11 @@ import {
   FULL_LANES_MAX,
   LANE_PROLOGUE_SECONDS,
   LANES,
+  RERUN_BUDGET_SECONDS,
+  RERUN_EXECUTIONS,
 } from "./test-selection/policy.ts";
 import { say } from "./step-summary.ts";
+import { outcomesOf, verdictOf } from "./test-selection/report.ts";
 import { duration } from "./test-selection/duration.ts";
 import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
@@ -119,6 +131,7 @@ import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
   laneMeasurementName,
+  RERUN_MEASUREMENT_NAME,
 } from "./lane-measurement.ts";
 
 /** What the lane was asked to do. */
@@ -406,6 +419,19 @@ export interface Batch {
    * batch spent, which is what says how far the calibration was out.
    */
   projected: number;
+
+  /**
+   * Every identity the manifest holds in the batch's units, as
+   * `knownKey()` names it. A test holding others is recorded on every run
+   * where it is one of these, and otherwise only when it fails on its own
+   * account. Absent, no such test is known.
+   */
+  known?: ReadonlySet<string>;
+}
+
+/** How `Batch.known` names an identity in a unit. */
+function knownKey(unit: Unit, test: TestIdentity): string {
+  return `${unit}\t${testIdentityKey(test)}`;
 }
 
 /**
@@ -425,9 +451,9 @@ export function unitsForRun(batch: Batch, run: number): UnitRequest[] {
 
 /**
  * Turns a lane's selections into batches. A unit runs once carrying the
- * skip list of everything inside it that was not selected, so choosing
- * one test out of a file leaves its siblings registered as ignored rather
- * than missing.
+ * skip list of everything inside it that was not selected and encloses
+ * nothing that was, so choosing one test out of a file leaves its
+ * siblings registered as ignored rather than missing.
  *
  * A unit its suite declares whole carries no skip list, because its runner runs
  * every identity in it and reads no list.
@@ -449,6 +475,7 @@ export function batchesOf(
     inUnit.set(key, [...inUnit.get(key) ?? [], entry]);
   }
   const batches = new Map<string, Batch>();
+  const known = new Map<string, Set<string>>();
   // What each unit was selected for: the names to run, and the most
   // repeats any one of them asked for.
   const selected = new Map<string, { names: Set<string>; repeats: number }>();
@@ -473,12 +500,23 @@ export function batchesOf(
     // A unit declared whole runs every identity in it, chosen or not.
     const whole = wholeOf.get(suite)!.has(unit);
     const runs = whole ? all : all.filter((entry) => names.has(entry.test.n));
+    // A `describe` that fails as a whole is recorded under its own title,
+    // and the outermost `describe` registers one test under its title, so
+    // skipping that title skips every leaf inside it. A title enclosing a
+    // chosen name therefore stays off the list.
+    const around = new Set([...names].flatMap(enclosingNames));
     const request: UnitRequest = {
       unit,
-      skip: whole ? [] : all.filter((entry) => !names.has(entry.test.n))
+      skip: whole ? [] : all
+        .filter((entry) =>
+          !names.has(entry.test.n) && !around.has(entry.test.n)
+        )
         .map((entry) => entry.test.n),
       cost: runs.reduce((total, entry) => total + entry.cost, 0),
     };
+    const suiteKnows = known.get(suiteId) ?? new Set();
+    known.set(suiteId, suiteKnows);
+    for (const entry of all) suiteKnows.add(knownKey(unit, entry.test));
     const batch = batches.get(suiteId);
     if (batch === undefined) {
       batches.set(suiteId, {
@@ -490,6 +528,7 @@ export function batchesOf(
           suiteId,
           selections.filter(({ entry }) => entry.suite === suiteId),
         ),
+        known: suiteKnows,
       });
     } else {
       batch.units.push(request);
@@ -559,25 +598,92 @@ export function batchesOf(
 /** What running one invocation came to. */
 interface Outcome {
   ok: boolean;
+
+  /** Whether the lane passed a signal on to the invocation. */
+  interrupted: boolean;
+
   seconds: number;
+}
+
+/**
+ * Whether a lane has been told to stop, and the commands it passes that
+ * on to.
+ *
+ * A job stops a step that reaches its bound by sending it SIGINT, and
+ * SIGTERM if it is still running a few seconds later. The lane passes
+ * each signal on to the commands it is running and starts nothing more.
+ * A test runner told to stop names the tests it was in the middle of and
+ * writes its report before it exits, so a lane cut off by its bound keeps
+ * the records of what it finished and says what held it up.
+ */
+export class LaneStop {
+  #signal: Deno.Signal | undefined;
+  #running = new Set<Deno.ChildProcess>();
+  #signalled = new WeakSet<Deno.ChildProcess>();
+
+  /** The first signal the lane was sent, or undefined if none was. */
+  get signal(): Deno.Signal | undefined {
+    return this.#signal;
+  }
+
+  /** Stops the lane, and passes `signal` on to every command running. */
+  receive(signal: Deno.Signal): void {
+    this.#signal ??= signal;
+    for (const child of this.#running) this.#passOn(child, signal);
+  }
+
+  /**
+   * Waits for `child` to exit, passing on whatever the lane is sent
+   * meanwhile, and says whether it passed anything on. A child that
+   * starts after the lane was told to stop is sent the first signal the
+   * lane was sent.
+   */
+  async wait(
+    child: Deno.ChildProcess,
+  ): Promise<{ status: Deno.CommandStatus; interrupted: boolean }> {
+    if (this.#signal !== undefined) this.#passOn(child, this.#signal);
+    this.#running.add(child);
+    try {
+      const status = await child.status;
+      return { status, interrupted: this.#signalled.has(child) };
+    } finally {
+      this.#running.delete(child);
+    }
+  }
+
+  /** Sends `signal` to `child`, which may have exited already. */
+  #passOn(child: Deno.ChildProcess, signal: Deno.Signal): void {
+    try {
+      child.kill(signal);
+      this.#signalled.add(child);
+    } catch {
+      // Deno refuses to signal a child that has exited, and one that has
+      // exited has nothing left to stop.
+    }
+  }
 }
 
 /** Runs one invocation, with the capabilities' environment around it. */
 export async function runInvocation(
   invocation: Invocation,
   env: Record<string, string>,
+  stop: LaneStop = new LaneStop(),
 ): Promise<Outcome> {
   const [command, ...args] = invocation.command;
   const startedAt = performance.now();
-  const result = await new Deno.Command(command!, {
-    args,
-    cwd: invocation.cwd,
-    env: { ...Deno.env.toObject(), ...env, ...invocation.env },
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
+  const { status, interrupted } = await stop.wait(
+    new Deno.Command(command!, {
+      args,
+      cwd: invocation.cwd,
+      env: { ...Deno.env.toObject(), ...env, ...invocation.env },
+      stdin: "null",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn(),
+  );
   return {
-    ok: result.success,
+    ok: status.success,
+    interrupted,
     seconds: (performance.now() - startedAt) / 1000,
   };
 }
@@ -799,6 +905,9 @@ async function directoriesIn(at: string): Promise<string[]> {
  * not failed for it: the mistake is in the metadata, and the tests it
  * came with either passed or did not. The record then belongs to no
  * suite, which is what the store half of the drift guard fails on.
+ *
+ * A batch whose lane is told to stop gathers what the execution running
+ * then recorded, and starts no other.
  */
 export async function runBatch(
   batch: Batch,
@@ -807,6 +916,7 @@ export async function runBatch(
   spool: string | undefined,
   env: Record<string, string>,
   coverage?: BatchCoverage,
+  stop: LaneStop = new LaneStop(),
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -814,8 +924,25 @@ export async function runBatch(
   seconds: number;
   unexplained: number;
   silent: string[];
+  /**
+   * What the tests this batch's own skip lists named recorded. None of it
+   * ships, but a skipped test reported inside a `describe` shows that
+   * `describe` ran as far as its tests.
+   */
+  passedOver: TestRecord[];
+
+  /**
+   * The names this batch's test processes registered over every execution,
+   * by the repository-relative file that registered them, as
+   * `readRegistrations()` reads them. That file is the unit for a suite
+   * whose units are files. A file whose processes left no name map is not
+   * here.
+   */
+  registered: Map<string, Set<string>>;
 }> {
   const records: TestRecord[] = [];
+  const passedOver: TestRecord[] = [];
+  const registered = new Map<string, Set<string>>();
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
@@ -840,6 +967,7 @@ export async function runBatch(
   // Seconds the records the suite places in a unit took, over every pass.
   let ran = 0;
   for (let run = 1; run <= batchRepeats(batch); run++) {
+    if (stop.signal !== undefined) break;
     console.log(
       `ci-lane: starting ${batch.suite.id}, run ${run} of ` +
         `${batchRepeats(batch)}`,
@@ -878,6 +1006,7 @@ export async function runBatch(
       }),
     });
     for (const invocation of invocations) {
+      if (stop.signal !== undefined) break;
       const outcome = await runInvocation(invocation, {
         ...env,
         // Each execution writes into a spool of its own, so a repeat
@@ -885,11 +1014,12 @@ export async function runBatch(
         // way through keeps what finished.
         CF_TEST_RECORDS_DIR: batchSpool,
         ...invocation.env,
-      });
+      }, stop);
       seconds += outcome.seconds;
       if (!outcome.ok) ok = false;
       const collected = await collectRecords({
         spoolDir: batchSpool,
+        interrupted: outcome.interrupted,
         junit: (invocation.junit ?? []).map((output) => ({
           kind: output.kind,
           scope: output.scope,
@@ -902,6 +1032,16 @@ export async function runBatch(
         ...(batch.suite.variant === undefined
           ? {}
           : { variant: batch.suite.variant }),
+        known: (test, file) => {
+          const named = batch.suite.variant === undefined
+            ? test
+            : { ...test, v: batch.suite.variant };
+          const location = batch.suite.locate(
+            file === undefined ? { test: named } : { test: named, file },
+          );
+          return location?.level === "unit" &&
+            (batch.known?.has(knownKey(location.unit, named)) ?? false);
+        },
       });
       if (
         !outcome.ok &&
@@ -916,12 +1056,20 @@ export async function runBatch(
           if (
             record.outcome === "skip" &&
             skipped.has(`${location.unit}\t${record.test.n}`)
-          ) continue;
+          ) {
+            passedOver.push(record);
+            continue;
+          }
           ran += record.durationMs / 1000;
         }
         records.push(record);
       }
       for (const conflict of collected.conflicts) conflicts.push(conflict);
+      for (const [file, names] of await readRegistrations(batchSpool)) {
+        const known = registered.get(file);
+        if (known === undefined) registered.set(file, names);
+        else for (const name of names) known.add(name);
+      }
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
     }
@@ -929,6 +1077,9 @@ export async function runBatch(
       if (!heard.has(request.unit)) silent.add(request.unit);
     }
   }
+  // A batch that stopped part way measured only the part it ran, and the
+  // cost fit reads only a passing batch's measurements.
+  if (stop.signal !== undefined) ok = false;
   if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
@@ -996,6 +1147,8 @@ export async function runBatch(
     seconds,
     unexplained,
     silent: [...silent].sort(),
+    passedOver,
+    registered,
   };
 }
 
@@ -1008,12 +1161,22 @@ export interface Accounting {
   excused: string[];
 
   /**
-   * Identities the batch was asked to run and no record accounts for.
-   * An excused failure beside one of these is not excused: an invocation
-   * that recorded a failure and then stopped has run almost nothing
-   * while satisfying any weaker test.
+   * Identities the batch was asked to run and no record accounts for,
+   * which the tree holds or may hold. An excused failure beside one of
+   * these is not excused: an invocation that recorded a failure and then
+   * stopped has run almost nothing while satisfying any weaker test.
    */
   unaccounted: string[];
+
+  /**
+   * Identities the batch was asked to run that the tree holds no test
+   * for, as the names their unit's own test processes registered show. A
+   * manifest carries one for a test renamed since it was published, and
+   * for a test only a branch ever ran, in a file the tree still holds.
+   * An invocation that stopped cannot have left one of these unrecorded,
+   * since there was nothing to record, so an excusal stands beside them.
+   */
+  absent: string[];
 
   /**
    * The units a failure was seen in, whether or not it was excused. A
@@ -1026,16 +1189,22 @@ export interface Accounting {
 /**
  * Reads one batch's records against what it was asked to run.
  *
- * An identity is accounted for by a record naming it. A stand-in is
- * accounted for by its unit recording anything at all: a stand-in is what
- * the packer places for a unit no manifest has seen, and no record will
- * ever carry its name, because a real record is named for a test rather
- * than for a file.
+ * An identity is accounted for by a record naming it or naming a test
+ * inside it. A stand-in is accounted for by its unit recording anything
+ * at all: a stand-in is what the packer places for a unit no manifest
+ * has seen, and no record will ever carry its name, because a real record
+ * is named for a test rather than for a file.
  *
- * An identity that went unaccounted for while its unit recorded is
- * ordinary churn — a manifest is hours old by construction, and a test
- * renamed since records under the new name — so it costs an excusal
- * rather than the run.
+ * An identity that went unaccounted for while its unit recorded costs an
+ * excusal rather than the run, unless `registered` shows the tree holds
+ * no such test. A manifest is hours old by construction, and it holds
+ * every identity any run recorded in a file the tree still holds, so it
+ * names tests renamed since and tests that only a branch ever ran. No run
+ * of this tree can record one of those, and its missing record says
+ * nothing about whether an invocation stopped, so it is set apart as
+ * absent and an excusal stands beside it. Where `registered` says nothing
+ * about a unit, as for a suite whose processes leave no name map, the
+ * identity stays unaccounted for.
  *
  * Whether every execution ran what it was asked to is not a question for
  * this. A batch's records arrive as one list however many executions
@@ -1047,6 +1216,7 @@ export function accountFor(
   asked: readonly Selection[],
   records: readonly TestRecord[],
   nonGating: ReadonlySet<string>,
+  registered: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): Accounting {
   const gating: string[] = [];
   const excused: string[] = [];
@@ -1058,24 +1228,75 @@ export function accountFor(
     if (location?.level === "unit") heardUnits.add(location.unit);
     const key = testIdentityKey(record.test);
     heard.add(key);
+    // Ingestion drops the case a `describe` reports for itself wherever a
+    // leaf inside it reports, unless the batch knows it or it failed on its
+    // own account, so a leaf's record, skipped or not, is what accounts for
+    // every other `describe` enclosing it.
+    for (const outer of enclosingNames(record.test.n)) {
+      heard.add(testIdentityKey({ ...record.test, n: outer }));
+    }
     if (record.outcome !== "fail") continue;
     if (location?.level === "unit") failedUnits.add(location.unit);
     (nonGating.has(key) ? excused : gating).push(key);
   }
-  const unaccounted = asked
-    .filter((selection) => selection.entry.suite === batch.suite.id)
-    .filter((selection) =>
-      isStandIn(selection.entry)
-        ? !heardUnits.has(selection.entry.unit)
-        : !heard.has(testIdentityKey(selection.entry.test))
-    )
-    .map((selection) => testIdentityKey(selection.entry.test));
+  const unaccounted: string[] = [];
+  const absent: string[] = [];
+  for (const selection of asked) {
+    if (selection.entry.suite !== batch.suite.id) continue;
+    if (isStandIn(selection.entry)) {
+      if (!heardUnits.has(selection.entry.unit)) {
+        unaccounted.push(testIdentityKey(selection.entry.test));
+      }
+      continue;
+    }
+    const key = testIdentityKey(selection.entry.test);
+    if (heard.has(key)) continue;
+    const names = registered.get(selection.entry.unit);
+    if (registersNoSuchTest(names, selection.entry.test.n)) absent.push(key);
+    else unaccounted.push(key);
+  }
   return {
     gating: [...new Set(gating)].sort(),
     excused: [...new Set(excused)].sort(),
     unaccounted: [...new Set(unaccounted)].sort(),
+    absent: [...new Set(absent)].sort(),
     failedUnits: [...failedUnits].sort(),
   };
+}
+
+/**
+ * Whether the names a unit's test processes registered show its tree
+ * holds no test named `name`. No registration at all shows nothing.
+ *
+ * A name is held where it was registered, and where it encloses a name
+ * that was: the bdd re-export records each leaf's whole chain and not the
+ * `describe` blocks along it, so a nested `describe` is known by the
+ * leaves inside it.
+ *
+ * A name is shown absent only where everything registered that encloses
+ * it is a `describe`, which a registered name is where another
+ * registered name lies inside it. A registered test holds more than its
+ * registration says: the steps its body names as it runs are recorded
+ * beneath it and registered nowhere. And a `describe` registered with
+ * nothing inside it reads as such a test, which is right, since that is
+ * what a process whose bdd re-export recorded no leaves leaves behind,
+ * and a leaf missing from it says nothing.
+ */
+function registersNoSuchTest(
+  registered: ReadonlySet<string> | undefined,
+  name: string,
+): boolean {
+  if (registered === undefined) return false;
+  const holdsInside = (outer: string): boolean => {
+    for (const other of registered) {
+      if (other.startsWith(outer + NAME_SEPARATOR)) return true;
+    }
+    return false;
+  };
+  if (registered.has(name) || holdsInside(name)) return false;
+  return enclosingNames(name).every((outer) =>
+    !registered.has(outer) || holdsInside(outer)
+  );
 }
 
 /** Says what a batch's records came to, where they came to anything. */
@@ -1103,17 +1324,26 @@ export function describeAccounting(
         `judge a change by, which do not fail this run:`
       : `${suite}: ${accounting.excused.length} failures a flake rate ` +
         `would excuse, which fail this run because the batch did not ` +
-        `account for everything it was asked to run:`,
+        `account for everything it was asked to run that the tree holds:`,
     accounting.excused,
   );
   // Named whenever there are any, because this is the one list that
-  // decides whether an excusal holds, and a rename is what it usually
-  // is. A summary saying the batch left something unaccounted for and
-  // not saying what is a message nobody can act on.
+  // decides whether an excusal holds. A summary saying the batch left
+  // something unaccounted for and not saying what is a message nobody can
+  // act on.
   section(
     `${suite}: ${accounting.unaccounted.length} identities no record ` +
-      `accounts for, which a rename since the manifest would explain:`,
+      `accounts for, which the tree holds or may hold:`,
     accounting.unaccounted,
+  );
+  // Named as well, though they decide nothing: a rename among them keeps
+  // its history under the old name until an alias joins it to the new
+  // one, and this is where its author sees that it needs one.
+  section(
+    `${suite}: ${accounting.absent.length} identities the tree holds no ` +
+      `test for, which a rename since the manifest, or a test only a ` +
+      `branch ran, would explain:`,
+    accounting.absent,
   );
   section(
     `${suite}: ${silent.length} units an execution recorded nothing for, ` +
@@ -1121,6 +1351,250 @@ export function describeAccounting(
     silent,
   );
   if (lines.length > 0) say(lines);
+}
+
+/**
+ * The units of a batch holding a test that failed every time the batch
+ * ran it, each with those tests by key.
+ *
+ * A test that both passed and failed in the batch has disagreed with
+ * itself at this commit already, so running it again adds nothing. A
+ * failure the suite places in none of the batch's units is left out, since
+ * a lane can run again only a unit it ran.
+ */
+export function unsettled(
+  batch: Batch,
+  records: readonly TestRecord[],
+): Map<Unit, Set<string>> {
+  const outcomes = outcomesOf(records);
+  const held = new Set(batch.units.map(({ unit }) => unit));
+  const units = new Map<Unit, Set<string>>();
+  for (const record of records) {
+    const key = testIdentityKey(record.test);
+    if (verdictOf(outcomes.get(key)) !== "fail") continue;
+    const location = batch.suite.locate(record);
+    if (location?.level !== "unit" || !held.has(location.unit)) continue;
+    units.set(location.unit, (units.get(location.unit) ?? new Set()).add(key));
+  }
+  return units;
+}
+
+/** A batch whose failures a lane of the full run runs again. */
+export interface Rerun {
+  batch: Batch;
+
+  /** The environment the batch ran in. */
+  env: Record<string, string>;
+
+  /** What `unsettled()` found in the batch's records. */
+  failing: ReadonlyMap<Unit, ReadonlySet<string>>;
+}
+
+/** What rerunning a lane's failures came to, with each test by key. */
+export interface Reruns {
+  /** Seconds the reruns took. */
+  seconds: number;
+
+  /** Tests that passed on a rerun. */
+  passed: string[];
+
+  /** Tests a rerun recorded, and that never passed. */
+  failed: string[];
+
+  /** Tests whose unit ran again, and that no rerun recorded. */
+  unrecorded: string[];
+
+  /** Tests whose unit was not run again, for want of budget. */
+  unrun: string[];
+
+  /** Records the reruns kept as written, as `runBatch()` reports them. */
+  conflicts: TestRecord[];
+}
+
+/**
+ * Runs again the units holding a test that failed every time its batch
+ * ran it, and ships what those runs record as ordinary records.
+ *
+ * The publisher reads a test that passed and failed at one commit, in one
+ * order, as flaky, and a test run once per commit can never do that, so
+ * its failures on the full run read as commits breaking it. These reruns
+ * give it the pass a flaky test needs, and a test that fails every rerun
+ * goes on reading as broken. They collect evidence and decide nothing:
+ * what the lane fails for is settled from the batches' own records.
+ *
+ * A unit runs again as its batch ran it, with the same skip list, so the
+ * rerun asks the same tests the same thing. A unit its suite runs whole
+ * runs whole again, and is charged for every test it holds. Coverage is
+ * off, since nothing scores what a rerun would measure.
+ *
+ * Each rerun goes to the batch holding the unit that has run again least,
+ * across every batch, and offers that batch's units the budget in the same
+ * order, so the budget is spread over the lane's failures before it is
+ * spent on one of them. A unit starts only where what the packer charges
+ * for it fits in what the reruns have left of `RERUN_BUDGET_SECONDS`, and
+ * the reruns' own time is what they take off it. A lane told to stop
+ * starts no rerun.
+ */
+export async function rerunFailures(
+  reruns: readonly Rerun[],
+  manifest: Manifest,
+  selections: readonly Selection[],
+  options: LaneOptions,
+  workDir: string,
+  spool: string | undefined,
+  stop: LaneStop = new LaneStop(),
+): Promise<Reruns> {
+  let seconds = 0;
+  let passes = 0;
+  const passed = new Set<string>();
+  const recorded = new Set<string>();
+  const reached = new Set<string>();
+  const conflicts: TestRecord[] = [];
+  const waiting = reruns.map(({ failing }) => new Map(failing));
+  // How many times each batch's units have run again.
+  const counts = reruns.map(() => new Map<Unit, number>());
+  /** What the packer charges for one pass of `batch` over `requests`. */
+  const chargeFor = (
+    batch: Batch,
+    requests: readonly UnitRequest[],
+  ): number => {
+    const held = new Set(requests.map(({ unit }) => unit));
+    return suiteCharge(
+      manifest,
+      batch.suite.id,
+      selections
+        .filter(({ entry }) =>
+          entry.suite === batch.suite.id && held.has(entry.unit)
+        )
+        .map(({ entry }) => ({ entry, repeats: 1 })),
+    );
+  };
+  while (stop.signal === undefined) {
+    const left = RERUN_BUDGET_SECONDS - seconds;
+    let next: number | undefined;
+    let least = Infinity;
+    for (const [index, { batch }] of reruns.entries()) {
+      const pending = waiting[index]!;
+      for (const request of batch.units) {
+        if (!pending.has(request.unit)) continue;
+        const times = counts[index]!.get(request.unit) ?? 0;
+        // What is left only shrinks, so a unit that does not fit on its
+        // own now never will.
+        if (
+          times >= RERUN_EXECUTIONS || chargeFor(batch, [request]) > left
+        ) {
+          pending.delete(request.unit);
+          continue;
+        }
+        if (times < least) {
+          least = times;
+          next = index;
+        }
+      }
+    }
+    if (next === undefined) break;
+    const { batch, env } = reruns[next]!;
+    const pending = waiting[next]!;
+    const count = counts[next]!;
+    // The first unit offered fits on its own, so something is chosen. One
+    // that fits on its own but not beside those already chosen waits for
+    // a later rerun, where it is offered ahead of them.
+    const chosen: UnitRequest[] = [];
+    let charge = 0;
+    const offered = batch.units
+      .filter(({ unit }) => pending.has(unit))
+      .sort((a, b) => (count.get(a.unit) ?? 0) - (count.get(b.unit) ?? 0));
+    for (const request of offered) {
+      const charged = chargeFor(batch, [...chosen, request]);
+      if (charged > left) continue;
+      chosen.push(request);
+      charge = charged;
+    }
+    // Handed over in the batch's own order, as the batch was.
+    const units = batch.units.filter((request) => chosen.includes(request));
+    for (const { unit } of units) count.set(unit, (count.get(unit) ?? 0) + 1);
+    passes += 1;
+    const startedAt = performance.now();
+    const result = await runBatch(
+      {
+        ...batch,
+        units,
+        runs: new Map(units.map(({ unit }) => [unit, 1])),
+        projected: charge,
+      },
+      options,
+      path.join(workDir, `rerun-${passes}`),
+      undefined,
+      env,
+      undefined,
+      stop,
+    );
+    seconds += (performance.now() - startedAt) / 1000;
+    if (spool !== undefined) spoolRecords(spool, result.records);
+    for (const conflict of result.conflicts) conflicts.push(conflict);
+    for (const record of result.records) {
+      const key = testIdentityKey(record.test);
+      recorded.add(key);
+      if (record.outcome === "pass") passed.add(key);
+    }
+    for (const { unit } of units) {
+      const keys = [...pending.get(unit)!];
+      for (const key of keys) reached.add(key);
+      const still = keys.filter((key) => !passed.has(key));
+      if (still.length === 0) pending.delete(unit);
+      else pending.set(unit, new Set(still));
+    }
+  }
+  const failing = reruns.flatMap(({ failing }) =>
+    [...failing.values()].flatMap((keys) => [...keys])
+  ).sort();
+  return {
+    seconds,
+    passed: failing.filter((key) => passed.has(key)),
+    failed: failing.filter((key) => recorded.has(key) && !passed.has(key)),
+    unrecorded: failing.filter((key) => reached.has(key) && !recorded.has(key)),
+    unrun: failing.filter((key) => !reached.has(key)),
+    conflicts,
+  };
+}
+
+/** Says what rerunning a lane's failures came to, where it came to anything. */
+export function describeReruns(reruns: Reruns): void {
+  if (
+    reruns.passed.length + reruns.failed.length + reruns.unrecorded.length +
+        reruns.unrun.length === 0
+  ) {
+    return;
+  }
+  const lines = [
+    "## Reruns",
+    "",
+    `Rerunning failures took ${duration(reruns.seconds)} of ` +
+    `${duration(RERUN_BUDGET_SECONDS)}. What a rerun records is evidence ` +
+    "for the publisher, and changes nothing about whether this run fails.",
+  ];
+  /** One paragraph of the summary, headed and then listed. */
+  const section = (head: string, keys: readonly string[]): void => {
+    if (keys.length === 0) return;
+    lines.push("", head, "");
+    for (const key of keys) lines.push(`- ${key}`);
+  };
+  section(
+    "Passed on a rerun, so this commit holds both outcomes for them:",
+    reruns.passed,
+  );
+  section("Run again and never passed:", reruns.failed);
+  section(
+    "Their unit ran again and no rerun recorded them, so nothing was " +
+      "learned about them:",
+    reruns.unrecorded,
+  );
+  section(
+    "Not run again, because their unit did not fit what was left of the " +
+      "budget:",
+    reruns.unrun,
+  );
+  say(lines);
 }
 
 /**
@@ -1158,7 +1632,8 @@ export function describeConflicts(conflicts: readonly TestRecord[]): void {
     "These records name a surface the suite that ran them does not " +
     "declare, so they were kept as written rather than marked:",
     "",
-    ...conflicts.map((record) => `- ${testIdentityKey(record.test)}`),
+    ...[...new Set(conflicts.map((record) => testIdentityKey(record.test)))]
+      .map((key) => `- ${key}`),
   ]);
 }
 
@@ -1381,6 +1856,13 @@ export interface LaneDeps {
    * the run testing it and its spool ships.
    */
   spool?: () => string | undefined;
+
+  /**
+   * What tells the lane to stop part way through, made once the lane is
+   * about to run anything. The command line stops it on SIGINT and
+   * SIGTERM; a lane run from inside a test is stopped by the test.
+   */
+  stop?: () => LaneStop;
 }
 
 /**
@@ -1610,7 +2092,9 @@ export function describeFullLanes(laid: Plan, prologue: number): void {
     `Each is packed against ${duration(laid.budgetSeconds)} of work, and ` +
     `the job around it takes about ${duration(prologue)} more to set up ` +
     `and ship. The longest is projected to take ` +
-    `${duration(longest + prologue)} in all.`,
+    `${duration(longest + prologue)} in all. A lane holding a test that ` +
+    `failed every time may start up to ${duration(RERUN_BUDGET_SECONDS)} ` +
+    `of reruns after that.`,
     "",
     "| Lane | Tests | Projected work | Projected job |",
     "| --- | --- | --- | --- |",
@@ -1752,6 +2236,7 @@ export async function runLane(
     describeWithheld(laid.withheld, seen.mandatory);
   }
   if (options.dryRun) return true;
+  const stop = deps.stop?.() ?? new LaneStop();
 
   // Asked before any batch runs, because the first pattern a batch
   // compiles writes the file whatever the cache held.
@@ -1827,21 +2312,27 @@ export async function runLane(
   // failing the run.
   const excused = new Set<string>();
   const unexcused = new Set<string>();
+  // The batches holding a test that failed every time, which the full run
+  // runs again once every batch has run.
+  const reruns: Rerun[] = [];
+  let rerun: Reruns | undefined;
   try {
     for (const batch of batches) {
+      // Two capabilities may export the same name and mean different
+      // things by it, and the two server-execution arms can share a lane.
+      const env = opened.envFor(batch.suite.needs);
       // A failure never stops the lane: one failing batch would otherwise
       // hide every batch and every repeat after it, and the point of a
-      // lane is what it measured.
+      // lane is what it measured. Being told to stop does.
+      if (stop.signal !== undefined) break;
       const result = await runBatch(
         batch,
         options,
         workDir,
         spool,
-        // Two capabilities may export the same name and mean different
-        // things by it, and the two server-execution arms can share a
-        // lane.
-        opened.envFor(batch.suite.needs),
+        env,
         batchCoverage(options, batch.suite.id, seen.coverage),
+        stop,
       );
       for (const conflict of result.conflicts) conflicts.push(conflict);
       // The records decide, rather than the command's exit status: a
@@ -1854,13 +2345,14 @@ export async function runLane(
       const accounting = accountFor(
         batch,
         mine.selections,
-        result.records,
+        [...result.records, ...result.passedOver],
         nonGating,
+        result.registered,
       );
       // An invocation is excused only when it accounted for every
-      // identity it was asked to run: one that recorded a failure and
-      // then stopped has run almost nothing while satisfying any weaker
-      // test.
+      // identity it was asked to run that the tree holds: one that
+      // recorded a failure and then stopped has run almost nothing while
+      // satisfying any weaker test.
       const excusing = accounting.unaccounted.length === 0;
       describeAccounting(batch.suite.id, accounting, excusing, result.silent);
       if (
@@ -1876,6 +2368,18 @@ export async function runLane(
       for (const key of accounting.excused) {
         (excusing ? excused : unexcused).add(key);
       }
+      if (options.full) {
+        const failing = unsettled(batch, result.records);
+        if (failing.size > 0) reruns.push({ batch, env, failing });
+      }
+    }
+    if (stop.signal !== undefined) {
+      ok = false;
+      console.log(
+        `ci-lane: stopped by ${stop.signal} before finishing its plan; ` +
+          `it passes the signal on to whatever test command is running ` +
+          `and starts nothing more`,
+      );
     }
     // Written once every batch has run, so that a batch that withdrew an
     // excusal is heard before any is recorded, and a report of this run
@@ -1888,6 +2392,21 @@ export async function runLane(
           measurementRecord(excusedMeasurementName(key), 0, true)
         ),
       );
+    }
+    // After every batch, so that a rerun never displaces the work the lane
+    // was packed with, and after the lane's verdict is settled, so that
+    // nothing a rerun records can change it.
+    if (options.full) {
+      rerun = await rerunFailures(
+        reruns,
+        seen.manifest,
+        mine.selections,
+        options,
+        workDir,
+        spool,
+        stop,
+      );
+      for (const conflict of rerun.conflicts) conflicts.push(conflict);
     }
   } catch (error) {
     // A lane whose loop threw has failed, whatever the batches it got
@@ -1902,16 +2421,28 @@ export async function runLane(
     // and the logs are large.
     if (!ok) await describeCapabilityLogs(opened.logs);
     await opened.close();
-    await leaveWorkDir(ok);
+    if (!ok) await leaveWorkDir(false);
   }
+  // A lane that has passed so far keeps its directory until its coverage
+  // is converted, which can still fail it.
+  const undecided = ok;
   describeConflicts(conflicts);
+  if (rerun !== undefined) describeReruns(rerun);
   // After the capabilities are closed, because a conversion is the lane's
   // own work and needs nothing a suite opened. A conversion that lost a
   // tracked file fails the lane: every line of that file reads as
   // uncovered downstream, so a gate scored from it would fail somebody
-  // for a report that was never complete.
-  const converted = await convertCoverage(options);
+  // for a report that was never complete. A lane told to stop converts
+  // nothing: the job ends it seconds after asking, and a conversion takes
+  // minutes.
+  const converted = stop.signal === undefined
+    ? await convertCoverage(options)
+    : { ok: true, reports: [] };
   if (!converted.ok) ok = false;
+  // A signal can arrive while the conversion runs, and a lane told to stop
+  // has failed whenever it was told.
+  if (stop.signal !== undefined) ok = false;
+  if (undecided) await leaveWorkDir(ok);
   const marked = await markMeasuredFailures(options, suites, failedUnits);
   if (compileCacheState !== undefined) {
     await writeCompileCacheState(options, compileCacheState);
@@ -1921,14 +2452,19 @@ export async function runLane(
   // bound less the prologue the budget was derived with. Read last, so that
   // it holds everything the lane did after its prologue. The publisher
   // counts from these how many lanes ran past their bound, and how many of
-  // those the packer had expected to.
+  // those the packer had expected to. The packer charges nothing for
+  // reruns, so their time is left out of the lane's work and recorded
+  // apart.
   if (spool !== undefined) {
     spoolRecords(spool, [
       timingRecord(
         laneMeasurementName("spent"),
-        (performance.now() - startedAt) / 1000,
+        (performance.now() - startedAt) / 1000 - (rerun?.seconds ?? 0),
         ok,
       ),
+      ...(rerun === undefined
+        ? []
+        : [timingRecord(RERUN_MEASUREMENT_NAME, rerun.seconds, ok)]),
       timingRecord(
         laneMeasurementName("projected"),
         mine.projectedSeconds,
@@ -2020,8 +2556,21 @@ export async function main(
   return await runLane(options, deps) ? 0 : 1;
 }
 
-/** What the lane the command line runs reads its manifest from. */
-const store: LaneDeps = { manifest: fetchManifest };
+/**
+ * What the lane the command line runs reads its manifest from, and what
+ * stops it: the signals a job stops a step with. A lane that only plans
+ * or counts leaves those signals to end it as they would any process.
+ */
+const store: LaneDeps = {
+  manifest: fetchManifest,
+  stop: () => {
+    const stop = new LaneStop();
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      Deno.addSignalListener(signal, () => stop.receive(signal));
+    }
+    return stop;
+  },
+};
 
 // `Deno.exitCode` rather than `Deno.exit`, which would end the process
 // before the unload handlers run — and one of those is what writes a

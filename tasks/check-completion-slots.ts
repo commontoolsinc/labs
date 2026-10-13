@@ -73,8 +73,6 @@ export const NO_CANDIDATES = new Map<string, string>([
   ["id from-mnemonic:mnemonic", "the same"],
   ["ingest revoke:id", "an ingest key id, held by whoever minted it"],
   ["ingest rotate:id", "the same"],
-  ["ingest gmail-bind:id", "the same"],
-  ["ingest gmail-unbind:id", "the same"],
   // Words the caller is coining or composing.
   ["acl set:capability", "a capability string, composed rather than chosen"],
   ["piece search:query", "a search query"],
@@ -109,11 +107,17 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "profile repair-name-protection:expect",
     "the receipt from the owner-reviewed inspection",
   ],
+  [
+    "profile repair-root:expect",
+    "the receipt from the operator-reviewed inspection",
+  ],
   ["piece new:request-key", "an opaque caller retry key"],
   [
-    "ingest gmail-bind:gmail-access-token",
+    "ingest mint:gmail-access-token",
     "a secret; a candidate list is the wrong place",
   ],
+  ["ingest mint:gmail-id-token", "the same"],
+  ["ingest mint:target", "a cell reference the caller chooses"],
   ["space invite create:ttl", "an admission lifetime in seconds"],
   ["space invite create:max-uses", "a distinct identity count"],
   ["space invite create:shell", "a caller-selected shell origin"],
@@ -126,6 +130,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "a secret input path or stdin marker, supplied explicitly",
   ],
   // Numbers, durations and bounds. Nothing enumerates a count.
+  ["space compact:verify-sample", "an every-nth stride over the documents"],
   ["limit", "a row count"],
   ["depth", "a graph depth"],
   ["seq", "a revision sequence number"],
@@ -148,6 +153,10 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "how many local jobs one runner runs at once; a count",
   ],
   ["submission-after-seq", "a revision sequence number"],
+  ["before-seq", "a revision sequence number"],
+  ["before", "a timestamp"],
+  ["keep-last", "a row count"],
+  ["keep-payloads", "a duration"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
   ["as", "a DID whose view to approximate, pasted from elsewhere"],

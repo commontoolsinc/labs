@@ -1,187 +1,424 @@
 /**
- * Exercises message versions and exact request identity through the room's
- * writer streams under the pattern test runner's reviewed gestures.
+ * A FabriChat group room of its own, as several viewers sharing it: what a
+ * send stores, how edits, deletions, and obliterations change a message, how
+ * replies divide into the conversation and its threads, and what the room's
+ * recent activity records.
  */
-
 import {
   action,
   type AddIntegrity,
   assert,
   type Cell,
-  FabricEpochNsec,
+  currentPrincipal,
+  equals,
   pattern,
   TESTS,
   UI,
   Writable,
 } from "commonfabric";
-import { hasText } from "../test/vnode-helpers.ts";
-import { CHAT_POLICY } from "./records.ts";
+import { findNodeByProp, propValue } from "../test/vnode-helpers.ts";
+import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  FabriChatRoom,
-  type StoredMemory,
-  type StoredMessage,
-} from "./room.tsx";
-import type {
-  ChatMessage,
-  ChatProfile,
-  ChatRoomAbout,
-  ChatRoomPolicy,
+  type ActivityCounters,
+  type ComposerState,
+  type MessageCell,
+  type MessageRecord,
+  type MessagesValue,
+  type ReactionList,
+  type RequestMemo,
+  type SentActivity,
+  type UsedTime,
+} from "./room-records.tsx";
+import { FabriChatRoomCore } from "./room.tsx";
+import {
+  CHAT_DELETE_ACTION,
+  CHAT_DELETE_SURFACE,
+  CHAT_EDIT_ACTION,
+  CHAT_EDIT_SURFACE,
+  CHAT_OBLITERATE_ACTION,
+  CHAT_OBLITERATE_SURFACE,
+  CHAT_SEND_ACTION,
+  CHAT_SEND_SURFACE,
+  type ChatProfile,
+  epochNsecFromMsec,
+  nsecOf,
 } from "./schemas.tsx";
 
+type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
+type RowArg = Parameters<typeof FabriChatMessageRow>[0];
+
+// A stand-in for a viewer's `#profile`, which a pattern test cannot resolve.
+// It is labeled, as a Fabric profile is, because a message may link only a
+// document that carries a label.
+type TestProfile = AddIntegrity<
+  ChatProfile,
+  readonly ["fabrichat-test-profile"]
+>;
+
+// Every message write is a protected write, so each step carries the trusted
+// gesture of the message surface: the headless equivalent of a click there.
+const sendGesture = {
+  surface: CHAT_SEND_SURFACE,
+  action: CHAT_SEND_ACTION,
+};
+const editGesture = {
+  surface: CHAT_EDIT_SURFACE,
+  action: CHAT_EDIT_ACTION,
+};
+const deleteGesture = {
+  surface: CHAT_DELETE_SURFACE,
+  action: CHAT_DELETE_ACTION,
+};
+const obliterateGesture = {
+  surface: CHAT_OBLITERATE_SURFACE,
+  action: CHAT_OBLITERATE_ACTION,
+};
+
+// A composer delivers its field's text on the trusted click.
+const typed = (text: string, requestId?: string) => ({
+  type: "click",
+  target: { value: text },
+  ...(requestId === undefined ? {} : { requestId }),
+});
+
+const stored = (messages: Cell<MessagesValue>): MessageRecord[] =>
+  messages.get() as MessageRecord[];
+
+const bodies = (messages: Cell<MessagesValue>): string =>
+  stored(messages).map((message) =>
+    typeof message.body === "string"
+      ? message.body
+      : message.authorProfile?.get() === undefined
+      ? "<obliterated>"
+      : "<deleted>"
+  ).join(" | ");
+
+const times = (messages: Cell<MessagesValue>): bigint[] =>
+  stored(messages).map((message) => nsecOf(message.sentAt));
+
+const strictlyIncreasing = (values: readonly bigint[]): boolean =>
+  values.every((value, index) => index === 0 || values[index - 1] < value);
+
+// Each of the latest messages is a link to the stored message.
+const mainTexts = (latest: readonly MessageCell[]): string =>
+  latest.map((each) => {
+    const message = each.get();
+    return typeof message?.body === "string" ? message.body : "<gone>";
+  }).join(" | ");
+
+const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
+  (activity.get() ?? []).map((entry) => entry.seq);
+
+const composerDisabled = (root: unknown): unknown =>
+  propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
+
 export default pattern(() => {
-  const profile = new Writable<AddIntegrity<ChatProfile, ["chat-test"]>>({
-    name: "Alice",
-  });
-  const policy = new Writable<AddIntegrity<ChatRoomPolicy, ["chat-test"]>>(
-    CHAT_POLICY,
+  const messages = Writable.of<MessagesValue>([] as MessagesValue);
+  const reactionLists = Writable.of<ReactionList[]>([] as ReactionList[]);
+  const requests = Writable.of<RequestMemo[]>([]);
+  const usedTimes = Writable.of<UsedTime[]>([]);
+  const activity = Writable.of<SentActivity[]>([]);
+  const counters = Writable.of<ActivityCounters[]>([]);
+  const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
+  const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
+  const pendingProfile = Writable.of<TestProfile | undefined>(undefined);
+  const records = {
+    about: { kind: "group" as const, title: "Team" },
+    messages,
+    reactionLists,
+    requests,
+    usedTimes,
+    activity,
+    counters,
+  };
+
+  const alice = FabriChatRoomCore(
+    { myProfile: aliceProfile, ...records } as RoomArg,
   );
-  const about = new Writable<AddIntegrity<ChatRoomAbout, ["chat-test"]>>();
-  const version = new Writable({
-    body: "  Hello  ",
-    sentAt: new FabricEpochNsec(0n),
-  });
-  const editVersion = new Writable({
-    body: "Edited",
-    sentAt: new FabricEpochNsec(0n),
-  });
-  const initialize = action(() => {
-    version.key("sentAt").set(
-      new FabricEpochNsec(BigInt(Date.now()) * 1_000_000n),
-    );
-    editVersion.key("sentAt").set(version.get().sentAt);
-    about.set({
-      kind: "direct",
-      createdAt: new FabricEpochNsec(0n),
-      policy,
-    });
-  });
-  const records = new Writable<StoredMessage[]>([]);
-  const memory = new Writable<StoredMemory>();
-  const room = FabriChatRoom({
-    myProfile: profile,
-    about,
-    records,
-    memory,
-  });
-  const reader = FabriChatRoom({ about, records, memory });
-  const firstMessage: Cell<ChatMessage> = records.key(0);
-  const sendEvent = { requestId: "send-1", version };
-  const editEvent = {
-    requestId: "edit-1",
-    message: firstMessage,
-    version: editVersion,
+  const bob = FabriChatRoomCore(
+    { myProfile: bobProfile, ...records } as RoomArg,
+  );
+  const pending = FabriChatRoomCore(
+    { myProfile: pendingProfile, ...records } as RoomArg,
+  );
+
+  const rowRecords = {
+    inThread: false,
+    kind: "group" as const,
+    composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
+    ...records,
   };
-  const reactEvent = {
-    requestId: "react-1",
-    message: firstMessage,
-    emoji: "👩🏽‍💻",
-  };
-  const sendGesture = { surface: "ChatSendSurface", action: "ChatSend" };
-  const reactGesture = { surface: "ChatReactSurface", action: "ChatReact" };
+  const aliceOnFirst = FabriChatMessageRow({
+    message: messages.key(0),
+    myProfile: aliceProfile,
+    ...rowRecords,
+  } as RowArg);
+  const bobOnFirst = FabriChatMessageRow({
+    message: messages.key(0),
+    myProfile: bobProfile,
+    ...rowRecords,
+  } as RowArg);
+  const bobOnSecond = FabriChatMessageRow({
+    message: messages.key(1),
+    myProfile: bobProfile,
+    ...rowRecords,
+  } as RowArg);
+  const aliceOnThird = FabriChatMessageRow({
+    message: messages.key(2),
+    myProfile: aliceProfile,
+    ...rowRecords,
+  } as RowArg);
+  // The thread-only reply that the replies below send first.
+  const bobOnThreadReply = FabriChatMessageRow({
+    message: messages.key(3),
+    myProfile: bobProfile,
+    ...rowRecords,
+  } as RowArg);
+
   return {
     [TESTS]: [
-      { action: initialize },
-      { render: room[UI] },
-      { action: room.sendMessage, event: sendEvent, trustedUi: sendGesture },
-      { assertion: assert(() => room.messages.latest.messages.length === 1) },
+      // Seed durable bookkeeping older than the proposal/activity windows.
+      // Later writes must preserve it even though neither visible record
+      // remains in the room's activity log.
+      {
+        action: action(() => {
+          const key = JSON.stringify([currentPrincipal(), "ancient-request"]);
+          const memo = requests.elementById(key);
+          memo.set({ key, at: epochNsecFromMsec(0) });
+          requests.addUnique(memo);
+          const used = usedTimes.elementById("0");
+          used.set({ at: epochNsecFromMsec(0) });
+          usedTimes.addUnique(used);
+        }),
+      },
       {
         assertion: assert(() =>
-          room.recentActivity.length === 1 &&
-          room.recentActivity[0].seq === 1 &&
-          room.recentActivityExpiredThrough === 0
+          alice.about.kind === "group" && alice.about.title === "Team" &&
+          alice.about.createdAt === undefined &&
+          alice.about.policy.get().maxWindowCount === 100 &&
+          alice.about.policy.get().proposedTimeMaxAgeNsec.value ===
+            600_000_000_000n
         ),
       },
-      { render: room[UI] },
-      { assertion: assert(() => hasText(room[UI], "Hello")) },
-      { render: reader[UI] },
-      { assertion: assert(() => hasText(reader[UI], "Hello")) },
+      { assertion: assert(() => composerDisabled(pending[UI]) === true) },
+      { assertion: assert(() => composerDisabled(alice[UI]) === false) },
       {
         assertion: assert(() =>
-          records.get().length === 1 && records.get()[0].body === "  Hello  "
+          alice.canSend === true && pending.canSend === false
         ),
       },
-      { action: room.sendMessage, event: sendEvent, trustedUi: sendGesture },
-      { assertion: assert(() => records.get().length === 1) },
+
+      // Sends: a blank one, and one with a proposal far older than the
+      // room's window, are refused.
       {
-        action: room.messages.openWindow,
+        action: alice.sendMessage,
+        event: typed("Hello, team", "alice-1"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: alice.sendMessage,
+        event: typed("   "),
+        trustedUi: sendGesture,
+      },
+      {
+        action: alice.sendMessage,
         event: {
-          requestId: "window-1",
-          windowId: "main",
-          from: { before: "end" },
-          count: 10,
+          requestId: "alice-stale",
+          version: { body: "Very late", sentAt: epochNsecFromMsec(1000) },
         },
+        trustedUi: sendGesture,
       },
+      {
+        action: pending.sendMessage,
+        event: typed("From nobody"),
+        trustedUi: sendGesture,
+      },
+      { assertion: assert(() => bodies(messages) === "Hello, team") },
       {
         assertion: assert(() =>
-          room.messages.windows.get()?.main?.messages.length === 1 &&
-          !room.messages.windows.get()?.main?.hasNewer
+          equals(stored(messages)[0]?.authorProfile, aliceProfile) &&
+          stored(messages)[0]?.earlierVersions.length === 0
         ),
       },
+
+      // The same request, delivered again, changes nothing.
       {
-        action: room.sendMessage,
-        event: { ...sendEvent, requestId: "send-2" },
+        action: alice.sendMessage,
+        event: typed("Hello, team", "alice-1"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: bob.sendMessage,
+        event: typed("Hi, Alice"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: bob.sendMessage,
+        event: typed("Hi, Alice"),
         trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          records.get().length === 2 &&
-          records.get()[0].sentAt.value !== records.get()[1].sentAt.value
+          bodies(messages) === "Hello, team | Hi, Alice | Hi, Alice"
         ),
       },
+      // Sends in the same clock tick still get times unique in the room.
+      { assertion: assert(() => strictlyIncreasing(times(messages))) },
+      { assertion: assert(() => alice.messages.count === 3) },
       {
-        action: room.editMessage,
-        event: editEvent,
-        trustedUi: { surface: "ChatEditSurface", action: "ChatEdit" },
+        assertion: assert(() =>
+          alice.participants.length === 2 &&
+          equals(alice.participants[0], aliceProfile) &&
+          equals(alice.participants[1], bobProfile)
+        ),
+      },
+
+      // Edits keep the version they replace. Authenticated ownership is
+      // exercised with distinct principals in `direct.test.tsx`.
+      {
+        action: aliceOnFirst.editMessage,
+        event: typed("Hello, everyone"),
+        trustedUi: editGesture,
+      },
+      {
+        assertion: assert(() => {
+          const first = stored(messages)[0];
+          return first?.body === "Hello, everyone" &&
+            first?.editedAt !== undefined &&
+            first?.earlierVersions.length === 1 &&
+            first?.earlierVersions[0].body === "Hello, team" &&
+            nsecOf(first?.earlierVersions[0].sentAt) === nsecOf(first?.sentAt);
+        }),
+      },
+
+      // Deletion keeps the deleted text in history.
+      {
+        action: bobOnSecond.deleteMessage,
+        event: {},
+        trustedUi: deleteGesture,
+      },
+      {
+        assertion: assert(() => {
+          const second = stored(messages)[1];
+          return typeof second?.body === "object" &&
+            equals(second?.authorProfile, bobProfile) &&
+            second?.earlierVersions.length === 1 &&
+            second?.earlierVersions[0].body === "Hi, Alice";
+        }),
+      },
+      // A deleted message takes no edit.
+      {
+        action: bobOnSecond.editMessage,
+        event: typed("Back again"),
+        trustedUi: editGesture,
+      },
+      {
+        assertion: assert(() => typeof stored(messages)[1]?.body === "object"),
+      },
+
+      // Obliteration in a group room by its OWNER, which this lane's user is;
+      // `members.test.tsx` covers a member who isn't.
+      {
+        action: aliceOnThird.obliterateMessage,
+        event: {},
+        trustedUi: obliterateGesture,
+      },
+      {
+        assertion: assert(() => {
+          const third = stored(messages)[2];
+          return typeof third?.body === "object" &&
+            third?.authorProfile?.get() === undefined &&
+            third?.earlierVersions.length === 0;
+        }),
+      },
+
+      // Replies: a thread reply stays out of the conversation, a "both" reply
+      // shows in each, and a "main" reply quotes its target there.
+      {
+        action: aliceOnFirst.replyInThread,
+        event: typed("In the thread"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: aliceOnFirst.replyInBoth,
+        event: typed("In both"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: bobOnFirst.replyInMain,
+        event: typed("Quoting you"),
+        trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          records.get()[0].body === "Edited" &&
-          records.get()[0].earlierVersions[0].body === "  Hello  "
+          mainTexts(alice.messages.latest.messages) ===
+            "Hello, everyone | <gone> | <gone> | In both | Quoting you"
         ),
       },
       {
-        assertion: assert(() =>
-          room.messages.windows.get()?.main?.messages.length === 1 &&
-          room.messages.windows.get()?.main?.messages[0].body === "Edited" &&
-          room.messages.windows.get()?.main?.hasNewer
-        ),
+        assertion: assert(() => {
+          const replies = stored(messages).slice(3);
+          return replies.length === 3 &&
+            replies.every((reply) =>
+              reply.replyTo !== undefined &&
+              nsecOf(reply.sentAt) > nsecOf(stored(messages)[0]?.sentAt)
+            ) &&
+            replies.map((reply) => reply.replyTo?.shownIn).join() ===
+              "thread,both,main";
+        }),
       },
-      { action: room.sendReaction, event: reactEvent, trustedUi: reactGesture },
+
+      // Refused: a reply to a deleted message, a reply quoted in the main
+      // conversation to a message shown only in a thread, and an edit whose
+      // proposed time is far older than the room's window.
       {
-        action: room.sendReaction,
-        event: { ...reactEvent, requestId: "react-2" },
-        trustedUi: reactGesture,
-      },
-      { assertion: assert(() => records.get()[0].reactions.length === 1) },
-      {
-        action: room.deleteMessage,
-        event: { requestId: "delete-1", message: firstMessage },
-        trustedUi: { surface: "ChatDeleteSurface", action: "ChatDelete" },
-      },
-      {
-        assertion: assert(() =>
-          typeof records.get()[0].body === "object" &&
-          records.get()[0].earlierVersions[1].body === "Edited" &&
-          records.get()[0].reactions.length === 0
-        ),
+        action: bobOnSecond.replyInThread,
+        event: typed("To the deleted one"),
+        trustedUi: sendGesture,
       },
       {
-        action: room.obliterateMessage,
-        event: { requestId: "obliterate-1", message: firstMessage },
-        trustedUi: {
-          surface: "ChatObliterateSurface",
-          action: "ChatObliterate",
+        action: bobOnThreadReply.replyInMain,
+        event: typed("Quoting a thread reply"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: aliceOnFirst.editMessage,
+        event: {
+          requestId: "alice-stale-edit",
+          version: { body: "Very late edit", sentAt: epochNsecFromMsec(1000) },
         },
+        trustedUi: editGesture,
       },
       {
         assertion: assert(() =>
-          records.get()[0].authorProfile?.get() === undefined &&
-          records.get()[0].earlierVersions.length === 0
+          stored(messages).length === 6 &&
+          stored(messages)[0]?.body === "Hello, everyone"
         ),
       },
-      { action: room.sendMessage, event: sendEvent, trustedUi: sendGesture },
-      { assertion: assert(() => records.get().length === 2) },
+
+      // Every recorded change has an activity entry, numbered without gaps
+      // but for the obliterated message's earlier entries.
+      {
+        assertion: assert(() =>
+          activitySeqs(activity).join() === "1,2,4,5,6,7,8,9"
+        ),
+      },
+      { assertion: assert(() => alice.recentActivityExpiredThrough === 0) },
+      {
+        action: alice.sendMessage,
+        event: typed("Ancient request replay", "ancient-request"),
+        trustedUi: sendGesture,
+      },
+      {
+        assertion: assert(() =>
+          stored(messages).length === 6 &&
+          usedTimes.elementById("0").get()?.at.value === 0n
+        ),
+      },
     ],
-    room,
   };
 });

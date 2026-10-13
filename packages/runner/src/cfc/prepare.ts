@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/api";
+import type { CellScope, FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
@@ -114,6 +114,10 @@ import {
   getTransactionWriteAttempts,
   getTransactionWrittenSpaces,
 } from "../storage/transaction-inspection.ts";
+import {
+  type ConsumedLocation,
+  exchangeEachObservation,
+} from "./access-integrity.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   PRINCIPAL_CLAIM_KINDS,
@@ -136,6 +140,7 @@ import {
 import { ConsumedLabelIndex } from "./consumed-label-index.ts";
 import { collectDeclaredMonotonicityViolations } from "./declared-monotonicity.ts";
 import {
+  admitsRulesOfKind,
   type CfcGrantConsumptionContext,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
@@ -191,7 +196,7 @@ import {
   clauseBearsReadFailedMarker,
   uniqueCfcAtoms,
 } from "./observation.ts";
-import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX, type ExchangeRule } from "./policy.ts";
 import { createTxCfcModulePolicyResolver } from "./policy-resolver.ts";
 import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { sinkClassOf } from "./sink-inventory.ts";
@@ -222,6 +227,7 @@ import {
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
   type StoredCfcMetadata,
+  type TrustSnapshot,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -436,9 +442,10 @@ const labelForEntriesAtPath = (
 //  - No declared entry sits strictly below that path. Every read at-or-below
 //    the entry's path then resolves the declared component to what it
 //    resolves to at the entry's own path, which is the one place this checks.
-//  - The entry carries confidentiality only. Integrity is never unioned
-//    across components (§8.12.8), so a declared integrity claim cannot stand
-//    in for a per-value one.
+//  - The entry carries confidentiality only. A declared integrity claim is
+//    the store policy's and a per-value one the written value's (§8.12.8),
+//    so neither stands in for the other, although `labelForEntriesAtPath`
+//    joins every component's integrity at a path into one set.
 //  - The declared component covers the entry's clauses under every read
 //    selection that consumes the entry, and covers whatever the entry's own
 //    component resolves to once the entry is gone; and that residual
@@ -717,7 +724,8 @@ const consumedEntriesForRead = (
  * read's own path, joined, for a recursive read, with every entry below it.
  * The join is a union on both axes, so its integrity is evidence found
  * SOMEWHERE in the value read; `observationInputWitnesses` is the form that
- * holds of all of it.
+ * holds of all of it, and `consumedLocations` the form the release gates'
+ * per-access join reads.
  */
 const labelForConsumedEntries = (
   entries: readonly LabelMapEntry[],
@@ -826,22 +834,118 @@ const asWitnessEvidence = (entry: LabelMapEntry): LabelMapEntry =>
     ? { ...entry, label: { confidentiality: entry.label.confidentiality } }
     : entry;
 
+/** One location an observation consumed, with what it resolves to there. */
+type ResolvedLocation = {
+  readonly path: readonly string[];
+
+  /** The label the observation's entries resolve to here. */
+  readonly label: IFCLabel;
+
+  /** The entries this location's integrity is resolved over. */
+  readonly evidence: readonly LabelMapEntry[];
+
+  /** The integrity those entries resolve to here. */
+  readonly integrity: readonly CfcAtom[] | undefined;
+};
+
+/**
+ * The locations one observation consumed: its own path and, for a recursive
+ * observation, the path of every entry beneath it. Each is resolved over the
+ * entries that resolve at it, so a label written at one location does not
+ * speak for its siblings. `only` selects the locations whose label carries
+ * confidentiality, or every location whose label carries anything.
+ *
+ * A location's integrity never comes from the runtime's concrete existence
+ * stamps. An existence stamp is minted once, when its path is first stamped,
+ * and carried through every later overwrite; left in, it would shadow the
+ * value stamp of whatever later wrote over its path whole. `templates` says
+ * what a runtime-minted `*` template's integrity is: `"witness"` takes none
+ * from it, as an input witness must, since a template labels membership and
+ * slots rather than a written value; `"evidence"` keeps it, as a release
+ * gate does for the clause the template itself carries, which
+ * `carriedStampLabel` keeps honest by withdrawing the template's
+ * `TransformedBy` once another writer writes in its container.
+ *
+ * `entries` are the ones the observation consumed. They decide a location's
+ * label, as they decide the confidentiality the observation contributes to
+ * the join. `evidence`, when given, is what a location's integrity is
+ * resolved over instead. A shallow read of a node observes a function of the
+ * value stored there — its presence and type, and for a container its keys
+ * or length — and the value-class stamp is the record of who wrote that
+ * value, while the shape class a shallow read consumes holds only existence
+ * stamps, which never carry integrity. The schema traversal through which
+ * compiled code reads its arguments makes one shallow read per node it
+ * visits, scalar leaves included, so without this no location of such a
+ * read would carry integrity.
+ */
+function* resolvedLocations(
+  entries: readonly LabelMapEntry[],
+  path: readonly string[],
+  nonRecursive: boolean | undefined,
+  only: "confidential" | "labeled",
+  templates: "witness" | "evidence",
+  evidence?: readonly LabelMapEntry[],
+): Generator<ResolvedLocation> {
+  const locations = new Map<string, readonly string[]>([
+    [pathKey(path), path],
+  ]);
+  if (nonRecursive !== true) {
+    for (const entry of entries) {
+      if (entry.path.length <= path.length) continue;
+      if (!isPrefix(path, entry.path)) continue;
+      locations.set(pathKey(entry.path), entry.path);
+    }
+  }
+  const consumed = witnessTrie(entries);
+  const held = evidence === undefined ? undefined : witnessTrie(evidence);
+  for (const location of locations.values()) {
+    const resolved = entriesResolvingAtLocation(consumed, location);
+    const label = labelForEntriesAtPath(resolved, location);
+    if (
+      label === undefined ||
+      (only === "confidential"
+        ? (label.confidentiality?.length ?? 0) === 0
+        : !hasLabelValues(label))
+    ) {
+      continue;
+    }
+    // The consumed label is the evidence too unless something it resolved
+    // is not evidence as it stands, which is the uncommon case.
+    const evidenceAt = held === undefined
+      ? resolved
+      : entriesResolvingAtLocation(held, location);
+    if (
+      held === undefined &&
+      evidenceAt.every((entry) =>
+        isWitnessEvidence(entry) &&
+        (templates === "evidence" || !isRuntimeMintedTemplate(entry))
+      )
+    ) {
+      yield {
+        path: location,
+        label,
+        evidence: evidenceAt,
+        integrity: label.integrity,
+      };
+      continue;
+    }
+    const witnessed = templates === "evidence"
+      ? evidenceAt.filter(isWitnessEvidence)
+      : evidenceAt.filter(isWitnessEvidence).map(asWitnessEvidence);
+    yield {
+      path: location,
+      label,
+      evidence: witnessed,
+      integrity: labelForEntriesAtPath(witnessed, location)?.integrity,
+    };
+  }
+}
+
 /**
  * The input witnesses one observation holds: the retained atoms common to
  * every confidential location it consumed (`input-witness.ts`), or
- * `undefined` when it consumed nothing confidential.
- *
- * `entries` are the ones the observation consumed. They decide which
- * locations are confidential, as they decide the confidentiality the
- * observation contributes to the join. `evidence`, when given, is what a
- * location's integrity is resolved over instead. A shallow read of a node
- * observes a function of the value stored there — its presence and type,
- * and for a container its keys or length — and the value-class stamp is the
- * record of who wrote that value, while the shape class a shallow read
- * consumes holds only existence stamps, which never carry integrity. The
- * schema traversal through which compiled code reads its arguments makes one
- * shallow read per node it visits, scalar leaves included, so without this
- * no location of such a read would carry a witness.
+ * `undefined` when it consumed nothing confidential. The arguments are
+ * `resolvedLocations()`'s.
  */
 const observationInputWitnesses = (
   entries: readonly LabelMapEntry[],
@@ -856,37 +960,17 @@ const observationInputWitnesses = (
   ) {
     return undefined;
   }
-  const locations = new Map<string, readonly string[]>([
-    [pathKey(path), path],
-  ]);
-  if (nonRecursive !== true) {
-    for (const entry of entries) {
-      if (entry.path.length <= path.length) continue;
-      if (!isPrefix(path, entry.path)) continue;
-      locations.set(pathKey(entry.path), entry.path);
-    }
-  }
-  const consumed = witnessTrie(entries);
-  const held = evidence === undefined ? undefined : witnessTrie(evidence);
   let witnesses: CfcAtom[] | undefined;
-  for (const location of locations.values()) {
-    const resolved = entriesResolvingAtLocation(consumed, location);
-    const label = labelForEntriesAtPath(resolved, location);
-    if ((label?.confidentiality?.length ?? 0) === 0) continue;
-    // The consumed label is the evidence too unless something it resolved
-    // is not evidence as it stands, which is the uncommon case.
-    const evidenceAt = held === undefined
-      ? resolved
-      : entriesResolvingAtLocation(held, location);
-    const integrity = held === undefined &&
-        evidenceAt.every((entry) =>
-          isWitnessEvidence(entry) && !isRuntimeMintedTemplate(entry)
-        )
-      ? label?.integrity
-      : labelForEntriesAtPath(
-        evidenceAt.filter(isWitnessEvidence).map(asWitnessEvidence),
-        location,
-      )?.integrity;
+  for (
+    const { integrity } of resolvedLocations(
+      entries,
+      path,
+      nonRecursive,
+      "confidential",
+      "witness",
+      evidence,
+    )
+  ) {
     const retained = retainedInputWitnesses(integrity);
     witnesses = witnesses === undefined
       ? retained
@@ -896,6 +980,60 @@ const observationInputWitnesses = (
   }
   return witnesses;
 };
+
+/**
+ * Whether an entry's integrity is evidence about the value currently at its
+ * path, which a value-intrinsic exchange rule may be matched against (spec
+ * §5.3): the flow stamps (`derived`, `structure`) and the writer's own stamps
+ * (`minted`), whose evidence a later write withdraws. A `declared` entry is
+ * store policy, whose integrity a schema states and no write withdraws; a
+ * `link` entry copies what its target carried when the reference was written;
+ * an `external-ingest` mark is not checked against the value it names.
+ */
+const bindsCurrentValueEvidence = (entry: LabelMapEntry): boolean =>
+  entry.origin === "derived" || entry.origin === "structure" ||
+  entry.origin === MINTED_ORIGIN;
+
+/**
+ * The labeled locations one observation of the document `document` consumed,
+ * as a release gate reads them (`access-integrity.ts`). A location is keyed
+ * by the document and its path, a link probe's being the slot it probes, so
+ * observing one location twice is observing one value. Its evidence is the
+ * integrity of the entries resolving there that bind the current value. The
+ * other arguments are `resolvedLocations()`'s.
+ */
+const consumedLocations = (
+  document: string,
+  entries: readonly LabelMapEntry[],
+  path: readonly string[],
+  nonRecursive: boolean | undefined,
+): ConsumedLocation[] =>
+  Array.from(
+    resolvedLocations(entries, path, nonRecursive, "labeled", "evidence"),
+    ({ path: location, label, evidence, integrity }) => ({
+      key: stringTupleKey([document, pathKey(probedSlotPath(location))]),
+      confidentiality: label.confidentiality ?? [],
+      integrity: integrity ?? [],
+      evidence: labelForEntriesAtPath(
+        evidence.filter(bindsCurrentValueEvidence),
+        location,
+      )?.integrity ?? [],
+    }),
+  );
+
+/**
+ * The location a label-metadata observation consumed: its clauses, and no
+ * integrity, since metadata carries no evidence.
+ */
+const labelMetadataLocation = (
+  confidentiality: readonly CfcConfClause[],
+  index: number,
+): ConsumedLocation => ({
+  key: stringTupleKey(["label-metadata", String(index)]),
+  confidentiality,
+  integrity: [],
+  evidence: [],
+});
 
 // Read-like shape (space/id/scope/path + a recursive read profile) for the
 // addresses whose invalidating writes scheduled this run — the §8.9.2 trigger
@@ -1482,7 +1620,7 @@ const structuralProvenanceForPath = (
   claim: string,
 ): StructuralProvenanceInput | undefined => {
   const logicalPath = canonicalizeLogicalPath(path);
-  return tx.getCfcState().writePolicyInputs.find((
+  return writePolicyInputsForDocument(tx, target).find((
     input,
   ): input is StructuralProvenanceInput =>
     input.kind === "structural-provenance" &&
@@ -1580,7 +1718,7 @@ const writeIsPatternSetupInitialization = (
   path: readonly string[],
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "structural-provenance" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.claim === CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION &&
@@ -1669,7 +1807,7 @@ const writeIsRuntimeInitialization = (
   path: readonly string[],
   waived: "writeAuthorizedBy" | "uiContract",
 ): boolean => {
-  const candidates = tx.getCfcState().writePolicyInputs.filter((input) =>
+  const candidates = writePolicyInputsForDocument(tx, target).filter((input) =>
     input.kind === "initialization" && input.mode !== "replay" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -1758,6 +1896,59 @@ const writeIsRuntimeInitialization = (
 };
 
 /**
+ * The write-policy inputs that can bear on `target`'s document, by the
+ * documents an input names: its target, and for a structural-provenance
+ * claim its sources too. The index is built once per transaction for the
+ * inputs recorded so far and rebuilt when more are recorded, so a check at
+ * one of a commit's many written paths reads the inputs about that document
+ * rather than every input the transaction holds.
+ */
+const writePolicyInputsForDocument = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+): readonly WritePolicyInput[] => {
+  const inputs = tx.getCfcState().writePolicyInputs;
+  let indexed = writePolicyInputIndexes.get(tx);
+  if (indexed === undefined || indexed.length !== inputs.length) {
+    const byDocument = new Map<string, WritePolicyInput[]>();
+    const add = (
+      address: { space: MemorySpace; id: string; scope?: CellScope },
+      input: WritePolicyInput,
+    ) => {
+      const key = documentKeyOf(address);
+      const list = byDocument.get(key);
+      if (list === undefined) byDocument.set(key, [input]);
+      else if (list[list.length - 1] !== input) list.push(input);
+    };
+    for (const input of inputs) {
+      if ("target" in input && input.target !== undefined) {
+        add(input.target, input);
+      }
+      if (input.kind === "structural-provenance") {
+        for (const source of input.sources) add(source, input);
+      }
+    }
+    indexed = { length: inputs.length, byDocument };
+    writePolicyInputIndexes.set(tx, indexed);
+  }
+  return indexed.byDocument.get(documentKeyOf(target)) ?? [];
+};
+
+const writePolicyInputIndexes = new WeakMap<
+  IExtendedStorageTransaction,
+  { length: number; byDocument: Map<string, WritePolicyInput[]> }
+>();
+
+const documentKeyOf = (
+  address: { space: MemorySpace; id: string; scope?: CellScope },
+): string =>
+  `${address.space}\0${address.id}\0${normalizeCellScope(address.scope)}`;
+
+/**
  * Whether `path` lies at or under a capture or binding the runtime staged in
  * this transaction, with the slot still holding it. Staging writes nothing
  * the referenced value holds, so the integrity the receiving slot's schema
@@ -1775,7 +1966,7 @@ const pathHoldsStagedReference = (
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
   const scope = normalizeCellScope(target.scope);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "initialization" &&
     (input.mode === "capture" || input.mode === "binding") &&
     tx.isRuntimeWritePolicyInput(input) &&
@@ -1879,7 +2070,7 @@ const pathHoldsUnattributedInitialization = (
     address.space === target.space && address.id === target.id &&
     normalizeCellScope(address.scope) === normalizeCellScope(target.scope) &&
     concretePathHasPrefix(logicalPath, canonicalizeLogicalPath(address.path));
-  const inputs = tx.getCfcState().writePolicyInputs;
+  const inputs = writePolicyInputsForDocument(tx, target);
   if (
     !tx.getCfcState().attributedInitialization &&
     inputs.some((input) => {
@@ -1985,7 +2176,7 @@ const writePreservesRuntimeOutput = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): boolean => {
-  const input = tx.getCfcState().writePolicyInputs.find((input) =>
+  const input = writePolicyInputsForDocument(tx, target).find((input) =>
     input.kind === "preserved-output" && tx.isRuntimeWritePolicyInput(input) &&
     sameDocument(input.target, target) && input.target.path.length === 0
   );
@@ -2042,7 +2233,7 @@ const writeIsPolicyApplication = (
     path: readonly string[],
   ) => ImplementationIdentity | undefined,
 ): boolean => {
-  const applications = tx.getCfcState().writePolicyInputs.filter((
+  const applications = writePolicyInputsForDocument(tx, target).filter((
     input,
   ): input is Extract<WritePolicyInput, { kind: "policy-application" }> =>
     input.kind === "policy-application" &&
@@ -2083,7 +2274,7 @@ const writeReplaysArgumentSlot = (
   },
   path: readonly string[],
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "initialization" && input.mode === "replay" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -2187,7 +2378,7 @@ const writeIsOwnerAdoption = (
   },
   path: readonly string[],
 ): boolean => {
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "owner-adoption" && tx.isRuntimeWritePolicyInput(input) &&
     input.owner === tx.getCfcState().trustSnapshot?.actingPrincipal &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -2243,7 +2434,7 @@ type LinkSourceProjection = {
  * Each preparation owns a fresh resolver. Without write inspection, reuse is
  * limited to one target's input collection.
  */
-class VerifierMetadataResolver {
+export class VerifierMetadataResolver {
   #tx: IExtendedStorageTransaction;
   #envelopes = new Map<
     MemorySpace,
@@ -2253,6 +2444,7 @@ class VerifierMetadataResolver {
     >
   >();
   #seenWrites = 0;
+  #generation = 0;
   #viewIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
   #views = new WeakMap<CfcMetadata, Map<string, LinkSourceProjection>>();
   #labelIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
@@ -2268,6 +2460,14 @@ class VerifierMetadataResolver {
   /** Binds metadata reads and write inspection to the same transaction. */
   constructor(tx: IExtendedStorageTransaction) {
     this.#tx = tx;
+  }
+
+  /**
+   * Advances each time a refresh retires a resolution, so a caller holding
+   * results read through this resolver can tell whether any still stands.
+   */
+  get generation(): number {
+    return this.#generation;
   }
 
   /** Returns the current envelope, propagating unreadable-envelope errors. */
@@ -2475,6 +2675,7 @@ class VerifierMetadataResolver {
       this.#coverIndexes = new WeakMap();
       this.#covers = new WeakMap();
       this.#seenWrites = 0;
+      this.#generation += 1;
       return;
     }
     for (let index = this.#seenWrites; index < writes.length; index++) {
@@ -2496,7 +2697,7 @@ class VerifierMetadataResolver {
         this.#labels.delete(metadata);
         this.#linkSources.delete(metadata);
       }
-      documents?.delete(write.id);
+      if (documents?.delete(write.id)) this.#generation += 1;
     }
     this.#seenWrites = writes.length;
   }
@@ -5418,6 +5619,33 @@ const storedRepresentedPrincipalsAt = (
   ];
 };
 
+/**
+ * Whether the run on `tx` acts for no one on a serving runtime, so that a
+ * claim or an owner binding resolved for it would name a principal it does not
+ * act for. A run acts for the actor its serving loop stamps on it. A run of
+ * the loop's own (`bookkeeping`) acts for the principal whose trust snapshot
+ * the loop attached to it, such as the owner the space-root ensure resolves or
+ * the parent of a start it defers, and for no one under the serving runtime's
+ * ambient snapshot, which names the runtime itself. Any other run with no
+ * stamped actor acts for no one whatever snapshot it carries: a demanded
+ * derivation carries its demander's for its reads, before the seal settles
+ * whether it acts for anyone. A transaction no serving loop stamped acts for
+ * no one under the ambient snapshot. Off the serving posture every run acts
+ * for the runtime's own user.
+ */
+const servedRunActsForNoOne = (
+  tx: IExtendedStorageTransaction,
+  trustSnapshot: TrustSnapshot,
+): boolean => {
+  const servingIdentity = tx.getCfcState().servingIdentity;
+  if (servingIdentity === undefined || waveRunActorOf(tx) !== undefined) {
+    return false;
+  }
+  const kind = waveRunContextOf(tx)?.kind;
+  if (kind !== undefined && kind !== "bookkeeping") return true;
+  return trustSnapshot.actingPrincipal === servingIdentity;
+};
+
 const currentPrincipalIntegrityReason = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -5479,6 +5707,18 @@ const currentPrincipalIntegrityReason = (
       return `ownerPrincipal requires matching represents-principal integrity at /${
         path.join("/")
       }`;
+    }
+    // A run that acts for no one would match or bind an owner it does not
+    // act for, the service under the serving runtime's own snapshot. Only an
+    // initialization on nobody's behalf at a placeholder owner checks no
+    // owner and binds no one, so only that is left to admit.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/64
+    if (
+      servedRunActsForNoOne(tx, trustSnapshot) &&
+      (!isCurrentPrincipalPlaceholder(ownerPrincipalSpec) ||
+        !pathHoldsUnattributedInitialization(tx, target, path))
+    ) {
+      return `ownerPrincipal requires the run's actor at /${path.join("/")}`;
     }
     if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
       return `ownerPrincipal mismatch at /${path.join("/")}`;
@@ -5543,10 +5783,10 @@ const currentPrincipalIntegrityReason = (
       path.join("/")
     }`;
   }
-  // A served run with no actor keeps the serving runtime's own trust
-  // snapshot, so a claim it minted would name the service.
+  // A run that acts for no one would mint a claim naming a principal it does
+  // not act for, the service under the serving runtime's own snapshot.
   if (
-    waveRunContextOf(tx) !== undefined && waveRunActorOf(tx) === undefined &&
+    servedRunActsForNoOne(tx, trustSnapshot) &&
     claimsCurrentPrincipalAt(tx, target, path)
   ) {
     return `current-principal integrity requires the run's actor at /${
@@ -6239,7 +6479,7 @@ const ifcEntryAppliesToAttemptedWrite = (
       tx.getWriteDetails?.(target.space) ?? [];
     // Owner adoption changes policy while retaining the stored bytes. It is
     // still a policy attempt and must pass every ordinary requirement gate.
-    let touched = tx.getCfcState().writePolicyInputs.some((input) =>
+    let touched = writePolicyInputsForDocument(tx, target).some((input) =>
       input.kind === "owner-adoption" && tx.isRuntimeWritePolicyInput(input) &&
       input.target.space === target.space && input.target.id === target.id &&
       normalizeCellScope(input.target.scope) === target.scope &&
@@ -6654,6 +6894,387 @@ const cfcFloorTrustContext = (
   };
 };
 
+/**
+ * One read `verifyInputRequirements` quantifies over, at its activity-clock
+ * position. A read without one (journal-less backend) is treated as
+ * preceding every write: it joins every prefix, which is the conservative
+ * direction.
+ */
+type InputRead = Omit<IReadActivity, "journalIndex"> & {
+  journalIndex: number;
+};
+
+/** The reads an `InputReadView` holds, and what they were built from. */
+type InputReadSnapshot = {
+  // What the reads were copied from: every record the transaction offered,
+  // in order, the metadata object each carried, and whether each distinct
+  // metadata object classed its reads as the verifier's own. A record keeps
+  // its place in the transaction's list while that classification changes,
+  // by its metadata being replaced or changed in place.
+  records: readonly IReadActivity[];
+  metas: readonly IReadActivity["meta"][];
+  internalByMeta: ReadonlyMap<IReadActivity["meta"], boolean>;
+  triggerCount: number;
+  reads: readonly InputRead[];
+  // The value path each read observes, or `undefined` for a read of one of
+  // the document's own members, which observes no payload and so consumes no
+  // payload label. Captured before any envelope resolves: backend reads may
+  // mutate a caller-owned path array.
+  gatePaths: readonly (ValuePath | undefined)[];
+  // Stage-0 measurement: the reads lacking a clock position.
+  clockLessReads: number;
+};
+
+/**
+ * The labeled reads a protected entry's input checks quantify over, built
+ * from the input reads whose documents resolved to a label with values.
+ * Returns what the per-entry checks consume: each read's gate path, its
+ * effective label, and the labeled locations it consumed, resolved on first
+ * ask.
+ */
+const buildGatedInputReads = (
+  tx: IExtendedStorageTransaction,
+  reads: readonly InputRead[],
+  gatePaths: readonly (ValuePath | undefined)[],
+  sourceMetadata: readonly (CfcMetadata | undefined)[],
+) => {
+  // One path index per document's label map, built for the per-access join
+  // the first time it resolves a read of that document.
+  const labelIndexes = new Map<CfcMetadata, ConsumedLabelIndex>();
+  const labelIndexOf = (metadata: CfcMetadata): ConsumedLabelIndex => {
+    let index = labelIndexes.get(metadata);
+    if (index === undefined) {
+      index = new ConsumedLabelIndex(metadata.labelMap.entries);
+      labelIndexes.set(metadata, index);
+    }
+    return index;
+  };
+  const gatedReads = reads.flatMap((read, index) => {
+    const path = gatePaths[index];
+    if (path === undefined) return [];
+    const metadata = sourceMetadata[index];
+    const selection = {
+      nonRecursive: read.nonRecursive,
+      consumes: "all" as const,
+    };
+    let locations: readonly ConsumedLocation[] | undefined;
+    return [{
+      ...read,
+      path,
+      label: effectiveReadLabel(metadata, path, selection),
+      // The labeled locations the read consumed, as the per-access join
+      // reads them (`access-integrity.ts`), resolved on first ask.
+      locations: (): readonly ConsumedLocation[] =>
+        locations ??= metadata === undefined ? [] : consumedLocations(
+          stringTupleKey([
+            read.space,
+            read.id,
+            normalizeCellScope(read.scope),
+          ]),
+          // Only the entries bearing on the read, so the locations are
+          // resolved over them rather than over the whole document.
+          consumedEntriesForRead(
+            metadata,
+            path,
+            selection,
+            labelIndexOf(metadata),
+          ),
+          path,
+          read.nonRecursive,
+        ),
+    }];
+  }).filter((read) =>
+    read.label !== undefined &&
+    // A present-but-empty label ({} — no atoms) is the same trust level as
+    // an absent one (excluded above); whether metadata materialized an
+    // empty entry is a persistence/sync artifact and must not decide gate
+    // membership.
+    hasLabelValues(read.label)
+  );
+  // Label-metadata observations (inv-12 Stage 2) join the gate with their
+  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
+  // no journal position, so they sit at -Infinity and join EVERY protected
+  // write's prefix — the conservative direction for a screen, and only new
+  // introspection-using code ever records one (no existing flow regresses).
+  // Confidentiality-only records: never provenance-only, never a floor
+  // witness.
+  for (
+    const [index, observation] of tx.getCfcState().labelMetadataObservations
+      .entries()
+  ) {
+    gatedReads.push({
+      space: observation.target.space,
+      id: observation.target.id as URI,
+      scope: normalizeCellScope(observation.target.scope),
+      path: canonicalizeLogicalPath(observation.target.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: { confidentiality: [...observation.confidentiality] },
+      locations: () => [
+        labelMetadataLocation(observation.confidentiality, index),
+      ],
+    });
+  }
+  for (
+    const observation of tx.getCfcState().externalContentObservations ?? []
+  ) {
+    const gateLabel: IFCLabel = {
+      confidentiality: observation.flow.confidentiality,
+      integrity: observation.consumed.integrity,
+    };
+    if (!hasLabelValues(gateLabel)) continue;
+    gatedReads.push({
+      ...observation.source,
+      id: observation.source.id as URI,
+      path: canonicalizeLogicalPath(observation.source.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: gateLabel,
+      locations: () => observation.locations,
+    });
+  }
+  return gatedReads;
+};
+
+/**
+ * The reads `verifyInputRequirements` quantifies over, held for one boundary
+ * pass. Every target the pass verifies, under each of its verification
+ * schemas, asks for the same reads, the same stored envelope behind each,
+ * and the same labeled set, and a pass may verify hundreds of targets, so
+ * each is built once and reused while what it was built from stands.
+ *
+ * The reads are the transaction's potentially external read activities,
+ * runtime-internal verifier reads excluded, and its trigger reads (§8.9.2 /
+ * SC-3, H5): a handler scheduled by a labeled write must satisfy
+ * `requiredIntegrity` even if its branch never re-reads that write, so they
+ * join the gate when enabled, at `-Infinity`, since their invalidating
+ * writes scheduled the run and so logically precede every write in the
+ * attempt (doc §4). The view reads the transaction's activity again on
+ * every ask, since a record's internal-verifier classification is its
+ * metadata's and can change while the record keeps its place. It copies
+ * the reads again only when the records differ, one carries another
+ * metadata object, or a metadata object classes its reads otherwise than
+ * it did, so a read recorded or reclassified during the pass reaches the
+ * targets verified after it.
+ * The resolver's generation says whether a write retired an envelope the
+ * view resolved. The view is deliberately class-blind (`consumes: "all"`):
+ * the gate is a screen over everything the transaction consumed, and
+ * over-inclusive quantification is the fail-safe direction for it;
+ * per-class narrowing of consumers is C4. Provenance-only reads are not
+ * filtered here: the S7 exemption is applied per entry, inside that entry's
+ * prefix. Distinct from the egress side's consumed set
+ * (`collectConsumedLabel`), which stays transaction-global — a sink request
+ * records no per-write provenance, so the whole consumed set is the sound
+ * over-approximation there (doc §7.4).
+ */
+export class InputReadView {
+  readonly #tx: IExtendedStorageTransaction;
+  #reads?: InputReadSnapshot;
+  #resolved?: {
+    reads: readonly InputRead[];
+    generation: number;
+    sourceMetadata: readonly (CfcMetadata | undefined)[];
+  };
+  #gated?: {
+    sourceMetadata: readonly (CfcMetadata | undefined)[];
+    observationCount: number;
+    externalObservationCount: number;
+    gatedReads: ReturnType<typeof buildGatedInputReads>;
+  };
+
+  /** Binds the view to the transaction whose reads it holds. */
+  constructor(tx: IExtendedStorageTransaction) {
+    this.#tx = tx;
+  }
+
+  /**
+   * Every read, each carrying a document-rooted path, as a read activity
+   * does: the transaction's reads as they stand at this ask, which the
+   * envelopes and the labeled set below then describe until the next ask.
+   * Counts, per ask, whether the set was copied for it or reused; a boundary
+   * pass asks once per schema it verifies a target under.
+   */
+  reads(): readonly InputRead[] {
+    const before = this.#reads;
+    const current = this.#current();
+    this.#tx.noteCfcPreparationWork(
+      current === before ? "inputReadViewsReused" : "inputReadViewsBuilt",
+    );
+    return current.reads;
+  }
+
+  /** How many of the reads the last `reads()` saw lack a clock position. */
+  clockLessReads(): number {
+    return this.#held().clockLessReads;
+  }
+
+  /**
+   * The stored envelope of each read's document, in the order of `reads()`,
+   * resolved through `resolver` as it stands after its refresh. Resolving
+   * propagates an unreadable-envelope refusal, so a transaction that
+   * consumed such a document fails closed whether or not anything asks what
+   * its label says.
+   */
+  sourceMetadata(
+    resolver: VerifierMetadataResolver,
+  ): readonly (CfcMetadata | undefined)[] {
+    const { reads } = this.#held();
+    const generation = resolver.generation;
+    if (
+      this.#resolved?.reads !== reads ||
+      this.#resolved.generation !== generation
+    ) {
+      this.#resolved = {
+        reads,
+        generation,
+        sourceMetadata: reads.map((read) =>
+          resolver.read(
+            read.space,
+            read.id,
+            normalizeCellScope(read.scope),
+            read.type ?? "application/json",
+          )
+        ),
+      };
+    }
+    return this.#resolved.sourceMetadata;
+  }
+
+  /**
+   * The labeled reads a protected entry quantifies over, with the
+   * transaction's label-metadata and external-content observations joined.
+   * Resolving one read's label joins every entry of that document's stored
+   * label map that bears on the read path, so the set costs the read count
+   * times those maps' sizes, and it is kept until a read, an envelope or an
+   * observation it was built from changes.
+   */
+  gatedReads(
+    resolver: VerifierMetadataResolver,
+  ): ReturnType<typeof buildGatedInputReads> {
+    const sourceMetadata = this.sourceMetadata(resolver);
+    const state = this.#tx.getCfcState();
+    const observationCount = state.labelMetadataObservations.length;
+    const externalObservationCount =
+      state.externalContentObservations?.length ?? 0;
+    if (
+      this.#gated?.sourceMetadata !== sourceMetadata ||
+      this.#gated.observationCount !== observationCount ||
+      this.#gated.externalObservationCount !== externalObservationCount
+    ) {
+      this.#gated = {
+        sourceMetadata,
+        observationCount,
+        externalObservationCount,
+        gatedReads: buildGatedInputReads(
+          this.#tx,
+          this.#held().reads,
+          this.#held().gatePaths,
+          sourceMetadata,
+        ),
+      };
+    }
+    return this.#gated.gatedReads;
+  }
+
+  /**
+   * Helper for `reads()`, which returns the snapshot the view holds while it
+   * still stands for the transaction's activity, and otherwise builds one.
+   * This is the one place the view reads that activity.
+   */
+  #current(): InputReadSnapshot {
+    const tx = this.#tx;
+    const raw = tx.getPotentiallyExternalReadActivities?.() ??
+      tx.getReadActivities?.() ?? [];
+    const rawList: readonly IReadActivity[] = Array.isArray(raw)
+      ? raw
+      : [...raw];
+    const triggers = triggerReadSources(tx);
+    if (
+      this.#reads !== undefined &&
+      this.#reads.triggerCount === triggers.length &&
+      InputReadView.#stands(this.#reads, rawList)
+    ) {
+      return this.#reads;
+    }
+    let clockLessReads = 0;
+    const metas: IReadActivity["meta"][] = [];
+    const internalByMeta = new Map<IReadActivity["meta"], boolean>();
+    const reads: InputRead[] = [];
+    for (const read of rawList) {
+      const meta = read.meta;
+      metas.push(meta);
+      let internal = internalByMeta.get(meta);
+      if (internal === undefined) {
+        internal = isInternalVerifierRead(meta);
+        internalByMeta.set(meta, internal);
+      }
+      if (internal) continue;
+      if (read.journalIndex === undefined) clockLessReads += 1;
+      reads.push({ ...read, journalIndex: read.journalIndex ?? -Infinity });
+    }
+    for (const read of triggers) {
+      // A trigger read names a payload path, so its document path is that
+      // path under `value`.
+      reads.push({
+        ...read,
+        path: toDocumentPath(["value", ...read.path]),
+        journalIndex: -Infinity,
+      });
+    }
+    this.#reads = {
+      // A copy, so the records compared at the next ask are the ones this
+      // snapshot was built from even where the transaction hands out its
+      // own growing list.
+      records: [...rawList],
+      metas,
+      internalByMeta,
+      triggerCount: triggers.length,
+      reads,
+      gatePaths: reads.map((read) => canonicalizeDocumentPath(read.path)),
+      clockLessReads,
+    };
+    return this.#reads;
+  }
+
+  /**
+   * Helper for the members that describe the reads, which returns the
+   * snapshot the last `reads()` saw without reading the transaction's
+   * activity again, or builds the first one where nothing has asked yet.
+   */
+  #held(): InputReadSnapshot {
+    return this.#reads ?? this.#current();
+  }
+
+  /**
+   * Helper for `#current()`, which says whether `held` was built from
+   * exactly `records`, each classified as it is now. The transaction keeps a
+   * record whose classification is not sealed so that a consumer reads its
+   * metadata again, so every ask reads every record's metadata: a record
+   * carrying another metadata object ends the snapshot, and so does a
+   * metadata object that classes its reads otherwise than it did. The
+   * classification is the metadata object's, and a transaction's records
+   * share a few of them, so each distinct one is classified once per ask.
+   */
+  static #stands(
+    held: InputReadSnapshot,
+    records: readonly IReadActivity[],
+  ): boolean {
+    if (records.length !== held.records.length) return false;
+    for (let index = 0; index < records.length; index++) {
+      const read = records[index];
+      if (read !== held.records[index] || read.meta !== held.metas[index]) {
+        return false;
+      }
+    }
+    for (const [meta, internal] of held.internalByMeta) {
+      if (isInternalVerifierRead(meta) !== internal) return false;
+    }
+    return true;
+  }
+}
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -6676,6 +7297,8 @@ const verifyInputRequirements = (
   // quantify under.
   prefixBounds: WritePrefixBounds,
   metadataResolver: VerifierMetadataResolver,
+  // The boundary pass's reads, resolved through `metadataResolver`.
+  inputReads: InputReadView,
   // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
@@ -6694,157 +7317,30 @@ const verifyInputRequirements = (
   // label was left un-rewritten, so the attempt after the referenced document
   // syncs can fit, and tagging it terminal would strand that write.
 ): { reason: string; verdict: boolean } | undefined => {
-  // The labeled reads the per-entry checks below quantify over, each carrying
-  // its activity-clock position. Distinct from the egress side's consumed set
-  // (collectConsumedLabel), which stays transaction-global — a sink request
-  // records no per-write provenance, so the whole consumed set is the sound
-  // over-approximation there (doc §7.4). Deliberately class-blind
-  // (`consumes: "all"`): the gate is a screen over everything the tx
-  // consumed, and over-inclusive quantification is the fail-safe direction
-  // for it; per-class narrowing of consumers is C4.
-  //
-  // Provenance-only reads are NOT filtered here (unlike before D4): the S7
-  // exemption is applied per entry, inside that entry's prefix.
-  // Stage-0 measurement: read activities lacking a clock position (counted
-  // below only while a hook collects; the enforcement path pays a
-  // short-circuited presence check per read, nothing else).
-  //
-  // The stored envelope of each read's document is resolved here, ahead of
-  // the label: `storedMetadataFor` refuses an envelope this build cannot
-  // interpret, by version or by shape, and a transaction that consumed such
-  // a document fails closed whether or not anything asks what its label
-  // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. Resolutions remain valid until the
-  // transaction writes the document. The activity list stays live so newly
-  // recorded reads remain visible to later targets.
-  let clockLessReads = 0;
-  // Every read here carries a document-rooted path, as a read activity does.
-  const currentReads = [
-    ...[
-      ...(tx.getPotentiallyExternalReadActivities?.() ??
-        tx.getReadActivities?.() ?? []),
-    ].filter((read) => !isInternalVerifierRead(read.meta)).map((read) => {
-      if (provenance !== undefined && read.journalIndex === undefined) {
-        clockLessReads += 1;
-      }
-      return {
-        ...read,
-        // A read without a clock position (journal-less backend) is treated
-        // as preceding every write: it joins every prefix — conservative.
-        journalIndex: read.journalIndex ?? -Infinity,
-      };
-    }),
-    // §8.9.2 / SC-3 (H5): the trigger reads join the gate when enabled — a
-    // handler scheduled by a labeled write must satisfy requiredIntegrity even
-    // if its branch never re-reads that write. Empty when the flag is off.
-    // Trigger reads have no journal position — their invalidating writes
-    // scheduled the run, so they logically precede every write in the attempt
-    // and sit at -Infinity, joining EVERY protected write's prefix (doc §4);
-    // anything else would let the scheduling channel escape the per-write
-    // gate. A trigger read names a payload path, so its document path is that
-    // path under `value`.
-    ...triggerReadSources(tx).map((read) => ({
-      ...read,
-      path: toDocumentPath(["value", ...read.path]),
-      journalIndex: -Infinity,
-    })),
-  ];
+  // The reads this verification quantifies over are the boundary pass's
+  // view (`InputReadView`), shared by every target the pass verifies. The
+  // ask fixes the reads that the envelopes and the labeled set below
+  // describe.
+  inputReads.reads();
   // Candidate-read inspection is an extension seam and may expose writes made
   // while producing the current view. Refresh after that inspection so every
   // envelope resolution observes those writes.
   metadataResolver.refresh();
   const schemaEntries = cfcSchemaEntries(schema);
-  const needsReadLabels = provenance !== undefined ||
-    schemaEntries.some(({ schema: entrySchema }) => {
-      const ifc = isObjectOrArray(entrySchema) ? entrySchema.ifc : undefined;
-      return (ifc?.requiredIntegrity?.length ?? 0) > 0 ||
-        ifc?.maxConfidentiality !== undefined;
-    });
-  // A read of one of the document's own members has no gate path: it
-  // observes no payload, so it consumes no payload label.
-  const gatePaths: (ValuePath | undefined)[] = [];
-  const sourceMetadata = currentReads.map((read) => {
-    // Gate paths are captured before resolving an envelope: backend reads may
-    // mutate a caller-owned path array. Ungated targets only need the address.
-    if (needsReadLabels) gatePaths.push(canonicalizeDocumentPath(read.path));
-    return metadataResolver.read(
-      read.space,
-      read.id,
-      normalizeCellScope(read.scope),
-      read.type ?? "application/json",
-    );
-  });
+  // The stored envelope of each read's document is resolved here, ahead of
+  // the label: `storedMetadataFor` refuses an envelope this build cannot
+  // interpret, by version or by shape, and a transaction that consumed such
+  // a document fails closed whether or not anything asks what its label
+  // says. That refusal must not depend on what a target declares, nor on
+  // whether the measurement dial is on.
+  inputReads.sourceMetadata(metadataResolver);
   if (provenance !== undefined) {
-    provenance.clockLessReads = clockLessReads;
+    provenance.clockLessReads = inputReads.clockLessReads();
   }
-
-  // Resolving one read's label joins every entry of that document's stored
-  // label map that bears on the read path, so the whole set costs the
-  // transaction's read count times those maps' sizes. Only a schema entry
-  // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
-  // so the set is assembled on first ask and kept for the rest of the call.
-  const buildGatedReads = () => {
-    const gatedReads = currentReads.flatMap((read, index) => {
-      const path = gatePaths[index];
-      if (path === undefined) return [];
-      return [{
-        ...read,
-        path,
-        label: effectiveReadLabel(
-          sourceMetadata[index],
-          path,
-          { nonRecursive: read.nonRecursive, consumes: "all" },
-        ),
-      }];
-    }).filter((read) =>
-      read.label !== undefined &&
-      // A present-but-empty label ({} — no atoms) is the same trust level as
-      // an absent one (excluded above); whether metadata materialized an
-      // empty entry is a persistence/sync artifact and must not decide gate
-      // membership.
-      hasLabelValues(read.label)
-    );
-    // Label-metadata observations (inv-12 Stage 2) join the gate with their
-    // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
-    // no journal position, so they sit at -Infinity and join EVERY protected
-    // write's prefix — the conservative direction for a screen, and only new
-    // introspection-using code ever records one (no existing flow regresses).
-    // Confidentiality-only records: never provenance-only, never a floor
-    // witness.
-    for (const observation of tx.getCfcState().labelMetadataObservations) {
-      gatedReads.push({
-        space: observation.target.space,
-        id: observation.target.id as URI,
-        scope: normalizeCellScope(observation.target.scope),
-        path: canonicalizeLogicalPath(observation.target.path),
-        type: "application/json",
-        meta: {},
-        journalIndex: -Infinity,
-        label: { confidentiality: [...observation.confidentiality] },
-      });
-    }
-    for (
-      const observation of tx.getCfcState().externalContentObservations ?? []
-    ) {
-      const gateLabel: IFCLabel = {
-        confidentiality: observation.flow.confidentiality,
-        integrity: observation.consumed.integrity,
-      };
-      if (!hasLabelValues(gateLabel)) continue;
-      gatedReads.push({
-        ...observation.source,
-        id: observation.source.id as URI,
-        path: canonicalizeLogicalPath(observation.source.path),
-        type: "application/json",
-        meta: {},
-        journalIndex: -Infinity,
-        label: gateLabel,
-      });
-    }
-    return gatedReads;
-  };
-  let gatedReadsMemo: ReturnType<typeof buildGatedReads> | undefined;
-  const gatedReadsOf = () => (gatedReadsMemo ??= buildGatedReads());
+  // Only the measurement dial, and a schema entry that declares
+  // `requiredIntegrity` or `maxConfidentiality` and applies to an attempted
+  // write, read the labeled set, so it is resolved where one of them asks.
+  const gatedReadsOf = () => inputReads.gatedReads(metadataResolver);
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
@@ -7022,14 +7518,24 @@ const verifyInputRequirements = (
     // — the read-side half of #14 rides the same dial as the write-side
     // half by design.
     if (requiredIntegrity.length > 0 && gating.length > 0) {
-      // Coherent satisfaction (§8.10.3, Epic B5): each requirement must be
-      // met by ONE shared witness atom across every gated read, not by a
-      // different witness per read — "each input was screened by someone"
-      // is not "the inputs were screened". The single-read case reduces to
-      // the plain floor. Quantifies over D4's per-write prefix `gating`, not
-      // the transaction-global gate-visible read set.
+      // Coherent satisfaction (§8.10.3, §8.8, Epic B5): each requirement must
+      // be met by ONE witness, by its key, that every consumed observation
+      // carries, not by a different witness per observation — "each input
+      // was screened by someone" is not "the inputs were screened". A whole
+      // read is a traversal over primitive observations (§4.6.3), so each
+      // location a gated read consumed is one observation, and a witness one
+      // location carries and another lacks is no witness for the object. A
+      // read none of whose locations is labeled is one observation under its
+      // own label. §3.1.6.2's join labels a derived value, not an input
+      // check. Quantifies over D4's per-write prefix `gating`, not the
+      // transaction-global gate-visible read set.
       const ok = cfcIntegritySatisfiesFloorCoherently(
-        gating.map((read) => read.label?.integrity ?? []),
+        gating.flatMap((read) => {
+          const locations = read.locations();
+          return locations.length === 0
+            ? [read.label?.integrity ?? []]
+            : locations.map((location) => location.integrity);
+        }),
         requiredIntegrity,
         cfcFloorTrustContext(tx),
       );
@@ -7079,10 +7585,11 @@ const verifyInputRequirements = (
         // WRITE is a consuming site for single-use grants — the ceiling
         // decision persists with the written value — but only under the
         // enforce dial, where this evaluation's outcome IS the decision.
-        const outcome = evaluateGatedConfidentiality(
+        const outcome = evaluateAccessExchange(
           tx,
           confidentiality,
           read.label?.integrity ?? [],
+          read.locations,
           [],
           mode === "enforce" ? "consuming" : "observing",
           target.space,
@@ -7212,7 +7719,7 @@ const trustedEventMatchesContract = (
   path: readonly string[],
   contract: UiContract,
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "trusted-event" &&
     input.target.space === target.space &&
     input.target.id === target.id &&
@@ -9063,7 +9570,7 @@ const transactionReleasesStore = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "release-program" && tx.isRuntimeWritePolicyInput(input) &&
     sameDocument(input.target, target) &&
     canonicalizeLogicalPath(input.target.path).length === 0
@@ -9215,7 +9722,7 @@ const releaseProgramModules = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): readonly string[] =>
-  tx.getCfcState().writePolicyInputs.flatMap((input) =>
+  writePolicyInputsForDocument(tx, target).flatMap((input) =>
     input.kind === "release-program" && tx.isRuntimeWritePolicyInput(input) &&
       sameDocument(input.target, target) &&
       canonicalizeLogicalPath(input.target.path).length === 0
@@ -9561,6 +10068,14 @@ const collectConsumedLabelImpl = (
    * that union.
    */
   sources: readonly ConsumedAtomSource[];
+
+  /**
+   * Every labeled location the transaction consumed, as the release gates
+   * evaluate exchange rules over them (`access-integrity.ts`), resolved on
+   * first ask: one location at a time, then over their class-aware join,
+   * never over the union above.
+   */
+  locations: () => readonly ConsumedLocation[];
 } => {
   tx.noteCfcConsumedLabelWalk?.();
   const atoms: unknown[] = [];
@@ -9598,12 +10113,19 @@ const collectConsumedLabelImpl = (
     if (bucket === undefined) sourceBuckets.set(key, [source]);
     else bucket.push(source);
   };
-  // Integrity evidence riding the same consumed entries: the guard pool the
-  // exchange evaluator matches rule preconditions against (Epic B5). Same
-  // transaction-global over-approximation as the confidentiality union —
-  // rules bind kind/source structurally, so evidence still has to match the
-  // clause it discharges.
+  // Integrity evidence riding the same consumed entries, pooled the way the
+  // confidentiality union is. The release gates evaluate rules over
+  // `locations()` instead, and use this union only to tell whether any
+  // integrity was consumed at all.
   const integrityAtoms: CfcAtom[] = [];
+  // What each observation consumed, for `locations()`.
+  const observations: {
+    document: string;
+    entries: LabelMapEntry[];
+    path: ValuePath;
+    nonRecursive: boolean | undefined;
+  }[] = [];
+  const otherLocations: ConsumedLocation[] = [];
   // The label index of the document a read names, or `undefined` when the
   // document has no label metadata.
   const labelsOf = (
@@ -9644,6 +10166,7 @@ const collectConsumedLabelImpl = (
     // #3993). A nonRecursive read sees ONLY the value at `path`, so it counts
     // ancestor-or-equal entries but NOT descendants — counting those would
     // false-reject valid commits (review round 2 on #3993).
+    const consumed: LabelMapEntry[] = [];
     for (const { entry, path: entryPath } of labels.overlapping(path)) {
       // CONCRETE structure entries label only the container node's shape:
       // an ancestor structure entry does not apply to a read strictly
@@ -9664,6 +10187,7 @@ const collectConsumedLabelImpl = (
         : (isPrefix(entryPath, path) ||
           (nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
+      consumed.push(entry);
       const contributed = entry.label.confidentiality ?? [];
       for (const atom of contributed) atoms.push(atom);
       for (const atom of contributed) {
@@ -9687,6 +10211,18 @@ const collectConsumedLabelImpl = (
       for (const atom of entry.label.integrity ?? []) {
         integrityAtoms.push(atom);
       }
+    }
+    if (consumed.length > 0) {
+      observations.push({
+        document: stringTupleKey([
+          read.space,
+          read.id,
+          normalizeCellScope(read.scope),
+        ]),
+        entries: consumed,
+        path,
+        nonRecursive,
+      });
     }
   };
   for (const read of tx.getReadActivities?.() ?? []) {
@@ -9736,15 +10272,24 @@ const collectConsumedLabelImpl = (
   // protected value. Confidentiality only: a metadata observation carries no
   // evidence, so it contributes nothing to the exchange evaluator's guard
   // pool.
-  for (const observation of tx.getCfcState().labelMetadataObservations) {
+  for (
+    const [index, observation] of tx.getCfcState().labelMetadataObservations
+      .entries()
+  ) {
     for (const atom of observation.confidentiality) atoms.push(atom);
     for (const atom of observation.confidentiality) {
       noteSource(atom, observation.target, observation.target.path);
     }
+    otherLocations.push(
+      labelMetadataLocation(observation.confidentiality, index),
+    );
   }
   for (
     const observation of tx.getCfcState().externalContentObservations ?? []
   ) {
+    for (const location of observation.locations) {
+      otherLocations.push(location);
+    }
     for (const atom of observation.consumed.confidentiality ?? []) {
       atoms.push(atom);
     }
@@ -9761,12 +10306,20 @@ const collectConsumedLabelImpl = (
       }
     }
   }
+  let locations: readonly ConsumedLocation[] | undefined;
   // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
   return {
     confidentiality: uniqueCfcAtoms(atoms),
     integrity: uniqueCfcAtoms(integrityAtoms),
     modulePolicySpaces,
     sources,
+    locations: () =>
+      locations ??= [
+        ...observations.flatMap(({ document, entries, path, nonRecursive }) =>
+          consumedLocations(document, entries, path, nonRecursive)
+        ),
+        ...otherLocations,
+      ],
   };
 };
 
@@ -9864,6 +10417,8 @@ export const describeSinkReleaseRefusal = (
  * Claims registered by a consuming resolution are staged into receipt
  * writes at the end of `prepareBoundaryCommit` (the same pass), so
  * consumption commits atomically with the release.
+ *
+ * `admitsRule`, when given, restricts the evaluation to the rules it admits.
  */
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
@@ -9874,6 +10429,7 @@ const evaluateGatedConfidentiality = (
   destinationSpace?:
     | MemorySpace
     | ((reference: unknown) => MemorySpace | undefined),
+  admitsRule?: (rule: ExchangeRule) => boolean,
 ): {
   confidentiality: readonly CfcConfClause[];
   exhausted: boolean;
@@ -9906,6 +10462,7 @@ const evaluateGatedConfidentiality = (
         availability: grantAvailability,
       }),
       grantConsumption: consumption,
+      ...(admitsRule === undefined ? {} : { admitsRule }),
       modulePolicyResolver: createTxCfcModulePolicyResolver(
         tx,
         (reference) => {
@@ -9928,6 +10485,93 @@ const evaluateGatedConfidentiality = (
     firings: result.firings.length,
     resolutionFailures: result.resolutionFailures,
     grantResolutionUnavailable: grantAvailability.unavailable,
+  };
+};
+
+/**
+ * Evaluates the exchange rules over what one access consumed, as a release
+ * gate does (`access-integrity.ts`): the value-intrinsic rules at each
+ * location `locations` returns, matched against that location's own evidence
+ * (`exchangeEachObservation()`), then every other rule over the join. An
+ * evaluation that runs out of fuel leaves `confidentiality` as read and marks
+ * the outcome exhausted. The other arguments are
+ * `evaluateGatedConfidentiality()`'s.
+ *
+ * With no rule that could fire, or no integrity consumed for a rule to
+ * match, the access is evaluated as consumed, with `pooled` as its
+ * integrity, and its locations are not resolved: that evaluation decides
+ * alike.
+ */
+const evaluateAccessExchange = (
+  tx: IExtendedStorageTransaction,
+  confidentiality: readonly CfcConfClause[],
+  pooled: readonly CfcAtom[],
+  locations: () => readonly ConsumedLocation[],
+  boundary: readonly CfcAtom[],
+  consumption: CfcGrantConsumptionContext,
+  destinationSpace?:
+    | MemorySpace
+    | ((reference: unknown) => MemorySpace | undefined),
+): ReturnType<typeof evaluateGatedConfidentiality> => {
+  if (
+    confidentiality.length === 0 || pooled.length === 0 ||
+    ((tx.getCfcState().policySnapshot?.records.length ?? 0) === 0 &&
+      modulePolicyReferencesIn(confidentiality).length === 0)
+  ) {
+    return evaluateGatedConfidentiality(
+      tx,
+      confidentiality,
+      pooled,
+      boundary,
+      consumption,
+      destinationSpace,
+    );
+  }
+  let exhausted = false;
+  let firings = 0;
+  const failures: ReturnType<
+    typeof evaluateGatedConfidentiality
+  >["resolutionFailures"][number][] = [];
+  const access = exchangeEachObservation(
+    confidentiality,
+    locations(),
+    (clauses, evidence) => {
+      const outcome = evaluateGatedConfidentiality(
+        tx,
+        clauses,
+        evidence,
+        [],
+        "observing",
+        destinationSpace,
+        admitsRulesOfKind("value-intrinsic"),
+      );
+      exhausted ||= outcome.exhausted;
+      firings += outcome.firings;
+      for (const failure of outcome.resolutionFailures) {
+        failures.push(failure);
+      }
+      return outcome.confidentiality;
+    },
+  );
+  const joined = evaluateGatedConfidentiality(
+    tx,
+    access.confidentiality,
+    access.integrity,
+    boundary,
+    consumption,
+    destinationSpace,
+    admitsRulesOfKind("not-value-intrinsic"),
+  );
+  exhausted ||= joined.exhausted;
+  for (const failure of joined.resolutionFailures) failures.push(failure);
+  return {
+    ...joined,
+    confidentiality: exhausted ? confidentiality : joined.confidentiality,
+    exhausted,
+    firings: firings + joined.firings,
+    resolutionFailures: failures.filter((failure, index) =>
+      failures.findIndex((other) => deepEqual(other, failure)) === index
+    ),
   };
 };
 
@@ -10000,30 +10644,32 @@ const verifySinkRequestCeilings = (
       // (design §2.2) under the enforce dial — the rewritten label decides
       // whether the request flushes past the ceiling. Observe evaluates for
       // diagnostics only and must never spend a grant.
-      const outcome = evaluateGatedConfidentiality(
+      const destinationSpace = (reference: unknown) => {
+        const key = modulePolicyArtifactKey(reference);
+        const spaces = [...(consumed.modulePolicySpaces.get(key) ?? [])]
+          .sort();
+        if (spaces.length === 0) return undefined;
+        // Every consumed label origin must carry its own exact local copy.
+        // Bind every origin into the commit, so a concurrent change in any
+        // one of them rejects the release before its post-commit effect can
+        // flush. Precondition-only origin commits are harmless to split; the
+        // effect runs only after the complete transaction succeeds.
+        tx.enableMultiSpaceWrites?.(spaces);
+        for (const space of spaces) {
+          if (tx.resolveCfcPolicyManifest(reference, space) === undefined) {
+            return undefined;
+          }
+        }
+        return spaces[0];
+      };
+      const outcome = evaluateAccessExchange(
         tx,
         consumed.confidentiality,
         consumed.integrity,
+        consumed.locations,
         boundary,
         mode === "enforce" ? "consuming" : "observing",
-        (reference) => {
-          const key = modulePolicyArtifactKey(reference);
-          const spaces = [...(consumed.modulePolicySpaces.get(key) ?? [])]
-            .sort();
-          if (spaces.length === 0) return undefined;
-          // Every consumed label origin must carry its own exact local copy.
-          // Bind every origin into the commit, so a concurrent change in any
-          // one of them rejects the release before its post-commit effect can
-          // flush. Precondition-only origin commits are harmless to split; the
-          // effect runs only after the complete transaction succeeds.
-          tx.enableMultiSpaceWrites?.(spaces);
-          for (const space of spaces) {
-            if (tx.resolveCfcPolicyManifest(reference, space) === undefined) {
-              return undefined;
-            }
-          }
-          return spaces[0];
-        },
+        destinationSpace,
       );
       if (mode === "enforce") {
         if (outcome.exhausted) {
@@ -10654,6 +11300,7 @@ export function* prepareBoundaryCommitSteps(
   }
   const bindCreator = creatorBinding(tx, currentLinkWrites);
   const metadataResolver = new VerifierMetadataResolver(tx);
+  const inputReads = new InputReadView(tx);
   const linkLabels = createLinkLabelDeriver(
     tx,
     candidates,
@@ -10903,6 +11550,7 @@ export function* prepareBoundaryCommitSteps(
           ),
         prefixBounds,
         metadataResolver,
+        inputReads,
         // The precision counters measure each protected write once.
         index === 0 ? prefixProvenance : undefined,
         stored.status === "loaded"
@@ -11693,7 +12341,10 @@ export function* prepareBoundaryCommitSteps(
       // space is the owner's: §3.6.4 makes that principal its sole owner,
       // and the space's id is that principal. A person-audience clause is
       // not one of these: `User(alice)` is honored by the reader check
-      // whoever holds the bytes, so it needs no replica set to agree.
+      // whoever holds the bytes, so it needs no replica set to agree. An
+      // owner that crossed a space boundary arrives as its `{digestOf}`
+      // commitment, which answers this equality question the same way
+      // (§4.6.4.1).
       const namesAnotherSpace = (alternative: unknown): boolean => {
         if (!isObjectOrArray(alternative)) return false;
         const atom = alternative as {
@@ -11703,7 +12354,7 @@ export function* prepareBoundaryCommitSteps(
         };
         if (atom.type === CFC_ATOM_TYPE.Space) return atom.id !== space;
         if (atom.type === CFC_ATOM_TYPE.PersonalSpace) {
-          return atom.owner !== space;
+          return !commitmentAwareEquals(atom.owner as FabricValue, space);
         }
         return false;
       };

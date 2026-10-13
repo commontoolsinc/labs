@@ -284,9 +284,11 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
 /**
  * The self-contained schema a link carries across a space boundary. Its
  * external documents are loaded from the space holding the declaration;
- * the target space need not hold them. An incomplete declaration selects
- * nothing until its missing documents arrive. A declaration rejected by the
- * decomposer logs a warning and selects nothing.
+ * the target space need not hold them. A declaration inside a `data:`
+ * document, which no space stores, is held by the space in the address
+ * naming that document. An incomplete declaration selects nothing until its
+ * missing documents arrive. A declaration rejected by the decomposer logs a
+ * warning and selects nothing.
  */
 export function schemaForSpaceCrossing(
   tx: IExtendedStorageTransaction,
@@ -316,13 +318,27 @@ export function schemaForSpaceCrossing(
   }
 }
 
+// The inline form each external reference recomposed to, by reference.
+// Recomposition builds a fresh closure every time, so without this every
+// node plan's inputs document deep-froze and hashed the same few schemas
+// again; a reference names one content, so the form it recomposed to in
+// this registry epoch is the form it has.
+let inlinedSchemaByRef = new Map<string, FabricValue>();
+onSchemaRegistryClear(() => {
+  inlinedSchemaByRef = new Map();
+});
+
 /**
  * Rewrites reference-form link schemas inside `value` back to their inline
- * (recomposed) form. A `data:` document is self-contained by construction —
- * the value lives in the id and no write ever installs anything alongside
- * it — so a link serialized into one carries its schema inline, exactly as
- * with the flag off. A reference whose closure the registry cannot supply
- * stays a reference; the traversal's loader gates that read either way.
+ * (recomposed) form, for a value no space has stored that is about to
+ * become a `data:` document. A link inside a `data:` document resolves its
+ * schema's references in the space of the address naming the document
+ * (`schemaForSpaceCrossing`), and the traversal admits a reference there
+ * only where that space persists its closure. No write has put the closure
+ * behind such a value's references in any space, so each link carries its
+ * schema inline, exactly as with the flag off. A reference whose closure
+ * the registry cannot supply stays a reference; the traversal's loader
+ * gates that read either way.
  */
 export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
   value: T,
@@ -331,16 +347,83 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
     if (!isObjectNotArray(schema)) return schema;
     const ref = schema.$ref;
     if (typeof ref !== "string" || !isExternalSchemaRef(ref)) return schema;
+    const inlined = inlinedSchemaByRef.get(ref);
+    if (inlined !== undefined) return inlined;
     try {
       // Recomposition never mints an empty `$defs` (a closure of one
       // document returns the body alone), so the result rides as it is. A
       // schema document is plain JSON, hence a FabricValue.
-      return internSchema(
+      const recomposed = internSchema(
         recomposeSchema(ref, lookupSchemaDocument),
       ) as FabricValue;
+      inlinedSchemaByRef.set(ref, recomposed);
+      return recomposed;
     } catch {
       return schema;
     }
+  }) as T;
+}
+
+const wireEncoder = new TextEncoder();
+
+/**
+ * The bytes `value` takes on the wire, where frames are UTF-8 JSON;
+ * `undefined` for a value JSON cannot serialize, a cyclic one among them.
+ */
+function wireByteLength(value: unknown): number | undefined {
+  try {
+    return wireEncoder.encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Rewrites inline link schemas inside `value` to their reference form, the
+ * form a link created by `createSigilLinkFromParsedLink()` carries with the
+ * flag on, registering each closure in the realm registry as that does. A
+ * value copied out of a `data:` document minted from unstored data carries
+ * its link schemas inline (`inlineExternalSchemaRefsInValue`), and written
+ * as it stands into an ordinary document it would store, and send, every
+ * closure in full for every link: a nested instance's argument document
+ * carries one per captured input. A reference already stamped, a trivial
+ * schema, a schema decomposition refuses, and a schema that takes no more
+ * wire bytes than the reference that would replace it (a bare handle stamp
+ * such as `{ asCell: ["stream"] }`, which readers combine structurally) ride
+ * through unchanged. A cyclic schema has no inline wire form, so its
+ * reference always replaces it. The value is rebuilt only along the paths
+ * that change, so a value carrying nothing to rewrite is returned as it is.
+ */
+export function externalizeLinkSchemasInValue<T extends FabricValue>(
+  value: T,
+): T {
+  return mapLinkSchemas(value, (schema) => {
+    if (!isObjectNotArray(schema) || !isNontrivialSchema(schema)) {
+      return schema;
+    }
+    if (typeof schema.$ref === "string" && isExternalSchemaRef(schema.$ref)) {
+      return schema;
+    }
+    const externalized = externalizeLinkSchema(
+      schema as JSONSchema,
+      KeepAsCell.All,
+    );
+    if (
+      !isObjectNotArray(externalized) ||
+      typeof externalized.$ref !== "string" ||
+      !isExternalSchemaRef(externalized.$ref)
+    ) {
+      return schema;
+    }
+    const inlineBytes = wireByteLength(schema);
+    const referenceBytes = wireByteLength(externalized);
+    if (
+      inlineBytes !== undefined && referenceBytes !== undefined &&
+      inlineBytes <= referenceBytes
+    ) {
+      return schema;
+    }
+    return externalized as FabricValue;
   }) as T;
 }
 
@@ -351,7 +434,6 @@ export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
   options: {
     base?: Cell<any> | NormalizedFullLink;
-    baseSpace?: MemorySpace;
     includeSchema?: boolean;
     overwrite?: "redirect" | "this"; // default is "this"
     // Which asCell entries to preserve in the included schema. When omitted,
@@ -383,9 +465,7 @@ export function createSigilLinkFromParsedLink(
     }
   } else {
     reference.id = link.id;
-
-    // Handle baseSpace option - only include space if different from baseSpace
-    if (link.space !== options.baseSpace) reference.space = link.space;
+    if (link.space) reference.space = link.space;
     if (link.scope) reference.scope = link.scope;
   }
 

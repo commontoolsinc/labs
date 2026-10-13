@@ -652,6 +652,33 @@ Topological sort over the work set with:
    which is sound.
 3. Deterministic fallback on remaining ties (registration order).
 
+**Where a cycle is broken.** When nodes remain to place and none is ready,
+the unplaced nodes hold at least one cycle, and the sort places one node
+ahead of an input it reads. That node is always a member of a cycle that no
+unplaced node outside it feeds: a strongly connected component of the graph
+over the unplaced nodes that has more than one node and no edge arriving
+from an unplaced node outside it. A node is never a cycle alone, since a
+node's read of its own output is not an edge.
+
+So a break reorders edges inside a cycle and no others, which is what rule 1
+requires of it:
+
+- A node that only reads from a cycle is not a candidate. It becomes ready
+  once the nodes it reads are placed, and is placed after them. Placed ahead
+  of them, it would run on inputs the same pass then replaces, or be passed
+  over as clean and wait for another pass.
+- A cycle that another cycle feeds is broken after the one feeding it has
+  been placed.
+- The components are those of the nodes unplaced at the time of the break.
+  A node that an earlier break left outside every cycle, reading from what
+  remains of the one it was a member of, is not a candidate at a later
+  break.
+
+Among the candidates the order of preference is rule 2, then the fewest
+unplaced inputs, then rule 3. The choice is a function of the graph and of
+registration order alone, so it does not depend on the order in which nodes
+entered the work set.
+
 ### 7.5 Events
 
 Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
@@ -1049,6 +1076,7 @@ eligibleAt(N) = max(
   N.gate.debounceReadyAt ?? 0,    // reset on each invalidation while gated
   N.gate.throttleReadyAt ?? 0,    // lastRunAt + throttleMs
   N.gate.backoffUntil ?? 0,       // §7.7
+  N.gate.echoBackoffUntil ?? 0,   // remote-echo breaker
 )
 eligible(N) = now ≥ eligibleAt(N)
 ```
@@ -1064,6 +1092,14 @@ eligible(N) = now ≥ eligibleAt(N)
   adjusts `gate.debounce`.
 - **Cycle backoff** — replaces v1's cycle-aware debounce *and* cycle breaker
   with the §7.7 escalating gate.
+- **Remote-echo backoff** — a computation that keeps rewriting a document it
+  reads, re-triggered each time by another writer's change to that same
+  document, is deferred with its own escalating gate (`echoBackoffUntil`).
+  Each run there still commits, so neither §7.7 nor the commit retry paths
+  see the loop; the policy and its reset rules are in
+  [`../../plans/scheduler-remote-echo-breaker.md`](../../plans/scheduler-remote-echo-breaker.md).
+  Like a throttle window, an echo-deferred re-run of an already-ran
+  computation does not hold `idle()` open.
 
 ### 8.3 Semantics
 
@@ -1076,8 +1112,9 @@ A retry the scheduler owes after a wait — a run whose commit was refused for a
 stale basis, re-queued once the conflict's catch-up gate (§7.6) resolved — is
 not an input change and is queued past the debounce and throttle: the debounce
 is not re-armed and an armed readiness of either is released (the `retry`
-option of `MarkInvalidOptions`; the §7.7 backoff stays). The refused run left
-nothing durable and its wait was its delay. The node keeps this release until
+option of `MarkInvalidOptions`; the §7.7 backoff and the remote-echo backoff
+stay, since each bounds a loop). The refused run left nothing durable and its
+wait was its delay. The node keeps this release until
 the owed run starts: intervening input invalidations still record their causes
 but do not re-arm freshness gates. A retry requested during a run remains owed
 after that run completes. Starting the next run consumes the release, and

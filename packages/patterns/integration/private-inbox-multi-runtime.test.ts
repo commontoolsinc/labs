@@ -15,7 +15,18 @@
  * daemon's, as when the daemon writes the pointer last, it adopts that one,
  * though its other profile still points at the first, and retains the one it
  * held, whose offers stay readable. A Home whose profile keeps its pointer
- * per user creates no inbox while that profile advertises one.
+ * per user creates no inbox while that profile advertises one. A Home refused
+ * another principal's inbox has it replaced by its owner: a send of the
+ * replacement that no click on the refusal notice's button marks is refused,
+ * and a marked one creates the Home's own inbox and points the refused
+ * profile at it, including when the refused inbox's space has stopped letting
+ * the owner read it. A client requests a Home's inbox, as a loom daemon does,
+ * for two of its profiles at once, and reads, from each handling's receipt,
+ * the one inbox Home creates and both profiles point at; each receipt links to
+ * Home's one answer for its profile. A request for a profile pointed elsewhere
+ * reads `not-held`, one for a profile without `setInbox` `unpointable`, one to
+ * a Home with no profiles `unlisted`, and one to a Home without the stream
+ * sends nothing.
  *
  * The inbox's space grants every principal `WRITE` in both server-execution
  * postures: the serving loop makes a sender's write where server execution is
@@ -55,12 +66,46 @@ const writeRefusals = (
   return typeof cfc === "object" ? cfc["write-policy-gate"]?.total ?? 0 : 0;
 };
 
+/**
+ * The trusted surface and action of the button on Home's refusal notice, as
+ * `packages/patterns/system/private-inbox.tsx` declares them
+ * (`TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE`,
+ * `TRUSTED_REPLACE_REFUSED_INBOX_ACTION`). Named here rather than imported: the
+ * pattern module compiles only in the runtime, and the event is matched by
+ * string either way.
+ */
+const REPLACE_CLICK = {
+  surface: "PrivateInboxRefusalSurface",
+  action: "ReplaceRefusedPrivateInbox",
+};
+
 /** What the host found when it ensured a Home's inbox. */
 type HostEnsure = {
   outcome: string;
   reason?: string;
   inbox?: { id: string; space: string };
   profile?: { id: string; space: string };
+};
+
+/**
+ * What a client learned when it requested a Home's inbox: Home's answer, the
+ * inbox it names, and the inbox the profile it named points at once Home had
+ * answered.
+ */
+type RequestAnswer = {
+  status: string;
+  inbox?: { id: string; space: string };
+  pointer?: { id: string; space: string };
+};
+
+/**
+ * A request's receipt, read back raw: its own address, and the document and
+ * path it links to.
+ */
+type RequestReceipt = {
+  receipt: { id: string; space: string };
+  id: string;
+  path: string[];
 };
 
 /** An offer as the owner reads it. */
@@ -97,6 +142,22 @@ describe("private inbox across runtimes", () => {
   let readoptCreated: HostEnsure;
   let readoption: HostEnsure;
   let readoptOriginal: PieceAddress;
+  let replacingRefused: PieceAddress;
+  let unmarkedReplacement: {
+    refusals: number;
+    held: unknown;
+    reason: unknown;
+    replacement: unknown;
+  };
+  let markedReplacementRefusals: number;
+  let requested: RequestAnswer[];
+  let receipts: RequestReceipt[];
+  let leavingAnswers: { before: unknown[]; after: unknown[] };
+  let contestedRequest: RequestAnswer;
+  let pointerOnlyRequest: RequestAnswer;
+  let profilelessRequest: RequestAnswer;
+  let olderRequest: RequestAnswer;
+  let olderHandledBefore: unknown;
 
   /** The link a profile of the owner's holds to its inbox, if any. */
   const profileInbox = async (index: number) =>
@@ -112,6 +173,38 @@ describe("private inbox across runtimes", () => {
    */
   const ensureThroughHost = async (path: string[]): Promise<HostEnsure> =>
     await owner.client().call("ensurePrivateInbox", { path }) as HostEnsure;
+
+  /**
+   * Has the owner's runtime request the inbox of the Home stand-in at `path`,
+   * as a loom daemon does, naming its profile at `profile`.
+   */
+  const requestInbox = async (
+    path: string[],
+    profile: (string | number)[],
+  ): Promise<RequestAnswer> =>
+    await owner.client().call("requestPrivateInbox", {
+      path,
+      profile,
+    }) as RequestAnswer;
+
+  /**
+   * Has the owner's runtime send the request `requestInbox` does, and returns
+   * the receipt as `requestReceipt` reads it back.
+   */
+  const requestReceipt = async (
+    path: string[],
+    profile: (string | number)[],
+  ): Promise<RequestReceipt> =>
+    await owner.client().call("requestReceipt", {
+      path,
+      profile,
+    }) as RequestReceipt;
+
+  /** The status the receipt `receipt` reads, following the link it holds. */
+  const readReceipt = async (receipt: RequestReceipt): Promise<unknown> =>
+    await owner.client().call("readReceiptStatus", {
+      receipt: receipt.receipt,
+    });
 
   /** How many adoption refusals the owner's host has logged. */
   const adoptionRefusals = async (): Promise<number> => {
@@ -374,6 +467,152 @@ describe("private inbox across runtimes", () => {
       (await owner.link(["readoptingHome", "privateInbox", "piece"])).id ===
         readoptLoom.id
     );
+
+    // `replacingHome`: two profiles, the second pointing at the stranger's
+    // inbox, which the host refuses. Its replacement is sent once with no
+    // click marking it, and then as the refusal notice's button sends it.
+    await owner.send("createReplacingProfile");
+    await owner.send("createReplacingProfile");
+    await harness.settle();
+    await owner.send("pointReplacingProfileAtStranger", { index: 1 });
+    await harness.settleUntil(async () =>
+      await pointed(["replacingHome", "profiles", 1])
+    );
+    await ensureThroughHost(["replacingHome"]);
+    const replacingReason = ["replacingHome", "privateInboxRefusal", "refusal"];
+    await harness.settleUntil(async () =>
+      (await owner.read([...replacingReason, "reason"])) !== undefined
+    );
+    replacingRefused = await owner.link([...replacingReason, "inbox"]);
+    const replacingHeld = ["replacingHome", "privateInbox", "piece"];
+    const replacement = [
+      "replacingHome",
+      "privateInboxReplacement",
+      "replacement",
+    ];
+    const unmarkedBefore = await refusals(owner);
+    await owner.send("replaceReplacingInbox");
+    await harness.settleUntil(async () =>
+      await refusals(owner) > unmarkedBefore ||
+      (await owner.read(replacingHeld)) !== undefined
+    );
+    unmarkedReplacement = {
+      refusals: await refusals(owner) - unmarkedBefore,
+      held: await owner.read(replacingHeld),
+      reason: await owner.read([...replacingReason, "reason"]),
+      replacement: await owner.read(replacement),
+    };
+    const markedBefore = await refusals(owner);
+    await owner.send("replaceReplacingInbox", {}, REPLACE_CLICK);
+    await harness.settleUntil(async () =>
+      await refusals(owner) > markedBefore ||
+      ((await owner.read(replacingHeld)) !== undefined &&
+        (await owner.link(["replacingHome", "profiles", 1, "inbox", "piece"]))
+            .id === (await owner.link(replacingHeld)).id)
+    );
+    markedReplacementRefusals = await refusals(owner) - markedBefore;
+
+    // `requestingHome`: two profiles pointing at no inbox, whose inbox a
+    // client requests for both at once. `profilelessHome` has no profiles,
+    // and `olderHome` no stream to request through.
+    await owner.send("createRequestingProfile");
+    await owner.send("createRequestingProfile");
+    await harness.settle();
+    requested = await Promise.all([
+      requestInbox(["requestingHome"], ["requestingHome", "profiles", 0]),
+      requestInbox(["requestingHome"], ["requestingHome", "profiles", 1]),
+    ]);
+    // Two more requests, read back as stored, and the second profile pointed
+    // at the loom-shaped inbox and requested for again, as when something
+    // other than Home wins its pointer. A third profile, of a vintage without
+    // `setInbox`, is added and requested for.
+    receipts = [];
+    for (const index of [0, 1]) {
+      receipts.push(
+        await requestReceipt(["requestingHome"], [
+          "requestingHome",
+          "profiles",
+          index,
+        ]),
+      );
+    }
+    const loom = await owner.link(["loomInbox", "piece"]);
+    await owner.send("pointRequestingProfileAtLoom", { index: 1 });
+    await harness.settleUntil(async () =>
+      (await owner.link(["requestingHome", "profiles", 1, "inbox", "piece"]))
+        .id === loom.id
+    );
+    contestedRequest = await requestInbox(
+      ["requestingHome"],
+      ["requestingHome", "profiles", 1],
+    );
+    await owner.send("createRequestingPointerOnlyProfile");
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["requestingHome", "profiles"])) as unknown[])
+        .length === 3
+    );
+    pointerOnlyRequest = await requestInbox(
+      ["requestingHome"],
+      ["requestingHome", "profiles", 2],
+    );
+
+    // `leavingHome`: three profiles. The first two are requested for, and
+    // once their receipts read `ensured`, the third is pointed at the
+    // loom-shaped inbox and the first leaves the list, which moves the second
+    // and third up one place.
+    for (let index = 0; index < 3; index++) {
+      await owner.send("createLeavingProfile");
+    }
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["leavingHome", "profiles"])) as unknown[])
+        .length === 3
+    );
+    const leavingReceipts: RequestReceipt[] = [];
+    for (const index of [0, 1]) {
+      leavingReceipts.push(
+        await requestReceipt(["leavingHome"], [
+          "leavingHome",
+          "profiles",
+          index,
+        ]),
+      );
+    }
+    const statuses = async () =>
+      await Promise.all(
+        leavingReceipts.map(readReceipt),
+      );
+    await harness.settleUntil(async () =>
+      (await statuses()).every((status) => status === "ensured")
+    );
+    const before = await statuses();
+    const loomLink = await owner.link(["loomInbox", "piece"]);
+    await owner.send("pointLeavingProfileAtLoom", { index: 2 });
+    await harness.settleUntil(async () =>
+      (await owner.link(["leavingHome", "profiles", 2, "inbox", "piece"]))
+        .id === loomLink.id
+    );
+    await owner.send("dropLeavingFirstProfile");
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["leavingHome", "profiles"])) as unknown[])
+        .length === 2
+    );
+    await harness.settle();
+    leavingAnswers = { before, after: await statuses() };
+
+    profilelessRequest = await requestInbox(
+      ["profilelessHome"],
+      ["requestingHome", "profiles", 0],
+    );
+    await harness.settleUntil(async () =>
+      (await owner.read(["profilelessHome", "privateInbox", "piece"])) !==
+        undefined
+    );
+    olderHandledBefore = await owner.read(["olderHome", "handled"]);
+    olderRequest = await requestInbox(
+      ["olderHome"],
+      ["olderHome", "profiles", 0],
+    );
+    await harness.settle();
   });
 
   afterAll(async () => {
@@ -625,6 +864,42 @@ describe("private inbox across runtimes", () => {
     expect((await profileInbox(count)).id).toBe(inbox.id);
   });
 
+  it("refuses a replacement of the refused inbox that no click on the refusal notice's button marks, and changes nothing", () => {
+    expect(unmarkedReplacement.refusals).toBeGreaterThan(0);
+    expect(unmarkedReplacement.held).toBeUndefined();
+    expect(unmarkedReplacement.reason).toBe("inbox-adoption-acl-mismatch");
+    expect(unmarkedReplacement.replacement).toBeUndefined();
+  });
+
+  it("replaces the refused inbox on a click on the refusal notice's button with one of its own, and points the refused profile at it", async () => {
+    expect(markedReplacementRefusals).toBe(0);
+    const held = await owner.link(["replacingHome", "privateInbox", "piece"]);
+    expect(held.space).not.toBe(replacingRefused.space);
+    expect(held.space).not.toBe(harness.spaceDid);
+    expect(
+      (await owner.link(["replacingHome", "profiles", 1, "inbox", "piece"]))
+        .id,
+    ).toBe(held.id);
+    expect(
+      await owner.read(["replacingHome", "privateInboxRefusal", "refusal"]),
+    ).toBeUndefined();
+    const replaced = [
+      "replacingHome",
+      "privateInboxReplacement",
+      "replacement",
+    ];
+    expect(await owner.read([...replaced, "reason"])).toBe(
+      "inbox-adoption-acl-mismatch",
+    );
+    expect((await owner.link([...replaced, "inbox"])).id).toBe(
+      replacingRefused.id,
+    );
+    expect(await owner.read([...replaced, "replacedAt"])).toBeGreaterThan(0);
+    expect(
+      await owner.read(["replacingHome", "retainedPrivateInboxes"]),
+    ).toEqual([]);
+  });
+
   it("creates no inbox while a profile whose pointer it cannot read advertises one", async () => {
     // The profile keeps its pointer per user in a space of its own. With
     // server execution on, the Home's serving runtime refuses to read that
@@ -643,6 +918,65 @@ describe("private inbox across runtimes", () => {
 
     expect(await owner.read(["unreadableHome", "privateInbox", "piece"]))
       .toBeUndefined();
+  });
+
+  it("answers a request with the inbox Home holds, once the profile it names points at it", async () => {
+    const held = await owner.link(["requestingHome", "privateInbox", "piece"]);
+    expect(requested[0]).toEqual({
+      status: "ensured",
+      inbox: { id: held.id, space: held.space },
+      pointer: { id: held.id, space: held.space },
+    });
+  });
+
+  it("answers two requests made at once with the one inbox", () => {
+    expect(requested[1].status).toBe("ensured");
+    expect(requested[1].inbox).toEqual(requested[0].inbox);
+    expect(requested[1].pointer).toEqual(requested[0].inbox);
+  });
+
+  it("links each request's receipt to Home's one answer for the profile, launching nothing per request", () => {
+    expect(receipts).toHaveLength(2);
+    const [forFirst, forSecond] = receipts;
+    expect(forFirst?.id).toBeDefined();
+    expect(forSecond?.id).toBe(forFirst?.id);
+    expect(forFirst?.path[0]).toBe("profiles");
+    expect(forSecond?.path[0]).toBe("profiles");
+    expect(forSecond?.path[1]).not.toBe(forFirst?.path[1]);
+  });
+
+  it("keeps a receipt answering for its own profile when an earlier profile leaves Home's list, and answers `unlisted` for the one that left", () => {
+    expect(leavingAnswers.before).toEqual(["ensured", "ensured"]);
+    expect(leavingAnswers.after).toEqual(["unlisted", "ensured"]);
+  });
+
+  it("answers `not-held` for a profile something other than Home has pointed at another inbox", async () => {
+    const loom = await owner.link(["loomInbox", "piece"]);
+    expect(contestedRequest).toEqual({
+      status: "not-held",
+      pointer: { id: loom.id, space: loom.space },
+    });
+  });
+
+  it("answers `unpointable` for a profile without `setInbox`", () => {
+    expect(pointerOnlyRequest.status).toBe("unpointable");
+    expect(pointerOnlyRequest.inbox).toBeUndefined();
+  });
+
+  it("answers a request to a Home with no profiles as unlisted, and creates the Home's inbox", async () => {
+    expect(profilelessRequest.status).toBe("unlisted");
+    expect(profilelessRequest.inbox).toBeUndefined();
+    expect(await owner.read(["profilelessHome", "profiles"])).toEqual([]);
+    expect(
+      (await owner.link(["profilelessHome", "privateInbox", "piece"])).id,
+    ).not.toBe(requested[0].inbox?.id);
+  });
+
+  it("sends nothing to a Home without the stream, and reports it unavailable", async () => {
+    expect(olderRequest.status).toBe("unavailable");
+    expect(await owner.read(["olderHome", "handled"])).toBe(
+      olderHandledBefore,
+    );
   });
 
   it("delivers each offer a sender's own handler sends, from the sender", async () => {
@@ -710,15 +1044,21 @@ describe("private inbox across runtimes", () => {
     // offer's `id`, `from` and `space`, as a loom sender does.
     await offer("read back");
 
-    const offers = (await sender.read(["offers"], {
-      piece: inbox,
-    })) as ReadOffer[];
-    expect(
-      offers.some((each) =>
+    // The inbox lives in the owner's space. The sender's replica already
+    // holds a copy of it that its subscription keeps current, so the read
+    // answers from that copy, and the row appears once the delivery has
+    // reached it rather than on the first read after the owner saw it.
+    const readsBack = async () => {
+      const offers = (await sender.read(["offers"], {
+        piece: inbox,
+      })) as ReadOffer[];
+      return offers.some((each) =>
         each.id === "read back" && each.from === sender.identity.did() &&
         each.space === harness.spaceDid
-      ),
-    ).toBe(true);
+      );
+    };
+    await harness.settleUntil(readsBack);
+    expect(await readsBack()).toBe(true);
   });
 
   it("refuses a stranger's served copy of the offers", {
@@ -733,5 +1073,131 @@ describe("private inbox across runtimes", () => {
       refusedBefore,
     );
     expect(await stranger.read(["copiedOffers"])).toEqual([]);
+  });
+
+  it("replaces an inbox in Home's own private-inbox space with another piece in that space, leaving the refused one's offers in it", async () => {
+    await offer("before the own-space replacement");
+    const before = (await ownerOffers(inbox)).map((each) => each.title);
+    await owner.send("createOwnSpaceProfile");
+    await harness.settle();
+    await owner.send("pointOwnSpaceProfileAtPrivateInbox", { index: 0 });
+    await harness.settleUntil(async () =>
+      await pointed(["ownSpaceHome", "profiles", 0])
+    );
+    await owner.send("refuseOwnSpaceInbox");
+    const refusalPath = ["ownSpaceHome", "privateInboxRefusal", "refusal"];
+    await harness.settleUntil(async () =>
+      (await owner.read([...refusalPath, "reason"])) !== undefined
+    );
+    const heldPath = ["ownSpaceHome", "privateInbox", "piece"];
+    const refusedBefore = await refusals(owner);
+    await owner.send("replaceOwnSpaceInbox", {}, REPLACE_CLICK);
+    await harness.settleUntil(async () =>
+      await refusals(owner) > refusedBefore ||
+      ((await owner.read(heldPath)) !== undefined &&
+        (await owner.link(["ownSpaceHome", "profiles", 0, "inbox", "piece"]))
+            .id === (await owner.link(heldPath)).id)
+    );
+    expect(await refusals(owner)).toBe(refusedBefore);
+
+    const held = await owner.link(heldPath);
+    expect(held.space).toBe(inbox.space);
+    expect(held.id).not.toBe(inbox.id);
+    expect(await ownerOffers(held)).toEqual([]);
+    expect(before).toContain("before the own-space replacement");
+    expect((await ownerOffers(inbox)).map((each) => each.title)).toEqual(
+      before,
+    );
+    expect((await owner.link(["privateInbox", "piece"])).id).toBe(inbox.id);
+    expect(await owner.read(refusalPath)).toBeUndefined();
+  });
+
+  it("replaces a refused inbox the owner can no longer read, and points the refused profile at Home's own", async () => {
+    // The stranger's inbox grants the owner `READ` while a profile is pointed
+    // at it, and then revokes it, so the host refuses the inbox for access.
+    const reader = { reader: owner.identity.did() };
+    await stranger.send("createUnreadableInbox", reader);
+    await harness.settleUntil(async () =>
+      (await owner.read(["unreadableInbox", "piece"])) !== undefined
+    );
+    const unreadable = await owner.link(["unreadableInbox", "piece"]);
+    await owner.send("createUnreadableRefusedProfile");
+    await harness.settle();
+    await owner.send("pointUnreadableRefusedProfile", { index: 0 });
+    const pointer = [
+      "unreadableRefusedHome",
+      "profiles",
+      0,
+      "inbox",
+      "piece",
+    ];
+    await harness.settleUntil(async () =>
+      await pointed(["unreadableRefusedHome", "profiles", 0])
+    );
+    expect((await owner.link(pointer)).id).toBe(unreadable.id);
+    await stranger.send("revokeUnreadableInbox", reader, REPLACE_CLICK);
+    await harness.settle();
+    await expect(owner.read(["offers"], { piece: unreadable })).rejects
+      .toThrow(/unauthorized|lacks READ/);
+
+    expect(await ensureThroughHost(["unreadableRefusedHome"])).toMatchObject({
+      outcome: "refused",
+      reason: "inbox-access-refused",
+    });
+    const refusal = ["unreadableRefusedHome", "privateInboxRefusal", "refusal"];
+    await harness.settleUntil(async () =>
+      (await owner.read([...refusal, "reason"])) !== undefined
+    );
+    expect(await owner.read([...refusal, "reason"])).toBe(
+      "inbox-access-refused",
+    );
+
+    // A runtime of the owner's started after the revocation sends the marked
+    // replacement first. The serving loop replaces the inbox; with server
+    // execution off, that runtime's own replacement is refused.
+    const held = ["unreadableRefusedHome", "privateInbox", "piece"];
+    const late = await harness.addSession({
+      label: "private-inbox-owner-late",
+      identity: owner.identity,
+    });
+    try {
+      const lateRefusedBefore = await refusals(late);
+      await late.send("replaceUnreadableRefusedInbox", {}, REPLACE_CLICK);
+      await harness.settleUntil(async () =>
+        await refusals(late) > lateRefusedBefore ||
+        (await owner.read(held)) !== undefined
+      );
+      if (SERVER_EXECUTION) {
+        expect(await owner.read(held)).not.toBeUndefined();
+        expect(await owner.read(refusal)).toBeUndefined();
+      } else {
+        // TODO(danfuzz): Deliberately the wrong outcome. The replacement record
+        // keeps a typed link to the refused inbox, which a runtime started
+        // after the revocation can't commit, so CFC refuses the replacement and
+        // nothing changes. Once the record keeps the replaced inbox without the
+        // typed link, this runtime replaces it, and this step goes red.
+        expect(await refusals(late)).toBeGreaterThan(lateRefusedBefore);
+        expect(await owner.read(held)).toBeUndefined();
+        expect(await owner.read([...refusal, "reason"])).toBe(
+          "inbox-access-refused",
+        );
+        expect((await stranger.link(pointer)).id).toBe(unreadable.id);
+      }
+    } finally {
+      await harness.closeSession("private-inbox-owner-late");
+    }
+
+    const refusedBefore = await refusals(owner);
+    await owner.send("replaceUnreadableRefusedInbox", {}, REPLACE_CLICK);
+    await harness.settleUntil(async () =>
+      await refusals(owner) > refusedBefore ||
+      ((await owner.read(held)) !== undefined &&
+        (await stranger.link(pointer)).id === (await owner.link(held)).id)
+    );
+    expect(await refusals(owner)).toBe(refusedBefore);
+    expect((await stranger.link(pointer)).id).toBe(
+      (await owner.link(held)).id,
+    );
+    expect(await owner.read(refusal)).toBeUndefined();
   });
 });

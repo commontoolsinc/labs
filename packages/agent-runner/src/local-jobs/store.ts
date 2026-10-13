@@ -52,6 +52,20 @@ export interface LocalJobRequest {
    * declaring it is what counts, as on the console's task route.
    */
   browserHost?: Record<string, unknown>;
+
+  /**
+   * Pieces the job holds from its first turn, by the name the model sees:
+   * each address becomes an input cell, and the model a handle to it. Only a
+   * profile with a fabric session holds them, and only pieces in its space.
+   */
+  inputs?: Record<string, string>;
+
+  /**
+   * Where each space an input names outside the profile's own is served: a
+   * space DID mapped to its toolshed's origin. The job is routed there for
+   * that space and nowhere else.
+   */
+  foreignSpaces?: Record<string, string>;
 }
 
 /** One event of a job, in `seq` order. */
@@ -88,6 +102,9 @@ export interface LocalJob {
 
   errorCode?: string;
 
+  /** What the run said of its error, from the job's final `state` event. */
+  errorDetail?: string;
+
   /** Usage, turns and tool calls, once the job ran. */
   report?: Record<string, unknown>;
 
@@ -102,6 +119,7 @@ export interface LocalJobEnding {
   state: "completed" | "failed" | "cancelled" | "interrupted";
   result?: unknown;
   errorCode?: string;
+  errorDetail?: string;
   report?: Record<string, unknown>;
 }
 
@@ -396,9 +414,15 @@ export class LocalJobStore {
         "state",
         {
           state,
-          ...(!completed && state !== "cancelled" &&
-              ending.errorCode !== undefined
-            ? { errorCode: ending.errorCode }
+          ...(!completed && state !== "cancelled"
+            ? {
+              ...(ending.errorCode !== undefined
+                ? { errorCode: ending.errorCode }
+                : {}),
+              ...(ending.errorDetail !== undefined
+                ? { errorDetail: ending.errorDetail }
+                : {}),
+            }
             : {}),
         },
         at,
@@ -479,6 +503,8 @@ export class LocalJobStore {
   #view(row: JobRow): LocalJob {
     const events = this.events(row.id);
     const steps = events.filter((event) => event.kind === "step");
+    const errorDetail = events.findLast((event) => event.kind === "state")
+      ?.body.errorDetail;
     return {
       id: row.id,
       caller: row.caller,
@@ -495,6 +521,7 @@ export class LocalJobStore {
         ? { result: JSON.parse(row.result_json) }
         : {}),
       ...(row.error_code !== null ? { errorCode: row.error_code } : {}),
+      ...(typeof errorDetail === "string" ? { errorDetail } : {}),
       ...(row.report_json !== null
         ? { report: JSON.parse(row.report_json) }
         : {}),

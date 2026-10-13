@@ -1091,6 +1091,8 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   plan: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
+  // `cf profile repair-root --from-snapshot` is a directory of space DBs.
+  "from-snapshot": () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.
   out: () => Promise.resolve(directive({ kind: "files" })),
   output: () => Promise.resolve(directive({ kind: "files" })),
@@ -1104,9 +1106,42 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
     ["space clone"],
     () => Promise.resolve(directive({ kind: "files" })),
   ),
-  // A hashtag search scope on `wish`, and a scope key on `inspect`.
-  scope: onlyOn(["wish"], () => wishScopeCandidates()),
+  // A hashtag search scope on `wish`, a scope kind on `space compact`, and a
+  // scope key on `inspect`.
+  scope: onlyOn(
+    ["wish", "space compact"],
+    (line) =>
+      line.path.join(" ") === "space compact"
+        ? Promise.resolve(values(SCOPE_KIND_CANDIDATES))
+        : wishScopeCandidates(),
+  ),
+  // `cf space compact --documents` names an id namespace; the three the
+  // store uses are the candidates, and a longer prefix is typed past them.
+  documents: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(values(ID_PREFIX_CANDIDATES)),
+  ),
+  // `cf space compact --verify --against` names the backup a result was
+  // compacted from: a store file, like the positional.
+  against: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
+  ),
 };
+
+/** The scope kinds `cf space compact --scope` restricts a selection to. */
+const SCOPE_KIND_CANDIDATES: readonly Candidate[] = [
+  { value: "space", description: "space-scoped instances" },
+  { value: "user", description: "per-user instances" },
+  { value: "session", description: "per-session instances" },
+];
+
+/** The id namespaces a store holds, as `cf space compact --documents` prefixes. */
+const ID_PREFIX_CANDIDATES: readonly Candidate[] = [
+  { value: "of:", description: "entity documents" },
+  { value: "computed:", description: "computed cells" },
+  { value: "cid:", description: "content-addressed label documents" },
+];
 
 /** `cf inspect` subcommands whose first positional opens a local space. */
 const INSPECT_SPACE_COMMANDS: readonly string[] = [
@@ -1202,6 +1237,9 @@ const ARGUMENT_PROVIDERS: Readonly<
   // candidates.
   "space clone:space": () => spaceCandidates(),
   "space fingerprint:space": () => spaceCandidates(),
+  // `compact` takes a store file by path, never a space name.
+  "space compact:store": () =>
+    Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
   // `verify`/`reset` take a clone directory built by `space clone`.
   "space verify:dir": () => Promise.resolve(directive({ kind: "dirs" })),
   "space reset:dir": () => Promise.resolve(directive({ kind: "dirs" })),

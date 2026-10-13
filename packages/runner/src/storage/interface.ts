@@ -42,6 +42,7 @@ import type {
   ScopeKey,
   ScopeKeyIdentity,
   SessionReadCeiling,
+  SessionReport,
   SessionSyncUpsert,
   SqliteDbRef,
   SqliteOperation,
@@ -496,6 +497,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   authorizationError?(space: MemorySpace): Error | undefined;
 
+  /**
+   * The terminal error of a space's remote subscription. Ordinary reconnects
+   * and reads supplied by an authoritative local store return `undefined`.
+   */
+  spaceSessionError?(space: MemorySpace): Error | undefined;
+
   /** The latest authoritative access loss for a space, cleared on reopening. */
   spaceAccessError?(space: MemorySpace): Error | undefined;
 
@@ -514,6 +521,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * opens and transient connection failures do not emit.
    */
   subscribeSpaceAccessChange?(observer: (space: MemorySpace) => void): Cancel;
+
+  /**
+   * Observes a space's memory session being replaced on reconnect rather than
+   * resumed: the host no longer held the session, as when its process
+   * restarted, so what it serves may have changed. The initial open and a
+   * resumed reconnect do not emit.
+   */
+  subscribeSpaceSessionReplaced?(
+    observer: (space: MemorySpace) => void,
+  ): Cancel;
 
   /**
    * Register an in-flight commit so the durability barrier
@@ -753,6 +770,32 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
     address: { space: MemorySpace; id: URI; scope?: CellScope },
     identity: ScopeKeyIdentity,
   ): Promise<void>;
+
+  /**
+   * Whether a sync of a document in `space` also kicks the loads of what
+   * the server's walk reached through links into other spaces: the server
+   * reports those links with the frame (`SessionSync.crossings`), and the
+   * manager loads each from its space as a pending load, listed by
+   * `pendingCrossingLoadAddresses()` and awaited through `loadsSettled()`.
+   * A caller that would otherwise read each synced document to find such
+   * links has nothing to find. Optional: managers without lazy remote
+   * replication, and sessions on servers that do not report crossings,
+   * answer false or nothing.
+   */
+  followsCrossings?(space: MemorySpace): boolean;
+
+  /**
+   * The crossing loads in flight (see `followsCrossings`): the address of
+   * each document a frame's crossing named that has not landed or failed
+   * yet. A caller awaits them through `loadsSettled()` by their
+   * pending-load keys, those its identity can resolve, and asks again
+   * once they settle, since a crossing's own frame can report crossings.
+   */
+  pendingCrossingLoadAddresses?(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[];
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -969,6 +1012,27 @@ export const hasPresenceStorageCapability = (
   if (value === null || value === undefined) return false;
   const candidate = value as Partial<IPresenceStorageCapability>;
   return typeof candidate.joinPresenceRoom === "function";
+};
+
+/**
+ * A storage provider that reports diagnostics about its space session to the
+ * memory server serving the space (memory-v2 `04-protocol.md` §4.14).
+ */
+export interface ISessionReportStorageCapability {
+  /**
+   * Sends `report` on this provider's space session, best-effort: a server
+   * without the capability, a connection that is down, and a refusal all
+   * drop the report without an error.
+   */
+  sendReport(report: SessionReport): void;
+}
+
+export const hasSessionReportStorageCapability = (
+  value: unknown,
+): value is ISessionReportStorageCapability => {
+  if (value === null || value === undefined) return false;
+  const candidate = value as Partial<ISessionReportStorageCapability>;
+  return typeof candidate.sendReport === "function";
 };
 
 /**
@@ -2298,8 +2362,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Settles whether this transaction is CFC-relevant — the flow-label
-   * relevance probe, then the sink-request ceiling probe — and runs
-   * `prepareCfc()` when it is.
+   * relevance probe, then the sink-request ceiling probe — and runs the
+   * verification `prepareCfc()` runs when it is, without reading the digest.
    *
    * `commit()` runs this itself, so the enforcement ladder always decides on
    * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
@@ -2319,11 +2383,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   prepareForCommitCooperatively(signal: AbortSignal): Promise<void>;
 
   /**
-   * Runs CFC boundary verification for this transaction and records the
-   * prepared digest. Takes no caller-supplied input: the commit-time digest
-   * recheck only confirms the prepared input matches real activity, so an
-   * external input override would let a caller skip verification while still
-   * passing the recheck (audit S2).
+   * Runs CFC boundary verification for this transaction, seals the activity
+   * it verified as the prepared input, and returns that input's digest, or
+   * the empty string when verification refused. Takes no caller-supplied
+   * input: the commit-time digest recheck only confirms the prepared input
+   * matches real activity, so an external input override would let a caller
+   * skip verification while still passing the recheck (audit S2).
    */
   prepareCfc(): string;
 
@@ -3170,6 +3235,10 @@ export interface ISpaceReplica extends ISpace {
   /** Whether the current connection retains the negotiated view protocol. */
   viewReplicationSupported?(): boolean;
 
+  /** Whether the server this replica's session is on reports the links
+   * its walks follow out of the space (`syncCrossingsV1`). */
+  crossingsReported?(): boolean;
+
   /** Waits for session restoration before issuing fallback subscriptions. */
   whenSessionRestored?(): Promise<void>;
 
@@ -3229,6 +3298,31 @@ export interface ISpaceReplica extends ISpace {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
+
+  /**
+   * The commit sequence through which every document this replica watches
+   * holds every change, or `undefined` when it cannot say: before the first
+   * server push applies; after a frame failed to apply or was applied with
+   * entries quarantined, until the replica resets; and while the session's
+   * server runs server execution or does not say whether it does, since its
+   * executor commits waves outside the publication turn a push is complete
+   * under. A document a watch mutation delivered may hold a later state than
+   * this sequence.
+   */
+  completeThroughSeq?(): number | undefined;
+
+  /**
+   * Whether the replica's state for the document is confirmed: the document
+   * is watched and delivered, no local write to it is pending, and its value
+   * is neither a refused write folded locally nor an own write promoted past
+   * what a push has covered. An absent document a push delivered is
+   * confirmed.
+   */
+  isConfirmedDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
 
   commitNative?(
     transaction: NativeStorageCommit,

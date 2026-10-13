@@ -6,12 +6,14 @@ import {
   activeCapture,
   asDefinition,
   buildCapture,
+  enclosingNames,
   fileForName,
   MACHINERY_MODULE_SUFFIXES,
   NAME_MAP_PREFIX,
   NAME_MAP_SUFFIX,
   parseSkipList,
   readNameMaps,
+  readRegistrations,
   repositoryPathOf,
   repositoryRootOf,
   runDirectory,
@@ -151,6 +153,23 @@ describe("registration", () => {
     });
   });
 
+  describe("enclosingNames()", () => {
+    it("returns each enclosing name, outermost first", () => {
+      expect(enclosingNames("outer > inner > deep")).toEqual([
+        "outer",
+        "outer > inner",
+      ]);
+    });
+
+    it("cuts at separators that overlap", () => {
+      expect(enclosingNames("outer > > step")).toEqual(["outer", "outer >"]);
+    });
+
+    it("returns nothing for a name with no separator", () => {
+      expect(enclosingNames("outer>inner")).toEqual([]);
+    });
+  });
+
   describe("fileForName()", () => {
     const names = new Map([
       ["outer", "packages/a/outer.test.ts"],
@@ -168,6 +187,14 @@ describe("registration", () => {
       );
       expect(fileForName("outer > inner > deep", names)).toBe(
         "packages/a/inner.test.ts",
+      );
+    });
+
+    it("returns the file of a registered name that ends in the separator's mark", () => {
+      // A step of a test named "arrow >" reports as "arrow > > step".
+      const arrow = new Map([["arrow >", "packages/a/arrow.test.ts"]]);
+      expect(fileForName("arrow > > step", arrow)).toBe(
+        "packages/a/arrow.test.ts",
       );
     });
 
@@ -342,6 +369,88 @@ describe("registration", () => {
         const names = await readNameMaps(dir);
         expect(names.size).toBe(1);
         expect(names.get("good")).toBe("packages/a/one.test.ts");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+  });
+
+  describe("readRegistrations()", () => {
+    it("returns each file's names from every map a spool holds", async () => {
+      // Every execution of a unit writes a map of its own, and what the
+      // file registered is all of them together.
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", {
+          "glaze": "packages/a/one.test.ts",
+          "glaze > sets": "packages/a/one.test.ts",
+        });
+        await writeNameMap(dir, "02", {
+          "glaze > cools": "packages/a/one.test.ts",
+          "proof": "packages/a/two.test.ts",
+        });
+        const registered = await readRegistrations(dir);
+        expect(
+          [...registered].map(([file, names]) => [file, [...names].sort()]),
+        ).toEqual([
+          ["packages/a/one.test.ts", [
+            "glaze",
+            "glaze > cools",
+            "glaze > sets",
+          ]],
+          ["packages/a/two.test.ts", ["proof"]],
+        ]);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("keeps a name two files both registered under each of them", async () => {
+      // Which file holds a test is not what this answers, so a shared
+      // name is not ambiguous here the way it is to `readNameMaps()`.
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", { shared: "packages/a/one.test.ts" });
+        await writeNameMap(dir, "02", { shared: "packages/b/two.test.ts" });
+        const registered = await readRegistrations(dir);
+        expect(registered.get("packages/a/one.test.ts")).toEqual(
+          new Set(["shared"]),
+        );
+        expect(registered.get("packages/b/two.test.ts")).toEqual(
+          new Set(["shared"]),
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("leaves out a mapped file that is not a path", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", {
+          good: "packages/a/one.test.ts",
+          number: 7,
+          empty: "",
+        });
+        expect([...await readRegistrations(dir)]).toEqual([
+          ["packages/a/one.test.ts", new Set(["good"])],
+        ]);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns no file for a spool holding no readable map", async () => {
+      // A process that wrote no readable map says nothing about what its
+      // file holds.
+      const dir = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(
+          join(dir, `${NAME_MAP_PREFIX}01${NAME_MAP_SUFFIX}`),
+          "{not json",
+        );
+        expect((await readRegistrations(dir)).size).toBe(0);
+        expect((await readRegistrations("/nonexistent-spool")).size).toBe(0);
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
@@ -600,7 +709,7 @@ describe("what the capture does when it cannot write", () => {
 
   it("does nothing at all when there is no spool", () => {
     const { capture } = buildCapture({ registrar });
-    capture.names.set("a test", "packages/a/one.test.ts");
+    capture.attribute("a test", "packages/a/one.test.ts");
     // No spool is a run that was never recording, not a failed write.
     capture.flush();
   });
@@ -619,10 +728,53 @@ describe("what the capture does when it cannot write", () => {
     const spool = await Deno.makeTempDir();
     try {
       const { capture } = buildCapture({ registrar, spool });
-      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.attribute("a test", "packages/a/one.test.ts");
       capture.flush();
       const names = await readNameMaps(spool);
       expect(names.get("a test")).toBe("packages/a/one.test.ts");
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("writes a name once the code registering it has run", async () => {
+    // A test run that is interrupted ends without unloading, so nothing
+    // waits for the end of the run to write the names its report needs.
+    const spool = await Deno.makeTempDir();
+    try {
+      const { capture } = buildCapture({ registrar, spool });
+      capture.attribute("a test", "packages/a/one.test.ts");
+      expect([...Deno.readDirSync(spool)]).toEqual([]);
+      await Promise.resolve();
+      const names = await readNameMaps(spool);
+      expect(names.get("a test")).toBe("packages/a/one.test.ts");
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("writes each name it learned once", async () => {
+    const spool = await Deno.makeTempDir();
+    try {
+      const { capture } = buildCapture({ registrar, spool });
+      capture.attribute("a test", "packages/a/one.test.ts");
+      capture.flush();
+      capture.attribute("another test", "packages/a/two.test.ts");
+      capture.flush();
+      capture.flush();
+      await Promise.resolve();
+      const written = [...Deno.readDirSync(spool)].map((entry) =>
+        Object.keys(
+          JSON.parse(Deno.readTextFileSync(join(spool, entry.name))).names,
+        )
+      ).sort();
+      expect(written).toEqual([["a test"], ["another test"]]);
+      expect(capture.names).toEqual(
+        new Map([
+          ["a test", "packages/a/one.test.ts"],
+          ["another test", "packages/a/two.test.ts"],
+        ]),
+      );
     } finally {
       await Deno.remove(spool, { recursive: true });
     }
@@ -636,7 +788,7 @@ describe("what the capture does when it cannot write", () => {
         spool,
         dir: "packages/b",
       });
-      capture.names.set("a test", "tools/one.test.ts");
+      capture.attribute("a test", "tools/one.test.ts");
       capture.flush();
       // A read scoped to that directory takes the map whole, file and
       // all, where a read scoped elsewhere is offered nothing: the file
@@ -656,7 +808,7 @@ describe("what the capture does when it cannot write", () => {
     const spool = await Deno.makeTempDir();
     try {
       const { capture } = buildCapture({ registrar, spool, dir: "" });
-      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.attribute("a test", "packages/a/one.test.ts");
       capture.flush();
       expect(
         (await readNameMaps(spool, { ranIn: "" })).get("a test"),
@@ -671,7 +823,8 @@ describe("what the capture does when it cannot write", () => {
 
   it("says so and carries on when the spool cannot be made", async () => {
     // A file where the directory should be. Failing to record must not
-    // fail the test run that was recording.
+    // fail the test run that was recording, and what it could not write
+    // the next write carries.
     const parent = await Deno.makeTempDir();
     const spool = join(parent, "in-the-way");
     await Deno.writeTextFile(spool, "");
@@ -680,13 +833,20 @@ describe("what the capture does when it cannot write", () => {
     console.warn = (...parts: unknown[]) => said.push(parts.join(" "));
     try {
       const { capture } = buildCapture({ registrar, spool });
-      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.attribute("a test", "packages/a/one.test.ts");
       capture.flush();
+      await Promise.resolve();
+      expect(said.join("\n")).toContain("cannot write a name map");
+      await Deno.remove(spool);
+      capture.attribute("another test", "packages/a/two.test.ts");
+      capture.flush();
+      const names = await readNameMaps(spool);
+      expect(names.get("a test")).toBe("packages/a/one.test.ts");
+      expect(names.get("another test")).toBe("packages/a/two.test.ts");
     } finally {
       console.warn = warn;
       await Deno.remove(parent, { recursive: true });
     }
-    expect(said.join("\n")).toContain("cannot write a name map");
   });
 });
 

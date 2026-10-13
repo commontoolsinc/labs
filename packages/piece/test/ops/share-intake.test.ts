@@ -31,14 +31,15 @@ const someoneElse = (await Identity.fromPassphrase("share intake other")).did();
 /** The origin of the host the test's runtime is served by. */
 const HOST = "https://home.example";
 
-// A Home pattern reduced to what the intake reads and the stream it sends,
-// whose `registerSharedSpace` records each event it is sent.
+// A Home pattern reduced to what the intake reads and the streams it sends,
+// whose `registerSharedSpace` and `chatManager.accept` record each event they
+// are sent.
 const program: RuntimeProgram = {
   main: "/home.tsx",
   files: [{
     name: "/home.tsx",
     contents: `
-import { type Cell, handler, pattern, Writable } from "commonfabric";
+import { type Cell, handler, pattern, spaceOf, Writable } from "commonfabric";
 
 type Pointer = { piece?: Cell<{ name?: string }> };
 
@@ -56,11 +57,15 @@ type Registration = {
 };
 
 type Result =
-  | { status: "registered"; space: string }
+  | { status: "registered" | "existing"; space: string }
   | { status: "conflict"; reason: string };
 
+type Acceptance = { room?: Cell<unknown>; keepArchived?: boolean };
+
 // Returns a conflict for a registration titled \`Conflicting\`, as Home's own
-// handler does for a space already registered under another kind.
+// handler does for a space already registered under another kind, and
+// \`existing\` for one titled \`Existing\`, as it does for a space it lists
+// already.
 const registerSharedSpace = handler<
   Registration,
   { registered: Writable<Registration[]> },
@@ -69,7 +74,19 @@ const registerSharedSpace = handler<
   registered.push(event);
   return event.title === "Conflicting"
     ? { status: "conflict", reason: "kind" }
+    : event.title === "Existing"
+    ? { status: "existing", space: event.space }
     : { status: "registered", space: event.space };
+});
+
+const accept = handler<
+  Acceptance,
+  { accepted: Writable<{ space?: string; keepArchived?: boolean }[]> }
+>((event, { accepted }) => {
+  accepted.push({
+    space: spaceOf(event.room),
+    keepArchived: event.keepArchived,
+  });
 });
 
 export default pattern(() => {
@@ -79,12 +96,17 @@ export default pattern(() => {
   const sharedSpaceCatalog = new Writable<Catalog>({ entries: {}, offers: {} })
     .for("sharedSpaceCatalog");
   const registered = new Writable<Registration[]>([]).for("registered");
+  const accepted = new Writable<{ space?: string; keepArchived?: boolean }[]>(
+    [],
+  ).for("accepted");
   return {
     privateInbox,
     retainedPrivateInboxes,
     sharedSpaceCatalog,
     registered,
     registerSharedSpace: registerSharedSpace({ registered }),
+    accepted,
+    chatManager: { accept: accept({ accepted }) },
   };
 });`,
   }],
@@ -335,6 +357,23 @@ describe("share-intake", () => {
     );
   }
 
+  /**
+   * What Home's `chatManager.accept` has been sent, once the intake's
+   * handling and the acceptances it sent have settled.
+   */
+  async function acceptedNow(intake: ShareIntake): Promise<Row[]> {
+    await intake.idle();
+    await runtime.idle();
+    return (await home.key("accepted" as never).asSchema(registeredSchema)
+      .pull() ?? []) as Row[];
+  }
+
+  /** How many failed sends to Home's chat manager the intake has logged. */
+  function acceptFailuresLogged(): number {
+    return getLoggerCountsBreakdown()["piece.share-intake"]
+      ?.["accept-failed"]?.warn ?? 0;
+  }
+
   /** How many conflicts from Home's handler the intake has logged. */
   function conflictsLogged(): number {
     return getLoggerCountsBreakdown()["piece.share-intake"]
@@ -403,6 +442,59 @@ describe("share-intake", () => {
       // The inbox document stands in for a Home holding no such stream.
       expect(startShareIntakeOf(runtime, inbox, identity.did()))
         .toBeUndefined();
+    });
+  });
+
+  describe("isIdle()", () => {
+    it("returns `false` while the intake takes up the offers it started with, and `true` once `idle()` has resolved", async () => {
+      // The intake's first subscription publishes as it is made, so the scan
+      // of the inbox, and the registration it sends, are under way by the time
+      // the constructor returns.
+
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      await deliver([offerOf(space, "waiting")]);
+      const started = start();
+      expect(started.isIdle()).toBe(false);
+
+      await started.idle();
+      expect(started.isIdle()).toBe(true);
+      expect(registeredIds(await registeredNow())).toEqual(["waiting"]);
+    });
+
+    it("returns `false` while a registration it sent awaits Home's receipt, once the scan that sent it has ended", async () => {
+      // The runtime, but for a read by link of anything in Home's space, which
+      // is where Home's handler writes the receipt of each handling. That read
+      // is held until `receipt` resolves. It comes after Home's handler has
+      // committed, which is after the scan that sent the registration ended.
+
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      const asked = Promise.withResolvers<void>();
+      const receipt = Promise.withResolvers<unknown>();
+      const held = new Proxy(runtime, {
+        get(target, name) {
+          if (name === "getCellFromLink") {
+            return (link: { space?: string }, ...rest: never[]) => {
+              if (link.space !== home.space) {
+                return target.getCellFromLink(link as never, ...rest);
+              }
+              asked.resolve();
+              return { pull: () => receipt.promise };
+            };
+          }
+          const value = Reflect.get(target, name, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const intake = startShareIntakeOf(held as never, home, identity.did());
+      if (intake === undefined) throw new Error("Home has no stream");
+      after = () => intake.stop();
+      await deliver([offerOf(space, "held")]);
+      await asked.promise;
+      expect(intake.isIdle()).toBe(false);
+
+      receipt.resolve(undefined);
+      await intake.idle();
+      expect(intake.isIdle()).toBe(true);
     });
   });
 
@@ -586,6 +678,90 @@ describe("share-intake", () => {
       expect(
         registeredIds(await registeredThrough("granted later")),
       ).toContain("granted later");
+    });
+
+    it("is accepted by Home's chat manager, in its space, keeping an archived entry archived, once registered", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      const intake = start();
+      await deliver([offerOf(space, "accepted")]);
+      await registeredThrough("accepted");
+
+      expect(await acceptedNow(intake)).toEqual([{
+        space,
+        keepArchived: true,
+      }]);
+    });
+
+    it("is not accepted when Home's handler finds its space already listed, or returns a conflict", async () => {
+      const existing = await offeredSpace({ [sender]: "WRITE" });
+      const conflicting = await offeredSpace({ [sender]: "WRITE" });
+      const fresh = await offeredSpace({ [sender]: "WRITE" });
+      const intake = start();
+      await deliver([
+        offerOf(existing, "existing", { title: "Existing" }),
+        offerOf(conflicting, "conflicting", { title: "Conflicting" }),
+        offerOf(fresh, "fresh"),
+      ]);
+      await registeredThrough("fresh");
+
+      expect(await acceptedNow(intake)).toEqual([{
+        space: fresh,
+        keepArchived: true,
+      }]);
+    });
+
+    it("is registered, and not accepted, when Home has no chat manager", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      // Home, but for a `chatManager` holding no `accept` stream.
+      const managerless = {
+        key: (name: string) =>
+          name === "chatManager"
+            ? { key: () => ({ getRaw: () => undefined }) }
+            : home.key(name as never),
+      };
+      const intake = startShareIntakeOf(
+        runtime,
+        managerless as never,
+        identity.did(),
+      );
+      if (intake === undefined) throw new Error("Home has no stream");
+      after = () => intake.stop();
+      const before = acceptFailuresLogged();
+      await deliver([offerOf(space, "managerless")]);
+
+      expect(registeredIds(await registeredThrough("managerless"))).toEqual([
+        "managerless",
+      ]);
+      expect(await acceptedNow(intake)).toEqual([]);
+      // Nothing was sent, so no send failed.
+      expect(acceptFailuresLogged() - before).toBe(0);
+    });
+
+    it("is registered, and the failure logged, when sending Home's chat manager the room fails", async () => {
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      // Home, but for a `chatManager.accept` that is no stream, so that
+      // sending to it throws.
+      const unacceptable = {
+        key: (name: string) =>
+          name === "chatManager"
+            ? { key: () => ({ getRaw: () => ({ $stream: true }) }) }
+            : home.key(name as never),
+      };
+      const intake = startShareIntakeOf(
+        runtime,
+        unacceptable as never,
+        identity.did(),
+      );
+      if (intake === undefined) throw new Error("Home has no stream");
+      after = () => intake.stop();
+      const before = acceptFailuresLogged();
+      await deliver([offerOf(space, "unaccepted")]);
+
+      expect(registeredIds(await registeredThrough("unaccepted"))).toEqual([
+        "unaccepted",
+      ]);
+      expect(await acceptedNow(intake)).toEqual([]);
+      expect(acceptFailuresLogged() - before).toBe(1);
     });
 
     it("is logged once as a conflict when Home's handler returns one", async () => {

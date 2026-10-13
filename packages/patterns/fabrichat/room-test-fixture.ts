@@ -1,48 +1,64 @@
-/** Shared storage and descriptions for the FabriChat room's pattern tests. */
+/** Shared protected storage and attested profiles for FabriChat room tests. */
 import {
-  action,
-  type AddIntegrity,
-  FabricEpochNsec,
+  handler,
   pattern,
+  type RepresentsCurrentUser,
+  type TrustedActionWrite,
   Writable,
 } from "commonfabric";
-import type { ParticipantRoster } from "../loom/participants.tsx";
-import { CHAT_POLICY } from "./records.ts";
-import type { StoredActivity, StoredMemory, StoredMessage } from "./room.tsx";
 import type {
-  ChatRoomAbout,
-  ChatRoomPolicy,
-  ChatRoomRecord,
-} from "./schemas.tsx";
+  ReactionList,
+  SentActivity,
+  SentMessage,
+  StoredActivityCounters,
+  StoredRequestMemo,
+  StoredUsedTime,
+} from "./room-records.tsx";
+import type { ChatProfile } from "./schemas.tsx";
 
 /** Fresh protected records shared by the viewers of one test room. */
 export const testRoomStorage = pattern(() => {
   return {
-    records: new Writable<StoredMessage[]>([]),
-    memory: new Writable<StoredMemory>(),
-    activity: new Writable<StoredActivity[]>([]),
-    roster: new Writable<ParticipantRoster>({}),
+    messages: Writable.of<SentMessage[]>([]),
+    reactionLists: Writable.of<ReactionList[]>([]),
+    requests: Writable.of<StoredRequestMemo[]>([]),
+    usedTimes: Writable.of<StoredUsedTime[]>([]),
+    activity: Writable.of<SentActivity[]>([]),
+    counters: Writable.of<StoredActivityCounters[]>([]),
   };
 });
 
-/** A labeled room description, optionally identifying a standalone room. */
-export const testRoomAbout = pattern<
-  { kind: "direct" | "group"; standalone: boolean }
->(({ kind, standalone }) => {
-  const policy = new Writable<AddIntegrity<ChatRoomPolicy, ["chat-test"]>>(
-    CHAT_POLICY,
-  );
-  const record = new Writable<AddIntegrity<ChatRoomRecord, ["chat-test"]>>();
-  const about = new Writable<AddIntegrity<ChatRoomAbout, ["chat-test"]>>();
-  const initialize = action(() => {
-    record.set({ kind, title: "Team", createdAt: new FabricEpochNsec(0n) });
-    about.set({
-      kind,
-      title: "Team",
-      createdAt: new FabricEpochNsec(0n),
-      policy,
-      ...(standalone ? { record } : {}),
-    });
-  });
-  return { about, initialize };
+/** A profile whose label names the actor who initializes it. */
+type OwnProfile = RepresentsCurrentUser<
+  TrustedActionWrite<
+    ChatProfile,
+    typeof writeProfile,
+    "ChatTestProfile",
+    "ChatTestProfileSurface"
+  >
+>;
+
+/** The profile initialized by the authenticated test participant. */
+interface ProfileState {
+  /** The actor's own profile. */
+  profile: Writable<OwnProfile>;
+}
+
+/** Attests the profile used to display the authenticated sender's controls. */
+const writeProfile = handler<void, ProfileState>(
+  (_, { profile }) => {
+    profile.set({ name: "Alice" } as OwnProfile);
+  },
+);
+
+/** The reviewed gesture that initializes a test profile. */
+export const profileGesture = {
+  surface: "ChatTestProfileSurface",
+  action: "ChatTestProfile",
+};
+
+/** A fresh profile and the gesture stream that attests its owner. */
+export const testRoomProfile = pattern(() => {
+  const profile = new Writable<OwnProfile>();
+  return { profile, initialize: writeProfile({ profile }) };
 });

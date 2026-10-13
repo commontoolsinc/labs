@@ -113,17 +113,37 @@ profile's data fields, and its view state is per session; nothing else in the
 space is protected from a visitor (a *named* `inSpace(name)` would put every
 profile created under one name in one space) —
 running `/api/patterns/system/profile-home.tsx`; the link
-is appended to `profiles`.
+is appended to `profiles`. The home Profile tab renders the **profile picker**
+(`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
+the default, and stamp MRU. There is no `profileName` mirror field anymore.
 
 The create passes `root: true`, so the profile is its space's root: the space's
 genesis commit reserves the root's address, the space cell's `defaultPattern`
 links the profile there, and a host holding only the profile space's DID
-reaches the profile as it reaches any space's root. A profile space whose
-genesis reserved no root, which is every profile space created before the
-create passed `root: true`, has no profile as its root, and its profile is
-reached only through a link to it, such as the one in `profiles`. The home Profile tab renders the **profile picker**
-(`profile-picker.tsx`): it lists profiles, lets the user create more inline, pick
-the default, and stamp MRU. There is no `profileName` mirror field anymore.
+reaches the profile as it reaches any space's root.
+
+A profile space whose genesis reserved no root, which is every profile space
+created before the create passed `root: true`, can get its profile as its root
+from `cf profile repair-root`, run by an operator across a store or by the
+person over their own Home's profiles (the
+[CLI README](../../../packages/cli/README.md) describes running it). The repair
+links the existing profile as the space cell's `defaultPattern` where the space
+has no root, and where its root is one a space-root ensure created and nothing
+was added to: a client's open of the space by its owner creates one, and so,
+with server execution on, does the server when any session opens the space.
+Any other root it leaves alone, and that space's profile stays a profile its
+space does not have as its root. A repaired profile is not at the reserved
+address, since a genesis commit cannot gain a reservation afterward, and it is
+a root like any other in a space that grants every principal `WRITE`: anyone
+can link something else there. `getSpaceRootPattern()` returns whatever root
+the space cell links, or `undefined` when it links none, and throws the server's
+refusal when the server refuses the reader the space; it does not ask whether
+the root is a profile or whom it represents. So a host that finds a person's
+profile from the space's DID makes those checks itself: it takes the root as the person's profile only when the
+root is a piece in that space, rather than a path into one, and its label says
+it represents the person the host expects. Until the repair reaches it, a
+profile in such a space is reached only through a link to it, such as the one
+in `profiles`.
 
 `profiles`/`defaultProfile`/`mru` are CFC-protected profile-link data, created
 through the trusted profile-create / picker surfaces. Untrusted writes are
@@ -153,7 +173,15 @@ The home default pattern holds the user's private inbox in
 where other people deliver offers to the user. The user has one inbox, whichever
 side creates it. The host sends Home's `ensurePrivateInbox` stream the first
 time a runtime worker brings up Home, and again at the worker's next bring-up of
-Home if that ensure failed, and decides by one profile: the first, in the order
+Home if that ensure failed. A worker brings up Home when a client asks it to
+ensure Home is running, to create a space, or to run the Home space's root.
+The shell asks for Home's root when it shows Home, and on every page, once per
+runtime, asks for an existing Home to be running once the first piece the page
+shows is on screen and the view has settled. That request brings Home up only
+where Home's root records the pattern it runs, and otherwise creates and
+starts nothing. Reading Home's root with `start: false`, opening another
+space's root, and the `cf` CLI start no ensure.
+The host decides by one profile: the first, in the order
 `#profile` answers in (the default, then the MRU list, then `profiles` list
 order), that points at an inbox. A loom daemon decides by the profile `#profile`
 answers with too. Home keeps an inbox it holds while that profile points at it,
@@ -178,17 +206,30 @@ recorded it. Each ensure, which is to say the next bring-up of Home in a runtime
 worker, clears it when Home adopts or creates an inbox, when the deciding
 profile points at the inbox Home holds, or when no profile points at the refused
 inbox any longer. Nothing else clears it automatically in between, though the
-owner's own code can also clear it, or record a refusal, by sending Home's
-`ensurePrivateInbox` stream. It is read from Home's root like any other field of
-Home, the root being the link the `#default` wish answers with, as "Custom Home
-Pattern" below says. A profile created once Home holds the inbox is pointed at
-it as it is created; one created earlier is pointed by the next ensure. Home
-decides only when an ensure runs, so a pointer that moves is decided at the
-first bring-up of Home in the next runtime worker to start, once the current
-worker's ensure has succeeded. A loom daemon does the same in the other
-direction, adopting the inbox a profile advertises and never replacing a pointer
-to a different one. [The private inbox](../../features/private-inbox.md)
-describes the whole arrangement.
+owner can clear it by replacing the refused inbox, as below, and the owner's own
+code can clear it, or record a refusal, by sending Home's `ensurePrivateInbox`
+stream. It is read from Home's root like any other field of Home, the root being
+the link the `#default` wish answers with, as "Custom Home Pattern" below says,
+and Home shows it as a notice above its tabs, by its code and time alone. The
+notice's "Use a new inbox" button, which a click on it sends, has Home clear the
+refusal, keep its inbox or create its own, and point the profiles that point at
+the refused inbox at it, and records that in
+`defaultPattern.privateInboxReplacement`. A profile created once Home holds the
+inbox is pointed at it as it is created; one created earlier is pointed by the
+next ensure. Home decides only when an ensure runs, so a pointer that moves is
+decided at the first bring-up of Home in the next runtime worker to start, once
+the current worker's ensure has succeeded. A loom daemon does the same in the
+other direction, adopting the inbox a profile advertises and never replacing a
+pointer to a different one. A client that would otherwise create an inbox of its
+own, as a loom daemon does, asks Home for it through
+`defaultPattern.requestPrivateInbox`, naming the profile it finds the owner by:
+Home ensures its inbox with an event naming nothing, which keeps or creates
+Home's inbox and points the profiles that point at none but adopts nothing,
+and its handling's receipt links to Home's answer for that profile, which
+reads `ensured` once the profile points at Home's inbox, or a final status
+saying why it never will.
+[The private inbox](../../features/private-inbox.md) describes the whole
+arrangement, and the request's contract under "Requesting it".
 
 ## Spaces
 
@@ -246,8 +287,14 @@ no runner is registered, the tab explains that requests remain queued until one
 starts. A queue with no entries shows "No agent runs yet."
 
 A request made in a home space that holds no queue — its home pattern does not
-exist, or is a version without the field — ends `refused`, and
-`wish({ query: "#agent_queue" })` there resolves to nothing.
+exist, or is a version without the field — ends `refused`. Where the home
+pattern is a version without the field, `wish({ query: "#agent_queue" })`
+resolves to nothing; where there is no home pattern yet, a headless wish
+resolves to nothing too, and any other resolves through the empty slot. A write
+through that cell is refused with a `SpaceRootMissingError`. When the write is a
+handler's on a client runtime and the refusal escapes the handler, the home
+pattern is created and the handler runs again; a serving runtime creates none.
+[Built-in Targets](wish.md#built-in-targets) describes both.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
@@ -278,7 +325,9 @@ holds none until the home space is next opened, since nothing updates a piece
 nobody opens, and the wish does not open it; a custom home pattern
 ([Custom Home Pattern](#custom-home-pattern)) holds one only if it says so.
 Until then `wish({ query: "#chatManager" })` reports an error naming both
-remedies, rather than resolving to nothing.
+remedies, rather than resolving to nothing. A home space with no home pattern
+yet holds no chat manager either, and the wish reports the same error there
+without creating the home pattern.
 
 Home hands the manager its shared-space catalog ([Shared-space
 catalog](../../features/shared-space-catalog.md)), and the manager registers
@@ -290,14 +339,23 @@ intake among them, and forgetting a room archives its entry.
 ## Custom Home Pattern
 
 The home space's default pattern is the home experience itself — by default,
-`/api/patterns/system/home.tsx`. A Home is created once, on its user's first
-open, and from then on it owns account data: profiles, favorites, navigation,
-the shared-space catalog and the private inbox pointer. It is changed only in
-place, with `cf piece setsrc` on its root, which retains that data. Nothing
-but that first open creates the root of an identity Home, and nothing replaces
-or unlinks it: root recreation refuses a Home before stopping, unlinking or
-compiling anything, whether the Home is absent, installed, or pointing at a
-target that cannot currently be loaded, and the low-level link and unlink
+`/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
+first of: its user's first open; the home space's own server, which ensures the
+root once server execution activates the space and its owner resolves; and the
+first write by a handler on a client runtime through a cell a wish handed out
+for a Home target, when the write's refusal escapes the handler (see
+[Built-in Targets](wish.md#built-in-targets)). A read never creates one, a
+wish's or a handler's.
+On a serving runtime such a write is refused until the root exists, so under
+server execution a user's first profile can be created only once their Home has
+a root. From then on it owns account
+data: profiles, favorites, navigation, the shared-space catalog and the private
+inbox pointer. It is changed only in place, with `cf piece setsrc` on its root,
+which retains that data. Nothing but those three creates the root of an
+identity Home, and nothing replaces or unlinks it: root
+recreation refuses a Home before stopping, unlinking or compiling anything,
+whether the Home is absent, installed, or pointing at a target that cannot
+currently be loaded, and the low-level link and unlink
 refuse to replace or drop a root a Home holds. (`cf space set-home` is
 retired; see
 [Retired: `cf space set-home`](../../../packages/cli/README.md#retired-cf-space-set-home).)
@@ -457,8 +515,9 @@ Both the home pattern and the default app pattern follow the same mechanism:
 3. The pattern is compiled, run, linked as `spaceCell.defaultPattern`, and its
    source URL is stamped as `patternSource` for future updates
 4. `recreateDefaultPattern()` replaces a non-Home root, and refuses an identity
-   Home, absent or present, which is created on first open and updated in
-   place. A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
+   Home, absent or present, which is created as
+   [Custom Home Pattern](#custom-home-pattern) describes and updated in place.
+   A URL-based pattern stamps `patternSource`; a custom `RuntimeProgram`
    remains untracked by the URL updater and may carry a separate repository
    locator
 5. Before an existing eligible root starts, it is reconciled in place. A root

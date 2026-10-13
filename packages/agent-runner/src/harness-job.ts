@@ -18,6 +18,7 @@ import { join } from "@std/path";
 
 import {
   type CfHarnessStructuredResultValidation,
+  processCfHarnessCliEnv,
   runCfHarnessCli,
   type RunCfHarnessCliDependencies,
   selectCfHarnessCliSandboxRuntime,
@@ -61,6 +62,12 @@ export interface HarnessJobFabric {
 
   /** Input cells the model holds as handles: name to rendered reference. */
   inputs: Readonly<Record<string, string>>;
+
+  /**
+   * Other spaces the session may reach, each a DID mapped to the host serving
+   * it: where a piece handed in as an input lives outside the job's space.
+   */
+  foreignSpaces?: Readonly<Record<string, string>>;
 }
 
 /** One job, as plain data. */
@@ -114,7 +121,55 @@ export interface HarnessJobSpec {
 
   /** The job's fabric session and input cells; absent for a job with none. */
   fabric?: HarnessJobFabric;
+
+  /**
+   * The pattern index `search_patterns`, `record_feedback` and a
+   * `pattern-author` child search. The harness signs its requests with the
+   * fabric identity, so a spec naming one has a fabric part.
+   */
+  patternIndexUrl?: string;
+
+  /**
+   * Whether the job contributes what it authors to the pattern index; the
+   * harness publishes unless this is `false`.
+   */
+  patternIndexPublish?: boolean;
 }
+
+/**
+ * The harness settings a job never takes from its environment: each grants
+ * a run a fabric session or a setting of one, a Loom transport, a pattern
+ * index, or a CFC enforcement mode. A job's authority is its spec, and the
+ * runner's environment is not a grant, so these are removed from whatever
+ * environment the harness is handed; the enforcement mode is then the one
+ * `argvOf` pins.
+ */
+export const HARNESS_JOB_GRANT_ENV_KEYS = [
+  "CF_HARNESS_FABRIC_API_URL",
+  "CF_HARNESS_FABRIC_IDENTITY",
+  "CF_HARNESS_FABRIC_SPACE",
+  "CF_HARNESS_FABRIC_FOREIGN_SPACES",
+  "CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE",
+  "CF_HARNESS_FABRIC_CFC_FLOW_LABELS",
+  "CF_HARNESS_FABRIC_CFC_POSTURE",
+  // `CF_CFC_MODE`, the fabric runtime's own dial, which the CLI reads as a
+  // fallback for this one, stays: the mode `argvOf` pins outranks both.
+  "CF_HARNESS_CFC_ENFORCEMENT_MODE",
+  "CF_HARNESS_SPACE_DB",
+  "CF_HARNESS_LOOM_AUTHORING_CONFIG",
+  "CF_HARNESS_LOOM_RETRIEVAL_CONFIG",
+  "CF_HARNESS_LOOM_COMMANDS_CONFIG",
+  "CF_HARNESS_PATTERN_INDEX_URL",
+  "CF_HARNESS_PATTERN_INDEX_PUBLISH",
+  "CF_HARNESS_PATTERN_INDEX_PUBLISH_DISCOVERABLE",
+] as const;
+
+/**
+ * The CFC enforcement mode every job runs at. The spec's `taskRole` decides
+ * which tools a job may use only under an enforcing mode, so the mode is
+ * the job's own, pinned here, never a dial inherited from the process.
+ */
+export const HARNESS_JOB_CFC_ENFORCEMENT_MODE = "enforce-explicit";
 
 /** What a job runs with besides its spec. */
 export interface HarnessJobOptions {
@@ -150,7 +205,16 @@ export type HarnessJobResult =
       /** The handles the job held, for resolving those the result names. */
       handleTable: ReturnType<typeof createHarnessHandleTable>;
     }
-    | { outcome: "failed"; errorCode: AgentRunErrorCode }
+    | {
+      outcome: "failed";
+      errorCode: AgentRunErrorCode;
+
+      /**
+       * Why, where the harness said: for `INVALID_RESULT`, that no result
+       * was submitted, or the field the schema refused and the reason.
+       */
+      errorDetail?: string;
+    }
     | { outcome: "cancelled" }
   );
 
@@ -177,7 +241,7 @@ const reportOf = (result: HarnessPromptLoopResult): AgentRunReport => {
 /**
  * Helper for the job, which builds the harness's arguments from the spec.
  * The `--fabric-*` and `--input-cell` arguments appear exactly when the spec
- * has a fabric part.
+ * has a fabric part, and `--pattern-index-url` when it names an index.
  */
 const argvOf = (
   spec: HarnessJobSpec,
@@ -187,6 +251,8 @@ const argvOf = (
 ): string[] => [
   "--output-mode",
   "batch",
+  "--cfc-enforcement-mode",
+  HARNESS_JOB_CFC_ENFORCEMENT_MODE,
   "--workspace",
   workspace,
   "--artifact-root",
@@ -210,8 +276,18 @@ const argvOf = (
       spec.fabric.space,
       "--max-confidentiality",
       JSON.stringify(spec.fabric.maxConfidentiality),
+      ...(Object.keys(spec.fabric.foreignSpaces ?? {}).length > 0
+        ? [
+          "--fabric-foreign-spaces",
+          JSON.stringify(spec.fabric.foreignSpaces),
+        ]
+        : []),
     ]
     : []),
+  ...(spec.patternIndexUrl !== undefined
+    ? ["--pattern-index-url", spec.patternIndexUrl]
+    : []),
+  ...(spec.patternIndexPublish === false ? ["--no-pattern-index-publish"] : []),
   ...(spec.loomRetrievalConfigPath !== undefined
     ? ["--loom-retrieval-config", spec.loomRetrievalConfigPath]
     : []),
@@ -261,8 +337,9 @@ export const selectHarnessJobSandboxRuntime = (
 /**
  * Runs one job. It ends `completed` with the value the model submitted and
  * the handles the job held; `cancelled` when its signal aborted; `failed` as
- * `LIMIT_REACHED` when the model-turn limit ended it, as `INVALID_RESULT`
- * when the loop completed without a result satisfying its schema, and as
+ * `LIMIT_REACHED` when the model-turn limit ended it, as `INVALID_RESULT`,
+ * with the validator's reason, when the loop completed without a result
+ * satisfying its schema, and as
  * `PROVIDER_FAILURE` when the model or a tool failed, or when a validated
  * result could not be read back.
  */
@@ -294,9 +371,12 @@ export const runHarnessJob = async (
   const createInnerLoop = options.harnessDeps?.createPromptLoop ??
     ((loopOptions: CreateHarnessPromptLoopOptions) =>
       new CfHarnessPromptLoop(loopOptions));
+  const env = { ...(options.harnessDeps?.env ?? processCfHarnessCliEnv()) };
+  for (const key of HARNESS_JOB_GRANT_ENV_KEYS) delete env[key];
   const deps: RunCfHarnessCliDependencies = {
     ...options.harnessDeps,
     ...SANDBOX_SELECTION,
+    env,
     ...(spec.commandJobId !== undefined
       ? { commandJobId: spec.commandJobId }
       : {}),
@@ -350,13 +430,16 @@ export const runHarnessJob = async (
   }
   const report = reportOf(loopResult);
   if (exitCode !== 0) {
-    return {
-      outcome: "failed",
-      errorCode: resultValidation?.status === "invalid"
-        ? INVALID_RESULT
-        : PROVIDER_FAILURE,
-      report,
-    };
+    return resultValidation?.status === "invalid"
+      ? {
+        outcome: "failed",
+        errorCode: INVALID_RESULT,
+        ...(resultValidation.validation_error !== undefined
+          ? { errorDetail: resultValidation.validation_error }
+          : {}),
+        report,
+      }
+      : { outcome: "failed", errorCode: PROVIDER_FAILURE, report };
   }
 
   let structuredResult: unknown;

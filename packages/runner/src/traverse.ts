@@ -60,6 +60,7 @@ import {
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import { schemaTypesAreDisjoint } from "./schema-type-disjointness.ts";
 import type {
   CellScope,
   JSONObject,
@@ -75,7 +76,7 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
@@ -1638,6 +1639,17 @@ export type TraversalContext = {
   traverseCells: boolean;
 
   /**
+   * Whether an inline object or array held in an array is traversed at its
+   * address in the document that stores it. Otherwise the traversal gives
+   * such an element a `data:` address carrying a snapshot of its value, which
+   * is what gives the object a read returns its value identity. A walk that
+   * selects documents for a storage engine sets this: it returns no object,
+   * so the snapshot buys it nothing, and its storage holds no document at a
+   * `data:` address, so each read under one is a lookup that finds nothing.
+   */
+  inlineArrayItemsInPlace: boolean;
+
+  /**
    * Reports a followed link whose target document is absent from the local
    * replica. Cross-space targets (target space !== `sourceSpace`) can never
    * be covered by the source doc's per-space subscription; same-space
@@ -1780,6 +1792,7 @@ export function createTraversalContext(
     schemaTracker,
     scopeKeyIdentity,
     traverseCells,
+    inlineArrayItemsInPlace: false,
     onMissingLinkTarget,
     missingLinkTargets: 0,
     missingLinkTargetDocs: new Set<string>(),
@@ -3559,29 +3572,6 @@ export function combineSchemaForLink(
     _combineLinkSchemaCache,
     key,
     schemaWithProperties(parentSchema, { default: linkDefault }),
-  );
-}
-
-function schemaTypesAreDisjoint(
-  parentType: JSONSchemaObj["type"],
-  linkType: JSONSchemaObj["type"],
-): boolean {
-  if (parentType === undefined || linkType === undefined) return false;
-
-  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
-  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
-    return false;
-  }
-
-  return !parentTypes.some((parent) =>
-    linkTypes.some((link) =>
-      parent === link ||
-      (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number") ||
-      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
-      (link === "object" && isFabricPrimitiveSchemaType(parent))
-    )
   );
 }
 
@@ -5448,7 +5438,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell to hold the object, except when it is requested as Cell. While
       // this means updates aren't propagated, it seems like the right trade-off
       // for stability of links and the ability to mutate them without creating
-      // loops (see below).
+      // loops (see below). A traversal whose context sets
+      // `inlineArrayItemsInPlace` traverses the element where it is stored
+      // instead.
       //
       // This makes
       // ```ts
@@ -5588,30 +5580,42 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
         }
       } else if (
+        !this.context.inlineArrayItemsInPlace &&
         arrayItemUsesValueIdentity(item, curSelector.schema)
       ) {
-        // We create an element link, but this is just to establish the id if we encounter
-        // other links in our data value and we need to construct a relative link.
+        // An inline object or array gets a `data:` address carrying a
+        // snapshot of its value, so that the object a read returns copies
+        // the data when written elsewhere; a link to this slot would name
+        // whatever the slot holds next.
+        //
+        // A context that sets `inlineArrayItemsInPlace` does not take this
+        // branch. Its traversal goes through the element at its address in
+        // the document that stores it, like any other nested value, so it
+        // mints no id and issues no read at a `data:` address.
+        //
+        // The element link exists to give the snapshot an id for the links
+        // inside the element that name no document.
         const elementLink = getNormalizedLink(
           curDoc.address,
           curSelector.schema,
         );
-        // Replace doc with a DataCellURI style doc
-        // Need to read recursively here
+        // The snapshot's address keeps this document's space, which is where
+        // a link inside the element resolves the references in its schema.
+        // The snapshot is of the whole element, so the read is recursive.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        // A link inside the element that names no document takes its id from
+        // the address it is read under, which under the `data:` address is
+        // the snapshot. The walk continues over the element with each such
+        // link given the id of the document storing the element.
+        const snapshot = dataUriSnapshotWithResolvedLinks(
+          curDoc.value,
+          elementLink,
+        );
         const elementAddress = curDoc.address;
-        // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
-        // Right now, we aren't passing both the link info and doc info, so we
-        // will override the doc here.
-        // I could switch based off the traverseCells flag (true for queries),
-        // but I don't want to have that change behavior here.
         curDoc = {
           ...curDoc,
-          address: {
-            ...curDoc.address,
-            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
-            path: ["value"],
-          },
+          address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
+          value: snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;

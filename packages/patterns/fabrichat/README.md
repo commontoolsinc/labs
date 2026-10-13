@@ -26,8 +26,8 @@ controls admit sends, edits, deletions, reactions, and permanent removal.
 Ownership checks in writers use the authenticated principal, independently of
 profile selection. Display controls use the principal attested by the viewer's
 profile. Without that attestation, original-sender controls are unavailable.
-Root rooms keep request bookkeeping in a separate protected document from their
-creation metadata.
+Room records and request bookkeeping use separately protected documents from
+their creation metadata.
 
 The room offers the latest 100 main-conversation messages and up to 50 fixed
 session windows. A window retains original message links, so edits and removal
@@ -35,12 +35,11 @@ remain visible without moving the window when new messages arrive. The UI has
 thread navigation, older-message navigation, version history, and a composer
 shared by placements in the same session. A refused send preserves its draft.
 
-Activity has a ten-minute display window; the reactive clock expires idle
-entries from the public view. Writers prune expired storage when recording the
-next event. The expiration watermark is independent of permanent removal.
-Request identities remain remembered after removal. They are retained for the
-room's lifetime because the runtime does not establish a finite maximum event
-redelivery delay.
+Activity has a ten-minute retention window; writers prune expired entries when
+recording the next event. The expiration watermark is independent of permanent
+removal. Request identities remain remembered after removal. They are retained
+for the room's lifetime because the runtime does not establish a finite maximum
+event redelivery delay.
 
 ## Manager and clients
 
@@ -53,22 +52,24 @@ Home's shared-space catalog supplies the manager's rooms. Creating or accepting
 a room registers its space; forgetting archives the catalog entry at the
 revision the client observed. The manager retains its direct-room lookup after
 forgetting, so opening that direct conversation again restores the same room.
-Immutable creation intents preserve the initial request's choices during
-resumption and coalesce concurrent starts for one counterpart.
+Creation commits the room, its grants, catalog registration, and terminal
+outcome together. Repeated requests preserve their original outcome.
 
 A client must verify direct-room container admission before creating a
 placement, as the specification requires. The placement reports the viewer's
 room access and hides room facts while access is unavailable. A group can be
 placed in a wider container, where nonmembers see its inaccessible link.
 
-The manager produces a notice for every other member, containing a room link and
-recipient, never conversation contents. A request naming a counterpart's
-attested profile also offers the room through that profile's share inbox.
-Clients acknowledge delivered notices through `delivered`. Receiving a notice
-grants no access; `accept` checks admission and the immutable creator
-attestation. A social space's own chat cannot be added to the catalog as a
-standalone room. Rooms offer Add to my chats, and each attested participant has
-a reviewed control for starting a direct conversation.
+The manager offers a room through the share inboxes of the recipient profiles
+the request names. Members offered nothing receive a notice containing a room
+link and recipient, never conversation contents. The manager's people picker
+finds profiles through the participants of its listed rooms. Clients acknowledge
+delivered notices through `delivered`. Receiving a notice grants no access;
+`accept` checks admission and the immutable creator attestation. A social
+space's own chat cannot be added to the catalog as a standalone room. Writing in
+a standalone room asks the manager to join it; the room reads no private catalog
+while writing shared messages. Each attested participant has a reviewed control
+for starting a direct conversation.
 
 ## Validation
 

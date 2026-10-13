@@ -24,10 +24,18 @@ a room to anyone its space doesn't admit.
   way. It is what keeps one person's conversation from splitting.
 - **The conversations a container shows** are the adapters the container holds,
   each linking to a placement of one room, plus the container's own chat when it
-  is a social space that has one.
+  is a social space that has one. A client that wants a `loom` root's own chat
+  sends the root's `ensureChatRoom`, which creates the room unless the root
+  names one, and reads it from `chatRoom`. A client MUST NOT create that room
+  itself: a piece created at the top level of the space is registered through
+  the root's `addPiece`, which shows it as a panel.
 - **The people a client offers** when starting a conversation from a social
   space are that space's participants, as claims, until it offers a member set
-  (see [social spaces](README.md#social-spaces)).
+  (see [social spaces](README.md#social-spaces)). When starting a group from
+  the person's chats, they are the manager's `people`, the profiles of those
+  the person shares a room with, by the principal each attests. A client names
+  each person picked there by profile, in `createGroup`'s `profiles`, so the
+  manager offers them the room.
 - **A notice** says the person has been admitted to a room. Its claim of who
   sent it is unauthenticated. Before sending `accept` for a direct room, a
   client MUST read the principal the room's `about.record` is labeled
@@ -38,6 +46,12 @@ a room to anyone its space doesn't admit.
   created the room from the same label. Whether to add the room to their list is
   the person's decision, so a client SHOULD accept only after showing them who
   created the room, and what it is.
+- **An offer** of a room needs nothing from a client. The person's host vets
+  it, registers the room in their Home's catalog, and accepts it on their
+  behalf, with `keepArchived`, so the room is in their `rooms`, and a direct
+  room is in their `direct` unless that already holds a room with its creator.
+  Either way their later `openDirect` with the creator finds the room `direct`
+  holds (see [`ChatManagerOutput`](ChatManagerOutput.md#offers)).
 
 ## Showing a room
 
@@ -66,7 +80,12 @@ A client that draws natively MUST:
   never by display name.
 - **Show members from the room's space.** A room's `participants` are its
   space's participants, as claims, plus its authors. None of them is proof that
-  someone can read the room.
+  someone can read the room. To name each of them, and to tell which one is the
+  reader, as when titling a direct room with the other person's name, a client
+  reads the room's `participantEntries`, which pairs each participant's profile
+  with the principal it attests. It is best effort and derived for each reader:
+  an entry whose profile the reader can't read holds no principal, and it is
+  not an access list.
 - **Offer any single emoji as a reaction** (see
   [`ChatReaction`](ChatReaction.md)), and show any that others have used, even
   ones the client wouldn't offer itself.
@@ -108,13 +127,26 @@ gesture on the reviewed surface its policy names:
 | add a reaction | room | `sendReaction` | `ChatReactSurface` |
 | remove a reaction | room | `deleteReaction` | `ChatReactSurface` |
 | start a conversation | manager | `openDirect`, `createGroup` | `ChatStartSurface` |
-| add a member | room's rendering | `addMember` | `ChatAddMemberSurface` |
+| add a member | room | `addMember` | `ChatAddMemberSurface` |
 
 A client that draws natively sends `addMember` through
 [the sanctioned issuing path](#the-sanctioned-issuing-path) on
-`ChatAddMemberSurface`, as it sends the acts above. It finds the stream on the
-room's output rather than in `[VIEWS]` (see
-[`ChatRoomOutput`](ChatRoomOutput.md#addmembertarget--value-string-)).
+`ChatAddMemberSurface`, as it sends the acts above. It finds the stream in
+`[VIEWS]`, beside `canAdd`, which says whether the reader may add anyone, false
+in a direct room, and `addRequests`, where each add's outcome is recorded under
+its `requestId` (see
+[`ChatRoomOutput`](ChatRoomOutput.md#addmemberrequestid-string-target--value-string--profile-cellchatprofile)).
+An add that is done carries `delivery` once it is known how the person added
+was told of the room, and until then it is still being delivered: every add
+that is done gets one. Where it is `access-only`, nobody told them, and the
+client asks the adder to send them the room's link. A client offers people to add from its
+user's manager's `people`, and names a person picked there by their profile as
+well as their address, so the manager offers the room through that profile.
+To leave the people already in the room out of its add control, it reads the
+room's `participantPrincipals`, the principals the room's `participantEntries`
+hold. It is a best-effort set to leave out, not an access list: someone who
+has been added but has never joined isn't among them, and neither is a
+participant whose profile the reader can't read.
 
 A client sends to the room's own streams, never through a placement or an
 adapter.

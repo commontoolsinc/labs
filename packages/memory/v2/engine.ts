@@ -682,6 +682,12 @@ ORDER BY seq DESC, op_index DESC
 LIMIT 1
 `;
 
+// The newest `set` or `delete` at or before a revision, searched no further
+// back than `:floor`, which is the newest snapshot's seq (see
+// {@link latestBaseAndSnapshot}). The index this walks does not cover `op`, so
+// every patch row in the range costs a table fetch; a document patched ten
+// thousand times since its last `set` has a snapshot within the last ten of
+// them, and the floor is what keeps the walk at that length.
 const SELECT_LATEST_BASE = `
 SELECT seq, op_index, op, data
 FROM revision
@@ -689,6 +695,7 @@ WHERE branch = :branch
   AND id = :id
   AND scope_key = :scope_key
   AND op IN ('set', 'delete')
+  AND seq >= :floor
   AND (
     seq < :seq OR
     (seq = :seq AND op_index <= :op_index)
@@ -706,6 +713,31 @@ WHERE branch = :branch
   AND seq <= :seq
 ORDER BY seq DESC
 LIMIT 1
+`;
+
+// The newest snapshot strictly before a seq. A snapshot at a seq holds the
+// state after every operation of that commit, so a reconstruction at an
+// exact (seq, op_index) that is not the commit's last operation on the
+// document must start below it — see {@link readRevision}.
+const SELECT_LATEST_SNAPSHOT_BELOW = `
+SELECT seq, value
+FROM snapshot
+WHERE branch = :branch
+  AND id = :id
+  AND scope_key = :scope_key
+  AND seq < :seq
+ORDER BY seq DESC
+LIMIT 1
+`;
+
+const SELECT_REVISION_ROW = `
+SELECT seq, op_index, op, data
+FROM revision
+WHERE branch = :branch
+  AND id = :id
+  AND scope_key = :scope_key
+  AND seq = :seq
+  AND op_index = :op_index
 `;
 
 const SELECT_PATCHES = `
@@ -747,11 +779,29 @@ SELECT COALESCE(MAX(seq), 0) AS seq
 FROM "commit"
 `;
 
+const SELECT_DATA_VERSION = `PRAGMA data_version`;
+
 const SELECT_EXISTING_COMMIT = `
 SELECT seq, branch, original, resolution, class, holder
 FROM "commit"
 WHERE session_id = :session_id
   AND local_seq = :local_seq
+`;
+
+// The oldest row an instance still has, with the commit it is attributed to.
+// Compaction (docs/plans/compact-space.md, I4) attributes the boundary row of
+// every instance it truncates to a commit stamped with
+// {@link COMPACTION_SESSION_PREFIX}, so this row says whether history below
+// it was deleted or never existed — see {@link historyCompactedBelow}.
+const SELECT_OLDEST_REVISION_ATTRIBUTION = `
+SELECT r.seq AS seq, c.class AS class, c.session_id AS session_id
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+ORDER BY r.seq ASC, r.op_index ASC
+LIMIT 1
 `;
 
 // The derived-class admission read (serving-loop.md §2): the space's LIVE
@@ -916,14 +966,18 @@ interface PreparedStatements {
   selectBranches: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectDataVersion: PreparedStatement;
   selectCurrentEntityId: PreparedStatement;
   selectCurrentEntityIds: PreparedStatement;
   selectCurrentEntityIdPage: PreparedStatement;
   selectCurrentEntityIdPageAfter: PreparedStatement;
   selectExistingCommit: PreparedStatement;
+  selectOldestRevisionAttribution: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
   selectLatestSnapshot: PreparedStatement;
+  selectLatestSnapshotBelow: PreparedStatement;
+  selectRevisionRow: PreparedStatement;
   selectLiveExecutionLease: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
@@ -940,6 +994,51 @@ interface PreparedStatements {
   deleteBranch: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
 }
+
+/**
+ * The session id prefix of a compaction commit: the `system`-class commit
+ * `cf space compact` inserts, which every row it rewrites or re-attributes
+ * points at (docs/plans/compact-space.md, I4). No client session carries it;
+ * the engine reads it as the mark that history below a row was deleted.
+ */
+export const COMPACTION_SESSION_PREFIX = "compaction:";
+
+/**
+ * Whether the instance's history below `basisSeq` was compacted away, as
+ * opposed to never having existed.
+ *
+ * Reconstructing a basis reads the newest row at or before it, and a basis
+ * older than the instance's oldest row reads as absent either way. The two
+ * must not be confused: the identity exemption replays a commit's operations
+ * on the reader's basis, and a patch applied to nothing can equal the stored
+ * document while the same patch applied to the view the reader actually
+ * held would not. Compaction marks the distinction in the store itself — the
+ * oldest surviving row of every instance it truncated points at a commit
+ * whose session id carries {@link COMPACTION_SESSION_PREFIX} — and this reads
+ * that mark and nothing else about the row: a boundary that was a `set`
+ * before compaction and one that became a `set` are the same case. An
+ * instance whose oldest row points at an ordinary commit lost nothing, and a
+ * basis older than it is a genuine absence.
+ */
+const historyCompactedBelow = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    basisSeq: number;
+  },
+): boolean => {
+  const oldest = engine.statements.selectOldestRevisionAttribution.get({
+    branch: options.branch,
+    id: options.id,
+    scope_key: options.scopeKey,
+  }) as { seq: number; class: string; session_id: string } | undefined;
+  return oldest !== undefined &&
+    options.basisSeq < oldest.seq &&
+    oldest.class === "system" &&
+    oldest.session_id.startsWith(COMPACTION_SESSION_PREFIX);
+};
 
 /** A decoded revision the engine keeps, with the encoded size it stands in
  * for in the cache's byte budget. */
@@ -979,12 +1078,13 @@ export type DocumentCacheStats = {
    * the rows after that, so what this counts is how far back the rebuild had
    * to start.
    *
-   * Every rebuild counts, whichever of the two callers asked for it: a read
-   * the cache did not serve, and the commit-time check that the pre-state a
-   * patch lands on carries no reserved schema reference. The second reads
-   * only in a space whose commits or stored rows carry such a reference, and
-   * resumes from the same cache, so it is replay work of the same kind rather
-   * than a separate population. */
+   * Every rebuild counts, whichever caller asked for it: a read the cache
+   * did not serve; the commit-time check that the pre-state a patch lands on
+   * carries no reserved schema reference, which reads only in a space whose
+   * commits or stored rows carry such a reference and resumes from the same
+   * cache; and {@link readRevision}, whose rebuild of a row that is not its
+   * commit's last operation on the document starts from a snapshot below the
+   * row's seq rather than at it, so counts the rows from there. */
   patchReplays: number;
 };
 
@@ -1042,6 +1142,10 @@ export type Engine = {
   /** The coordinator this engine's cache reports to for the bound across
    * engines (the open option of the same name), if it has one. */
   documentCacheCoordinator?: DocumentCacheCoordinator;
+
+  /** The observer of this engine's commit decisions (the open option of
+   * the same name), if it has one. */
+  commitObserver?: CommitObserver;
 
   /**
    * Where {@link cacheDocumentForRevision} puts entries while a commit is
@@ -1167,6 +1271,36 @@ export class OpCodecError extends ProtocolError {
   override name = "OpCodecError";
 }
 
+/**
+ * One commit the engine decided, as reported to the engine's
+ * {@link CommitObserver}: what every path that applies a commit names,
+ * whichever path it was.
+ */
+export type CommitDecision = {
+  /** The space the committing caller named, where it named one. An engine
+   * serves one space, so whoever opened it knows which. */
+  space?: string;
+
+  /** The session the commit was recorded under. */
+  sessionId: SessionId;
+
+  /** The principal the caller named for the commit, where it named one. */
+  principal?: string;
+
+  /** Whether the commit is durable, or was rolled back. */
+  accepted: boolean;
+
+  /** The operations the commit carried, accepted or not. */
+  operations: number;
+};
+
+/**
+ * Called once per commit the engine decides, after an accepted commit is
+ * durable or a rejected one has rolled back. An error it throws is
+ * reported and does not undo the decision.
+ */
+export type CommitObserver = (decision: CommitDecision) => void;
+
 export type OpenOptions = {
   url: URL;
   snapshotInterval?: number;
@@ -1193,6 +1327,10 @@ export type OpenOptions = {
    * retained engine's direct reads included.
    */
   documentCacheCoordinator?: DocumentCacheCoordinator;
+
+  /** The observer every commit decision is reported to; see
+   * {@link CommitObserver}. */
+  commitObserver?: CommitObserver;
 };
 
 export type InvocationRecord = {
@@ -1220,6 +1358,17 @@ export type ApplyCommitOptions = {
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
+
+  /**
+   * The committing session's client advertised `elidedVerdicts`: its replica
+   * promotes a layer the verdict elides to the document its transaction
+   * computed rather than folding the layer's ops over its confirmed base,
+   * so the identity proof holds the commit to its first condition alone: a
+   * write that reaches the stored document from the reader's view is an
+   * identity even where replaying it on the stored document would change
+   * it, as a positional `splice` does. Absent, both conditions apply.
+   */
+  elidedVerdicts?: boolean;
 
   /** The commit's class (docs/specs/server-side-execution/protocol.md §1),
    *  determined by the ADMISSION PATH that processed the commit — the
@@ -1340,9 +1489,15 @@ export type AppliedCommit = {
   replayed?: true;
 
   /**
-   * Operation indexes whose `cid:` set matched the stored content exactly
-   * and applied as a no-op: no revision, no head advance, no dirty mark.
-   * The commit itself still records and advances the space log.
+   * Operation indexes that applied as a no-op: a `cid:` set that matched
+   * the stored content exactly, or every operation of an identity commit
+   * (03-commit-model.md §3.6.1). An elided operation produced no revision,
+   * advanced no head, and marked nothing dirty. The commit itself still
+   * records and advances the space log, and a replica that advertised
+   * `elidedVerdicts` promotes a pending layer every operation of which is
+   * listed here to the document its transaction computed where the commit
+   * read the document, which is when the identity proof established that
+   * document is the stored one.
    */
   elidedOpIndexes?: number[];
 
@@ -1606,6 +1761,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranches: database.prepare(SELECT_BRANCHES),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectDataVersion: database.prepare(SELECT_DATA_VERSION),
   selectCurrentEntityId: database.prepare(SELECT_CURRENT_ENTITY_ID),
   selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
   selectCurrentEntityIdPage: database.prepare(SELECT_CURRENT_ENTITY_ID_PAGE),
@@ -1613,9 +1769,14 @@ const prepareStatements = (database: Database): PreparedStatements => ({
     SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
   ),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
+  selectOldestRevisionAttribution: database.prepare(
+    SELECT_OLDEST_REVISION_ATTRIBUTION,
+  ),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
+  selectLatestSnapshotBelow: database.prepare(SELECT_LATEST_SNAPSHOT_BELOW),
+  selectRevisionRow: database.prepare(SELECT_REVISION_ROW),
   selectLiveExecutionLease: database.prepare(SELECT_LIVE_EXECUTION_LEASE),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
@@ -2040,6 +2201,7 @@ export const open = async (
     documentCacheBudgetBytes = DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES,
     documentCacheMaxEntries = DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES,
     documentCacheCoordinator,
+    commitObserver,
   }: OpenOptions,
 ): Promise<Engine> => {
   if (
@@ -2091,6 +2253,7 @@ export const open = async (
     ...(documentCacheCoordinator === undefined
       ? {}
       : { documentCacheCoordinator }),
+    ...(commitObserver === undefined ? {} : { commitObserver }),
     branchStates: new Map(),
   };
 };
@@ -2762,6 +2925,21 @@ export const headSeq = (
 export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
+
+/**
+ * SQLite's `PRAGMA data_version` on this engine's connection. It differs
+ * between two readings when another connection committed to the store in
+ * between, and never for this connection's own commits, so two equal
+ * readings mean that what was read from the store between them has not been
+ * changed by another connection. A reading that differs may also follow a
+ * commit that changed nothing the caller read, which costs it one re-read.
+ * The reading comes from the connection's current snapshot, so inside a
+ * transaction it describes what that transaction sees, and it is one
+ * prepared pragma step.
+ */
+export const dataVersion = (engine: Engine): number =>
+  (engine.statements.selectDataVersion.get() as { data_version: number })
+    .data_version;
 
 // Event-append admission (server-execution v2 Phase 3, D-v2-1;
 // events.md §1, §4; protocol.md §2's event-append rows). ONE stamping
@@ -3680,6 +3858,45 @@ const transformEffectsDocOperation = <
   return cloned;
 };
 
+/**
+ * Helper for the commit entry points, which takes down what the observer
+ * will be told about a commit at the moment it is applied, so a caller that
+ * reuses or edits its options afterwards changes nothing already recorded.
+ * The operation count is the submitted array length, including for rejected
+ * commits; malformed non-array operations count as zero.
+ */
+const decisionOf = (
+  options: ApplyCommitOptions,
+  accepted: boolean,
+): CommitDecision => {
+  const operations = options.commit.operations;
+  return {
+    ...(options.space === undefined ? {} : { space: options.space }),
+    sessionId: options.sessionId,
+    ...(options.principal === undefined
+      ? {}
+      : { principal: options.principal }),
+    accepted,
+    operations: Array.isArray(operations) ? operations.length : 0,
+  };
+};
+
+/**
+ * Helper for the commit entry points, which reports one decision to the
+ * engine's observer. It runs after the decision is settled, so an error
+ * the observer throws cannot undo a durable commit: it is reported and
+ * otherwise ignored.
+ */
+const observeCommit = (engine: Engine, decision: CommitDecision): void => {
+  const observer = engine.commitObserver;
+  if (observer === undefined) return;
+  try {
+    observer(decision);
+  } catch (error) {
+    console.error("memory v2: commit observer threw", error);
+  }
+};
+
 export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
@@ -3717,10 +3934,33 @@ export const runAtomicCommit = <T>(
   }
   const staged = new Map<string, DocumentCacheEntry>();
   engine.stagedDocumentCache = staged;
+  // Every commit the operation applied, as the observer will be told of it
+  // once the transaction has settled: one that threw is rejected either
+  // way, and one that applied is accepted only if the transaction then
+  // commits, since an operation may catch a failed apply and carry on.
+  const decided: CommitDecision[] = [];
   try {
-    const applied = engine.database.transaction(() =>
-      operation((options) => applyCommitTransaction(engine, options))
-    ).immediate();
+    let applied: T;
+    try {
+      applied = engine.database.transaction(() =>
+        operation((options) => {
+          try {
+            const result = applyCommitTransaction(engine, options);
+            decided.push(decisionOf(options, true));
+            return result;
+          } catch (error) {
+            decided.push(decisionOf(options, false));
+            throw error;
+          }
+        })
+      ).immediate();
+    } catch (error) {
+      for (const decision of decided) {
+        observeCommit(engine, { ...decision, accepted: false });
+      }
+      throw error;
+    }
+    for (const decision of decided) observeCommit(engine, decision);
     // Durable now, so what was read from those rows can be remembered. A
     // revision the cache already holds was served from it rather than
     // staged, so a present key here is not expected; skipping it keeps the
@@ -4073,7 +4313,7 @@ export const applyWaveCommit = (
     outboxAppends?: readonly OutboxAppendRow[];
   },
 ): AppliedCommit => {
-  return engine.database.transaction(
+  const applyUnderTransaction = engine.database.transaction(
     (txEngine: Engine, txOptions: typeof options) => {
       const { waveBasis, basisInstances, outboxAppends, ...restOptions } =
         txOptions;
@@ -4238,7 +4478,17 @@ export const applyWaveCommit = (
       }
       return applied;
     },
-  ).immediate(engine, options);
+  );
+  const decision = decisionOf(options, true);
+  let applied: AppliedCommit;
+  try {
+    applied = applyUnderTransaction.immediate(engine, options);
+  } catch (error) {
+    observeCommit(engine, { ...decision, accepted: false });
+    throw error;
+  }
+  observeCommit(engine, decision);
+  return applied;
 };
 
 // Per-version record of stored schema documents whose content verified
@@ -4986,6 +5236,7 @@ const applyCommitTransaction = (
     delegated,
     systemEventActor,
     allowEmptyOperations,
+    elidedVerdicts = false,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   // The derived-class posture gate (protocol.md §1): off the flag NOTHING
@@ -5832,12 +6083,14 @@ const applyCommitTransaction = (
   // operations on it in order: replayed on the document as the commit's
   // read of it saw it, the sequence yields the stored document, and
   // replayed on the stored document it leaves that unchanged. The second
-  // condition is for the writer's own replica, which re-folds the
-  // operations over whatever confirmed base it holds when the accept
-  // arrives: a sequence idempotent on the durable value lands on that value
-  // from any base between the read and the head, where a positional splice
-  // replayed over a base already carrying its elements would duplicate
-  // them.
+  // condition is for a writer's replica that re-folds the operations over
+  // whatever confirmed base it holds when the accept arrives: a sequence
+  // idempotent on the durable value lands on that value from any base
+  // between the read and the head, where a positional splice replayed over
+  // a base already carrying its elements would duplicate them. A replica
+  // that promotes an elided layer to the document its transaction computed
+  // (`elidedVerdicts`) needs no such guarantee, and its commits are held to
+  // the first condition alone.
   type DocumentOps = Array<
     Extract<typeof commit.operations[number], { op: "set" | "patch" }>
   >;
@@ -5871,7 +6124,10 @@ const applyCommitTransaction = (
   // that names another branch says nothing about this one and is passed
   // over. A basis below the branch's creation seq is not a state of this
   // branch (06-branching.md §6.10.1), so such a read leaves the view
-  // unreconstructable as well. With no read of the document at all the
+  // unreconstructable as well, and so does a basis below the point to which
+  // compaction truncated the instance's history: what the reader saw there
+  // is gone, and an absent document would stand in for it (see
+  // historyCompactedBelow). With no read of the document at all the
   // sequence is an identity only where it is idempotent, so the stored
   // document is the basis.
   type Basis =
@@ -5885,7 +6141,15 @@ const applyCommitTransaction = (
     first: DocumentOps[number],
     stored: EntityDocument,
     at: (seq: number) => EntityDocument | null,
+    scopeKey: string,
   ): Basis => {
+    const compactedBelow = (basisSeq: number): boolean =>
+      historyCompactedBelow(engine, {
+        branch,
+        id: first.id,
+        scopeKey,
+        basisSeq,
+      });
     const sameDocument = (candidate: { id: string; scope?: unknown }) =>
       candidate.id === first.id &&
       normalizeScope(
@@ -5901,6 +6165,7 @@ const applyCommitTransaction = (
       ) {
         return { known: false };
       }
+      if (compactedBelow(pending.basisSeq)) return { known: false };
       let document = documentAt(pending.basisSeq);
       const layers = [...pendingReadLayers(pending)].sort((a, b) => a - b);
       for (const localSeq of layers) {
@@ -5928,6 +6193,7 @@ const applyCommitTransaction = (
     );
     if (confirmed === undefined) return { known: true, document: stored };
     if (confirmed.seq < branchCreatedSeq) return { known: false };
+    if (compactedBelow(confirmed.seq)) return { known: false };
     return { known: true, document: documentAt(confirmed.seq) };
   };
   // Proving the identity reads the stored document and, for a patch, the
@@ -5963,6 +6229,11 @@ const applyCommitTransaction = (
     }
     for (const { opIndex, operations } of byDocument.values()) {
       const first = operations[0];
+      const scopeKey = scopeKeyByOpIndex.get(opIndex) ??
+        resolveScopeKey(first.scope, {
+          principal: scanPrincipal,
+          sessionId: scanSession,
+        });
       const at = (seq?: number) =>
         read(engine, {
           id: first.id,
@@ -5971,7 +6242,7 @@ const applyCommitTransaction = (
           scope: first.scope,
           principal: scanPrincipal,
           sessionId: scanSession,
-          scopeKey: scopeKeyByOpIndex.get(opIndex),
+          scopeKey,
         });
       const stored = at();
       if (stored === null) return false;
@@ -5980,15 +6251,17 @@ const applyCommitTransaction = (
       // staleness refusal the commit arrived with stands; the ordinary
       // apply path reports a patch's own failure on the retry.
       try {
-        const basis = basisOf(first, stored, at);
+        const basis = basisOf(first, stored, at, scopeKey);
         if (!basis.known) return false;
         const fromBasis = replay(basis.document, operations);
-        const onStored = replay(stored, operations);
-        if (
-          !valueEqual(fromBasis as FabricValue, stored as FabricValue) ||
-          !valueEqual(onStored as FabricValue, stored as FabricValue)
-        ) {
+        if (!valueEqual(fromBasis as FabricValue, stored as FabricValue)) {
           return false;
+        }
+        if (!elidedVerdicts) {
+          const onStored = replay(stored, operations);
+          if (!valueEqual(onStored as FabricValue, stored as FabricValue)) {
+            return false;
+          }
         }
       } catch {
         return false;
@@ -6909,18 +7182,20 @@ const resolvePendingReads = (
     // staleness, not from the protocol.
     const trueBasis = read.basisSeq;
     if (!options.checkStaleness) continue;
-    const conflictSeq = trueBasis !== undefined
-      ? findConflictSeq(
+    const scanTrueBasis = (afterSeq: number) =>
+      findConflictSeq(
         engine,
         scans,
         branch,
         read.id,
         resolveScopeKey(read.scope, { principal, sessionId }),
-        trueBasis,
+        afterSeq,
         read.path,
         read.nonRecursive ?? false,
         { sessionKey, namedLocalSeqs: layers },
-      )
+      );
+    let conflictSeq = trueBasis !== undefined
+      ? scanTrueBasis(trueBasis)
       : findConflictSeq(
         engine,
         scans,
@@ -6931,6 +7206,25 @@ const resolvePendingReads = (
         read.path,
         read.nonRecursive ?? false,
       );
+    // A named layer the store accepted as an identity wrote nothing, so the
+    // foreign write its proof matched stands in the interval as though the
+    // reader had not seen it. Where the reader's view of the document is the
+    // one that proof was made against, the scan starts at that layer's seq
+    // instead (03-commit-model.md §3.6.3). It is looked for only once the
+    // declared basis has found a conflict, so a read that validates pays
+    // nothing for it.
+    if (conflictSeq !== null && trueBasis !== undefined) {
+      const identityBasis = identityLayerBasis(
+        engine,
+        sessionKey,
+        branch,
+        read,
+        layers,
+      );
+      if (identityBasis > trueBasis) {
+        conflictSeq = scanTrueBasis(identityBasis);
+      }
+    }
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale pending read: ${read.id} via localSeq ${
@@ -6948,6 +7242,85 @@ const resolvePendingReads = (
   }
 
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
+};
+
+/**
+ * Helper for `resolvePendingReads()`, which returns the highest seq at which
+ * one of the own-session `layers` a true-basis pending read names was
+ * accepted as an identity commit for the read's document, where the reader's
+ * view of the document through that layer is the view the identity was proved
+ * against, or the read's declared `basisSeq` when no named layer qualifies
+ * (03-commit-model.md §3.6.3).
+ *
+ * An identity commit elides every operation (§3.6.1), so the layer leaves no
+ * revision for the staleness scan to exclude, while the write its proof
+ * matched is a foreign revision inside the read's interval. The proof
+ * established that the stored document at the layer's seq is the one the
+ * layer's transaction computed from its own view, and the reader's view
+ * through the layer is that document when the layer's operations on it begin
+ * with a `set`, whose value is independent of any base, or when the read of
+ * the document the proof reconstructed the layer's view from sat on the basis
+ * the reader declares, through no own layer the reader does not name. Below
+ * that seq the document holds exactly what the reader saw, so nothing there
+ * can make the read stale.
+ */
+const identityLayerBasis = (
+  engine: Engine,
+  sessionKey: string,
+  branch: BranchName,
+  read: ClientCommit["reads"]["pending"][number],
+  layers: readonly number[],
+): number => {
+  const basisSeq = read.basisSeq!;
+  const scope = normalizeScope(read.scope);
+  const sameDocument = (candidate: { id: string; scope?: CellScope }) =>
+    candidate.id === read.id && normalizeScope(candidate.scope) === scope;
+  let identityBasis = basisSeq;
+  for (const localSeq of layers) {
+    const row = engine.statements.selectExistingCommit.get({
+      session_id: sessionKey,
+      local_seq: localSeq,
+    }) as CommitRow | undefined;
+    if (row === undefined || row.seq <= identityBasis) continue;
+    if ((row.branch || DEFAULT_BRANCH) !== branch) continue;
+    const layer = decodeTrustedMemoryBoundary(row.original) as ClientCommit;
+    const opIndexes: number[] = [];
+    let replayable = true;
+    for (const [opIndex, operation] of layer.operations.entries()) {
+      if (operation.op === "sqlite" || !sameDocument(operation)) continue;
+      if (operation.op !== "set" && operation.op !== "patch") {
+        replayable = false;
+        break;
+      }
+      opIndexes.push(opIndex);
+    }
+    if (!replayable || opIndexes.length === 0) continue;
+    const written = new Set(
+      (engine.statements.selectCommitRevisions.all({
+        commit_seq: row.seq,
+      }) as RevisionRow[]).map((revision) => revision.op_index),
+    );
+    if (opIndexes.some((opIndex) => written.has(opIndex))) continue;
+    // The read the identity proof reconstructed the layer's view from, chosen
+    // as `applyCommitTransaction()`'s `basisOf()` chooses it: the first
+    // pending read of the document, else its first confirmed read on the
+    // branch. Another read of the document beside it proved nothing.
+    const provedPending = layer.reads.pending.find(sameDocument);
+    const provedConfirmed = provedPending === undefined
+      ? layer.reads.confirmed.find((candidate) =>
+        sameDocument(candidate) && (candidate.branch ?? branch) === branch
+      )
+      : undefined;
+    const viewIsProved = layer.operations[opIndexes[0]].op === "set" ||
+      (provedPending !== undefined &&
+        provedPending.basisSeq === basisSeq &&
+        pendingReadLayers(provedPending).every((named) =>
+          layers.includes(named)
+        )) ||
+      provedConfirmed?.seq === basisSeq;
+    if (viewIsProved) identityBasis = row.seq;
+  }
+  return identityBasis;
 };
 
 /** A true-basis read's exclusion of the own-session layers it names. */
@@ -7433,6 +7806,51 @@ const validateStatefulEntityRevisions = (
   }
 };
 
+/**
+ * The two rows a reconstruction at `(seq, opIndex)` can start from: the
+ * newest snapshot at or before `seq` — strictly before it under
+ * `snapshotBelow`, for a reconstruction at a row that is not its commit's
+ * last on the document — and the newest `set` or `delete` at or before the
+ * revision but no older than that snapshot. A base older than the
+ * snapshot never wins the choice between them (the snapshot already holds its
+ * effect and every patch since), so the base lookup is bounded below by the
+ * snapshot's seq rather than walking the document's whole patch history to
+ * find a `set` it would then discard.
+ */
+const latestBaseAndSnapshot = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    seq: number;
+    opIndex: number;
+    /** Consider only snapshots strictly before `seq`: the reconstruction is
+     * at an exact row rather than at the end of its commit. */
+    snapshotBelow?: boolean;
+  },
+): { baseRow: ReadRow | undefined; snapshotRow: SnapshotRow | undefined } => {
+  const { branch, id, scopeKey, seq, opIndex } = options;
+  const snapshotStatement = options.snapshotBelow
+    ? engine.statements.selectLatestSnapshotBelow
+    : engine.statements.selectLatestSnapshot;
+  const snapshotRow = snapshotStatement.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+  }) as SnapshotRow | undefined;
+  const baseRow = engine.statements.selectLatestBase.get({
+    branch,
+    id,
+    scope_key: scopeKey,
+    seq,
+    op_index: opIndex,
+    floor: snapshotRow?.seq ?? 0,
+  }) as ReadRow | undefined;
+  return { baseRow, snapshotRow };
+};
+
 /** Substring probe over the serialized rows reconstruction would read — the
  *  latest set/snapshot base and the patch span — without decoding any of
  *  them. A negative answer proves the reconstructed pre-state cannot contain
@@ -7448,19 +7866,13 @@ const storedEntitySourcesMayContainRef = (
   },
 ): boolean => {
   const { id, scopeKey, branch, seq, opIndex } = options;
-  const baseRow = engine.statements.selectLatestBase.get({
+  const { baseRow, snapshotRow } = latestBaseAndSnapshot(engine, {
     branch,
     id,
-    scope_key: scopeKey,
+    scopeKey,
     seq,
-    op_index: opIndex,
-  }) as ReadRow | undefined;
-  const snapshotRow = engine.statements.selectLatestSnapshot.get({
-    branch,
-    id,
-    scope_key: scopeKey,
-    seq,
-  }) as SnapshotRow | undefined;
+    opIndex,
+  });
 
   let baseSeq = 0;
   let baseOpIndex = -1;
@@ -7556,20 +7968,73 @@ const latestMaterializationSeq = (
   scopeKey: string,
   seq: number,
 ): number => {
-  const baseRow = engine.statements.selectLatestBase.get({
+  const { baseRow, snapshotRow } = latestBaseAndSnapshot(engine, {
     branch,
     id,
-    scope_key: scopeKey,
+    scopeKey,
     seq,
-    op_index: Number.MAX_SAFE_INTEGER,
-  }) as ReadRow | undefined;
-  const snapshotRow = engine.statements.selectLatestSnapshot.get({
-    branch,
-    id,
-    scope_key: scopeKey,
-    seq,
-  }) as SnapshotRow | undefined;
+    opIndex: Number.MAX_SAFE_INTEGER,
+  });
   return Math.max(baseRow?.seq ?? 0, snapshotRow?.seq ?? 0);
+};
+
+/**
+ * The document a stored revision row produces: the state after exactly that
+ * row, and before any later operation the same commit applied to the
+ * document.
+ *
+ * {@link read} at a seq returns the state after the whole commit, which is
+ * what every reader wants: a commit's operations on one document land
+ * together. One caller wants the row instead — the compaction tool
+ * (docs/plans/compact-space.md, §1 option (a)), when a bounded cut falls
+ * between two operations of one commit on one document and the boundary it
+ * materializes must hold the state the kept operations then replay over. A
+ * snapshot at the row's own seq holds the state after the commit's last
+ * operation, so the reconstruction starts from a snapshot strictly below the
+ * seq, or from the newest `set` or `delete` before the row, and replays the
+ * patches up to and including the row. Throws when no such row exists.
+ */
+export const readRevision = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    id: EntityId;
+    scopeKey?: string;
+    seq: number;
+    opIndex: number;
+  },
+): EntityDocument | null => {
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const scopeKey = options.scopeKey ?? DEFAULT_SCOPE_KEY;
+  const row = engine.statements.selectRevisionRow.get({
+    branch,
+    id: options.id,
+    scope_key: scopeKey,
+    seq: options.seq,
+    op_index: options.opIndex,
+  }) as ReadRow | undefined;
+  if (row === undefined) {
+    throw new Error(
+      `no revision of ${options.id} at seq ${options.seq} op_index ${options.opIndex}`,
+    );
+  }
+  switch (row.op) {
+    case "set":
+      return decodeStoredDocument(row.data);
+    case "delete":
+      return null;
+    case "patch":
+      return reconstructPatchedDocument(engine, {
+        id: options.id,
+        scopeKey,
+        branch,
+        seq: row.seq,
+        opIndex: row.op_index,
+        exact: true,
+      }).document;
+    default:
+      throw new Error(`unexpected stored revision op: ${row.op}`);
+  }
 };
 
 const reconstructPatchedDocument = (
@@ -7580,22 +8045,21 @@ const reconstructPatchedDocument = (
     branch: BranchName;
     seq: number;
     opIndex: number;
+    /** Reconstruct the state after exactly this row; see
+     * {@link readRevision} for why a snapshot at the row's own seq is then
+     * not a base. */
+    exact?: boolean;
   },
 ): { document: EntityDocument; encodedBytes: number } => {
   const { id, scopeKey, branch, seq, opIndex } = options;
-  const baseRow = engine.statements.selectLatestBase.get({
+  const { baseRow, snapshotRow } = latestBaseAndSnapshot(engine, {
     branch,
     id,
-    scope_key: scopeKey,
+    scopeKey,
     seq,
-    op_index: opIndex,
-  }) as ReadRow | undefined;
-  const snapshotRow = engine.statements.selectLatestSnapshot.get({
-    branch,
-    id,
-    scope_key: scopeKey,
-    seq,
-  }) as SnapshotRow | undefined;
+    opIndex,
+    snapshotBelow: options.exact === true,
+  });
 
   let baseSeq = 0;
   let baseOpIndex = -1;

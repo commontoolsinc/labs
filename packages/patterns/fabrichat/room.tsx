@@ -1,1752 +1,1478 @@
 /**
- * Stores an attested conversation with exact times, request deduplication,
- * editable history, reactions, and session-owned message windows.
+ * `FabriChatRoom`: one conversation, an implementation of `ChatRoomOutput`
+ * (`docs/specs/fabrichat/FabriChatRoom.md`). What the room stores, and the
+ * handlers that write it, are in `room-records.tsx`; one message's rendering
+ * is in `message-row.tsx`.
+ *
+ * Who may read and write is the business of the room's space: its access list
+ * decides. A room a manager creates is its space's root, and keeps the space's
+ * participants itself: the profiles of those who joined, each added through
+ * `addParticipant`, the roster's one writer (`../loom/participants.tsx`). A
+ * room in some other social space, which isn't its space's root, lists that
+ * space's participants as the root lists them (`wish("#default")`), then those
+ * who joined the room itself. The room shows every author alongside them.
+ *
+ * `FabriChatRoomCore` takes the viewer's profile as an input, so a test can
+ * supply a stand-in. The default export, `FabriChatRoom`, resolves the real
+ * one with `#profile`.
  */
-
 import {
   action,
-  type AuthoredByCurrentUser,
   type Cell,
   computed,
-  currentPrincipal,
   type Default,
-  entityRefToString,
   equals,
   eventKey,
-  FabricEpochNsec,
-  getEntityId,
+  type FabricEpochNsec,
   grantSpaceAccess,
   handler,
-  lift,
   NAME,
   pattern,
   type PerSession,
-  type PerSpace,
   principalOf,
   SELF,
   spaceAccess,
   spaceOf,
-  type Stream,
-  type TrustedActionWrite,
+  Stream,
   UI,
   VIEWS,
   type VNode,
   wish,
   Writable,
-  type WriteAuthorizedBy,
-  type WritePolicyAnyOf,
 } from "commonfabric";
 import {
   addParticipant,
-  participantEntries,
   type ParticipantRosterCell,
 } from "../loom/participants.tsx";
-import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
-import type { Created } from "./manager.tsx";
-import { ParticipantChip } from "./participant.tsx";
+import { isInMain, type ShownIn, viewPlaces } from "./logic.ts";
 import {
-  CHAT_POLICY,
-  conversationView,
-  handlerTime,
-  isMainMessage,
-  isSingleEmoji,
-  proposedTime,
-  reserveTime,
-  threadRoot,
-} from "./records.ts";
+  type ActivityCell,
+  type ActivityCounters,
+  type ActivityCountersCell,
+  canActIn,
+  commitDelete,
+  commitDeleteReaction,
+  commitEdit,
+  commitObliterate,
+  commitSend,
+  commitSendReaction,
+  commitWindow,
+  compareEntries,
+  type ComposerState,
+  entryFor,
+  FABRICHAT_POLICY,
+  isObliterated,
+  isOwnerOf,
+  type JoinRoomRequest,
+  type MessageCell,
+  messageEntries,
+  type MessageEntry,
+  type MessagesCell,
+  NO_ACTIVITY,
+  NUMBERING_KEY,
+  type ReactionListsCell,
+  type RequestsCell,
+  type RoomStreamEvent,
+  type RoomWindowEvent,
+  type StoredAbout,
+  type UsedTimesCell,
+  type WindowsCell,
+  type WindowsValue,
+} from "./room-records.tsx";
+import { bodyText, FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ChatManagerFacts,
-  type ChatMessage,
-  type ChatMessageWindow,
+  type AboutRecord,
+  type AddMemberDelivery,
+  addMemberOfferId,
+  type AddMemberOutcome,
+  type AddMemberRefusalCode,
+  CHAT_ADD_MEMBER_ACTION,
+  CHAT_ADD_MEMBER_SURFACE,
+  CHAT_SEND_ACTION,
+  CHAT_SEND_SURFACE,
+  CHAT_START_ACTION,
+  CHAT_START_SURFACE,
+  type ChatDisplay,
   type ChatProfile,
-  type ChatReaction,
-  type ChatReactionTallies,
-  type ChatReply,
+  type ChatRequestOutcome,
   type ChatRoomAbout,
   type ChatRoomActivity,
+  type ChatRoomKind,
   type ChatRoomLink,
-  type ChatRoomOutput,
   type ChatRoomPolicy,
-  type ChatRoomRecord,
-  type ChatWindowAnchor,
   isPrincipalDID,
-  type ManagerStreamEvent,
-  type MessageRequest,
-  type OpenWindowRequest,
-  type SendMessageRequest,
+  type ProfileCell,
 } from "./schemas.tsx";
-import { selectWindow } from "./window.ts";
 
-/** A message version admitted by one of the room's reviewed writers. */
-export type StoredMessage = AuthoredByCurrentUser<
-  WritePolicyAnyOf<ChatMessage, [
-    TrustedActionWrite<
-      unknown,
-      typeof commitSend,
-      "ChatSend",
-      "ChatSendSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof sendMessageFromUi,
-      "ChatSend",
-      "ChatSendSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitEdit,
-      "ChatEdit",
-      "ChatEditSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof editMessageFromUi,
-      "ChatEdit",
-      "ChatEditSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitDelete,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof deleteMessageFromUi,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitObliterate,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof obliterateMessageFromUi,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-  ]>
->;
-
-/** A reaction's own label and reviewed writers, independent of its message. */
-export type StoredReaction = AuthoredByCurrentUser<
-  WritePolicyAnyOf<ChatReaction, [
-    TrustedActionWrite<
-      unknown,
-      typeof commitSendReaction,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof sendReactionFromUi,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitDeleteReaction,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof deleteReactionFromUi,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitDelete,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof deleteMessageFromUi,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitObliterate,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof obliterateMessageFromUi,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-  ]>
->;
-
-/** Bookkeeping kept across message obliteration and event redelivery. */
-export interface RoomMemory {
-  requests: Record<string, boolean>;
-  authors: Record<string, string>;
-  usedTimes: Record<string, boolean>;
-  nextSeq: number;
-  expiredThrough: number;
-}
-
-/** Bookkeeping writable only by the room's record writers. */
-export type StoredMemory = WritePolicyAnyOf<RoomMemory, [
-  WriteAuthorizedBy<unknown, typeof commitSend>,
-  WriteAuthorizedBy<unknown, typeof sendMessageFromUi>,
-  WriteAuthorizedBy<unknown, typeof commitEdit>,
-  WriteAuthorizedBy<unknown, typeof editMessageFromUi>,
-  WriteAuthorizedBy<unknown, typeof commitDelete>,
-  WriteAuthorizedBy<unknown, typeof deleteMessageFromUi>,
-  WriteAuthorizedBy<unknown, typeof commitObliterate>,
-  WriteAuthorizedBy<unknown, typeof obliterateMessageFromUi>,
-  WriteAuthorizedBy<unknown, typeof commitSendReaction>,
-  WriteAuthorizedBy<unknown, typeof sendReactionFromUi>,
-  WriteAuthorizedBy<unknown, typeof commitDeleteReaction>,
-  WriteAuthorizedBy<unknown, typeof deleteReactionFromUi>,
-]>;
-
-/** Activity records retain the authenticated actor of their own event. */
-export type StoredActivity = AuthoredByCurrentUser<
-  WritePolicyAnyOf<ChatRoomActivity, [
-    TrustedActionWrite<
-      unknown,
-      typeof commitSend,
-      "ChatSend",
-      "ChatSendSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof sendMessageFromUi,
-      "ChatSend",
-      "ChatSendSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitEdit,
-      "ChatEdit",
-      "ChatEditSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof editMessageFromUi,
-      "ChatEdit",
-      "ChatEditSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitDelete,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof deleteMessageFromUi,
-      "ChatDelete",
-      "ChatDeleteSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitObliterate,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof obliterateMessageFromUi,
-      "ChatObliterate",
-      "ChatObliterateSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitSendReaction,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof sendReactionFromUi,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof commitDeleteReaction,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-    TrustedActionWrite<
-      unknown,
-      typeof deleteReactionFromUi,
-      "ChatReact",
-      "ChatReactSurface"
-    >,
-  ]>
->;
-
-/** The internal writer bindings; identity is read at execution time. */
-export interface RoomWriterState {
-  myProfile?: Cell<ChatProfile>;
-  records: Writable<ChatMessage[]>;
-  memory: Writable<RoomMemory>;
-  activity: Writable<ChatRoomActivity[]>;
-  about: Cell<Pick<ChatRoomAbout, "kind">>;
-  uiMessage?: Cell<ChatMessage>;
-  uiEmoji?: string;
-  uiReply?: Writable<ChatReply | null>;
-  uiDraft?: Writable<string>;
-  uiThread?: Writable<{ root?: Cell<ChatMessage>; before?: FabricEpochNsec }>;
-}
-
-/** The text captured by a reviewed submit control at the gesture. */
-export interface TextGesture {
-  target?: { value?: string };
-}
-
-/** Captures the text and time of a reviewed submit gesture. */
-function uiVersion(
-  event: TextGesture,
-): SendMessageRequest["version"] | undefined {
-  return typeof event.target?.value === "string"
-    ? { body: event.target.value, sentAt: new FabricEpochNsec(handlerTime()) }
-    : undefined;
-}
-
-/** Resolves the message visibly bound to a reviewed control. */
-function messageRequest(
-  input: MessageRequest | TextGesture,
-  state: RoomWriterState,
-): MessageRequest | undefined {
-  return "requestId" in input
-    ? input
-    : state.uiMessage
-    ? { requestId: eventKey(), message: state.uiMessage }
-    : undefined;
-}
-
-/** Returns a stable record key for a resolved entity. */
-function entityKey(cell: Cell<unknown>): string | undefined {
-  const ref = getEntityId(cell.resolveAsCell());
-  return ref === undefined ? undefined : entityRefToString(ref);
-}
-
-/** Returns the authenticated sender's unspent request key. */
-function requestKey(
-  requestId: string,
-  state: RoomWriterState,
-): string | undefined {
-  const principal = currentPrincipal();
-  if (
-    !principal || !state.about.get() ||
-    typeof requestId !== "string" || !requestId.trim()
-  ) {
-    return undefined;
-  }
-  const key = JSON.stringify([principal, requestId]);
-  return state.memory.key("requests").key(key).get() ? undefined : key;
-}
-
-/** Finds the room-owned handle to an event's message. */
-function messageIndex(
-  message: Cell<ChatMessage>,
-  state: RoomWriterState,
-): number {
-  return message
-    ? state.records.get().findIndex((entry) => equals(entry, message))
-    : -1;
-}
-
-/** Returns whether the actor sent the message, independently of profile selection. */
-function isSender(message: Cell<ChatMessage>, state: RoomWriterState): boolean {
-  const key = entityKey(message);
-  return key !== undefined &&
-    state.memory.key("authors").key(key).get() === currentPrincipal();
-}
-
-/** Appends activity and advances the expiration watermark in the writer's transaction. */
-function recordActivity(
-  state: RoomWriterState,
-  requestId: string,
-  what: Cell<ChatMessage>,
-  at: ChatRoomActivity["at"],
-  now: bigint,
-  obliterated?: Cell<ChatMessage>,
-): void {
-  const expired = state.activity.get().filter((entry) =>
-    entry.at.value < now - CHAT_POLICY.recentActivityWindowNsec.value
-  );
-  const watermark = expired.reduce(
-    (highest, entry) => Math.max(highest, entry.seq),
-    state.memory.key("expiredThrough").get() ?? 0,
-  );
-  state.memory.key("expiredThrough").set(watermark);
-  const seq = state.memory.key("nextSeq").get() ?? 1;
-  state.memory.key("nextSeq").set(seq + 1);
-  state.activity.set(
-    state.activity.get().filter((entry) =>
-      entry.at.value >= now - CHAT_POLICY.recentActivityWindowNsec.value &&
-      (!obliterated || !equals(entry.what, obliterated))
+/**
+ * The room's participants: those listed, then every author not among them,
+ * each once, in the order each first appears. Two are the same person when
+ * their profiles are the same cell.
+ */
+export const participantsOf = (
+  listed: readonly ProfileCell[],
+  entries: readonly MessageEntry[],
+): ProfileCell[] =>
+  [
+    ...listed,
+    ...[...entries].sort(compareEntries).map((entry) =>
+      isObliterated(entry.record) ? undefined : entry.record.authorProfile
     ),
+  ].reduce<ProfileCell[]>(
+    (found, profile) =>
+      profile === undefined ||
+        found.some((known) => equals(known, profile))
+        ? found
+        : [...found, profile],
+    [],
   );
-  const activity = new Writable<StoredActivity>();
-  activity.set({ seq, at, requestId, what });
-  state.activity.push(activity);
+
+/** A participant, with the principal their profile attests. */
+export interface ParticipantEntry {
+  /** The participant's profile. */
+  profile: ProfileCell;
+
+  /**
+   * The principal the profile's `represents-principal` label attests; absent
+   * when it attests none, or when the label can't be read where the entry is
+   * derived.
+   */
+  principal?: string;
 }
 
-/** Records a new message from the authenticated sender, preserving its exact text. */
-function writeSend(
-  input: (SendMessageRequest) | TextGesture,
-  state: RoomWriterState,
-): void {
-  const version = "requestId" in input ? input.version : uiVersion(input);
-  if (!version) return;
-  const event: SendMessageRequest = "requestId" in input ? input : {
-    requestId: eventKey(),
-    version,
-    replyTo: state.uiReply?.get() ??
-      (state.uiThread?.get().root?.get() !== undefined
-        ? { message: state.uiThread.get().root!, shownIn: "thread" }
-        : undefined),
+/**
+ * One entry for each of `participants`, in their order, each with the
+ * principal its profile attests where that can be read.
+ */
+export const participantEntriesOf = (
+  participants: readonly ProfileCell[],
+): ParticipantEntry[] =>
+  participants.map((profile) => ({
+    profile,
+    principal: principalOf(profile, "represents-principal"),
+  }));
+
+/** The principals `entries` attest, each once, in the order of `entries`. */
+export const principalsOf = (
+  entries: readonly ParticipantEntry[],
+): string[] =>
+  entries.reduce<string[]>(
+    (found, { principal }) =>
+      principal === undefined || found.includes(principal)
+        ? found
+        : [...found, principal],
+    [],
+  );
+
+/** What joining a room asks: the profile to add to its participants. */
+export interface JoinRoomEvent {
+  /** The profile, as the live cell in its own space. */
+  profile: ProfileCell;
+}
+
+/**
+ * What a participant's chip sends its viewer's manager's `openDirect`: the
+ * click on its chat control, whose target names the person to chat with.
+ */
+export interface StartDirectEvent {
+  /** The chat control, naming the other person by their profile. */
+  readonly target?: {
+    /** The other person's profile, bound as the control's `name`. */
+    // `Cell<…>` is written out rather than reached through an alias: the
+    // event's schema marks a reference position only where the wrapper is
+    // written in the event type.
+    readonly name?: Cell<ChatProfile>;
   };
-  const key = requestKey(event.requestId, state);
-  const profile = state.myProfile?.resolveAsCell();
-  if (
-    !key || profile?.get() === undefined ||
-    typeof event.version?.body !== "string" || !event.version.body.trim()
-  ) return;
-  const now = handlerTime();
-  const proposed = proposedTime(event.version.sentAt, now);
-  if (proposed === undefined) return;
-  const targetIndex = event.replyTo
-    ? messageIndex(event.replyTo.message, state)
-    : -1;
-  if (event.replyTo && targetIndex < 0) return;
-  const target = targetIndex < 0
-    ? undefined
-    : state.records.key(targetIndex).resolveAsCell();
-  if (
-    event.replyTo && (!target || typeof target.get().body !== "string" ||
-      !["main", "thread", "both"].includes(event.replyTo.shownIn) ||
-      (event.replyTo.shownIn === "main" && !isMainMessage(target.get())))
-  ) return;
-  const floor = target && proposed <= target.get().sentAt.value
-    ? target.get().sentAt.value + 1n
-    : proposed;
-  const used = state.memory.key("usedTimes");
-  const sentAt = reserveTime(used, floor, now);
-  const at = reserveTime(used, now, now);
-  if (!sentAt || !at) return;
-  const reactions = new Writable<StoredReaction[]>([]);
-  const message = new Writable<StoredMessage>();
-  message.set({
-    authorProfile: profile,
-    body: event.version.body,
-    sentAt,
-    earlierVersions: [],
-    ...(event.replyTo
-      ? { replyTo: { message: target!, shownIn: event.replyTo.shownIn } }
-      : {}),
-    reactions: [],
-  });
-  message.key("reactions").set(reactions);
-  state.records.addUnique(message);
-  const id = entityKey(message);
-  if (id === undefined) {
-    throw new Error("A stored chat message must have an entity.");
-  }
-  state.memory.key("authors").key(id).set(currentPrincipal()!);
-  state.memory.key("requests").key(key).set(true);
-  recordActivity(state, event.requestId, message, at, now);
-  if (state.uiDraft?.get() === event.version.body) state.uiDraft.set("");
-  state.uiReply?.set(null);
 }
 
-/** Binds the protocol event directly to its verified writer. */
-export const commitSend = handler<SendMessageRequest, RoomWriterState>((
-  event,
-  state,
-) => writeSend(event, state));
+/** What a participant's chip needs. */
+export interface ParticipantChipInput {
+  /** The participant's profile. */
+  participant: ProfileCell;
 
-/** Binds the reviewed DOM event to the same room operation. */
-const sendMessageFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeSend(event, state));
+  /** The viewer's profile, which holds no value while it is unknown. */
+  myProfile: ProfileCell | undefined;
 
-/** Records a new version while retaining the sender's profile and original position. */
-function writeEdit(
-  input:
-    | (MessageRequest & { version: SendMessageRequest["version"] })
-    | TextGesture,
-  state: RoomWriterState,
-): void {
-  const request = messageRequest(input, state);
-  const version = "requestId" in input ? input.version : uiVersion(input);
-  if (!request || !version) return;
-  const event = { ...request, version };
-  const key = requestKey(event.requestId, state);
-  const index = messageIndex(event.message, state);
-  if (index < 0) return;
-  const message = state.records.key(index).resolveAsCell();
-  if (
-    !key || !message || !isSender(message, state) ||
-    state.myProfile?.get() === undefined ||
-    typeof message.get().body !== "string" ||
-    typeof event.version?.body !== "string" || !event.version.body.trim()
-  ) return;
-  const now = handlerTime();
-  const proposed = proposedTime(event.version.sentAt, now);
-  if (proposed === undefined) return;
-  const editedAt = reserveTime(state.memory.key("usedTimes"), proposed, now);
-  const at = reserveTime(state.memory.key("usedTimes"), now, now);
-  if (!editedAt || !at) return;
-  const previous = message.get();
-  message.key("earlierVersions").push({
-    body: previous.body as string,
-    sentAt: previous.editedAt ?? previous.sentAt,
-  });
-  message.key("body").set(event.version.body);
-  message.key("editedAt").set(editedAt);
-  state.memory.key("requests").key(key).set(true);
-  recordActivity(state, event.requestId, message, at, now);
+  /**
+   * Whether the viewer has a manager to start a direct chat with; absent for
+   * none.
+   */
+  startsDirect?: boolean;
+
+  /**
+   * The viewer's manager's `openDirect`, when `startsDirect` holds. The
+   * control sends its click there itself, so that the manager receives the
+   * viewer's reviewed `ChatStart`.
+   */
+  startDirect?: Stream<StartDirectEvent>;
 }
 
-/** Binds the protocol event directly to its verified writer. */
-export const commitEdit = handler<
-  MessageRequest & { version: SendMessageRequest["version"] },
-  RoomWriterState
->((event, state) => writeEdit(event, state));
-
-/** Binds the reviewed DOM event to the same room operation. */
-const editMessageFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeEdit(event, state));
-
-/** Records the sender's deletion, keeping the version it replaced. */
-function writeDelete(
-  input: (MessageRequest) | TextGesture,
-  state: RoomWriterState,
-): void {
-  const event = messageRequest(input, state);
-  if (!event) return;
-  const key = requestKey(event.requestId, state);
-  const index = messageIndex(event.message, state);
-  if (index < 0) return;
-  const message = state.records.key(index).resolveAsCell();
-  if (
-    !key || !message || !isSender(message, state) ||
-    typeof message.get().body !== "string"
-  ) return;
-  removeMessage(event, state, key, message, false);
+/** What a participant's chip provides. */
+export interface ParticipantChipOutput {
+  /** The participant's badge, and the control that starts a chat with them. */
+  [UI]: VNode;
 }
 
-/** Binds the protocol event directly to its verified writer. */
-export const commitDelete = handler<MessageRequest, RoomWriterState>((
-  event,
-  state,
-) => writeDelete(event, state));
-
-/** Binds the reviewed DOM event to the same room operation. */
-const deleteMessageFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeDelete(event, state));
-
-/** Obliterates an owned direct message or a group message curated by an owner. */
-function writeObliterate(
-  input: (MessageRequest) | TextGesture,
-  state: RoomWriterState,
-): void {
-  const event = messageRequest(input, state);
-  if (!event) return;
-  const key = requestKey(event.requestId, state);
-  const index = messageIndex(event.message, state);
-  if (index < 0) return;
-  const message = state.records.key(index).resolveAsCell();
-  if (
-    !key || !message || message.key("authorProfile").get() === undefined ||
-    (state.about.get().kind === "direct"
-      ? !isSender(message, state)
-      : spaceAccess(state.about) !== "OWNER")
-  ) return;
-  removeMessage(event, state, key, message, true);
-}
-
-/** Binds the protocol event directly to its verified writer. */
-export const commitObliterate = handler<MessageRequest, RoomWriterState>((
-  event,
-  state,
-) => writeObliterate(event, state));
-
-/** Binds the reviewed DOM event to the same room operation. */
-const obliterateMessageFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeObliterate(event, state));
-
-/** Applies a deletion or obliteration under the caller's reviewed writer identity. */
-function removeMessage(
-  event: MessageRequest,
-  state: RoomWriterState,
-  key: string,
-  message: Writable<ChatMessage>,
-  obliterate: boolean,
-): void {
-  const now = handlerTime();
-  const editedAt = reserveTime(state.memory.key("usedTimes"), now, now);
-  const at = reserveTime(state.memory.key("usedTimes"), now, now);
-  if (!editedAt || !at) return;
-  const previous = message.get();
-  if (obliterate) {
-    message.key("authorProfile").set(undefined);
-    message.key("earlierVersions").set([]);
-  } else {
-    message.key("earlierVersions").push({
-      body: previous.body as string,
-      sentAt: previous.editedAt ?? previous.sentAt,
-    });
-  }
-  message.key("reactions").set([]);
-  message.key("body").set({ deleted: true });
-  message.key("editedAt").set(editedAt);
-  state.memory.key("requests").key(key).set(true);
-  recordActivity(
-    state,
-    event.requestId,
-    message,
-    at,
-    now,
-    obliterate ? message : undefined,
+/**
+ * One participant, shown by their profile, with a control that starts a direct
+ * chat with them. The control shows only where it can start one: for someone
+ * other than the viewer, whose profile attests a principal, to a viewer who
+ * has a manager. It names the participant to the manager by their profile,
+ * bound as the control's `name`, which crosses into the click's event as the
+ * profile's own cell; the manager reads whom it names from the profile's
+ * `represents-principal` label, and offers the room through the share inbox
+ * the profile points at.
+ */
+export const ParticipantChip = pattern<
+  ParticipantChipInput,
+  ParticipantChipOutput
+>(({ participant, myProfile, startsDirect, startDirect }) => {
+  const counterpart = computed(() =>
+    principalOf(participant, "represents-principal") ?? ""
   );
-}
-
-/** Adds one reaction per profile and emoji. */
-function writeSendReaction(
-  input: (MessageRequest & { emoji: string }) | TextGesture,
-  state: RoomWriterState,
-): void {
-  const request = messageRequest(input, state);
-  const emoji = "requestId" in input
-    ? input.emoji
-    : state.uiEmoji ?? input.target?.value;
-  if (!request || typeof emoji !== "string") return;
-  const event = { ...request, emoji };
-  const key = requestKey(event.requestId, state);
-  const index = messageIndex(event.message, state);
-  if (index < 0) return;
-  const message = state.records.key(index).resolveAsCell();
-  const profile = state.myProfile?.resolveAsCell();
-  if (
-    !key || !message || typeof message.get().body !== "string" ||
-    profile?.get() === undefined || !isSingleEmoji(event.emoji)
-  ) return;
-  const profileId = entityKey(profile);
-  if (!profileId) return;
-  const reactions = message.key("reactions");
-  if (
-    reactions.get().some((reaction) =>
-      equals(reaction.reactorProfile, profile) && reaction.emoji === event.emoji
-    )
-  ) {
-    state.memory.key("requests").key(key).set(true);
-    return;
-  }
-  const now = handlerTime();
-  const sentAt = reserveTime(state.memory.key("usedTimes"), now, now);
-  const at = reserveTime(state.memory.key("usedTimes"), now, now);
-  if (!sentAt || !at) return;
-  const reaction = new Writable<StoredReaction>();
-  reaction.set({ reactorProfile: profile, emoji: event.emoji, sentAt });
-  reactions.addUnique(reaction);
-  state.memory.key("requests").key(key).set(true);
-  recordActivity(state, event.requestId, message, at, now);
-}
-
-/** Binds the protocol event directly to its verified writer. */
-export const commitSendReaction = handler<
-  MessageRequest & { emoji: string },
-  RoomWriterState
->((event, state) => writeSendReaction(event, state));
-
-/** Binds the reviewed DOM event to the same room operation. */
-const sendReactionFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeSendReaction(event, state));
-
-/** Removes only the sender's reaction, without toggling an absent one back on. */
-function writeDeleteReaction(
-  input: (MessageRequest & { emoji: string }) | TextGesture,
-  state: RoomWriterState,
-): void {
-  const request = messageRequest(input, state);
-  const emoji = "requestId" in input
-    ? input.emoji
-    : state.uiEmoji ?? input.target?.value;
-  if (!request || typeof emoji !== "string") return;
-  const event = { ...request, emoji };
-  const key = requestKey(event.requestId, state);
-  const index = messageIndex(event.message, state);
-  if (index < 0) return;
-  const message = state.records.key(index).resolveAsCell();
-  const profile = state.myProfile?.resolveAsCell();
-  if (
-    !key || !message || typeof message.get().body !== "string" || !profile ||
-    !isSingleEmoji(event.emoji)
-  ) return;
-  const profileId = entityKey(profile);
-  if (!profileId) return;
-  const reactions = message.key("reactions");
-  const reactionIndex = reactions.get().findIndex((reaction) =>
-    equals(reaction.reactorProfile, profile) && reaction.emoji === event.emoji
+  // Who may start a chat differs by viewer, so the control is hidden by a
+  // prop rather than built as a different tree (see `FabriChatMessageRow`).
+  const chatDisplay = computed((): ChatDisplay =>
+    startsDirect === true && myProfile?.get() !== undefined &&
+      !equals(participant, myProfile) && counterpart !== ""
+      ? "inline-flex"
+      : "none"
   );
-  if (reactionIndex < 0) {
-    state.memory.key("requests").key(key).set(true);
-    return;
-  }
-  const reaction = reactions.key(reactionIndex).resolveAsCell();
-  if (principalOf(reaction, "authored-by") !== currentPrincipal()) return;
-  const now = handlerTime();
-  const at = reserveTime(state.memory.key("usedTimes"), now, now);
-  if (!at) return;
-  reactions.removeByValue(reaction);
-  const removed: Writable<ChatReaction | undefined> = reaction;
-  removed.set(undefined);
-  state.memory.key("requests").key(key).set(true);
-  recordActivity(state, event.requestId, message, at, now);
-}
 
-/** Binds the protocol event directly to its verified writer. */
-export const commitDeleteReaction = handler<
-  MessageRequest & { emoji: string },
-  RoomWriterState
->((event, state) => writeDeleteReaction(event, state));
-
-/** Binds the reviewed DOM event to the same room operation. */
-const deleteReactionFromUi = handler<TextGesture, RoomWriterState>((
-  event,
-  state,
-) => writeDeleteReaction(event, state));
-
-/** A session's fixed selection, retaining entities rather than message snapshots. */
-interface WindowSelection {
-  requestId: string;
-  root?: Cell<ChatMessage>;
-  from: ChatWindowAnchor;
-  messages: Cell<ChatMessage>[];
-}
-
-/** Selects live message references for the sending session. */
-const openWindow = handler<OpenWindowRequest, {
-  records: Cell<ChatMessage[]>;
-  windows: Writable<Record<string, WindowSelection>>;
-}>((event, { records, windows }) => {
-  if (!event.requestId || !event.windowId) return;
-  const known = windows.key(event.windowId).get();
-  if (known?.requestId === event.requestId) return;
-  if (
-    !known && Object.keys(windows.get()).length >= CHAT_POLICY.maxOpenWindows
-  ) return;
-  const all = records.get();
-  if (
-    event.root &&
-    (!all.some((entry) => equals(entry, event.root)) ||
-      threadRoot(event.root.get()))
-  ) return;
-  const view = conversationView(all, event.root);
-  const selection = selectWindow(
-    view,
-    event.from,
-    event.count,
-    CHAT_POLICY.maxWindowCount,
-  );
-  if (!selection) return;
-  windows.key(event.windowId).set({
-    requestId: event.requestId,
-    ...(event.root ? { root: event.root } : {}),
-    from: event.from,
-    messages: selection.messages.map((message) =>
-      records.key(
-        all.findIndex((entry) => entry.sentAt.value === message.sentAt.value),
-      )
-        .resolveAsCell()
-    ),
-  });
-});
-
-/** Removes one session window. */
-const closeWindow = handler<{ requestId: string; windowId: string }, {
-  windows: Writable<Record<string, WindowSelection>>;
-}>((event, { windows }) => {
-  if (!event.requestId || !event.windowId) return;
-  const { [event.windowId]: _removed, ...remaining } = windows.get();
-  windows.set(remaining);
-});
-
-/** Room storage and the profile supplied by its production wish boundary. */
-export interface RoomInput {
-  myProfile?: Cell<ChatProfile>;
-  about: Cell<ChatRoomAbout>;
-  /** Profiles explicitly added through the room's roster writer. */
-  roster?: ParticipantRosterCell;
-  records?: PerSpace<Writable<StoredMessage[] | Default<[]>>>;
-  memory?: PerSpace<Writable<StoredMemory>>;
-  activity?: PerSpace<Writable<StoredActivity[] | Default<[]>>>;
-}
-
-/** A window keeps original documents while its reader sees message values. */
-type ReferenceWindow = Omit<ChatMessageWindow, "messages"> & {
-  messages: Cell<ChatMessage>[];
-};
-
-/** Re-exports windows by alias with the protocol's ordinary data reader schema. */
-const WindowViews = pattern<
-  { value: Record<string, ReferenceWindow> },
-  Record<string, ChatMessageWindow>
->(({ value }) => value);
-
-/** Exposes activity values through aliases to their original authored documents. */
-const ActivityView = pattern<
-  { value: Cell<ChatRoomActivity>[] },
-  ChatRoomActivity[]
->(({ value }) => value);
-
-/** Retains the scoped boundary around a derived session window map. */
-const windowCell = lift(
-  (value: Cell<PerSession<Record<string, ChatMessageWindow>>>) => {
-    value.get();
-    return value;
-  },
-);
-
-/** The people contributing one emoji, read live from the message's reaction cells. */
-interface ReactionTally {
-  emoji: string;
-  profiles: Cell<ChatProfile>[];
-  mine: boolean;
-}
-
-/** Renders one message with direct, separately reviewed writer controls. */
-const MessageCard = pattern<{
-  message: Cell<ChatMessage>;
-  state: RoomWriterState;
-  reply: Writable<ChatReply | null>;
-  thread: Writable<{ root?: Cell<ChatMessage>; before?: FabricEpochNsec }>;
-}, { [UI]: VNode }>(({ message, state, reply, thread }) => {
-  const editing = new Writable.perSession(false);
-  const history = new Writable.perSession(false);
-  const reacting = new Writable.perSession(false);
-  const bound = {
-    myProfile: state.myProfile,
-    records: state.records,
-    memory: state.memory,
-    activity: state.activity,
-    about: state.about,
-    uiMessage: message,
-  };
-  const live = computed(() => typeof message.key("body").get() === "string");
-  const removed = computed(() =>
-    message.key("authorProfile").get() === undefined
-  );
-  const mine = computed(() => {
-    const viewer = principalOf(state.myProfile, "represents-principal");
-    const key = entityKey(message);
-    return viewer !== undefined && key !== undefined &&
-      state.memory.key("authors").key(key).get() === viewer;
-  });
-  const replyCount = computed(() =>
-    (state.records.get() ?? []).filter((entry) =>
-      equals(threadRoot(entry), message)
-    )
-      .length
-  );
-  const canObliterate = computed(() =>
-    state.about.get()?.kind === "direct"
-      ? mine
-      : spaceAccess(state.about) === "OWNER"
-  );
-  const quotedBody = computed(() => {
-    const body = message.get()?.replyTo?.message.get()?.body;
-    return typeof body === "string" ? body : "Deleted message";
-  });
-  const tallies = computed(() =>
-    (message.key("reactions").get() ?? []).reduce<ReactionTally[]>(
-      (groups, reaction) => {
-        const existing = groups.find((group) => group.emoji === reaction.emoji);
-        const own = equals(reaction.reactorProfile, state.myProfile);
-        if (existing) {
-          existing.profiles.push(reaction.reactorProfile);
-          existing.mine ||= own;
-        } else {
-          groups.push({
-            emoji: reaction.emoji,
-            profiles: [reaction.reactorProfile],
-            mine: own,
-          });
-        }
-        return groups;
-      },
-      [],
-    )
-  );
   return {
     [UI]: (
-      <cf-vstack
-        gap="2"
-        style={{
-          padding: "0.75rem 0",
-          borderBottom: "1px solid var(--cf-color-border)",
-        }}
-      >
-        {removed
-          ? <cf-text variant="caption">Removed message</cf-text>
-          : (
-            <cf-profile-badge
-              $profile={message.get()?.authorProfile}
-              size="sm"
-            />
-          )}
-        {message.get()?.replyTo
-          ? (
-            <blockquote
-              style={{
-                margin: "0",
-                padding: "0.5rem",
-                borderLeft: "2px solid var(--cf-color-border)",
-              }}
-            >
-              <cf-text variant="caption">Replying to</cf-text>
-              <cf-text>
-                {quotedBody}
-              </cf-text>
-            </blockquote>
-          )
-          : null}
-        <cf-cfc-authorship
-          $value={message}
-          $author={message.key("authorProfile")}
+      <span style={{ display: "inline-flex", gap: "0.25rem" }}>
+        <cf-profile-badge variant="chip" $profile={participant} />
+        <span
+          data-ui-pattern={CHAT_START_SURFACE}
+          data-ui-event-integrity={CHAT_START_SURFACE}
+          hidden
+          style={{ display: chatDisplay }}
         >
-          <cf-text style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-            {live
-              ? String(message.get()?.body)
-              : removed
-              ? "Message removed"
-              : "Deleted message"}
-          </cf-text>
-        </cf-cfc-authorship>
-        {message.get()?.editedAt
-          ? <cf-text variant="caption">Edited</cf-text>
-          : null}
-        <cf-hstack gap="2" wrap>
-          {live
-            ? (
-              <cf-button
-                size="sm"
-                variant="ghost"
-                onClick={action(() => {
-                  thread.set({ root: threadRoot(message.get()) ?? message });
-                  reply.set({ message, shownIn: "thread" });
-                })}
-              >
-                Reply
-              </cf-button>
-            )
-            : null}
-          {replyCount > 0
-            ? (
-              <cf-button
-                size="sm"
-                variant="ghost"
-                onClick={action(() => thread.set({ root: message }))}
-              >
-                View thread ({replyCount})
-              </cf-button>
-            )
-            : null}
-          {live && mine
-            ? (
-              <cf-button
-                size="sm"
-                variant="ghost"
-                onClick={action(() => editing.set(!editing.get()))}
-              >
-                Edit
-              </cf-button>
-            )
-            : null}
-          {live && mine
-            ? (
-              <div
-                data-ui-pattern="ChatDeleteSurface"
-                data-ui-event-integrity="ChatDeleteSurface"
-              >
-                <cf-button
-                  size="sm"
-                  variant="ghost"
-                  data-ui-action="ChatDelete"
-                  onClick={deleteMessageFromUi(bound)}
-                >
-                  Delete
-                </cf-button>
-              </div>
-            )
-            : null}
-          {!removed && canObliterate
-            ? (
-              <div
-                data-ui-pattern="ChatObliterateSurface"
-                data-ui-event-integrity="ChatObliterateSurface"
-              >
-                <cf-button
-                  size="sm"
-                  variant="ghost"
-                  data-ui-action="ChatObliterate"
-                  onClick={obliterateMessageFromUi(bound)}
-                >
-                  Remove permanently
-                </cf-button>
-              </div>
-            )
-            : null}
-          {live && (message.get()?.earlierVersions.length ?? 0) > 0
-            ? (
-              <cf-button
-                size="sm"
-                variant="ghost"
-                onClick={action(() => history.set(!history.get()))}
-              >
-                Version history
-              </cf-button>
-            )
-            : null}
-        </cf-hstack>
-        {history.get() && live
-          ? (
-            <cf-vstack gap="2">
-              {(message.get()?.earlierVersions ?? []).map((version) => (
-                <cf-text style={{ whiteSpace: "pre-wrap" }}>
-                  {version.body}
-                </cf-text>
-              ))}
-            </cf-vstack>
-          )
-          : null}
-        {editing.get() && live && mine
-          ? (
-            <div
-              data-ui-pattern="ChatEditSurface"
-              data-ui-event-integrity="ChatEditSurface"
-            >
-              <cf-submit-input
-                placeholder="Replacement text"
-                buttonText="Save edit"
-                data-ui-action="ChatEdit"
-                onClick={editMessageFromUi(bound)}
-              />
-            </div>
-          )
-          : null}
-        {live
-          ? (
-            <div
-              data-ui-pattern="ChatReactSurface"
-              data-ui-event-integrity="ChatReactSurface"
-            >
-              <cf-hstack gap="2" wrap>
-                {tallies.map((tally) => (
-                  <cf-hover-card>
-                    {tally.mine
-                      ? (
-                        <cf-button
-                          size="sm"
-                          variant="outline"
-                          data-ui-action="ChatReact"
-                          onClick={deleteReactionFromUi({
-                            myProfile: state.myProfile,
-                            records: state.records,
-                            memory: state.memory,
-                            activity: state.activity,
-                            about: state.about,
-                            uiMessage: message,
-                            uiEmoji: tally.emoji,
-                          })}
-                        >
-                          {tally.emoji} {tally.profiles.length}
-                        </cf-button>
-                      )
-                      : (
-                        <cf-button
-                          size="sm"
-                          variant="ghost"
-                          data-ui-action="ChatReact"
-                          onClick={sendReactionFromUi({
-                            myProfile: state.myProfile,
-                            records: state.records,
-                            memory: state.memory,
-                            activity: state.activity,
-                            about: state.about,
-                            uiMessage: message,
-                            uiEmoji: tally.emoji,
-                          })}
-                        >
-                          {tally.emoji} {tally.profiles.length}
-                        </cf-button>
-                      )}
-                    <cf-vstack slot="card">
-                      {tally.profiles.map((profile) => (
-                        <cf-profile-badge $profile={profile} size="sm" />
-                      ))}
-                    </cf-vstack>
-                  </cf-hover-card>
-                ))}
-              </cf-hstack>
-              <cf-button
-                size="sm"
-                variant="ghost"
-                aria-label="Add reaction"
-                onClick={action(() => reacting.set(!reacting.get()))}
-              >
-                Add reaction
-              </cf-button>
-              <div
-                hidden
-                style={{ display: reacting.get() ? "block" : "none" }}
-              >
-                {["👍", "😺"].map((emoji) => (
-                  <cf-button
-                    size="sm"
-                    variant="ghost"
-                    data-ui-action="ChatReact"
-                    onClick={sendReactionFromUi({ ...bound, uiEmoji: emoji })}
-                  >
-                    {emoji}
-                  </cf-button>
-                ))}
-                <cf-submit-input
-                  placeholder="One emoji"
-                  buttonText="React"
-                  data-ui-action="ChatReact"
-                  onClick={sendReactionFromUi(bound)}
-                />
-              </div>
-            </div>
-          )
-          : null}
-      </cf-vstack>
+          <cf-button
+            data-ui-action={CHAT_START_ACTION}
+            $name={participant}
+            size="sm"
+            variant="ghost"
+            onClick={startDirect}
+          >
+            Chat
+          </cf-button>
+        </span>
+      </span>
     ),
   };
 });
 
-/** Selects a supplied profile or the room viewer's profile by reference. */
-const selectProfile = lift(({
-  supplied,
-  resolved,
-}: { supplied?: Cell<ChatProfile>; resolved?: Cell<ChatProfile> }) =>
-  supplied?.get() === undefined ? resolved : supplied
-);
+/**
+ * What adding a member asks of a room: the person to admit, by their chat
+ * address, by their profile, or by both.
+ */
+export interface AddMemberEvent {
+  /**
+   * Chosen by the sender, and unique among its adds. The outcome is recorded
+   * under it, and sending the same event again with it changes nothing. A
+   * rendered control's click carries none, and is given one of its own.
+   */
+  readonly requestId?: string;
 
-/** Admits an owner-selected member to a standalone group room. */
-const commitAddMember = handler<TextGesture, {
-  about: Cell<ChatRoomAbout>;
-  outcome: Writable<string>;
-}>((event, { about, outcome }) => {
-  const description = about.get();
-  if (
-    description?.record?.get()?.kind === undefined ||
-    description.kind !== "group"
-  ) {
-    outcome.set("Members of this chat are managed by its space.");
-    return;
-  }
-  const member = event.target?.value?.trim();
-  if (!isPrincipalDID(member)) {
-    outcome.set("That isn't a chat address.");
-    return;
-  }
-  grantSpaceAccess(about, member, "OWNER");
-  outcome.set(`Added ${member}. Send them this chat's link.`);
-});
+  /**
+   * The new member's profile, whose `represents-principal` label names them,
+   * through whose share inbox the viewer's manager offers them the room.
+   */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  readonly profile?: Cell<ChatProfile>;
 
-/** A room's record and its direct protocol surface. */
-export const FabriChatRoom = pattern<RoomInput, ChatRoomOutput>(
+  /** The control, holding the new member's chat address. */
+  readonly target?: { readonly value?: string };
+}
+
+/**
+ * What a room asks of its viewer's manager when the viewer adds someone: the
+ * event of the manager's `offerRoom`.
+ */
+export interface OfferRoomRequest {
+  /**
+   * Keys the request among the manager's, as `addMemberOfferId()` composes it
+   * from the room's space and the add's own `requestId`.
+   */
+  requestId: string;
+
+  /** The room. */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  room: Cell<ChatRoomLink>;
+
+  /** The new member's DID. */
+  member: string;
+
+  /** The new member's profile, when the add named one. */
+  // `Cell<…>` is written out rather than reached through an alias, as for
+  // `room`.
+  profile?: Cell<ChatProfile>;
+}
+
+/**
+ * The part of the viewer's manager a room reaches: what it tells a member it
+ * admits through, and what it tells of the viewer joining it.
+ */
+export interface RoomManager {
+  /** Offers the room to a member, and records how it told them. */
+  offerRoom: Stream<OfferRoomRequest>;
+
+  /** The outcome of each of the manager's requests, by its `requestId`. */
+  requests: Record<string, ChatRequestOutcome>;
+
+  /**
+   * The people the viewer's rooms list, other than the viewer: by principal,
+   * the profiles attesting it.
+   */
+  people: PerSession<Record<string, ProfileCell[]>>;
+
+  /** Makes a room the viewer has joined one of their chats. */
+  joinRoom?: Stream<JoinRoomRequest>;
+}
+
+/** Each of the viewer's adds' outcomes, by its `requestId`. */
+export type AddRequestsCell = Writable<
+  Record<string, AddMemberOutcome> | Default<Record<PropertyKey, never>>
+>;
+
+/**
+ * `outcomes`, where each add that is done with no `delivery` of its own takes
+ * the one the viewer's manager decided for it, which `requests` records under
+ * `addMemberOfferId()`: its `delivery`, or, where the manager refused to tell
+ * the member, `access-only`, with the manager's reason as
+ * `deliveryRefusal`. An add whose verdict hasn't landed keeps none.
+ */
+export const withDeliveries = (
+  outcomes: Readonly<Record<string, AddMemberOutcome>>,
+  space: string | undefined,
+  requests: Readonly<Record<string, ChatRequestOutcome>> | undefined,
+): Record<string, AddMemberOutcome> =>
+  Object.fromEntries(
+    Object.entries(outcomes).map(([id, outcome]) => {
+      if (
+        outcome?.status !== "done" || outcome.delivery !== undefined ||
+        space === undefined
+      ) {
+        return [id, outcome];
+      }
+      const verdict = requests?.[addMemberOfferId(space, id)];
+      if (verdict?.status === "refused") {
+        return [id, {
+          ...outcome,
+          delivery: "access-only",
+          deliveryRefusal: verdict.reason,
+        }];
+      }
+      const delivery = verdict?.status === "done"
+        ? verdict.delivery
+        : undefined;
+      return [id, delivery === undefined ? outcome : { ...outcome, delivery }];
+    }),
+  );
+
+/** What the session's latest add came to, which the control shows. */
+interface LatestAdd {
+  /** The add's `requestId`. */
+  requestId: string;
+
+  /** Whom it admitted, when it did. */
+  member?: string;
+
+  /** How they were told of the room, where the add itself decided it. */
+  delivery?: AddMemberDelivery;
+
+  /** Why it was refused, when it was. */
+  refusal?: string;
+}
+
+/** What adding a member is bound to. */
+interface AddMemberState {
+  /** One of the room's records, which names the room's space. */
+  room: MessagesCell;
+
+  /** Whether the room is one a manager created in a space of its own. */
+  ownSpace: boolean;
+
+  /** The room's kind, which a direct room's space keeps to its two members. */
+  kind: ChatRoomKind;
+
+  /** The viewer's adds' outcomes; absent where they aren't remembered. */
+  requests?: AddRequestsCell;
+
+  /** What the session's latest add came to, which the control shows. */
+  latest: Writable<LatestAdd | undefined>;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent for a core used
+   * on its own, which can't name itself to a manager.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * Whether the room can ask the viewer's manager to tell someone of it: the
+   * viewer has a manager that has resolved, with an `offerRoom`, and the room
+   * has `self` to name itself by.
+   */
+  canOffer: boolean;
+
+  /** The viewer's manager's `offerRoom`, when `canOffer` holds. */
+  offerRoom?: Stream<OfferRoomRequest>;
+
+  /**
+   * A rendered picker's person, by their profile, which an event's own
+   * outranks.
+   */
+  picked?: Cell<ChatProfile>;
+}
+
+/**
+ * Admits a person to the room's space, with OWNER, so that they too may add
+ * others, from a trusted gesture on `ChatAddMemberSurface`, and has the
+ * viewer's manager tell them of the room. Only an OWNER of the space may admit
+ * someone, only to a group room, and the session is shown what came of it.
+ *
+ * The person is named by chat address, or by a profile whose label names them,
+ * or by both, which then have to agree. The viewer's manager offers them the
+ * room through the profile's share inbox, or, given only their address,
+ * through the profiles its people list for them, and decides how they were
+ * told. An add with no manager to send to, because the viewer has none or
+ * theirs hasn't resolved, admits them and tells them nothing, and records so
+ * at once.
+ */
+const commitAddMember = handler<AddMemberEvent, AddMemberState>(
   (
+    event,
     {
-      myProfile: suppliedProfile,
-      about,
-      records,
-      memory,
-      activity,
-      roster,
+      room,
+      ownSpace,
+      kind,
+      requests,
+      latest,
+      self,
+      canOffer,
+      offerRoom,
+      picked,
     },
   ) => {
-    const profile = wish<ChatProfile>({ query: "#profile" });
-    const myProfile = selectProfile({
-      supplied: suppliedProfile,
-      resolved: profile.result,
-    });
-    const profileSetupDisplay = computed(() =>
-      myProfile?.get() === undefined ? "block" : "none"
-    );
-    const state = {
-      myProfile,
-      about,
-      records,
-      memory,
-      activity,
-    } as RoomWriterState;
-    const manager = wish<Pick<ChatManagerFacts, "openDirect">>({
-      query: "#chatManager",
-    });
-    const reply = new Writable.perSession<ChatReply | null>(null);
-    const draft = new Writable.perSession("");
-    const thread = new Writable.perSession<
-      { root?: Cell<ChatMessage>; before?: FabricEpochNsec }
-    >({});
-    const visibleConversation = computed(() =>
-      conversationView(records!.get(), thread.get().root)
-    );
-    const visibleMessages = computed(() => {
-      const end = thread.get().before;
-      return visibleConversation.filter((message) =>
-        end === undefined || message.sentAt.value < end.value
-      )
-        .slice(-CHAT_POLICY.maxWindowCount);
-    });
-    const visibleMessageRefs = computed((): Cell<ChatMessage>[] => {
-      const stored = records!.get();
-      const end = thread.get().before;
-      const visible = conversationView(stored, thread.get().root).filter((
-        message,
-      ) => end === undefined || message.sentAt.value < end.value).slice(
-        -CHAT_POLICY.maxWindowCount,
-      );
-      return visible.map((message) =>
-        records!.key(
-          stored.findIndex((entry) =>
-            entry.sentAt.value === message.sentAt.value
-          ),
-        )
-          .resolveAsCell()
-      );
-    });
-    const olderAvailable = computed(() => {
-      const first = visibleMessages[0]?.sentAt.value;
-      return first !== undefined &&
-        visibleConversation.some((message) => message.sentAt.value < first);
-    });
-    const clock = wish<number>({ query: "#now/1" });
-    const activityRefs = computed((): Cell<ChatRoomActivity>[] =>
-      activity!.get().flatMap((entry, index) =>
-        entry.at.value >= (BigInt(Math.floor(clock.result ?? 0)) * 1_000_000n -
-            CHAT_POLICY.recentActivityWindowNsec.value)
-          ? [activity!.key(index).resolveAsCell()]
-          : []
-      )
-    );
-    const recentActivity = ActivityView({ value: activityRefs });
-    const selections = new Writable.perSession<Record<string, WindowSelection>>(
-      {},
-    );
-    const windowValues = computed(() =>
-      Object.fromEntries(
-        Object.entries(selections.get()).map(([id, selection]) => {
-          const selected = selection.messages.map((message) => message.get());
-          const view = conversationView(records!.get(), selection.root);
-          const first = selected[0]?.sentAt.value;
-          const last = selected[selected.length - 1]?.sentAt.value;
-          const empty = selectWindow(view, selection.from, 1, 1);
-          return [
-            id,
-            {
-              requestId: selection.requestId,
-              ...(selection.root ? { root: selection.root } : {}),
-              messages: selection.messages,
-              hasOlder: first === undefined
-                ? empty?.hasOlder ?? false
-                : view.some((message) => message.sentAt.value < first),
-              hasNewer: last === undefined
-                ? empty?.hasNewer ?? false
-                : view.some((message) => message.sentAt.value > last),
-            } satisfies ReferenceWindow,
-          ];
-        }),
-      )
-    );
-    const windows = windowCell(WindowViews({ value: windowValues }));
-    const all = computed(() => conversationView(records!.get()));
-    const latestMessages = computed((): Cell<ChatMessage>[] => {
-      const stored = records!.get();
-      return conversationView(stored).slice(-CHAT_POLICY.maxWindowCount).map((
-        message,
-      ) =>
-        records!.key(
-          stored.findIndex((entry) =>
-            entry.sentAt.value === message.sentAt.value
-          ),
-        ).resolveAsCell()
-      );
-    });
-    const hasOlder = computed(() => all.length > CHAT_POLICY.maxWindowCount);
-    const messages = {
-      count: computed(() => records!.get().length),
-      oldestAt: computed(() =>
-        [...records!.get()].sort((a, b) =>
-          a.sentAt.value < b.sentAt.value ? -1 : 1
-        )[0]?.sentAt
-      ),
-      newestAt: computed(() =>
-        [...records!.get()].sort((a, b) =>
-          a.sentAt.value < b.sentAt.value ? 1 : -1
-        )[0]?.sentAt
-      ),
-      latest: { messages: latestMessages, hasOlder },
-      windows,
-      openWindow: openWindow({ records: records!, windows: selections }),
-      closeWindow: closeWindow({ windows: selections }),
-    };
-    const space = wish<{ participants: Cell<ChatProfile>[] }>({
-      query: "#default",
-    });
-    const ownSpace = computed(() =>
-      about.get()?.record?.get()?.kind !== undefined
-    );
-    const joined = computed(() =>
-      roster === undefined ? [] : participantEntries(roster)
-    );
-    const participants = computed(() =>
-      records!.get().reduce<Cell<ChatProfile>[]>(
-        (profiles, message) =>
-          message.authorProfile !== undefined &&
-            !profiles.some((entry) => equals(entry, message.authorProfile))
-            ? [...profiles, message.authorProfile]
-            : profiles,
-        ownSpace
-          ? [...joined]
-          : [...(space.result?.participants ?? []), ...joined],
-      )
-    );
-    const join = addParticipant({ roster });
-    const addOutcome = new Writable.perSession("");
-    const addMember = commitAddMember({ about, outcome: addOutcome });
-    const canAdd = computed(() =>
-      ownSpace && about.get()?.kind === "group" &&
-      spaceAccess(about) === "OWNER"
-    );
-    const canSend = computed(() => {
-      const access = spaceAccess(about);
-      return myProfile?.get() !== undefined &&
-        (access === "WRITE" || access === "OWNER");
-    });
-    const reactionTallies = computed((): ChatReactionTallies[] => {
-      const visible = latestMessages.map((message) => message.get());
-      for (const window of Object.values(windowValues)) {
-        for (const messageRef of window.messages) {
-          const message = messageRef.get();
-          if (
-            !visible.some((entry) =>
-              entry.sentAt.value === message.sentAt.value
-            )
-          ) visible.push(message);
-        }
-      }
-      const stored = records!.get();
-      return visible.map((message) => {
-        const index = stored.findIndex((entry) =>
-          entry.sentAt.value === message.sentAt.value
-        );
-        const reactions: ChatReactionTallies["reactions"] = [];
-        for (const reaction of message.reactions) {
-          let group = reactions.find((entry) => entry.emoji === reaction.emoji);
-          if (!group) {
-            group = {
-              emoji: reaction.emoji,
-              count: 0,
-              mine: false,
-              profiles: [],
-            };
-            reactions.push(group);
-          }
-          group.count++;
-          group.mine ||= equals(reaction.reactorProfile, myProfile);
-          group.profiles.push(reaction.reactorProfile);
-        }
-        return { message: records!.key(index).resolveAsCell(), reactions };
+    const requestId = event?.requestId ?? eventKey();
+    if (requests?.key(requestId).get() !== undefined) return;
+    const refuse = (reason: string, code?: AddMemberRefusalCode): void => {
+      requests?.key(requestId).set({
+        status: "refused",
+        reason,
+        ...(code === undefined ? {} : { code }),
       });
-    });
-    const facts = {
-      about,
-      recentActivity,
-      recentActivityExpiredThrough: computed(() =>
-        activity!.get().filter((entry) =>
-          entry.at.value < (BigInt(Math.floor(clock.result ?? 0)) * 1_000_000n -
-            CHAT_POLICY.recentActivityWindowNsec.value)
-        )
-          .reduce(
-            (through, entry) => Math.max(through, entry.seq),
-            memory!.key("expiredThrough").get() ?? 0,
-          )
-      ),
-      participants,
-      addParticipant: join,
-      messages,
-      canSend,
-      reactionTallies,
-      sendMessage: commitSend(state),
-      editMessage: commitEdit(state),
-      deleteMessage: commitDelete(state),
-      obliterateMessage: commitObliterate(state),
-      sendReaction: commitSendReaction(state),
-      deleteReaction: commitDeleteReaction(state),
+      latest.set({ requestId, refusal: reason });
     };
+    // A space's own chat shares its space, whose members are its own
+    // business, whatever a rendering shows.
+    if (!ownSpace) {
+      refuse("Members of this chat are added by its space.");
+      return;
+    }
+    // A direct room is a conversation between two people, whatever reaches
+    // its stream.
+    if (kind === "direct") {
+      refuse("A direct chat keeps its two members.", "direct-room");
+      return;
+    }
+    // A profile names the person its `represents-principal` label attests, so
+    // one attesting no one names no one.
+    const profile = event?.profile ?? picked;
+    const attested = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    if (profile !== undefined && !isPrincipalDID(attested)) {
+      refuse("That profile doesn't say whose it is.");
+      return;
+    }
+    const typed = event?.target?.value?.trim() ?? "";
+    const member = typed === "" ? attested ?? "" : typed;
+    if (!isPrincipalDID(member)) {
+      refuse("That isn't a chat address.");
+      return;
+    }
+    if (attested !== undefined && attested !== member) {
+      refuse("That profile isn't theirs.");
+      return;
+    }
+    try {
+      grantSpaceAccess(room, member, "OWNER");
+    } catch (error) {
+      // A refusal the call can see throws before anything is staged, so the
+      // session is told, and nothing else changes.
+      refuse(
+        `They couldn't be added: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return;
+    }
+    // The manager decides how the member was told, in an event of its own,
+    // and records it, which the room's `addRequests` then reads.
+    const space = spaceOf(room);
+    if (
+      canOffer && offerRoom !== undefined && self !== undefined &&
+      space !== undefined
+    ) {
+      offerRoom.send({
+        requestId: addMemberOfferId(space, requestId),
+        room: self,
+        member,
+        ...(profile === undefined ? {} : { profile }),
+      });
+      requests?.key(requestId).set({ status: "done" });
+      latest.set({ requestId, member });
+      return;
+    }
+    requests?.key(requestId).set({ status: "done", delivery: "access-only" });
+    latest.set({ requestId, member, delivery: "access-only" });
+  },
+);
+
+/** What the control adding a member to a room needs. */
+export interface AddMemberInput {
+  /** One of the room's records, which names the room's space. */
+  room: MessagesCell;
+
+  /** The viewer's profile, which holds no value while it is unknown. */
+  myProfile: ProfileCell | undefined;
+
+  /**
+   * Whether the room is one a manager created in a space of its own. A
+   * space's own chat shares its space, whose members are its own business.
+   */
+  ownSpace: boolean;
+
+  /** The room's kind; a direct room's space keeps to its two members. */
+  kind: ChatRoomKind;
+
+  /** The viewer's adds' outcomes; absent where they aren't remembered. */
+  requests?: AddRequestsCell;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent for a core used
+   * on its own, which can't name itself to a manager.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * The viewer's manager; absent while the viewer has none, or theirs hasn't
+   * resolved.
+   */
+  manager?: RoomManager;
+
+  /** The principals of those already in the room, whom the picker leaves out. */
+  present: PerSession<string[]>;
+}
+
+/** What the control adding a member to a room provides. */
+export interface AddMemberOutput {
+  /**
+   * The control, shown only to an OWNER of a group room in a space of its own
+   * whose profile has resolved, as the room's other controls are.
+   */
+  [UI]: VNode;
+
+  /** Admits the person the event names, from a trusted gesture. */
+  add: Stream<AddMemberEvent>;
+
+  /**
+   * The outcome of each of the viewer's adds, with how the person was told of
+   * the room once that is decided.
+   */
+  outcomes: Record<string, AddMemberOutcome>;
+
+  /**
+   * Whether the viewer can add someone: an OWNER of a group room in a space of
+   * its own.
+   */
+  canAdd: boolean;
+}
+
+/**
+ * Offers an OWNER of a group room's space a way to admit someone else to it,
+ * by their chat address, or by picking them from the people the viewer's
+ * manager lists who aren't in the room yet.
+ */
+export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
+  (
+    {
+      room,
+      myProfile,
+      ownSpace,
+      kind,
+      requests,
+      self,
+      manager,
+      present,
+    },
+  ) => {
+    const latest = new Writable.perSession<LatestAdd | undefined>(undefined);
+    // Read as values: a handler bound to a manager that isn't there is bound
+    // to a stream that still reads as present, whose sends are dropped.
+    const canOffer = computed(() =>
+      manager?.offerRoom !== undefined && self !== undefined
+    );
+    const bindings = {
+      room,
+      ownSpace,
+      kind,
+      requests,
+      latest,
+      self,
+      canOffer,
+      offerRoom: manager?.offerRoom,
+    };
+    const add = commitAddMember(bindings);
+    const canAdd = computed(() =>
+      ownSpace && kind !== "direct" && spaceAccess(room) === "OWNER"
+    );
+    // Who may add differs by viewer, and what came of an add by session, so
+    // both are hidden by a prop rather than built as a different tree (see
+    // `FabriChatMessageRow`).
+    const addDisplay = computed((): ChatDisplay =>
+      canAdd && myProfile?.get() !== undefined ? "flex" : "none"
+    );
+    const outcomes = computed((): Record<string, AddMemberOutcome> =>
+      withDeliveries(requests?.get() ?? {}, spaceOf(room), manager?.requests)
+    );
+    // What the session's latest add came to: how the person was told of the
+    // room, once that is decided, and what to do where they weren't.
+    const shown = computed((): string => {
+      const add = latest.get();
+      if (add === undefined) return "";
+      if (add.refusal !== undefined) return add.refusal;
+      const recorded = outcomes[add.requestId];
+      const done = recorded?.status === "done" ? recorded : undefined;
+      const delivery = done?.delivery ?? add.delivery;
+      return delivery === undefined
+        ? `Added ${add.member}.`
+        : delivery === "offered"
+        ? `Added ${add.member}, and offered them this chat.`
+        : delivery === "noticed"
+        ? `Added ${add.member}. Your chats remind you to send them this chat's link.`
+        : done?.deliveryRefusal !== undefined
+        ? `Added ${add.member}, who couldn't be told of this chat: ${done.deliveryRefusal} Send them its link.`
+        : `Added ${add.member}. Send them this chat's link.`;
+    });
+    const outcomeDisplay = computed((): ChatDisplay =>
+      shown === "" ? "none" : "block"
+    );
+    // Each person the manager lists who isn't in the room, by the first
+    // profile attesting them, per session, as the manager's people are.
+    const candidates = computed((): PerSession<ProfileCell[]> =>
+      Object.entries(manager?.people ?? {}).flatMap(
+        ([principal, profiles]): ProfileCell[] =>
+          present.includes(principal) || profiles[0] === undefined
+            ? []
+            : [profiles[0]],
+      )
+    );
+    const candidatesDisplay = computed((): ChatDisplay =>
+      candidates.length === 0 ? "none" : "block"
+    );
+
     return {
-      [NAME]: computed(() =>
-        about.get()?.title ||
-        (about.get()?.kind === "direct" ? "Direct chat" : "Chat")
-      ),
       [UI]: (
-        <cf-theme
-          theme={{
-            density: "comfortable",
-            colors: { primary: "#126b63", primaryForeground: "#ffffff" },
-          }}
+        <cf-vstack
+          id="fabrichat-add-member"
+          gap="1"
+          hidden
+          style={{ display: addDisplay }}
         >
-          <cf-screen>
-            <cf-hstack slot="header" justify="between" align="center">
-              <cf-heading level={2}>
-                {about.get()?.title || "Conversation"}
-              </cf-heading>
-              <cf-profile-badge $profile={myProfile} size="sm" />
-            </cf-hstack>
-            <cf-vstack id="fabrichat-messages" gap="3" padding="4">
-              <cf-hstack gap="2" wrap>
-                {participants.map((profile) => {
-                  const chip = ParticipantChip({
-                    participant: profile,
-                    myProfile,
-                    startDirect: manager.result?.openDirect,
-                  });
-                  return chip[UI];
-                })}
-              </cf-hstack>
-              <cf-vstack
-                id="fabrichat-add-member"
-                hidden
-                style={{ display: canAdd ? "flex" : "none" }}
-              >
-                <div
-                  data-ui-pattern="ChatAddMemberSurface"
-                  data-ui-event-integrity="ChatAddMemberSurface"
+          <div
+            data-ui-pattern={CHAT_ADD_MEMBER_SURFACE}
+            data-ui-event-integrity={CHAT_ADD_MEMBER_SURFACE}
+          >
+            <cf-submit-input
+              data-ui-action={CHAT_ADD_MEMBER_ACTION}
+              inputId="fabrichat-add-member-address"
+              placeholder="Their chat address (did:key:…)"
+              buttonText="Add"
+              onClick={add}
+            />
+          </div>
+          <div
+            id="fabrichat-add-member-people"
+            hidden
+            style={{ display: candidatesDisplay }}
+          >
+            <cf-vstack gap="1">
+              <cf-text variant="caption">
+                Or add people from your chats:
+              </cf-text>
+              {candidates.map((profile) => (
+                <cf-hstack
+                  gap="2"
+                  align="center"
+                  data-ui-pattern={CHAT_ADD_MEMBER_SURFACE}
+                  data-ui-event-integrity={CHAT_ADD_MEMBER_SURFACE}
                 >
-                  <cf-submit-input
-                    inputId="fabrichat-add-member-address"
-                    placeholder="Their chat address"
-                    buttonText="Add"
-                    data-ui-action="ChatAddMember"
-                    onClick={addMember}
-                  />
-                </div>
-                <cf-text id="fabrichat-add-member-outcome">
-                  {addOutcome}
-                </cf-text>
-              </cf-vstack>
-              {thread.get().root?.get() !== undefined
-                ? (
-                  <cf-hstack gap="2">
-                    <cf-heading level={3}>Thread</cf-heading>
-                    <cf-button
-                      variant="ghost"
-                      onClick={action(() => {
-                        thread.set({});
-                        reply.set(null);
-                        thread.key("before").set(undefined);
-                      })}
-                    >
-                      Back to conversation
-                    </cf-button>
-                  </cf-hstack>
-                )
-                : null}
-              <cf-hstack gap="2">
-                {olderAvailable
-                  ? (
-                    <cf-button
-                      variant="outline"
-                      onClick={action(() =>
-                        thread.key("before").set(
-                          visibleMessages[0]?.sentAt,
-                        )
-                      )}
-                    >
-                      Older messages
-                    </cf-button>
-                  )
-                  : null}
-                {thread.get().before !== undefined
-                  ? (
-                    <cf-button
-                      variant="outline"
-                      onClick={action(() =>
-                        thread.key("before").set(undefined)
-                      )}
-                    >
-                      Latest messages
-                    </cf-button>
-                  )
-                  : null}
-              </cf-hstack>
-              {visibleMessages.length === 0
-                ? <cf-text>No messages yet</cf-text>
-                : null}
-              {visibleMessageRefs.map((message) => {
-                const card: PerSession<{ [UI]: VNode }> = MessageCard({
-                  message,
-                  state,
-                  reply,
-                  thread,
-                });
-                return card[UI];
-              })}
+                  <cf-profile-badge variant="chip" $profile={profile} />
+                  <cf-button
+                    data-ui-action={CHAT_ADD_MEMBER_ACTION}
+                    size="sm"
+                    variant="ghost"
+                    onClick={commitAddMember({ ...bindings, picked: profile })}
+                  >
+                    Add
+                  </cf-button>
+                </cf-hstack>
+              ))}
             </cf-vstack>
-            <cf-vstack slot="footer" gap="2" padding="4">
-              {reply.get()
-                ? (
-                  <cf-hstack gap="2">
-                    <cf-text>Replying to a message</cf-text>
-                    <cf-text variant="caption">
-                      Placement: {reply.get()?.shownIn}
-                    </cf-text>
-                    {reply.get()?.message.get()?.replyTo?.shownIn !== "thread"
-                      ? (
-                        <cf-button
-                          variant="ghost"
-                          onClick={action(() => {
-                            const selected = reply.get();
-                            if (selected) {
-                              reply.set({ ...selected, shownIn: "main" });
-                              thread.set({});
-                            }
-                          })}
-                        >
-                          Conversation only
-                        </cf-button>
-                      )
-                      : null}
-                    <cf-button
-                      variant="ghost"
-                      onClick={action(() => {
-                        const selected = reply.get();
-                        if (selected) {
-                          reply.set({ ...selected, shownIn: "thread" });
-                        }
-                      })}
-                    >
-                      Thread only
-                    </cf-button>
-                    <cf-button
-                      variant="ghost"
-                      onClick={action(() => {
-                        const selected = reply.get();
-                        if (selected) {
-                          reply.set({ ...selected, shownIn: "both" });
-                        }
-                      })}
-                    >
-                      Conversation and thread
-                    </cf-button>
-                    <cf-button
-                      variant="ghost"
-                      onClick={action(() => reply.set(null))}
-                    >
-                      Cancel reply
-                    </cf-button>
-                  </cf-hstack>
-                )
-                : null}
-              <div
-                data-ui-pattern="ChatSendSurface"
-                data-ui-event-integrity="ChatSendSurface"
-              >
-                <cf-submit-input
-                  inputId="fabrichat-message"
-                  value={draft}
-                  clearOnSubmit={false}
-                  onInput={action((event: TextGesture) =>
-                    draft.set(event.target?.value ?? "")
-                  )}
-                  placeholder="Write a message"
-                  buttonText="Send"
-                  disabled={!canSend}
-                  data-ui-action="ChatSend"
-                  onClick={sendMessageFromUi({
-                    ...state,
-                    uiReply: reply,
-                    uiDraft: draft,
-                    uiThread: thread,
-                  })}
-                />
-              </div>
-              {!canSend
-                ? (
-                  <cf-text variant="caption">
-                    A profile and write access are required to send.
-                  </cf-text>
-                )
-                : null}
-              <div
-                id="fabrichat-profile-setup"
-                hidden
-                style={{ display: profileSetupDisplay, maxWidth: "720px" }}
-              >
-                {profile[UI]}
-              </div>
-            </cf-vstack>
-          </cf-screen>
-        </cf-theme>
+          </div>
+          <div
+            id="fabrichat-add-member-outcome"
+            hidden
+            style={{ display: outcomeDisplay }}
+          >
+            <cf-text variant="caption">{shown}</cf-text>
+          </div>
+        </cf-vstack>
       ),
-      ...facts,
-      addMember,
-      [VIEWS]: { room: facts },
+      add,
+      outcomes,
+      canAdd,
     };
   },
 );
 
-/** Whether Home keeps this room's space among its saved chats. */
-function listsRoomIn(catalog: unknown, space: string | undefined): boolean {
-  if (!isSharedSpaceCatalog(catalog) || space === undefined) return false;
-  const entry = catalog.entries[space];
-  return entry?.state === "saved" && entry.kind === "fabrichat-room";
+/** A room's messages: facts, the newest, and this session's windows. */
+export interface ChatMessageList {
+  /** How many messages the room holds, obliterated tombstones included. */
+  count: number;
+
+  /** The oldest message's `sentAt`; absent while there are none. */
+  oldestAt?: FabricEpochNsec;
+
+  /** The newest message's `sentAt`; absent while there are none. */
+  newestAt?: FabricEpochNsec;
+
+  /** The newest messages of the main conversation, kept current. */
+  latest: {
+    /** Up to `maxWindowCount` of them, oldest first. */
+    messages: MessageCell[];
+
+    /** Whether the main conversation has older messages than these. */
+    hasOlder: boolean;
+  };
+
+  /** This session's open windows, by the `windowId` its client chose. */
+  windows: PerSession<WindowsCell>;
+
+  /** Opens a window, or moves one already open. */
+  openWindow: Stream<RoomWindowEvent>;
+
+  /** Closes a window. */
+  closeWindow: Stream<RoomWindowEvent>;
 }
 
-/** Forwards the canonical room link to the viewer's manager. */
-const askToList = handler<unknown, {
-  room: Cell<ChatRoomLink>;
-  accept?: Stream<ManagerStreamEvent>;
-}>((_event, { room, accept }) => {
-  accept?.send({ requestId: eventKey(), room });
-});
+/** A room's data face, for hosts that draw it natively. */
+export interface ChatRoomView {
+  /** What the room says about itself. */
+  about: ChatRoomAbout;
 
-/** Lets an admitted viewer save this room's canonical root in their manager. */
-const AddToChats = pattern<{
-  room: Cell<ChatRoomLink>;
-  about: Cell<ChatRoomAbout>;
-  myProfile?: Cell<ChatProfile>;
-}, { [UI]: VNode }>(({ room, about, myProfile }) => {
-  const manager = wish<
-    Pick<ChatManagerFacts, "accept" | "sharedSpaceCatalog">
-  >({ query: "#chatManager" });
-  const creator = computed(() =>
-    principalOf(about.get()?.record, "authored-by")
+  /** What the room recorded recently, in `seq` order. */
+  recentActivity: ChatRoomActivity[];
+
+  /** The highest `seq` dropped from `recentActivity` for age; 0 for none. */
+  recentActivityExpiredThrough: number;
+
+  /**
+   * The room's participants: for a room that is its space's root, those who
+   * joined it; for any other, its space's participants as the space's root
+   * lists them, then those who joined the room itself; and then any author
+   * neither lists.
+   */
+  participants: ProfileCell[];
+
+  /**
+   * Those who joined the room itself, each added once through
+   * `addParticipant`, in the order they were added. Unlike `participants`, it
+   * lists no author it doesn't hold, and no participant of another space, so
+   * it is read from the roster alone. Like `participants`, it is a claim, not
+   * proof of access.
+   */
+  roster: ProfileCell[];
+
+  /**
+   * One entry for each of `participants`, in their order: the profile, and the
+   * principal its `represents-principal` label attests, absent where it
+   * attests none or the label can't be read where the list is derived. Like
+   * `participants`, it is not proof of access.
+   */
+  participantEntries: PerSession<ParticipantEntry[]>;
+
+  /**
+   * The principals `participantEntries` holds, each once, in the order of
+   * `participants`.
+   */
+  participantPrincipals: PerSession<string[]>;
+
+  /**
+   * Adds a profile to those who joined the room, once. Any participant may add
+   * any profile, so an entry is a claim: it does not say that the profile's
+   * principal holds access to the room's space.
+   */
+  addParticipant: Stream<JoinRoomEvent>;
+
+  /** The room's messages. */
+  messages: ChatMessageList;
+
+  /** Whether this reader can send, edit, delete, and react. */
+  canSend: boolean;
+
+  /** Sends a message. */
+  sendMessage: Stream<RoomStreamEvent>;
+
+  /** Records a new version of one of the sender's messages. */
+  editMessage: Stream<RoomStreamEvent>;
+
+  /** Records one of the sender's messages as deleted. */
+  deleteMessage: Stream<RoomStreamEvent>;
+
+  /** Reduces a message to a tombstone. */
+  obliterateMessage: Stream<RoomStreamEvent>;
+
+  /** Adds the sender's reaction to a message. */
+  sendReaction: Stream<RoomStreamEvent>;
+
+  /** Removes the sender's reaction to a message. */
+  deleteReaction: Stream<RoomStreamEvent>;
+
+  /**
+   * Admits someone to the room's space, with OWNER, from a trusted gesture on
+   * the rendering's `ChatAddMemberSurface`, or from a client's own control
+   * through the sanctioned issuing path, and has the viewer's manager tell
+   * them of the room. Only an OWNER of a group room in a space of its own may
+   * admit someone.
+   */
+  addMember: Stream<AddMemberEvent>;
+
+  /**
+   * Whether this reader can add someone: an OWNER of a group room in a space
+   * of its own.
+   */
+  canAdd: boolean;
+
+  /**
+   * The outcome of each of this reader's adds, by its `requestId`, with how
+   * the member was told of the room once that is decided.
+   */
+  addRequests: Record<string, AddMemberOutcome>;
+}
+
+/** What a room offers everyone its space admits: `ChatRoomOutput`. */
+export interface ChatRoomOutput extends ChatRoomView {
+  /** The room's name, for lists of pieces. */
+  [NAME]: string;
+
+  /** The room's own rendering, with its reviewed surfaces. */
+  [UI]: VNode;
+
+  /** The room's data face, as one group. */
+  [VIEWS]: { room: ChatRoomView };
+}
+
+/** What a room stores, and who is looking at it. */
+export interface FabriChatRoomCoreInput {
+  /** The viewer's profile, which holds no value while it is unknown. */
+  myProfile: ProfileCell | undefined;
+
+  /**
+   * What the room says about itself, as its creator wrote it; absent for a
+   * space's own chat, which reads as a group room with no title.
+   */
+  about?: Cell<AboutRecord>;
+
+  /** The room's messages. */
+  messages: MessagesCell;
+
+  /** Every message's reaction list. */
+  reactionLists: ReactionListsCell;
+
+  /** The requests the room has acted on. */
+  requests: RequestsCell;
+
+  /** The times the room has recorded something at. */
+  usedTimes: UsedTimesCell;
+
+  /** The room's recent activity. */
+  activity: ActivityCell;
+
+  /** Where the activity's numbering stands. */
+  counters: ActivityCountersCell;
+
+  /** Those who joined the room; absent for a room nobody can join. */
+  roster?: ParticipantRosterCell;
+
+  /** The viewer's adds' outcomes; absent where they aren't remembered. */
+  addRequests?: AddRequestsCell;
+
+  /**
+   * Whether the viewer has a manager to start a direct chat with; absent for
+   * none.
+   */
+  startsDirect?: boolean;
+
+  /** The viewer's manager's `openDirect`, when `startsDirect` holds. */
+  startDirect?: Stream<StartDirectEvent>;
+
+  /**
+   * The room itself, as the viewer's manager links it; absent, the room can't
+   * name itself to a manager, and an add tells the person added nothing.
+   */
+  self?: Cell<ChatRoomLink>;
+
+  /**
+   * The viewer's manager, which tells someone they add of the room; absent
+   * while the viewer has none, or theirs hasn't resolved.
+   */
+  manager?: RoomManager;
+}
+
+/**
+ * What the room's core offers: `ChatRoomOutput`, and the streams its own
+ * composers send to, which take the reply they compose from the session's
+ * composer state.
+ */
+export interface FabriChatRoomCoreOutput extends ChatRoomOutput {
+  /** The main composer's send, replying to the reply being composed. */
+  composerSend: Stream<RoomStreamEvent>;
+
+  /** The thread composer's send, replying in the open thread. */
+  threadComposerSend: Stream<RoomStreamEvent>;
+}
+
+/**
+ * A conversation with a composer that sends as the viewer: the whole of
+ * `ChatRoomOutput`, given the viewer's profile.
+ */
+export const FabriChatRoomCore = pattern<
+  FabriChatRoomCoreInput,
+  FabriChatRoomCoreOutput
+>((input) => {
+  const {
+    myProfile,
+    about,
+    messages,
+    reactionLists,
+    requests,
+    usedTimes,
+    activity,
+    counters,
+    roster,
+    addRequests,
+    startsDirect,
+    startDirect,
+    self,
+    manager,
+  } = input;
+  const composer = new Writable.perSession<ComposerState>({
+    draft: "",
+    threadDraft: "",
+  });
+  const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
+  // A room the manager created has `about`, and is its space's root; a
+  // space's own chat, sharing its space, has none.
+  const ownSpace = computed(() => about?.get() !== undefined);
+  // Read as a value, as `canOffer` is: a handler bound to a manager that
+  // isn't there is bound to a stream that still reads as present.
+  const canJoin = computed(() =>
+    ownSpace && manager?.joinRoom !== undefined && self !== undefined
   );
-  const canList = computed(() =>
-    manager.result !== undefined &&
-    !listsRoomIn(manager.result.sharedSpaceCatalog, spaceOf(room)) &&
-    about.get()?.record?.get()?.kind !== undefined &&
-    (about.get()?.kind !== "direct" ||
-      (creator !== undefined &&
-        creator !== principalOf(myProfile, "represents-principal")))
+  const records = {
+    kind,
+    composer,
+    messages,
+    reactionLists,
+    requests,
+    usedTimes,
+    activity,
+    counters,
+    canJoin,
+    joinRoom: manager?.joinRoom,
+    self,
+  };
+  const alsoToMain = new Writable.perSession(false);
+  const windows = new Writable.perSession<WindowsValue>();
+
+  const entries = computed(() => messageEntries(messages));
+  // Every message's place in the views, derived once for the whole list. Each
+  // row reads its own message's entry, so no row scans the list, and a change
+  // to one message re-runs only the rows whose entries changed.
+  const places = computed(() =>
+    viewPlaces(
+      entries.map(({ key, sentAt, replyTo }) => ({ key, sentAt, replyTo })),
+    )
   );
+  const mainEntries = computed(() =>
+    entries.filter(isInMain).sort(compareEntries)
+  );
+  const latest = computed(() => ({
+    messages: mainEntries.slice(-FABRICHAT_POLICY.maxWindowCount).map((
+      entry,
+    ) => entry.cell),
+    hasOlder: mainEntries.length > FABRICHAT_POLICY.maxWindowCount,
+  }));
+  const count = computed(() => entries.length);
+  const sortedEntries = computed(() => [...entries].sort(compareEntries));
+  const oldestAt = computed(() => sortedEntries[0]?.record.sentAt);
+  const newestAt = computed(() =>
+    sortedEntries[sortedEntries.length - 1]?.record.sentAt
+  );
+  // The space's participants as its root lists them, for a room that isn't
+  // that root. A root room's `#default` is the room itself, so it reads only
+  // its own; a space whose root isn't there yet lists none.
+  const space = wish<{ participants?: ProfileCell[] }>({ query: "#default" });
+  // Preserve the roster array's backing link so readers never compete to
+  // materialize its profile references. This projection has no writer contract.
+  const joined = computed((): ProfileCell[] =>
+    roster === undefined ? [] : roster.get()?.items ?? []
+  );
+  const listed = computed((): ProfileCell[] =>
+    ownSpace ? [...joined] : [...(space.result?.participants ?? []), ...joined]
+  );
+  const participants = computed(() => participantsOf(listed, entries));
+  // A profile lives in its owner's own space, and attests no one to a reader
+  // that space refuses, so the entries, and the principals taken from them,
+  // are derived per session: one instance for every reader is one their
+  // runtimes hold differently.
+  const participantEntries = computed((): PerSession<ParticipantEntry[]> =>
+    participantEntriesOf(participants)
+  );
+  const participantPrincipals = computed((): PerSession<string[]> =>
+    principalsOf(participantEntries)
+  );
+  const join = addParticipant({ roster });
+  const canSend = computed(() => canActIn(messages, myProfile));
+  const addMember = AddMember({
+    room: messages,
+    myProfile,
+    ownSpace,
+    kind,
+    requests: addRequests,
+    self,
+    manager,
+    present: participantPrincipals,
+  });
+  const cannotSend = computed(() => !canSend);
+  const isOwner = computed(() => isOwnerOf(messages));
+  // The policy is a document of its own, which `about` links.
+  const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
+  const aboutView = {
+    kind,
+    title: computed(() => about?.get()?.title),
+    createdAt: computed(() => about?.get()?.createdAt),
+    policy,
+    // The stored record itself, as a link, so a reader can read its label.
+    record: about,
+  };
+  const expiredThrough = computed(() =>
+    ((counters.elementById(NUMBERING_KEY).get() ??
+      NO_ACTIVITY) as ActivityCounters).expiredThrough
+  );
+  const title = computed(() =>
+    about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  );
+  // The key of the session's open thread's root; `""` while no thread is
+  // open.
+  const openThreadKey = computed(() => {
+    const root = composer.get()?.thread;
+    return (root?.get() === undefined ? undefined : entryFor(entries, root))
+      ?.key ?? "";
+  });
+  const hasThread = computed(() => openThreadKey !== "");
+  // The session's open thread: its root, and every message in the thread the
+  // root starts, in the order the room recorded them. The thread's list maps
+  // it, so a session holds a thread row for each message of the thread it has
+  // open, and none while it has no thread open. The list is the session's
+  // own, as the open thread is, and the rows mapped from it are stored per
+  // session with it, so no viewer's rows replace another's.
+  const threadMessages = computed((): PerSession<MessageCell[]> =>
+    openThreadKey === ""
+      ? []
+      : entries.filter((entry) =>
+        entry.key === openThreadKey ||
+        places[entry.key]?.thread === openThreadKey
+      ).map((entry) => entry.cell)
+  );
+  const replyingTo = computed(() => bodyText(composer.get()?.replyTo?.get()));
+  // Per-session and per-viewer parts are hidden by a prop, never built as a
+  // different tree (see `FabriChatMessageRow`).
+  const replyDisplay = computed(
+    (): ChatDisplay => (replyingTo ? "flex" : "none"),
+  );
+  const threadDisplay = computed(
+    (): ChatDisplay => (hasThread ? "flex" : "none"),
+  );
+  const isEmpty = computed(() => mainEntries.length === 0);
+  const threadShownIn = computed((): ShownIn =>
+    alsoToMain.get() ? "both" : "thread"
+  );
+
+  const sendMessage = commitSend({ myProfile, ...records });
+  const composeSend = commitSend({
+    myProfile,
+    ...records,
+    replyFrom: "replyTo",
+  });
+  const sendThreadReply = commitSend({
+    myProfile,
+    ...records,
+    replyFrom: "thread",
+    shownIn: threadShownIn,
+  });
+  const streams = {
+    sendMessage,
+    editMessage: commitEdit({
+      myProfile,
+      ...records,
+    }),
+    deleteMessage: commitDelete({
+      myProfile,
+      ...records,
+    }),
+    obliterateMessage: commitObliterate({
+      myProfile,
+      ...records,
+    }),
+    sendReaction: commitSendReaction({
+      myProfile,
+      ...records,
+    }),
+    deleteReaction: commitDeleteReaction({
+      myProfile,
+      ...records,
+    }),
+  };
+  const messageList = {
+    count,
+    oldestAt,
+    newestAt,
+    latest,
+    windows,
+    openWindow: commitWindow({ op: "open", messages, windows }),
+    closeWindow: commitWindow({ op: "close", messages, windows }),
+  };
+  const view = {
+    about: aboutView,
+    recentActivity: activity,
+    recentActivityExpiredThrough: expiredThrough,
+    participants,
+    roster: joined,
+    participantEntries,
+    participantPrincipals,
+    addParticipant: join,
+    messages: messageList,
+    canSend,
+    ...streams,
+    addMember: addMember.add,
+    canAdd: addMember.canAdd,
+    addRequests: addMember.outcomes,
+  };
+  const closeThread = action(() => composer.key("thread").set(undefined));
+  const cancelReply = action(() => composer.key("replyTo").set(undefined));
+
   return {
+    [NAME]: title,
     [UI]: (
-      <cf-hstack
-        id="fabrichat-add-to-chats"
-        hidden
-        gap="2"
-        style={{ display: canList ? "flex" : "none", padding: "1rem" }}
-      >
-        <cf-text>
-          {about.get()?.kind === "direct"
-            ? `Created by ${creator ?? ""}`
-            : "Add this conversation to your private index."}
-        </cf-text>
-        <cf-button
-          onClick={askToList({ room, accept: manager.result?.accept })}
+      <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "720px" }}>
+        <cf-hstack justify="between" align="center" gap="4">
+          <cf-heading level={3}>{title}</cf-heading>
+          <cf-profile-badge $profile={myProfile} size="sm" />
+        </cf-hstack>
+
+        {
+          /* A plain flex row, not `cf-hstack`, whose host clips overflow
+            and would cut off the badges' verified glow. */
+        }
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
         >
-          Add to my chats
-        </cf-button>
-      </cf-hstack>
+          {participants.map((participant) => (
+            <ParticipantChip
+              participant={participant}
+              myProfile={myProfile}
+              startsDirect={startsDirect}
+              startDirect={startDirect}
+            />
+          ))}
+        </div>
+        {addMember[UI]}
+
+        <cf-vstack
+          id="fabrichat-messages"
+          gap="3"
+          style={{ minHeight: "160px" }}
+        >
+          {messages.map((message) => (
+            <FabriChatMessageRow
+              message={message}
+              inThread={false}
+              myProfile={myProfile}
+              kind={kind}
+              composer={composer}
+              places={places}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
+              messages={messages}
+              reactionLists={reactionLists}
+              requests={requests}
+              usedTimes={usedTimes}
+              activity={activity}
+              counters={counters}
+              canJoin={canJoin}
+              joinRoom={manager?.joinRoom}
+              self={self}
+            />
+          ))}
+          {isEmpty
+            ? <cf-empty-state message="No messages yet. Say hello!" />
+            : null}
+        </cf-vstack>
+
+        <cf-hstack
+          gap="2"
+          align="center"
+          hidden
+          style={{ display: replyDisplay }}
+        >
+          <cf-text variant="caption">Replying to: {replyingTo}</cf-text>
+          <cf-button size="sm" variant="ghost" onClick={cancelReply}>
+            Cancel
+          </cf-button>
+        </cf-hstack>
+        <div
+          data-ui-pattern={CHAT_SEND_SURFACE}
+          data-ui-event-integrity={CHAT_SEND_SURFACE}
+        >
+          <cf-submit-input
+            data-ui-action={CHAT_SEND_ACTION}
+            value={composer.key("draft")}
+            onInput={action((event: { target?: { value?: string } }) =>
+              composer.key("draft").set(event.target?.value ?? "")
+            )}
+            clearOnSubmit={false}
+            inputId="fabrichat-message"
+            placeholder="Message"
+            buttonText="Send"
+            disabled={cannotSend}
+            onClick={composeSend}
+          />
+        </div>
+
+        <cf-vstack
+          id="fabrichat-thread"
+          gap="2"
+          hidden
+          style={{
+            display: threadDisplay,
+            borderTop: "1px solid var(--cf-theme-color-border)",
+            paddingTop: "0.75rem",
+          }}
+        >
+          <cf-hstack justify="between" align="center">
+            <cf-heading level={4}>Thread</cf-heading>
+            <cf-button size="sm" variant="ghost" onClick={closeThread}>
+              Close
+            </cf-button>
+          </cf-hstack>
+          {threadMessages.map((message) => (
+            <FabriChatMessageRow
+              message={message}
+              inThread
+              myProfile={myProfile}
+              kind={kind}
+              composer={composer}
+              places={places}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
+              messages={messages}
+              reactionLists={reactionLists}
+              requests={requests}
+              usedTimes={usedTimes}
+              activity={activity}
+              counters={counters}
+              canJoin={canJoin}
+              joinRoom={manager?.joinRoom}
+              self={self}
+            />
+          ))}
+          <cf-checkbox $checked={alsoToMain}>
+            Also send to the conversation
+          </cf-checkbox>
+          <div
+            data-ui-pattern={CHAT_SEND_SURFACE}
+            data-ui-event-integrity={CHAT_SEND_SURFACE}
+          >
+            <cf-submit-input
+              data-ui-action={CHAT_SEND_ACTION}
+              value={composer.key("threadDraft")}
+              onInput={action((event: { target?: { value?: string } }) =>
+                composer.key("threadDraft").set(event.target?.value ?? "")
+              )}
+              clearOnSubmit={false}
+              inputId="fabrichat-thread-message"
+              placeholder="Reply in thread"
+              buttonText="Reply"
+              disabled={cannotSend}
+              onClick={sendThreadReply}
+            />
+          </div>
+        </cf-vstack>
+      </cf-vstack>
     ),
+    [VIEWS]: { room: view },
+    ...view,
+    composerSend: composeSend,
+    threadComposerSend: sendThreadReply,
   };
 });
 
-/** Storage of a root room, or a chat belonging to an existing social space. */
+/**
+ * What a room stores. Each record but `about` has a default, so a space's own
+ * chat starts with none of them.
+ */
 export interface FabriChatRoomInput {
-  /** Creation facts labeled by the manager's reviewed start. */
-  about?: Created<ChatRoomRecord>;
+  /**
+   * What the room says about itself, written once by the manager that creates
+   * it. A space's own chat has none, and reads as a group room with no title.
+   */
+  about?: StoredAbout;
 
-  /** Message documents owned by the room's writers. */
-  records?: PerSpace<Writable<StoredMessage[] | Default<[]>>>;
+  /** The room's messages. */
+  messages?: MessagesCell;
 
-  /** Recent changes with their original authorship labels. */
-  activity?: PerSpace<Writable<StoredActivity[] | Default<[]>>>;
+  /** Every message's reaction list. */
+  reactionLists?: ReactionListsCell;
 
-  /** Profiles added through the canonical participant writer. */
+  /** The requests the room has acted on. */
+  requests?: RequestsCell;
+
+  /** The times the room has recorded something at. */
+  usedTimes?: UsedTimesCell;
+
+  /** The room's recent activity. */
+  activity?: ActivityCell;
+
+  /** Where the activity's numbering stands. */
+  counters?: ActivityCountersCell;
+
+  /**
+   * Those who joined the room. It changes only through `addParticipant`, the
+   * one writer its write contract admits.
+   */
   participants?: ParticipantRosterCell;
 }
 
-/** Resolves the viewer and stores the creation record in the room's own space. */
-export default pattern<FabriChatRoomInput, ChatRoomOutput>(({
-  about: record,
-  records,
-  activity,
-  participants,
-  [SELF]: self,
-}) => {
-  const policy = new Writable<ChatRoomPolicy>(CHAT_POLICY);
-  const roomMemory = new Writable<StoredMemory>({
-    requests: {},
-    authors: {},
-    usedTimes: {},
-    nextSeq: 1,
-    expiredThrough: 0,
-  });
-  const about = {
-    kind: computed(() => record?.kind ?? "group"),
-    title: computed(() => record?.title),
-    createdAt: computed(() => record?.createdAt ?? new FabricEpochNsec(0n)),
-    policy,
-    record,
-  };
-  const room = FabriChatRoom({
+/**
+ * A FabriChat room whose viewer is the person looking at it: the
+ * `ChatRoomOutput` its space's members share. A viewer with no profile can
+ * read the conversation, and is offered the form that creates one.
+ */
+const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
+  ({
     about,
-    records,
-    memory: roomMemory,
+    messages,
+    reactionLists,
+    requests,
+    usedTimes,
     activity,
-    roster: participants,
-  });
-  const profile = wish<ChatProfile>({ query: "#profile" });
-  const listing = AddToChats({
-    room: self,
-    about: room.about,
-    myProfile: profile.result,
-  });
-  return {
-    [NAME]: room[NAME],
-    [VIEWS]: room[VIEWS],
-    about: room.about,
-    recentActivity: room.recentActivity,
-    recentActivityExpiredThrough: room.recentActivityExpiredThrough,
-    participants: room.participants,
-    addParticipant: room.addParticipant,
-    messages: room.messages,
-    canSend: room.canSend,
-    reactionTallies: room.reactionTallies,
-    sendMessage: room.sendMessage,
-    editMessage: room.editMessage,
-    deleteMessage: room.deleteMessage,
-    obliterateMessage: room.obliterateMessage,
-    sendReaction: room.sendReaction,
-    deleteReaction: room.deleteReaction,
-    addMember: room.addMember,
-    [UI]: (
-      <cf-vstack>
-        {listing[UI]}
-        {room[UI]}
-      </cf-vstack>
-    ),
-  };
-});
+    counters,
+    participants,
+    // The room itself, the link another member's manager lists it by.
+    [SELF]: self,
+  }) => {
+    const profileWish = wish<ChatProfile>({ query: "#profile" });
+    // The viewer's adds' outcomes, which follow them, and only them, across
+    // sessions.
+    const addRequests = new Writable.perUser<
+      Record<string, AddMemberOutcome>
+    >({});
+    // The viewer's manager, which starts a direct chat with a participant,
+    // makes this room one of the viewer's chats once they join it, and tells
+    // someone the viewer adds of it.
+    const managerWish = wish<
+      RoomManager & { openDirect: Stream<StartDirectEvent> }
+    >({ query: "#chatManager" });
+    const startsDirect = computed(() => managerWish.result !== undefined);
+    // Hidden by a prop rather than a branch, and `hidden` until the prop has a
+    // value, as `FabriChatMessageRow` says.
+    const setupDisplay = computed((): ChatDisplay =>
+      profileWish.result === undefined ? "block" : "none"
+    );
+    const room = FabriChatRoomCore(
+      {
+        myProfile: profileWish.result,
+        about,
+        messages,
+        reactionLists,
+        requests,
+        usedTimes,
+        activity,
+        counters,
+        roster: participants,
+        addRequests,
+        startsDirect,
+        startDirect: managerWish.result?.openDirect,
+        self,
+        manager: managerWish.result,
+      },
+    );
+
+    return {
+      [NAME]: room[NAME],
+      [VIEWS]: room[VIEWS],
+      about: room.about,
+      recentActivity: room.recentActivity,
+      recentActivityExpiredThrough: room.recentActivityExpiredThrough,
+      participants: room.participants,
+      roster: room.roster,
+      participantEntries: room.participantEntries,
+      participantPrincipals: room.participantPrincipals,
+      addParticipant: room.addParticipant,
+      messages: room.messages,
+      canSend: room.canSend,
+      sendMessage: room.sendMessage,
+      editMessage: room.editMessage,
+      deleteMessage: room.deleteMessage,
+      obliterateMessage: room.obliterateMessage,
+      sendReaction: room.sendReaction,
+      deleteReaction: room.deleteReaction,
+      addMember: room.addMember,
+      canAdd: room.canAdd,
+      addRequests: room.addRequests,
+      [UI]: (
+        <cf-screen>
+          {room[UI]}
+          <div
+            id="fabrichat-profile-setup"
+            hidden
+            style={{
+              display: setupDisplay,
+              padding: "0 1rem 1rem",
+              maxWidth: "720px",
+            }}
+          >
+            {profileWish[UI]}
+          </div>
+        </cf-screen>
+      ),
+    };
+  },
+);
+
+export default FabriChatRoom;

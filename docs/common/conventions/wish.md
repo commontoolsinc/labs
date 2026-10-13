@@ -95,6 +95,11 @@ as an empty box.
 return { [UI]: wishResult[UI] };
 ```
 
+The wish holds its view as a handle rather than as a value. A pattern that uses
+`result` alone, as one handing the found piece on to something else does, loads
+none of the found piece's view. The view loads where it is shown, and the
+renderer reads it there.
+
 ## Wishing for a Specific Piece
 
 Decorate your schema with a jsdoc comment containing a `#tag`:
@@ -302,10 +307,30 @@ These query strings resolve to well-known cells without a search. The
 `#`-prefixed targets resolve against the current space by default, except
 `#favorites`, `#journal`, `#learned`, `#learnedSummary`, `#agent_queue`,
 `#chatManager`, and the `#profile*` targets, which require a signed-in user and
-resolve from that user's home space. `#chatManager` reports an error, naming
-the remedies, when the home pattern holds no chat manager: a system home
-pattern set up before its source had one gains it when the home space is next
-opened, and a custom one holds it only if it says so.
+resolve from that user's home space. A wish reads; it never creates the home
+pattern, the home space's root. The targets that resolve under that root are
+`#favorites`, `#journal`, `#learned`, `#learnedSummary`, `#agent_queue`, the
+profile create surface `#profile` offers while the user has no profile, and a
+`"~"`-scoped target such as `#default`. While the home space's `defaultPattern`
+slot is empty, as it is before the home space is first opened, a headless wish
+for one of these resolves to nothing, with no result and no error, and a
+`"~"`-scoped one resolves to whatever else its scope reaches. Any other wish for
+one of these hands out a cell through the empty slot, where a read finds
+nothing. A write beneath the empty slot is refused with a
+`SpaceRootMissingError` rather than landing in the space cell itself. When the
+write is a handler's on a client runtime, and the refusal escapes the handler,
+the root is created and the handler runs again, so the write lands under the
+root. None of these creates one, and each leaves the slot empty: a handler that
+only reads beneath the empty slot, a handler that catches the refusal itself, a
+write outside a handler, and any write on a serving runtime. A root whose
+creation fails leaves the handler's refusal standing, with the failure as its
+cause. A slot that already holds something is resolved through as it stands.
+The other `#profile*` targets only read the profile roster through the slot as
+it stands, so for them an empty slot reads as no profiles. `#chatManager` only reads the home
+pattern too, and reports an error, naming the remedies, when there is no home
+pattern or it holds no chat manager: a system home pattern set up before its
+source had one gains it when the home space is next opened, and a custom one
+holds it only if it says so.
 The `scope` parameter can redirect or fan the others out across other spaces.
 
 | Target              | Description                                             |

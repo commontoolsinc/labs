@@ -17,9 +17,9 @@ import {
 
 /**
  * Encode a bound Cell to the stored `_cf_link` sigil-link JSON string: an
- * ABSOLUTE link (id + space + scope, no `base`/`baseSpace`) with `schema`/
- * `asCell` stripped (`includeSchema: false`), so the row resolves independent of
- * any base document and stores no schema flags.
+ * ABSOLUTE link (id + space + scope, no `base`) with `schema`/`asCell` stripped
+ * (`includeSchema: false`), so the row resolves independent of any base
+ * document and stores no schema flags.
  */
 export function encodeCellToSigilString(cell: Cell<unknown>): string {
   const link: NormalizedFullLink = cell.getAsNormalizedFullLink();
