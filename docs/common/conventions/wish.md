@@ -95,6 +95,11 @@ as an empty box.
 return { [UI]: wishResult[UI] };
 ```
 
+The wish holds its view as a handle rather than as a value. A pattern that uses
+`result` alone, as one handing the found piece on to something else does, loads
+none of the found piece's view. The view loads where it is shown, and the
+renderer reads it there.
+
 ## Wishing for a Specific Piece
 
 Decorate your schema with a jsdoc comment containing a `#tag`:

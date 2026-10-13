@@ -100,6 +100,18 @@ counts their three child templates (`shape`, `value`, and `followRef`). These
 counters measure work before final entry coalescing; they do not count distinct
 persisted entries.
 
+`inputReadViewsBuilt` and `inputReadViewsReused` count the input-requirement
+verifications of a boundary pass, by whether the pass copied the transaction's
+reads for that verification or reused the copy it held. A written target is
+verified once under each schema that applies to it — its candidate schema, the
+schema its document stores, and the stored envelope at each path the write went
+through — and a failure ends its verifications early, so the two counters sum to
+the verifications run, not to the targets written. A pass copies the reads again
+only when a read was recorded or reclassified since the last verification. The
+counters cover that copy alone. The stored envelope behind each read is resolved
+again when a write retires one, and the labeled reads are assembled again with
+them, and neither is counted here.
+
 ## Parsing untrusted CFC labels
 
 `parseIfcLabel` from `@commonfabric/runner/cfc` is the public boundary for a
@@ -569,6 +581,21 @@ runtime.runner.stop(result);
 
 The storage system provides persistence for cells and synchronization across
 clients.
+
+Storage synchronization and `Cell.pull()` depend on live space subscriptions. A
+terminated session makes storage synchronization return its failure even for
+documents already loaded into the replica, and `Cell.pull()` rejects terminal
+connection or takeover errors in any space the read reaches. A failed session in
+an unrelated space does not fail the pull. Authorization denials retain their
+absent-value semantics and per-space access report.
+`storageManager.spaceSessionError(space)` exposes a terminal session error
+without starting I/O. Ordinary reconnects keep the session open and restore its
+subscriptions; a takeover ends the session and requires a fresh client. An
+authoritative local store continues supplying reads independently of the remote
+session.
+
+Reactive reads through `get()`, `sink()`, and computations continue using cached
+documents; they do not surface terminal session errors through this check.
 
 Remote memory connections use native WebSockets in browsers and for plain `ws:`
 URLs. Deno `wss:` connections use the `ws` package through Deno's Node TLS stack

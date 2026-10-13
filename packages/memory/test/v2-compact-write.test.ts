@@ -736,6 +736,12 @@ describe("compactStore", () => {
           ]),
         });
       }
+      // The client commits are an hour old, as a store's are by the time a
+      // run reaches it, so the interrupted run's compaction commit is created
+      // after the cutoff of a zero window.
+      e.database.exec(
+        `UPDATE "commit" SET created_at = datetime(created_at, '-1 hour')`,
+      );
     };
     await build(build3);
     const twin = `${dir}/twin.sqlite`;
@@ -781,6 +787,7 @@ describe("compactStore", () => {
     });
     expect(second.instancesCompacted).toBe(2);
     expect(second.report.payloads.alreadyHollowed).toBe(0);
+    expect(second.report.payloads.insideWindow).toBe(0);
     expect(second.report.payloads.exemptCompaction).toBe(1);
     expect(formatCompactionReport(second.report)).toContain(
       "earlier runs' commits keep 1",
