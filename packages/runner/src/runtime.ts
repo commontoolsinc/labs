@@ -109,6 +109,7 @@ import { isRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { collectConsumedLabel, deriveFlowJoin } from "./cfc/prepare.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { memoryHostForForeignOrigin } from "./deployment-meta.ts";
+import { DerivedInternalCellIds } from "./derived-internal-cell-ids.ts";
 import {
   type DelegatedCarriage,
   waveRunActorOf,
@@ -1295,6 +1296,7 @@ export class Runtime {
   #tearingDownWrites = false;
   readonly #writeTeardown = new AbortController();
   readonly #transactions = new WeakSet<IExtendedStorageTransaction>();
+  readonly #derivedInternalCellIds = new DerivedInternalCellIds();
 
   readonly id: string;
   readonly scheduler: Scheduler;
@@ -1489,6 +1491,11 @@ export class Runtime {
    */
   get scopeKeyIdentity(): ScopeKeyIdentity {
     return this.storageManager.scopeKeyIdentity();
+  }
+
+  /** The ids of the derived internal cells this runtime's pieces own. */
+  get derivedInternalCellIds(): DerivedInternalCellIds {
+    return this.#derivedInternalCellIds;
   }
 
   /**
@@ -2508,8 +2515,11 @@ export class Runtime {
     this.#viewReplication?.dispose();
     // Before either drain below, each of which waits for the scheduler to go
     // idle: a queued event waiting for its piece to become startable waits on
-    // another participant's commit, not on work of this runtime's own.
+    // another participant's commit, not on work of this runtime's own, and one
+    // waiting for its piece's pattern change can wait on a load that only
+    // `stopAll()` below would release.
     this.scheduler.endPieceStartWaits();
+    this.scheduler.endPatternChangeWaits();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
@@ -4289,7 +4299,6 @@ export class Runtime {
     // before it becomes ordinary immutable data.
     const store = immutableCellsFor(this);
     const readerSchema = internCellLinkSchema(schema);
-    store.retainSchema(readerSchema);
     const snapshot = store.create(
       inlineExternalSchemaRefsInValue(
         fabricFromConvertibleJsValue(
@@ -4310,7 +4319,7 @@ export class Runtime {
         ),
       ),
     );
-    return createCell(
+    const cell = createCell(
       this,
       {
         space,
@@ -4323,6 +4332,8 @@ export class Runtime {
       undefined,
       cfcLabelView,
     );
+    store.retainSchema(readerSchema);
+    return cell;
   }
 
   /**

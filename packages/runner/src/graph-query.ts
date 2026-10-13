@@ -246,6 +246,10 @@ export class GraphQueryWalk {
           );
         },
     );
+    // The manager serves stored documents and nothing is handed back to be
+    // written elsewhere, so an inline array element is walked where it is
+    // stored.
+    this.#context.inlineArrayItemsInPlace = true;
     this.#memo = options.memo ?? createSchemaMemo();
     this.stats = options.stats ?? createGraphQueryWalkStats();
   }

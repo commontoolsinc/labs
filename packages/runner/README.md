@@ -461,7 +461,7 @@ const userCell = runtime.getCell(
 );
 
 // Schema defaults are readable immediately — but they are VIRTUAL (backed
-// by a read-only data: document), so seed the cell with a real write
+// by a read-only snapshot: document), so seed the cell with a real write
 // before mutating through nested cells.
 const seed = runtime.edit();
 userCell.withTx(seed).set({

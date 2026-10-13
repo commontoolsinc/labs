@@ -79,6 +79,13 @@ remain on the original mutable array element. Moving an inline element's value
 behind an immutable ID changes its addressing, not what the computation depends
 on. A link or an explicitly declared cell handle already has its own identity.
 
+Traversal snapshots inline object or array elements read as values. An element
+requested as a cell keeps its array-slot address. A context with
+`inlineArrayItemsInPlace` traverses inline elements at their stored addresses
+without minting snapshots. `GraphQueryWalk` enables this for memory-server
+schema queries, which select stored documents rather than return value-identity
+objects.
+
 ## Schemas and outbound values
 
 A snapshot taken from storage retains a link's schema as given, including a

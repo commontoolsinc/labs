@@ -445,7 +445,7 @@ export function createSigilLinkFromParsedLink(
 
   return pinImmutableCell(
     linkRefFrom<CellLinkRefPayload>(reference),
-    reference.id,
+    link.id,
   );
 }
 
@@ -983,20 +983,16 @@ export function getDerivedInternalCellLink(
   descriptor: DerivedInternalCellDescriptor,
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
-  const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    // The kind's ONLY representation is the URI scheme applied here by
-    // toURI; the hash preimage is kind-free, so this mint site is the single
-    // place a computed identity is established.
+    // The runtime's `DerivedInternalCellIds` mints the hash, which is
+    // kind-free. The kind's ONLY representation is the URI scheme `toURI`
+    // applies here, so this is the single place a hash becomes the id of a
+    // computed cell.
     id: toURI(
-      createRef(
-        {},
-        {
-          parent,
-          type: "internal",
-          cause: descriptor.partialCause,
-        },
+      cellRuntime(resultCell).derivedInternalCellIds.idFor(
+        resultCell,
+        descriptor.partialCause,
       ),
       descriptor.kind,
     ),

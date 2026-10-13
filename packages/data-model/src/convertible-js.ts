@@ -15,7 +15,7 @@
  * that a wrong value is worse than none. A value that is already a deep-frozen
  * `FabricValue` crosses by identity instead of being rebuilt, including a
  * frozen cyclic subtree. A cycle through data requiring conversion is refused;
- * requesting mutable plain containers requires copying those containers.
+ * requesting mutable plain containers may require copying frozen containers.
  *
  * Outbound, a wrapper is unwrapped to the JS type it stands for, while a
  * `FabricInstance` with no JS counterpart passes through untouched. Both

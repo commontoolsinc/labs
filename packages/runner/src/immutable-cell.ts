@@ -369,6 +369,17 @@ export function ownImmutableCells(owner: object): ImmutableCellStore {
 
 /** Returns a bound owner's store, following transparent transaction wrappers. */
 export function immutableCellsFor(owner: object): ImmutableCellStore {
+  const store = findImmutableCells(owner);
+  if (store === undefined) {
+    throw new Error("Immutable cells require an explicitly bound owner");
+  }
+  return store;
+}
+
+/** Finds an existing ownership binding through transparent wrappers. */
+export function findImmutableCells(
+  owner: object,
+): ImmutableCellStore | undefined {
   const visited = new Set<object>();
   let current: object | undefined = owner;
   while (current !== undefined && !visited.has(current)) {
@@ -381,7 +392,7 @@ export function immutableCellsFor(owner: object): ImmutableCellStore {
       ? wrapped
       : undefined;
   }
-  throw new Error("Immutable cells require an explicitly bound owner");
+  return undefined;
 }
 
 /** Keeps an element snapshot alive for as long as its cell or link object. */

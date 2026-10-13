@@ -61,6 +61,22 @@ describe("immutable-cell", () => {
     }
   });
 
+  it("inherits an existing store when wrapping a bound transaction", () => {
+    const raw = new ManagedStorageTransaction(
+      new StoreObjectManager(new Map()),
+    );
+    const store = ownImmutableCells(raw);
+    try {
+      const first = new ExtendedStorageTransaction(raw);
+      const second = new ExtendedStorageTransaction(first);
+      expect(immutableCellsFor(first)).toBe(store);
+      expect(immutableCellsFor(second)).toBe(store);
+      expect(immutableCellsFor(raw)).toBe(store);
+    } finally {
+      store.dispose();
+    }
+  });
+
   it("compares legacy schema references with native and portable snapshots", () => {
     const release = acquireSchemaRegistryLease();
     const store = new ImmutableCellStore();

@@ -4,6 +4,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 ## Audits and reports
 
+- [Immutable-cell review fixes](development/performance/2026-10-13-immutable-cell-review-fixes/README.md) — Weak element ownership retained-heap measurements, paired creation timings under shared-host load, and focused served-pattern evidence for PR 8814.
 - [Immutable cell feedback: ownership, events, and measurement correction](development/performance/2026-10-13-immutable-cell-feedback/README.md) — 2026-10-13; nested snapshot ownership, portable event identity, traversal memoization, and corrected measured-input sharing evidence under concurrent validation load.
 - [Native immutable cells: implementation and measurements](development/performance/2026-10-12-native-immutable-cells/README.md) — 2026-10-12; native frozen snapshots with saved link origins, paired cold/reused measurements and raw samples, compact IDs, and measured runtime-lifetime retention costs.
 
@@ -460,4 +461,3 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## The retired tutorial site
 
 - [tutorials/](tutorials/) — the complete MyST source of the retired docs.commontools.dev site: nine chapters, example code and images, and the build scaffolding, entered at [index.md](tutorials/index.md). Its state chapters and LLM tour teach the retired `cell()` API.
-- [Immutable-cell review fixes](development/performance/2026-10-13-immutable-cell-review-fixes/README.md) — Weak element ownership retained-heap measurements, paired creation timings under shared-host load, and focused served-pattern evidence for PR 8814.

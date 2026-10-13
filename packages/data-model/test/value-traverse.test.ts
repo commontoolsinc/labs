@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import {
   deepFreeze,
+  estimateFabricValueSize,
   type FabricContainerValue,
   type FabricValue,
   forEachFabricContainerValue,
@@ -10,6 +11,22 @@ import {
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
 
 describe("forEachFabricContainerValue", () => {
+  it("weighs payloads and instance state without copying frozen graphs", () => {
+    const payload = "x".repeat(100_000);
+    const shared = deepFreeze({ payload });
+    const root = deepFreeze({ left: shared, right: shared });
+    const weight = estimateFabricValueSize(root);
+    expect(weight).toBeGreaterThan(payload.length * 2);
+    expect(weight).toBeLessThan(payload.length * 3);
+    expect(estimateFabricValueSize(root)).toBe(weight);
+    expect(estimateFabricValueSize(new UnknownValue("Size@1", payload)))
+      .toBeGreaterThan(payload.length * 2);
+    const mutable = { payload: "small" };
+    const before = estimateFabricValueSize(mutable);
+    mutable.payload = payload;
+    expect(estimateFabricValueSize(mutable)).toBeGreaterThan(before);
+  });
+
   it("visits shared containers once, including instance codec state", () => {
     const child = deepFreeze({ count: 1 });
     const state = deepFreeze({ child });

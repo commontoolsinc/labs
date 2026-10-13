@@ -279,13 +279,18 @@ const REPLAY_SCOPE_IDENTITY = {
   sessionId: "replay-session",
 };
 
-function makeContext(traverseCells: boolean): TraversalContext {
-  return createTraversalContext(
+function makeContext(
+  traverseCells: boolean,
+  inlineArrayItemsInPlace: boolean,
+): TraversalContext {
+  const context = createTraversalContext(
     new CompoundCycleTracker(),
     new MapSetStringToPathSelectors(true),
     REPLAY_SCOPE_IDENTITY,
     traverseCells,
   );
+  context.inlineArrayItemsInPlace = inlineArrayItemsInPlace;
+  return context;
 }
 
 export function replayFixture(
@@ -338,7 +343,10 @@ export function replayFixture(
     invocationIndex++;
     let context = contexts.get(invocation.context);
     if (context === undefined) {
-      context = makeContext(invocation.traverseCells);
+      context = makeContext(
+        invocation.traverseCells,
+        invocation.inlineArrayItemsInPlace === true,
+      );
       contexts.set(invocation.context, context);
     }
     contextUses.set(

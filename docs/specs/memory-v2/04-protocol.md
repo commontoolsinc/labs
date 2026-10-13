@@ -360,6 +360,11 @@ interface SessionOpenRequest {
     sessionId?: SessionId;
     seenSeq?: number;
     sessionToken?: string;
+    // A random key the client makes for one session and sends on every open
+    // of it, and the number of the open among that session's opens, from 1
+    // (see the rules). Both inside the signed descriptor.
+    resumeKey?: string;
+    resumeAttempt?: number;
     // The read ceiling every `db.query` served as this session reads
     // under (see the rules). Inside the signed descriptor: a bound on
     // what the session is served, declared by the session itself.
@@ -412,10 +417,14 @@ interface SessionOpenInvocation {
   aud: DID;
   args: {
     protocol: "memory";
+    // The request's `session` descriptor, field for field: the server refuses
+    // an open whose descriptor differs from the signed one.
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
       sessionToken?: string;
+      resumeKey?: string;
+      resumeAttempt?: number;
     };
   };
   challenge: string;
@@ -475,6 +484,19 @@ Rules:
   carry the same kind. Every open of a space with history is told the kind its
   genesis declares, in `spaceKind`, whether the session declared one or not
 - the server rotates `sessionToken` on every successful `session.open`
+- a client sends the same `resumeKey` on every open of one session, a random
+  value it makes for that session alone, with a `resumeAttempt` that counts
+  the session's opens from 1. The server keeps the key, the attempt and the
+  presented `sessionToken` of a session's latest open, and resumes the session
+  from that presented token, as well as from the latest one, when the resume
+  carries the same key and a greater attempt: the connection can drop after
+  the server handles a resume and before its response arrives, and the client
+  then holds only the token it presented. The attempt orders resumes: one the
+  client gave up on carries the same key and token as the one that replaced
+  it, and is refused when it reaches the server after that one has restored
+  the session. Only this fallback needs the key; the latest token resumes the
+  session without one
+- an open whose connection closes while the server admits it opens nothing
 - at most one connection may own a given `(space, sessionId)` at a time
 - a successful resume transfers ownership to the new connection, invalidates the
   old owner for that session, and MAY emit `session/revoked` to the previous
@@ -482,7 +504,7 @@ Rules:
 - a successful `session.open` returns a new challenge in `sessionOpen` for
   signed-open clients; a connection-auth client does not replace its audience
   or held challenge from that response
-- a stale `sessionToken` MUST fail with `SessionRevokedError`
+- any other stale `sessionToken` MUST fail with `SessionRevokedError`
 - when a resumed session already has watches installed, `sync` carries the
   catch-up delta the client missed while offline
 - a resuming client that advertises `sessionHoldings` (and whose server does)

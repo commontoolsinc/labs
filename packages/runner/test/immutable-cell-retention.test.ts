@@ -34,6 +34,8 @@ describe("immutable-cell-retention", () => {
       explicit: { held: "explicit" },
       queued: { held: "queued" },
       parsed: { held: "parsed" },
+      relative: { held: "relative" },
+      failedSchemaRetained: false,
     });
   });
 });

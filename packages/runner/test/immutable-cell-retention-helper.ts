@@ -1,11 +1,12 @@
 /** GC ownership checks for native snapshots, run with the real event loop. */
+import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { yieldToEventLoop } from "@commonfabric/utils/sleep";
 import { convertCellsToLinks } from "../src/cell.ts";
 import { immutableCellsFor, immutableSnapshot } from "../src/immutable-cell.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { createSigilLinkFromParsedLink, parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const gc = (globalThis as { gc?: () => void }).gc;
@@ -67,6 +68,38 @@ const parsed = parseLink(
     id: store.createElement(deepFreeze({ held: "parsed" }), base).id,
   }).getAsLink(),
 );
+function relativeHandle() {
+  const snapshot = store.createElement(deepFreeze({ held: "relative" }), base);
+  const link = { ...base, id: snapshot.id };
+  return {
+    id: snapshot.id,
+    handle: createSigilLinkFromParsedLink(link, { base: link }),
+  };
+}
+const relative = relativeHandle();
+if (linkRefPayload(relative.handle).id !== undefined) {
+  throw new Error("Expected a relative link without an explicit id");
+}
+function failedReaderSchema() {
+  const snapshot = store.createElement(
+    deepFreeze({ held: "failed-schema" }),
+    base,
+  );
+  const weak = new WeakRef(snapshot);
+  const cyclic: { self?: unknown } = {};
+  cyclic.self = cyclic;
+  let threw = false;
+  try {
+    runtime.getImmutableCell(signer.did(), cyclic, {
+      default: { "/": { "link@1": { id: snapshot.id } } },
+    });
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error("Cyclic snapshot must fail");
+  return weak;
+}
+const failedSchema = failedReaderSchema();
 const explicitId = store.create({ held: "explicit" }).id;
 sources.length = 0;
 // WeakRef targets survive the job that created them; collection follows a turn.
@@ -83,10 +116,13 @@ const report = {
   cell: cell.getRaw(),
   link: runtime.getCellFromLink(link).getRaw(),
   parsed: runtime.getCellFromLink(parsed).getRaw(),
+  relative: immutableSnapshot(relative.id).value,
+  failedSchemaRetained: failedSchema.deref() !== undefined,
   queued: runtime.getCellFromLink(queued.link).getRaw(),
   explicit: immutableSnapshot(explicitId).value,
 };
 // Keep both the runtime and source keys live through the collection above.
+if (relative.handle === undefined) throw new Error("Lost relative handle");
 if (equalSources.length !== 100) throw new Error("Lost source keys");
 await runtime.dispose();
 console.log(JSON.stringify(report));

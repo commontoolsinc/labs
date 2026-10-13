@@ -138,7 +138,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the pre-sync repeats or does not need: a child start re-planning the
   subtree its parent named, every plan's inputs cell re-inlining its
   schemas, a cross-space pass that materializes every plan to find a link,
-  and a planning loop that never yields to read the answers it asked for.
+  a planning loop that never yields to read the answers it asked for, and a
+  node bound once for the pre-sync and again for its instantiation.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and
