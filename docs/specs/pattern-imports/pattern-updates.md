@@ -389,6 +389,11 @@ pattern's setup has settled, so that a withdrawn setup leaves the old graph in
 place, and a wave settles after the cycle that sealed into it has ended. A call
 made within that cycle cannot wait for the settlement, so on such a runtime
 `ensureDefaultPattern` returns with the old pattern's graph still running.
+On a client runtime the watcher re-instantiates only once the setup it stages
+for the new pattern has committed, and a refused setup leaves the old pattern
+running under the moved pointer. Until the piece settles on one of the two, an
+event for its streams waits, and then runs the handler of the pattern it
+settled on.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and

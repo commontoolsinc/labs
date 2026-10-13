@@ -398,6 +398,7 @@ export function isHeadEventParked(
 ): boolean {
   const headEvent = state.eventQueue[0];
   return headEvent?.handlerLoadPending === true ||
+    headEvent?.patternChangePending === true ||
     headEvent?.retryReadinessPending === true ||
     (headEvent?.notBefore !== undefined && headEvent.notBefore > now);
 }
@@ -534,6 +535,7 @@ export function dropQueuedEvent(
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
   event.endPieceStartWait?.("settled");
+  event.endPatternChangeWait?.();
   if (event.originTx !== undefined) {
     state.releaseLineageEvent?.(event.originTx, event);
   }
@@ -1311,7 +1313,17 @@ export function addSchedulerEventHandler(state: {
 
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
+  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly eventQueue: QueuedEvent[];
+
+  /** Holds `idle()` open until `work` settles (`Scheduler.trackBackgroundTask`). */
+  readonly trackBackgroundTask: (work: Promise<unknown>) => void;
+
+  /** The heads held for a pattern change, while each waits. */
+  readonly patternChangeWaits: Set<QueuedEvent>;
+
+  /** Whether `endPatternChangeWaits()` has run; no hold begins after it. */
+  readonly patternChangeWaitsEnded: () => boolean;
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -1707,6 +1719,135 @@ export function preflightQueuedEventDependencies(state: {
   }
 }
 
+/**
+ * The pattern change that `handler`'s piece, or a piece that instantiated
+ * it, is making (`Runner.pendingPatternChangeFor`), or `undefined` when none
+ * is. Until that change settles, the handler may be about to be replaced by
+ * the incoming pattern's, or kept because its setup did not land.
+ */
+function patternChangeHolding(
+  runtime: Runtime,
+  handler: EventHandler,
+): Promise<void> | undefined {
+  const pieces = piecesOf(handler);
+  if (pieces.length === 0) return undefined;
+  return runtime.runner.pendingPatternChangeFor(pieces);
+}
+
+/** The result cells of the pieces whose graphs registered `handler`. */
+function piecesOf(handler: EventHandler): NormalizedFullLink[] {
+  return eventHandlerImplementations(handler).flatMap((implementation) => {
+    const piece = (implementation as Partial<TelemetryAnnotations>).viewPiece;
+    return piece === undefined ? [] : [piece];
+  });
+}
+
+/**
+ * Whether `handler` belongs to a graph its piece has replaced: it is no longer
+ * registered, and the piece it came from runs with a graph installed. A
+ * running piece's current graph has its handlers registered, so the one that
+ * registered `handler` is gone. A stopped piece's handler is not judged.
+ */
+function isReplacedGraphHandler(
+  state: Pick<SchedulerEventExecutionState, "runtime" | "eventHandlers">,
+  handler: EventHandler,
+): boolean {
+  if (state.eventHandlers.some(([, registered]) => registered === handler)) {
+    return false;
+  }
+  return piecesOf(handler).some((piece) =>
+    state.runtime.runner.pieceGraphIsInstalled(
+      state.runtime.getCellFromLink(piece),
+    )
+  );
+}
+
+/**
+ * Points `queuedEvent` at the handler registered for its stream now, and
+ * reports whether there is one. An event takes its stream's handler when it is
+ * queued, and a piece that changes pattern or re-instantiates its graph
+ * before the event dispatches replaces that handler with its new graph's: the
+ * one the event holds then belongs to a graph that no longer runs, and writes
+ * through bindings nothing reads.
+ */
+function followRegisteredHandler(
+  state: Pick<SchedulerEventExecutionState, "eventHandlers">,
+  queuedEvent: QueuedEvent,
+): boolean {
+  const current = findEventHandler(state.eventHandlers, queuedEvent.eventLink);
+  if (current === undefined) return false;
+  if (current !== queuedEvent.handler) {
+    queuedEvent.handler = current;
+    queuedEvent.action = (tx) => current(tx, queuedEvent.event);
+    delete queuedEvent.preflightImplementation;
+  }
+  return true;
+}
+
+/**
+ * Parks the head `queuedEvent` until `change` settles, then hands it to the
+ * handler registered for its stream by then: the incoming pattern's once the
+ * piece swapped, the running one's when the swap's setup did not land. An
+ * event sent once a pointer move commits is the incoming pattern's to handle,
+ * and running it on the outgoing graph would write through bindings the
+ * incoming one no longer reads. The head holds the queue's FIFO slot, as a
+ * head whose handler's piece is loading does, so a later event cannot
+ * overtake it; and the wait holds `idle()` open, since the queue is quiet
+ * because it is waiting.
+ */
+function holdHeadEventForPatternChange(
+  state: SchedulerEventExecutionState,
+  queuedEvent: QueuedEvent,
+  change: Promise<void>,
+): void {
+  queuedEvent.patternChangePending = true;
+  logger.debug("scheduler", () => [
+    `event ${queuedEvent.id} waits for its piece's pattern change`,
+  ]);
+  const { promise: ended, resolve: end } = Promise.withResolvers<void>();
+  queuedEvent.endPatternChangeWait = end;
+  state.patternChangeWaits.add(queuedEvent);
+  const task = Promise.race([change, ended]).then(() => {
+    state.patternChangeWaits.delete(queuedEvent);
+    delete queuedEvent.endPatternChangeWait;
+    if (
+      queuedEvent.finalOutcomeNotified ||
+      !state.eventQueue.includes(queuedEvent)
+    ) return;
+    // The wait also ends when the piece stops, or when the scheduler is
+    // disposed, and then the event keeps the handler it was queued with, as
+    // a stopped piece's event does on the ordinary path.
+    if (
+      !followRegisteredHandler(state, queuedEvent) &&
+      isReplacedGraphHandler(state, queuedEvent.handler)
+    ) {
+      // The pattern the piece settled on registered nothing for this
+      // stream: events.md §5's drop predicate ("no runnable handler").
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: no handler registered for ${queuedEvent.eventLink.id} after its piece changed pattern`,
+      );
+      return;
+    }
+    delete queuedEvent.patternChangePending;
+  }).finally(() => state.queueExecution());
+  state.trackBackgroundTask(task);
+}
+
+/**
+ * Ends every pattern-change wait, for a scheduler being disposed: such a wait
+ * can be held by a pattern load that only the watcher's cancellation, later
+ * in the disposal, would release. The caller also makes
+ * `patternChangeWaitsEnded()` report `true`, so that no head is held again.
+ */
+export function endPatternChangeWaits(
+  state: Pick<SchedulerEventExecutionState, "patternChangeWaits">,
+): void {
+  for (const event of [...state.patternChangeWaits]) {
+    event.endPatternChangeWait?.();
+  }
+}
+
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
   eventBlockingDeps: Set<Action>,
@@ -1740,6 +1881,10 @@ export async function processPullQueuedEventDuringExecute(
   // completion hydrates the same object and queues a fresh execution tick.
   if (queuedEvent.handlerLoadPending) return;
 
+  // The head waits for its piece's pattern change; the change's settlement
+  // hands it its handler and queues a fresh tick.
+  if (queuedEvent.patternChangePending) return;
+
   // The head is a stale-basis retry holding its slot while the state it
   // re-runs against arrives; the readiness continuation queues a fresh tick.
   if (queuedEvent.retryReadinessPending) return;
@@ -1759,6 +1904,26 @@ export async function processPullQueuedEventDuringExecute(
   }
 
   delete queuedEvent.notBefore;
+
+  const change = state.patternChangeWaitsEnded()
+    ? undefined
+    : patternChangeHolding(state.runtime, queuedEvent.handler);
+  if (change !== undefined) {
+    holdHeadEventForPatternChange(state, queuedEvent, change);
+    return;
+  }
+  if (
+    !followRegisteredHandler(state, queuedEvent) &&
+    isReplacedGraphHandler(state, queuedEvent.handler)
+  ) {
+    // The graph the piece replaced its handler's with registered nothing for
+    // this stream: events.md §5's drop predicate ("no runnable handler").
+    state.dropEvent(
+      queuedEvent,
+      `Event dropped: no handler registered for ${queuedEvent.eventLink.id} after its piece replaced its graph`,
+    );
+    return;
+  }
 
   const { handler } = queuedEvent;
 
