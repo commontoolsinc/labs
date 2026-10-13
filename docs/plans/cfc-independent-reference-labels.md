@@ -389,6 +389,16 @@ no label of its own declares an empty one into a labeled store, so that a
 re-link of the standing row would find a declaration; nothing reads it, and
 it goes.
 
+The harness audit's AUD-25, "labels across a followed link", counts the links
+a run's cells hold by the `origin: "link"` entries in the run's cell-labels
+snapshot (`packages/cf-harness/audit/checks/structural.ts`). A reference with
+no label of its own stores no such entry, so the check reads a run whose links
+are bare, as a sqlite result's row links are, as holding no link at all and
+reports itself not applicable. The snapshot reader in
+`packages/cf-harness/src/space-labels.ts` walks values and already knows every
+link it found. The snapshot should record those paths and the check should
+count them, with its fixtures rebuilt on what a reader reports.
+
 ## Legacy data
 
 No migration runs. A link entry persisted under the over-approximation carries

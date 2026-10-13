@@ -1620,7 +1620,7 @@ const structuralProvenanceForPath = (
   claim: string,
 ): StructuralProvenanceInput | undefined => {
   const logicalPath = canonicalizeLogicalPath(path);
-  return tx.getCfcState().writePolicyInputs.find((
+  return writePolicyInputsForDocument(tx, target).find((
     input,
   ): input is StructuralProvenanceInput =>
     input.kind === "structural-provenance" &&
@@ -1718,7 +1718,7 @@ const writeIsPatternSetupInitialization = (
   path: readonly string[],
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "structural-provenance" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.claim === CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION &&
@@ -1807,7 +1807,7 @@ const writeIsRuntimeInitialization = (
   path: readonly string[],
   waived: "writeAuthorizedBy" | "uiContract",
 ): boolean => {
-  const candidates = tx.getCfcState().writePolicyInputs.filter((input) =>
+  const candidates = writePolicyInputsForDocument(tx, target).filter((input) =>
     input.kind === "initialization" && input.mode !== "replay" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -2176,7 +2176,7 @@ const writePreservesRuntimeOutput = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): boolean => {
-  const input = tx.getCfcState().writePolicyInputs.find((input) =>
+  const input = writePolicyInputsForDocument(tx, target).find((input) =>
     input.kind === "preserved-output" && tx.isRuntimeWritePolicyInput(input) &&
     sameDocument(input.target, target) && input.target.path.length === 0
   );
@@ -2233,7 +2233,7 @@ const writeIsPolicyApplication = (
     path: readonly string[],
   ) => ImplementationIdentity | undefined,
 ): boolean => {
-  const applications = tx.getCfcState().writePolicyInputs.filter((
+  const applications = writePolicyInputsForDocument(tx, target).filter((
     input,
   ): input is Extract<WritePolicyInput, { kind: "policy-application" }> =>
     input.kind === "policy-application" &&
@@ -2274,7 +2274,7 @@ const writeReplaysArgumentSlot = (
   },
   path: readonly string[],
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "initialization" && input.mode === "replay" &&
     tx.isRuntimeWritePolicyInput(input) &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -2378,7 +2378,7 @@ const writeIsOwnerAdoption = (
   },
   path: readonly string[],
 ): boolean => {
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "owner-adoption" && tx.isRuntimeWritePolicyInput(input) &&
     input.owner === tx.getCfcState().trustSnapshot?.actingPrincipal &&
     input.target.space === target.space && input.target.id === target.id &&
@@ -2434,7 +2434,7 @@ type LinkSourceProjection = {
  * Each preparation owns a fresh resolver. Without write inspection, reuse is
  * limited to one target's input collection.
  */
-class VerifierMetadataResolver {
+export class VerifierMetadataResolver {
   #tx: IExtendedStorageTransaction;
   #envelopes = new Map<
     MemorySpace,
@@ -2444,6 +2444,7 @@ class VerifierMetadataResolver {
     >
   >();
   #seenWrites = 0;
+  #generation = 0;
   #viewIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
   #views = new WeakMap<CfcMetadata, Map<string, LinkSourceProjection>>();
   #labelIndexes = new WeakMap<CfcMetadata, ConsumedLabelIndex>();
@@ -2459,6 +2460,14 @@ class VerifierMetadataResolver {
   /** Binds metadata reads and write inspection to the same transaction. */
   constructor(tx: IExtendedStorageTransaction) {
     this.#tx = tx;
+  }
+
+  /**
+   * Advances each time a refresh retires a resolution, so a caller holding
+   * results read through this resolver can tell whether any still stands.
+   */
+  get generation(): number {
+    return this.#generation;
   }
 
   /** Returns the current envelope, propagating unreadable-envelope errors. */
@@ -2685,6 +2694,7 @@ class VerifierMetadataResolver {
       this.#coverIndexes = new WeakMap();
       this.#covers = new WeakMap();
       this.#seenWrites = 0;
+      this.#generation += 1;
       return;
     }
     for (let index = this.#seenWrites; index < writes.length; index++) {
@@ -2706,7 +2716,7 @@ class VerifierMetadataResolver {
         this.#labels.delete(metadata);
         this.#linkSources.delete(metadata);
       }
-      documents?.delete(write.id);
+      if (documents?.delete(write.id)) this.#generation += 1;
     }
     this.#seenWrites = writes.length;
   }
@@ -6470,7 +6480,7 @@ const ifcEntryAppliesToAttemptedWrite = (
       tx.getWriteDetails?.(target.space) ?? [];
     // Owner adoption changes policy while retaining the stored bytes. It is
     // still a policy attempt and must pass every ordinary requirement gate.
-    let touched = tx.getCfcState().writePolicyInputs.some((input) =>
+    let touched = writePolicyInputsForDocument(tx, target).some((input) =>
       input.kind === "owner-adoption" && tx.isRuntimeWritePolicyInput(input) &&
       input.target.space === target.space && input.target.id === target.id &&
       normalizeCellScope(input.target.scope) === target.scope &&
@@ -6889,6 +6899,387 @@ const cfcFloorTrustContext = (
   };
 };
 
+/**
+ * One read `verifyInputRequirements` quantifies over, at its activity-clock
+ * position. A read without one (journal-less backend) is treated as
+ * preceding every write: it joins every prefix, which is the conservative
+ * direction.
+ */
+type InputRead = Omit<IReadActivity, "journalIndex"> & {
+  journalIndex: number;
+};
+
+/** The reads an `InputReadView` holds, and what they were built from. */
+type InputReadSnapshot = {
+  // What the reads were copied from: every record the transaction offered,
+  // in order, the metadata object each carried, and whether each distinct
+  // metadata object classed its reads as the verifier's own. A record keeps
+  // its place in the transaction's list while that classification changes,
+  // by its metadata being replaced or changed in place.
+  records: readonly IReadActivity[];
+  metas: readonly IReadActivity["meta"][];
+  internalByMeta: ReadonlyMap<IReadActivity["meta"], boolean>;
+  triggerCount: number;
+  reads: readonly InputRead[];
+  // The value path each read observes, or `undefined` for a read of one of
+  // the document's own members, which observes no payload and so consumes no
+  // payload label. Captured before any envelope resolves: backend reads may
+  // mutate a caller-owned path array.
+  gatePaths: readonly (ValuePath | undefined)[];
+  // Stage-0 measurement: the reads lacking a clock position.
+  clockLessReads: number;
+};
+
+/**
+ * The labeled reads a protected entry's input checks quantify over, built
+ * from the input reads whose documents resolved to a label with values.
+ * Returns what the per-entry checks consume: each read's gate path, its
+ * effective label, and the labeled locations it consumed, resolved on first
+ * ask.
+ */
+const buildGatedInputReads = (
+  tx: IExtendedStorageTransaction,
+  reads: readonly InputRead[],
+  gatePaths: readonly (ValuePath | undefined)[],
+  sourceMetadata: readonly (CfcMetadata | undefined)[],
+) => {
+  // One path index per document's label map, built for the per-access join
+  // the first time it resolves a read of that document.
+  const labelIndexes = new Map<CfcMetadata, ConsumedLabelIndex>();
+  const labelIndexOf = (metadata: CfcMetadata): ConsumedLabelIndex => {
+    let index = labelIndexes.get(metadata);
+    if (index === undefined) {
+      index = new ConsumedLabelIndex(metadata.labelMap.entries);
+      labelIndexes.set(metadata, index);
+    }
+    return index;
+  };
+  const gatedReads = reads.flatMap((read, index) => {
+    const path = gatePaths[index];
+    if (path === undefined) return [];
+    const metadata = sourceMetadata[index];
+    const selection = {
+      nonRecursive: read.nonRecursive,
+      consumes: "all" as const,
+    };
+    let locations: readonly ConsumedLocation[] | undefined;
+    return [{
+      ...read,
+      path,
+      label: effectiveReadLabel(metadata, path, selection),
+      // The labeled locations the read consumed, as the per-access join
+      // reads them (`access-integrity.ts`), resolved on first ask.
+      locations: (): readonly ConsumedLocation[] =>
+        locations ??= metadata === undefined ? [] : consumedLocations(
+          stringTupleKey([
+            read.space,
+            read.id,
+            normalizeCellScope(read.scope),
+          ]),
+          // Only the entries bearing on the read, so the locations are
+          // resolved over them rather than over the whole document.
+          consumedEntriesForRead(
+            metadata,
+            path,
+            selection,
+            labelIndexOf(metadata),
+          ),
+          path,
+          read.nonRecursive,
+        ),
+    }];
+  }).filter((read) =>
+    read.label !== undefined &&
+    // A present-but-empty label ({} — no atoms) is the same trust level as
+    // an absent one (excluded above); whether metadata materialized an
+    // empty entry is a persistence/sync artifact and must not decide gate
+    // membership.
+    hasLabelValues(read.label)
+  );
+  // Label-metadata observations (inv-12 Stage 2) join the gate with their
+  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
+  // no journal position, so they sit at -Infinity and join EVERY protected
+  // write's prefix — the conservative direction for a screen, and only new
+  // introspection-using code ever records one (no existing flow regresses).
+  // Confidentiality-only records: never provenance-only, never a floor
+  // witness.
+  for (
+    const [index, observation] of tx.getCfcState().labelMetadataObservations
+      .entries()
+  ) {
+    gatedReads.push({
+      space: observation.target.space,
+      id: observation.target.id as URI,
+      scope: normalizeCellScope(observation.target.scope),
+      path: canonicalizeLogicalPath(observation.target.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: { confidentiality: [...observation.confidentiality] },
+      locations: () => [
+        labelMetadataLocation(observation.confidentiality, index),
+      ],
+    });
+  }
+  for (
+    const observation of tx.getCfcState().externalContentObservations ?? []
+  ) {
+    const gateLabel: IFCLabel = {
+      confidentiality: observation.flow.confidentiality,
+      integrity: observation.consumed.integrity,
+    };
+    if (!hasLabelValues(gateLabel)) continue;
+    gatedReads.push({
+      ...observation.source,
+      id: observation.source.id as URI,
+      path: canonicalizeLogicalPath(observation.source.path),
+      type: "application/json",
+      meta: {},
+      journalIndex: -Infinity,
+      label: gateLabel,
+      locations: () => observation.locations,
+    });
+  }
+  return gatedReads;
+};
+
+/**
+ * The reads `verifyInputRequirements` quantifies over, held for one boundary
+ * pass. Every target the pass verifies, under each of its verification
+ * schemas, asks for the same reads, the same stored envelope behind each,
+ * and the same labeled set, and a pass may verify hundreds of targets, so
+ * each is built once and reused while what it was built from stands.
+ *
+ * The reads are the transaction's potentially external read activities,
+ * runtime-internal verifier reads excluded, and its trigger reads (§8.9.2 /
+ * SC-3, H5): a handler scheduled by a labeled write must satisfy
+ * `requiredIntegrity` even if its branch never re-reads that write, so they
+ * join the gate when enabled, at `-Infinity`, since their invalidating
+ * writes scheduled the run and so logically precede every write in the
+ * attempt (doc §4). The view reads the transaction's activity again on
+ * every ask, since a record's internal-verifier classification is its
+ * metadata's and can change while the record keeps its place. It copies
+ * the reads again only when the records differ, one carries another
+ * metadata object, or a metadata object classes its reads otherwise than
+ * it did, so a read recorded or reclassified during the pass reaches the
+ * targets verified after it.
+ * The resolver's generation says whether a write retired an envelope the
+ * view resolved. The view is deliberately class-blind (`consumes: "all"`):
+ * the gate is a screen over everything the transaction consumed, and
+ * over-inclusive quantification is the fail-safe direction for it;
+ * per-class narrowing of consumers is C4. Provenance-only reads are not
+ * filtered here: the S7 exemption is applied per entry, inside that entry's
+ * prefix. Distinct from the egress side's consumed set
+ * (`collectConsumedLabel`), which stays transaction-global — a sink request
+ * records no per-write provenance, so the whole consumed set is the sound
+ * over-approximation there (doc §7.4).
+ */
+export class InputReadView {
+  readonly #tx: IExtendedStorageTransaction;
+  #reads?: InputReadSnapshot;
+  #resolved?: {
+    reads: readonly InputRead[];
+    generation: number;
+    sourceMetadata: readonly (CfcMetadata | undefined)[];
+  };
+  #gated?: {
+    sourceMetadata: readonly (CfcMetadata | undefined)[];
+    observationCount: number;
+    externalObservationCount: number;
+    gatedReads: ReturnType<typeof buildGatedInputReads>;
+  };
+
+  /** Binds the view to the transaction whose reads it holds. */
+  constructor(tx: IExtendedStorageTransaction) {
+    this.#tx = tx;
+  }
+
+  /**
+   * Every read, each carrying a document-rooted path, as a read activity
+   * does: the transaction's reads as they stand at this ask, which the
+   * envelopes and the labeled set below then describe until the next ask.
+   * Counts, per ask, whether the set was copied for it or reused; a boundary
+   * pass asks once per schema it verifies a target under.
+   */
+  reads(): readonly InputRead[] {
+    const before = this.#reads;
+    const current = this.#current();
+    this.#tx.noteCfcPreparationWork(
+      current === before ? "inputReadViewsReused" : "inputReadViewsBuilt",
+    );
+    return current.reads;
+  }
+
+  /** How many of the reads the last `reads()` saw lack a clock position. */
+  clockLessReads(): number {
+    return this.#held().clockLessReads;
+  }
+
+  /**
+   * The stored envelope of each read's document, in the order of `reads()`,
+   * resolved through `resolver` as it stands after its refresh. Resolving
+   * propagates an unreadable-envelope refusal, so a transaction that
+   * consumed such a document fails closed whether or not anything asks what
+   * its label says.
+   */
+  sourceMetadata(
+    resolver: VerifierMetadataResolver,
+  ): readonly (CfcMetadata | undefined)[] {
+    const { reads } = this.#held();
+    const generation = resolver.generation;
+    if (
+      this.#resolved?.reads !== reads ||
+      this.#resolved.generation !== generation
+    ) {
+      this.#resolved = {
+        reads,
+        generation,
+        sourceMetadata: reads.map((read) =>
+          resolver.read(
+            read.space,
+            read.id,
+            normalizeCellScope(read.scope),
+            read.type ?? "application/json",
+          )
+        ),
+      };
+    }
+    return this.#resolved.sourceMetadata;
+  }
+
+  /**
+   * The labeled reads a protected entry quantifies over, with the
+   * transaction's label-metadata and external-content observations joined.
+   * Resolving one read's label joins every entry of that document's stored
+   * label map that bears on the read path, so the set costs the read count
+   * times those maps' sizes, and it is kept until a read, an envelope or an
+   * observation it was built from changes.
+   */
+  gatedReads(
+    resolver: VerifierMetadataResolver,
+  ): ReturnType<typeof buildGatedInputReads> {
+    const sourceMetadata = this.sourceMetadata(resolver);
+    const state = this.#tx.getCfcState();
+    const observationCount = state.labelMetadataObservations.length;
+    const externalObservationCount =
+      state.externalContentObservations?.length ?? 0;
+    if (
+      this.#gated?.sourceMetadata !== sourceMetadata ||
+      this.#gated.observationCount !== observationCount ||
+      this.#gated.externalObservationCount !== externalObservationCount
+    ) {
+      this.#gated = {
+        sourceMetadata,
+        observationCount,
+        externalObservationCount,
+        gatedReads: buildGatedInputReads(
+          this.#tx,
+          this.#held().reads,
+          this.#held().gatePaths,
+          sourceMetadata,
+        ),
+      };
+    }
+    return this.#gated.gatedReads;
+  }
+
+  /**
+   * Helper for `reads()`, which returns the snapshot the view holds while it
+   * still stands for the transaction's activity, and otherwise builds one.
+   * This is the one place the view reads that activity.
+   */
+  #current(): InputReadSnapshot {
+    const tx = this.#tx;
+    const raw = tx.getPotentiallyExternalReadActivities?.() ??
+      tx.getReadActivities?.() ?? [];
+    const rawList: readonly IReadActivity[] = Array.isArray(raw)
+      ? raw
+      : [...raw];
+    const triggers = triggerReadSources(tx);
+    if (
+      this.#reads !== undefined &&
+      this.#reads.triggerCount === triggers.length &&
+      InputReadView.#stands(this.#reads, rawList)
+    ) {
+      return this.#reads;
+    }
+    let clockLessReads = 0;
+    const metas: IReadActivity["meta"][] = [];
+    const internalByMeta = new Map<IReadActivity["meta"], boolean>();
+    const reads: InputRead[] = [];
+    for (const read of rawList) {
+      const meta = read.meta;
+      metas.push(meta);
+      let internal = internalByMeta.get(meta);
+      if (internal === undefined) {
+        internal = isInternalVerifierRead(meta);
+        internalByMeta.set(meta, internal);
+      }
+      if (internal) continue;
+      if (read.journalIndex === undefined) clockLessReads += 1;
+      reads.push({ ...read, journalIndex: read.journalIndex ?? -Infinity });
+    }
+    for (const read of triggers) {
+      // A trigger read names a payload path, so its document path is that
+      // path under `value`.
+      reads.push({
+        ...read,
+        path: toDocumentPath(["value", ...read.path]),
+        journalIndex: -Infinity,
+      });
+    }
+    this.#reads = {
+      // A copy, so the records compared at the next ask are the ones this
+      // snapshot was built from even where the transaction hands out its
+      // own growing list.
+      records: [...rawList],
+      metas,
+      internalByMeta,
+      triggerCount: triggers.length,
+      reads,
+      gatePaths: reads.map((read) => canonicalizeDocumentPath(read.path)),
+      clockLessReads,
+    };
+    return this.#reads;
+  }
+
+  /**
+   * Helper for the members that describe the reads, which returns the
+   * snapshot the last `reads()` saw without reading the transaction's
+   * activity again, or builds the first one where nothing has asked yet.
+   */
+  #held(): InputReadSnapshot {
+    return this.#reads ?? this.#current();
+  }
+
+  /**
+   * Helper for `#current()`, which says whether `held` was built from
+   * exactly `records`, each classified as it is now. The transaction keeps a
+   * record whose classification is not sealed so that a consumer reads its
+   * metadata again, so every ask reads every record's metadata: a record
+   * carrying another metadata object ends the snapshot, and so does a
+   * metadata object that classes its reads otherwise than it did. The
+   * classification is the metadata object's, and a transaction's records
+   * share a few of them, so each distinct one is classified once per ask.
+   */
+  static #stands(
+    held: InputReadSnapshot,
+    records: readonly IReadActivity[],
+  ): boolean {
+    if (records.length !== held.records.length) return false;
+    for (let index = 0; index < records.length; index++) {
+      const read = records[index];
+      if (read !== held.records[index] || read.meta !== held.metas[index]) {
+        return false;
+      }
+    }
+    for (const [meta, internal] of held.internalByMeta) {
+      if (isInternalVerifierRead(meta) !== internal) return false;
+    }
+    return true;
+  }
+}
+
 const verifyInputRequirements = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
@@ -6911,6 +7302,8 @@ const verifyInputRequirements = (
   // quantify under.
   prefixBounds: WritePrefixBounds,
   metadataResolver: VerifierMetadataResolver,
+  // The boundary pass's reads, resolved through `metadataResolver`.
+  inputReads: InputReadView,
   // Stage-0 precision counters (docs/specs/cfc-value-level-provenance.md §6),
   // accumulated across the boundary pass. undefined — the default, whenever
   // no onPrefixProvenance hook is installed — skips all measurement.
@@ -6929,198 +7322,30 @@ const verifyInputRequirements = (
   // label was left un-rewritten, so the attempt after the referenced document
   // syncs can fit, and tagging it terminal would strand that write.
 ): { reason: string; verdict: boolean } | undefined => {
-  // The labeled reads the per-entry checks below quantify over, each carrying
-  // its activity-clock position. Distinct from the egress side's consumed set
-  // (collectConsumedLabel), which stays transaction-global — a sink request
-  // records no per-write provenance, so the whole consumed set is the sound
-  // over-approximation there (doc §7.4). Deliberately class-blind
-  // (`consumes: "all"`): the gate is a screen over everything the tx
-  // consumed, and over-inclusive quantification is the fail-safe direction
-  // for it; per-class narrowing of consumers is C4.
-  //
-  // Provenance-only reads are NOT filtered here (unlike before D4): the S7
-  // exemption is applied per entry, inside that entry's prefix.
-  // Stage-0 measurement: read activities lacking a clock position (counted
-  // below only while a hook collects; the enforcement path pays a
-  // short-circuited presence check per read, nothing else).
-  //
-  // The stored envelope of each read's document is resolved here, ahead of
-  // the label: `storedMetadataFor` refuses an envelope this build cannot
-  // interpret, by version or by shape, and a transaction that consumed such
-  // a document fails closed whether or not anything asks what its label
-  // says. That refusal must not depend on what a target declares, nor on
-  // whether the measurement dial is on. Resolutions remain valid until the
-  // transaction writes the document. The activity list stays live so newly
-  // recorded reads remain visible to later targets.
-  let clockLessReads = 0;
-  // Every read here carries a document-rooted path, as a read activity does.
-  const currentReads = [
-    ...[
-      ...(tx.getPotentiallyExternalReadActivities?.() ??
-        tx.getReadActivities?.() ?? []),
-    ].filter((read) => !isInternalVerifierRead(read.meta)).map((read) => {
-      if (provenance !== undefined && read.journalIndex === undefined) {
-        clockLessReads += 1;
-      }
-      return {
-        ...read,
-        // A read without a clock position (journal-less backend) is treated
-        // as preceding every write: it joins every prefix — conservative.
-        journalIndex: read.journalIndex ?? -Infinity,
-      };
-    }),
-    // §8.9.2 / SC-3 (H5): the trigger reads join the gate when enabled — a
-    // handler scheduled by a labeled write must satisfy requiredIntegrity even
-    // if its branch never re-reads that write. Empty when the flag is off.
-    // Trigger reads have no journal position — their invalidating writes
-    // scheduled the run, so they logically precede every write in the attempt
-    // and sit at -Infinity, joining EVERY protected write's prefix (doc §4);
-    // anything else would let the scheduling channel escape the per-write
-    // gate. A trigger read names a payload path, so its document path is that
-    // path under `value`.
-    ...triggerReadSources(tx).map((read) => ({
-      ...read,
-      path: toDocumentPath(["value", ...read.path]),
-      journalIndex: -Infinity,
-    })),
-  ];
+  // The reads this verification quantifies over are the boundary pass's
+  // view (`InputReadView`), shared by every target the pass verifies. The
+  // ask fixes the reads that the envelopes and the labeled set below
+  // describe.
+  inputReads.reads();
   // Candidate-read inspection is an extension seam and may expose writes made
   // while producing the current view. Refresh after that inspection so every
   // envelope resolution observes those writes.
   metadataResolver.refresh();
   const schemaEntries = cfcSchemaEntries(schema);
-  const needsReadLabels = provenance !== undefined ||
-    schemaEntries.some(({ schema: entrySchema }) => {
-      const ifc = isObjectOrArray(entrySchema) ? entrySchema.ifc : undefined;
-      return (ifc?.requiredIntegrity?.length ?? 0) > 0 ||
-        ifc?.maxConfidentiality !== undefined;
-    });
-  // A read of one of the document's own members has no gate path: it
-  // observes no payload, so it consumes no payload label.
-  const gatePaths: (ValuePath | undefined)[] = [];
-  const sourceMetadata = currentReads.map((read) => {
-    // Gate paths are captured before resolving an envelope: backend reads may
-    // mutate a caller-owned path array. Ungated targets only need the address.
-    if (needsReadLabels) gatePaths.push(canonicalizeDocumentPath(read.path));
-    return metadataResolver.read(
-      read.space,
-      read.id,
-      normalizeCellScope(read.scope),
-      read.type ?? "application/json",
-    );
-  });
+  // The stored envelope of each read's document is resolved here, ahead of
+  // the label: `storedMetadataFor` refuses an envelope this build cannot
+  // interpret, by version or by shape, and a transaction that consumed such
+  // a document fails closed whether or not anything asks what its label
+  // says. That refusal must not depend on what a target declares, nor on
+  // whether the measurement dial is on.
+  inputReads.sourceMetadata(metadataResolver);
   if (provenance !== undefined) {
-    provenance.clockLessReads = clockLessReads;
+    provenance.clockLessReads = inputReads.clockLessReads();
   }
-
-  // One path index per document's label map, built for the per-access join
-  // the first time it resolves a read of that document.
-  const labelIndexes = new Map<CfcMetadata, ConsumedLabelIndex>();
-  const labelIndexOf = (metadata: CfcMetadata): ConsumedLabelIndex => {
-    let index = labelIndexes.get(metadata);
-    if (index === undefined) {
-      index = new ConsumedLabelIndex(metadata.labelMap.entries);
-      labelIndexes.set(metadata, index);
-    }
-    return index;
-  };
-
-  // Resolving one read's label joins every entry of that document's stored
-  // label map that bears on the read path, so the whole set costs the
-  // transaction's read count times those maps' sizes. Only a schema entry
-  // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
-  // so the set is assembled on first ask and kept for the rest of the call.
-  const buildGatedReads = () => {
-    const gatedReads = currentReads.flatMap((read, index) => {
-      const path = gatePaths[index];
-      if (path === undefined) return [];
-      const metadata = sourceMetadata[index];
-      const selection = {
-        nonRecursive: read.nonRecursive,
-        consumes: "all" as const,
-      };
-      let locations: readonly ConsumedLocation[] | undefined;
-      return [{
-        ...read,
-        path,
-        label: effectiveReadLabel(metadata, path, selection),
-        // The labeled locations the read consumed, as the per-access join
-        // reads them (`access-integrity.ts`), resolved on first ask.
-        locations: (): readonly ConsumedLocation[] =>
-          locations ??= metadata === undefined ? [] : consumedLocations(
-            stringTupleKey([
-              read.space,
-              read.id,
-              normalizeCellScope(read.scope),
-            ]),
-            // Only the entries bearing on the read, so the locations are
-            // resolved over them rather than over the whole document.
-            consumedEntriesForRead(
-              metadata,
-              path,
-              selection,
-              labelIndexOf(metadata),
-            ),
-            path,
-            read.nonRecursive,
-          ),
-      }];
-    }).filter((read) =>
-      read.label !== undefined &&
-      // A present-but-empty label ({} — no atoms) is the same trust level as
-      // an absent one (excluded above); whether metadata materialized an
-      // empty entry is a persistence/sync artifact and must not decide gate
-      // membership.
-      hasLabelValues(read.label)
-    );
-    // Label-metadata observations (inv-12 Stage 2) join the gate with their
-    // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
-    // no journal position, so they sit at -Infinity and join EVERY protected
-    // write's prefix — the conservative direction for a screen, and only new
-    // introspection-using code ever records one (no existing flow regresses).
-    // Confidentiality-only records: never provenance-only, never a floor
-    // witness.
-    for (
-      const [index, observation] of tx.getCfcState().labelMetadataObservations
-        .entries()
-    ) {
-      gatedReads.push({
-        space: observation.target.space,
-        id: observation.target.id as URI,
-        scope: normalizeCellScope(observation.target.scope),
-        path: canonicalizeLogicalPath(observation.target.path),
-        type: "application/json",
-        meta: {},
-        journalIndex: -Infinity,
-        label: { confidentiality: [...observation.confidentiality] },
-        locations: () => [
-          labelMetadataLocation(observation.confidentiality, index),
-        ],
-      });
-    }
-    for (
-      const observation of tx.getCfcState().externalContentObservations ?? []
-    ) {
-      const gateLabel: IFCLabel = {
-        confidentiality: observation.flow.confidentiality,
-        integrity: observation.consumed.integrity,
-      };
-      if (!hasLabelValues(gateLabel)) continue;
-      gatedReads.push({
-        ...observation.source,
-        id: observation.source.id as URI,
-        path: canonicalizeLogicalPath(observation.source.path),
-        type: "application/json",
-        meta: {},
-        journalIndex: -Infinity,
-        label: gateLabel,
-        locations: () => observation.locations,
-      });
-    }
-    return gatedReads;
-  };
-  let gatedReadsMemo: ReturnType<typeof buildGatedReads> | undefined;
-  const gatedReadsOf = () => (gatedReadsMemo ??= buildGatedReads());
+  // Only the measurement dial, and a schema entry that declares
+  // `requiredIntegrity` or `maxConfidentiality` and applies to an attempted
+  // write, read the labeled set, so it is resolved where one of them asks.
+  const gatedReadsOf = () => inputReads.gatedReads(metadataResolver);
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
@@ -7499,7 +7724,7 @@ const trustedEventMatchesContract = (
   path: readonly string[],
   contract: UiContract,
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "trusted-event" &&
     input.target.space === target.space &&
     input.target.id === target.id &&
@@ -9453,7 +9678,7 @@ const transactionReleasesStore = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): boolean =>
-  tx.getCfcState().writePolicyInputs.some((input) =>
+  writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "release-program" && tx.isRuntimeWritePolicyInput(input) &&
     sameDocument(input.target, target) &&
     canonicalizeLogicalPath(input.target.path).length === 0
@@ -9605,7 +9830,7 @@ const releaseProgramModules = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
 ): readonly string[] =>
-  tx.getCfcState().writePolicyInputs.flatMap((input) =>
+  writePolicyInputsForDocument(tx, target).flatMap((input) =>
     input.kind === "release-program" && tx.isRuntimeWritePolicyInput(input) &&
       sameDocument(input.target, target) &&
       canonicalizeLogicalPath(input.target.path).length === 0
@@ -11227,6 +11452,7 @@ export function* prepareBoundaryCommitSteps(
   }
   const bindCreator = creatorBinding(tx, currentLinkWrites);
   const metadataResolver = new VerifierMetadataResolver(tx);
+  const inputReads = new InputReadView(tx);
   const linkLabels = createLinkLabelDeriver(
     tx,
     candidates,
@@ -11485,6 +11711,7 @@ export function* prepareBoundaryCommitSteps(
           ),
         prefixBounds,
         metadataResolver,
+        inputReads,
         // The precision counters measure each protected write once.
         index === 0 ? prefixProvenance : undefined,
         stored.status === "loaded"

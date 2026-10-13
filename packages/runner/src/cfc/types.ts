@@ -1243,4 +1243,6 @@ export type CfcPreparationWork =
   | "stagedReferenceDerivations"
   | "stagedReferenceCacheHits"
   | "flowTemplateEntriesMinted"
-  | "flowTemplateContainers";
+  | "flowTemplateContainers"
+  | "inputReadViewsBuilt"
+  | "inputReadViewsReused";
