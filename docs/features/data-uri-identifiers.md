@@ -111,7 +111,7 @@ Representative places that mint one:
   document that stores it; `GraphQueryWalk` in
   `packages/runner/src/graph-query.ts` sets it for the walk a memory server
   runs to resolve a schema query.
-- The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
+- The lazy schema view in `packages/runner/src/schema-view.ts` mints one for
   an array element that is an inline object, when the reader touches it. The
   element's value is already in hand, so the identifier costs no read. Without
   it `toCell` on such an element would name the array's INDEX, and writing that
@@ -137,9 +137,9 @@ it from the document's address.
 
 That places an obligation on whoever mints one from a value holding links:
 
-- The snapshot mints above — `resolveAsCell()`, query traversal, the lazy
-  schema view — take the value out of a stored document and address the
-  result in that document's space. The space already holds every schema
+- The snapshot mints above — `resolveAsCell()`, a traversal that snapshots an
+  inline array element, the lazy schema view — take the value out of a stored
+  document and address the result in that document's space. The space already holds every schema
   document those links reference, because the write that stored a link
   stored its schema documents with it.
 - `Runtime.getImmutableCell()` takes a caller's value, whose links no write
