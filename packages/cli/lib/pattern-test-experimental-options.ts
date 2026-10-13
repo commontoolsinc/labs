@@ -5,19 +5,13 @@ import {
   withServerExecutionDefault,
 } from "@commonfabric/runner";
 
-/** The flags of a runtime `cf test` builds, with its posture decided. */
-export type PatternTestExperimentalOptions = ExperimentalOptions & {
-  /**
-   * Whether the run is on the server-execution arm, in which case the runner
-   * hosts a serving loop beside the memory server its runtimes commit to.
-   */
-  serverExecution: boolean;
-};
-
 /**
  * Resolves the experimental flags of a runtime `cf test` builds from `env`,
  * deciding its server-execution posture as a deployed entry point does: the
  * explicit `EXPERIMENTAL_SERVER_EXECUTION`, else the first-party default.
+ * `serverExecution` is `true` in the result exactly when that posture is ON;
+ * otherwise the result holds what `env` sets and nothing more, so a run on
+ * the OFF arm names no flag its environment did not.
  *
  * The posture decides the topology as well as the runtime's flags. A runtime
  * on the server-execution arm commits the event a handler is fired with and
@@ -26,6 +20,9 @@ export type PatternTestExperimentalOptions = ExperimentalOptions & {
  */
 export function patternTestExperimentalOptions(
   env: EnvReader,
-): PatternTestExperimentalOptions {
-  return withServerExecutionDefault(experimentalOptionsFromEnv(env));
+): ExperimentalOptions {
+  const experimental = experimentalOptionsFromEnv(env);
+  return withServerExecutionDefault(experimental).serverExecution
+    ? { ...experimental, serverExecution: true }
+    : experimental;
 }

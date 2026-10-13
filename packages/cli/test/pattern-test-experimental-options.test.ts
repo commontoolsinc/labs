@@ -27,10 +27,10 @@ describe("patternTestExperimentalOptions()", () => {
     ).toStrictEqual({ serverExecution: false });
   });
 
-  it("returns the first-party default for `serverExecution` when the environment leaves it unset", () => {
-    expect(patternTestExperimentalOptions(envOf({}))).toStrictEqual({
-      serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
-    });
+  it("returns `serverExecution` as `true` exactly when the first-party default is on, when the environment leaves it unset", () => {
+    expect(patternTestExperimentalOptions(envOf({}))).toStrictEqual(
+      SERVER_EXECUTION_DEFAULT_ENABLED ? { serverExecution: true } : {},
+    );
   });
 
   it("returns the other flags the environment sets", () => {
@@ -44,7 +44,7 @@ describe("patternTestExperimentalOptions()", () => {
     ).toStrictEqual({
       modernCellRep: true,
       lazyMaterialization: false,
-      serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,
+      ...(SERVER_EXECUTION_DEFAULT_ENABLED ? { serverExecution: true } : {}),
     });
   });
 });
