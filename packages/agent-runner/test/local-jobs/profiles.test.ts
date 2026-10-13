@@ -359,44 +359,40 @@ describe("local-jobs/profiles", () => {
           });
       });
 
-      it("refuses an input naming a piece in another space, naming the input", async () => {
-        const carry = (await read({ carry: CARRY })).get("carry")!;
-
-        const narrowed = narrowLocalJobProfile(carry, {
-          inputs: { focus: ELSEWHERE },
-        });
-
-        expect(narrowed).toEqual({ refusal: expect.any(String) });
-        expect((narrowed as { refusal: string }).refusal).toContain(
-          "`focus`",
-        );
-        expect((narrowed as { refusal: string }).refusal).toContain(
-          "another space",
-        );
-      });
-
-      it("refuses a space-qualified input it cannot compare with the profile's space as written", async () => {
-        // A space named by DID and one named by name are compared only once a
-        // session resolves the name, so the enqueue refuses the pair rather
-        // than admitting what the run would later refuse.
+      it("admits an input naming a piece in another space by DID, whichever way the profile names its own", async () => {
+        // The host hands a job the piece it should act on, wherever that
+        // piece lives; the lane admits its space to the run.
         const named = (await read({
           carry: { ...CARRY, fabric: { ...CARRY.fabric, space: "my-space" } },
         })).get("carry")!;
         const byDid = (await read({ carry: CARRY })).get("carry")!;
 
-        const didUnderName = narrowLocalJobProfile(named, {
-          inputs: { focus: ELSEWHERE },
-        });
-        const nameUnderDid = narrowLocalJobProfile(byDid, {
-          inputs: { focus: "pattern:other-space/tracker" },
-        });
+        expect(narrowLocalJobProfile(byDid, { inputs: { focus: ELSEWHERE } }))
+          .toEqual({ profile: byDid });
+        expect(narrowLocalJobProfile(named, { inputs: { focus: ELSEWHERE } }))
+          .toEqual({ profile: named });
+      });
 
-        for (const narrowed of [didUnderName, nameUnderDid]) {
+      it("refuses a piece address naming a space other than the profile's, naming the input", async () => {
+        // A slug resolves only in the session's own space, so one qualified
+        // by another space cannot be reached.
+        const named = (await read({
+          carry: { ...CARRY, fabric: { ...CARRY.fabric, space: "my-space" } },
+        })).get("carry")!;
+        const byDid = (await read({ carry: CARRY })).get("carry")!;
+
+        for (
+          const narrowed of [
+            narrowLocalJobProfile(named, {
+              inputs: { focus: "pattern:other-space/tracker" },
+            }),
+            narrowLocalJobProfile(byDid, {
+              inputs: { focus: "pattern:other-space/tracker" },
+            }),
+          ]
+        ) {
           expect((narrowed as { refusal: string }).refusal).toContain(
             "`focus`",
-          );
-          expect((narrowed as { refusal: string }).refusal).toContain(
-            "/of:<id>",
           );
         }
         expect(

@@ -1678,19 +1678,21 @@ request may name fewer tools and fewer turns, and, under a profile that admits
 one, declare a browser host (below); leaving it out declines the browser. Under
 a profile with a fabric session it may hand the job pieces as
 `inputs: {<name>: <address>}`: each becomes an input cell the model holds as a
-handle from its first turn, and a piece outside the profile's space is refused
-at enqueue as `beyond_profile`. It may set nothing else. A job runs through the
-same `cf-harness` path as an agent run, with the fabric session its profile
-names, if any. Every tool call, including delegated calls, counts as progress,
-and so does its return; prose and reasoning do not. A `step` carries
-`{turn, tool}`, and the same step again with `returned: true` once the calls of
-that turn have returned and the loop's model has the turn. A `command` records
-each command the host ran for it. Children add
-`child: {profile, childRunId, parentToolCallId, depth}` to either body. The
-harness admits one level of delegation, so depth is `1`. Only a child's
-`browser` tool steps carry `action` (such as `click` or `snapshot`), without the
-operation's arguments or page content. Other child tool steps, such as
-`submit_result`, omit `action`.
+handle from its first turn. An address naming another space by DID
+(`//<did>/of:<id>`) admits that space for the job, on the profile's host and
+under its identity, and the job may call the verbs of the piece it was handed
+there; a slug address naming another space is refused at enqueue as
+`beyond_profile`. It may set nothing else. A job runs through the same
+`cf-harness` path as an agent run, with the fabric session its profile names, if
+any. Every tool call, including delegated calls, counts as progress, and so does
+its return; prose and reasoning do not. A `step` carries `{turn, tool}`, and the
+same step again with `returned: true` once the calls of that turn have returned
+and the loop's model has the turn. A `command` records each command the host ran
+for it. Children add `child: {profile, childRunId, parentToolCallId, depth}` to
+either body. The harness admits one level of delegation, so depth is `1`. Only a
+child's `browser` tool steps carry `action` (such as `click` or `snapshot`),
+without the operation's arguments or page content. Other child tool steps, such
+as `submit_result`, omit `action`.
 
 The lane coalesces consecutive steps with the same tool, child, browser action
 and `returned`, ignoring turn numbers. Thus N identical browser operations in

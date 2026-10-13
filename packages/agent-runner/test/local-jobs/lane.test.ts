@@ -1055,6 +1055,36 @@ describe("local-jobs/lane", () => {
         await Deno.remove(key.dir, { recursive: true });
       });
 
+      it("admits the space of an input in another space, on the profile's host", async () => {
+        // Each space a handed piece lives in is admitted for the run; an
+        // input in the profile's own space adds nothing.
+        const key = await identityKey();
+        const other =
+          "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        const foreign = `//${other}/of:fid1:${"A".repeat(43)}`;
+        const own = `/of:fid1:${"B".repeat(43)}`;
+        const { lane, nextRun, enqueue } = laneWith({
+          profiles: new Map([["carry", {
+            ...CARRY,
+            fabric: {
+              ...CARRY.fabric!,
+              space: key.did,
+              identityKeyPath: key.path,
+            },
+          }]]),
+        });
+        lane.start();
+        enqueue("a", { ...REQUEST, inputs: { focus: foreign, own } }, "carry");
+        const run = await nextRun(0);
+
+        expect(run.spec.fabric?.inputs).toEqual({ focus: foreign, own });
+        expect(run.spec.fabric?.foreignSpaces).toEqual({
+          [other]: "https://toolshed.example",
+        });
+        run.settle({ outcome: "cancelled" });
+        await Deno.remove(key.dir, { recursive: true });
+      });
+
       it("reads another space at that space's ceiling only while its ACL admits the identity", async () => {
         const key = await identityKey();
         const profiles = new Map([["carry", {

@@ -366,7 +366,20 @@ export const callVerbTool: HarnessToolDefinition<
     const session = await sessionPieces("call_verb", context);
     if (!session.ok) return fail(session.message);
     const { pieces } = session;
-    const piece = await resolvePiece("call_verb", pieces, ref);
+    // A piece in another space is writable only where the run was handed it
+    // as an input and its space is admitted to the session. A piece merely
+    // discovered there stays readable and not writable.
+    const handedKey = handleRefAddressKey(ref);
+    const handed = handedKey !== undefined &&
+      (context.inputCells ?? []).some((cell) =>
+        handleRefAddressKey(cell.ref) === handedKey
+      );
+    const piece = await resolvePiece(
+      "call_verb",
+      pieces,
+      ref,
+      (space) => handed && Object.hasOwn(session.foreignSpaces, space),
+    );
     if (!piece.ok) return fail(piece.message);
 
     // Awaited to its settlement rather than raced with the run's abort: a

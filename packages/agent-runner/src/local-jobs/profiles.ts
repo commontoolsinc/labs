@@ -358,14 +358,39 @@ export const readLocalJobProfiles = async (
 };
 
 /**
+ * The space each of `inputs` names by DID, mapped to `fabric`'s host: the
+ * spaces a job handed those pieces is admitted to, beside its own. An input
+ * in `ownSpace`, or one that names no space or names it by name, adds none.
+ */
+export const localJobForeignSpaces = (
+  fabric: LocalJobFabric,
+  inputs: Readonly<Record<string, string>> | undefined,
+  ownSpace: string = fabric.space,
+): Record<string, string> => {
+  const spaces: Record<string, string> = {};
+  for (const ref of Object.values(inputs ?? {})) {
+    if (parseNamedPieceAddress(ref) !== undefined) continue;
+    let space: string | undefined;
+    try {
+      space = parseHandleRef(ref).space;
+    } catch {
+      continue;
+    }
+    if (space !== undefined && isDID(space) && space !== ownSpace) {
+      spaces[space] = fabric.host;
+    }
+  }
+  return spaces;
+};
+
+/**
  * Why `profile` cannot hold `inputs`, or `undefined` when it can: each one is
- * held to the rule the harness mints an input cell under, against the
- * profile's own space, so a piece in any other space is refused here rather
- * than when the job starts. A space the profile names by name rather than by
- * DID is compared as a name, as the harness compares it, and an input naming
- * its space the other way — a DID under a profile naming its space by name, a
- * name under one naming it by DID — is refused, because the two can only be
- * compared once a session has resolved the name.
+ * held to the rule the harness mints an input cell under. A link may name a
+ * piece in any space by DID — that space is admitted for the job, by
+ * {@link localJobForeignSpaces} — while a piece address names a slug, which
+ * resolves only in the profile's own space: one naming another space is
+ * refused, as is one qualified by name under a profile naming its space by
+ * DID, since only a session can resolve the name to compare them.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
@@ -379,26 +404,21 @@ const refuseInputs = (
     return "The profile has no fabric session, so it can hold no inputs.";
   }
   const byDid = isDID(fabric.space);
+  const foreign = localJobForeignSpaces(fabric, inputs);
   for (const [name, ref] of Object.entries(inputs)) {
     try {
       checkInputCellSpec(
         { name, ref },
         byDid ? fabric.space as MemorySpace : undefined,
         byDid ? undefined : fabric.space,
+        foreign,
       );
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
     const named = parseNamedPieceAddress(ref);
-    const qualifiedOtherWay = named !== undefined
-      ? byDid && named.spaceName !== undefined
-      : !byDid && parseHandleRef(ref).space !== undefined;
-    if (qualifiedOtherWay) {
-      return `Input \`${name}\` names its space ${
-        byDid ? "by name" : "by DID"
-      }, and the profile names its space ${
-        byDid ? "by DID" : "by name"
-      }, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
+    if (byDid && named?.spaceName !== undefined) {
+      return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
   return undefined;

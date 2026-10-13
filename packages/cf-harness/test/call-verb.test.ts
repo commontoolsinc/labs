@@ -20,6 +20,7 @@ import type {
 } from "../src/contracts/transcript.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
 import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
+import type { HarnessInputCell } from "../src/contracts/input-cells.ts";
 import {
   createHarnessHandleTable,
   mintAddressHandle,
@@ -87,11 +88,13 @@ const TIMER_PATTERN_SOURCE = [
 const contextWith = (
   session: HarnessFabricSession,
   table?: ReturnType<typeof createHarnessHandleTable>,
+  inputCells?: readonly HarnessInputCell[],
 ): HarnessToolContext =>
   ({
     runId: "run-call-verb",
     cfcEnforcementMode: "disabled",
     ...(table !== undefined ? { handleTable: table } : {}),
+    ...(inputCells !== undefined ? { inputCells } : {}),
     getFabricSession: () => Promise.resolve(session),
     nextOutputId: (toolId: string) =>
       createToolOutputId("run-call-verb", toolId, 1),
@@ -429,6 +432,73 @@ describe("call-verb", () => {
       expect((output as { message: string }).message).toContain(
         "this run's own space",
       );
+    });
+  });
+
+  describe("with a piece in another space", () => {
+    /** The session as a job handed a piece in the neighbour space has it:
+     * that space admitted, on the session's own host. */
+    let admitted: HarnessFabricSession;
+
+    /** A timer in the neighbour space, held as a handle, and the token. */
+    const foreignTimer = async (): Promise<{ ref: string; token: string }> => {
+      const created = await neighbour.create(TIMER_PATTERN_SOURCE, {
+        input: {},
+      });
+      const ref =
+        `//${neighbour.getSpace()}/${created.getCell().getAsNormalizedFullLink().id}`;
+      const minted = await mintAddressHandle(held, ref);
+      held = minted.table;
+      return { ref, token: minted.token };
+    };
+
+    beforeEach(() => {
+      admitted = {
+        ...session,
+        foreignSpaces: { [neighbour.getSpace()]: "http://toolshed.test/" },
+      };
+    });
+
+    it("describes and calls a verb of a piece the run was handed in another space", async () => {
+      // An input names the piece in its own space, and the space is admitted
+      // for the run: the piece is described there and its verb runs there.
+      const timer = await foreignTimer();
+      const inputs = [{ name: "timer", ...timer }];
+
+      const described = await describeHandleTool.invoke(
+        contextWith(admitted, held, inputs),
+        { token: timer.token },
+      );
+      const output = await callVerbTool.invoke(
+        contextWith(admitted, held, inputs),
+        { token: timer.ref, verb: "start", event: { minutes: 10 } },
+      );
+
+      expect(described.verbs?.map((verb) => verb.name)).toEqual([
+        "start",
+        "stop",
+      ]);
+      expect(output).toMatchObject({ status: "ok", verb: "start" });
+      expect(await readField(timer.ref, "status")).toBe("running");
+    });
+
+    it("refuses a verb of a piece in an admitted space the run was not handed", async () => {
+      // The run holds a handle to the second timer, and the space is
+      // admitted; only the first was handed in, so the second stays readable
+      // and not writable.
+      const handed = await foreignTimer();
+      const other = await foreignTimer();
+
+      const output = await callVerbTool.invoke(
+        contextWith(admitted, held, [{ name: "timer", ...handed }]),
+        { token: other.ref, verb: "start", event: { minutes: 10 } },
+      );
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "this run's own space",
+      );
+      expect(await readField(other.ref, "status")).toBe("idle");
     });
   });
 
