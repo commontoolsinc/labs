@@ -500,6 +500,10 @@ Rules:
 - a resume whose connection closes during catch-up fails; the connection
   detaches its session as it closes, so the session's grace period runs while
   catch-up is pending
+- an open that fails after registering session ownership releases its
+  connection's session handle and detaches the session; catch-up computed for
+  that open is rolled back for redelivery, unless a newer open has already
+  replaced it
 - at most one connection may own a given `(space, sessionId)` at a time
 - a successful resume transfers ownership to the new connection, invalidates the
   old owner for that session, and MAY emit `session/revoked` to the previous

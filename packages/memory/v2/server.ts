@@ -1154,6 +1154,17 @@ class Connection {
     return this.#sessions.has(sessionKey(space, sessionId));
   }
 
+  /**
+   * Ends a session this connection holds: its handle and presence memberships
+   * leave the connection, and the registry detaches it for its resume grace
+   * period. Routed sessions release their retained interests immediately.
+   */
+  closeSession(space: string, sessionId: string): void {
+    this.#sessions.delete(sessionKey(space, sessionId));
+    this.#server.endPresenceForSession(space, sessionId, this.id);
+    this.#server.detachSession(space, sessionId, this.id);
+  }
+
   #shouldSuppressSessionSend(
     space: string,
     sessionId: string,
@@ -1707,18 +1718,6 @@ class Connection {
     });
   }
 
-  /**
-   * Helper for `#receiveOrdered()`, which ends a session this connection
-   * holds the way closing the connection ends it: the session leaves the
-   * connection, its presence memberships end, and the registry keeps it
-   * detached, resumable until its grace runs out.
-   */
-  #closeSession(space: string, sessionId: string): void {
-    this.#sessions.delete(sessionKey(space, sessionId));
-    this.#server.endPresenceForSession(space, sessionId, this.id);
-    this.#server.detachSession(space, sessionId, this.id);
-  }
-
   #receiveImmediate(message: ImmediateClientMessage): void {
     if (this.#closed) return;
     if (!this.#ready) {
@@ -2088,7 +2087,7 @@ class Connection {
         ) {
           return;
         }
-        this.#closeSession(parsed.space, parsed.sessionId);
+        this.closeSession(parsed.space, parsed.sessionId);
         this.#send({ type: "response", requestId: parsed.requestId, ok: {} });
         return;
       case "event.attention.resolve":
@@ -4869,6 +4868,9 @@ export class Server {
     message: SessionOpenRequest,
     connection: Connection,
   ): Promise<ResponseMessage<SessionOpenResult>> {
+    let opened: ReturnType<SessionRegistry["open"]> | undefined;
+    let catchup: SessionEffectMessage | null = null;
+    let completed = false;
     try {
       if (
         this.options.ownsSpace !== undefined &&
@@ -5028,7 +5030,6 @@ export class Server {
         ? undefined
         : this.#sessions.get(message.space, message.session.sessionId)
           ?.ownerConnectionId;
-      let opened: ReturnType<SessionRegistry["open"]>;
       try {
         opened = this.#sessions.open(
           message.space,
@@ -5063,7 +5064,7 @@ export class Server {
         connection.addSession(message.space, opened.sessionId, principal);
         const admitted = this.#sessions.get(message.space, opened.sessionId)!;
         admitted.routedAuthority = () =>
-          connection.allowsRoutedSession(message.space, opened.sessionId);
+          connection.allowsRoutedSession(message.space, admitted.id);
       } else {
         // Catch-up awaits below. The connection must already track its
         // session so closing it detaches this owner during that wait.
@@ -5114,7 +5115,7 @@ export class Server {
       // instances instead, KEYED (the session's wire vocabulary is
       // sticky), so the retraction names exactly them and never the
       // session's own instance.
-      const catchup = opened.resumed === true
+      catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
           opened.sessionId,
@@ -5153,6 +5154,7 @@ export class Server {
       // Activation trigger (serving-loop.md §1): session open makes the
       // space ACTIVE-eligible; notify the host after the open succeeded.
       this.#notifySessionOpened(message.space);
+      completed = true;
       return {
         type: "response",
         requestId: message.requestId,
@@ -5187,6 +5189,26 @@ export class Server {
         wireError.retriable = true;
       }
       return respondTypedError<SessionOpenResult>(message.requestId, wireError);
+    } finally {
+      if (!completed && opened !== undefined) {
+        const current = this.#sessions.get(message.space, opened.sessionId);
+        // A takeover rotates the token. Cleanup belongs to this exact open;
+        // an older catch-up must leave a newer owner's delivery state intact.
+        if (current === null || current.sessionToken === opened.sessionToken) {
+          if (current !== null) {
+            if (catchup !== null) {
+              this.rollbackUndeliveredSync(
+                message.space,
+                opened.sessionId,
+                catchup,
+              );
+            } else {
+              this.markSessionForFullResync(message.space, opened.sessionId);
+            }
+          }
+          connection.closeSession(message.space, opened.sessionId);
+        }
+      }
     }
   }
 
