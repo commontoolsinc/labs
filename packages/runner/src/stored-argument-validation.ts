@@ -71,24 +71,62 @@ interface HandleViewContext {
 }
 
 /**
- * Creates a validation view of `materialized`, a schemaless materialization of
- * stored state read under `schema`, in which a stored link at a position whose
- * schema declares a cell handle is that handle, a Cell recorded in
- * `context.handles`, rather than the value the link reaches. A link is a valid
- * handle whatever it reaches, and what it reaches is not part of the value
- * being judged, so validation never reads it; the reactive reads that follow
- * the handle check that value against its own schema. Every other position
- * resolves to the materialized value, a container to a view of its own, and
- * neither input is modified.
+ * Returns the stored value at `cell` as validation reads it: its schemaless
+ * materialization through `tx`, in which a stored link at a position whose
+ * schema in `schema` declares a cell handle is that handle rather than the
+ * value the link reaches. A link is a valid handle whatever it reaches, and
+ * what it reaches is not part of the value being judged, so validation never
+ * reads it; the reactive reads that follow the handle check that value
+ * against its own schema. Every other position reads as the materialized
+ * value does. Positions along `materializedPath`, the one a caller writes at,
+ * are materialized whatever their schema declares, since what is written
+ * there lands in what the link reaches.
  *
- * Fields resolve on access, so validation only reads the graph it inspects. A
- * container read under the same schema twice is the same view, so shared
+ * `acceptsOpaque` is the predicate a merge of defaults and a validation over
+ * `value` take as their `acceptOpaqueValue`: it accepts the handles this view
+ * holds, and whatever {@link acceptsOpaqueCellOrUnresolvedLink} accepts. The
+ * handles never reach storage: a caller writes the value at
+ * `materializedPath`, which holds none.
+ */
+export function materializeStoredValueForValidation(
+  cell: Cell<unknown>,
+  schema: JSONSchema,
+  tx: IExtendedStorageTransaction,
+  materializedPath: readonly (string | number)[] = [],
+): {
+  value: unknown;
+  acceptsOpaque: (value: unknown, schema: JSONSchema) => boolean;
+} {
+  const context: HandleViewContext = {
+    views: new WeakMap(),
+    handles: new WeakSet(),
+  };
+  return {
+    value: viewStoredLinksAsHandles(
+      cell.asSchema(undefined).withTx(tx).get(),
+      schema,
+      materializedPath.map(String),
+      context,
+    ),
+    acceptsOpaque: (value, schema) =>
+      (isObjectOrArray(value) && context.handles.has(value)) ||
+      acceptsOpaqueCellOrUnresolvedLink(value, schema),
+  };
+}
+
+/**
+ * Helper for `materializeStoredValueForValidation()`, which views
+ * `materialized`, read under `schema`, with its handle-typed stored links as
+ * handles, leaving the position `keep` names materialized. Fields resolve on
+ * access, so validation only reads the graph it inspects. A container off
+ * `keep` read under the same schema twice is the same view, so shared
  * containers and cycles keep their identity for the validator's recursion
  * guard.
  */
 function viewStoredLinksAsHandles(
   materialized: unknown,
   schema: JSONSchema,
+  keep: readonly string[],
   context: HandleViewContext,
 ): unknown {
   if (
@@ -97,35 +135,40 @@ function viewStoredLinksAsHandles(
   ) {
     return materialized;
   }
-  let bySchema = context.views.get(materialized);
-  if (bySchema === undefined) {
-    bySchema = new Map();
-    context.views.set(materialized, bySchema);
+  let bySchema: Map<JSONSchema, object> | undefined;
+  if (keep.length === 0) {
+    bySchema = context.views.get(materialized);
+    if (bySchema === undefined) {
+      bySchema = new Map();
+      context.views.set(materialized, bySchema);
+    }
+    const cached = bySchema.get(schema);
+    if (cached !== undefined) return cached;
   }
-  const cached = bySchema.get(schema);
-  if (cached !== undefined) return cached;
 
   const container = getCellOrThrow(materialized);
   const view: object = Array.isArray(materialized)
     ? new Array(materialized.length)
     : {};
-  bySchema.set(schema, view);
+  bySchema?.set(schema, view);
   for (const key of Object.keys(materialized)) {
     Object.defineProperty(view, key, {
       configurable: true,
       enumerable: true,
       get: () => {
         const childSchema = ContextualFlowControl.schemaAtPath(schema, [key]);
+        const kept = keep[0] === key;
         const slot = container.key(key);
         // Only the slot's own bytes are read here: a raw read resolves links
         // on the way to the slot and leaves the one stored in it unfollowed.
-        const handle =
+        const handle = !kept &&
           ContextualFlowControl.declaredHandleKind(childSchema) !== undefined &&
           isCellLink(slot.getRaw({ meta: ignoreReadForScheduling }));
         if (handle) context.handles.add(slot);
         const child = handle ? slot : viewStoredLinksAsHandles(
           (materialized as Record<string, unknown>)[key],
           childSchema,
+          kept ? keep.slice(1) : [],
           context,
         );
         Object.defineProperty(view, key, {
@@ -443,26 +486,19 @@ function storedArgumentJudge(
   select: (argument: unknown) => unknown,
 ) => string | undefined {
   const argumentLink = argumentCell.getAsNormalizedFullLink();
-  const context: HandleViewContext = {
-    views: new WeakMap(),
-    handles: new WeakSet(),
-  };
-  const acceptOpaqueValue = (value: unknown, schema: JSONSchema): boolean =>
-    (isObjectOrArray(value) && context.handles.has(value)) ||
-    acceptsOpaqueCellOrUnresolvedLink(value, schema);
-  const materializedArgument = viewStoredLinksAsHandles(
-    argumentCell.asSchema(undefined).withTx(tx).get(),
+  const stored = materializeStoredValueForValidation(
+    argumentCell,
     argumentSchema,
-    context,
+    tx,
   );
   const validationArgument: unknown = mergeSchemaDefaults(
-    materializedArgument,
+    stored.value,
     defaults,
     argumentSchema,
-    { mergeMaterializedLinks: true, acceptOpaqueValue },
+    { mergeMaterializedLinks: true, acceptOpaqueValue: stored.acceptsOpaque },
   );
   const validationOptions = {
-    acceptOpaqueValue,
+    acceptOpaqueValue: stored.acceptsOpaque,
     // An OPTIONAL key holding `undefined` carries no data, and a handler
     // mints one without meaning to: `comments.push({ author, ... })` with
     // no author in hand writes the key, and the codec stores that presence.
