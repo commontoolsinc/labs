@@ -171,11 +171,13 @@ describe("serving-memory-server", () => {
 
     it("runs the serving loop's work in the serving context, and a client's frames outside it", async () => {
       // Each record is one crossing. The host activates the space when the
-      // client's session opens it. Each side integrates what the other
-      // committed from a server frame, which the memory server sends on a
-      // turn the committing side's request armed. The served derivation that
-      // reads the client's write makes the fetch.
+      // client's session opens it, and disposes its runtime when the test
+      // closes it. Each side integrates what the other committed from a
+      // server frame, which the memory server sends on a turn the committing
+      // side's request armed. The served derivation that reads the client's
+      // write makes the fetch.
       const activations: boolean[] = [];
+      const disposals: boolean[] = [];
       const servingIntegrations: boolean[] = [];
       const clientIntegrations: boolean[] = [];
       const fetches: boolean[] = [];
@@ -192,6 +194,7 @@ describe("serving-memory-server", () => {
         prepareStorageManager: (manager) => {
           activations.push(inServingContext());
           manager.subscribe(recordIntegrations(servingIntegrations));
+          return () => disposals.push(inServingContext());
         },
         fetch: () => {
           fetches.push(inServingContext());
@@ -235,9 +238,12 @@ describe("serving-memory-server", () => {
           result,
           (value) => value?.v === 7,
         );
+        await serving.host.close();
 
         expect(activations.length).toBeGreaterThan(0);
         expect(activations.every((serving) => serving)).toBe(true);
+        expect(disposals.length).toBeGreaterThan(0);
+        expect(disposals.every((serving) => serving)).toBe(true);
         expect(servingIntegrations.length).toBeGreaterThan(0);
         expect(servingIntegrations.every((serving) => serving)).toBe(true);
         expect(clientIntegrations.length).toBeGreaterThan(0);
@@ -248,6 +254,17 @@ describe("serving-memory-server", () => {
         await serving.host.close();
         await client.dispose();
       }
+    });
+
+    it("runs a lifecycle verb in the serving context, whatever asked for it", async () => {
+      await using serving = await startServingMemoryServer({
+        apiUrl: new URL(import.meta.url),
+      });
+      const receipt = await serving.host.runLifecycleVerb(
+        alice.did() as MemorySpace,
+        { name: "probe", run: () => Promise.resolve(inServingContext()) },
+      );
+      expect(receipt).toBe(true);
     });
 
     it("closes the serving loop and the server once, however often it is asked", async () => {
