@@ -29,6 +29,14 @@ const V2 = [
   "",
 ].join("\n");
 
+const V3 = [
+  "import { pattern } from 'commonfabric';",
+  "export default pattern<Record<string, never>, { marker: string }>(() => {",
+  "  return { marker: 'v3' };",
+  "});",
+  "",
+].join("\n");
+
 const programOf = (contents: string): RuntimeProgram => ({
   main: "/main.tsx",
   files: [{ name: "/main.tsx", contents }],
@@ -72,9 +80,10 @@ describe("Runner.patternPointerFollowed()", () => {
     await server.close();
   });
 
-  // V2 is compiled and persisted by a runtime of its own, through a replica
-  // of its own, so `rt` has never evaluated it.
-  const persistV2 = async (): Promise<string> => {
+  // The pattern is compiled and persisted by a runtime of its own, through a
+  // replica of its own, so `rt` has never evaluated it.
+  const persistV2 = (): Promise<string> => persist(V2);
+  const persist = async (contents: string): Promise<string> => {
     const otherManager = EmulatedStorageManager.connectTo(server, {
       as: signer,
     });
@@ -84,11 +93,12 @@ describe("Runner.patternPointerFollowed()", () => {
     });
     try {
       const tx = other.edit();
-      const v2 = await other.patternManager.compilePattern(programOf(V2), {
-        space,
-        tx,
-      });
-      const identity = other.patternManager.getArtifactEntryRef(v2)!.identity;
+      const pattern = await other.patternManager.compilePattern(
+        programOf(contents),
+        { space, tx },
+      );
+      const identity =
+        other.patternManager.getArtifactEntryRef(pattern)!.identity;
       other.prepareTxForCommit(tx);
       expect((await tx.commit().settled).error).toBeUndefined();
       await other.idle();
@@ -147,6 +157,30 @@ describe("Runner.patternPointerFollowed()", () => {
     };
     releaseHeld = release;
     return { entered, release };
+  };
+
+  // Holds every naming step open. `entered(n)` resolves once the step of
+  // index `n` has been entered, and `release` lets them all proceed.
+  const holdEveryNaming = () => {
+    const released = Promise.withResolvers<void>();
+    const steps: PromiseWithResolvers<void>[] = [];
+    const step = (n: number) => (steps[n] ??= Promise.withResolvers<void>());
+    let entries = 0;
+    rt.runner.accessForTestingOnly.dependencySyncer = async (
+      target,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      step(entries++).resolve();
+      await released.promise;
+      return sync(target, pattern, inputs);
+    };
+    releaseHeld = released.resolve;
+    return {
+      entered: (n: number) => step(n).promise,
+      release: released.resolve,
+    };
   };
 
   // Moves the pointer and lets the watcher observe the move.
@@ -239,6 +273,56 @@ describe("Runner.patternPointerFollowed()", () => {
     const state = settlementOf(rt.runner.patternPointerFollowed(cell));
     await clock.settle();
     expect(state.settled).toBe(true);
+  });
+
+  it("stays pending for a piece stopped and started again whose new watcher has a follow in flight", async () => {
+    // The restart goes through a cell whose transaction read the pointer
+    // before it moved, so it instantiates the pattern the piece was running
+    // while the pointer names one the runtime has never evaluated. The new
+    // watcher begins its follow as it is installed, in the turn of the stop,
+    // which is before the wait's continuation runs.
+
+    const v2Identity = await persistV2();
+    const v3Identity = await persist(V3);
+    const cell = await runV1("followed-restarted-mid-follow");
+    const readTx = rt.edit();
+    try {
+      const stale = cell.withTx(readTx);
+      const pointerBefore = stale.getMetaRaw("patternIdentity");
+      const hold = holdEveryNaming();
+      await repoint(cell, v2Identity);
+      await hold.entered(0);
+
+      const followed = rt.runner.patternPointerFollowed(cell);
+      const state = settlementOf(followed);
+
+      // No turn passes between the pointer's second move and the restart,
+      // so the stopped watcher never observes that move.
+      const tx = rt.edit();
+      cell.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: v3Identity,
+        symbol: "default",
+      }, rawMetaWriteAuthorization);
+      rt.prepareTxForCommit(tx);
+      const committed = tx.commit().settled;
+      expect(stale.getMetaRaw("patternIdentity")).toEqual(pointerBefore);
+      rt.runner.stop(stale);
+      const started = rt.runner.start(stale);
+
+      expect((await committed).error).toBeUndefined();
+      expect(await started).toBe(true);
+      await hold.entered(1);
+      await clock.settle();
+      expect(state.settled).toBe(false);
+      expect(markerOf(cell)).toBe("v1");
+
+      hold.release();
+      await followed;
+      await cell.pull();
+      expect(markerOf(cell)).toBe("v3");
+    } finally {
+      readTx.abort();
+    }
   });
 
   it("resolves for a piece that is not running", async () => {

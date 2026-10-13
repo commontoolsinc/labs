@@ -139,6 +139,7 @@ interface ObservedCapabilityUsage {
   readonly escapedPaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly wildcardPaths: readonly (readonly string[])[];
   readonly hasUnverifiedCellUse: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
@@ -2011,6 +2012,7 @@ function normalizeObservedCapabilityUsage(
     escapedPaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
+    wildcardPaths: wildcardPrefixes,
     hasUnverifiedCellUse: state.hasUnverifiedCellUse,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
       !state.hasNonIdentityUse &&
@@ -4065,6 +4067,16 @@ export function analyzeFunctionCapabilities(
             // so the caller uses nothing there for identity alone either.
             for (const escapedPath of paramSummary.escapedPaths ?? []) {
               recordEscape(source.root, [...source.path, ...escapedPath]);
+            }
+            // Where the callee read through a key that can name any member,
+            // the caller's value is reached below that prefix by an access
+            // neither names: its identity markings there are erased, as the
+            // callee's are, and the prefix reaches the caller's summary.
+            for (const wildcardPath of paramSummary.wildcardPaths ?? []) {
+              const path = [...source.path, ...wildcardPath];
+              if (!isSelfReference(source.root, path)) {
+                ensureState(source.root).wildcardPaths.add(encodePath(path));
+              }
             }
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
