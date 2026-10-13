@@ -216,6 +216,31 @@ describe("requestPrivateInboxOf()", () => {
     expect(await home.key("named" as never).pull()).toEqual({});
   });
 
+  it("returns `abandoned` once the signal aborts while Home has yet to handle the request, which Home still handles", async () => {
+    const profile = await documentIn(identity.did(), {});
+    const controller = new AbortController();
+    const named = home.key("named" as never).asSchema({
+      type: "object",
+      properties: { piece: { type: "unknown", asCell: ["cell"] } },
+    });
+
+    const request = requestPrivateInboxOf(
+      runtime,
+      home,
+      profile,
+      controller.signal,
+    );
+    controller.abort();
+
+    expect(await request).toEqual({ status: "abandoned" });
+    expect((named.get() as { piece?: unknown } | undefined)?.piece)
+      .toBeUndefined();
+    await runtime.idle();
+    const handled = await named.pull() as { piece?: Cell<unknown> };
+    expect(handled.piece === undefined ? undefined : addressOf(handled.piece))
+      .toEqual(addressOf(profile));
+  });
+
   it("rejects when Home's handling of the request fails", async () => {
     const profile = await documentIn(identity.did(), {});
     await setHome("failRequest", true);
