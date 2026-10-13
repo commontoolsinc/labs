@@ -497,26 +497,6 @@ let unwrapTransaction: (
 ) => IExtendedStorageTransaction | undefined;
 let isExtendedStorageTransaction: (value: object) => boolean;
 
-/**
- * The prepared-digest records built for a transaction's activity, kept by
- * the activity object each describes (`#buildPreparedDigestInput`). An
- * activity is recorded once and never changes, so its record is a function
- * of it and of the rank the clock gives it, and a prepare after further
- * activity rebuilds the input from the records already built rather than
- * freezing and hashing new ones.
- */
-const consumedReadRecords = new WeakMap<
-  IReadActivity,
-  { rank: number | undefined; record: ConsumedRead }
->();
-
-const addressRecords = new WeakMap<object, CfcRecordAddress>();
-
-const writeAttemptRecords = new WeakMap<
-  IWriteAttempt,
-  { rank: number; record: OrderedWriteAttempt }
->();
-
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #commitCallbacks = new Set<
     (
@@ -2575,66 +2555,41 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       rankByRaw.set(raw, rank);
     });
 
-    // Each record is kept by the activity it describes, so a rebuild after
-    // the transaction journals more activity hands out the records it built
-    // before, and the hash cache keyed by their identity answers for them.
-    // A rank-stamped record is reused only while its rank holds, which it
-    // does while the clock is monotonic: later activity ranks after it.
     const consumedReads: ConsumedRead[] = [];
     for (const { read, raw } of pendingReads) {
-      const rank = raw === undefined ? undefined : rankByRaw.get(raw)!;
-      const kept = consumedReadRecords.get(read);
-      if (kept !== undefined && kept.rank === rank) {
-        consumedReads.push(kept.record);
-        continue;
-      }
       // Strip the raw stamp and path before the spread; re-attach the rank
       // (or leave the field absent when the backend never stamped one — an
       // explicit undefined would hash differently from absence), and the
       // record's one path.
       const { journalIndex: _raw, path, ...bare } = read;
-      const record: ConsumedRead = deepFreeze({
+      consumedReads.push(deepFreeze({
         ...bare,
         scope: normalizeCellScope(read.scope),
         ...cfcRecordPath(path),
-        ...(rank !== undefined ? { journalIndex: rank } : {}),
-      });
-      consumedReadRecords.set(read, { rank, record });
-      consumedReads.push(record);
+        ...(raw !== undefined ? { journalIndex: rankByRaw.get(raw)! } : {}),
+      }));
     }
 
     const log = this.getReactivityLog();
     const attemptedWrites: CfcRecordAddress[] = (log.attemptedWrites ?? [])
-      .map((address) => {
-        const kept = addressRecords.get(address);
-        if (kept !== undefined) return kept;
-        const { path, ...rest } = address;
-        const record: CfcRecordAddress = deepFreeze({
-          ...rest,
+      .map(({ path, ...address }) =>
+        deepFreeze({
+          ...address,
           scope: normalizeCellScope(address.scope),
           // The reactivity log records the journal's document-rooted paths.
           ...cfcRecordPath(toDocumentPath(path)),
-        });
-        addressRecords.set(address, record);
-        return record;
-      });
+        })
+      );
 
     const writes: CfcRecordAddress[] = [];
     for (const space of getTransactionWrittenSpaces(this)) {
       for (const write of this.getWriteDetails(space)) {
-        const kept = addressRecords.get(write.address);
-        if (kept !== undefined) {
-          writes.push(kept);
-          continue;
-        }
         const { path, ...address } = write.address;
-        const record: CfcRecordAddress = deepFreeze({
+        writes.push(deepFreeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           ...cfcRecordPath(path),
-        });
-        addressRecords.set(write.address, record);
-        writes.push(record);
+        }));
       }
     }
 
@@ -2643,21 +2598,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // OrderedWriteAttempt.
     const writeAttemptLog: OrderedWriteAttempt[] = [];
     for (const attempt of rawAttempts) {
-      const rank = rankByRaw.get(attempt.journalIndex)!;
-      const kept = writeAttemptRecords.get(attempt);
-      if (kept !== undefined && kept.rank === rank) {
-        writeAttemptLog.push(kept.record);
-        continue;
-      }
-      const record: OrderedWriteAttempt = deepFreeze({
+      writeAttemptLog.push(deepFreeze({
         space: attempt.space,
         id: attempt.id,
         scope: normalizeCellScope(attempt.scope),
         path: [...attempt.path],
-        journalIndex: rank,
-      });
-      writeAttemptRecords.set(attempt, { rank, record });
-      writeAttemptLog.push(record);
+        journalIndex: rankByRaw.get(attempt.journalIndex)!,
+      }));
     }
 
     return {

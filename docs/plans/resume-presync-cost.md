@@ -256,15 +256,24 @@ where the pre-sync was no longer the whole cost.
       quantifies over, built once and reused across the pass's targets
       while the read list, the trigger reads and the resolved envelopes
       stand; the reactivity log stands across a verifier read it does not
-      list; a commit's digest records are kept by the activity each
-      describes, so a rebuild hands out the records it built before; and a
-      deep-frozen document's schema entries are kept by the document. On
-      the thirty-row room's reload, preparation fell from a fifth of the
-      load to a twentieth, and its mean from 17 to 5 ms per commit on a
-      pair of runs at the same load. The binding walk's narrowing of a
-      pattern's authored argument schema, which the record above charged
-      to preparation, is its own cost, and the schema is now interned once
-      per pattern so the narrowing is kept (`packages/runner/src/runner.ts`).
+      list; and a deep-frozen document's schema entries are kept by the
+      document, unless the walk lacked a schema document a reference
+      names. On the thirty-row room's reload, preparation fell from 18% of
+      the load to 6%, and its mean from 18 to 3 ms per commit, on a pair
+      of runs at the same machine load. The binding walk's narrowing of a
+      pattern's authored argument schema is its own cost outside
+      preparation, 6% of the same load: the walk now reads a deep-frozen
+      copy of the schema, so the narrowing is kept
+      (`packages/runner/src/runner.ts`).
+- [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
+      transaction elides as equal to what is stored, read 345 documents
+      each on average, and take nine tenths of what preparation still
+      costs. An elided write is still an attempt the gates answer to, so
+      such a commit cannot skip preparation without changing what is
+      refused. What it mostly pays is the prepared digest, built and
+      hashed over every read for a comparison that the unchanged activity
+      epoch already answers at commit; hashing it only when the epoch has
+      moved is the next cut, and the flow join after it.
 - [x] The storage manager keeps each data URI's hash and decoded value in a
       weight-bounded memo, and does not sync a link that declares a stream:
       its document holds no value a read uses, and the sync had sent one
