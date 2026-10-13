@@ -81,9 +81,9 @@ describe("derived-internal-cell-ids", () => {
       }
     });
 
-    it("hashes an id once for one result cell and one partial cause object", () => {
+    it("hashes an id once for one result cell and one deep-frozen partial cause", () => {
       const { ids, mints } = counted();
-      const partialCause = { $generated: 1 };
+      const partialCause = Object.freeze({ $generated: 1 });
       ids.idFor(first, partialCause);
       ids.idFor(first, partialCause);
       ids.idFor(first.withTx(runtime.readTx()), partialCause);
@@ -151,62 +151,42 @@ describe("derived-internal-cell-ids", () => {
       );
     });
 
-    it("hashes an id once for partial causes equal in content", () => {
+    it("hashes again for an equal deep-frozen partial cause held in another object", () => {
       const { ids, mints } = counted();
-      const one = ids.idFor(first, { $generated: 1, name: ["a", null] });
-      const other = ids.idFor(first, { $generated: 1, name: ["a", null] });
+      const one = ids.idFor(first, Object.freeze({ $generated: 1 }));
+      const other = ids.idFor(first, Object.freeze({ $generated: 1 }));
 
       expect(other.toString()).toBe(one.toString());
-      expect(mints()).toBe(1);
-    });
-
-    it("returns the id of a partial cause as it is when asked, after a change in place", () => {
-      const { ids, mints } = counted();
-      const partialCause = { $generated: 1 };
-      const before = ids.idFor(first, partialCause);
-      partialCause.$generated = 2;
-      const after = ids.idFor(first, partialCause);
-
-      expect(before.toString()).toBe(derived(first, { $generated: 1 }));
-      expect(after.toString()).toBe(derived(first, { $generated: 2 }));
       expect(mints()).toBe(2);
     });
 
-    it("returns one id for partial causes whose members come in another order", () => {
-      const { ids } = counted();
-
-      expect(ids.idFor(first, { a: 1, b: 2 }).toString()).toBe(
-        derived(first, { a: 1, b: 2 }),
-      );
-      expect(ids.idFor(first, { b: 2, a: 1 }).toString()).toBe(
-        derived(first, { b: 2, a: 1 }),
-      );
-    });
-
-    it("hashes each time for a partial cause that holds one object twice", () => {
-      // `createRef()` reads the second occurrence of an object as a cycle, so
-      // the id differs from that of two equal objects, and content alone
-      // does not name it.
+    it("hashes each time for a partial cause that is not deep-frozen, and returns the id of its content at the time", () => {
+      // An object that can change names whatever it holds when asked, so no
+      // id is kept for it.
 
       const { ids, mints } = counted();
-      const shared = { n: 1 };
-      const twice = { left: shared, right: shared };
-      const apart = { left: { n: 1 }, right: { n: 1 } };
+      const partialCause = { $generated: 1, name: ["a"] };
+      const before = ids.idFor(first, partialCause);
+      const again = ids.idFor(first, partialCause);
+      partialCause.$generated = 2;
+      const after = ids.idFor(first, partialCause);
 
-      expect(ids.idFor(first, twice).toString()).toBe(derived(first, twice));
-      expect(ids.idFor(first, twice).toString()).toBe(derived(first, twice));
-      expect(ids.idFor(first, apart).toString()).toBe(derived(first, apart));
+      expect(before.toString()).toBe(
+        derived(first, { $generated: 1, name: ["a"] }),
+      );
+      expect(again.toString()).toBe(before.toString());
+      expect(after.toString()).toBe(
+        derived(first, { $generated: 2, name: ["a"] }),
+      );
       expect(mints()).toBe(3);
     });
 
-    it("hashes each time for a partial cause that holds an instance of a class", () => {
+    it("hashes each time for a frozen partial cause that holds an object that is not", () => {
       const { ids, mints } = counted();
-      const partialCause = { at: new Date(0) } as unknown as JSONValue;
-      const one = ids.idFor(first, partialCause);
-      const other = ids.idFor(first, partialCause);
+      const partialCause = Object.freeze({ $generated: 1, name: ["a"] });
+      ids.idFor(first, partialCause);
+      ids.idFor(first, partialCause);
 
-      expect(one.toString()).toBe(derived(first, partialCause));
-      expect(other.toString()).toBe(one.toString());
       expect(mints()).toBe(2);
     });
 
@@ -236,7 +216,7 @@ describe("derived-internal-cell-ids", () => {
 
   describe("on a runtime", () => {
     it("supplies the id of a derived internal cell's link", () => {
-      const partialCause = { $generated: 4 };
+      const partialCause = Object.freeze({ $generated: 4 });
       let mints = 0;
       runtime.derivedInternalCellIds.accessForTestingOnly.mintRecorder = () => {
         mints += 1;
