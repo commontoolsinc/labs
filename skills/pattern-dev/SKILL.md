@@ -158,6 +158,25 @@ session; that specific cause is fixed, but a UI that fires writes faster than
 the graph converges is still paying queueing it does not have to. Where a
 control can be held during settle, hold it.
 
+Hiding a list's rows does not make them cheap. `list.map(...)` instantiates what
+its callback builds once per element whether or not anything shows it: a row
+hidden by a `display` prop still has its nodes planned on every load, its
+documents written on the first run, and those documents delivered on every
+reload. A second `.map` over the same list — a thread panel, a detail pane, a
+tab most sessions never open — is therefore a second full set of instances, and
+hiding it removes none of that cost. Nothing at authoring time says so, because
+the two calls read as two views of one list. Map a list that holds only what the
+view shows. Where what it shows is chosen per session or per user, make that
+list a computed of that scope, such as `computed((): PerSession<Item[]> => …)`:
+`map` stores its result, and the instances it starts, at the scope of the list
+it maps, so each session holds its own rows and no viewer's choice replaces
+another's. A `display` prop stays the tool for a part of one row that differs by
+viewer. The worked case is `threadMessages` in
+`packages/patterns/fabrichat/room.tsx`: mapping the open thread's messages in
+place of every message took a first load of a thirty-message room from sixty row
+instances to thirty, and its commits from 7,083 operations in 8.8 MB to 3,451 in
+4.4 MB.
+
 Runtime notes:
 
 - Use the `cf` skill, or read `skills/cf/SKILL.md`, when you need CLI command
