@@ -7052,11 +7052,12 @@ const buildGatedInputReads = (
  * join the gate when enabled, at `-Infinity`, since their invalidating
  * writes scheduled the run and so logically precede every write in the
  * attempt (doc §4). The view reads the transaction's activity again on
- * every ask and classifies every record again, since a record's
- * internal-verifier classification is its metadata's and can change while
- * the record keeps its place; it copies the reads again only when a record
- * joined or left the inputs or carries other metadata, so a read recorded
- * or reclassified during the pass reaches the targets verified after it.
+ * every ask, since a record's internal-verifier classification is its
+ * metadata's and can change while the record keeps its place. It copies
+ * the reads again only when the records differ, one carries another
+ * metadata object, or a metadata object classes its reads otherwise than
+ * it did, so a read recorded or reclassified during the pass reaches the
+ * targets verified after it.
  * The resolver's generation says whether a write retired an envelope the
  * view resolved. The view is deliberately class-blind (`consumes: "all"`):
  * the gate is a screen over everything the transaction consumed, and

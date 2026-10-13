@@ -134,9 +134,7 @@ describe("InputReadView", () => {
           tx.abort();
         }
       });
-    });
 
-    describe("reads() over a record whose metadata changes", () => {
       it("returns the reads as each record is classified at that ask", () => {
         // A record keeps its place in the transaction's list while its
         // internal-verifier classification changes, so the list's length
