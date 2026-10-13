@@ -471,6 +471,7 @@ export function dropQueuedEvent(
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
   event.endPieceStartWait?.("settled");
+  event.endPatternChangeWait?.();
   if (event.originTx !== undefined) {
     state.releaseLineageEvent?.(event.originTx, event);
   }

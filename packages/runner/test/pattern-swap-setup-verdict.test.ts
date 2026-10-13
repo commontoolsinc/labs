@@ -436,6 +436,65 @@ describe("pattern-swap-setup-verdict", () => {
     cancel();
   });
 
+  it("ends a held event's wait when its origin's commit is refused", async () => {
+    // The origin commits locally and its server verdict is held, so the event
+    // it sends is queued under a pending same-space origin and reaches the
+    // hold. Refusing the origin drops the event while the swap's setup is
+    // still held, and the drop has to end the wait for `idle()` to resolve.
+    const { piece, v2Ref, cancel } = await runAppending();
+    const outgoingList = piece.key("list").resolveAsCell();
+    const outgoingAdd = piece.key("add").resolveAsCell();
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
+    const { held, restore } = whenHeld();
+    const transact = server.transact.bind(server);
+    try {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        v2Ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+
+      const verdict = Promise.withResolvers<void>();
+      const reached = Promise.withResolvers<void>();
+      server.transact = async (...args) => {
+        server.transact = transact;
+        reached.resolve();
+        await verdict.promise;
+        const [message, publishVerdict] = args;
+        const response = {
+          type: "response" as const,
+          requestId: message.requestId,
+          error: {
+            name: "ConflictError",
+            message: "refuse the origin",
+          },
+        };
+        publishVerdict?.(response as never);
+        return response as never;
+      };
+      const origin = runtime.edit();
+      runtime.getCell<number>(space, "swap-verdict-origin").withTx(origin)
+        .set(1);
+      outgoingAdd.withTx(origin).send({ add: "orphan" });
+      runtime.prepareTxForCommit(origin);
+      const committed = origin.commit();
+      await reached.promise;
+      await held;
+      verdict.resolve();
+      expect((await committed.settled).error).toBeDefined();
+      await runtime.idle();
+      expect(await outgoingList.pull()).toEqual(["before"]);
+    } finally {
+      server.transact = transact;
+      settle.resolve();
+      restore();
+      runtime.prepareTxForCommit = prepare;
+    }
+    cancel();
+  });
+
   it("ends a held event's wait when the runtime is disposed keeping its storage", async () => {
     // The swap's setup never settles while the runtime is disposed, so only
     // the disposal can end the event's wait.
