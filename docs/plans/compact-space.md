@@ -748,8 +748,8 @@ the run's report as its `original`, for `cf inspect`.
 
 The procedure never deletes the original: it is moved aside with its `-wal`
 and `-shm` companions, and the result is installed under its name. Rolling
-back is moving the result out and the original back, then starting the
-instance. The commands are written down before the instance is stopped, as
+back is moving the result out and the original back, then starting every
+instance again. The commands are written down before the instance is stopped, as
 the staging copy document requires. The backup is a second copy of the same
 pre-compaction state should the original be damaged in the move.
 

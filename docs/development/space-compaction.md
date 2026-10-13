@@ -5,8 +5,10 @@ document, the revision rows and snapshots behind its current value are
 deleted and the oldest kept row becomes a `set` holding that value; the
 payload of every commit older than a retention window is replaced by a
 marker, except commit 1's, the commits an `op_*` row references, and the
-compaction commits' own. Every commit row stays. What is removed lives on
-only in the archive the operator takes first. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
+compaction commits' own. Every commit row stays. The compacted file keeps
+none of what was removed; it lives on in the archive the operator takes
+first, and, until the operator retires it, in the original file the swap
+moves aside for rollback. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
 design and the reasons; this is the procedure, as it was rehearsed on a clone
 of the Topics space's 2026-10-09 snapshot, written for the operator who will
 run it on Estuary.
@@ -200,10 +202,10 @@ is listed, and a read through the API returns the content.
 
 The procedure never deletes the original: it is moved aside with its `-wal`
 and `-shm` companions, and the result is installed under its name. Rolling
-back is moving the result out and the original back, then starting the
-instance. Write the commands down before the instance is stopped. The backup
-is a second copy of the same pre-compaction state should the original be
-damaged in the move.
+back is moving the result out and the original back, then starting every
+instance and confirming each is active, as step 7 does. Write the commands
+down before anything is stopped. The backup is a second copy of the same
+pre-compaction state should the original be damaged in the move.
 
 ## What the store shows afterward
 
