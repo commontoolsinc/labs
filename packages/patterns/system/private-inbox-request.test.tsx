@@ -235,8 +235,8 @@ export default pattern(() => {
     answerOf(holdingAnswers, pointedElsewhere) === "not-held" &&
     equals(pointedElsewhere.inbox?.piece, elsewhere.get().piece)
   );
-  const assert_another_inbox_in_the_held_inbox_space_is_pending = assert(() =>
-    answerOf(holdingAnswers, pointedNearby) === "pending"
+  const assert_another_inbox_in_the_held_inbox_space_is_not_held = assert(() =>
+    answerOf(holdingAnswers, pointedNearby) === "not-held"
   );
 
   // Two requests to the first Home, one after the other, as from two clients.
@@ -318,7 +318,7 @@ export default pattern(() => {
       { action: action_point_the_profiles },
       { assertion: assert_the_answer_follows_the_pointer_to_the_held_inbox },
       { assertion: assert_a_profile_another_inbox_won_is_not_held },
-      { assertion: assert_another_inbox_in_the_held_inbox_space_is_pending },
+      { assertion: assert_another_inbox_in_the_held_inbox_space_is_not_held },
       { action: action_request_first },
       { action: action_request_second },
       { action: action_request_where_home_creates_none },

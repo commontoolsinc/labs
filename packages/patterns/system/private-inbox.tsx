@@ -28,7 +28,6 @@ import {
   isWellFormedDID,
   NAME,
   pattern,
-  spaceOf,
   type Stream,
   type TrustedActionWrite,
   UI,
@@ -679,24 +678,23 @@ export type PrivateInboxRequest = {
    * The profile the client finds the owner by, which is to advertise Home's
    * inbox: the one `#profile` answers with.
    */
-  from?: Cell<AnswerTarget>;
+  from?: Cell<PointTarget>;
 };
 
 /**
  * Where a request for Home's private inbox stands, for the profile it names:
  *
  * - `pending` while Home is giving the profile its inbox: Home holds an inbox
- *   the profile does not point at yet, or at another piece in that inbox's
- *   space, or holds none and is creating one.
+ *   the profile does not point at yet, or holds none and is creating one.
  * - `ensured` once the profile points at the inbox Home holds.
  * - `unlisted` when the request names no profile in Home's list, which Home
  *   never points.
  * - `unpointable` when the profile has no `setInbox`, through which alone Home
  *   points it.
  * - `not-held` when the profile advertises an inbox other than the one Home
- *   holds, as when something other than Home sets its pointer first, or Home
- *   holds none and creates none, because a profile advertises an inbox that
- *   awaits the host's vetting.
+ *   holds, as when something other than Home sets its pointer first, which
+ *   Home never replaces, or Home holds none and creates none, because a
+ *   profile advertises an inbox that awaits the host's vetting.
  */
 export type PrivateInboxAnswerStatus =
   | "pending"
@@ -744,9 +742,10 @@ export type PrivateInboxAnswers = {
 };
 
 /**
- * A profile as a request names it: its pointer, and its `setInbox` as stored,
- * which is absent from a profile of a vintage without one, so that Home can
- * tell it never points such a profile.
+ * A profile in Home's list as a request reads it: its pointer, and its
+ * `setInbox` as stored, which is absent from a profile of a vintage without
+ * one, so that Home can tell it never points such a profile. A `Stream` type
+ * would read as a stream whether or not the profile holds one.
  */
 export type AnswerTarget = {
   // The pointer is a typed link, for the reason `InboxPointable` gives.
@@ -774,11 +773,9 @@ export function profileKeyOf(profile: unknown): string | undefined {
  * is still to point the profile at the inbox it holds, so a pointer that comes
  * to name anything else is a final status:
  *
- * - The profile points at an inbox in another space than the one Home holds,
- *   or Home holds none: `not-held`. A pointer to another piece in the space of
- *   the inbox Home holds is Home's own inbox, as a reader whose view of Home's
- *   holder and of the pointer lag one behind the other sees it, and is
- *   `pending`.
+ * - The profile points at an inbox other than the one Home holds, or Home
+ *   holds none: `not-held`, since Home points only a profile that points at
+ *   none.
  * - The profile points at no inbox, Home holds none, and another profile
  *   advertises one, so Home creates none: `not-held`.
  */
@@ -803,11 +800,8 @@ export function privateInboxAnswersOf(
         ? { status: "not-held" }
         : { status: "pending" };
     }
-    if (held !== undefined && equals(pointer, held)) {
-      return { status: "ensured" };
-    }
-    return held !== undefined && spaceOf(pointer) === spaceOf(held)
-      ? { status: "pending" }
+    return held !== undefined && equals(pointer, held)
+      ? { status: "ensured" }
       : { status: "not-held" };
   };
   const answers: Record<string, PrivateInboxAnswer> = {};
@@ -887,7 +881,7 @@ export const PrivateInboxAnswering = pattern<
 export const requestPrivateInbox = handler<
   PrivateInboxRequest,
   {
-    profiles: PointTarget[];
+    profiles: AnswerTarget[];
     requested: Writable<Record<string, boolean>>;
     answers: Writable<PrivateInboxAnswers>;
     ensure: Stream<EnsurePrivateInboxEvent>;
@@ -896,17 +890,16 @@ export const requestPrivateInbox = handler<
 >((event, { profiles, requested, answers, ensure }) => {
   ensure.send({});
   const profile = event?.from;
-  const listed = profile !== undefined &&
-    (profiles ?? []).some((each) =>
-      each !== undefined && equals(each, profile)
-    );
-  const key = listed ? profileKeyOf(profile.resolveAsCell()) : undefined;
-  if (profile === undefined || key === undefined) {
+  const listed = profile === undefined ? undefined : (profiles ?? []).find(
+    (each) => each !== undefined && equals(each, profile),
+  );
+  const key = listed === undefined || profile === undefined
+    ? undefined
+    : profileKeyOf(profile.resolveAsCell());
+  if (listed === undefined || key === undefined) {
     return answers.key("unlisted");
   }
-  if (profile.key("setInbox").get() === undefined) {
-    return answers.key("unpointable");
-  }
+  if (listed.setInbox === undefined) return answers.key("unpointable");
   if (requested.get()?.[key] !== true) requested.key(key).set(true);
   return answers.key("profiles").key(key);
 });

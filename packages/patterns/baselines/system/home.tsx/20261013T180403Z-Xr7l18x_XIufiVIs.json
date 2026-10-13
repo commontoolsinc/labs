@@ -310,17 +310,6 @@
         ],
         "type": "object"
       },
-      "AnswerTarget": {
-        "properties": {
-          "inbox": {
-            "$ref": "#/$defs/ProfileInbox"
-          },
-          "setInbox": {
-            "type": "unknown"
-          }
-        },
-        "type": "object"
-      },
       "BackwardsCompatibleProfile": {
         "properties": {
           "$NAME": {
@@ -1533,7 +1522,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/private-inbox.tsx",
-              "moduleIdentity": "cI0PEXWRNKL5gYqCG2k97Och9YghLIlMTIQZ0p5kOcI",
+              "moduleIdentity": "tMHp3P9tRDvBIrnIw7qPb60qzTjtciBxPvYNhBoXI1g",
               "path": [
                 "replaceRefusedPrivateInbox"
               ]
@@ -1553,7 +1542,7 @@
       "PrivateInboxRequest": {
         "properties": {
           "from": {
-            "$ref": "#/$defs/AnswerTarget",
+            "$ref": "#/$defs/InboxPointable",
             "description": "The profile the client finds the owner by, which is to advertise Home's\ninbox: the one `#profile` answers with.",
             "tags": [
               "profile"

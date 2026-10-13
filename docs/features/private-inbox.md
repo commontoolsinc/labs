@@ -317,20 +317,19 @@ answer is `unlisted`. An answer holds `status`:
 
 | `status` | The profile `from` names | Final |
 | --- | --- | --- |
-| `pending` | is in Home's list and points at no inbox, or at another piece in the space of the inbox Home holds, and Home is pointing it at the inbox it holds or creates | no |
+| `pending` | is in Home's list and points at no inbox, and Home is pointing it at the inbox it holds or creates | no |
 | `ensured` | points at the inbox Home holds | yes |
 | `unlisted` | is not in Home's list, or has left it since the request, or the event names none, so Home points it at nothing | yes |
 | `unpointable` | has no `setInbox`, through which alone Home points a profile | yes |
-| `not-held` | points at an inbox in another space than the one Home holds, as when something other than Home sets its pointer first, or points anywhere while Home holds none, or points at none while Home holds none and creates none, because another profile advertises an inbox that awaits the host's vetting | yes |
+| `not-held` | points at an inbox other than the one Home holds, as when something other than Home sets its pointer first, which Home never replaces, or points anywhere while Home holds none, or points at none while Home holds none and creates none, because another profile advertises an inbox that awaits the host's vetting | yes |
 
 The profile is pointed in events after the handler's run, Home's pointing step
 and then the profile's own `setInbox`, so `ensured` comes only once the
 profile's pointer names Home's inbox, and every way that pointer can come to
 name something else is a final status rather than a `pending` that never ends.
-A pointer to another piece in the space of the inbox Home holds reads
-`pending`, since only Home's own inboxes are there, and a reader whose view of
-Home's holder and of the pointer lag one behind the other can see one. The
-answer holds no link to the inbox: a link to an inbox carries the label its
+The handler reads whether the profile has `setInbox` from Home's list, bound
+as a value, so it decides only once the profile has loaded. The answer holds
+no link to the inbox: a link to an inbox carries the label its
 owner gives its offers, which would then reach every run reading Home's
 answers. Once a request is `ensured`, the client reads the inbox from the
 profile's pointer.
