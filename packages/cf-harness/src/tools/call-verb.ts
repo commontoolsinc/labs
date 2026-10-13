@@ -17,30 +17,13 @@
  * into the handling's receipt.
  */
 
-import type { JSONSchema, Pattern } from "@commonfabric/api";
-import { nearestName } from "@commonfabric/piece/refusal";
-import { verbEventForDispatch } from "@commonfabric/piece/verb-input";
-import {
-  handlerVerbEvents,
-  type PieceCallableListing,
-  verbsFromCompiledPattern,
-} from "@commonfabric/piece/verb-listing";
-import {
-  PieceController,
-  type PiecesController,
-} from "@commonfabric/piece/ops";
-import {
-  type Cell,
-  type IExtendedStorageTransaction,
-  isLink,
-  isStream,
-  sendEvent,
-  transactionFailureMessage,
-} from "@commonfabric/runner";
+import type { JSONSchema } from "@commonfabric/api";
+import { callVerb, type VerbCall } from "@commonfabric/piece/verb-call";
+import { isLink } from "@commonfabric/runner";
 import { describeSinkReleaseRefusal } from "@commonfabric/runner/cfc";
 import { localRefTarget } from "@commonfabric/runner/cfc/schema-sanitization";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
-import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   HANDLE_TOKEN_PATTERN,
   REFERENT_TOKEN_PATTERN,
@@ -146,32 +129,6 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   } satisfies JSONSchema,
   tags: ["fabric", "piece", "verb"],
 };
-
-/**
- * The verbs `piece` exposes on its result, read from the compiled pattern it
- * is pinned to: the rows `cf piece verbs` lists, narrowed to the handlers a
- * result declares or wires, which is what an event can be sent to here.
- *
- * @throws Error when the piece's pattern cannot be loaded.
- */
-export const heldPieceVerbs = async (
-  pieces: PiecesController,
-  piece: Cell<unknown>,
-): Promise<PieceCallableListing[]> =>
-  resultVerbs(await heldPiecePattern(pieces, piece));
-
-/** The compiled pattern `piece` is pinned to, its result left unprojected. */
-const heldPiecePattern = (
-  pieces: PiecesController,
-  piece: Cell<unknown>,
-): Promise<Pattern> =>
-  new PieceController(pieces, piece).getPattern({ projectResult: false });
-
-/** The rows of `pattern`'s listing an event can be sent to here. */
-const resultVerbs = (pattern: Pattern): PieceCallableListing[] =>
-  verbsFromCompiledPattern(pattern).filter((verb) =>
-    verb.kind === "handler" && verb.on === "result"
-  );
 
 /** The first string in `event` that is a whole handle token, at any depth. */
 const firstTokenIn = (event: unknown): string | undefined => {
@@ -288,30 +245,6 @@ const withOpaqueLinkAt = (
   } as JSONSchema;
 };
 
-/** The refusal for a name `verbs` does not hold, naming the ones it does. */
-const notAVerbMessage = (
-  name: string,
-  verbs: readonly PieceCallableListing[],
-): string => {
-  const names = verbs.map((verb) => verb.name);
-  const nearest = nearestName(name, names);
-  return `"${name}" is not a verb of this piece. ` +
-    (nearest === undefined ? "" : `Did you mean "${nearest}"? `) +
-    (names.length === 0
-      ? "It declares no verbs"
-      : `Its verbs are ${names.map((verb) => `"${verb}"`).join(", ")}`);
-};
-
-/**
- * Whether a receipt's stored value is the value-less witness: the plain empty
- * record a handling writes when its verb returned nothing. Decided on the
- * stored value, for the reason `executeResolvedCallable` gives in
- * `packages/cli/lib/callable.ts`: an instance read through a cell arrives as
- * a proxy over an empty stub, so only the stored form tells the two apart.
- */
-const isValueLessReceipt = (raw: unknown): boolean =>
-  isObjectNotArray(raw) && !isInstance(raw) && Object.keys(raw).length === 0;
-
 export const callVerbTool: HarnessToolDefinition<
   CallVerbToolInput,
   CallVerbToolOutput
@@ -338,84 +271,37 @@ export const callVerbTool: HarnessToolDefinition<
     const piece = await resolvePiece("call_verb", pieces, ref);
     if (!piece.ok) return fail(piece.message);
 
-    let pattern: Pattern;
-    try {
-      pattern = await heldPiecePattern(pieces, piece.cell);
-    } catch (error) {
-      return fail(
-        `call_verb could not read the piece's pattern: ${errorMessage(error)}`,
-      );
-    }
-    const verbs = resultVerbs(pattern);
-    const verb = verbs.find((candidate) => candidate.name === name);
-    if (verb === undefined) return fail(notAVerbMessage(name, verbs));
-
     // A token the run holds reached this tool as the address it stands for,
     // so one still written as a token is one the run does not hold.
     const unheld = firstTokenIn(input.event);
     if (unheld !== undefined) {
       return fail(
-        `call_verb refused the event for "${name}" without sending it: ${unheld} is not a handle this run holds`,
+        `the event for "${name}" was refused before it was sent: ${unheld} is not a handle this run holds`,
       );
     }
-
-    // Judged against the verb's declared event, which is the schema
-    // describe_handle lists for it, so what a model was told it may send and
-    // what is accepted here are one schema. The handler module's own event
-    // contract decides which positions take a reference, where an address
-    // converts to the link the verb stores.
-    const schema = verb.inputSchema === true ? undefined : verb.inputSchema;
-    const judged = await verbEventForDispatch(
-      input.event,
-      schema,
-      () => Promise.resolve(handlerVerbEvents(pattern).get(name)),
-    );
-    if ("refusal" in judged) {
-      return fail(
-        `call_verb refused the event for "${name}" without sending it: ${judged.refusal}`,
-      );
-    }
-    const event = judged.value;
 
     const { runtime } = pieces;
-    await pieces.startPiece(piece.cell);
-    const stream = piece.cell.key(name).asSchemaFromLinks() as Cell<unknown>;
-    if (!isStream(stream)) {
-      return fail(`"${name}" did not resolve to a stream on this piece`);
-    }
-    // The commit callback is the handling's own: it fires once this event's
-    // handler has run and its transaction has committed.
-    const committed = Promise.withResolvers<IExtendedStorageTransaction>();
-    try {
-      sendEvent(stream, event, committed.resolve);
-    } catch (error) {
-      return fail(
-        `call_verb could not send the event: ${errorMessage(error)}`,
-      );
-    }
-    let tx!: IExtendedStorageTransaction;
-    const handling = committed.promise.then((value) => {
-      tx = value;
+    let called: VerbCall | undefined;
+    const calling = callVerb(
+      runtime,
+      piece.cell.getAsNormalizedFullLink(),
+      name,
+      input.event,
+    ).then((value) => {
+      called = value;
     });
-    if (await raceWithAbort(handling, context.signal) === "aborted") {
+    if (await raceWithAbort(calling, context.signal) === "aborted") {
       return fail("call_verb was cancelled before the verb's handling settled");
     }
-    const status = tx.status();
-    if (status.status === "error") {
-      // SHORTCUT (2026-10-12): the handler's failure, its thrown text
-      // included, reaches the model as written. A handler over data the model
-      // cannot read may carry that data in what it throws, and a pattern's
-      // author can write instructions there. To harden, measure the failure
-      // against the release ceiling as the result below is, and withhold it
-      // where the ceiling refuses it.
-      return fail(
-        `the handler for "${name}" failed, and nothing it wrote was kept: ${
-          transactionFailureMessage(status.error)
-        }`,
-      );
-    }
+    // SHORTCUT (2026-10-12): a failing handler's message, its thrown text
+    // included, reaches the model as written. A handler over data the model
+    // cannot read may carry that data in what it throws, and a pattern's
+    // author can write instructions there. To harden, measure the failure
+    // against the release ceiling as the result below is, and withhold it
+    // where the ceiling refuses it.
+    if (called!.status !== "settled") return fail(called!.message);
 
-    const receipt = tx.handlingReceiptLink;
+    const receipt = called!.receipt;
     if (receipt === undefined) return { outputId, status: "ok", verb: name };
     const space = pieces.getSpace();
     const resultRef = createLLMFriendlyLink(receipt, space);
@@ -444,7 +330,7 @@ export const callVerbTool: HarnessToolDefinition<
     } finally {
       releaseTx.abort("call_verb release measurement");
     }
-    if (value === undefined || isValueLessReceipt(raw)) {
+    if (value === undefined || called!.result === undefined) {
       return { outputId, status: "ok", verb: name, resultRef };
     }
     if (withheld) {
@@ -464,7 +350,7 @@ export const callVerbTool: HarnessToolDefinition<
       // reference the verb returned, and goes back as the address of what it
       // points at — the piece a verb created comes back as that piece's
       // handle, not as a copy of its fields.
-      const declared = schemaShapeOnly(verb.outputSchema ?? {});
+      const declared = schemaShapeOnly(called!.outputSchema ?? {});
       let shaped = declared;
       for (const path of storedLinkPaths(raw)) {
         const target = runtime.getCellFromLink({

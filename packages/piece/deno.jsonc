@@ -21,6 +21,7 @@
     "./declared-fields": "./src/declared-fields.ts",
     "./refusal": "./src/refusal.ts",
     "./schema-compatibility": "./src/schema-compatibility.ts",
+    "./verb-call": "./src/verb-call.ts",
     "./verb-input": "./src/verb-input.ts",
     "./verb-listing": "./src/verb-listing.ts"
   }

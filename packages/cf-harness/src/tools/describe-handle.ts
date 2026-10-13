@@ -11,6 +11,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import { pieceVerbs } from "@commonfabric/piece/verb-call";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -45,7 +46,6 @@ import { admitsFabricReference } from "../foreign-spaces.ts";
 import { resolveHandleToken, resolveReferentToken } from "../handle-table.ts";
 import { projectHarnessResearchKitForModel } from "../research/model-projection.ts";
 import { schemaShapeOnly } from "../schema-shape.ts";
-import { heldPieceVerbs } from "./call-verb.ts";
 import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 export interface DescribeHandleToolInput {
@@ -809,7 +809,7 @@ const pieceVerbsOf = async (
 ): Promise<HarnessCallableDescriptor[] | undefined> => {
   if (getPatternIdentityRef(root) === undefined) return undefined;
   try {
-    return (await heldPieceVerbs(session.pieces, root)).map((verb) => ({
+    return (await pieceVerbs(session.pieces.runtime, root)).map((verb) => ({
       name: verb.name,
       ...(verb.description !== undefined
         ? { description: verb.description }

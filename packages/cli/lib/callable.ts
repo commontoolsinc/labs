@@ -5,13 +5,12 @@ import {
   isSchemaObject,
   schemaIsObjectShaped,
 } from "@commonfabric/piece/declared-fields";
+import { sendVerbEvent } from "@commonfabric/piece/verb-call";
 import { verbEventForDispatch } from "@commonfabric/piece/verb-input";
 import { cloneWithoutBoundToolKeys } from "@commonfabric/piece/verb-listing";
 import {
   type Cell,
   encodeJsonPointer,
-  type EventAppendDeliveryOutcome,
-  type IExtendedStorageTransaction,
   type MemorySpace,
   type NormalizedFullLink,
   renderCellReference,
@@ -1006,83 +1005,24 @@ export async function executeResolvedCallable(
       // later call can fetch the outcome, and that needs the pair naming it.
       throw new Error("--no-wait requires an invocation id");
     }
-    deps.onPhase?.("dispatched");
-    // Two settlements come back from one send. `appended` is the caller's
-    // own authored act durable: under server execution the event append,
-    // which the server then handles; otherwise the handling's commit, the
-    // same moment as `handled`. `handled` is the handling's final commit
-    // callback — under server execution, the served handling's consequence.
-    // The dispatch span runs to the first, the dispatch-to-commit time the
-    // `--verbose` phases report, and the readback below waits for the second
-    // before it reads the receipt.
-    const handled = Promise.withResolvers<IExtendedStorageTransaction>();
-    const tx = await timeCliPhase(
-      "executeCallable.dispatch",
-      () =>
-        new Promise<IExtendedStorageTransaction>((resolve, reject) => {
-          const onAppended = (
-            delivery: EventAppendDeliveryOutcome,
-            appendedTx: IExtendedStorageTransaction,
-          ) => {
-            // A refusal the transaction itself carries — a handling that
-            // threw or whose commit was rejected — is reported below off
-            // the transaction's status, with the runtime error it
-            // recorded; only an append refused on an otherwise clean
-            // transaction is reported here.
-            if (delivery.delivered || appendedTx.status().status === "error") {
-              resolve(appendedTx);
-            } else {
-              reject(new Error(`event append refused: ${delivery.refused}`));
-            }
-          };
-          // The commit callback settles both: a sender that never reports
-          // the append — one whose act IS the commit — is acknowledged
-          // here, and the appended report, when it comes, comes first.
-          const onCommit = (committedTx: IExtendedStorageTransaction) => {
-            resolve(committedTx);
-            handled.resolve(committedTx);
-          };
-          try {
-            (deps.sendEvent ?? sendEvent)(
-              resolved.callableCell,
-              dispatchInput,
-              onCommit,
-              {
-                ...(invocation === undefined ? {} : {
-                  // The id and the session that chose it travel together:
-                  // an id is the caller's own word, and only the pair
-                  // decides which receipt this handling files under.
-                  eventId: invocation.id,
-                  session: invocation.session,
-                }),
-                onAppended,
-              },
-            );
-          } catch (error) {
-            reject(error);
-          }
-        }),
-    );
-    // Acknowledgment is transaction-local (verb contract, Settlement): the
-    // callback above fires on THIS caller's durable act. Awaiting
-    // runtime.idle()/pieces.synced() here instead would hold an
-    // already-committed write hostage to every derived recomputation it
-    // triggered elsewhere in the graph.
-    deps.onPhase?.("committed");
-
-    const txStatus = tx.status();
-    const deduplicated = txStatus.status === "error" &&
-      "precondition" in txStatus.error &&
-      txStatus.error.precondition === "receipt-exists";
-    if (txStatus.status === "error" && !deduplicated) {
+    const sent = await sendVerbEvent(resolved.callableCell, dispatchInput, {
+      ...(invocation !== undefined ? { invocation } : {}),
+      ...(deps.onPhase !== undefined ? { onPhase: deps.onPhase } : {}),
+      // The dispatch span is the dispatch-to-commit time the `--verbose`
+      // phases report.
+      time: (span, run) => timeCliPhase(`executeCallable.${span}`, run),
+      ...(deps.sendEvent !== undefined ? { sendEvent: deps.sendEvent } : {}),
+    });
+    if (sent.status === "failed") {
       const latestRuntimeError = runtimeErrors.slice(errorCountBefore).at(-1)
         ?.message;
       throw new Error(
         `Handler "${resolved.cellKey}" failed: ${
-          latestRuntimeError ?? transactionFailureMessage(txStatus.error)
+          latestRuntimeError ?? transactionFailureMessage(sent.error)
         }`,
       );
     }
+    const { deduplicated, receipt: link } = sent;
 
     // The handling committed, so the space it committed to is named here —
     // before the early return below, which a call without an invocation id
@@ -1093,11 +1033,6 @@ export async function executeResolvedCallable(
 
     if (invocationId === undefined) return {};
 
-    // The handling's receipt address, taken off the transaction the commit
-    // callback handed back (verb contract WS-D). It is known HERE — at
-    // commit, before anything is read — which is what lets the detached exit
-    // below publish an address for an outcome nobody waited for.
-    const link = tx.handlingReceiptLink;
     const receiptAddress = link === undefined
       ? undefined
       : toInvocationResultLink(link, resolved.space);
@@ -1119,23 +1054,11 @@ export async function executeResolvedCallable(
       };
     }
 
-    // The readback needs the handling itself to have landed, which under
-    // server execution is the served handling's consequence — refused,
-    // errored, or dropped there, the readback would find no receipt. Off
-    // it, `handled` settled with `tx` above.
-    const handledTx = await timeCliPhase(
-      "executeCallable.handled",
-      () => handled.promise,
-    );
-    const handledStatus = handledTx.status();
-    if (
-      handledStatus.status === "error" && handledTx !== tx &&
-      !("precondition" in handledStatus.error &&
-        handledStatus.error.precondition === "receipt-exists")
-    ) {
+    const handling = await sent.handled();
+    if (handling.status === "failed") {
       throw new Error(
         `Handler "${resolved.cellKey}" failed: ${
-          transactionFailureMessage(handledStatus.error)
+          transactionFailureMessage(handling.error)
         }`,
       );
     }
