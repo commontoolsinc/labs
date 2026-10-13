@@ -1268,10 +1268,17 @@ otherwise, with the status and selected headers.
 
 A final assistant reply must contain non-whitespace text. A reply with no text
 and no function tool calls fails the run with `provider-unavailable`, including
-when the provider returned HTTP 200. Tool-only replies continue through normal
-tool dispatch. The normalized assistant message stays in the transcript, and the
-run report retains the model attempts and token usage. This failure does not
-trigger a retry.
+when the provider returned HTTP 200. The one exception is a run that has
+`submit_result`: when a turn that still offers tools follows, its first such
+reply is answered with a host notice asking it to submit the answer, or why it
+cannot be given, and only a second fails it. Tool-only replies continue through
+normal tool dispatch. The normalized assistant message stays in the transcript,
+and the run report retains the model attempts and token usage. This failure does
+not trigger a retry. A Codex attempt that reached its terminal response records
+that response's `status` as `terminalStatus` and the type of each of its output
+items as `outputItemTypes`, which together say whether a blank reply was a
+`completed` response with an empty message, a reasoning item alone, or no item
+at all.
 
 A failed attempt carries the provider's own reason wherever the provider stated
 one. `providerError` holds the provider's `type`, `code`, and `message` as the
@@ -2856,14 +2863,17 @@ reason, and the model corrects it and submits again. An accepted value is the
 run's return: the run completes after the turn that submitted it, without asking
 the model for another, and the words the model wrote beside the call, if any,
 are its final answer. A later valid submission in that same turn replaces an
-earlier one. This is the way that works under every enforcement mode and
-prompt-slot role — under `enforce-strict`, a run whose prompt is bound as
-`context` or `quote` is refused `bash`, `edit_file`, and `write_file`, and so
-cannot write the file itself. A run that does hold such a tool may still write
-the file directly; both ways end at the same path. With `--allow-tool`, name
-`submit_result` alongside the run's other tools. The schema and host path are
-retained in run state, so a resumed root run keeps the same result contract
-without repeating the command-line flags; a conflicting restatement is refused.
+earlier one. A turn with neither words nor a tool call gets one host notice
+asking for the submission when a turn that still offers tools follows it; a
+second such turn, or one with no such turn after it, fails the run. This is the
+way that works under every enforcement mode and prompt-slot role — under
+`enforce-strict`, a run whose prompt is bound as `context` or `quote` is refused
+`bash`, `edit_file`, and `write_file`, and so cannot write the file itself. A
+run that does hold such a tool may still write the file directly; both ways end
+at the same path. With `--allow-tool`, name `submit_result` alongside the run's
+other tools. The schema and host path are retained in run state, so a resumed
+root run keeps the same result contract without repeating the command-line
+flags; a conflicting restatement is refused.
 
 The system prompt includes the complete result schema for both batch and
 operator runs, whether the result is submitted through the tool or written to
