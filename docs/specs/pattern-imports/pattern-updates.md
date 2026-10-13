@@ -379,6 +379,20 @@ re-instantiation, through the runner's `patternPointerFollowed()`, so the root
 it returns runs the new pattern whether or not the root was running when it
 was opened.
 
+Opening any other piece makes that promise for the pointer moves it can
+account for. `openPiece`, and a `getPieceCell` that reconciles, wait through
+the same `patternPointerFollowed()` before they start the piece. They wait for
+the move their own reconcile made, and for any earlier move the piece's watcher
+has already observed. The watcher observes a move in a scheduler pass, so an
+open whose reconcile moved the pointer first waits for the runtime to go idle.
+An open that moved nothing skips that wait, which would hold it until every
+other piece in the runtime is quiescent, and so does not wait for a move
+committed elsewhere that the watcher has yet to observe. The wait is for the
+opened piece's watcher alone, and lasts as long as its follow does. For a
+pointer another replica moved to a pattern this runtime has not compiled, that
+includes loading the pattern, which starting the same piece would wait for if
+it were not running.
+
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
   causes.

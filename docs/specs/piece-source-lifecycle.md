@@ -1235,6 +1235,14 @@ is the batch lane's,
    candidate value even when it is unchanged, and advance the revision head.
 7. Start the accepted pattern on the existing piece result cell.
 
+A piece that is already running when it is opened keeps its reactive nodes
+through step 7. The runner's pattern watcher re-instantiates it on the accepted
+pattern, and the open resolves once the watcher has, so the caller is handed a
+piece running the pattern its `patternIdentity` names whether or not the piece
+was running. "In-place apply" in
+[`pattern-imports/pattern-updates.md`](pattern-imports/pattern-updates.md)
+states which pointer moves that wait covers.
+
 If reconciliation fails and the current source remains loadable, the runtime
 starts that source. A piece in that state is not following its origin any
 more, and it must say so.
