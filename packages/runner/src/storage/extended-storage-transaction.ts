@@ -2589,12 +2589,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   #buildPreparedDigestInput(): PreparedDigestInput {
-    // Each pushed record is deepFrozen so that every CfcAddress (and every
-    // path inside one) that flows into the digest input is immutable from
-    // the moment of construction. This makes the records safe to use as
-    // identity-stable cache keys (e.g. for the `hashStringOf()` WeakMap
-    // cache) and matches the chokepoint freeze applied to dereference
-    // traces and write-policy inputs.
+    // Every record pushed here is frozen at every level, so the input is
+    // immutable from the moment of construction: a digest hashed from it
+    // later is the digest of the activity as it stood here. A record's
+    // members are primitives, a path the canonical path functions froze, and
+    // a read's `meta`, so `Object.freeze()` on the record with `deepFreeze()`
+    // on the `meta` covers all of it. The records stay out of the deep-frozen
+    // cache, which nothing asks of them: entering one costs more than
+    // building it, and `isDeepFrozen()` walks a record the cache lacks to the
+    // same answer.
     // Activity-clock ranks for the digest: the prefix-provenance gate
     // consumes only the RELATIVE order of non-internal reads and write
     // attempts, so the digest binds dense ranks over exactly that set. Raw
@@ -2631,7 +2634,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // explicit undefined would hash differently from absence), and the
       // record's one path.
       const { journalIndex: _raw, path, ...bare } = read;
-      consumedReads.push(deepFreeze({
+      // Shared with the journal's own record of the read.
+      deepFreeze(bare.meta);
+      consumedReads.push(Object.freeze({
         ...bare,
         scope: normalizeCellScope(read.scope),
         ...cfcRecordPath(path),
@@ -2642,7 +2647,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const log = this.getReactivityLog();
     const attemptedWrites: CfcRecordAddress[] = (log.attemptedWrites ?? [])
       .map(({ path, ...address }) =>
-        deepFreeze({
+        Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           // The reactivity log records the journal's document-rooted paths.
@@ -2654,7 +2659,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     for (const space of getTransactionWrittenSpaces(this)) {
       for (const write of this.getWriteDetails(space)) {
         const { path, ...address } = write.address;
-        writes.push(deepFreeze({
+        writes.push(Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           ...cfcRecordPath(path),
@@ -2667,103 +2672,109 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // OrderedWriteAttempt.
     const writeAttemptLog: OrderedWriteAttempt[] = [];
     for (const attempt of rawAttempts) {
-      writeAttemptLog.push(deepFreeze({
+      writeAttemptLog.push(Object.freeze({
         space: attempt.space,
         id: attempt.id,
         scope: normalizeCellScope(attempt.scope),
-        path: [...attempt.path],
+        path: Object.freeze([...attempt.path]),
         journalIndex: rankByRaw.get(attempt.journalIndex)!,
       }));
     }
 
-    return deepFreeze({
-      consumedReads,
-      attemptedWrites,
-      writes,
-      writeAttemptLog,
-      dereferenceTraces: [...this.#cfcState.dereferenceTraces],
-      triggerReads: [...this.#cfcState.triggerReads],
-      writePolicyInputs: [...this.#cfcState.writePolicyInputs],
-      ...(this.#cfcState.assertedValueRoots.length > 0
-        ? { assertedValueRoots: [...this.#cfcState.assertedValueRoots] }
-        : {}),
-      ...(this.#cfcState.structureContainers.length > 0
-        ? { structureContainers: [...this.#cfcState.structureContainers] }
-        : {}),
-      implementationIdentity: this.#cfcState.implementationIdentity,
-      trustSnapshot: this.#cfcState.trustSnapshot,
-      ...(this.#cfcState.moduleDelegations.size > 0
-        ? {
-          moduleDelegations: [...this.#cfcState.moduleDelegations]
-            .flatMap(([space, spaceDelegations]) =>
-              [...spaceDelegations].map(([
-                moduleIdentity,
-                delegatedModuleIdentities,
-              ]) => ({
-                space,
-                moduleIdentity,
-                delegatedModuleIdentities: [
-                  ...delegatedModuleIdentities,
-                ].sort(),
-              }))
-            )
-            .sort((left, right) =>
-              left.space < right.space
-                ? -1
-                : left.space > right.space
-                ? 1
-                : left.moduleIdentity < right.moduleIdentity
-                ? -1
-                : left.moduleIdentity > right.moduleIdentity
-                ? 1
-                : 0
-            ),
-        }
-        : {}),
-      // Digest-only projection: the decision-relevant identity of the policy
-      // set (Epic B5). The snapshot itself is frozen Runtime config; only its
-      // identity needs to invalidate.
-      policySnapshot: this.#cfcState.policySnapshot === undefined
-        ? undefined
-        : { digest: this.#cfcState.policySnapshot.digest },
-      // Consulted grants (§8.12.7 route 2a): the resolution-time content
-      // digests recorded by the grant resolver — a boundary decision's
-      // policy-state inputs, bound the same way policySnapshot.digest is
-      // (drift between prepare and the commit-time rebuild mismatches →
-      // cfc-prepared-digest-mismatch). EXTERNAL mutation between prepare
-      // and commit is additionally rejected for WRITING transactions by the
-      // storage layer's claim pass — the resolver's read validated the
-      // grant document snapshot; a zero-write transaction skips that pass,
-      // the same snapshot-consistency posture every labeled read has, and a
-      // revocation then takes effect on the next evaluation (design §2.2).
-      ...(this.#cfcState.consultedGrants.length > 0
-        ? { consultedGrants: [...this.#cfcState.consultedGrants] }
-        : {}),
-      ...(this.#cfcState.consultedPolicyManifests.length > 0
-        ? {
-          consultedPolicyManifests: [
-            ...this.#cfcState.consultedPolicyManifests,
-          ],
-        }
-        : {}),
-      // Label-metadata observations (inv-12 Stage 2): boundary-decision
-      // inputs (they change the flow join and the consumed set), bound like
-      // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
-      // byte-identical.
-      ...(this.#cfcState.labelMetadataObservations.length > 0
-        ? {
-          labelMetadataObservations: [
-            ...this.#cfcState.labelMetadataObservations,
-          ],
-        }
-        : {}),
-      ...(this.#cfcState.externalContentObservations.length > 0
-        ? {
-          externalContentObservations: [
-            ...this.#cfcState.externalContentObservations,
-          ],
-        }
-        : {}),
+    // The four arrays above hold records frozen where they were made. Every
+    // other member is small, and holds records the transaction deep-froze
+    // when it recorded them or containers built here, which `deepFreeze()`
+    // finishes.
+    return Object.freeze({
+      consumedReads: Object.freeze(consumedReads),
+      attemptedWrites: Object.freeze(attemptedWrites),
+      writes: Object.freeze(writes),
+      writeAttemptLog: Object.freeze(writeAttemptLog),
+      ...deepFreeze({
+        dereferenceTraces: [...this.#cfcState.dereferenceTraces],
+        triggerReads: [...this.#cfcState.triggerReads],
+        writePolicyInputs: [...this.#cfcState.writePolicyInputs],
+        ...(this.#cfcState.assertedValueRoots.length > 0
+          ? { assertedValueRoots: [...this.#cfcState.assertedValueRoots] }
+          : {}),
+        ...(this.#cfcState.structureContainers.length > 0
+          ? { structureContainers: [...this.#cfcState.structureContainers] }
+          : {}),
+        implementationIdentity: this.#cfcState.implementationIdentity,
+        trustSnapshot: this.#cfcState.trustSnapshot,
+        ...(this.#cfcState.moduleDelegations.size > 0
+          ? {
+            moduleDelegations: [...this.#cfcState.moduleDelegations]
+              .flatMap(([space, spaceDelegations]) =>
+                [...spaceDelegations].map(([
+                  moduleIdentity,
+                  delegatedModuleIdentities,
+                ]) => ({
+                  space,
+                  moduleIdentity,
+                  delegatedModuleIdentities: [
+                    ...delegatedModuleIdentities,
+                  ].sort(),
+                }))
+              )
+              .sort((left, right) =>
+                left.space < right.space
+                  ? -1
+                  : left.space > right.space
+                  ? 1
+                  : left.moduleIdentity < right.moduleIdentity
+                  ? -1
+                  : left.moduleIdentity > right.moduleIdentity
+                  ? 1
+                  : 0
+              ),
+          }
+          : {}),
+        // Digest-only projection: the decision-relevant identity of the policy
+        // set (Epic B5). The snapshot itself is frozen Runtime config; only its
+        // identity needs to invalidate.
+        policySnapshot: this.#cfcState.policySnapshot === undefined
+          ? undefined
+          : { digest: this.#cfcState.policySnapshot.digest },
+        // Consulted grants (§8.12.7 route 2a): the resolution-time content
+        // digests recorded by the grant resolver — a boundary decision's
+        // policy-state inputs, bound the same way policySnapshot.digest is
+        // (drift between prepare and the commit-time rebuild mismatches →
+        // cfc-prepared-digest-mismatch). EXTERNAL mutation between prepare
+        // and commit is additionally rejected for WRITING transactions by the
+        // storage layer's claim pass — the resolver's read validated the
+        // grant document snapshot; a zero-write transaction skips that pass,
+        // the same snapshot-consistency posture every labeled read has, and a
+        // revocation then takes effect on the next evaluation (design §2.2).
+        ...(this.#cfcState.consultedGrants.length > 0
+          ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+          : {}),
+        ...(this.#cfcState.consultedPolicyManifests.length > 0
+          ? {
+            consultedPolicyManifests: [
+              ...this.#cfcState.consultedPolicyManifests,
+            ],
+          }
+          : {}),
+        // Label-metadata observations (inv-12 Stage 2): boundary-decision
+        // inputs (they change the flow join and the consumed set), bound like
+        // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
+        // byte-identical.
+        ...(this.#cfcState.labelMetadataObservations.length > 0
+          ? {
+            labelMetadataObservations: [
+              ...this.#cfcState.labelMetadataObservations,
+            ],
+          }
+          : {}),
+        ...(this.#cfcState.externalContentObservations.length > 0
+          ? {
+            externalContentObservations: [
+              ...this.#cfcState.externalContentObservations,
+            ],
+          }
+          : {}),
+      }),
     });
   }
 
