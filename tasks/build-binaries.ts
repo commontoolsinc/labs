@@ -220,6 +220,16 @@ export class BuildConfig {
     return this.#path("packages", "fuse");
   }
 
+  memorySqliteReadWorkerPath() {
+    return this.#path(
+      "packages",
+      "memory",
+      "v2",
+      "sqlite",
+      "read-worker.ts",
+    );
+  }
+
   /**
    * Every path the build reads, as opposed to writes: those its path methods
    * name, and the compiler inputs whose fingerprint `prepareWorkspace()`
@@ -243,6 +253,7 @@ export class BuildConfig {
       this.cliEntryPath(),
       this.cliMultiUserTestWorkerPath(),
       this.fusePackagePath(),
+      this.memorySqliteReadWorkerPath(),
       ...COMPILE_FINGERPRINT_INPUTS.map((input) =>
         this.#path(...input.split("/"))
       ),
@@ -264,6 +275,9 @@ export class BuildConfig {
           this.toolshedEnvPath(),
           this.staticAssetsPath(),
           ...this.patternPaths(),
+          // The worker the memory server reads injected SQLite sources on.
+          // The compile does not follow a worker's module, so it is named here.
+          this.memorySqliteReadWorkerPath(),
         ];
       case "cf":
         return [
@@ -273,6 +287,9 @@ export class BuildConfig {
           // The worker `cf test` spawns in multi-user mode. The compile does
           // not follow a worker's module, so it is named here.
           this.cliMultiUserTestWorkerPath(),
+          // The worker the memory server `cf` embeds reads injected SQLite
+          // sources on, named for the same reason.
+          this.memorySqliteReadWorkerPath(),
           // The build metadata `packages/cli/lib/build-info.ts` reads.
           this.cliEnvPath(),
         ];
