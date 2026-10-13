@@ -1239,6 +1239,20 @@ Deno.test("v2 patch generator never emits indexed-array add/remove/move (leaf-on
     assertEquals(offendingOps(growPatches), []);
     record(growPatches.map((patch) => patch.op));
 
+    // A write beneath an element the array lacks. The element arrives holding
+    // what was written, as a nested array and as a record holding an array.
+    for (const beneath of [["0", "0"], ["0", "tags", "0"]]) {
+      await writeItems([]);
+      drafts.length = 0;
+      const deep = storage.edit();
+      const path = ["value", "items", ...beneath];
+      expect(deep.write({ space, id, type, path }, "x").error).toBeUndefined();
+      expect((await deep.commit().settled).error).toBeUndefined();
+      const deepPatches = patchesInDrafts();
+      expect(offendingOps(deepPatches)).toEqual([]);
+      record(deepPatches.map((patch) => patch.op));
+    }
+
     // Sanity: the idioms above actually exercised the array diff path and
     // produced the safe shapes, so the no-indexed-op assertions aren't vacuous.
     assert(seen.has("splice"), `expected a splice op; saw ${[...seen]}`);
