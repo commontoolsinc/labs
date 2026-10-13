@@ -219,14 +219,13 @@ shown. `participants.tsx` holds the roster and `addParticipant({profile})`, the
 only writer its write contract admits; a write from any other action, or from
 another pattern holding the roster cell, is refused. Adding is a mergeable set
 add, so concurrent additions all land and a listed profile is not added twice.
-The roster links only a profile whose label the runtime holds, the first entry
-included: a bare document names no principal, and adding one is refused. Any
-participant may add any profile, so the stored list is a set of claims: a
-consumer that needs the actual participants keeps only profiles whose principal
-currently holds access to the Loom's space, which hides an entry for anyone else
-and drops a removed member without deleting their entry. The root does not
-render the list: it holds claims, and only a consumer that can read the access
-list can say which are participants.
+Any participant may add any document, a bare one that names no principal
+included, so the stored list is a set of claims: a consumer that needs the
+actual participants keeps only profiles whose principal currently holds access
+to the Loom's space, which hides an entry for anyone else and drops a removed
+member without deleting their entry. The root does not render the list: it holds
+claims, and only a consumer that can read the access list can say which are
+participants.
 
 `chatRoom` links the Loom's chat room, so every member finds it in the Loom's
 shared state. It is a link to a room piece in the Loom's own space, typed as

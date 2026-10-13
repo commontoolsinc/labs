@@ -2469,11 +2469,12 @@ describe("run-pattern", () => {
           parseLLMFriendlyLink(output.resultRef, space),
         ).key("secret");
         expect(forwarded.get()).toBe("s3cr3t");
+        // The result holds a reference to the foreign value and no copy of
+        // its label: the label is read where the value is stored.
         expect(cfcLabelViewForCellFailClosed(forwarded)?.entries)
           .toContainEqual({
             path: [],
             label,
-            observes: "followRef",
           });
         const foreignSecret = runtime.getCellFromLink(link).key("secret");
         expect(foreignSecret.get()).toBe("s3cr3t");

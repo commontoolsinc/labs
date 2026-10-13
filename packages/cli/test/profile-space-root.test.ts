@@ -331,18 +331,14 @@ describe("profileSpaceRoot()", () => {
       expect(out[planted.space].differ).toEqual([]);
     });
 
-    it("writes the space cell of a space it repairs, and one empty content-addressed document", async () => {
+    it("writes only the space cell of a space it repairs", async () => {
       const out = await written(false);
       for (const listed of [unrooted, planted]) {
         const { spaceCell, differ } = out[listed.space];
         const ids = differ.map((entity) => (entity as { id: string }).id);
-        expect(ids).toContain(spaceCell);
-        const others = differ.filter((entity) =>
-          (entity as { id: string }).id !== spaceCell
-        );
-        expect(others).toHaveLength(1);
-        expect((others[0] as { id: string }).id.startsWith("cid:")).toBe(true);
-        expect((others[0] as { value: unknown }).value).toEqual({});
+        // The link carries no label of its own here, so the space cell gains
+        // none and no schema document is written beside it.
+        expect(ids).toEqual([spaceCell]);
       }
     });
   });

@@ -381,7 +381,12 @@ instead of the flow join:
   nothing else from the slot. The other paths also keep the slot's own
   entries, integrity included. A slot stores nothing below itself: a link
   write persists the reference's own label at the slot (spec §8.12.8), and the
-  labels of what the link reaches are read at the target.
+  labels of what the link reaches are read at the target. A cell's stored
+  label view (`cfcLabelViewForCell` and its fail-closed forms) reads them
+  there too: it follows the links the cell's path lands on or crosses, and
+  joins the labels its own document stores at the path with the reference
+  restrictions of each slot followed in another document and the labels of
+  the document holding the value.
 
 That precision win is what pays for the epic on the LLM/agent surface.
 
