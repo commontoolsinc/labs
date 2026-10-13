@@ -1907,6 +1907,16 @@ encoded subtree appears at each position it appeared at. Whether the decoded
 objects are `===` to each other is a further promise, which an engine states
 only if it makes it.
 
+**A cell write keeps shared references within that write, and no further.**
+The runtime's write path (`Cell.set()` and the collection operations) stores a
+value holding the same object at two positions as one shared cell: the later
+position is stored as a link to the earlier one, so a later write through
+either position is read at both, across sessions. What is shared is the
+stored cell, not the JavaScript object written: the object itself is left as
+it was. The sharing reaches only as far as one write. The same object written
+by two writes — two `set()` calls, even in one transaction, two handlers, or
+two cells — is stored as two independent values.
+
 Cycles *across* documents are a separate matter, and are supported whatever an
 engine does within one. They are written as explicit links (`FabricInstance`s
 referencing other documents), so two cells may reference each other and form a

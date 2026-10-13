@@ -27,6 +27,16 @@ This shift has several benefits:
 - **Simpler types** - Your data models are cleaner without synthetic keys
 - **Natural composition** - Objects can reference other objects directly
 
+### One object written at two positions
+
+Writing the same object at two positions in one write makes them one shared
+cell: after `state.set({ a: EMPTY, b: EMPTY })`, a push to `a` is read in `b`
+too, across sessions. Separate writes never share: `state.key("a").set(EMPTY)`
+and then `state.key("b").set(EMPTY)` store two independent values, even in one
+handler. The object itself is not changed by a later write: `EMPTY` stays as
+it was. When two positions should start out equal but change independently,
+write each its own value (`[]` and `[]`), or write them separately.
+
 ## The `equals()` Function
 
 Use `equals()` to ask whether two things are the *same* thing. It resolves each side to what it points at in the graph — following links — and compares those referents. It never compares contents: two separately-created values are not `equals()` however identical they look, and a value with no place in the graph (a fresh object literal, say) has nothing to compare, so it is never `equals()` to anything but itself.
