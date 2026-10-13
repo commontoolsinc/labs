@@ -74,6 +74,18 @@ throws if `data` contains a reference cycle. It lives in the runner rather than
 in the codec because it needs the cell and link machinery, which `data-model`
 does not have.
 
+`dataUriSnapshotWithResolvedLinks(data, base?)` mints the same identifier and
+returns beside it the value to walk under that identifier. A caller that holds
+`data` and goes on to read it under the identifier it minted walks that value
+and not `data`. A link in `data` that names no document takes its identifier
+from the address it is read under. Under the minted address that is the `data:`
+identifier itself, so the link's path would be read inside the snapshot and not
+in the document that stores the link. Where `base` has an identifier, the
+returned value is `data` with each such link given that identifier; every other
+link is left as `data` holds it, schema included. Without a `base`, or with one
+that has no identifier, there is nothing to give such a link, and the returned
+value is `data` as given.
+
 The walk rebuilds a container only when a link under it was rewritten;
 everything else it hands back by identity, so a value carrying no link at all
 reaches `dataUriFromValue` as the objects the caller passed in. A value that
@@ -104,11 +116,13 @@ Representative places that mint one:
   changes to another array element do not require that reader to rerun.
 - Traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
   document for an array element that is an inline object or array and is read
-  as a value, so that the object a read returns is identified by its value. An
-  element the schema requests as a cell gets no snapshot: its handle links to
-  the array slot. A traversal whose context sets `inlineArrayItemsInPlace`
-  mints none either way and traverses an inline element at its address in the
-  document that stores it; `GraphQueryWalk` in
+  as a value, so that the object a read returns is identified by its value. It
+  continues over the value `dataUriSnapshotWithResolvedLinks` returns, so a link
+  inside the element that names no document resolves against the document
+  storing the element. An element the schema requests as a cell gets no
+  snapshot: its handle links to the array slot. A traversal whose context sets
+  `inlineArrayItemsInPlace` mints none either way and traverses an inline
+  element at its address in the document that stores it; `GraphQueryWalk` in
   `packages/runner/src/graph-query.ts` sets it for the walk a memory server
   runs to resolve a schema query.
 - The lazy schema view in `packages/runner/src/schema-view.ts` mints one for
@@ -148,12 +162,34 @@ That places an obligation on whoever mints one from a value holding links:
   encoding (`inlineExternalSchemaRefsInValue` in
   `packages/runner/src/link-utils.ts`).
 
+A value leaves a runtime for a space by one of two routes, a stored write
+(`normalizeAndDiff` and `Cell.setRaw()`) and a stream send (`Cell.send()`),
+and both pass it through `findAndInlineDataUriLinks` first, so what goes is
+the value an identifier carries, with any identifier held inside that value
+dissolved in turn. A runtime therefore does not receive a snapshot from
+another runtime through storage. A snapshot it minted names schema documents
+it already holds: its replica received them with the stored document the
+snapshot was taken from, and its schema-document registry registered them as
+they arrived or were written.
+
+One position is out of the walk's reach. A `FabricInstance` keeps its state
+behind its codec, so an identifier held there is not dissolved. The two
+routes treat an instance as each treats one written directly: a send refuses
+a value holding one, including one inside the value an identifier carries,
+and a stored write stores the instance whole, with whatever its state holds.
+
+A caller can still hand a runtime an identifier directly, built elsewhere or
+kept from an earlier session. Nothing delivers schema documents beside an
+identifier, so that caller owes the runtime the ones its links reference: a
+read through a transaction finds them only if the space in the identifier's
+address holds them, and a schema it cannot resolve is not applied.
+
 `findAndInlineDataUriLinks` and the storage manager's `data:` sync walk have
 no transaction to read a space through. Where either narrows a link's schema
-to a path below the link, it resolves the reference through the realm's
-schema-document registry, which holds every schema document a session has
-written or been delivered. A reference the registry does not hold cannot be
-narrowed, and the narrowing throws.
+to a path below the link, it resolves the reference through the registry,
+which holds the schema documents of every snapshot the runtime minted. A
+reference the registry does not hold cannot be narrowed, and the narrowing
+throws.
 
 ## Reading one
 
@@ -171,9 +207,13 @@ the other direction from minting: it walks a value looking for links whose
 identifier is a `data:` URI of this codebase's media type, and replaces each
 with the value that identifier carries. If the decoded payload has another link
 on the way to the link's path, that link is followed instead, with the
-remaining path segments appended to it. A link carrying any other media type is
-returned as it came in, on the same footing as a link naming a document in a
-space.
+remaining path segments appended to it. The value an identifier carries is
+walked in turn, so an identifier held inside it is replaced as well. A link
+carrying any other media type is returned as it came in, on the same footing
+as a link naming a document in a space. A `FabricInstance` handed over, or
+decoded as the whole of an identifier's value, is refused; one deeper inside
+a decoded value is returned whole, or refused as well where the caller asks
+with `refuseCarriedInstances`.
 
 ### The payload is the value, not the document
 

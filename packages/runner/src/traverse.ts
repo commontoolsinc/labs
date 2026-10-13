@@ -76,7 +76,7 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
@@ -1644,9 +1644,8 @@ export type TraversalContext = {
    * such an element a `data:` address carrying a snapshot of its value, which
    * is what gives the object a read returns its value identity. A walk that
    * selects documents for a storage engine sets this: it returns no object,
-   * its storage holds no document at a `data:` address, and a link inside
-   * the element that names no document resolves against the storing
-   * document only at the element's own address.
+   * so the snapshot buys it nothing, and its storage holds no document at a
+   * `data:` address, so each read under one is a lookup that finds nothing.
    */
   inlineArrayItemsInPlace: boolean;
 
@@ -5591,10 +5590,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         //
         // A context that sets `inlineArrayItemsInPlace` does not take this
         // branch. Its traversal goes through the element at its address in
-        // the document that stores it, like any other nested value. That
-        // address is the one a link inside the element naming no document
-        // resolves against, so the traversal goes on to the documents such a
-        // link reaches.
+        // the document that stores it, like any other nested value, so it
+        // mints no id and issues no read at a `data:` address.
         //
         // The element link exists to give the snapshot an id for the links
         // inside the element that name no document.
@@ -5606,14 +5603,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // a link inside the element resolves the references in its schema.
         // The snapshot is of the whole element, so the read is recursive.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        // A link inside the element that names no document takes its id from
+        // the address it is read under, which under the `data:` address is
+        // the snapshot. The walk continues over the element with each such
+        // link given the id of the document storing the element.
+        const snapshot = dataUriSnapshotWithResolvedLinks(
+          curDoc.value,
+          elementLink,
+        );
         const elementAddress = curDoc.address;
         curDoc = {
           ...curDoc,
-          address: {
-            ...curDoc.address,
-            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
-            path: ["value"],
-          },
+          address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
+          value: snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;
