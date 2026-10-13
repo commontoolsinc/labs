@@ -268,9 +268,10 @@ where the pre-sync was no longer the whole cost.
 - [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
       transaction elides as equal to what is stored, read 345 documents
       each on average, and take nine tenths of what preparation still
-      costs. An elided write is still an attempt the gates answer to, so
-      such a commit cannot skip preparation without changing what is
-      refused. What it mostly pays is the prepared digest, built and
+      costs. An elided write is still an attempt the gates answer to
+      (the Contextual Flow Control specification's §8.10.2.1), so such a
+      commit cannot skip preparation without changing what is refused.
+      What it mostly pays is the prepared digest, built and
       hashed over every read for a comparison that the unchanged activity
       epoch already answers at commit; hashing it only when the epoch has
       moved is the next cut, and the flow join after it.
