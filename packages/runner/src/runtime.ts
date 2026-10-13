@@ -977,7 +977,9 @@ export interface CfcRuntimeStats {
   /**
    * Input-requirement verifications for which a boundary pass copied the
    * transaction's reads. A written target takes one verification per schema
-   * that applies to it, so this counts verifications, not targets.
+   * that applies to it, so this counts verifications, not targets. It counts
+   * the copy of the reads alone: resolving the stored envelopes again after a
+   * write retires one is not counted.
    */
   inputReadViewsBuilt: number;
 
