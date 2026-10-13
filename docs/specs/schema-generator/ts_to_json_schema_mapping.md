@@ -1806,8 +1806,10 @@ and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`definesDocument` or `cellsOpaque` lookup reads the node (`formatChildType` in
-`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
+`definesDocument` lookup reads the node (`formatChildType` in
+`schema-generator.ts`); a `cellsOpaque` lookup reads the node wherever a member
+is formatted (`formatChildType`), and the generation root, or the print a
+printed root is read in place of (`#generateSchemaInternal`); a `spelledBy` lookup reads the node, wherever a member
 or a printed generation root is formatted (`formatChildType` and
 `#generateSchemaInternal` in
 `schema-generator.ts`).
@@ -1913,9 +1915,11 @@ or a printed generation root is formatted (`formatChildType` and
   policy, and reads that policy in part (§11, `definesDocument`). A value
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
-- **`cellsOpaque`** marks the remainder of a recursion the contract overlay of
-  a handler's event or state cuts (`overlayContractCapabilities()`), whose
-  cells no use the callback makes reaches. Every cell the node's reading reaches, outside
+- **`cellsOpaque`** marks a node the contract overlay of a handler's event or
+  state (`overlayContractCapabilities()`) reads without reading inside it, whose
+  cells no use the callback makes reaches: the remainder of a recursion it cuts,
+  or a node it keeps as written because it cannot read inside it, as a tuple or
+  a scoped cell. Every cell the node's reading reaches, outside
   the value of another cell, is `opaque`, whatever capability its wrapper
   writes; a stream or a SQLite handle keeps its brand
   (`isCellCapabilityKind`), and the cells inside a cell's value are read as

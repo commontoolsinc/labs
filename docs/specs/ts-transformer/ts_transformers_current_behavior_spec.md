@@ -462,8 +462,9 @@ wrapper the alias names does; an alias met again inside its own expansion — a
 recursive event type — stays the reference it is. A named reference whose
 subtree holds no cell-like position passes through untouched; one
 expands only when a capability inside it must change, and a self-referential
-type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. A recursion
+type ends that expansion at the cycle, since a literal cannot spell its own
+recursion: the node past the cycle stays as authored where a use the body makes
+reaches below it, and is read with its cells `opaque` where none does. A recursion
 that instantiates its declaration without end, as `Nest<T[]>` inside
 `Nest<T>` does, never meets its own type again. The schema generator's
 `cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
@@ -485,18 +486,28 @@ writes it. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A reference the alias reading above does not see through — to an interface, or
-to a type alias that takes type parameters — expands as the type it denotes,
-which for a generic declaration is the declaration instantiated with the
-reference's arguments, built one level deep (`unfoldReferencedType()`). An
+to a type alias that takes type parameters — and a node of a kind the walk does
+not read inside, such as a mapped type, a conditional, or a tuple, expand as the
+type they denote, which for a generic declaration is the declaration
+instantiated with the reference's arguments, built one level deep
+(`unfoldDenotedType()`). The search for a cell-like position that decides
+whether to expand reads properties a mapped type makes, which have no
+declaration, and index signatures. An
 object is built from its properties, with their optionality and the type's
 index signatures as the instantiation has them. Each property is written as its
 declaration's annotation where that still denotes the property's type, and is
 printed from its type where an argument replaced what the annotation names, so
 `v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
-cell is built from its parts, each printed from its own type. A tuple is kept
-as written, as a tuple written out is, and so is a type that carries a scope,
-since only a scope wrapper names its scope: a scoped cell keeps the capability
-written for it. An optional member's node is read at the member's type without
+cell is built from its parts, each printed from its own type. A tuple, and a
+type that carries a scope, are not unfolded, since only a scope wrapper names
+its scope. Such a node is kept as written where a use the body makes reaches
+inside it, so a scoped cell the body reads keeps the capability written for it,
+and is otherwise read with every cell in it `opaque` (`keptAsWritten()`): a cell
+kept at the capability its author wrote would confer authority no use
+exercises. The same holds for a cell an index signature types, where no use
+reaches a key the literal does not declare, and for an event the body never
+reads at all; the schema generator honors that `opaque` reading at the root of
+a schema as well as at a member. An optional member's node is read at the member's type without
 the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
 holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
 with `undefined`. A printed node is overlaid on its

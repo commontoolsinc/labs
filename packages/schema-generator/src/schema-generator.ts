@@ -1358,6 +1358,11 @@ export class SchemaGenerator {
       ...(options?.rootWriterSupplied && typeNode &&
         { rootWriterSuppliedAt: typeNode }),
       ...(schemaHints && { schemaHints }),
+      // A root whose cells no use reaches reads them opaque, as a member does
+      // (`formatChildType()`); a print read in place carries its hints on the
+      // print.
+      ...(schemaHints?.get((hintsNode ?? typeNode)!)?.cellsOpaque &&
+        { cellsOpaque: true }),
     };
     context = this.#withGenericBindings(type, context);
     // A print read as the annotation that spells it keeps the print's own
