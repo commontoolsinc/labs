@@ -33,11 +33,12 @@ const patternIdentity = {
   symbol: "default",
 };
 
-// A start verdict for a piece whose result document nothing ever writes.
+// A start verdict for a piece whose result document, reached through a
+// backlink, nothing ever writes.
 const neverStartedVerdict: EnsurePieceVerdict = {
   started: false,
   reason: "no-pattern-meta",
-  rootIsEmpty: true,
+  root: { space, id: "of:never-written", scope: "space" },
   observedDocIds: ["of:never-written"],
   observedDocs: [{ space, id: "of:never-written", scope: "space" }],
 };
@@ -98,7 +99,7 @@ describe("scheduler-event-piece-start", () => {
   // that `runtimeB` creates, through the shared server alone.
   function newRuntime(
     storage: EmulatedStorageManager,
-    options: Pick<RuntimeOptions, "commitBackpressure"> = {},
+    options: Pick<RuntimeOptions, "commitBackpressure" | "experimental"> = {},
   ): Runtime {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -314,7 +315,7 @@ describe("scheduler-event-piece-start", () => {
       return Promise.resolve({
         started: false,
         reason: "no-pattern-meta",
-        rootIsEmpty: true,
+        root: { space, id: "of:never-written", scope: "space" },
         observedDocIds: [link.id],
         observedDocs: [{ space, id: link.id, scope: "space" }],
       });
@@ -370,7 +371,6 @@ describe("scheduler-event-piece-start", () => {
         started: false,
         reason: "no-pattern-meta",
         root: { space, id: link.id, scope: "space" },
-        rootIsEmpty: false,
         observedDocIds: [link.id],
         observedDocs: [
           { space, id: link.id, scope: "user" },
@@ -424,7 +424,7 @@ describe("scheduler-event-piece-start", () => {
       return Promise.resolve({
         started: false,
         reason: "no-pattern-meta",
-        rootIsEmpty: true,
+        root: { space, id: "of:never-written", scope: "space" },
         observedDocIds: [id],
         observedDocs: [{ space, id, scope: "space" }],
       });
@@ -513,6 +513,30 @@ describe("scheduler-event-piece-start", () => {
     expect(errors.length).toBe(1);
     expect(errors[0]).toBeInstanceOf(EventDroppedError);
     expect(errors[0].message).toContain("failed: boom");
+  });
+
+  it("drops a send whose piece cannot be started at once, reporting nothing, when server execution is on", async () => {
+    // With server execution on, a client event without a served carriage is
+    // the echo of a run the server makes and reports on for itself.
+    const storage = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = newRuntime(storage, {
+      experimental: { serverExecution: true },
+    });
+    const echoErrors: Error[] = [];
+    runtime.scheduler.onError((error) => echoErrors.push(error));
+    try {
+      setLoadPieceForEvent(runtime, () => Promise.resolve(neverStartedVerdict));
+      const waitBegins = onEachWaitBegins(runtime);
+
+      const status = send(runtime, streamLink(runtime, "echo"), "queued");
+
+      expect(await waitBegins(status)).toBe(false);
+      expect(await status).toBe("error");
+      expect(echoErrors).toEqual([]);
+    } finally {
+      await runtime.dispose({ closeStorage: false });
+      await storage.close();
+    }
   });
 
   it("settles a send whose piece start is still in flight when its runtime is disposed, without waiting out the retry window", async () => {

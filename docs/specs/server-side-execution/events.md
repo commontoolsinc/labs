@@ -730,9 +730,10 @@ loop's duty).
   test reads whether the piece has a graph installed, not what its
   start reported.
 
-  A CLIENT event — one with no served carriage, so no durable entry
-  for a later pass to re-drain — whose piece cannot be started yet
-  waits instead, holding its slot at the head of the event queue as
+  With server execution off, a CLIENT event — one with no served
+  carriage, so no durable entry for a later pass to re-drain, and no
+  server delivering it — whose piece cannot be started yet waits
+  instead, holding its slot at the head of the event queue as
   the piece load it follows does. A send can reach a piece before the
   commit that creates it does: another participant's runtime has
   written the link the send follows and not yet the piece itself. The
@@ -750,7 +751,9 @@ loop's duty).
   reaches the scheduler error channel as an `EventDroppedError` as
   well as settling the commit callback, since a send made from inside
   a handler has no callback to settle. A runtime being disposed ends
-  every such wait, settling the event as dropped.
+  every such wait, settling the event as dropped. With server
+  execution on, such an event is the echo of a run the server makes
+  and reports on itself, so it neither waits nor reports its drop.
 
   **Where the notice lives, and when it retires (T7).** The
   dropped-event notice — `{ status: "dropped", reason }` naming the

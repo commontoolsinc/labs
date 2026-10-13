@@ -479,10 +479,22 @@ export function dropQueuedEvent(
 }
 
 /**
+ * Whether this runtime is the only deliverer of a client event, as it is with
+ * server execution off. With it on, a client event without a served carriage
+ * is the echo of a run the server makes, delivers and reports on itself.
+ */
+function clientDeliversItsEvents(
+  state: Pick<SchedulerEventQueueState, "runtime">,
+): boolean {
+  return state.runtime.experimental.serverExecution !== true;
+}
+
+/**
  * Drops a client event whose stream has no handler, as `dropQueuedEvent()`
- * does, and reports the drop as an `EventDroppedError` through the scheduler
- * error channel. A send made from inside a handler carries no commit callback,
- * so without the report its drop would reach nobody but the log.
+ * does, and, where the client is the event's only deliverer, reports the
+ * drop as an `EventDroppedError` through the scheduler error channel. A send
+ * made from inside a handler carries no commit callback, so without the
+ * report its drop would reach nobody but the log.
  */
 function dropUndeliverableClientEvent(
   state: SchedulerEventQueueState,
@@ -492,6 +504,7 @@ function dropUndeliverableClientEvent(
 ): void {
   if (event.finalOutcomeNotified) return;
   dropQueuedEvent(state, event, reason);
+  if (!clientDeliversItsEvents(state)) return;
   state.handleError(
     new EventDroppedError({ streamId: event.eventLink.id, reason, attempts }),
     event.handler,
@@ -502,21 +515,31 @@ function dropUndeliverableClientEvent(
  * Whether a piece the start in `verdict`, made for `eventLink`, did not start
  * may still start once another writer's commit lands: its graph is not
  * installed, or its owning document carries no pattern pointer while being
- * either empty or reached through a `result` backlink, so that it is another
- * document than the one the start began from. A document holding a value of
+ * either reached through a `result` backlink, so that it is another document
+ * than the one the start began from, or empty. A document holding a value of
  * its own and no pointer is not a piece, and no commit will make it one.
  */
 function pieceMayStillStart(
+  state: Pick<SchedulerEventQueueState, "runtime">,
   verdict: EnsurePieceVerdict,
   eventLink: NormalizedFullLink,
 ): boolean {
   if (verdict.started) return true;
   if (verdict.reason !== "no-pattern-meta") return false;
-  if (verdict.rootIsEmpty === true) return true;
   const root = verdict.root;
-  return root !== undefined &&
-    (root.id !== eventLink.id || root.space !== eventLink.space ||
-      (root.scope ?? "space") !== (eventLink.scope ?? "space"));
+  if (root === undefined) return false;
+  if (
+    root.id !== eventLink.id || root.space !== eventLink.space ||
+    (root.scope ?? "space") !== (eventLink.scope ?? "space")
+  ) {
+    return true;
+  }
+  // The start synced this document, so the replica holds what the store
+  // does; reading it there costs no load.
+  return state.runtime.storageManager.open(root.space).replica.getDocument(
+    root.id,
+    root.scope,
+  )?.value === undefined;
 }
 
 /** The identity of an observed document: its space, scope and ID. */
@@ -962,8 +985,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     }
     state.queueExecution();
 
-    // A client event (no served carriage) whose piece cannot be started yet
-    // has no durable entry for a later pass to re-deliver, so the head waits
+    // With server execution off, a client event (no served carriage) whose
+    // piece cannot be started yet has no durable entry for a later pass to
+    // re-deliver, and no server delivering it either, so the head waits
     // for something that could change the answer — a commit touching a
     // document the start read, or a handler registering for the stream —
     // and asks again. The wait holds the queue's head, so it is bounded:
@@ -1060,7 +1084,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }
           if (
             windowSpent || attempts > EVENT_DEFERRAL_DROP_THRESHOLD ||
-            !pieceMayStillStart(verdict, args.eventLink)
+            !clientDeliversItsEvents(state) ||
+            !pieceMayStillStart(state, verdict, args.eventLink)
           ) {
             dropUndeliverableClientEvent(state, queuedEvent, reason, attempts);
             return;
@@ -1134,7 +1159,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const reason = `Event dropped: no handler registered for ` +
       `${args.eventLink.id} after starting its piece`;
     notifyEventDropped(state, args, reason);
-    if (args.served === undefined) {
+    if (args.served === undefined && clientDeliversItsEvents(state)) {
       state.handleError(
         new EventDroppedError({
           streamId: args.eventLink.id,

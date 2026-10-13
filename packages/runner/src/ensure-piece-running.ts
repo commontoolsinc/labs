@@ -121,11 +121,6 @@ export type EnsurePieceVerdict = {
    * `pattern-unloadable`. */
   root?: OwningRootAddress;
 
-  /** On a `no-pattern-meta` verdict, whether the owning doc held no value
-   * when the traversal read it, as a piece's result doc does before its
-   * creation commit lands. */
-  rootIsEmpty?: boolean;
-
   /** Every doc id the traversal read (the demanded root plus chain
    * links): the demand cycle's commit-triggered re-arm watches these. */
   observedDocIds: string[];
@@ -222,7 +217,6 @@ export async function ensurePieceRunningVerdict(
           started: false,
           reason: "no-pattern-meta",
           root,
-          rootIsEmpty: resultCell.getRaw() === undefined,
           observedDocIds,
           observedDocs,
         };
