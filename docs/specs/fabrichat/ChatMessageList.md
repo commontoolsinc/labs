@@ -163,4 +163,8 @@ and shared.
 A native client reaches a room's message list through the room's `messages`
 link, reads its `windows`, and sends to `openWindow` and `closeWindow` through
 it, as it reaches the room itself (see
-[`clients.md`](clients.md#showing-a-room)).
+[`clients.md`](clients.md#showing-a-room)). The room offers the same two
+streams at its own top level as well (see
+[`ChatRoomOutput`](ChatRoomOutput.md#facts)), for a client that sends only to
+a view's top-level streams; a window opened through either is the same window,
+in the same `windows`.
