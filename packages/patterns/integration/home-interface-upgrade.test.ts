@@ -9,7 +9,10 @@ import { fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
-import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricDurationNsec,
+  FabricEpochNsec,
+} from "@commonfabric/data-model/fabric-primitives";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
@@ -75,7 +78,20 @@ describe("Home interface upgrade", () => {
       const social = await runtime.createSpace({});
       const roomTx = runtime.edit();
       const room = runtime.getCell(social, "direct room", undefined, roomTx);
-      room.set({ about: { kind: "direct" }, participants: [] });
+      // The seed fits the manager's schema, so a candidate that changes the
+      // manager is judged on retention rather than refused at swap setup.
+      const policy = runtime.getCell(social, "room policy", undefined, roomTx);
+      policy.set({
+        ownersMayObliterate: false,
+        keepsHistory: true,
+        deletionIsObliteration: false,
+        proposedTimeMaxAgeNsec: new FabricDurationNsec(1000n),
+        proposedTimeMaxLeadNsec: new FabricDurationNsec(1000n),
+        recentActivityWindowNsec: new FabricDurationNsec(1000n),
+        maxWindowCount: 10,
+        maxOpenWindows: 2,
+      });
+      room.set({ about: { kind: "direct", policy }, participants: [] });
       runtime.prepareTxForCommit(roomTx);
       expect((await roomTx.commit().settled).error).toBeUndefined();
       const seedTx = runtime.edit();
@@ -89,7 +105,13 @@ describe("Home interface upgrade", () => {
           since: new FabricEpochNsec(1000n),
         },
       };
-      const requests = { refused: { status: "refused", code: "shared-inbox" } };
+      const requests = {
+        refused: {
+          status: "refused",
+          reason: "Two profiles share an inbox.",
+          code: "shared-inbox",
+        },
+      };
       const notices = [{ id: "queued notice", room, recipient: counterpart }];
       const manager = home.key("chatManager");
       // `requests` is a direct argument binding, while the public notice list

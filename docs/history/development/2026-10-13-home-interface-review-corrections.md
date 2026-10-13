@@ -31,11 +31,18 @@ private UI computation or member admission in a manager-created room.
 
 ## State retention
 
-Restoring `manager.tsx` alone was insufficient. An in-place Home update that
-also changed the manager's `room.tsx` dependency emptied seeded `requests`,
-`direct`, and `outgoingNotices`. The direct records lost their counterpart and
-room links. The remaining FabriChat role change was therefore removed as well;
-the draft's production FabriChat files now match main at `676e4cae1b`.
+An in-place Home update whose candidate also carried the role change's
+`manager.tsx` and `room.tsx` first appeared to empty seeded `requests`,
+`direct`, and `outgoingNotices`. That seed did not fit the manager's schema:
+the direct room's `about` had no `policy`, and the refused request had no
+`reason`. The manager's swap setup refused the stored arguments ("updated
+arguments do not match the candidate schema"), and the manager then read as
+empty. With a seed that fits the schema, the same candidate kept all three
+fields, as Opus measured in the
+[second review round](https://github.com/commonfabric/labs/pull/8820#discussion_r4262880854).
+The FabriChat role change stays removed from this draft; its production
+FabriChat files match main at `676e4cae1b`. A manager update whose schema
+refuses any stored record still leaves the manager reading as empty.
 
 The final measurement compiles the real Home entry from `676e4cae1b`, with the
 production manager and its dependencies, seeds the actual manager argument
@@ -67,9 +74,9 @@ The deterministic DID comparison remains valid: `isSharedSpaceCatalog` calls
 only ASCII identifiers, including ASCII percent escapes.
 
 The draft retains the Home catalog interface and Social spaces browser. A
-FabriChat role refactor remains separate work requiring a state-preserving
-update arrangement. Existing main baselines are retained; only the draft's
-superseded FabriChat and Home baselines are removed.
+FabriChat role refactor remains separate work; its update must keep stored
+manager arguments valid under the candidate schema. Existing main baselines are
+retained; only the draft's superseded FabriChat and Home baselines are removed.
 
 ## Validation
 
