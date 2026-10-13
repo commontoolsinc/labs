@@ -1735,15 +1735,13 @@ export class V2StorageTransaction implements IStorageTransaction {
         ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
         journalIndex: this.#activityClock++,
       };
-      this.#recordReadActivity(readActivity);
-      // A record carrying the sealed verifier metadata is frozen with it
-      // (`#recordReadActivity`), and that metadata has the scheduler ignore
-      // the read and marks no attempted write, so the log never lists it and
-      // stands across it. Any other read's metadata can still change what
-      // the log says of it, so it retires the log.
-      if (readActivity.meta !== stableInternalVerifierRead) {
-        this.#invalidateReactivityLog();
-      }
+      // A sealed record is frozen with metadata that has the scheduler
+      // ignore the read and marks no attempted write, so the log never lists
+      // it and stands across it. Any other record's metadata can be replaced
+      // or changed after the read, whatever it says now, and with it what
+      // the log says of the read, so such a read retires the log.
+      const sealed = this.#recordReadActivity(readActivity);
+      if (!sealed) this.#invalidateReactivityLog();
     }
     if (options?.trackReadWithoutLoad === true) {
       if (!hasDataUriScheme(address.id) && !skipCommitPrecondition) {
@@ -3194,14 +3192,20 @@ export class V2StorageTransaction implements IStorageTransaction {
     };
   }
 
-  /** Records every read and retains mutable classifications for later checks. */
-  #recordReadActivity(read: IReadActivity): void {
-    if (read.meta === stableInternalVerifierRead) {
+  /**
+   * Records every read and retains mutable classifications for later checks.
+   * Returns whether the record is sealed: one carrying the sealed verifier
+   * metadata is frozen with it, so its classification is permanent.
+   */
+  #recordReadActivity(read: IReadActivity): boolean {
+    const sealed = read.meta === stableInternalVerifierRead;
+    if (sealed) {
       Object.freeze(read);
     } else {
       this.#potentiallyExternalReadActivities.push(read);
     }
     this.#readActivities.push(read);
+    return sealed;
   }
 
   #prepareWriteSpace(

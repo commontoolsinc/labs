@@ -254,8 +254,9 @@ where the pre-sync was no longer the whole cost.
 - [x] A boundary pass holds one view of the transaction's reads, the
       stored envelope behind each and the labeled set a protected entry
       quantifies over, built once and reused across the pass's targets
-      while the records it was copied from keep their classification and
-      the resolved envelopes stand; the reactivity log stands across a read
+      while the transaction's input records, and the metadata object each
+      carries, are the ones it was copied from and the resolved envelopes
+      stand; the reactivity log stands across a read
       under the sealed verifier metadata, which it never lists; and a
       deep-frozen document's schema entries are kept by the
       document, unless the walk lacked a schema document a reference
