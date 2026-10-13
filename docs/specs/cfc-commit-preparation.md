@@ -127,9 +127,18 @@ computes it when something first reads it: the string `prepareCfc()` returns,
 two snapshots to compare. A transaction prepared through `prepareForCommit()`
 and committed with the activity it prepared over reads none, so it
 canonicalizes and hashes nothing. An invalidated preparation keeps the
-snapshot it had, and its `digest` is computed the same way. A snapshot the
-hash refuses, such as one holding a read whose `meta` carries a value hashing
-does not accept, raises where its digest is first read.
+snapshot it had, and its `digest` is computed the same way.
+
+The hash is not defined for every value: it refuses one that is not a fabric
+value, a `Date` or a function among them. What a snapshot record takes over
+from the journal, a read's `meta` first of all, is hashed where the snapshot
+is taken, once per object, so a `meta` the hash refuses throws at the end of
+the preparation and the transaction does not commit, whether or not anything
+reads its digest. The records the snapshot builds itself hold strings,
+numbers and frozen paths. The decision inputs recorded through the
+transaction's `record…` methods are typed as fabric values and deep-frozen as
+they are recorded, and are not hashed again at the preparation; one that the
+hash refuses all the same throws where the snapshot's digest is first read.
 
 **The recheck.** Every journaled read, every write, and every change to a
 recorded decision input advances the transaction's activity epoch, and a

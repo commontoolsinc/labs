@@ -2,6 +2,7 @@ import {
   deepFreeze,
   type FabricPlainObject,
   type FabricValue,
+  hashOf,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
   taggedHashStringOf,
@@ -372,14 +373,20 @@ type ActivitySnapshot = {
 };
 
 /**
- * Helper for `#buildPreparedDigestInput()`, which deep-freezes each member a
- * snapshot record takes over from a journal record: a read's `meta`, and
- * anything else object-valued the journal's record holds. A primitive, and a
- * value `deepFreeze()` has frozen before, cost one check each.
+ * Helper for `#buildPreparedDigestInput()`, which deep-freezes and hashes each
+ * member a snapshot record takes over from a journal record, other than a
+ * string, a number or a boolean: a read's `meta`, and anything else the
+ * journal's record holds. Hashing is what admits the member to a snapshot
+ * whose digest may never be computed: a value the hash refuses throws here,
+ * where the snapshot is taken. The hash is kept by the frozen object, so a
+ * `meta` many reads share costs one lookup per read.
  */
-function freezeJournalMembers(members: object): void {
+function sealJournalMembers(members: object): void {
   for (const key in members) {
-    deepFreeze((members as Record<string, unknown>)[key]);
+    const member = (members as Record<string, unknown>)[key];
+    const kind = typeof member;
+    if (kind === "string" || kind === "number" || kind === "boolean") continue;
+    hashOf(deepFreeze(member) as FabricValue);
   }
 }
 
@@ -2611,8 +2618,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // later is the digest of the activity as it stood here. A record holds
     // a path the canonical path functions froze, members built here from
     // primitives, and the members it takes over from the journal's record,
-    // which `freezeJournalMembers()` deep-freezes, so `Object.freeze()` on
-    // the record covers the rest. The records stay out of the deep-frozen
+    // which `sealJournalMembers()` deep-freezes and hashes, so
+    // `Object.freeze()` on the record covers the rest and the record is one
+    // the digest's hash accepts. The records stay out of the deep-frozen
     // cache, which nothing asks of them: entering one costs more than
     // building it, and `isDeepFrozen()` walks a record the cache lacks to the
     // same answer.
@@ -2652,7 +2660,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // explicit undefined would hash differently from absence), and the
       // record's one path.
       const { journalIndex: _raw, path, ...bare } = read;
-      freezeJournalMembers(bare);
+      sealJournalMembers(bare);
       consumedReads.push(Object.freeze({
         ...bare,
         scope: normalizeCellScope(read.scope),
@@ -2664,7 +2672,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const log = this.getReactivityLog();
     const attemptedWrites: CfcRecordAddress[] = (log.attemptedWrites ?? [])
       .map(({ path, ...address }) => {
-        freezeJournalMembers(address);
+        sealJournalMembers(address);
         return Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
@@ -2677,7 +2685,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     for (const space of getTransactionWrittenSpaces(this)) {
       for (const write of this.getWriteDetails(space)) {
         const { path, ...address } = write.address;
-        freezeJournalMembers(address);
+        sealJournalMembers(address);
         writes.push(Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),

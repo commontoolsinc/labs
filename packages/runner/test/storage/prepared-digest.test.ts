@@ -309,6 +309,19 @@ describe("prepared digest transaction binding", () => {
       }
     });
 
+    it("throws from the preparation for a read whose meta cannot be hashed", async () => {
+      // No digest is read here, so nothing but the snapshot itself stands
+      // between a value hashing refuses and a commit that never compares one.
+      const { tx, outcomes } = relevantTx();
+      tx.readValueOrThrow(address("input"), {
+        meta: { at: new Date(0) } as never,
+      });
+      expect(() => tx.prepareForCommit()).toThrow("Cannot hash value");
+      expect(tx.getCfcState().prepare.status).not.toBe("prepared");
+      expect(outcomes).toEqual([]);
+      await expect(tx.commit().settled).rejects.toThrow("Cannot hash value");
+    });
+
     it("holds the sealed snapshot immutable", () => {
       // The digest is hashed from the snapshot after the preparation, so
       // nothing reachable from it may change in between: neither a record
