@@ -184,11 +184,13 @@ agent-browser --session cf-shared snapshot -i
 # Click Login, then Import CLI Key.
 agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
 agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared wait --fn "globalThis.app.state().identity"
 agent-browser --session cf-shared eval "globalThis.app.state().identity?.did()"
 ```
 
-The last command prints the DID the page is signed in as, and `null` while the
-login screen is showing. That DID must match:
+The import is asynchronous: `wait --fn` returns once the page is signed in, and
+`eval` then prints that identity's DID. On a page still showing the login
+screen, `eval` prints `null`. That DID must match:
 
 ```bash
 deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"

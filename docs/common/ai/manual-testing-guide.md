@@ -99,6 +99,7 @@ agent-browser --session cf-shared snapshot -i
 # Click Login, then Import CLI Key.
 agent-browser --session cf-shared upload @<choose-file-ref> "$CF_IDENTITY"
 agent-browser --session cf-shared click @<import-key-ref>
+agent-browser --session cf-shared wait --fn "globalThis.app.state().identity"
 agent-browser --session cf-shared eval "globalThis.app.state().identity?.did()"
 ```
 

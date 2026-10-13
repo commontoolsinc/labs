@@ -231,7 +231,7 @@ signs the browser in as the CLI identity
 `CF_IDENTITY` naming the key that created the space, grant the browser's
 identity access and reload the page:
 ```bash
-CF_SPACE=<space DID> deno task cf acl set <browser DID> WRITE
+CF_SPACE="<space DID>" deno task cf acl set "<browser DID>" WRITE
 ```
 The browser's DID is the principal the error names;
 `globalThis.app.state().identity?.did()` in the page's console returns it too.
