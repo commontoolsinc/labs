@@ -100,9 +100,12 @@ result cell and that partial cause:
 createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
 ```
 
-(`packages/runner/src/link-utils.ts`, `getDerivedInternalCellLink`). The
-result is a `FabricHash`: hash bytes plus an algorithm tag, stringified as
-`<tag>:<base64urlHash>`, e.g. `fid1:abc…`
+(`packages/runner/src/derived-internal-cell-ids.ts`,
+`DerivedInternalCellIds.idFor()`, which `getDerivedInternalCellLink` in
+`packages/runner/src/link-utils.ts` calls; a runtime keeps the ids it has
+hashed, by result cell and partial cause). The result is a `FabricHash`: hash
+bytes plus an algorithm tag, stringified as `<tag>:<base64urlHash>`, e.g.
+`fid1:abc…`
 (`packages/data-model/src/fabric-primitives/FabricHash.ts`). The hash is
 opaque: nothing about the preimage — including `type: "internal"` or the
 partial cause — is recoverable from the id. `hashOf` mints the `fid1` tag at
