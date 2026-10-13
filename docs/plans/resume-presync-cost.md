@@ -224,12 +224,9 @@ where the pre-sync was no longer the whole cost.
       the document they read, so a writer's ordering edges cost the readers
       of what it writes rather than the whole set
       (`packages/runner/src/scheduler/topology.ts`).
-- [x] The sort's cycle break chooses from a heap it keeps current under the
-      break's preference, in place of a filter and a sort of every unvisited
-      action at every break. A load of the thirty-row room sorts a work set
-      of 3,900 actions with 1,991 breaks in one settle, and that pass had
-      cost 4 to 5 s, nearly all of it the comparator
-      (`packages/runner/src/scheduler/topology.ts`).
+- [x] The sort's cycle break chooses from a heap of candidates kept under
+      the break's preference, so a break does not rank the unplaced actions
+      again (`packages/runner/src/scheduler/topology.ts`).
 - [ ] The room's one cycle is a component of 180 computations: each message
       row's `placement`, `inOpenThread` and `cannotWrite` passes the
       captured `messages` cell to a helper, so the transformer marks each a

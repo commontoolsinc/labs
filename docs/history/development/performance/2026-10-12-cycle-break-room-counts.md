@@ -99,8 +99,32 @@ as an opaque handle.
 
 ## The sort's own cost
 
-The sort alone, over two shapes built in a script, the two versions run
-alternately on the loaded machine, minimum of five:
+Counted first, with temporary counters in the sort, so that the machine's
+load does not enter. A queue entry is a candidate put into the break's
+heap. The two kinds of step are an edge examined while confirming that a
+cycle a break fell in is still whole, and an edge examined while searching
+for components.
+
+| shape | actions | edges | breaks | queue entries | confirming steps | searching steps |
+| --- | --- | --- | --- | --- | --- | --- |
+| ring with edges both ways | 2,000 | 4,000 | 1,999 | 5,998 | 7,992 | 4,000 |
+| | 8,000 | 16,000 | 7,999 | 23,998 | 31,992 | 16,000 |
+| | 32,000 | 64,000 | 31,999 | 95,998 | 127,992 | 64,000 |
+| fully connected cycle | 100 | 9,900 | 99 | 9,998 | 19,404 | 9,900 |
+| | 200 | 39,800 | 199 | 39,998 | 78,804 | 39,800 |
+| | 400 | 159,600 | 399 | 159,998 | 317,604 | 159,600 |
+| | 800 | 639,200 | 799 | 639,998 | 1,275,204 | 639,200 |
+| pairs feeding each other | 2,000 | 2,000 | 1,000 | 2,000 | 0 | 2,000 |
+| | 16,000 | 16,000 | 8,000 | 16,000 | 0 | 16,000 |
+
+Within each shape every count stays close to one multiple of the edge
+count at every size: one and a half, two and one for the ring, and one, two
+and one for the fully connected cycle. So over these shapes the break's
+work grows with the edges of the graph it is given.
+
+Timed, the sort alone over two of the shapes, the fully connected one with
+readers added, the two versions run alternately on the loaded machine,
+minimum of five:
 
 | shape | old order | new order |
 | --- | --- | --- |
@@ -109,9 +133,9 @@ alternately on the loaded machine, minimum of five:
 | ring of 10,000 with edges both ways | 279 and 618 ms | 55 and 355 ms |
 | ring of 40,000 with edges both ways | 1,413 and 2,290 ms | 717 and 1,659 ms |
 
-The same script on the same code varied by a factor of five between runs,
-so the table supports no ratio. It shows that neither shape grows faster
-under the new order than under the old.
+The same script on the same code varied by a factor of five between runs.
+The timings therefore support no ratio between the two orders, and no
+comparison of how their costs grow. They are recorded as observed.
 
 The change went through three versions, all placing the same actions in the
 same order. The first searched the cycle for its components again after
@@ -123,11 +147,11 @@ that stays whole. The third checks only that the neighbors of the placed
 action still reach one another, and queues again only the members whose
 key changed.
 
-The script table is of the third version. Of the new-order renders, the
-last of room A ran the third version and the others the second. Within
-room A's renders, the large settle's sort took 2.5 s under the old order,
-1.3 to 1.6 s in the three renders of the second version, and 0.9 s in the
-render of the third.
+The counts and the timings above are of the third version. Of the
+new-order renders, the last of room A ran the third version and the others
+the second. Within room A's renders, the large settle's sort took 2.5 s
+under the old order, 1.3 to 1.6 s in the three renders of the second
+version, and 0.9 s in the render of the third.
 
 ## What this leaves
 
