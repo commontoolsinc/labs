@@ -275,7 +275,7 @@ describe("overlayContractCapabilities()", () => {
     const diagnostics: TransformationDiagnostic[] = [];
     const files = await transformFiles({
       "/main.tsx": `/// <cts-enable />
-import { handler, pattern, Writable } from "commonfabric";
+import { handler, pattern, Writable, WriteAuthorizedBy } from "commonfabric";
 ${declaration}
 const h = handler<${event}, { c: Writable<number> }>(${callback});
 export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
@@ -1021,6 +1021,50 @@ type Holder = { c: Writable<number>; t: [Writable<number>, string] };`,
       expect(capabilitiesOf(event)).toEqual([["cell"]]);
     });
 
+    for (
+      const [shape, declaration, event] of [
+        [
+          "a tuple",
+          "type Ev = [Writable<string>, WriteAuthorizedBy<number, typeof saver>];",
+          "Ev",
+        ],
+        [
+          "a generic tuple",
+          "type Ev<T> = [Writable<T>, WriteAuthorizedBy<number, typeof saver>];",
+          "Ev<string>",
+        ],
+      ] as const
+    ) {
+      it(`keeps the writer ${shape} names by its syntax where no use reaches its cells`, async () => {
+        const { event: schema } = await eventSchema(
+          `const saver = handler<unknown, {}>(() => {});
+${declaration}`,
+          event,
+          "(e, { c }) => { c.set(1); }",
+        );
+
+        expect(schema).toEqual({
+          type: "array",
+          items: {
+            anyOf: [
+              { type: "string", asCell: ["opaque"] },
+              {
+                type: "number",
+                ifc: {
+                  writeAuthorizedBy: {
+                    __ctWriterIdentityOf: {
+                      file: "/main.tsx",
+                      path: ["saver"],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        });
+      });
+    }
+
     it("keeps a tuple as written where the body reads its parent under a key it computes", async () => {
       const { event } = await eventSchema(
         `type Ev = {
@@ -1168,6 +1212,86 @@ type Ev = { c: Writable<number>; s: S };`,
         });
       });
     }
+  });
+
+  describe("a writer policy", () => {
+    // A writer is named only by the `typeof` its syntax writes, so the overlay
+    // reads a node that names one as written, never as a print of its type.
+
+    const saver = "const saver = handler<unknown, {}>(() => {});";
+    const policy = "Writable<WriteAuthorizedBy<number, typeof saver>>";
+    const writer = {
+      __ctWriterIdentityOf: { file: "/main.tsx", path: ["saver"] },
+    };
+
+    /** Every `ifc.writeAuthorizedBy` in `schema`, in reading order. */
+    function writersOf(schema: unknown): unknown[] {
+      if (Array.isArray(schema)) return schema.flatMap(writersOf);
+      if (typeof schema !== "object" || schema === null) return [];
+      const { ifc, ...rest } = schema as Record<string, unknown>;
+      const own = (ifc as { writeAuthorizedBy?: unknown } | undefined)
+        ?.writeAuthorizedBy;
+      return [
+        ...(own === undefined ? [] : [own]),
+        ...Object.values(rest).flatMap(writersOf),
+      ];
+    }
+
+    for (
+      const [shape, event, callback, capabilities] of [
+        [
+          "a `Record` whose cells hold one, kept as written",
+          `Record<"a" | "b", ${policy}>`,
+          "(e, { c }) => { e.a.get(); c.set(1); }",
+          [["cell"], ["cell"]],
+        ],
+        [
+          "a generic declaration's argument, kept as written",
+          "Box<typeof saver>",
+          "(e, { c }) => { c.set(e.c.get()); }",
+          [["cell"]],
+        ],
+        [
+          "a scoped cell no use reaches",
+          `{ x: PerUser<${policy}>; n: number }`,
+          "(e, { c }) => { c.set(e.n); }",
+          [[{ kind: "opaque", scope: "user" }]],
+        ],
+        [
+          "the cells an index signature types where no use reaches them",
+          `{ m: { [key: string]: ${policy} }; n: number }`,
+          "(e, { c }) => { c.set(e.n); }",
+          [["opaque"]],
+        ],
+      ] as const
+    ) {
+      it(`keeps the writer of ${shape}`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          `import type { PerUser } from "commonfabric";
+${saver}
+type Box<B> = { c: Writable<number>; p: WriteAuthorizedBy<number, B> };`,
+          event,
+          callback,
+        );
+
+        expect(capabilitiesOf(schema)).toEqual(capabilities);
+        expect(writersOf(schema)).toEqual(
+          writersOf(schema).map(() => writer),
+        );
+        expect(writersOf(schema).length).toBeGreaterThan(0);
+        expect(reported).toEqual([]);
+      });
+    }
+  });
+
+  it("keeps the cells of a `Record` as written where a rest element reaches them, and makes those beside it `opaque`", async () => {
+    const { event } = await eventSchema(
+      "",
+      `{ dict: Record<"a" | "b", Writable<number>>; other: Writable<number> }`,
+      "(e, { c }) => { const { ...rest } = e.dict; c.set(rest.a.get()); }",
+    );
+
+    expect(capabilitiesOf(event)).toEqual([["cell"], ["cell"], ["opaque"]]);
   });
 
   it("reads an optional member at its type without the `undefined` its `?` adds", async () => {

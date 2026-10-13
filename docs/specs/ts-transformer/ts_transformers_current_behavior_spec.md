@@ -502,11 +502,16 @@ printed from its type where an argument replaced what the annotation names, so
 `v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
 cell is built from its parts, each printed from its own type. A tuple, and a
 type that carries a scope, are not unfolded, since only a scope wrapper names
-its scope. Such a node is kept as written where a use the body makes reaches
-it (`reachedByUse()`), so a scoped cell the body reads keeps the capability
-written for it, and is otherwise read with every cell in it `opaque`
-(`keptAsWritten()`): a cell kept at the capability its author wrote would
-confer authority no use exercises. A use reaches a node where the summary
+its scope. Nor is a node whose syntax names a value binding
+(`namesValueBinding()`), as a writer policy's `typeof` does, unless every
+property is written as its own annotation: a writer is named only by that
+syntax, and a part printed from its type would drop it. Such a node is kept as
+written where a use the body makes reaches it (`reachedByUse()`), so a scoped
+cell the body reads keeps the capability written for it, and is otherwise read
+with every cell in it `opaque` (`keptAsWritten()`): a cell kept at the
+capability its author wrote would confer authority no use exercises. That
+reading is the node as written, inside parentheses of its own that carry
+`SchemaHint.cellsOpaque`, so a writer its syntax names stays. A use reaches a node where the summary
 observes one at the node, below it, or above it on a value reached whole (a key
 the body computes, a wildcard's prefix, as a destructuring or a rest element
 records, or a value that leaves the function), and anywhere where the body

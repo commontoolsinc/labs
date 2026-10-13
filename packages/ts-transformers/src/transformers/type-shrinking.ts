@@ -3106,9 +3106,12 @@ function contractCapabilityAt(
  * property's type and printed where an argument replaced what the annotation
  * names; a union, an array, or a cell as its printed parts. A tuple, and a
  * type that carries a scope, are not unfolded, as only a scope wrapper names
- * its scope. Such a node is kept as written where a use the body makes
- * reaches inside it, and otherwise read with every cell in it opaque
- * (`keptAsWritten()`), as is a cell an index signature types where no use
+ * its scope; nor is a node whose syntax names a value binding, as a writer's
+ * `typeof` does, unless each property is written as its own annotation, as
+ * only that syntax names the writer. Such a node is kept as written where a
+ * use the body makes reaches inside it, and otherwise read as written with
+ * every cell in it opaque (`keptAsWritten()`), as is a cell an index signature
+ * types where no use
  * reaches a key the literal does not declare: a cell kept at the capability
  * its author wrote would confer authority no use exercises. A printed node is overlaid on
  * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
@@ -3185,9 +3188,27 @@ export function overlayContractCapabilities(
   };
 
   /**
+   * `current`, a node standing for `type`, read as written with every cell in
+   * it opaque: a node of its own around it carries that reading, since
+   * `current` may be read elsewhere too, and its syntax, which alone names a
+   * writer a `typeof` query spells, stays; `current` itself where there is
+   * no state to record that reading in.
+   */
+  const opaqueAsWritten = (
+    current: ts.TypeNode,
+    type: ts.Type,
+  ): ts.TypeNode => {
+    if (!state) return current;
+    const reading = factory.createParenthesizedType(current);
+    typeRegistry?.set(reading, type);
+    state.recordSchemaHint(reading, { cellsOpaque: true });
+    return reading;
+  };
+
+  /**
    * `current`, a node standing for `type` that the overlay keeps as written
    * because it cannot read inside it, as the overlay serves it: read with
-   * every cell in it opaque (`opaqueRemainder()`) where it holds a cell-like
+   * every cell in it opaque (`opaqueAsWritten()`) where it holds a cell-like
    * position and no use the body makes reaches it (`reachedByUse()`), since
    * opaque is the capability each such cell would earn; `current`, as
    * written, otherwise.
@@ -3199,7 +3220,7 @@ export function overlayContractCapabilities(
   ): ts.TypeNode =>
     type && !reachedByUse(path) &&
       typeSubtreeContainsCellLike(type, checker, new Set(), [], budget)
-      ? opaqueRemainder(current, type)
+      ? opaqueAsWritten(current, type)
       : current;
 
   const walk = (
@@ -3303,7 +3324,7 @@ export function overlayContractCapabilities(
           ) {
             return member;
           }
-          const opaque = opaqueRemainder(member.type, valueType);
+          const opaque = opaqueAsWritten(member.type, valueType);
           if (opaque === member.type) return member;
           changed = true;
           return factory.updateIndexSignature(
@@ -3396,6 +3417,9 @@ export function overlayContractCapabilities(
       const resolvedType = currentType ??
         getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
       if (!resolvedType) return current;
+      // A reference whose syntax names a value binding unfolds only as far
+      // as its members' own annotations write it, as below.
+      const writtenOnly = namesValueBinding(current, checker);
       return expand(
         current,
         resolvedType,
@@ -3408,14 +3432,19 @@ export function overlayContractCapabilities(
             factory,
             typeRegistry,
             state,
+            writtenOnly,
           ),
       );
     }
 
     // A node of a kind the walk does not read inside, as a mapped type, a
-    // conditional, or a tuple, is read by the type it denotes.
+    // conditional, or a tuple, is read by the type it denotes. Where its
+    // syntax names a value binding, as a writer's `typeof` does, it unfolds
+    // only as far as its members' own annotations write it: a part printed
+    // from its type would drop the binding.
     const denoted = currentType ??
       getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
+    const writtenOnly = namesValueBinding(current, checker);
     return expand(
       current,
       denoted,
@@ -3428,6 +3457,7 @@ export function overlayContractCapabilities(
           factory,
           typeRegistry,
           state,
+          writtenOnly,
         ),
     );
   };
@@ -4186,7 +4216,8 @@ function unfoldPrint(
  * declaration's type parameters, which `type` may have replaced with
  * arguments, as `Box<string>` replaces `T` in `v: T`; such a property is
  * printed from its type. Returns `undefined` for a tuple, for a type that
- * carries a scope, and for a type that says something only as a whole.
+ * carries a scope, and for a type that says something only as a whole; and,
+ * where `writtenOnly` is set, for one any part of which would be printed.
  */
 function unfoldDenotedType(
   type: ts.Type,
@@ -4195,6 +4226,7 @@ function unfoldDenotedType(
   factory: ts.NodeFactory,
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
+  writtenOnly = false,
 ): ts.TypeNode | undefined {
   // Only a scope wrapper names its scope, so a node built from what it wraps
   // would drop it.
@@ -4219,6 +4251,7 @@ function unfoldDenotedType(
     typeRegistry,
     state,
     true,
+    writtenOnly,
   );
 }
 
@@ -4233,7 +4266,9 @@ type UnfoldedShape = "object" | "union" | "array" | "readonly array" | "cell";
  * object's property is written instead as its declaration's annotation where
  * that denotes the property's type (`readMemberAnnotation()`). Returns
  * `undefined` where `type` says something only as a whole: a union with a
- * `Default` brand, or an object with a property keyed by a symbol.
+ * `Default` brand, or an object with a property keyed by a symbol; and, where
+ * `writtenOnly` is set, where any part would be printed rather than written
+ * as its annotation.
  */
 function unfoldTypeAs(
   shape: UnfoldedShape,
@@ -4244,7 +4279,9 @@ function unfoldTypeAs(
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
   annotated = false,
+  writtenOnly = false,
 ): ts.TypeNode | undefined {
+  if (writtenOnly && shape !== "object") return undefined;
   const print = (printable: ts.Type) =>
     typeToTypeNodeWithRegistry(
       printable,
@@ -4260,6 +4297,7 @@ function unfoldTypeAs(
         factory,
         print,
         annotated,
+        writtenOnly,
       );
     case "union": {
       if (!type.isUnion()) return undefined;
@@ -4311,7 +4349,8 @@ function unfoldTypeAs(
  * its declaration's annotation where that denotes the property's type
  * (`readMemberAnnotation()`). Methods are left out, as schema generation reads
  * none. Returns `undefined` for a type with a property keyed by a symbol,
- * which has no name to write it under.
+ * which has no name to write it under, and, where `writtenOnly` is set, for
+ * one with a property or an index signature that would be printed.
  */
 function unfoldObjectType(
   type: ts.Type,
@@ -4320,7 +4359,11 @@ function unfoldObjectType(
   factory: ts.NodeFactory,
   print: (printable: ts.Type) => ts.TypeNode,
   annotated: boolean,
+  writtenOnly = false,
 ): ts.TypeLiteralNode | undefined {
+  if (writtenOnly && checker.getIndexInfosOfType(type).length > 0) {
+    return undefined;
+  }
   const members: ts.TypeElement[] = [];
   for (const property of checker.getPropertiesOfType(type)) {
     if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
@@ -4335,6 +4378,7 @@ function unfoldObjectType(
     const annotation = annotated
       ? readMemberAnnotation(property, propertyType, checker)
       : undefined;
+    if (writtenOnly && !annotation) return undefined;
     // An optional property is written without the `undefined` its
     // optionality adds to its type, as the printer writes it.
     const written = optional && propertyType.isUnion()
