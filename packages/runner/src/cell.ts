@@ -1841,8 +1841,9 @@ export class CellImpl<T extends FabricValue>
       // a real network it does not, and pull() resolved from held,
       // not-yet-loaded state (measured: a same-id retry's receipt readback
       // returned undefined against a remote host while identical calls
-      // passed against a local toolshed). Failures are swallowed like
-      // link-resolution's kicks: the read still resolves from the replica.
+      // passed against a local toolshed). Load failures are swallowed like
+      // link-resolution's kicks. Ordinary load failures resolve from the
+      // replica; the terminal session check below rejects terminal failures.
       this.#runtime.storageManager.trackUntilSettled(
         this.#startLoad().catch(() => {}),
       );
