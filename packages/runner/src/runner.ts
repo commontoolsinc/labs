@@ -89,6 +89,7 @@ import {
   recordNewDocumentProtectedDefaults,
   recordNewProtectedDefaults,
 } from "./cfc/default-initialization.ts";
+import { readStoredCfcMetadata } from "./cfc/metadata.ts";
 import {
   CFC_POLICY_MANIFEST_DOC_SCHEMA,
   CFC_POLICY_MANIFEST_ID_PREFIX,
@@ -100,6 +101,7 @@ import {
   recordReferencedArgumentFields,
   recordReplayedArgumentSlots,
 } from "./cfc/reference-initialization.ts";
+import { cfcSchemaEntries } from "./cfc/schema-label-view.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { spaceReaderRole } from "./cfc/space-membership.ts";
 import { isTrustedGesture } from "./cfc/ui-contract.ts";
@@ -803,6 +805,98 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     "output",
   );
 };
+
+/** Whether `schema` says who may write a value it describes, at any depth. */
+const declaresWriter = (schema: JSONSchema | undefined): boolean =>
+  schema !== undefined &&
+  cfcSchemaEntries(schema).some(({ schema: entry }) =>
+    isObjectOrArray(entry) && isObjectOrArray(entry.ifc) &&
+    (entry.ifc.writeAuthorizedBy !== undefined ||
+      entry.ifc.writePolicyAnyOf !== undefined ||
+      entry.ifc.uiContract !== undefined)
+  );
+
+/**
+ * Whether `value`, a node's bindings, holds an alias to the whole of this
+ * pattern's derived internal cell `partialCause`. An alias to a position inside
+ * the cell does not count, and neither does one deferred to a nested pattern,
+ * which names that pattern's cell, not this one's.
+ */
+const bindsDerivedCell = (value: unknown, partialCause: JSONValue): boolean => {
+  if (isAliasBinding(value)) {
+    return (value.$alias.defer ?? 0) === 0 &&
+      value.$alias.path.length === 0 &&
+      deepEqual(value.$alias.partialCause, partialCause);
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => bindsDerivedCell(item, partialCause));
+  }
+  return isObjectNotArray(value) &&
+    Object.values(value).some((item) => bindsDerivedCell(item, partialCause));
+};
+
+/**
+ * Whether one of `pattern`'s nodes fills the derived internal cell
+ * `partialCause` names: a lift, a builtin or a sub-pattern whose output is the
+ * cell. A handler lists nothing under its `outputs`, so a cell that only
+ * handlers write is the pattern's own state. A node that fills only a
+ * position inside a cell leaves the cell the pattern's state at its other
+ * positions; the builder never emits such an output, since every node it
+ * builds writes a cell of its own.
+ */
+const nodeFillsDerivedCell = (
+  pattern: Pattern,
+  partialCause: JSONValue,
+): boolean =>
+  pattern.nodes.some((node) => bindsDerivedCell(node.outputs, partialCause));
+
+/**
+ * The value a pattern's derived internal cell is seeded with where it holds
+ * none, or `undefined` where it is seeded with nothing. A declared default is
+ * the seed. A cell with no default whose schema says who may write it
+ * (`declaresWriter()`) is seeded with `undefined` where the cell is the site
+ * that declares that policy: the seed's envelope is what stores it, so a cell
+ * created without a value is held to its writer from its first write. That is
+ * the pattern's own state, a cell no node fills. A cell a node fills (a
+ * builtin's result, a lift's output, a sub-pattern's result) holds what the
+ * node produces, and the writers its schema names belong to what it carries,
+ * so it is not seeded. A cell a node fills only part of is seeded, so the
+ * policy of its other positions is stored; a seed of `undefined` leaves that
+ * node no object to write into, and its write fails rather than the policy
+ * going unstored. Nor is a cell whose schema makes it a link (`asCell`):
+ * it holds a reference, and the policy it describes is the referenced cell's,
+ * which that cell's own seed stores.
+ */
+const derivedCellSeed = (
+  pattern: Pattern,
+  descriptor: NonNullable<Pattern["derivedInternalCells"]>[number],
+): { readonly value: FabricValue } | undefined => {
+  const schema = descriptor.schema;
+  if (!isObjectOrArray(schema)) return undefined;
+  if (schema.default !== undefined) {
+    return {
+      value: fabricFromConvertibleJsValue(schema.default as JSONValue),
+    };
+  }
+  return schema.asCell === undefined && declaresWriter(schema) &&
+      !nodeFillsDerivedCell(pattern, descriptor.partialCause)
+    ? { value: undefined }
+    : undefined;
+};
+
+/**
+ * Whether `seed`, a derived internal cell's seed (`derivedCellSeed()`), is due
+ * at `link`, a document that holds no value. A default is. An `undefined` seed
+ * is due only while the document stores no envelope: storing one is all it
+ * does, and a document that stores one keeps it, so a cell that holds no value
+ * again, as a cleared one does, is not seeded on every start.
+ */
+const seedIsDue = (
+  tx: IExtendedStorageTransaction,
+  seed: { readonly value: FabricValue },
+  link: NormalizedFullLink,
+): boolean =>
+  seed.value !== undefined || readStoredCfcMetadata(tx, link) === undefined;
 
 /**
  * The kind-free ids of a pattern's derived internal cells on `resultCell` — the
@@ -2186,6 +2280,15 @@ type PieceVariantRegistration = {
   selection: ImplementationSelection;
 };
 
+/** The in-flight follows of one registration of a piece's pattern watcher. */
+type WatcherFollows = {
+  /** Follows that have not settled. */
+  pending: Set<Promise<unknown>>;
+
+  /** Resolves when the registration is cancelled. */
+  cancelled: Promise<void>;
+};
+
 export class Runner {
   /** Scoped defaults in a caller-owned setup share its commit or abort. */
   readonly #callerOwnedSetupTransactions = new WeakSet<
@@ -2218,6 +2321,17 @@ export class Runner {
    * wall-clock polling cannot observe this work.
    */
   #pendingWatcherPatternLoads = new Set<Promise<unknown>>();
+
+  /**
+   * The entries of `#pendingWatcherPatternLoads`, by the doc key of the piece
+   * whose watcher started each, under the watcher registration that did. A
+   * caller that moved a running piece's pattern pointer waits on that piece's
+   * entries alone (see `patternPointerFollowed()`), so that another piece's
+   * slow load does not hold it. A piece with nothing in flight has no entry.
+   * A cancelled registration's entry stays until its loads settle, which
+   * takes as long as their storage reads do, and is not waited on.
+   */
+  #watcherFollowsByPiece = new Map<string, WatcherFollows>();
 
   /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
@@ -3599,32 +3713,29 @@ export class Runner {
           scopeRank(derivedScope) >
             scopeRank(resultCell.getAsNormalizedFullLink().scope))
       ) {
-        const schemaDefault = isObjectOrArray(descriptor.schema)
-          ? descriptor.schema.default as JSONValue | undefined
-          : undefined;
-        if (schemaDefault !== undefined) {
-          const currentValue = derivedCell.getRawUntyped({
-            meta: ignoreReadForScheduling,
-          });
-          if (currentValue === undefined) {
-            const seed = fabricFromConvertibleJsValue(schemaDefault);
-            derivedCell.setRawUntyped(seed);
-            // The cell is the pattern's own and absent until now, so its
-            // default is an initialization whether or not anything projects
-            // it: a result field, a sub-pattern's argument, or nothing.
-            const seeded = derivedCell.getAsNormalizedFullLink();
-            tx.recordCfcWritePolicyInput({
-              kind: "initialization",
-              mode: "seed",
-              target: {
-                space: seeded.space,
-                id: seeded.id,
-                scope: seeded.scope,
-                path: [...seeded.path],
-              },
-              value: seed,
-            }, runtimeWritePolicyAuthorization);
-          }
+        const seed = derivedCellSeed(pattern, descriptor);
+        const seeded = derivedCell.getAsNormalizedFullLink();
+        if (
+          seed !== undefined &&
+          derivedCell.getRawUntyped({ meta: ignoreReadForScheduling }) ===
+            undefined &&
+          seedIsDue(tx, seed, seeded)
+        ) {
+          derivedCell.setRawUntyped(seed.value);
+          // The cell is the pattern's own and absent until now, so its seed
+          // is an initialization whether or not anything projects it: a
+          // result field, a sub-pattern's argument, or nothing.
+          tx.recordCfcWritePolicyInput({
+            kind: "initialization",
+            mode: "seed",
+            target: {
+              space: seeded.space,
+              id: seeded.id,
+              scope: seeded.scope,
+              path: [...seeded.path],
+            },
+            value: seed.value,
+          }, runtimeWritePolicyAuthorization);
         }
       }
     }
@@ -5365,6 +5476,10 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
+      const { promise: cancelled, resolve: markCancelled } = Promise
+        .withResolvers<void>();
+      const follows: WatcherFollows = { pending: new Set(), cancelled };
+      addCancel(markCancelled);
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -5606,8 +5721,7 @@ export class Runner {
                 err,
               );
             });
-          this.#pendingWatcherPatternLoads.add(named);
-          named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
+          this.#trackWatcherPatternLoad(pieceKey, follows, named);
           return;
         }
         // Async load for a pattern change after initial start. Errors are
@@ -5795,10 +5909,7 @@ export class Runner {
               err,
             );
           });
-        this.#pendingWatcherPatternLoads.add(watcherLoad);
-        watcherLoad.finally(() =>
-          this.#pendingWatcherPatternLoads.delete(watcherLoad)
-        );
+        this.#trackWatcherPatternLoad(pieceKey, follows, watcherLoad);
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5828,10 +5939,7 @@ export class Runner {
             }
             followPointer(newRef, newKey);
           });
-          this.#pendingWatcherPatternLoads.add(followed);
-          followed.finally(() =>
-            this.#pendingWatcherPatternLoads.delete(followed)
-          );
+          this.#trackWatcherPatternLoad(pieceKey, follows, followed);
         }),
       );
     };
@@ -8867,10 +8975,8 @@ export class Runner {
         if (scopeRank(derivedLink.scope) <= scopeRank(resultLink.scope)) {
           continue;
         }
-        const schemaDefault = isObjectOrArray(descriptor.schema)
-          ? descriptor.schema.default
-          : undefined;
-        if (schemaDefault === undefined) continue;
+        const seed = derivedCellSeed(instance.pattern, descriptor);
+        if (seed === undefined) continue;
         if (!isCurrent()) return false;
         if (options.allowReadOnly && !this.#runtime.servingPosture) {
           let readOnly = readOnlySpaces.get(derivedLink.space);
@@ -8960,7 +9066,8 @@ export class Runner {
           }
           if (
             derived.getRawUntyped({ meta: ignoreReadForScheduling }) !==
-              undefined
+              undefined ||
+            !seedIsDue(tx, seed, derivedLink)
           ) return;
           // A default belongs to its owning piece, so it carries the label on
           // the piece's root. The pattern pointer and the manifest read above
@@ -8977,13 +9084,12 @@ export class Runner {
           // same ownership claim as setup through the ordinary writer-fit gate.
           recordRuntimeOwnedStore(tx, owner, derivedLink);
           setResultCell(derived, owner.asSchema(instance.pattern.resultSchema));
-          const value = fabricFromConvertibleJsValue(schemaDefault);
-          derived.setRawUntyped(value);
+          derived.setRawUntyped(seed.value);
           tx.recordCfcWritePolicyInput({
             kind: "initialization",
             mode: "seed",
             target: { ...derivedLink, path: [] },
-            value,
+            value: seed.value,
           }, runtimeWritePolicyAuthorization);
         });
         if (outcome.error) {
@@ -10235,6 +10341,31 @@ export class Runner {
   }
 
   /**
+   * Helper for the pattern watcher, which records `load` as in flight until
+   * it settles, for the watcher registration `follows` of the piece
+   * `pieceKey` names.
+   */
+  #trackWatcherPatternLoad(
+    pieceKey: string,
+    follows: WatcherFollows,
+    load: Promise<unknown>,
+  ): void {
+    this.#pendingWatcherPatternLoads.add(load);
+    follows.pending.add(load);
+    this.#watcherFollowsByPiece.set(pieceKey, follows);
+    load.finally(() => {
+      this.#pendingWatcherPatternLoads.delete(load);
+      follows.pending.delete(load);
+      if (
+        follows.pending.size === 0 &&
+        this.#watcherFollowsByPiece.get(pieceKey) === follows
+      ) {
+        this.#watcherFollowsByPiece.delete(pieceKey);
+      }
+    });
+  }
+
+  /**
    * Settle in-flight pointer roll-forward COMMITS — bounded local work,
    * awaited by dispose() before the storage sessions they write through
    * close. Deliberately excludes watcher pattern LOADS: a load can be
@@ -10244,6 +10375,48 @@ export class Runner {
   async settlePointerCommits(): Promise<void> {
     while (this.#pendingPointerCommits.size > 0) {
       await Promise.allSettled([...this.#pendingPointerCommits]);
+    }
+  }
+
+  /**
+   * Resolves once the pattern watcher of the running piece `resultCell` names
+   * has finished following every move of the piece's pattern pointer it has
+   * observed. The piece then runs the pattern its pointer names, unless a
+   * follow failed, which is logged and leaves the piece on the pattern it was
+   * running. Resolves at once when nothing is in flight, as for a piece that
+   * is not running, and resolves when the piece is stopped with a follow in
+   * flight, whose remaining work has no effect. A subpath cell stands for its
+   * root document.
+   *
+   * The watcher observes a move in a scheduler pass, so a caller that has
+   * just committed one awaits `Runtime.idle()` before calling this. Following
+   * a move reads from storage, which `idle()` does not wait for: the writer
+   * authority the incoming pattern inherits, and the documents the incoming
+   * pattern reads that this replica lacks. A pattern this runtime does not
+   * hold is also loaded, so this waits as long as that load takes.
+   *
+   * Not covered: the commit that rolls back a pointer naming a pattern that
+   * cannot be loaded, and, on a runtime that seals its writes into a serving
+   * wave, the re-instantiation. That one follows the wave's settlement, and a
+   * wave settles after the cycle that sealed into it has ended, so a caller
+   * running within that cycle could not wait for it.
+   */
+  async patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+    const key = this.#getDocKey(rootCell);
+    // A settled follow's continuation can start another, so the entry is read
+    // again after each wait. A cancelled registration's follows run on to no
+    // effect, so the wait ends with the cancellation.
+    let follows: WatcherFollows | undefined;
+    while ((follows = this.#watcherFollowsByPiece.get(key)) !== undefined) {
+      const cancelled = await Promise.race([
+        Promise.allSettled([...follows.pending]).then(() => false),
+        follows.cancelled.then(() => true),
+      ]);
+      if (cancelled) return;
     }
   }
 

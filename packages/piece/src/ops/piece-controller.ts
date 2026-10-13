@@ -3,7 +3,6 @@ import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
-  acceptsOpaqueCellOrUnresolvedLink,
   applyPieceSourceTransition,
   Cell,
   type CellPath,
@@ -29,6 +28,7 @@ import {
   isStream,
   type JSONSchema,
   KeepAsCell,
+  materializeStoredValueForValidation,
   type MemorySpace,
   mergeSchemaDefaults,
   NAME,
@@ -3448,8 +3448,17 @@ class PiecePropIo implements PieceCellIo {
             linkValue,
           );
         }
+        // The stored input as validation reads it: a stored link in a slot
+        // the schema types as a cell handle stays that handle, and what it
+        // reaches is neither judged nor read here.
+        const stored = materializeStoredValueForValidation(
+          targetCell,
+          schema,
+          tx,
+          writePath,
+        );
         const stagedRoot = replaceMaterializedValueAtPath(
-          targetCell.asSchema(undefined).withTx(tx).get(),
+          stored.value,
           writePath,
           materializedValue,
         );
@@ -3475,9 +3484,7 @@ class PiecePropIo implements PieceCellIo {
           : replaceMaterializedValueAtPath(rawRoot, writePath, value);
         const argumentLink = targetCell.getAsNormalizedFullLink();
         const inputIssue = (candidate: unknown): string | undefined => {
-          const options = {
-            acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
-          };
+          const options = { acceptOpaqueValue: stored.acceptsOpaque };
           const issue = validateSchemaValue(schema, candidate, schema, options);
           if (issue === undefined) return undefined;
           return validateSchemaValue(
@@ -3501,7 +3508,7 @@ class PiecePropIo implements PieceCellIo {
             // extension `undefined`; do not replace it with a default.
             valuePresent: true,
             mergeMaterializedLinks: true,
-            acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+            acceptOpaqueValue: stored.acceptsOpaque,
           },
         );
         let nextValue = getValueAtPath(mergedRoot, writePath);
@@ -3513,7 +3520,7 @@ class PiecePropIo implements PieceCellIo {
             {
               valuePresent: true,
               mergeMaterializedLinks: true,
-              acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+              acceptOpaqueValue: stored.acceptsOpaque,
               acceptUnionCandidate: (candidate) =>
                 inputIssue(
                   replaceMaterializedValueAtPath(
