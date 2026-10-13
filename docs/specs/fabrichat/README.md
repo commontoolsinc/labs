@@ -409,8 +409,9 @@ design, as below.
   archived, and forgetting a room archives its entry, at the revision the
   request names. A direct room's counterpart is the one `direct` holds the room
   under, or else the room's labeled creator, and `openDirect` finds only a room
-  `direct` holds. A room tells whether the viewer's chats list it from the
-  catalog itself, which the manager offers as `sharedSpaceCatalog`. Accepting a
+  `direct` holds. A room reports a successful message or reaction through
+  `joinRoom`; the manager checks its private catalog in a separate Home-space
+  event, leaving an already saved room unchanged. Accepting a
   space's own chat is refused, since the catalog lists rooms by their own
   spaces.
 - **Request ids.** A rendered control sends no `requestId`, and the room and

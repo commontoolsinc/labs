@@ -6758,13 +6758,20 @@ export class Runner {
 
   /**
    * Load one family document under the identity captured before awaiting.
-   * A cell declared a stream is loaded whole, as the storage manager loads
-   * every such cell (`StorageManager.syncCell`).
+   * A cell declared a stream is loaded whole: its document holds no value
+   * a read uses, so a selector carrying the event schema would ask the
+   * store to walk a shape that is never there, and the gate's probe of the
+   * document reads its record, which the whole document brings.
    */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
+    if (ContextualFlowControl.declaresStream(cell.schema)) {
+      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
+        Cell<T>
+      >;
+    }
     return syncCellForIdentity(cell, identity);
   }
 

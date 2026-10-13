@@ -78,7 +78,10 @@ const rowIn = (root: unknown, id: string, text: string): unknown =>
     )
     .find((row) => row !== undefined);
 
-/** How each of `texts`' rows in the list `id` is displayed, in their order. */
+/**
+ * How each of `texts`' rows in the list `id` is displayed, in their order;
+ * `missing` for a text the list holds no row for.
+ */
 const rowDisplays = (
   root: unknown,
   id: string,
@@ -141,19 +144,20 @@ export default pattern(() => {
         event: typed("Other"),
         trustedUi: sendGesture,
       },
-      // Both are in the main conversation, no thread is open, and neither
-      // roots one.
+      // Both are in the main conversation, no thread is open, so the thread's
+      // list holds no row, and neither roots one.
       {
         assertion: assert(() =>
           rowDisplays(alice[UI], MAIN, ["Root", "Other"]) === "block block" &&
-          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) === "none none" &&
+          rowDisplays(alice[UI], THREAD, ["Root", "Other"]) ===
+            "missing missing" &&
           threadLinkText(alice[UI], "Root") === "none" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
       },
 
       // A reply in the open thread stays out of the main conversation, and
-      // its root counts it.
+      // its root counts it. The thread's list holds the thread's rows alone.
       { action: action(() => clickInRow(alice[UI], "Root", "Thread")) },
       {
         action: alice.threadComposerSend,
@@ -165,7 +169,7 @@ export default pattern(() => {
           rowDisplays(alice[UI], MAIN, ALL.slice(0, 3)) ===
             "block block none" &&
           rowDisplays(alice[UI], THREAD, ALL.slice(0, 3)) ===
-            "block none block" &&
+            "block missing block" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 1 reply" &&
           threadLinkText(alice[UI], "Other") === "none"
         ),
@@ -177,16 +181,20 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) === "block none block block" &&
+          rowDisplays(alice[UI], THREAD, ALL) ===
+            "block missing block block" &&
           threadLinkText(alice[UI], "Root") === "inline-flex 2 replies"
         ),
       },
+      // The room renders with the thread open, its rows among the rest.
+      { render: alice[UI] },
 
       // The open thread is the session's: another viewer's stays closed, and
       // their main conversation shows the same rows and the same count.
       {
         assertion: assert(() =>
-          rowDisplays(bob[UI], THREAD, ALL) === "none none none none" &&
+          rowDisplays(bob[UI], THREAD, ALL) ===
+            "missing missing missing missing" &&
           rowDisplays(bob[UI], MAIN, ALL) === "block block none none" &&
           threadLinkText(bob[UI], "Root") === "inline-flex 2 replies"
         ),
@@ -197,7 +205,8 @@ export default pattern(() => {
       { action: action(() => clickInRow(alice[UI], "Other", "Thread")) },
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) === "none block none none"
+          rowDisplays(alice[UI], THREAD, ALL) ===
+            "missing block missing missing"
         ),
       },
       { action: action(() => clickButton(alice[UI], "Close")) },
@@ -205,7 +214,8 @@ export default pattern(() => {
       // the room's OWNER, which this lane's user is.
       {
         assertion: assert(() =>
-          rowDisplays(alice[UI], THREAD, ALL) === "none none none none" &&
+          rowDisplays(alice[UI], THREAD, ALL) ===
+            "missing missing missing missing" &&
           controlDisplay(alice[UI], "Root", "Edit") === "inline-flex" &&
           controlDisplay(alice[UI], "Other", "Edit") === "none" &&
           controlDisplay(alice[UI], "Other", "Remove entirely") ===
