@@ -2,15 +2,21 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
-  DEFAULT_INPUT,
+  DEFAULT_SETUP,
   DEFAULT_STATE,
-  type IframeInputData,
   type PlacedNote,
+  type RingLoopsSetup,
 } from "./contract.ts";
 import {
+  authorNameOf,
+  authorTallies,
   cellAt,
   cellKey,
+  cellOf,
   cellShape,
+  checkedColor,
+  checkedTempo,
+  checkedVolume,
   defaultColor,
   FALLBACK_TEMPO_BPM,
   handTurn,
@@ -22,19 +28,22 @@ import {
   MIN_TEMPO_BPM,
   normalizeTempo,
   NOTE_COLORS,
+  noteFor,
   notesAtStep,
   positionAt,
   retimed,
   ringBands,
   ringLayoutOf,
+  ringViews,
   secondsPerStep,
   stepsBetween,
   timeOfStep,
   toggleEdit,
   type Transport,
+  validLayoutOf,
 } from "./model.ts";
 
-const layout = ringLayoutOf(DEFAULT_INPUT);
+const layout = ringLayoutOf(DEFAULT_SETUP);
 
 const TAU = 2 * Math.PI;
 
@@ -43,12 +52,21 @@ function pointAt(radius: number, turn: number): [number, number] {
   return [radius * Math.sin(turn * TAU), -radius * Math.cos(turn * TAU)];
 }
 
+const ada = { id: "ada", name: "Ada", color: "#4dabf7" };
+
 function noteAt(ringId: string, step: number, lane: number): PlacedNote {
-  return { ringId, step, lane, authorId: "ada", color: "#4dabf7" };
+  return {
+    ringId,
+    step,
+    lane,
+    authorId: "ada",
+    color: "#4dabf7",
+    authorName: "Ada",
+  };
 }
 
-function inputWith(overrides: Partial<IframeInputData>): IframeInputData {
-  return { ...DEFAULT_INPUT, ...overrides };
+function setupWith(overrides: Partial<RingLoopsSetup>): RingLoopsSetup {
+  return { ...DEFAULT_SETUP, ...overrides };
 }
 
 describe("model", () => {
@@ -58,28 +76,38 @@ describe("model", () => {
     });
 
     it("takes one lane from each step of the scale", () => {
-      expect(layout.lanes).toBe(DEFAULT_INPUT.scale.length);
+      expect(layout.lanes).toBe(DEFAULT_SETUP.scale.length);
     });
 
-    it("throws a `RangeError` for an input with no rings", () => {
-      expect(() => ringLayoutOf(inputWith({ rings: [] }))).toThrow(RangeError);
+    it("throws a `RangeError` for a setup with no rings", () => {
+      expect(() => ringLayoutOf(setupWith({ rings: [] }))).toThrow(RangeError);
     });
 
     it("throws a `TypeError` when two rings share an id", () => {
-      const [first] = DEFAULT_INPUT.rings;
-      expect(() => ringLayoutOf(inputWith({ rings: [first, first] })))
+      const [first] = DEFAULT_SETUP.rings;
+      expect(() => ringLayoutOf(setupWith({ rings: [first, first] })))
         .toThrow(TypeError);
     });
 
     it("throws a `RangeError` for a ring with a fractional beat count", () => {
-      const [first] = DEFAULT_INPUT.rings;
+      const [first] = DEFAULT_SETUP.rings;
       expect(() =>
-        ringLayoutOf(inputWith({ rings: [{ ...first, beats: 2.5 }] }))
+        ringLayoutOf(setupWith({ rings: [{ ...first, beats: 2.5 }] }))
       ).toThrow(RangeError);
     });
 
     it("throws a `RangeError` for an empty scale", () => {
-      expect(() => ringLayoutOf(inputWith({ scale: [] }))).toThrow(RangeError);
+      expect(() => ringLayoutOf(setupWith({ scale: [] }))).toThrow(RangeError);
+    });
+  });
+
+  describe("validLayoutOf()", () => {
+    it("returns the layout of a setup `ringLayoutOf()` accepts", () => {
+      expect(validLayoutOf(DEFAULT_SETUP)).toEqual(layout);
+    });
+
+    it("returns `undefined` for a setup with no rings", () => {
+      expect(validLayoutOf(setupWith({ rings: [] }))).toBeUndefined();
     });
   });
 
@@ -198,11 +226,24 @@ describe("model", () => {
     });
   });
 
+  describe("noteFor()", () => {
+    const cell = { ringIndex: 1, step: 7, lane: 2 };
+
+    it("returns a note in the cell that carries the author's id, name, and color", () => {
+      expect(noteFor(layout, cell, ada)).toEqual(noteAt("bells", 7, 2));
+    });
+
+    it("returns a note with no `authorName` for an author with no name", () => {
+      const note = noteFor(layout, cell, { ...ada, name: "" });
+      expect(Object.hasOwn(note, "authorName")).toBe(false);
+    });
+  });
+
   describe("toggleEdit()", () => {
     const cell = { ringIndex: 1, step: 7, lane: 2 };
 
     it("places a note by the author in an empty cell", () => {
-      expect(toggleEdit(layout, {}, cell, "ada", "#4dabf7")).toEqual({
+      expect(toggleEdit(layout, {}, cell, ada)).toEqual({
         key: "bells:7:2",
         value: noteAt("bells", 7, 2),
       });
@@ -210,21 +251,119 @@ describe("model", () => {
 
     it("removes the note from an occupied cell", () => {
       const notes = { "bells:7:2": noteAt("bells", 7, 2) };
-      expect(toggleEdit(layout, notes, cell, "grace", "#ff6b6b")).toEqual({
+      const grace = { id: "grace", name: "Grace", color: "#ff6b6b" };
+      expect(toggleEdit(layout, notes, cell, grace)).toEqual({
         key: "bells:7:2",
         value: null,
       });
     });
 
     it("places a note in a cell whose note was removed", () => {
-      const edit = toggleEdit(
-        layout,
-        { "bells:7:2": null },
-        cell,
-        "ada",
-        "red",
-      );
+      const edit = toggleEdit(layout, { "bells:7:2": null }, cell, ada);
       expect(edit.value?.authorId).toBe("ada");
+    });
+  });
+
+  describe("cellOf()", () => {
+    it("returns the cell a ring id, a step, and a lane name", () => {
+      expect(cellOf(layout, { ring: "bass", step: 23, lane: 4 })).toEqual({
+        ringIndex: 2,
+        step: 23,
+        lane: 4,
+      });
+    });
+
+    it("throws a `RangeError` listing the ring ids for an unknown ring", () => {
+      expect(() => cellOf(layout, { ring: "organ", step: 0, lane: 0 }))
+        .toThrow("The rings are: drums, bells, bass, pluck.");
+    });
+
+    it("throws a `RangeError` naming the last step for a step past the ring's end", () => {
+      expect(() => cellOf(layout, { ring: "bass", step: 24, lane: 0 }))
+        .toThrow("from 0 to 23");
+    });
+
+    it("throws a `RangeError` for a fractional step", () => {
+      expect(() => cellOf(layout, { ring: "bass", step: 1.5, lane: 0 }))
+        .toThrow(RangeError);
+    });
+
+    it("throws a `RangeError` naming the last lane for a lane outside the band", () => {
+      expect(() => cellOf(layout, { ring: "bass", step: 0, lane: 5 }))
+        .toThrow("from 0 to 4");
+    });
+  });
+
+  describe("authorNameOf()", () => {
+    it("returns the name the note carries", () => {
+      expect(authorNameOf(noteAt("bass", 0, 0))).toBe("Ada");
+    });
+
+    it("returns `Someone` for a note that carries no name", () => {
+      const { authorName: _, ...unnamed } = noteAt("bass", 0, 0);
+      expect(authorNameOf(unnamed)).toBe("Someone");
+    });
+  });
+
+  describe("ringViews()", () => {
+    const live = liveNotes(layout, {
+      "drums:8:0": noteAt("drums", 8, 0),
+      "drums:4:1": noteAt("drums", 4, 1),
+      "drums:4:0": noteAt("drums", 4, 0),
+    });
+    const [drums, bells] = ringViews(layout, live);
+
+    it("returns each ring's id and loop length in steps", () => {
+      expect(ringViews(layout, live).map((ring) => [ring.id, ring.steps]))
+        .toEqual([["drums", 16], ["bells", 20], ["bass", 24], ["pluck", 32]]);
+    });
+
+    it("lists what each lane of a drum ring plays", () => {
+      expect(drums.lanes).toEqual(["kick", "snare", "hat", "clap", "tom"]);
+    });
+
+    it("lists the note each lane of a pitched ring plays", () => {
+      expect(bells.lanes).toEqual(["A4", "C5", "D5", "E5", "G5"]);
+    });
+
+    it("orders a ring's notes by step and then by lane", () => {
+      expect(drums.notes).toEqual([
+        { step: 4, lane: 0, plays: "kick", by: "Ada" },
+        { step: 4, lane: 1, plays: "snare", by: "Ada" },
+        { step: 8, lane: 0, plays: "kick", by: "Ada" },
+      ]);
+    });
+
+    it("lists no notes for a ring nothing is placed on", () => {
+      expect(bells.notes).toEqual([]);
+    });
+  });
+
+  describe("authorTallies()", () => {
+    it("returns one tally for each name, the larger count first", () => {
+      const grace = { ...noteAt("bass", 0, 0), authorName: "Grace" };
+      const live = liveNotes(layout, {
+        "bass:0:0": grace,
+        "drums:0:0": noteAt("drums", 0, 0),
+        "drums:4:0": noteAt("drums", 4, 0),
+      });
+      expect(authorTallies(live).map((tally) => [tally.name, tally.count]))
+        .toEqual([["Ada", 2], ["Grace", 1]]);
+    });
+
+    it("returns the color most of an author's notes are drawn in", () => {
+      const live = liveNotes(layout, {
+        "bass:0:0": { ...noteAt("bass", 0, 0), color: "#ff6b6b" },
+        "drums:0:0": noteAt("drums", 0, 0),
+        "drums:4:0": noteAt("drums", 4, 0),
+      });
+      expect(authorTallies(live)).toEqual([
+        { name: "Ada", color: "#4dabf7", count: 3 },
+      ]);
+    });
+
+    it("returns no tally for rings with no notes", () => {
+      expect(authorTallies([])).toEqual([]);
     });
   });
 
@@ -259,6 +398,44 @@ describe("model", () => {
 
     it("returns the fallback for a value that is not a number", () => {
       expect(normalizeTempo(NaN)).toBe(FALLBACK_TEMPO_BPM);
+    });
+  });
+
+  describe("checkedTempo()", () => {
+    it("returns a tempo at either bound unchanged", () => {
+      expect(checkedTempo(MIN_TEMPO_BPM)).toBe(MIN_TEMPO_BPM);
+      expect(checkedTempo(MAX_TEMPO_BPM)).toBe(MAX_TEMPO_BPM);
+    });
+
+    it("throws a `RangeError` for a tempo outside the range", () => {
+      expect(() => checkedTempo(MAX_TEMPO_BPM + 1)).toThrow(RangeError);
+      expect(() => checkedTempo(MIN_TEMPO_BPM - 1)).toThrow(RangeError);
+    });
+
+    it("throws a `RangeError` for a value that is not a number", () => {
+      expect(() => checkedTempo(NaN)).toThrow(RangeError);
+    });
+  });
+
+  describe("checkedVolume()", () => {
+    it("returns a volume at either bound unchanged", () => {
+      expect(checkedVolume(0)).toBe(0);
+      expect(checkedVolume(1)).toBe(1);
+    });
+
+    it("throws a `RangeError` for a volume outside 0 to 1", () => {
+      expect(() => checkedVolume(1.01)).toThrow(RangeError);
+      expect(() => checkedVolume(-0.01)).toThrow(RangeError);
+    });
+  });
+
+  describe("checkedColor()", () => {
+    it("returns a color the palette offers unchanged", () => {
+      expect(checkedColor(NOTE_COLORS[3])).toBe(NOTE_COLORS[3]);
+    });
+
+    it("throws a `RangeError` for any other string", () => {
+      expect(() => checkedColor("red")).toThrow(RangeError);
     });
   });
 

@@ -13,6 +13,8 @@ import {
   type PlacedNote,
 } from "./contract.ts";
 import {
+  authorNameOf,
+  authorTallies,
   type Cell,
   cellAt,
   cellKey,
@@ -146,7 +148,7 @@ panel.className = "panel";
 
 const heading = document.createElement("div");
 const title = document.createElement("h1");
-title.textContent = DEFAULT_INPUT.title;
+title.textContent = DEFAULT_INPUT.setup.title;
 const deck = document.createElement("p");
 deck.className = "deck";
 deck.textContent =
@@ -200,7 +202,10 @@ const swatchButtons = NOTE_COLORS.map((color, index) => {
   return swatch;
 });
 swatches.append(...swatchButtons);
-colorGroup.append(colorHeading, swatches);
+const viewerLine = document.createElement("p");
+viewerLine.className = "viewer";
+viewerLine.dataset.testid = "viewer-name";
+colorGroup.append(colorHeading, swatches, viewerLine);
 
 const ringGroup = document.createElement("div");
 const ringHeading = document.createElement("h2");
@@ -208,6 +213,14 @@ ringHeading.textContent = "Rings, inner to outer";
 const ringList = document.createElement("ul");
 ringList.className = "ring-list";
 ringGroup.append(ringHeading, ringList);
+
+const authorGroup = document.createElement("div");
+const authorHeading = document.createElement("h2");
+authorHeading.textContent = "Notes by";
+const authorList = document.createElement("ul");
+authorList.className = "author-list";
+authorList.dataset.testid = "note-authors";
+authorGroup.append(authorHeading, authorList);
 
 const clearButton = document.createElement("button");
 clearButton.type = "button";
@@ -233,6 +246,7 @@ panel.append(
   volumeField,
   colorGroup,
   ringGroup,
+  authorGroup,
   clearButton,
   status,
   error,
@@ -313,6 +327,11 @@ function effectiveVolume(): number {
 /** Returns the color this user's notes are placed in. */
 function effectiveColor(): string {
   return output.get()?.color ?? defaultColor(authorId);
+}
+
+/** Returns the viewer's profile name, or the empty string for none. */
+function viewerName(): string {
+  return (input.get()?.viewerName ?? "").trim();
 }
 
 /** Returns the identifiers of the rings this user has silenced. */
@@ -896,7 +915,7 @@ function rebuildRingRows(): void {
 /** Brings every control in the panel up to date with the settings in effect. */
 function renderControls(): void {
   const isReady = ready();
-  title.textContent = input.get()?.title ?? DEFAULT_INPUT.title;
+  title.textContent = input.get()?.setup.title ?? DEFAULT_INPUT.setup.title;
   canvas.dataset.ready = String(isReady);
 
   playButton.disabled = !isReady;
@@ -942,6 +961,14 @@ function renderControls(): void {
     ? "Click again to clear everyone's notes"
     : "Clear all notes";
 
+  const name = viewerName();
+  viewerLine.textContent = !isReady
+    ? ""
+    : name
+    ? `Notes you place carry the name ${name}.`
+    : "No profile name is known, so notes you place carry none.";
+  renderAuthors();
+
   if (isReady) {
     status.textContent = `${live.length} ${
       live.length === 1 ? "note" : "notes"
@@ -950,16 +977,45 @@ function renderControls(): void {
   status.dataset.ready = String(isReady);
 }
 
-/** Describes the hovered cell beneath the canvas, or shows the hint. */
+/** Lists everyone with notes on the rings, each with a color and a count. */
+function renderAuthors(): void {
+  const tallies = authorTallies(live);
+  authorGroup.hidden = tallies.length === 0;
+  authorList.replaceChildren(...tallies.map((tally) => {
+    const row = document.createElement("li");
+    row.className = "author-row";
+    const dot = document.createElement("span");
+    dot.className = "author-dot";
+    dot.style.background = tally.color;
+    const name = document.createElement("span");
+    name.className = "author-name";
+    name.textContent = tally.name;
+    const count = document.createElement("span");
+    count.className = "author-count";
+    count.textContent = String(tally.count);
+    row.append(dot, name, count);
+    return row;
+  }));
+}
+
+/**
+ * Describes the hovered cell beneath the canvas, or shows the hint. The step
+ * and the lane are the numbers a caller of the pattern's verbs names the cell
+ * by, and a placed note names whoever placed it.
+ */
 function renderReadout(): void {
   if (!layout || !hoverCell) {
     readout.textContent = HINT;
     return;
   }
-  const ring = layout.rings[hoverCell.ringIndex];
-  readout.textContent = `${ring.label} · step ${
-    hoverCell.step + 1
-  } of ${ring.steps} · ${laneLabel(layout, ring, hoverCell.lane)}`;
+  const { ringIndex, step, lane } = hoverCell;
+  const ring = layout.rings[ringIndex];
+  const placed = live.find(({ note }) =>
+    note.ringId === ring.id && note.step === step && note.lane === lane
+  );
+  readout.textContent = `${ring.label} · step ${step} · lane ${lane} · ${
+    laneLabel(layout, ring, lane)
+  }${placed ? ` · placed by ${authorNameOf(placed.note)}` : ""}`;
 }
 
 /** Records the cell under the pointer, and redraws where it changed. */
@@ -978,13 +1034,14 @@ function setHover(cell: Cell | undefined): void {
 }
 
 /**
- * Brings the notes, the audio settings, the controls, and the canvas up to
- * date.
+ * Brings the notes, the audio settings, the controls, the readout, and the
+ * canvas up to date.
  */
 function refresh(): void {
   live = ready() && layout ? liveNotes(layout, currentNotes()) : [];
   applySettings();
   renderControls();
+  renderReadout();
   requestFrame();
 }
 
@@ -995,7 +1052,7 @@ function adoptInput(): void {
   const value = input.get();
   if (hydrated && value) {
     try {
-      layout = ringLayoutOf(value);
+      layout = ringLayoutOf(value.setup);
       if (error.textContent === layoutErrorMessage) error.textContent = "";
       layoutErrorMessage = undefined;
     } catch (cause) {
@@ -1023,13 +1080,11 @@ function adoptInput(): void {
  */
 function toggleCell(cell: Cell): void {
   if (!ready() || !layout) return;
-  const edit = toggleEdit(
-    layout,
-    currentNotes(),
-    cell,
-    authorId,
-    effectiveColor(),
-  );
+  const edit = toggleEdit(layout, currentNotes(), cell, {
+    id: authorId,
+    name: viewerName(),
+    color: effectiveColor(),
+  });
   if (pendingEdits.has(edit.key)) return;
   clearError();
   pendingEdits.set(edit.key, edit.value);

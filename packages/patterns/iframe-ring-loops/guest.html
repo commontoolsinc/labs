@@ -243,6 +243,46 @@
       color: #ff8787;
     }
 
+    .viewer {
+      margin: 0.55rem 0 0;
+      color: #a3abc7;
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+
+    .author-list {
+      display: grid;
+      gap: 0.3rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .author-row {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
+      font-size: 0.88rem;
+    }
+
+    .author-dot {
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 50%;
+    }
+
+    .author-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .author-count {
+      color: #a3abc7;
+      font-variant-numeric: tabular-nums;
+    }
+
     .clear {
       align-self: flex-start;
       font-size: 0.86rem;

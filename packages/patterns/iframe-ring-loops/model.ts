@@ -1,11 +1,12 @@
 /**
- * Pure logic of the Ring Loops guest: checking the rings an input describes,
- * mapping a pointer position to a cell, the step clock the audio scheduler
- * reads, and the pitch each lane sounds at. Nothing here touches the DOM or
- * the audio graph, so all of it runs under `deno test`.
+ * Pure logic of Ring Loops, shared by the guest and by the pattern's verbs:
+ * checking the rings a setup describes, mapping a pointer position or a
+ * caller's words to a cell, the step clock the audio scheduler reads, and the
+ * pitch each lane sounds at. Nothing here touches the DOM, the audio graph, or
+ * a cell, so all of it runs under `deno test`.
  */
 
-import type { IframeInputData, PlacedNote, RingVoice } from "./contract.ts";
+import type { PlacedNote, RingSpec, RingVoice } from "./contract.ts";
 
 /** Steps a beat divides into, which makes a step a sixteenth note. */
 export const STEPS_PER_BEAT = 4;
@@ -169,21 +170,108 @@ export interface Transport {
 }
 
 /**
- * Checks `input` and returns its rings with loop lengths counted in steps.
+ * The part of a setup that decides the rings, read-only so that a frozen
+ * snapshot of a `RingLoopsSetup` is one as much as a mutable copy is.
+ */
+export interface RingSetup {
+  /** Rings from the innermost outward. */
+  readonly rings: readonly Readonly<RingSpec>[];
+
+  /** MIDI note number of the lowest lane of an untransposed ring. */
+  readonly rootMidi: number;
+
+  /** Semitones each lane sits above the root. */
+  readonly scale: readonly number[];
+}
+
+/** Who is placing a note, as the note records them. */
+export interface NoteAuthor {
+  /** Opaque identifier of the author. */
+  readonly id: string;
+
+  /** Name the author goes by, or the empty string where none is known. */
+  readonly name: string;
+
+  /** CSS color the author's notes are drawn in. */
+  readonly color: string;
+}
+
+/** A cell as a caller names it: by the ring's identifier, a step and a lane. */
+export interface NoteSpec {
+  /** Identifier of the ring, such as `drums`. */
+  readonly ring: string;
+
+  /** Step along the ring, from 0 at the top; a step is a sixteenth note. */
+  readonly step: number;
+
+  /** Lane within the ring, from 0 at its inner edge; picks what plays. */
+  readonly lane: number;
+}
+
+/** One placed note, as a ring's listing shows it. */
+export interface NoteView {
+  /** Step along the ring, from 0 at the top; a step is a sixteenth note. */
+  readonly step: number;
+
+  /** Lane within the ring, from 0 at its inner edge. */
+  readonly lane: number;
+
+  /** What the note plays: a drum sound, or a note name such as `A3`. */
+  readonly plays: string;
+
+  /** Name of whoever placed the note. */
+  readonly by: string;
+}
+
+/** One ring with everything on it, for a reader with no canvas. */
+export interface RingView {
+  /** Identifier to name the ring by when adding or removing a note. */
+  readonly id: string;
+
+  /** Name the ring is shown under. */
+  readonly label: string;
+
+  /** Instrument the ring's notes sound on. */
+  readonly voice: RingVoice;
+
+  /** Steps in one loop of the ring; valid steps run from 0 to one less. */
+  readonly steps: number;
+
+  /** What each lane plays, by lane number from 0. */
+  readonly lanes: readonly string[];
+
+  /** Notes on the ring, in the order its hand reaches them. */
+  readonly notes: readonly NoteView[];
+}
+
+/** How many notes one author has on the rings. */
+export interface AuthorTally {
+  /** Name the author's notes carry. */
+  readonly name: string;
+
+  /** Color most of the author's notes are drawn in. */
+  readonly color: string;
+
+  /** Number of the author's notes on the rings. */
+  readonly count: number;
+}
+
+/**
+ * Checks `setup` and returns its rings with loop lengths counted in steps.
  *
  * @throws {TypeError} When the rings or the scale are missing or hold a value
  *   of the wrong kind, or when two rings share an identifier.
  * @throws {RangeError} When the ring count, the lane count, or a ring's beats
  *   fall outside what the canvas can draw.
  */
-export function ringLayoutOf(input: IframeInputData): RingLayout {
-  const { rings, scale, rootMidi } = input;
+export function ringLayoutOf(setup: RingSetup): RingLayout {
+  const { rings, scale, rootMidi } = setup;
   if (!Array.isArray(rings) || !Array.isArray(scale)) {
-    throw new TypeError("The input needs a list of rings and a scale.");
+    throw new TypeError("The setup needs a list of rings and a scale.");
   }
   if (rings.length < 1 || rings.length > MAX_RINGS) {
     throw new RangeError(
-      `The input needs 1 to ${MAX_RINGS} rings and has ${rings.length}.`,
+      `The setup needs 1 to ${MAX_RINGS} rings and has ${rings.length}.`,
     );
   }
   if (scale.length < 1 || scale.length > MAX_LANES) {
@@ -231,6 +319,21 @@ export function ringLayoutOf(input: IframeInputData): RingLayout {
     scale: [...scale],
     rootMidi,
   };
+}
+
+/**
+ * Returns the layout of `setup`, or `undefined` where `ringLayoutOf()` would
+ * refuse it.
+ */
+export function validLayoutOf(setup: RingSetup): RingLayout | undefined {
+  try {
+    return ringLayoutOf(setup);
+  } catch (cause) {
+    if (cause instanceof TypeError || cause instanceof RangeError) {
+      return undefined;
+    }
+    throw cause;
+  }
 }
 
 /** Returns the band of each of `count` rings, from the innermost outward. */
@@ -318,26 +421,122 @@ export function liveNotes(
   return live;
 }
 
+/** Returns the note `author` places in `cell`. */
+export function noteFor(
+  layout: RingLayout,
+  cell: Cell,
+  author: NoteAuthor,
+): PlacedNote {
+  return {
+    ringId: layout.rings[cell.ringIndex].id,
+    step: cell.step,
+    lane: cell.lane,
+    authorId: author.id,
+    color: author.color,
+    ...(author.name !== "" && { authorName: author.name }),
+  };
+}
+
 /**
  * Returns the write that toggles `cell`: removing the note that is there, or
- * placing one by `authorId` in `color` where the cell is empty.
+ * placing one by `author` where the cell is empty.
  */
 export function toggleEdit(
   layout: RingLayout,
   notes: Readonly<Record<string, PlacedNote | null | undefined>>,
   cell: Cell,
-  authorId: string,
-  color: string,
+  author: NoteAuthor,
 ): CellEdit {
   const ringId = layout.rings[cell.ringIndex].id;
   const key = cellKey(ringId, cell.step, cell.lane);
   const occupied = liveNotes(layout, { [key]: notes[key] }).length > 0;
-  return {
-    key,
-    value: occupied
-      ? null
-      : { ringId, step: cell.step, lane: cell.lane, authorId, color },
-  };
+  return { key, value: occupied ? null : noteFor(layout, cell, author) };
+}
+
+/**
+ * Returns the cell that `spec` names.
+ *
+ * @throws {RangeError} When no ring has the identifier, or the step or the
+ *   lane is not a whole number inside the ring. The message states the valid
+ *   values.
+ */
+export function cellOf(layout: RingLayout, spec: NoteSpec): Cell {
+  const ringIndex = layout.rings.findIndex((ring) => ring.id === spec.ring);
+  if (ringIndex < 0) {
+    throw new RangeError(
+      `No ring has that id. The rings are: ${
+        layout.rings.map((ring) => ring.id).join(", ")
+      }.`,
+    );
+  }
+  const ring = layout.rings[ringIndex];
+  if (!isIndexBelow(spec.step, ring.steps)) {
+    throw new RangeError(
+      `A step on ring \`${ring.id}\` is a whole number from 0 to ${
+        ring.steps - 1
+      }.`,
+    );
+  }
+  if (!isIndexBelow(spec.lane, layout.lanes)) {
+    throw new RangeError(
+      `A lane is a whole number from 0 to ${layout.lanes - 1}.`,
+    );
+  }
+  return { ringIndex, step: spec.step, lane: spec.lane };
+}
+
+/** Returns the name to show for whoever placed `note`. */
+export function authorNameOf(note: PlacedNote): string {
+  return note.authorName?.trim() || "Someone";
+}
+
+/**
+ * Returns every ring with what its lanes play and the notes on it, each ring's
+ * notes ordered by step and then by lane.
+ */
+export function ringViews(
+  layout: RingLayout,
+  live: readonly LiveNote[],
+): RingView[] {
+  return layout.rings.map((ring, ringIndex) => ({
+    id: ring.id,
+    label: ring.label,
+    voice: ring.voice,
+    steps: ring.steps,
+    lanes: Array.from(
+      { length: layout.lanes },
+      (_, lane) => laneLabel(layout, ring, lane),
+    ),
+    notes: live.filter((entry) => entry.ringIndex === ringIndex)
+      .map(({ note }) => ({
+        step: note.step,
+        lane: note.lane,
+        plays: laneLabel(layout, ring, note.lane),
+        by: authorNameOf(note),
+      }))
+      .sort((a, b) => a.step - b.step || a.lane - b.lane),
+  }));
+}
+
+/**
+ * Returns one tally for each name the notes carry, the author with the most
+ * notes first and equal counts in name order.
+ */
+export function authorTallies(live: readonly LiveNote[]): AuthorTally[] {
+  const byName = new Map<string, Map<string, number>>();
+  for (const { note } of live) {
+    const colors = byName.get(authorNameOf(note)) ?? new Map<string, number>();
+    colors.set(note.color, (colors.get(note.color) ?? 0) + 1);
+    byName.set(authorNameOf(note), colors);
+  }
+  return [...byName].map(([name, colors]) => {
+    const ranked = [...colors].sort((a, b) => b[1] - a[1]);
+    return {
+      name,
+      color: ranked[0][0],
+      count: ranked.reduce((total, [, count]) => total + count, 0),
+    };
+  }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 /**
@@ -361,6 +560,51 @@ export function notesAtStep(
 export function normalizeTempo(tempoBpm: number): number {
   if (!Number.isFinite(tempoBpm)) return FALLBACK_TEMPO_BPM;
   return Math.min(MAX_TEMPO_BPM, Math.max(MIN_TEMPO_BPM, tempoBpm));
+}
+
+/**
+ * Returns `tempoBpm` where it is a tempo the shared control offers.
+ *
+ * @throws {RangeError} When it is not a number from `MIN_TEMPO_BPM` to
+ *   `MAX_TEMPO_BPM`.
+ */
+export function checkedTempo(tempoBpm: number): number {
+  if (
+    !Number.isFinite(tempoBpm) || tempoBpm < MIN_TEMPO_BPM ||
+    tempoBpm > MAX_TEMPO_BPM
+  ) {
+    throw new RangeError(
+      `A tempo is a number from ${MIN_TEMPO_BPM} to ${MAX_TEMPO_BPM}.`,
+    );
+  }
+  return tempoBpm;
+}
+
+/**
+ * Returns `volume` where it is a playback volume.
+ *
+ * @throws {RangeError} When it is not a number from 0 to 1.
+ */
+export function checkedVolume(volume: number): number {
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+    throw new RangeError("A volume is a number from 0 to 1.");
+  }
+  return volume;
+}
+
+/**
+ * Returns `color` where it is one of `NOTE_COLORS`.
+ *
+ * @throws {RangeError} When it is any other string. The message lists the
+ *   colors on offer.
+ */
+export function checkedColor(color: string): string {
+  if (!NOTE_COLORS.includes(color)) {
+    throw new RangeError(
+      `A note color is one of: ${NOTE_COLORS.join(", ")}.`,
+    );
+  }
+  return color;
 }
 
 /** Returns how long one step lasts at `tempoBpm`, in seconds. */
@@ -456,9 +700,7 @@ export function defaultColor(authorId: string): string {
   return NOTE_COLORS[hash % NOTE_COLORS.length];
 }
 
-/**
- * Helper for `liveNotes()`, which checks that `value` indexes `length` slots.
- */
+/** Returns whether `value` is a whole number indexing one of `length` slots. */
 function isIndexBelow(value: number, length: number): boolean {
   return Number.isInteger(value) && value >= 0 && value < length;
 }
