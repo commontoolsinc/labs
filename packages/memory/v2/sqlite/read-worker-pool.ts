@@ -54,6 +54,18 @@ export type ReadWorkerQueryOptions = {
   signal?: AbortSignal;
 };
 
+/** How a {@link ReadWorkerPool} runs its workers. */
+export type ReadWorkerPoolOptions = {
+  /** The most reads run at once, one per worker. Four unless given. */
+  maxWorkers?: number;
+
+  /**
+   * The module each worker runs, `read-worker.ts` unless given; a test passes
+   * one that fails in the way it is testing.
+   */
+  workerModule?: URL;
+};
+
 /** A read's rows, and, for a labeled read, its result columns' origins. */
 export type ReadWorkerQueryResult<Row extends SqliteNativeRow> = {
   /** The rows, keyed by output column name. */
@@ -88,6 +100,7 @@ type ReadJob = {
  */
 export class ReadWorkerPool {
   #maxWorkers: number;
+  #workerModule: URL;
   #workers = new Set<ReadWorker>();
   #queue: ReadJob[] = [];
   #nextId = 1;
@@ -95,14 +108,19 @@ export class ReadWorkerPool {
   #closing: Promise<void> | undefined;
   #symbols: Promise<void> | undefined;
 
-  /** Constructs an instance which runs at most `maxWorkers` reads at once. */
-  constructor(maxWorkers = 4) {
+  /** Constructs an instance which runs workers as `options` says. */
+  constructor(options: ReadWorkerPoolOptions = {}) {
+    const {
+      maxWorkers = 4,
+      workerModule = new URL("./read-worker.ts", import.meta.url),
+    } = options;
     if (!Number.isInteger(maxWorkers) || maxWorkers < 1) {
       throw new RangeError(
         `sqlite: a read pool needs at least one worker, not ${maxWorkers}`,
       );
     }
     this.#maxWorkers = maxWorkers;
+    this.#workerModule = workerModule;
   }
 
   /**
@@ -223,7 +241,7 @@ export class ReadWorkerPool {
         );
       }
     });
-    const worker = new ReadWorker(this.#symbols, {
+    const worker = new ReadWorker(this.#workerModule, this.#symbols, {
       onReady: () => this.#dispatch(),
       onSettled: () => this.#dispatch(),
       onStarted: (job) => {
@@ -311,13 +329,18 @@ class ReadWorker {
   #closed: PromiseWithResolvers<void> | undefined;
 
   /**
-   * Constructs an instance which starts its worker and reports to `events`,
-   * taking reads once the worker has announced itself and `symbols` settled.
+   * Constructs an instance which starts a worker running `module` and reports
+   * to `events`, taking reads once the worker has announced itself and
+   * `symbols` settled.
    */
-  constructor(symbols: Promise<void>, events: ReadWorkerEvents) {
+  constructor(
+    module: URL,
+    symbols: Promise<void>,
+    events: ReadWorkerEvents,
+  ) {
     this.#symbols = symbols;
     this.#events = events;
-    this.#worker = new Worker(new URL("./read-worker.ts", import.meta.url), {
+    this.#worker = new Worker(module, {
       type: "module",
       name: "memory-sqlite-read",
     });

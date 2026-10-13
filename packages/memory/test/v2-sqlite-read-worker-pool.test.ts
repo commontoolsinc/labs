@@ -6,8 +6,8 @@
  * A long read here is a recursive CTE counting to fifty million, which takes
  * seconds of CPU. Every claim that turns on a read still running is made while
  * that read is in progress and against work measured in milliseconds, and a
- * read that is cancelled has to fail with SQLite's own `interrupted` as its
- * cause, which only a statement stopped mid-step reports. A regression that
+ * read that is cancelled has to fail with SQLite's own interrupt as its
+ * cause, which only a statement SQLite stopped reports. A regression that
  * keeps a read from being interrupted fails these cases once the count ends,
  * rather than hanging them.
  */
@@ -31,6 +31,15 @@ function settledFlag(promise: Promise<unknown>): () => boolean {
   let settled = false;
   promise.then(() => settled = true, () => settled = true);
   return () => settled;
+}
+
+/**
+ * The message of `error`'s cause. SQLite reports an interrupt as `interrupted`
+ * from a statement it stopped while stepping and `9: interrupted` from one it
+ * stopped while preparing.
+ */
+function causeMessage(error: Error): string | undefined {
+  return error.cause instanceof Error ? error.cause.message : undefined;
 }
 
 /** The error `promise` rejects with; fails the case when it resolves. */
@@ -68,7 +77,7 @@ describe("ReadWorkerPool", () => {
   describe("constructor()", () => {
     it("throws given fewer than one worker", () => {
       pool = new ReadWorkerPool();
-      expect(() => new ReadWorkerPool(0)).toThrow(RangeError);
+      expect(() => new ReadWorkerPool({ maxWorkers: 0 })).toThrow(RangeError);
     });
   });
 
@@ -143,7 +152,7 @@ describe("ReadWorkerPool", () => {
       });
 
       it("returns another read while a long one runs", async () => {
-        pool = new ReadWorkerPool(2);
+        pool = new ReadWorkerPool({ maxWorkers: 2 });
         const cancel = new AbortController();
         const long = pool.query(path, LONG_READ, undefined, {
           labeled: false,
@@ -163,7 +172,7 @@ describe("ReadWorkerPool", () => {
       });
 
       it("rejects with an `AbortError` interrupting a running read its signal cancels", async () => {
-        pool = new ReadWorkerPool(1);
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
         // Once a read has returned, the pool's one worker is idle, so the long
         // read below goes to it at once rather than waiting in the queue.
         await pool.query(path, "SELECT 1", undefined, { labeled: false });
@@ -176,11 +185,11 @@ describe("ReadWorkerPool", () => {
         const error = await rejectionOf(long);
         expect(error.name).toBe("AbortError");
         expect(error.message).toContain("the caller left");
-        expect(error.cause).toHaveProperty("message", "interrupted");
+        expect(causeMessage(error)).toMatch(/interrupted$/);
       });
 
       it("rejects with an `AbortError` dropping a queued read its signal cancels", async () => {
-        pool = new ReadWorkerPool(1);
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
         const running = new AbortController();
         const long = pool.query(path, LONG_READ, undefined, {
           labeled: false,
@@ -195,7 +204,7 @@ describe("ReadWorkerPool", () => {
         queued.abort();
         const error = await rejectionOf(waiting);
         expect(error.name).toBe("AbortError");
-        expect(error.cause).toBeUndefined();
+        expect(causeMessage(error)).toBeUndefined();
         expect(longSettled()).toBe(false);
         running.abort();
         await rejectionOf(long);
@@ -212,8 +221,37 @@ describe("ReadWorkerPool", () => {
         expect(error.name).toBe("AbortError");
       });
 
+      it("rejects the reads waiting for a worker that cannot start", async () => {
+        // A regression that starts another worker for the waiting read keeps
+        // starting them, and this case never settles.
+
+        pool = new ReadWorkerPool({
+          workerModule: new URL(
+            "./support/no-such-read-worker.ts",
+            import.meta.url,
+          ),
+        });
+        const error = await rejectionOf(
+          pool.query(path, "SELECT 1", undefined, { labeled: false }),
+        );
+        expect(error.message).toContain("a read worker failed");
+      });
+
+      it("rejects a read whose worker dies running it", async () => {
+        pool = new ReadWorkerPool({
+          workerModule: new URL(
+            "./support/read-worker-crash.ts",
+            import.meta.url,
+          ),
+        });
+        const error = await rejectionOf(
+          pool.query(path, "SELECT 1", undefined, { labeled: false }),
+        );
+        expect(error.message).toContain("the read worker crashed");
+      });
+
       it("returns the next read on a worker whose read was interrupted", async () => {
-        pool = new ReadWorkerPool(1);
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
         await pool.query(path, "SELECT 1", undefined, { labeled: false });
         const cancel = new AbortController();
         const long = pool.query(path, LONG_READ, undefined, {
@@ -234,7 +272,7 @@ describe("ReadWorkerPool", () => {
 
     describe("close()", () => {
       it("interrupts a running read, and settles once it has", async () => {
-        pool = new ReadWorkerPool(1);
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
         await pool.query(path, "SELECT 1", undefined, { labeled: false });
         const long = pool.query(path, LONG_READ, undefined, {
           labeled: false,
@@ -244,7 +282,7 @@ describe("ReadWorkerPool", () => {
         expect(longSettled()).toBe(true);
         const error = await rejectionOf(long);
         expect(error.message).toContain("the read pool closed");
-        expect(error.cause).toHaveProperty("message", "interrupted");
+        expect(causeMessage(error)).toMatch(/interrupted$/);
       });
 
       it("rejects a read asked for after it", async () => {

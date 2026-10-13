@@ -273,8 +273,9 @@ describe("server reads an injected source off its event loop", () => {
       );
 
       let readSettled = false;
-      const reading = session.sqliteQuery({ id: handleId }, LONG_READ);
-      reading.then(() => readSettled = true, () => readSettled = true);
+      const readEnded = session.sqliteQuery({ id: handleId }, LONG_READ)
+        .then(() => "returned", () => "threw")
+        .finally(() => readSettled = true);
       await server.firstQuery.promise;
       const answer = await otherSession.sqliteQuery(
         { id: "of:never-written" },
@@ -284,7 +285,7 @@ describe("server reads an injected source off its event loop", () => {
       expect(readSettled).toBe(false);
 
       await client.close();
-      await expect(reading).rejects.toThrow();
+      expect(await readEnded).toBe("threw");
     } finally {
       await other.close();
     }
@@ -294,7 +295,8 @@ describe("server reads an injected source off its event loop", () => {
     client = await connect({ transport: loopback(server) });
     const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
     await session.registerSqliteDiskSource(handleId, diskPath);
-    const reading = session.sqliteQuery({ id: handleId }, LONG_READ);
+    const readEnded = session.sqliteQuery({ id: handleId }, LONG_READ)
+      .then(() => "returned", () => "threw");
     const { signal, response } = await server.firstQuery.promise;
 
     await client.close();
@@ -302,6 +304,6 @@ describe("server reads an injected source off its event loop", () => {
     const answered = await response;
     expect(answered.ok).toBeUndefined();
     expect(answered.error?.name).toBe("AbortError");
-    await expect(reading).rejects.toThrow();
+    expect(await readEnded).toBe("threw");
   });
 });
