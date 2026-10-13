@@ -196,8 +196,28 @@ Exit: the cross-space pass costs in proportion to the links that cross.
 - [x] Test, red first: with a zero slice, a timer due before the resume
       starts fires before the wave's last sync is issued
       (`packages/runner/test/resume-presync-plan-count.test.ts`).
+- [x] The scheduler's settle loop yields the same way between actions,
+      on every posture (`packages/runner/src/scheduler/settle.ts`): a pass
+      of thousands of actions and their commits is one microtask chain
+      otherwise, and nothing the server sends during it is read. `idle()`
+      spans the yields, and a change a yield lets in reruns its reader
+      before `idle()` resolves.
+- [x] Test, red first: with a zero slice, a timer the settle's first
+      action arms fires before its last action runs
+      (`packages/runner/test/scheduler-settle-yield.test.ts`).
 - [ ] The frame log on the field check shows no receive silence longer than
-      the longest server operation.
+      the longest server operation. On the thirty-row room's reload the
+      yield takes the settle's small actions out of the silence, about 28%
+      of the settle, and three units remain back to back: each of the two
+      list `map` runs with its commit preparation, and the topological
+      sort of the iteration after them
+      ([`../history/development/performance/2026-10-12-settle-yield-fabrichat-room.md`](../history/development/performance/2026-10-12-settle-yield-fabrichat-room.md)).
+      A yield cannot divide a unit, and scheduler commits prepare
+      synchronously (`docs/specs/cfc-commit-preparation.md`).
+- [ ] An inbound frame is decoded through an asynchronous stream, chained
+      behind the frame before it, so one macrotask turn between two long
+      units delivers nothing: the yields on either side of a `map` run
+      read no frame.
 
 Exit: a load's watch responses are read as they arrive.
 
