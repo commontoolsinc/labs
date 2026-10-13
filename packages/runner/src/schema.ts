@@ -36,11 +36,10 @@ import {
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { CfcLabelViewRebaser } from "./cfc/label-view-rebaser.ts";
 import {
+  cfcAcquisitionViewForDereferenceTraces,
   type CfcDocumentLabels,
   type CfcLabelView,
   cfcLabelViewForAddress,
-  cfcLabelViewForDereference,
-  cfcLabelViewForDereferenceTraces,
   cfcLabelViewInDocument,
   cfcLabelViewOriginSpaces,
   cloneCfcLabelView,
@@ -1027,7 +1026,7 @@ function deriveDereferenceLabelView(
   viewChild: boolean,
 ): CfcLabelView | undefined {
   const derive = () =>
-    cfcLabelViewForDereferenceTraces(
+    cfcAcquisitionViewForDereferenceTraces(
       tx,
       tx.getCfcState().dereferenceTraces.slice(traceStart),
     );
@@ -1328,15 +1327,13 @@ export function validateAndTransform(
       // it, so resolveLink's cap check never sees this hop. Apply it here too,
       // or reading THROUGH the handle escapes the cap the schema declared
       // (#5230).
+      // The handle minted here carries the restrictions of the slot it
+      // stands for, and nothing of the document behind it (CFC §8.2.3).
       cfcLabelView = mergeCfcLabelViews([
         cfcLabelView,
-        isUnknownCellSchema(effectiveSchema)
-          ? cfcLabelViewForAddress(tx, cfcAddressFromLink(link))
-          : cfcLabelViewForDereference(
-            tx,
-            cfcAddressFromLink(link),
-            cfcAddressFromLink(next),
-          ),
+        referenceRestrictionsOf(
+          cfcLabelViewForAddress(tx, cfcAddressFromLink(link)),
+        ),
       ]);
       // We leave the asCell/asStream in the schema, so that createObject
       // knows to create a cell

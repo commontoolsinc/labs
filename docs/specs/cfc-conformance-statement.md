@@ -208,11 +208,15 @@ list, resolves the source's current evidence through `linkedSourceEvidence`,
 as §8.2.6 requires, and persists none of it; in that evidence the source's
 stored integrity stands as stored, and only the link schema's integrity and
 a schema the transaction writes the source under are gated against
-runtime-minted atoms. A handle's carried view is still
-built from the labels of the read that produced it, so its root restriction
-over-approximates the acquisition restriction of §8.2.3 where that read
-reached labeled content; `docs/plans/cfc-independent-reference-labels.md`
-stages the narrowing.
+runtime-minted atoms. A handle's carried view is the reference restrictions
+of the slots its resolution left (`cfcAcquisitionViewForDereferenceTraces`
+in `cfc/label-view-state.ts`, `referenceRestrictionsOf` for the schema
+traversal's crossings), confidentiality alone, and nothing of the document
+it names, whose labels are read from that document when the handle is
+followed; the resolution reads those labels all the same, so that a
+subscription depends on them. The reading attempt's own join reaches a
+written reference through the slot stamp of the writing transaction rather
+than through the handle.
 
 **This runtime does not claim the precise reference profile.** No labs
 document claims it, and the following is not established:

@@ -318,6 +318,25 @@ Depends on stages 2 and 3.
 
 Depends on stage 1; independent of stages 2 to 4.
 
+Implemented for the resolution routes: `cfcAcquisitionViewForDereferenceTraces`
+in `cfc/label-view-state.ts` gives a handle the reference restrictions of
+every slot its resolution left, and `Cell.resolveAsCell`, the query-result
+proxy, the schema reader's value and write-redirect resolutions and its
+`asCell` hop take that in place of the dereference's full view. The schema
+traversal's `cross` already carried the slot's restrictions alone. What is
+carried is confidentiality: the slot's integrity, an endorsement of the
+selection the slot holds, is not a property a copy of the handle inherits
+(§3.7.2), so a handle recovered from a query result carries the target's
+labels, read where they are, and nothing the slot endorsed. The reading
+attempt's own join is not carried on the handle either: a link written in
+the same transaction takes it from the slot stamp the persist loop mints, and
+a handle held across transactions carries the slot restriction alone. The
+resolution still reads the labels of every document it followed into, for
+the dependency a subscription needs: a label-only write to such a document
+re-fires a sink that followed the reference. `cfc-handle-acquisition.test.ts`
+pins both directions, and `cfc-label-view.test.ts` the handles recovered
+from query results, schema materialization and array proxies.
+
 The `cfcLabelView` a handle carries into a link write is built in
 `packages/runner/src/data-updating.ts` (`cfcLabelViewForPrimitiveLink`, the
 carried view on `set`) and `packages/runner/src/schema-view.ts`
@@ -366,7 +385,7 @@ Before stage 1 and after each of stages 1, 2 and 5, on the same checkout:
 | Probe | What it measures |
 |---|---|
 | The thirty-row room's first-run commit (`commit288.json` capture, or a fresh capture through `seed-room.ts`) | Per-row label-map bytes and entry count; today 36 KB of a 40 KB row and 85 entries, 63 of them copies and 16 KB of them atoms |
-| The staged-reference diamond probe at depths 8, 10 and 12 | Prepared entry count and serialized bytes; today 24,560 entries and about 3 MB at depth 12 |
+| The staged-reference diamond probe at depths 8, 10 and 12 | Prepared entry count and serialized bytes; before stage 1, 24,560 entries and about 3 MB at depth 12. With stages 1 to 5 on 2026-10-13, run with the probe's commit calls brought to the current receipt API and its copied-leaf assertion removed: 11 entries and 1,016 bytes at depth 8, 13 and 1,210 at depth 10, 15 and 1,404 at depth 12, one declared entry per node, in both staging orders, prepared in under 20 ms |
 | `cfc-prepare-ladder.bench.ts`, `cfc-staged-reference.bench.ts`, `cfc-input-witness.bench.ts` | Preparation time; the `authoritativeCoverCalls` and `stagedReferenceDerivations` work counters should fall to the number of links written |
 | The `cfc*` pattern integration tests and the CFC demos under `packages/patterns` | Refusals that appear because a pointer read newly carries its writer's join; each one is either the contract working or a coordinator whose read should carry the wiring marker of §18.6.2 |
 

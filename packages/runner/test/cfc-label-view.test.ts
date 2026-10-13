@@ -1961,10 +1961,7 @@ describe("CFC label view helpers", () => {
               "personal-space",
               "shared-space",
             ]),
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }, {
           path: ["details"],
@@ -1991,10 +1988,7 @@ describe("CFC label view helpers", () => {
               "shared-space",
               "target-detail",
             ]),
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2004,7 +1998,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on cells recovered from query results", async () => {
+  it("carries the target's labels and not the slot's endorsement on cells recovered from query results", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view query result to cell",
     );
@@ -2080,10 +2074,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2093,7 +2084,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on schema asCell materialization", async () => {
+  it("carries the target's labels and not the slot's endorsement on schema asCell materialization", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view schema asCell",
     );
@@ -2172,10 +2163,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2270,7 +2258,7 @@ describe("CFC label view helpers", () => {
     }
   });
 
-  it("keeps accumulated link labels on default-created asCell values", async () => {
+  it("carries the target's labels and not the slot's endorsement on default-created asCell values", async () => {
     const signer = await Identity.fromPassphrase(
       "cfc label view default asCell",
     );
@@ -2355,10 +2343,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-by-alice",
-              "authored-by-bob",
-            ]),
+            integrity: ["authored-by-bob"],
           },
         }],
       });
@@ -2462,10 +2447,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-first",
-            ]),
+            integrity: ["authored-first"],
           },
         }],
       });
@@ -2474,10 +2456,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-second",
-            ]),
+            integrity: ["authored-second"],
           },
         }],
       });
@@ -2567,10 +2546,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-first",
-              "authored-shared",
-            ]),
+            integrity: ["authored-shared"],
           },
         }],
       });
@@ -2579,10 +2555,7 @@ describe("CFC label view helpers", () => {
         entries: [{
           path: [],
           label: {
-            integrity: expect.arrayContaining([
-              "selected-second",
-              "authored-shared",
-            ]),
+            integrity: ["authored-shared"],
           },
         }],
       });
