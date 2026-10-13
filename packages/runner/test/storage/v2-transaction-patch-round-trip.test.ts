@@ -99,8 +99,10 @@ describe("v2-transaction", () => {
 
   describe("a record keyed by integer-like strings", () => {
     // A key of a plain object written as a non-negative integer is a key of
-    // that object, inside the range of array indices and past it.
-    // `toStrictEqual()` tells a record from the array an index would address.
+    // that object, inside the range of array indices and past it. A write at
+    // or beneath one travels as an op at the written path, so the record's
+    // other keys stay out of the commit. `toStrictEqual()` tells a record from
+    // the array an index would address.
 
     const farPast = "1791869505000000000";
     const keys = [
@@ -110,16 +112,21 @@ describe("v2-transaction", () => {
     ];
 
     for (const { key, where } of keys) {
-      it(`commits a key ${where} added to an empty record`, async () => {
+      it(`sends an \`add\` at a key ${where} added to an empty record`, async () => {
         const writer = connect();
         await commit(writer, "added", (cell) => cell.set({}));
 
-        await commit(writer, "added", (cell) => cell.set({ [key]: 1 }));
+        const sent = await commit(
+          writer,
+          "added",
+          (cell) => cell.set({ [key]: 1 }),
+        );
 
+        expect(sent).toEqual([`add /value/${key}`]);
         expect(await storedValue("added")).toStrictEqual({ [key]: 1 });
       });
 
-      it(`commits the removal of a key ${where} from a record`, async () => {
+      it(`sends a \`remove\` at a key ${where} removed from a record`, async () => {
         const writer = connect();
         await commit(
           writer,
@@ -127,11 +134,123 @@ describe("v2-transaction", () => {
           (cell) => cell.set({ [key]: 1, kept: 2 }),
         );
 
-        await commit(writer, "removed", (cell) => cell.set({ kept: 2 }));
+        const sent = await commit(
+          writer,
+          "removed",
+          (cell) => cell.set({ kept: 2 }),
+        );
 
+        expect(sent).toEqual([`remove /value/${key}`]);
         expect(await storedValue("removed")).toStrictEqual({ kept: 2 });
       });
     }
+
+    it("sends a `replace` at the written path beneath a key inside the array index range", async () => {
+      const writer = connect();
+      await commit(writer, "beneath", (cell) =>
+        cell.set({
+          byId: { "123": { name: "a" }, "124": { name: "b" } },
+        }));
+
+      const sent = await commit(
+        writer,
+        "beneath",
+        (cell) => cell.key("byId").key("123").key("name").set("z"),
+      );
+
+      expect(sent).toEqual(["replace /value/byId/123/name"]);
+      expect(await storedValue("beneath")).toStrictEqual({
+        byId: { "123": { name: "z" }, "124": { name: "b" } },
+      });
+    });
+
+    it("sends an `add` at the written path beneath a key inside the array index range that the record lacks", async () => {
+      // The record is there, so the server finds a plain object to create the
+      // key in.
+
+      const writer = connect();
+      await commit(writer, "new-key", (cell) => cell.set({ byId: {} }));
+
+      const sent = await commit(
+        writer,
+        "new-key",
+        (cell) => cell.key("byId").key("7").key("name").set("x"),
+      );
+
+      expect(sent).toEqual(["add /value/byId/7/name"]);
+      expect(await storedValue("new-key")).toStrictEqual({
+        byId: { "7": { name: "x" } },
+      });
+    });
+
+    it("sends an `add` at a record's `length` key", async () => {
+      // `length` is the other key an array has, and on a record it is a key
+      // like any other.
+
+      const writer = connect();
+      await commit(writer, "length", (cell) => cell.set({ size: { a: 1 } }));
+
+      const sent = await commit(
+        writer,
+        "length",
+        (cell) => cell.key("size").key("length").set(3),
+      );
+
+      expect(sent).toEqual(["add /value/size/length"]);
+      expect(await storedValue("length")).toStrictEqual({
+        size: { a: 1, length: 3 },
+      });
+    });
+
+    it("sends a record whole where a key inside the array index range is written into one the document lacks", async () => {
+      // The server shapes a container it creates by the segment that follows
+      // it, and would create an array for this key. The commit holds a record
+      // there, so the record travels as one `add`.
+
+      const writer = connect();
+      await commit(writer, "created-record", (cell) => cell.set({}));
+
+      const sent = await commit(writer, "created-record", (cell) => {
+        cell.key("p").key("meta").key("title").set("t");
+        cell.key("p").key("5").set("y");
+      });
+
+      expect(sent).toEqual(["add /value/p"]);
+      expect(await storedValue("created-record")).toStrictEqual({
+        p: { meta: { title: "t" }, "5": "y" },
+      });
+    });
+
+    it("commits two sessions' writes beneath different keys inside the array index range", async () => {
+      // Both transactions are staged before either commits, so each carries
+      // reads that predate the other's write. An op at the written path
+      // leaves the other key out of the commit, and neither conflicts.
+
+      const first = connect();
+      const second = connect();
+      await commit(first, "disjoint", (cell) =>
+        cell.set({
+          byId: { "1": { name: "a" }, "2": { name: "b" } },
+        }));
+      await second.runtime.getCell<FabricValue>(space, "disjoint").sync();
+
+      await Promise.all([
+        commit(
+          first,
+          "disjoint",
+          (cell) => cell.key("byId").key("1").key("name").set("A"),
+        ),
+        commit(
+          second,
+          "disjoint",
+          (cell) => cell.key("byId").key("2").key("name").set("B"),
+        ),
+      ]);
+
+      expect(await storedValue("disjoint")).toStrictEqual({
+        byId: { "1": { name: "A" }, "2": { name: "B" } },
+      });
+    });
 
     it("commits a key far past the array index range written beneath a key the record lacks", async () => {
       const writer = connect();
