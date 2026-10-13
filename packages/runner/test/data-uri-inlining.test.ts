@@ -174,6 +174,20 @@ describe("data URI inlining", () => {
       });
     });
 
+    it("inlines a `data:` link held inside the value another one carries", () => {
+      const inner = dataUriFromValueWithResolvedLinks({ depth: "inner" });
+      const outer = dataUriFromValueWithResolvedLinks({
+        held: { "/": { [LINK_V1_TAG]: { id: inner, path: [] } } },
+        list: [{ "/": { [LINK_V1_TAG]: { id: inner, path: ["depth"] } } }],
+      });
+
+      const result = findAndInlineDataUriLinks({
+        "/": { [LINK_V1_TAG]: { id: outer, path: [] } },
+      });
+
+      expect(result).toEqual({ held: { depth: "inner" }, list: ["inner"] });
+    });
+
     it("should handle data URIs with links and paths", () => {
       const innerCell = runtime.getCell(space, "inner", undefined, tx);
       innerCell.set({ nested: { value: "inner data" } });
@@ -432,6 +446,36 @@ describe("data URI inlining", () => {
         expect(() => findAndInlineDataUriLinks(link)).toThrow(
           "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
             "inlining a `data:` URI whose content is a `FabricInstance`.",
+        );
+      });
+
+      it("returns a `FabricError` below the root of a decoded payload as the same value, unless asked to refuse one", () => {
+        // The refusal covers a value handed over and the root of a decoded
+        // payload. Below that root an instance comes back whole, with
+        // whatever it holds left as it is, for a caller whose destination
+        // stores an instance whole. A caller whose destination admits none
+        // asks for the refusal there too.
+        const failure = new FabricError({
+          type: "Error",
+          message: "boom",
+          stack: undefined,
+          cause: undefined,
+          extras: undefined,
+        });
+        const uri = dataUriFromValueWithResolvedLinks(
+          { failure } as unknown as FabricValue,
+        );
+        const link = { "/": { [LINK_V1_TAG]: { id: uri, path: [] } } };
+
+        const result = findAndInlineDataUriLinks(link);
+        expect(result.failure).toBeInstanceOf(FabricError);
+        expect(result.failure.message).toBe("boom");
+
+        expect(() =>
+          findAndInlineDataUriLinks(link, { refuseCarriedInstances: true })
+        ).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining `data:` URI links.",
         );
       });
 

@@ -64,7 +64,6 @@ import {
   entryFor,
   FABRICHAT_POLICY,
   type JoinRoomRequest,
-  listsRoomIn,
   type MessageCell,
   messageEntries,
   type MessageEntry,
@@ -263,84 +262,6 @@ export const ParticipantChip = pattern<
     ),
   };
 });
-
-/** What adding a room to a manager's list asks of it: the room. */
-export interface AcceptRoomEvent {
-  /** The room to list. */
-  room: Cell<ChatRoomLink>;
-}
-
-/** Asks the viewer's manager to list `room`. */
-const askToList = handler<unknown, {
-  room: Cell<ChatRoomLink>;
-  accept?: Stream<AcceptRoomEvent>;
-}>((_event, { room, accept }) => {
-  accept?.send({ room });
-});
-
-/** What the control adding a room to the viewer's chats needs. */
-export interface AddToChatsInput {
-  /** The room. */
-  room: Cell<ChatRoomLink>;
-
-  /**
-   * The shared-space catalog the viewer's manager lists its rooms from; absent
-   * when the viewer has no manager.
-   */
-  catalog?: SharedSpaceCatalogStorage;
-
-  /** The viewer's manager's `accept`, when `catalog` is present. */
-  accept?: Stream<AcceptRoomEvent>;
-}
-
-/** What the control adding a room to the viewer's chats provides. */
-export interface AddToChatsOutput {
-  /** The control, shown only where it can add the room. */
-  [UI]: VNode;
-
-  /** Adds the room to the viewer's chats. */
-  add: Stream<unknown>;
-}
-
-/**
- * Offers to add a room to the viewer's chats, for a viewer with a manager that
- * doesn't list it: someone who reached the room by its link, rather than by a
- * notice their client delivered.
- */
-export const AddToChats = pattern<AddToChatsInput, AddToChatsOutput>(
-  ({ room, catalog, accept }) => {
-    // TODO(danfuzz): A stop-gap. Remove this control once creating a room
-    // offers it to every member, so that every member's catalog lists it
-    // without a step of their own.
-    const add = askToList({ room, accept });
-    // Whether the viewer's manager lists the room differs by viewer, so the
-    // control is hidden by a prop rather than built as a different tree (see
-    // `FabriChatMessageRow`).
-    const addDisplay = computed((): ChatDisplay =>
-      catalog !== undefined && !listsRoomIn(catalog, spaceOf(room))
-        ? "flex"
-        : "none"
-    );
-
-    return {
-      [UI]: (
-        <cf-hstack
-          id="fabrichat-add-to-chats"
-          gap="2"
-          align="center"
-          hidden
-          style={{ display: addDisplay, padding: "1rem 1rem 0" }}
-        >
-          <cf-text variant="caption">
-            This chat isn't in your chats yet.
-          </cf-text>
-          <cf-button size="sm" onClick={add}>Add to my chats</cf-button>
-        </cf-hstack>
-      ),
-      add,
-    };
-  },
-);
 
 /**
  * What adding a member asks of a room: the person to admit, by their chat
@@ -1439,13 +1360,10 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       Record<string, AddMemberOutcome>
     >({});
     // The viewer's manager, which starts a direct chat with a participant,
-    // lists this room when asked to, and tells someone the viewer adds of it.
+    // makes this room one of the viewer's chats once they join it, and tells
+    // someone the viewer adds of it.
     const managerWish = wish<
-      RoomManager & {
-        openDirect: Stream<StartDirectEvent>;
-        accept: Stream<AcceptRoomEvent>;
-        sharedSpaceCatalog: SharedSpaceCatalogStorage;
-      }
+      RoomManager & { openDirect: Stream<StartDirectEvent> }
     >({ query: "#chatManager" });
     const startsDirect = computed(() => managerWish.result !== undefined);
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
@@ -1496,11 +1414,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addRequests: room.addRequests,
       [UI]: (
         <cf-screen>
-          <AddToChats
-            room={self}
-            catalog={managerWish.result?.sharedSpaceCatalog}
-            accept={managerWish.result?.accept}
-          />
           {room[UI]}
           <div
             id="fabrichat-profile-setup"
