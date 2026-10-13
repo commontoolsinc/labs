@@ -286,18 +286,36 @@ onSchemaRegistryClear(() => {
 });
 
 /**
+ * Helper for {@link linkSchemaDeclaresPolicy}, which reports whether one
+ * `ifc` declaration holds anything: a label atom, or a policy field of any
+ * other name. An `ifc` that is empty, or whose label lists are, declares
+ * nothing. A field besides the label counts whatever it holds, since an empty
+ * `maxConfidentiality` is still a ceiling.
+ */
+const ifcHoldsPolicy = (ifc: Readonly<Record<string, unknown>>): boolean =>
+  Object.entries(ifc).some(([field, value]) =>
+    field === "confidentiality" || field === "integrity"
+      ? Array.isArray(value) && value.length > 0
+      : value !== undefined
+  );
+
+/**
  * Whether a link's schema declares any ifc policy anywhere in it, references
  * resolved: a label at its root is the reference's own restriction, and a
  * claim or a floor anywhere in it binds the document the reference places.
  * A link schema that arrives as a bare `$ref` to a registered schema is
  * resolved the same way, which a walk over the written object alone misses.
+ * A declaration that holds nothing does not count ({@link ifcHoldsPolicy}).
  */
 const linkSchemaDeclaresPolicy = (schema: JSONSchema | undefined): boolean => {
   if (!isObjectOrArray(schema)) return false;
   let declares = linkSchemaPolicyCache.get(schema);
   if (declares === undefined) {
     const missesBefore = externalResolutionMissCount();
-    declares = cfcSchemaEntries(schema).length > 0;
+    declares = cfcSchemaEntries(schema).some((entry) =>
+      isObjectOrArray(entry.schema) && isObjectOrArray(entry.schema.ifc) &&
+      ifcHoldsPolicy(entry.schema.ifc as Readonly<Record<string, unknown>>)
+    );
     if (
       isDeepFrozen(schema) && externalResolutionMissCount() === missesBefore
     ) {

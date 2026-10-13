@@ -6,7 +6,10 @@ import {
   isCell,
 } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
-import { resolveLink } from "../link-resolution.ts";
+import {
+  resolveLink,
+  resolveLinkTracingDereferences,
+} from "../link-resolution.ts";
 import {
   readStoredCfcLabelsForReader,
   type StoredCfcLabels,
@@ -130,13 +133,18 @@ const followedLabelViewsForCell = (
   try {
     const runtime = cellRuntime(cell);
     const tx = runtime.readTx(cellTx(cell));
-    const tracesBefore = tx.getCfcState().dereferenceTraces.length;
-    // A label read starts no sync: the value read it accompanies is what
-    // asks for a document in another space.
-    const resolved = resolveLink(runtime, tx, link, "value", {
-      kickCrossSpaceTargets: false,
-    });
-    const traces = tx.getCfcState().dereferenceTraces.slice(tracesBefore);
+    // A document in another space is left for the value read this label
+    // read accompanies to ask for: that kick takes no reservation, so one
+    // made here would repeat on every label read. A document of the cell's
+    // own space that this replica never pulled is asked for, once, against
+    // its reservation, as any resolution asks for it.
+    const { link: resolved, traces } = resolveLinkTracingDereferences(
+      runtime,
+      tx,
+      link,
+      "value",
+      { kickCrossSpaceTargets: false },
+    );
     if (traces.length === 0) {
       return { views: [], readFailed: false };
     }
