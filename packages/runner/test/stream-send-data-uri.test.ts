@@ -124,6 +124,17 @@ describe("stream-send-data-uri", () => {
     expect(queued).toEqual([{ boxed: { count: 3 } }]);
   });
 
+  it("carries an inline array element held inside an immutable cell as its value", async () => {
+    const { element, targetId } = await inlineElement(runtime.edit());
+    const immutable = runtime.getImmutableCell(space, { input: element });
+
+    await send({ boxed: immutable });
+
+    const event = queued[0] as { boxed: { input: { label: string } } };
+    expect(event.boxed.input.label).toBe("one");
+    expect(linkIdsIn(event)).toEqual([targetId]);
+  });
+
   it("carries a cell stored in a space as a link to it", async () => {
     const tx = runtime.edit();
     const stored = runtime.getCell(space, "send-stored", undefined, tx);

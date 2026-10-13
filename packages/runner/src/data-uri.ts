@@ -167,14 +167,28 @@ export function dataUriFromValueWithResolvedLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
+ * The value a `data:` link carries is searched in turn, so a `data:` link
+ * held inside it is inlined as well, to any depth.
+ *
  * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
  * inline. A `FabricInstance` is refused, since passing one through would leave
- * a link inside it un-inlined.
+ * a link inside it un-inlined. The refusal covers `value` and the root of the
+ * value a `data:` link carries. A `FabricInstance` below that root comes back
+ * as the same instance, with any link inside it left as it is.
  *
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
  */
 export function findAndInlineDataUriLinks(value: any): any {
+  return inlineDataUriLinks(value, false);
+}
+
+/**
+ * Recursive worker for {@link findAndInlineDataUriLinks}. `decoded` says
+ * `value` lies inside the value a `data:` link carried, where a
+ * `FabricInstance` is returned whole in place of being refused.
+ */
+function inlineDataUriLinks(value: any, decoded: boolean): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
@@ -210,7 +224,7 @@ export function findAndInlineDataUriLinks(value: any): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return findAndInlineDataUriLinks(newSigilLink);
+          return inlineDataUriLinks(newSigilLink, decoded);
         }
         if (path.length > 0) {
           // TODO(danfuzz): a path segment naming something inside a
@@ -229,10 +243,6 @@ export function findAndInlineDataUriLinks(value: any): any {
       // over directly is refused, while the same one decoded out of a `data:`
       // URI leaves silently, and a guard with a way around it is worse than no
       // guard, since it reads as covering the case.
-      //
-      // Only the payload itself is checked, because a decoded payload is
-      // returned rather than walked -- nothing here descends one, so there is
-      // no descent for a nested instance to be caught by.
       if (dataValue instanceof FabricInstance) {
         refuseFabricInstance(
           dataValue,
@@ -240,7 +250,11 @@ export function findAndInlineDataUriLinks(value: any): any {
         );
       }
 
-      return dataValue;
+      // The payload can hold a `data:` link of its own, an immutable cell
+      // that was handed a snapshot's cell for one, so it is walked as well.
+      // The descent ends: an id embedded in a payload is shorter than the id
+      // that encodes the payload, so no id can contain itself.
+      return inlineDataUriLinks(dataValue, true);
     } else {
       return value;
     }
@@ -249,7 +263,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = findAndInlineDataUriLinks(current);
+      const inlined = inlineDataUriLinks(current, decoded);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -266,6 +280,10 @@ export function findAndInlineDataUriLinks(value: any): any {
     // than an omission.
     return value;
   } else if (value instanceof FabricInstance) {
+    // Below the root of a decoded payload an instance is returned whole, and
+    // a link inside it survives as a link.
+    if (decoded) return value;
+
     // Refused. An instance's state can carry a `data:` URI link, and inlining
     // those is what this walk is for, so passing the value through would hand
     // it back _untransformed_ -- the link surviving as a link, the walk's
@@ -289,7 +307,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataUriLinks(entry);
+      const inlined = inlineDataUriLinks(entry, decoded);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {
