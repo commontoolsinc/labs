@@ -1,8 +1,8 @@
 # Independent reference labels: retiring the carried target view and the `LinkReference` atom
 
-_Proposed 2026-10-12. Stages 1 and 2 are implemented on the branch that
-carries this plan and await review; each stage below says what it depends on
-and what lands with it._
+_Proposed 2026-10-12. Stage 3 is merged in the specification; stages 1, 2, 4
+and 5 are implemented on the stacked branches that carry this plan and await
+review; each stage below says what it depends on and what lands with it._
 
 ## What this plan holds to
 
@@ -337,23 +337,23 @@ re-fires a sink that followed the reference. `cfc-handle-acquisition.test.ts`
 pins both directions, and `cfc-label-view.test.ts` the handles recovered
 from query results, schema materialization and array proxies.
 
-The `cfcLabelView` a handle carries into a link write is built in
+The `cfcLabelView` a handle carries into a link write is the view the handle
+was minted with: `Cell.resolveAsCell`, the query-result proxy
+(`packages/runner/src/query-result-proxy.ts`), the schema reader's
+resolutions (`packages/runner/src/schema.ts`) and the schema view's
+`createOpaqueReference` and `readChild` (`packages/runner/src/schema-view.ts`,
+which rebase what the cell handed them) give it, and
 `packages/runner/src/data-updating.ts` (`cfcLabelViewForPrimitiveLink`, the
-carried view on `set`) and `packages/runner/src/schema-view.ts`
-(`createOpaqueReference`, `readChild`, the rebase on narrowing) from the label
-view of the read that produced the handle, which is the target's labels at read
-time. Under the contract that view is the acquisition restriction: the
-confidentiality of the slot the handle was read from and of the query or
-selection that produced it. This stage narrows what a handle carries to
-`referenceRestrictionsOf` of the read's view plus the reading attempt's join,
-so that a handle obtained from a query result under a secret filter carries the
-filter and nothing else, and a handle read from a public slot carries nothing.
-It is the part of this work that reaches outside `cfc/`: query-result proxies,
-lazy reads, immutable containers holding references, and worker reference
-tokens each build or forward a view. Each is changed with its own test, and the
-stage is measured on the room capture separately from stage 1, since stage 1
-already removes the persisted copies and this stage removes what a handle
-holds in memory and sends over IPC.
+carried view on `set`) reads it off the handle at the write. Before this
+stage it was the label view of the read that produced the handle, the
+target's labels at read time; it is now the acquisition restriction stated
+above, so that a handle obtained from a query result under a secret filter
+carries the filter and nothing else, and a handle read from a public slot
+carries nothing. Worker reference tokens forward whichever view a handle
+holds, so they shrink with it. The stage is measured on the room capture
+separately from stage 1, since stage 1 removes the persisted copies and this
+stage removes what a handle holds in memory and sends over IPC; that
+measurement is still owed.
 
 ### Stage 6: retire what the copying made necessary
 

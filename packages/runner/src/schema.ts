@@ -1016,9 +1016,14 @@ export function annotateWithBackToCellSymbols(
  * child. They are kept out of the scheduler's view of what the ACTION read:
  * addresses the declared scope summary does not cover drop the action's
  * execution-context floor to `session`, which stops its observations being
- * adopted across users. The labels themselves are still derived and still
- * applied — CFC's own prepare pass reads the raw activity list and skips
- * internal verifier reads there regardless.
+ * adopted across users. CFC's own prepare pass reads the raw activity list
+ * and skips internal verifier reads there regardless.
+ *
+ * What the view holds is the restriction the handle acquires: the reference
+ * restrictions of the slot each dereference left (CFC §8.2.3), confidentiality
+ * alone. The target's labels are read for the dependency alone and left out
+ * of the view; they are read again, where they are, by whatever consumes the
+ * handle.
  */
 function deriveDereferenceLabelView(
   tx: IExtendedStorageTransaction,
