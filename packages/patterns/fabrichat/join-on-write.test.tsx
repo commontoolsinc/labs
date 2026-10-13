@@ -243,6 +243,10 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     messages: setup.messages,
     reactionLists: setup.reactionLists,
     requests: setup.requests,

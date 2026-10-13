@@ -10,17 +10,17 @@ import {
   equals,
   pattern,
   type PerSession,
+  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import { isInMain, threadReplyCounts } from "./logic.ts";
+import type { ViewPlace } from "./logic.ts";
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
-  canActIn,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -29,19 +29,17 @@ import {
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
-  entryFor,
   FABRICHAT_POLICY,
   isDeleted,
-  isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
-  messageEntries,
   type MessageRecord,
   type MessagesCell,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
   type UsedTimesCell,
+  viewKeyOf,
 } from "./room-records.tsx";
 import {
   CHAT_DELETE_ACTION,
@@ -130,6 +128,18 @@ export interface FabriChatMessageRowInput {
   /** The session's composer state. */
   composer: PerSession<ComposerCell>;
 
+  /**
+   * Every message's place in the room's views, by the message's key, as the
+   * room derives them from its messages. The row reads its own message's.
+   */
+  places: ReadonlyCell<Record<string, ViewPlace>>;
+
+  /** Whether the viewer can't send, edit, delete, or react in the room. */
+  cannotWrite: boolean;
+
+  /** Whether the viewer holds OWNER in the room's space. */
+  isOwner: boolean;
+
   /** The room's messages. */
   messages: MessagesCell;
 
@@ -208,6 +218,9 @@ export const FabriChatMessageRow = pattern<
     inThread,
     kind,
     composer,
+    places,
+    cannotWrite,
+    isOwner,
     messages,
     reactionLists,
     requests,
@@ -245,7 +258,6 @@ export const FabriChatMessageRow = pattern<
       `fabrichat-reactors-${key}`,
     );
   });
-  const cannotWrite = computed(() => !canActIn(messages, myProfile));
   const isDeletedNow = computed(() => isDeleted(message.get()));
   const isMine = computed(() => {
     const author = message.get()?.authorProfile;
@@ -260,7 +272,7 @@ export const FabriChatMessageRow = pattern<
     const viewer = myProfile.resolveAsCell();
     return kind === "direct"
       ? equals(record.authorProfile, viewer)
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwnerOf(messages);
+      : FABRICHAT_POLICY.ownersMayObliterate && isOwner === true;
   });
   const isEditing = computed(() => {
     const editing = composer.get()?.editing;
@@ -275,26 +287,23 @@ export const FabriChatMessageRow = pattern<
     const reply = message.get()?.replyTo;
     return reply?.shownIn === "main" ? bodyText(reply.message.get()) : "";
   });
-  // Whether the message belongs in the main conversation, and how many
-  // replies the thread it roots holds. Both read the room's messages alone,
-  // so whichever runtime runs the room computes them for every viewer.
-  const placement = computed(() => {
-    const entries = messageEntries(messages);
-    const own = entryFor(entries, message);
-    if (own === undefined) return { inMain: false, replies: 0 };
-    return {
-      inMain: isInMain(own),
-      replies: threadReplyCounts(entries).get(own.key) ?? 0,
-    };
+  // Where the views show the message. The room derives every message's place
+  // at once, from its messages alone, so whichever runtime runs the room
+  // computes them for every viewer. The row reads its own, and runs again
+  // only when that one changes.
+  const place = computed(() => {
+    const key = viewKeyOf(message);
+    const own = key === undefined ? undefined : places.key(key).get();
+    return { inMain: own?.inMain === true, replies: own?.replies ?? 0 };
   });
   const mainRowDisplay = computed((): ChatDisplay =>
-    placement.inMain ? "block" : "none"
+    place.inMain ? "block" : "none"
   );
   const threadLabel = computed(() =>
-    placement.replies === 1 ? "1 reply" : `${placement.replies} replies`
+    place.replies === 1 ? "1 reply" : `${place.replies} replies`
   );
   const threadLinkDisplay = computed((): ChatDisplay =>
-    !inThread && placement.replies > 0 ? "inline-flex" : "none"
+    !inThread && place.replies > 0 ? "inline-flex" : "none"
   );
   // What differs by viewer or by session is shown or hidden through a prop,
   // never by building a different tree: a branch chosen per viewer is stored
@@ -306,7 +315,7 @@ export const FabriChatMessageRow = pattern<
   // viewer's or the session's state has a value only once a runtime acting
   // for that viewer runs the room, which one that only renders it does not,
   // so a row's place in the main conversation, which every viewer is shown,
-  // is decided by a computed reading the room's messages alone.
+  // is decided from the room's messages alone.
   const ownDisplay = computed((): ChatDisplay =>
     isMine && !isDeletedNow ? "inline-flex" : "none"
   );
