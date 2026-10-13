@@ -7,6 +7,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   equals,
   pattern,
   TESTS,
@@ -18,7 +19,9 @@ import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
   type ComposerState,
+  type MessageCell,
   type MessageRecord,
+  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -77,10 +80,10 @@ const typed = (text: string, requestId?: string) => ({
   ...(requestId === undefined ? {} : { requestId }),
 });
 
-const stored = (messages: Writable<MessagesValue>): MessageRecord[] =>
+const stored = (messages: MessagesReadCell): MessageRecord[] =>
   messages.get() as MessageRecord[];
 
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: MessagesReadCell): string =>
   stored(messages).map((message) =>
     typeof message.body === "string"
       ? message.body
@@ -89,20 +92,20 @@ const bodies = (messages: Writable<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-const times = (messages: Writable<MessagesValue>): bigint[] =>
+const times = (messages: MessagesReadCell): bigint[] =>
   stored(messages).map((message) => nsecOf(message.sentAt));
 
 const strictlyIncreasing = (values: readonly bigint[]): boolean =>
   values.every((value, index) => index === 0 || values[index - 1] < value);
 
 // Each of the latest messages is a link to the stored message.
-const mainTexts = (latest: readonly Writable<MessageRecord>[]): string =>
+const mainTexts = (latest: readonly MessageCell[]): string =>
   latest.map((each) => {
     const message = each.get();
     return typeof message?.body === "string" ? message.body : "<gone>";
   }).join(" | ");
 
-const activitySeqs = (activity: Writable<SentActivity[]>): number[] =>
+const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
   (activity.get() ?? []).map((entry) => entry.seq);
 
 const composerDisabled = (root: unknown): unknown =>

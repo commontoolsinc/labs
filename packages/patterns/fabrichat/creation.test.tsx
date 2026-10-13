@@ -70,7 +70,7 @@ interface HeldRoom {
 }
 
 const statusOf = (
-  requests: Writable<Record<string, ChatRequestOutcome>>,
+  requests: Cell<Record<string, ChatRequestOutcome>>,
   id: string,
 ): string => requests.get()?.[id]?.status ?? "none";
 
@@ -102,7 +102,7 @@ const cellLinked = (
 
 /** Why the request `id` was refused, or its status if it wasn't. */
 const reasonOf = (
-  requests: Writable<Record<string, ChatRequestOutcome>>,
+  requests: Cell<Record<string, ChatRequestOutcome>>,
   id: string,
 ): string => {
   const outcome = requests.get()?.[id];
@@ -113,7 +113,7 @@ const reasonOf = (
 
 /** The code of the refusal recorded under `id`, or `none` for any other. */
 const codeOf = (
-  requests: Writable<Record<string, ChatRequestOutcome>>,
+  requests: Cell<Record<string, ChatRequestOutcome>>,
   id: string,
 ): string => {
   const outcome = requests.get()?.[id];
@@ -148,7 +148,7 @@ const roomOf = (
   id: string,
 ) => requests.key(id).key("entry").key("room").resolveAsCell();
 
-const recipientsOf = (notices: Writable<ChatManagerNotice[]>): string =>
+const recipientsOf = (notices: Cell<ChatManagerNotice[]>): string =>
   (notices.get() ?? []).map((notice) => notice.recipient).join(",");
 
 export default pattern(() => {

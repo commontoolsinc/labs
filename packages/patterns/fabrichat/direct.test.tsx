@@ -15,6 +15,7 @@ import {
   type ActivityCounters,
   type ComposerState,
   type MessageRecord,
+  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -51,7 +52,7 @@ const obliterateGesture = {
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 // Each message's body, or how it was taken away.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: MessagesReadCell): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string"
       ? message.body

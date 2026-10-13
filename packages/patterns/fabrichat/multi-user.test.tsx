@@ -15,6 +15,7 @@ import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
   type MessageRecord,
+  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -68,12 +69,12 @@ interface Setup {
 }
 
 // The messages' bodies, in the order they were recorded.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: MessagesReadCell): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string" ? message.body : "<gone>"
   ).join(" | ");
 
-const reactionsOnFirst = (messages: Writable<MessagesValue>): number => {
+const reactionsOnFirst = (messages: MessagesReadCell): number => {
   const first = ((messages.get() ?? []) as MessageRecord[])[0];
   return ((first?.reactions?.get() ?? []) as ChatReaction[]).length;
 };

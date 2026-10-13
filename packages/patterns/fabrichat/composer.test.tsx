@@ -15,6 +15,7 @@ import { clickButton, hasText } from "../test/vnode-helpers.ts";
 import {
   type ActivityCounters,
   type MessageRecord,
+  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -44,7 +45,7 @@ const sendGesture = {
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 // Each stored message, as `body@shownIn`.
-const summary = (messages: Writable<MessagesValue>): string =>
+const summary = (messages: MessagesReadCell): string =>
   (messages.get() as MessageRecord[]).map((message) =>
     `${message?.body}@${message?.replyTo?.shownIn ?? "-"}`
   ).join(" | ");

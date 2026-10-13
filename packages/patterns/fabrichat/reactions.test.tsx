@@ -8,6 +8,7 @@ import {
   action,
   type AddIntegrity,
   assert,
+  type Cell,
   pattern,
   TESTS,
   Writable,
@@ -17,6 +18,7 @@ import {
   type ActivityCounters,
   type ComposerState,
   type MessageRecord,
+  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -69,7 +71,7 @@ const talliesText = (tallies: readonly ReactionTally[]): string =>
   ).join(", ");
 
 const reactionsOn = (
-  messages: Writable<MessagesValue>,
+  messages: MessagesReadCell,
   index: number,
 ): ChatReaction[] => {
   const message = (messages.get() as MessageRecord[])[index];
@@ -78,7 +80,7 @@ const reactionsOn = (
 
 // How many reactions a held reaction list holds.
 const heldCount = (
-  holder: Writable<{ list?: Writable<ReactionList> }>,
+  holder: Cell<{ list?: Writable<ReactionList> }>,
 ): number => ((holder.get()?.list?.get() ?? []) as unknown[]).length;
 
 export default pattern(() => {
