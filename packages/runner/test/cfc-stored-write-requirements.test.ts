@@ -2038,4 +2038,112 @@ describe("stored write requirements", () => {
       }
     });
   });
+
+  describe("a branch-local floor normalized to one claim", () => {
+    // A document stored while its flag's floor sat on one `anyOf` branch,
+    // outside the normalized profile (§4.2.1.1), then written by code whose
+    // schema puts the floor and the mint on the flag as a whole, or by a
+    // reader's view that declares the mint without the floor. The stored
+    // branch floor never falls; what differs is whether the document stays
+    // writable.
+    const BRANCH_LOCAL = {
+      type: "object",
+      properties: { flag: { $ref: "#/$defs/Flag" } },
+      $defs: {
+        Flag: {
+          anyOf: [
+            {
+              type: "boolean",
+              enum: [true],
+              ifc: { addIntegrity: ["admin"], requiredIntegrity: ["admin"] },
+            },
+            { type: "boolean", enum: [false] },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const NORMALIZED = {
+      type: "object",
+      properties: { flag: { $ref: "#/$defs/Flag" } },
+      $defs: {
+        Flag: {
+          type: "boolean",
+          ifc: { addIntegrity: ["admin"], requiredIntegrity: ["admin"] },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    const VIEW = {
+      type: "object",
+      properties: { flag: { $ref: "#/$defs/FlagView" } },
+      $defs: {
+        FlagView: { type: "boolean", ifc: { addIntegrity: ["admin"] } },
+      },
+    } as const satisfies JSONSchema;
+
+    const storedEnvelope = (runtime: Runtime, id: string): string => {
+      const tx = runtime.edit();
+      const link = runtime.getCell(space, id, undefined, tx)
+        .getAsNormalizedFullLink();
+      const envelope = loadStoredCfcEnvelope(tx, link);
+      tx.abort("inspected");
+      expect(envelope.status).toBe("loaded");
+      return JSON.stringify((envelope as { schema: JSONSchema }).schema);
+    };
+
+    const seed = async (runtime: Runtime, id: string) => {
+      expect(
+        (await commitWrite(runtime, id, BRANCH_LOCAL, { flag: true }))
+          .error,
+      ).toBeUndefined();
+    };
+
+    it("keeps the stored branch floor under the normalized schema", async () => {
+      const runtime = start();
+      const id = "branch-local-flag-normalized";
+      await seed(runtime, id);
+      for (const flag of [false, true]) {
+        expect((await commitWrite(runtime, id, NORMALIZED, { flag })).error)
+          .toBeUndefined();
+      }
+      expect(storedEnvelope(runtime, id)).toContain(
+        '"requiredIntegrity":["admin"]',
+      );
+    });
+
+    it("keeps the floor and refuses further writes through a floorless view", async () => {
+      // The accepted break: the view's first write persists the stored
+      // branches inline beside its own claim, floor included, and the next
+      // merge refuses that branch-local claim.
+      const runtime = start();
+      const id = "branch-local-flag-view";
+      await seed(runtime, id);
+      expect((await commitWrite(runtime, id, VIEW, { flag: false })).error)
+        .toBeUndefined();
+      expect(storedEnvelope(runtime, id)).toContain(
+        '"requiredIntegrity":["admin"]',
+      );
+      expect(refusalOf(await commitWrite(runtime, id, VIEW, { flag: true })))
+        .toContain(
+          "ifc inside divergent anyOf branches is unsupported at /flag",
+        );
+    });
+
+    it("writes a fresh document through the normalized schema and the view", async () => {
+      const runtime = start();
+      const id = "normalized-flag-fresh";
+      expect(
+        (await commitWrite(runtime, id, NORMALIZED, { flag: true }))
+          .error,
+      ).toBeUndefined();
+      for (const flag of [false, true]) {
+        expect((await commitWrite(runtime, id, VIEW, { flag })).error)
+          .toBeUndefined();
+      }
+      expect(storedEnvelope(runtime, id)).toContain(
+        '"requiredIntegrity":["admin"]',
+      );
+    });
+  });
 });

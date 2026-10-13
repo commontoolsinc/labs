@@ -422,3 +422,119 @@ are the designs.
   disclosure residuals of the metadata channel; the specification's own
   alternative, treating the metadata as visible to the destination's readers,
   is what the runtime does for the fields it leaves public.
+
+## Node input requirements (§8.9, §8.10.3)
+
+Not one of §18.6.4's eight items, but a check §8.9 requires of every node
+("Input contract checks … MUST be enforced before commit") and §8.10.3
+defines, so its arrangement and gaps are recorded here.
+
+**What the runtime does.** Before a lift's, a computed node's or a handler's
+code runs, `#checkInputRequirements` in `runner.ts` calls
+`resolveNodeInputRequirements` and `nodeInputRefusals` in
+`cfc/node-input-requirements.ts`. They check each `requiredIntegrity` the
+node's input schema declares against what the node's binding reaches at the
+declared path, coherently (`cfcIntegritySatisfiesFloorCoherently`, the
+predicate the write gate uses). Each failure is recorded on the transaction
+(`recordCfcNodeInputRefusal`) and becomes a prepare reason, so it refuses the
+commit under the enforcing modes. What each observation carries:
+
+- a reference supplies its target's integrity and the reference's own
+  together (§8.2.4, `I_T ∪ I_R_applicable`); link-carried entries copied onto
+  the reference from its target (§8.2.5) are never counted. The reference's
+  own integrity is every non-link entry at or above its slot
+  (`referenceIntegrityAt` in `cfc/prepare.ts`), with no further applicability
+  filter; a bare atom there is within the self-mint residual below, and a
+  builtin-only atom is gated by its author;
+- a value written in the binding itself, a handler's `$event` payload
+  included, carries no evidence;
+- a requirement binds the values the code reads, and an absence is not one: a
+  path found absent, a key missing from a container, an empty or absent
+  collection whose members carry the requirement, or a document with no
+  value, whether the declared path, a reference's own path or the wiring led
+  there, is a `shape` read of the container (§4.6.3) and consumes no
+  requirement on the missing path. This is a divergence, admitting more than
+  a strict reading of §8.10.3, which resolves every logged read overlapping a
+  requirement's path to an observation and checks it, an absent key's
+  `shape` read included. It is taken by decision, flagged for a ruling, and
+  consistent with the runtime's other floors: the trusted agent's tool-input
+  floor gates injected values, not omissions (`builtins/llm-dialog.ts`); the
+  stored write floor governs values, not absence; §8.10.3's reference
+  `verifyInputRequirements` has nothing to check on an empty consumed set;
+  and §10's `to_city()` concerns a value other code nudged, not an omitted
+  one. §4.6.3's absent-slot probes taint by confidentiality and membership,
+  which stand and are not checked here. The deciding site carries a
+  `SPEC-PENDING` marker naming the ruling request. Against the behavior before
+  this check (no node input check at all) it only refuses more and stores
+  nothing new, so it runs at the default with no dial;
+- a `default` that a schema other than the code's own would supply at an
+  absent path (one a reference carries, or the graph's) and that the code's
+  schema would not supply the same way is a value no one vouched for, and is
+  refused;
+- every leaf of a reached value is an observation, an unlabeled one carrying
+  no integrity.
+
+For verified code the requirements are those of the schema bound to the code
+identity that ran, together with the graph's own, which may add requirements
+and cannot remove one: the one point under a `SPEC-PENDING` marker
+(commonfabric/specs#62). A verified identity whose artifact is not indexed is
+refused, terminally for that run. The artifact is looked up in the pattern
+manager's index, then in the engine's, which records the artifact each
+verified implementation was exported as, so code the engine runs after the
+pattern manager's index lost its module keeps its requirements. The check
+reads stored labels, so a transaction that has already written a document
+the check reads is refused (its labels may not be derived yet); a write to
+another document leaves the check as it was. The identity is the function's verified
+provenance, recorded when its module is evaluated, so a function two factories
+share carries the identity, and the requirements, of the factory it was first
+registered under.
+
+**A host arrangement, with direction.** The observations are found by
+following the node's binding to everything its code can reach at each
+declared path, under verifier-internal reads (§18.6.2), rather than taken from
+the attempt's read log, as §8.10.3 has it. The reach is a superset of what the
+code reads, so it over-taints: it can refuse an input the code would not have
+read. It stands in for three gaps in the read log, each a follow-up:
+
+- a lazily materialized argument logs only what the body touches, so a
+  declared path the body reads later, or not at all, has no logged read when
+  the gate runs;
+- a link resolution served from the snapshot memo, or a hop served from
+  `traverseDAG`'s memo, logs no read for that hop;
+- a `Cell`-typed input logs the reads the body makes through it later, after
+  the point where the check runs.
+
+When the log records each of these, the check can take its observations from
+the log and the reach can go.
+
+**Known gaps and residuals, with direction.**
+
+- `maxConfidentiality` declared on a node's input is not checked: an
+  under-taint for code that relies on such a ceiling.
+- The inputs of builtins are not checked: an under-taint for a builtin whose
+  input schema declares `requiredIntegrity`.
+- Choosing which stamped value to bind is not ruled out: a binding may point
+  an input at any value carrying the required evidence, an older one or one
+  from another item included. Binding two inputs to one item is what
+  instance-bound integrity (`scope.valueRef`, §4.5.1, §8.10.4) is for.
+- Absence as the permissive branch, flagged for a ruling: an absence consumes
+  no requirement, so code that treats a missing floored input as the
+  permissive choice (an empty roster as "everyone is an admin", a missing gate
+  as "open") can be steered by omitting it, or by pointing the binding at a
+  container that lacks it. The mitigation is the pattern's: make the
+  restrictive choice the default for an absent input, and guard a stored
+  field's removal with its write authority.
+- A `requiredIntegrity` inside an `anyOf` or `oneOf` branch is applied
+  whichever branch the value takes, an over-taint; §4.2.1.1 keeps such
+  declarations outside the normalized profile.
+- Bare string atoms that patterns mint through `addIntegrity` ("lobby-admin"
+  and the like) can be minted by any non-builtin code, so a floor or an input
+  requirement on one is no authority check. Admin rosters are guarded by their
+  write-authority binding (§3.3: "an access-control capability ... not value
+  integrity"; §8.15.5), and the code that reads a roster declares no
+  requirement on it (only a declared requirement creates one, §8.10.3).
+- A piece still running the source it was deployed with keeps the input
+  requirements its old schemas declared, so its nodes refuse a roster that
+  holds an unstamped entry until its source updates: an over-taint.
+- The cycle check keys on each reference's target, so a chain that passes one
+  target twice on different walks is refused, an over-taint.

@@ -12,10 +12,18 @@
  * `{ label }` / `{ await }` markers. See the multi-user section of
  * docs/common/patterns/multi-user-patterns.md.
  */
-import { assert, multiUserTest, pattern, TESTS } from "commonfabric";
 import {
+  assert,
+  multiUserTest,
+  pattern,
+  type PerSpace,
+  TESTS,
+} from "commonfabric";
+import {
+  type ChatAdminRegistryView,
   messagesValue,
   profilesValue,
+  type SharedRoomsView,
   TRUSTED_GROUP_CHAT_ADMIN_SURFACE,
   TRUSTED_GROUP_CHAT_PROFILE_SURFACE,
   TRUSTED_GROUP_CHAT_SAVE_PROFILE_ACTION,
@@ -50,21 +58,30 @@ const submitted = (text: string) => ({
   target: { value: text },
 });
 
+/**
+ * The chat as the participants read it: its rooms and admin registry through
+ * the views their readers declare, without the stored lists' floors.
+ */
+type ChatView = Omit<GroupChatDemoOutput, "rooms" | "adminRegistry"> & {
+  rooms: PerSpace<SharedRoomsView>;
+  adminRegistry: PerSpace<ChatAdminRegistryView>;
+};
+
 interface Setup {
-  chat: GroupChatDemoOutput;
+  chat: ChatView;
 }
 
 export const setup = pattern(() => ({
   chat: GroupChatDemo({} as GroupChatDemoInputArg),
 }));
 
-const profileNames = (chat: GroupChatDemoOutput): string[] =>
+const profileNames = (chat: ChatView): string[] =>
   profilesValue(chat.profiles)
     .map((profile) => profile.get()?.name ?? "")
     .filter((name) => name.length > 0)
     .toSorted();
 
-const messageBodies = (chat: GroupChatDemoOutput): string[] =>
+const messageBodies = (chat: ChatView): string[] =>
   messagesValue(chat.messages).map((m) => m.body);
 
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {

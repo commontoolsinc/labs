@@ -34,12 +34,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   an access consumed and the other rules over the join (§5.3, §4.6.3). What
   remains is a specs ruling on the join within one location and the display's
   fit of a cell's stored label.
-- [Input requirements on an endorsed computation's arguments](cfc-argument-input-requirements.md)
+- [Input requirements on a node's inputs](cfc-node-input-requirements.md)
   refuses a stand-in fed to code a rule endorses, by checking the integrity
-  each argument declares against the reads made through it. The declaration is
-  taken from the code's own module, not the graph's data, so a rule that guards
-  on the identity rests on it. It needs a narrow specs ruling first, and it
-  parks a per-item threshold drawn from a policy key.
+  each node's input declares against what its binding reaches. The
+  requirements are the code's own module's, unioned with the graph's, which
+  can add one and never remove one; that identity binding is the one point
+  marked `SPEC-PENDING`. It parks a per-item threshold drawn from a policy key.
 
 - [Shuffled test order: what is left to build](test-order-shuffle.md) carries
   the piece the shuffle does not yet have: a shuffle inside this repository's

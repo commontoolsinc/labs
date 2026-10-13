@@ -864,6 +864,8 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     pattern: "cfc-group-chat-demo/main.tsx",
     baselines: ["20260923T205929Z-mHuHgI9LlBLCu53t"],
     paths: [
+      "argument.adminRegistry.everyoneIsAdmin",
+      "result.adminRegistry.everyoneIsAdmin",
       "result.profileDraft",
       "result.messageDraft",
       "result.hostMessageDraft",
@@ -878,8 +880,27 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "result.hostLookalikeSend",
     ],
     reason:
-      "the drafts removed, with the trusted streams taking the text a `cf-submit-input` click carries",
-    record: "docs/history/cfc-chat-demo-submit-input-break.md",
+      "the everyone-is-admin flag normalized to one claim, its floor on the flag rather than on one branch" +
+      "; and the drafts removed, with the trusted streams taking the text a " +
+      "`cf-submit-input` click carries (docs/history/cfc-chat-demo-submit-input-break.md)",
+    record: "docs/history/everyone-admin-flag-normalized-break.md",
+  },
+  {
+    // The everyone-is-admin flag's floor moves off its `true` branch onto the
+    // flag as a whole (§4.2.1.1); the binding, contract, floor and mint that
+    // gate `true` are unchanged, and `false` gains them.
+    pattern: "cfc-group-chat-demo/main.tsx",
+    baselines: [
+      "20260923T232812Z-h-me8Kndg91BgtVA",
+      "20261004T000822Z-kUNF5sBKWx27omx3",
+    ],
+    paths: [
+      "argument.adminRegistry.everyoneIsAdmin",
+      "result.adminRegistry.everyoneIsAdmin",
+    ],
+    reason:
+      "the everyone-is-admin flag normalized to one claim, its floor on the flag rather than on one branch",
+    record: "docs/history/everyone-admin-flag-normalized-break.md",
   },
   {
     // Each `Panel` kind gains an optional `addedBy` DID. The proof does not

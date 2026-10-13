@@ -5,6 +5,7 @@ import Lobby, {
   currentLobbyUserIsAdmin,
   DEFAULT_LOBBY_ROSTER,
   type LobbyAdminRegistryValue,
+  type LobbyAdminRegistryView,
   lobbyAdminRolesValue,
   lobbyEveryoneIsAdmin,
   lobbyParticipantsValue,
@@ -31,6 +32,9 @@ export default pattern(() => {
   const adminRegistry = Writable.of<LobbyAdminRegistryValue>(
     {} as LobbyAdminRegistryValue,
   );
+  // The assertions read the registry as its readers declare it, without the
+  // stored roster's floor; the lobby itself is wired the stored cell.
+  const adminRegistryView: LobbyAdminRegistryView = adminRegistry as never;
   const aliceProfile = Writable.of<LobbyProfile>({ name: "Alice" });
   const bobProfile = Writable.of<LobbyProfile>({ name: "Bob" });
   const firstAlexProfile = Writable.of<LobbyProfile>({ name: "Alex" });
@@ -191,37 +195,37 @@ export default pattern(() => {
 
   const assert_initial_open_fallback = assert(() =>
     lobbyParticipantsValue(roster).length === 0 &&
-    lobbyAdminRolesValue(adminRegistry).length === 0 &&
-    lobbyEveryoneIsAdmin(adminRegistry) === true
+    lobbyAdminRolesValue(adminRegistryView).length === 0 &&
+    lobbyEveryoneIsAdmin(adminRegistryView) === true
   );
   const assert_alice_joined_once = assert(() =>
     participantNames(roster).join(",") === "Alice" &&
-    currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry)
+    currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistryView)
   );
   const assert_blank_profile_rejected = assert(() =>
     participantNames(roster).join(",") === "Alice"
   );
   const assert_both_are_admin_by_fallback = assert(() =>
     participantNames(roster).join(",") === "Alice,Bob" &&
-    currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry) &&
-    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
+    currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistryView) &&
+    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView)
   );
   const assert_bob_removed_alice_while_open = assert(() =>
     participantNames(roster).join(",") === "Bob"
   );
   const assert_lockdown_bootstraps_alice = assert(() => {
-    const roles = lobbyAdminRolesValue(adminRegistry);
-    return lobbyEveryoneIsAdmin(adminRegistry) === false &&
+    const roles = lobbyAdminRolesValue(adminRegistryView);
+    return lobbyEveryoneIsAdmin(adminRegistryView) === false &&
       roles.length === 1 &&
-      currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistry) &&
-      !currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry);
+      currentLobbyUserIsAdmin(aliceProfile, roster, adminRegistryView) &&
+      !currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView);
   });
   const assert_non_admin_remove_is_blocked = assert(() =>
     participantNames(roster).join(",") === "Bob,Alice"
   );
   const assert_bob_promoted = assert(() =>
-    lobbyAdminRolesValue(adminRegistry).length === 2 &&
-    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
+    lobbyAdminRolesValue(adminRegistryView).length === 2 &&
+    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView)
   );
   const assert_public_output_explicit_policy = assert(() =>
     lobby.everyoneIsAdmin === false &&
@@ -230,16 +234,16 @@ export default pattern(() => {
   );
   const assert_bob_removed_alice_and_role = assert(() =>
     participantNames(roster).join(",") === "Bob" &&
-    lobbyAdminRolesValue(adminRegistry).length === 1 &&
-    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
+    lobbyAdminRolesValue(adminRegistryView).length === 1 &&
+    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView)
   );
   const assert_last_admin_removal_blocked = assert(() =>
-    lobbyAdminRolesValue(adminRegistry).length === 1 &&
-    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
+    lobbyAdminRolesValue(adminRegistryView).length === 1 &&
+    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView)
   );
   const assert_open_policy_restored = assert(() =>
-    lobbyEveryoneIsAdmin(adminRegistry) === true &&
-    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
+    lobbyEveryoneIsAdmin(adminRegistryView) === true &&
+    currentLobbyUserIsAdmin(bobProfile, roster, adminRegistryView)
   );
   const assert_same_name_profiles_both_join = assert(() =>
     participantNames(roster).filter((name) => name === "Alex").length === 2

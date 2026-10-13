@@ -7,6 +7,7 @@ import {
   DEFAULT_LOBBY_ROSTER,
   type LobbyAdminRegistryCell,
   type LobbyAdminRegistryValue,
+  type LobbyAdminRegistryView,
   type LobbyProfile,
   type LobbyProfileCell,
   type LobbyRoster,
@@ -28,6 +29,14 @@ export interface LobbyMultiUserSetup {
   bobProfile: LobbyProfileCell;
 }
 
+/** The setup as the participants read it: the registry through its view. */
+export interface LobbyMultiUserView {
+  roster: LobbyRosterCell;
+  adminRegistry: LobbyAdminRegistryView;
+  aliceProfile: LobbyProfileCell;
+  bobProfile: LobbyProfileCell;
+}
+
 export const setup = pattern<Record<string, never>, LobbyMultiUserSetup>(() => {
   const roster = Writable.of<LobbyRosterValue>(DEFAULT_LOBBY_ROSTER);
   const adminRegistry = Writable.of<LobbyAdminRegistryValue>(
@@ -38,7 +47,7 @@ export const setup = pattern<Record<string, never>, LobbyMultiUserSetup>(() => {
   return { roster, adminRegistry, aliceProfile, bobProfile };
 });
 
-export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
+export const alice = pattern<{ setup: LobbyMultiUserView }>(({ setup }) => {
   const addSelf = addSelfToLobby({
     roster: setup.roster,
     viewerProfile: setup.aliceProfile,
@@ -100,7 +109,7 @@ export const alice = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
   };
 });
 
-export const bob = pattern<{ setup: LobbyMultiUserSetup }>(({ setup }) => {
+export const bob = pattern<{ setup: LobbyMultiUserView }>(({ setup }) => {
   const addSelf = addSelfToLobby({
     roster: setup.roster,
     viewerProfile: setup.bobProfile,

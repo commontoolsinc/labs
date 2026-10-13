@@ -18,6 +18,7 @@ import {
   chatAdminEveryoneIsAdmin,
   type ChatAdminRegistryCell,
   type ChatAdminRegistryValue,
+  type ChatAdminRegistryView,
   commitTrustedMessageSend,
   currentProfileCell,
   currentUserCanManageAdmins,
@@ -33,6 +34,7 @@ import {
   type SharedProfilesValue,
   type SharedRoomsCell,
   type SharedRoomsValue,
+  type SharedRoomsView,
   type SubmittedTextEvent,
   TrustedAdminPanel,
   type TrustedAdminPolicyEvent,
@@ -151,7 +153,7 @@ const SharedTranscript = pattern<
 type SharedTranscriptInputArg = Parameters<typeof SharedTranscript>[0];
 
 interface RoomsListInput {
-  rooms: SharedRoomsCell;
+  rooms: SharedRoomsView;
   id: string;
 }
 
@@ -232,8 +234,10 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
   const myProfileCell: MyProfileCell = myProfile!;
   const profilesCell: SharedProfilesCell = profiles!;
   const messagesCell: SharedMessagesCell = messages!;
-  const roomsCell: SharedRoomsCell = rooms!;
-  const adminRegistryCell: ChatAdminRegistryCell = adminRegistry!;
+  // The demo reads its rooms and registry through the views; its arguments
+  // and results keep the stored floors.
+  const roomsCell: SharedRoomsView = rooms as never;
+  const adminRegistryCell: ChatAdminRegistryView = adminRegistry as never;
   const trustedProfileSave = TrustedProfileSaveSurface({
     myProfile: myProfileCell,
     profiles: profilesCell,
@@ -399,8 +403,8 @@ export const GroupChatDemo = pattern<GroupChatDemoInput, GroupChatDemoOutput>((
     myProfile: myProfileCell as PerUser<MyProfileCell>,
     profiles: profilesCell as PerSpace<SharedProfilesCell>,
     messages: messagesCell as PerSpace<SharedMessagesCell>,
-    rooms: roomsCell as PerSpace<SharedRoomsCell>,
-    adminRegistry: adminRegistryCell as PerSpace<ChatAdminRegistryCell>,
+    rooms: rooms as PerSpace<SharedRoomsCell>,
+    adminRegistry: adminRegistry as PerSpace<ChatAdminRegistryCell>,
     currentProfileName: trustedProfileSave.currentProfileName,
     currentUserIsAdmin: computed(() =>
       currentProfileIsAdmin(myProfileCell, adminRegistryCell)

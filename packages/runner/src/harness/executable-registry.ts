@@ -31,6 +31,19 @@ export class ExecutableRegistry {
   >();
 
   /**
+   * The verified artifact each implementation above was exported as (the
+   * module a lift, a handler or a pattern factory builds), under the same
+   * entry ref. A node's input requirements are bound to the code that ran
+   * (`resolveNodeInputRequirements`), so where the pattern manager's artifact
+   * index does not hold a module this index resolves the implementation from,
+   * the code's declared schema is read from here.
+   */
+  readonly #verifiedArtifactsByEntryRef = new Map<
+    string,
+    Map<string, unknown>
+  >();
+
+  /**
    * Counter for host pseudo-module identities: each `trustHostValue()` call
    * mints a _unique_ `host:<n>` identity — uniqueness over content-derivation,
    * deliberately: host functions are closure-bearing, so two with identical
@@ -45,6 +58,7 @@ export class ExecutableRegistry {
 
   clear(): void {
     this.#verifiedImplementationsByEntryRef.clear();
+    this.#verifiedArtifactsByEntryRef.clear();
     this.#nextHostModuleId = 0;
     // `#hostRegisteredFunctions` is a WeakSet (uniterable); entries age out
     // with their functions. Stale membership after clear() is harmless: it
@@ -63,6 +77,7 @@ export class ExecutableRegistry {
     identity: string,
     symbol: string,
     implementation: HarnessedFunction,
+    artifact: unknown = implementation,
   ): void {
     let bucket = this.#verifiedImplementationsByEntryRef.get(identity);
     if (!bucket) {
@@ -70,6 +85,12 @@ export class ExecutableRegistry {
       this.#verifiedImplementationsByEntryRef.set(identity, bucket);
     }
     bucket.set(symbol, implementation);
+    let artifacts = this.#verifiedArtifactsByEntryRef.get(identity);
+    if (!artifacts) {
+      artifacts = new Map();
+      this.#verifiedArtifactsByEntryRef.set(identity, artifacts);
+    }
+    artifacts.set(symbol, artifact);
   }
 
   getVerifiedImplementation(
@@ -77,6 +98,11 @@ export class ExecutableRegistry {
     symbol: string,
   ): HarnessedFunction | undefined {
     return this.#verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
+  }
+
+  /** The verified artifact registered with an implementation, if any. */
+  getVerifiedArtifact(identity: string, symbol: string): unknown {
+    return this.#verifiedArtifactsByEntryRef.get(identity)?.get(symbol);
   }
 
   /**

@@ -86,6 +86,7 @@ import {
   areLinksSame,
   isPrimitiveCellLink,
   isWriteRedirectLink,
+  type NormalizedFullLink,
   type NormalizedLink,
   parseLink,
 } from "../link-utils.ts";
@@ -6834,7 +6835,7 @@ const isProvenanceOnlyConsumedLabel = (label: IFCLabel): boolean => {
 // accepts any concrete atom above the concept in THIS user's closure; plain
 // (concrete/pattern) floors ignore it (inv-11: concrete integrity portable,
 // concept satisfaction acting-principal scoped).
-const cfcFloorTrustContext = (
+export const cfcFloorTrustContext = (
   tx: IExtendedStorageTransaction,
 ): CfcFloorTrustContext => {
   const state = tx.getCfcState();
@@ -6842,6 +6843,90 @@ const cfcFloorTrustContext = (
     trustResolver: createTrustResolver(state.trustConfig),
     actingPrincipal: state.trustSnapshot?.actingPrincipal,
   };
+};
+
+/**
+ * The integrity at each location a whole read of the value at `address`
+ * consumes: one list per labeled location, as the read-side gate below takes
+ * a read in the transaction's log, and one for each of `leaves` — the value's
+ * leaf positions, relative to `address.path` — as its own label resolves
+ * there, empty where no label reaches it, since a public location is consumed
+ * too (§8.10.3). Entries at or below each of `references` — the reference
+ * slots the value holds, relative to `address.path` — are left out: a slot
+ * contributes confidentiality only (§8.2.4), and the reference's target is
+ * observed on its own. Link-carried entries are left out too: they copy a
+ * target's evidence onto the reference (§8.2.5). `address.path` is a payload
+ * path, as a link's is.
+ *
+ * For a node's input requirements (§8.9, §8.10.3), whose observations are
+ * made by following the node's binding rather than read from the log.
+ */
+export const consumedIntegrityAt = (
+  tx: IExtendedStorageTransaction,
+  address: NormalizedFullLink,
+  leaves: readonly (readonly string[])[],
+  references: readonly (readonly string[])[] = [],
+): (readonly CfcAtom[])[] => {
+  const scope = normalizeCellScope(address.scope);
+  const metadata = storedMetadataFor(
+    tx,
+    address.space,
+    address.id,
+    scope,
+    "application/json",
+  );
+  if (metadata === undefined) return [[]];
+  const path = canonicalizeLogicalPath(address.path);
+  const slots = references.map((reference) => [...path, ...reference]);
+  const entries = consumedEntriesForRead(metadata, path, {
+    nonRecursive: false,
+    consumes: "all",
+  }).filter((entry) =>
+    entry.origin !== "link" &&
+    !slots.some((slot) => isPrefix(slot, entry.path))
+  );
+  const observations: (readonly CfcAtom[])[] = consumedLocations(
+    stringTupleKey([address.space, address.id, scope]),
+    entries,
+    path,
+    false,
+  ).map((location) => location.integrity);
+  // A leaf's own evidence, as a witness reads it: a `*` template's
+  // integrity is membership provenance, not evidence about the value.
+  const evidence = entries.filter(isWitnessEvidence).map(asWitnessEvidence);
+  for (const leaf of leaves) {
+    observations.push(
+      labelForEntriesAtPath(evidence, [...path, ...leaf])?.integrity ?? [],
+    );
+  }
+  return observations.length > 0 ? observations : [[]];
+};
+
+/**
+ * The integrity a reference held at `address` applies to what it reaches
+ * (§8.2.4's `I_R_applicable`): the slot's own label as the container's writer
+ * left it, resolved at the slot, without link-carried entries, which copy the
+ * target's evidence onto the reference (§8.2.5).
+ */
+export const referenceIntegrityAt = (
+  tx: IExtendedStorageTransaction,
+  address: NormalizedFullLink,
+): readonly CfcAtom[] => {
+  const scope = normalizeCellScope(address.scope);
+  const metadata = storedMetadataFor(
+    tx,
+    address.space,
+    address.id,
+    scope,
+    "application/json",
+  );
+  if (metadata === undefined) return [];
+  const path = canonicalizeLogicalPath(address.path);
+  const entries = metadata.labelMap.entries.filter((entry) =>
+    entry.origin !== "link" && isPrefix(entry.path, path) &&
+    isWitnessEvidence(entry)
+  ).map(asWitnessEvidence);
+  return labelForEntriesAtPath(entries, path)?.integrity ?? [];
 };
 
 const verifyInputRequirements = (
@@ -10775,6 +10860,13 @@ export function* prepareBoundaryCommitSteps(
       verdictReason(
         `unprivileged write to protected runtime surface ${target}`,
       ),
+    );
+  }
+  // The input requirements a node's code declares, checked by the runner
+  // before the code ran (§8.9, §8.10.3; `cfc/node-input-requirements.ts`).
+  for (const refusal of state.nodeInputRefusals) {
+    reasons.push(
+      refusal.verdict ? verdictReason(refusal.reason) : refusal.reason,
     );
   }
   const identityForInput = (

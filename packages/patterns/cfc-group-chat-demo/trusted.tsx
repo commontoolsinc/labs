@@ -127,25 +127,25 @@ export type ChatAdminBootstrapRole = AddIntegrity<
   readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
 >;
 
-export type ChatEveryoneAdminFlag =
-  | RequiresIntegrity<
-    AddIntegrity<
-      TrustedActionWrite<
-        true,
-        typeof commitTrustedAdminToggle,
-        typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-        typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-      >,
-      readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+/**
+ * Whether everyone in the chat is an admin. One claim on the flag as a whole
+ * (§4.2.1.1: no IFC obligation may depend on which `anyOf` branch a value
+ * takes): only the reviewed toggle, from its trusted surface, may write it,
+ * and what it writes carries the admin mint and must carry it. Setting `true`
+ * is gated exactly as before; `false` is now gated the same way.
+ */
+export type ChatEveryoneAdminFlag = RequiresIntegrity<
+  AddIntegrity<
+    TrustedActionWrite<
+      boolean,
+      typeof commitTrustedAdminToggle,
+      typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+      typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
     >,
     readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
-  >
-  | TrustedActionWrite<
-    false,
-    typeof commitTrustedAdminToggle,
-    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
-    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
-  >;
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
 
 export interface ChatAdminRegistryStoredValue {
   readonly admins?: ChatAdminList;
@@ -180,6 +180,63 @@ export type SharedRoomsValue =
   | SharedRoomsStoredValue
   | Default<EmptySharedRoomsValue>;
 export type SharedRoomsCell = Writable<SharedRoomsValue>;
+
+/**
+ * The roster, the everyone-is-admin flag and the room list as the code that
+ * reads them declares them: the same writer bindings and mints as
+ * `ChatAdminList`, `ChatEveryoneAdminFlag` and `SharedRoomList`, without
+ * their floors. Who may change them is decided by those bindings (an
+ * access-control capability, not value integrity), so a node reading them to
+ * decide requires nothing of them; an input requirement exists only where a
+ * node declares one. The stored values keep their floors through
+ * `ChatAdminRegistryCell` and `SharedRoomsCell`, the demo's arguments and
+ * results.
+ */
+export type ChatAdminListView = AddIntegrity<
+  TrustedActionWrite<
+    ChatAdminRole[],
+    typeof commitTrustedAdminToggle,
+    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+
+export type ChatEveryoneAdminFlagView = AddIntegrity<
+  TrustedActionWrite<
+    boolean,
+    typeof commitTrustedAdminToggle,
+    typeof TRUSTED_GROUP_CHAT_SET_ADMIN_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ADMIN_SURFACE
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+
+export interface ChatAdminRegistryViewStoredValue {
+  readonly admins?: ChatAdminListView;
+  readonly bootstrapAdmin?: ChatAdminBootstrapRole;
+  readonly everyoneIsAdmin?: ChatEveryoneAdminFlagView;
+}
+
+/** The registry as its readers declare it; see `ChatAdminListView`. */
+export type ChatAdminRegistryView = Writable<
+  ChatAdminRegistryViewStoredValue | Default<EmptyAdminRegistryValue>
+>;
+
+export type SharedRoomListView = AddIntegrity<
+  TrustedActionWrite<
+    TrustedChatRoom[],
+    typeof commitTrustedRoomAdd,
+    typeof TRUSTED_GROUP_CHAT_ADD_ROOM_ACTION,
+    typeof TRUSTED_GROUP_CHAT_ROOM_SURFACE
+  >,
+  readonly [typeof GROUP_CHAT_ADMIN_INTEGRITY]
+>;
+
+/** The rooms as their readers declare them; see `ChatAdminListView`. */
+export type SharedRoomsView = Writable<
+  { readonly list?: SharedRoomListView } | Default<EmptySharedRoomsValue>
+>;
 
 /**
  * The click a `cf-submit-input` delivers, from its button or from Enter in its
@@ -217,7 +274,7 @@ export const profilesValue = (
     );
 
 export const roomsValue = (
-  rooms: SharedRoomsCell,
+  rooms: SharedRoomsView,
 ): TrustedChatRoom[] =>
   Array.from((rooms.get() as SharedRoomsStoredValue | undefined)?.list ?? []);
 
@@ -237,7 +294,7 @@ export const currentProfileSnapshot = (
 ): ChatProfile | undefined => currentProfileCell(myProfile)?.get();
 
 export const chatAdminRolesValue = (
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): ChatAdminRole[] => {
   const explicitAdmins = adminRegistryEntries<ChatAdminRole>(adminRegistry);
   if (explicitAdmins.length > 0) {
@@ -260,12 +317,12 @@ export const chatAdminRolesValue = (
 };
 
 export const chatAdminEveryoneIsAdmin = (
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): boolean => adminRegistryEveryoneIsAdmin<ChatAdminRole>(adminRegistry);
 
 export const currentUserAdminRole = (
   myProfile: MyProfileCell,
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): ChatAdminRole | undefined => {
   if (myProfileValue(myProfile).profile === undefined) {
     return undefined;
@@ -294,12 +351,12 @@ export const currentUserAdminRole = (
 
 export const currentUserIsAdmin = (
   myProfile: MyProfileCell,
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): boolean => currentUserAdminRole(myProfile, adminRegistry) !== undefined;
 
 export const currentUserCanManageAdmins = (
   myProfile: MyProfileCell,
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): boolean => currentUserIsAdmin(myProfile, adminRegistry);
 
 export const participantClaimsValue = (
@@ -378,7 +435,7 @@ export const adminParticipantRowsValue = (
   profiles: SharedProfilesCell,
   myProfile: MyProfileCell,
   messages: SharedMessagesCell,
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
 ): AdminParticipantRow[] => {
   const adminRoles = chatAdminRolesValue(adminRegistry);
   const everyoneIsAdmin = chatAdminEveryoneIsAdmin(adminRegistry);
@@ -584,7 +641,7 @@ interface TrustedAdminPolicyChange {
 
 export const prepareTrustedAdminToggle = (
   currentAdminRole: ChatAdminRole | undefined,
-  adminRegistry: ChatAdminRegistryCell,
+  adminRegistry: ChatAdminRegistryView,
   participant: AdminParticipantRow | undefined,
   myProfile?: MyProfileCell,
   nextEveryoneIsAdmin?: boolean,
@@ -671,7 +728,7 @@ export const commitTrustedAdminToggle = handler<
     profiles: SharedProfilesCell;
     myProfile: MyProfileCell;
     messages: SharedMessagesCell;
-    adminRegistry: ChatAdminRegistryCell;
+    adminRegistry: ChatAdminRegistryView;
     participant?: AdminParticipantRow;
   }
 >((
@@ -712,7 +769,7 @@ export const commitTrustedAdminToggle = handler<
     nextPolicy.everyoneIsAdmin !== undefined
   ) {
     const currentRegistry = adminRegistry.get() as
-      | ChatAdminRegistryStoredValue
+      | ChatAdminRegistryViewStoredValue
       | undefined;
     adminRegistry.set({
       ...(currentRegistry?.admins !== undefined
@@ -725,7 +782,7 @@ export const commitTrustedAdminToggle = handler<
         ? { everyoneIsAdmin: currentRegistry.everyoneIsAdmin }
         : {}),
       ...(nextPolicy.admins !== undefined
-        ? { admins: nextPolicy.admins as ChatAdminList }
+        ? { admins: nextPolicy.admins as ChatAdminListView }
         : {}),
       ...(nextPolicy.bootstrapAdmin !== undefined
         ? {
@@ -734,7 +791,8 @@ export const commitTrustedAdminToggle = handler<
         : {}),
       ...(nextPolicy.everyoneIsAdmin !== undefined
         ? {
-          everyoneIsAdmin: nextPolicy.everyoneIsAdmin as ChatEveryoneAdminFlag,
+          everyoneIsAdmin: nextPolicy
+            .everyoneIsAdmin as ChatEveryoneAdminFlagView,
         }
         : {}),
     });
@@ -742,7 +800,7 @@ export const commitTrustedAdminToggle = handler<
   }
 
   if (nextPolicy.admins !== undefined) {
-    adminRegistry.key("admins").set(nextPolicy.admins as ChatAdminList);
+    adminRegistry.key("admins").set(nextPolicy.admins as ChatAdminListView);
   }
 });
 type TrustedAdminToggleInput = Parameters<typeof commitTrustedAdminToggle>[0];
@@ -751,8 +809,8 @@ export const commitTrustedRoomAdd = handler<
   SubmittedTextEvent,
   {
     myProfile: MyProfileCell;
-    adminRegistry: ChatAdminRegistryCell;
-    rooms: SharedRoomsCell;
+    adminRegistry: ChatAdminRegistryView;
+    rooms: SharedRoomsView;
   }
 >((event, { myProfile, adminRegistry, rooms }) => {
   const { trimmedName, room } = prepareTrustedRoomAdd(
@@ -764,7 +822,7 @@ export const commitTrustedRoomAdd = handler<
   }
 
   const nextRooms = [...roomsValue(rooms), room];
-  rooms.set({ list: nextRooms as SharedRoomList });
+  rooms.set({ list: nextRooms as SharedRoomListView });
 });
 type TrustedRoomAddInput = Parameters<typeof commitTrustedRoomAdd>[0];
 
@@ -861,13 +919,13 @@ export interface TrustedAdminPanelInput {
   profiles: SharedProfilesCell;
   myProfile: MyProfileCell;
   messages: SharedMessagesCell;
-  adminRegistry: ChatAdminRegistryCell;
+  adminRegistry: ChatAdminRegistryView;
 }
 
 export interface TrustedAdminPanelOutput {
   [NAME]: string;
   [UI]: any;
-  adminRegistry: ChatAdminRegistryCell;
+  adminRegistry: ChatAdminRegistryView;
   toggleCurrentUserAdmin: Stream<TrustedAdminPolicyEvent>;
   toggleParticipantAdmin: Stream<TrustedAdminPolicyEvent>;
   toggleEveryoneAdmin: Stream<TrustedAdminPolicyEvent>;
@@ -1085,14 +1143,14 @@ export const TrustedChatSendSurface = pattern<
 
 export interface TrustedRoomAddSurfaceInput {
   myProfile: MyProfileCell;
-  adminRegistry: ChatAdminRegistryCell;
-  rooms: SharedRoomsCell;
+  adminRegistry: ChatAdminRegistryView;
+  rooms: SharedRoomsView;
 }
 
 export interface TrustedRoomAddSurfaceOutput {
   [NAME]: string;
   [UI]: any;
-  rooms: SharedRoomsCell;
+  rooms: SharedRoomsView;
   addRoom: Stream<SubmittedTextEvent>;
 }
 
