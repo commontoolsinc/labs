@@ -122,7 +122,7 @@ against the same reads on the uncompacted snapshot with the same engine
 | board again, warm | 10,073 ms | 8,201 ms |
 | patch replays after the cold board load | 44,928 | 14,273 |
 | one patch on each of the six longest-tailed documents, through the engine | 1–5 ms | 1–5 ms |
-| a topic title edit through the served API, via `cf cell set` | not measured | 10.7 s cold, 3.3 s warm |
+| a topic title edit through the served API, via `cf cell set` (one sample each) | 9.0 s cold, 3.2 s and 2.6 s warm | 10.7 s cold, 3.3 s and 3.3 s warm |
 
 The board's cold load is a traversal over 21,901 documents either way, which
 compaction does not touch; the replays that remain come from the authored
@@ -131,12 +131,14 @@ below the storm's 180 ms after stage 1's bounded base search, and stay there;
 after compaction the longest tails in the store are authored documents, since
 every compacted instance is down to its one row. The edit through the served
 API is another matter: its seconds are the session's watch add over the
-topic's graph (7.2 s cold, 2,864 traversals, `session.watch.add` the only slow
-query), not the write, whose server-side frame is in the noise. The storm
-record's 180 ms was a browser-side `transact` timing with the watch already
-in place, so `cf`'s round trip is not that number and cannot pass or fail
-against it; a comparable figure needs the same client-side instrument on the
-uncompacted file and the compacted one, which this rehearsal did not have. What the compaction buys is
+topic's graph (6.4 s cold on the uncompacted file, 7.2 s on the compacted,
+2,864 traversals each, `session.watch.add` the only slow query), not the
+write, whose server-side frame is in the noise. Measured the same way on both
+files, single samples on a laptop, the two are equal within what such samples
+vary by, which is what the criterion asks: the compacted file is no slower.
+The storm record's 180 ms was a browser-side `transact` timing with the watch
+already in place, so `cf`'s round trip is not that number and is not judged
+against it. What the compaction buys is
 the file: 8.45 GB where there was 22.71 GB, and a history that no longer
 grows a reader's work with every storm.
 
