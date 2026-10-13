@@ -434,10 +434,11 @@ function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
  * and otherwise the space cell's empty `defaultPattern` slot itself. A wish
  * creates no root. A read through the empty slot finds nothing, and a write
  * through it is refused unless the root exists by then
- * (`SpaceRootMissingError`); on a client runtime, a handler whose write there
- * is refused brings the root up and runs again
- * (`bringUpHomeRootForRefusedWrite`). A headless wish hands out nothing over an
- * empty slot, and throws `NoHomeRootError`, so it resolves to nothing.
+ * (`SpaceRootMissingError`); on a client runtime, when a handler's write there
+ * is refused and the refusal escapes the handler, the root is brought up and
+ * the handler runs again (`bringUpHomeRootForRefusedWrite`). A headless wish
+ * hands out nothing over an empty slot, and throws `NoHomeRootError`, so it
+ * resolves to nothing.
  */
 function getHomeRootCell(ctx: WishContext): Cell<any> {
   const found = findHomeRootCell(ctx);

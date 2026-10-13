@@ -11601,10 +11601,12 @@ export class Runner {
    * Brings up the user's Home root for a handler whose write beneath the
    * Home's empty slot was refused with `error`, then throws
    * {@link RetryImmediately} so the scheduler runs the handler again, and its
-   * write lands under the root. A creation that fails is reported as `error`
-   * itself, with the failure as its cause and the handler's `frame` attached,
-   * as a handler's other failures carry theirs. `undefined` when this runtime
-   * brings up no root for `error` (see `bringUpHomeRootForRefusedWrite()`).
+   * write lands under the root. As with an `inSpace()` name, an unserved event
+   * sent with `retries: false` is not run again, so its write drops once the
+   * root exists. A creation that fails is reported as `error` itself, with the
+   * failure as its cause and the handler's `frame` attached, as a handler's
+   * other failures carry theirs. `undefined` when this runtime brings up no
+   * root for `error` (see `bringUpHomeRootForRefusedWrite()`).
    */
   #bringUpHomeRootAndRetry(
     error: unknown,

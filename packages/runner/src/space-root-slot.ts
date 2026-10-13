@@ -24,8 +24,9 @@ export class SpaceRootMissingError extends Error {
     super(
       `${space} has no root yet, so a write beneath its \`defaultPattern\` ` +
         `slot is refused rather than landing in the space cell. On a client ` +
-        `runtime, a handler whose write beneath a user's own Home slot is ` +
-        `refused brings that Home's root up and runs again. Any other space ` +
+        `runtime, when a handler's write beneath a user's own Home slot is ` +
+        `refused and the refusal escapes the handler, that Home's root is ` +
+        `brought up and the handler runs again. Any other space ` +
         `gets its root when an OWNER of it opens it on a client runtime, or, ` +
         `under server execution, from the space's own server once the space ` +
         `is active and its owner resolves; a user with WRITE alone does not ` +
