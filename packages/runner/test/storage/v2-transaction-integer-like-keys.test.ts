@@ -10,7 +10,9 @@ import { Runtime } from "../../src/runtime.ts";
 import { EmulatedStorageManager } from "../../src/storage/v2-emulate.ts";
 import { newSharedServer } from "../memory-v2-test-utils.ts";
 
-const signer = await Identity.fromPassphrase("v2-transaction");
+const signer = await Identity.fromPassphrase(
+  "v2-transaction integer-like keys",
+);
 const space = signer.did();
 
 /** A storage session against the shared server, and the runtime over it. */
