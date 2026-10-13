@@ -18,7 +18,6 @@ import {
   type ActivityCounters,
   type ComposerState,
   type MessageRecord,
-  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -71,7 +70,7 @@ const talliesText = (tallies: readonly ReactionTally[]): string =>
   ).join(", ");
 
 const reactionsOn = (
-  messages: MessagesReadCell,
+  messages: Cell<MessagesValue>,
   index: number,
 ): ChatReaction[] => {
   const message = (messages.get() as MessageRecord[])[index];
@@ -121,6 +120,11 @@ export default pattern(() => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    openThreadKey: "",
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   };
   const aliceOnFirst = FabriChatMessageRow({

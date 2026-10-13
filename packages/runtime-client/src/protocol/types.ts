@@ -11,6 +11,7 @@ import type {
 } from "@commonfabric/data-model/fabric-primitives";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type { JoinVisitDecision } from "@commonfabric/piece/ops";
 import type {
   ApplyOpResolution,
   DeliveryAttention,
@@ -272,6 +273,13 @@ export enum RequestType {
    * directly would skip that repair, and nothing else performs it.
    */
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * whose space the request names, once the space passes vetting, answering
+   * with what was decided. Home is never created for it.
+   */
+  JoinVisitedRoom = "runtime:joinVisitedRoom",
 
   /**
    * Waits for reactive quiescence *and* for every issued commit to be durable.
@@ -1880,6 +1888,14 @@ export type EnsureHomePatternRunningRequest = BaseRequest & {
   existingOnly?: boolean;
 };
 
+/** The {@link RequestType.JoinVisitedRoom} request. */
+export type JoinVisitedRoomRequest = BaseRequest & {
+  type: RequestType.JoinVisitedRoom;
+
+  /** The space of the room the user visited. */
+  space: DID;
+};
+
 /** The {@link RequestType.Idle} request, which carries no payload. */
 export type IdleRequest = BaseRequest & {
   type: RequestType.Idle;
@@ -3353,6 +3369,7 @@ export type IPCClientRequest =
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
+  | JoinVisitedRoomRequest
   | ListEventAttentionRequest
   | ResolveEventAttentionRequest
   | GetGraphSnapshotRequest
@@ -3624,6 +3641,16 @@ export type HomePatternResponse = {
    * Home's root, absent where the request brought nothing up.
    */
   cell?: CellRef;
+};
+
+/**
+ * What a {@link RequestType.JoinVisitedRoom} request came to, absent where the
+ * user has no Home: `sent` to the chat manager, `no-chat-manager` for a Home
+ * whose chat manager has no `joinRoom`, or the reason vetting refused the
+ * space.
+ */
+export type JoinVisitedRoomResponse = {
+  decision?: JoinVisitDecision;
 };
 
 /**
@@ -4124,6 +4151,7 @@ export type RemoteResponse =
   | CellGetResponse
   | CellResponse
   | HomePatternResponse
+  | JoinVisitedRoomResponse
   | CfcLabelViewResponse
   | CellFieldsResponse
   | SnapshotSharePreview
@@ -4214,6 +4242,10 @@ export type Commands = {
   [RequestType.EnsureHomePatternRunning]: {
     request: EnsureHomePatternRunningRequest;
     response: HomePatternResponse;
+  };
+  [RequestType.JoinVisitedRoom]: {
+    request: JoinVisitedRoomRequest;
+    response: JoinVisitedRoomResponse;
   };
   [RequestType.Idle]: {
     request: IdleRequest;

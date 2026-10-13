@@ -21,7 +21,6 @@ import {
   type ComposerState,
   type MessageCell,
   type MessageRecord,
-  type MessagesReadCell,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
@@ -80,10 +79,10 @@ const typed = (text: string, requestId?: string) => ({
   ...(requestId === undefined ? {} : { requestId }),
 });
 
-const stored = (messages: MessagesReadCell): MessageRecord[] =>
+const stored = (messages: Cell<MessagesValue>): MessageRecord[] =>
   messages.get() as MessageRecord[];
 
-const bodies = (messages: MessagesReadCell): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   stored(messages).map((message) =>
     typeof message.body === "string"
       ? message.body
@@ -92,7 +91,7 @@ const bodies = (messages: MessagesReadCell): string =>
       : "<deleted>"
   ).join(" | ");
 
-const times = (messages: MessagesReadCell): bigint[] =>
+const times = (messages: Cell<MessagesValue>): bigint[] =>
   stored(messages).map((message) => nsecOf(message.sentAt));
 
 const strictlyIncreasing = (values: readonly bigint[]): boolean =>
@@ -145,6 +144,11 @@ export default pattern(() => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    openThreadKey: "",
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   };
   const aliceOnFirst = FabriChatMessageRow({
