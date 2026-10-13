@@ -6,11 +6,13 @@
  *
  * The context is entered where work crosses from one side to the other,
  * since everything else inherits it across its awaits and timers. An
- * `ExecutorHost` enters it for everything the memory server and its owner
- * call it for, and each in-process session takes its server frames through
+ * `ExecutorHost` enters it wherever the memory server or its owner starts
+ * work on it: an admitted commit, a session opening, a lifecycle verb, and
+ * its close. Each in-process session takes its server frames through
  * {@link servingContextLoopback}: the serving runtimes' in the context, an
  * emulated client's outside it. The memory server's own work runs in the
- * context of the session whose request it is handling.
+ * context of the session whose request it is handling, and a callback one
+ * side hands the other runs in the context of whichever side calls it.
  *
  * The context rides `AsyncLocalStorage` where the host provides it (Deno). A
  * browser has none, and hosts no serving loop; there the promise-aware

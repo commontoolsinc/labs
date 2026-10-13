@@ -645,11 +645,13 @@ one of its providers goes.
 
 The serving loop's work runs in the serving context, which the runner carries
 per async context and `inServingContext()` reports, so a test whose clients
-share the loop's realm can tell their output apart. The host enters it for
-everything the memory server calls it for, the serving runtimes' sessions take
-each server frame in it, and an emulated client session takes each one outside
-it. The memory server's own work runs in the context of the session whose
-request it is handling.
+share the loop's realm can tell their output apart. The host enters it
+wherever the memory server or the test starts work on it: an admitted commit,
+a session opening, a lifecycle verb, and its close. The serving runtimes'
+sessions take each server frame in it, and an emulated client session takes
+each one outside it. The memory server's own work runs in the context of the
+session whose request it is handling, and a callback one side hands the other
+runs in the context of whichever side calls it.
 
 ```ts
 // Shown at module scope.
