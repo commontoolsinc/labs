@@ -3,7 +3,7 @@ status: historical
 created: 2026-10-12
 archived: 2026-10-12
 reason: "Local implementation and validation snapshot of the Home interface first pass."
-superseded-by: "2026-10-13-home-interface-review-corrections.md"
+superseded-by: "docs/features/shared-space-catalog.md"
 ---
 
 # Home interface first pass

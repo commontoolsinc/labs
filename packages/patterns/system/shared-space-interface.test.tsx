@@ -90,8 +90,30 @@ export default pattern(() => {
     malformed.status === "unavailable" && malformed.reason === "malformed" &&
     malformedReceipts.status === "unavailable" &&
     malformedReceipts.reason === "malformed" &&
-    view.status === "ready" && view.saved.length === 0
+    view.status === "ready" && view.saved.length === 0 &&
+    ["toString", "constructor", "__proto__"].every((kind) =>
+      view.byKind[kind] === undefined
+    )
   );
+  const assert_absent_kinds = assert(() => {
+    const empty = sharedSpaceCollectionViewOf({ entries: {}, offers: {} });
+    return empty.status === "ready" &&
+      empty.byKind["toString"] === undefined &&
+      empty.byKind["constructor"] === undefined &&
+      empty.byKind["__proto__"] === undefined;
+  });
+  const assert_special_kinds = assert(() => {
+    const special = sharedSpaceCollectionViewOf({
+      entries: {
+        [LOOM]: { ...SEED.entries[LOOM], kind: "__proto__" },
+        [CHAT]: { ...SEED.entries[CHAT], kind: "constructor" },
+      },
+      offers: {},
+    });
+    return special.status === "ready" &&
+      special.byKind["__proto__"].saved[0]?.space === LOOM &&
+      special.byKind["constructor"].archived[0]?.space === CHAT;
+  });
   const action_seed = action(() => catalog.set(SEED));
   const assert_partitions = assert(() =>
     view.status === "ready" && view.saved.map((entry) =>
@@ -190,6 +212,8 @@ export default pattern(() => {
   return {
     [TESTS]: [
       { assertion: assert_availability },
+      { assertion: assert_absent_kinds },
+      { assertion: assert_special_kinds },
       { action: action_seed },
       { assertion: assert_partitions },
       { assertion: assert_saved_ui },

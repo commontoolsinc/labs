@@ -60,9 +60,10 @@ An unavailable observation reports `loading` for an undefined value and
 `malformed` for a value the complete catalog validator refuses. A ready view has
 `entries`, keyed by space DID, and `saved`, `archived`, and `other` lists. It
 also has `byKind`, whose keys are the kinds actually present and whose values
-contain those three lists. An absent kind has no entry. Lists order admission
-time newest first, treating missing times as zero and breaking ties by space
-DID. Entries retain extension fields and opaque revisions; unfamiliar states
+contain those three lists. An absent kind has no entry. For presentation, lists
+sort admission hints newest first, treating missing times as zero and breaking
+ties by space DID. This display order establishes no authoritative chronology
+or conflict precedence. Entries retain extension fields and opaque revisions; unfamiliar states
 appear under `other`. The receipts view has the same availability distinction
 and exposes `offers` when ready.
 

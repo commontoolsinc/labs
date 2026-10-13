@@ -106,7 +106,9 @@ function byKind(
       : group.other;
     list.push(entry);
   }
-  return Object.fromEntries(groups);
+  const result: Record<string, SharedSpaceKindView> = Object.create(null);
+  for (const [kind, group] of groups) result[kind] = group;
+  return result;
 }
 
 /**
