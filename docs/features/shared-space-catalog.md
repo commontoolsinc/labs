@@ -77,10 +77,17 @@ shared records and send a registration to Home without reading membership. Home
 handles that command in its own transaction; the two operations are separate
 commits, and completion of the social-space write does not confirm Home's
 registration. Reading the private view in the shared-record handler introduces
-private confidentiality into that handler's writes. Selecting commands preserves
-this transaction boundary; it grants no additional access and declassifies no
-data. An application's rendered membership list reads the view privately and
+private confidentiality into that handler's writes. Selecting commands avoids
+reading collection observations; it grants no additional access and declassifies
+no data. An application's rendered membership list reads the view privately and
 sends its observed revision to Home when the person chooses archive or restore.
+
+Structural role separation does not remove labels already declared on Home or
+manager documents. A root-private manager can still affect FabriChat's stream
+availability checks and manager-derived UI computeds that persist in the room's
+space. Those boundaries require independent verification and, where necessary,
+separate events or repair of stamped documents. Grouped command and observation
+roles alone do not establish that those reads are safe.
 
 Home's **Social spaces** tab browses the same validated collection. Search,
 kind, and membership filters are session-local. It lists saved and archived
