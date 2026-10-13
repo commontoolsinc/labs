@@ -1073,10 +1073,7 @@ describe("seeded violations", () => {
       path: ["result", "0"],
       origin: "link",
       confidentiality: [],
-      integrity: [{
-        type: "https://commonfabric.org/cfc/atom/LinkReference",
-        name: "LinkReference",
-      }],
+      integrity: [],
     });
 
     it("is not applicable to a run that configured no fabric session", () => {

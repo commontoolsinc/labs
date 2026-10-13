@@ -407,8 +407,8 @@ therefore carries its own guard:
   OR clause, is recorded even though the label it names is unchanged. Holding
   the rule at the value is what gives one answer across every spelling a
   stored envelope takes: a version-1 envelope carrying its labels, a version-2
-  one naming the large ones by content hash and holding the small ones inline,
-  and a version this build does not read at all.
+  or version-3 one naming the large ones by content hash and holding the small
+  ones inline, and a version this build does not read at all.
 - Nothing outside the runtime is given a way past this. A fixture still needs
   stored label state in shapes the derivation pass does not produce — a forged
   atom, a version this build cannot read, a record carrying no label map — and

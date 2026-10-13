@@ -28,10 +28,11 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 // append whose list moved under it conflicts and is re-derived against the
 // live list (`SpaceReplica.#commitReadActivities`), and its stamp lands
 // beside its own element. A stored envelope from before that held can still
-// stamp a slot beside another writer's reference, so a slot's stamp counts
-// toward a follower's input witness only where the slot's link entry names
-// the reference the slot holds, and a stamp describing another reference
-// witnesses nothing.
+// stamp a slot beside another writer's reference and nothing in it says
+// which reference a stamp describes, so a slot stamp from such an envelope
+// witnesses nothing (CFC §18.7), and the next persist of the envelope drops
+// its witness and marks the envelope with the vintage from which a slot
+// stamp describes the reference the slot holds.
 
 const signer = await Identity.fromPassphrase("cfc-witness-concurrent-append");
 const space = signer.did();
@@ -135,7 +136,7 @@ const push = async (
  */
 const storedSlotStamps = async (
   server: MemoryV2Server.Server,
-): Promise<{ slot: string; names: string; writer: string }[]> => {
+): Promise<{ slot: string; writer: string }[]> => {
   const storageManager = EmulatedStorageManager.connectTo(server, {
     as: signer,
   });
@@ -144,9 +145,6 @@ const storedSlotStamps = async (
     await load(runtime);
     const tx = runtime.edit();
     const briefs = runtime.getCell<unknown[]>(space, "briefs", undefined, tx);
-    const held = (briefs.getRaw() as unknown[]).map((link) =>
-      parseLink(link, briefs)!.id
-    );
     const metadata = readStoredCfcMetadata(
       tx,
       briefs.getAsNormalizedFullLink(),
@@ -158,18 +156,10 @@ const storedSlotStamps = async (
         !/^\d+$/.test(entry.path[0])
       ) return [];
       const integrity = entry.label.integrity ?? [];
-      const names = integrity.find((atom) =>
-        (atom as { type?: unknown }).type === CFC_ATOM_TYPE.LinkReference
-      ) as { source: { id: string } } | undefined;
       const writer = integrity.find((atom) =>
         (atom as { type?: unknown }).type === CFC_ATOM_TYPE.TransformedBy
       ) as { identity?: { symbol?: string } } | undefined;
-      const slot = entry.path[0];
-      return [{
-        slot,
-        names: names?.source.id === held[Number(slot)] ? "held" : "other",
-        writer: writer?.identity?.symbol ?? "",
-      }];
+      return [{ slot: entry.path[0], writer: writer?.identity?.symbol ?? "" }];
     });
   } finally {
     await runtime.dispose();
@@ -250,83 +240,32 @@ const commitWitnessesSubmit = async (
 };
 
 /**
- * Seeds two submitted briefs and a list of references to them whose slot
- * stamps name the submit step, the stamp at the second slot describing the
- * reference `described` names while the slot holds the one `held` names: the
- * label state a stale envelope leaves when an append lands elsewhere.
+ * Rewrites the list's stored envelope as one written before the placement
+ * rule held: the same entries, at version 1. In such an envelope nothing
+ * says which reference a slot stamp describes.
  */
-const seedListOfBriefs = async (
-  runtime: Runtime,
-  held: "first" | "second",
-  described: "first" | "second" | "legacy",
-): Promise<void> => {
+const downgradeEnvelope = async (runtime: Runtime): Promise<void> => {
+  await load(runtime);
+  const read = runtime.edit();
+  const briefs = runtime.getCell<unknown[]>(space, "briefs", undefined, read);
+  const value = briefs.getRaw();
+  const metadata = readStoredCfcMetadata(
+    read,
+    briefs.getAsNormalizedFullLink(),
+  )!;
+  read.abort();
   const tx = runtime.edit();
-  writeSeedEnvelopeDoc(tx, space);
-  const stamp = (reference?: string) => ({
-    confidentiality: [ROOM],
-    integrity: [
-      { type: CFC_ATOM_TYPE.TransformedBy, identity: SUBMIT },
-      ...(reference === undefined ? [] : [{
-        type: CFC_ATOM_TYPE.LinkReference,
-        source: { space, id: reference, path: [] },
-        target: { space, id: briefsId, path: [] },
-      }]),
-    ],
-  });
-  const idOf = (name: string) =>
-    runtime.getCell(space, name, undefined, tx).getAsNormalizedFullLink().id;
-  const briefsId = idOf("briefs");
-  const briefs = { first: idOf("first-brief"), second: idOf("second-brief") };
-  for (const [name, vote] of [["first", "reject"], ["second", "approve"]]) {
-    seedStoredEnvelope(tx, {
-      space,
-      scope: "space",
-      id: briefs[name as "first" | "second"],
-      path: [],
-    }, {
-      value: { vote },
-      cfc: {
-        version: 1,
-        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-        labelMap: {
-          version: 1,
-          entries: [{
-            path: [],
-            label: stamp(),
-            origin: "derived",
-            observes: "value",
-          }],
-        },
-      },
-    } as never);
-  }
-  const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
-  seedStoredEnvelope(tx, { space, scope: "space", id: briefsId, path: [] }, {
-    value: [link(briefs.first), link(briefs[held])],
+  seedStoredEnvelope(tx, {
+    space,
+    scope: "space",
+    id: briefs.getAsNormalizedFullLink().id,
+    path: [],
+  }, {
+    value: value as never,
     cfc: {
       version: 1,
-      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-      labelMap: {
-        version: 1,
-        entries: [
-          {
-            path: ["0"],
-            label: stamp(briefs.first),
-            origin: "derived",
-            observes: "value",
-          },
-          described === "legacy"
-            // A stamp from before entries were tagged: no origin, no
-            // observation class, and no reference named beside the writer.
-            ? { path: ["1"], label: stamp() }
-            : {
-              path: ["1"],
-              label: stamp(briefs[described]),
-              origin: "derived",
-              observes: "value",
-            },
-        ],
-      },
+      schemaHash: metadata.schemaHash,
+      labelMap: { version: 1, entries: metadata.labelMap.entries },
     },
   } as never);
   expect((await tx.commit({ holdSyncedUntilCovered: false }).verdict).error)
@@ -379,8 +318,8 @@ describe("input witnesses over appends made concurrently", () => {
     await push(server, attacker, ATTACKER, "approve");
     await push(server, stale, SUBMIT, "reject");
     expect(await storedSlotStamps(server)).toEqual([
-      { slot: "0", names: "held", writer: "plant" },
-      { slot: "1", names: "held", writer: "submit" },
+      { slot: "0", writer: "plant" },
+      { slot: "1", writer: "submit" },
     ]);
   });
 
@@ -415,30 +354,37 @@ describe("input witnesses over appends made concurrently", () => {
     );
   });
 
-  it("witnesses the submit step through slot stamps that name their references", async () => {
-    await seedListOfBriefs(session(), "second", "second");
+  it("withholds the witness through a slot stamp persisted before the placement rule held", async () => {
+    // Each slot holds the brief its stamp was written beside, and the stamp
+    // still witnesses nothing: in an envelope of that vintage a stamp can sit
+    // beside another writer's reference, and nothing in it tells the two
+    // cases apart.
+    const first = session();
+    await seed(first);
+    await push(server, first, SUBMIT, "reject");
+    await push(server, first, SUBMIT, "approve");
+    await downgradeEnvelope(first);
     expect(await commitWitnessesSubmit(server, ["reject", "approve"])).toBe(
-      true,
-    );
-  });
-
-  it("withholds the witness through a slot whose stamp names another reference", async () => {
-    // The second slot holds a copy of the first brief's reference, and its
-    // stamp names the second brief: the stamp does not describe the slot.
-    await seedListOfBriefs(session(), "first", "second");
-    expect(await commitWitnessesSubmit(server, ["reject", "reject"])).toBe(
       false,
     );
   });
 
-  it("withholds the witness through a slot whose untagged stamp names no reference", async () => {
-    // The second slot holds a copy of the first brief's reference, and its
-    // stamp, one written before entries were tagged, names the submit step
-    // but no reference, so it cannot say which pointer it describes.
-    await seedListOfBriefs(session(), "first", "legacy");
-    expect(await commitWitnessesSubmit(server, ["reject", "reject"])).toBe(
-      false,
-    );
+  it("re-persists an envelope from before the placement rule without its slot stamps' witness", async () => {
+    // The next labeled append rewrites the envelope in the current version;
+    // the carried-forward stamps keep their confidentiality and lose their
+    // witness, and the append's own stamp names its writer.
+    const writer = session();
+    await seed(writer);
+    await push(server, writer, SUBMIT, "reject");
+    await push(server, writer, SUBMIT, "approve");
+    await downgradeEnvelope(writer);
+    await load(writer);
+    await push(server, writer, SUBMIT, "approve");
+    expect(await storedSlotStamps(server)).toEqual([
+      { slot: "0", writer: "" },
+      { slot: "1", writer: "" },
+      { slot: "2", writer: "submit" },
+    ]);
   });
 
   it("withholds the witness where a concurrent append put another writer's element among the submitted ones", async () => {

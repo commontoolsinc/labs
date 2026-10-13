@@ -101,10 +101,6 @@ export const LABEL_FIELD_CLASSIFICATION:
     entry({ type: CFC_ATOM_TYPE.Context }, ["name"], "public"),
     entry({ type: CFC_ATOM_TYPE.Context }, ["hash"], "public"),
     entry({ type: CFC_ATOM_TYPE.Context }, ["subject"], "commitment"),
-    // "LinkReference.source/target → commitment — display/provenance only;
-    // nothing dereferences the persisted copy."
-    entry({ type: CFC_ATOM_TYPE.LinkReference }, ["source"], "commitment"),
-    entry({ type: CFC_ATOM_TYPE.LinkReference }, ["target"], "commitment"),
     // "TransformedBy.identity.sourceFile/bindingPath → commitment —
     // human-readable code layout is the leak; trust statements should bind
     // the content-addressed moduleIdentity (public) instead."

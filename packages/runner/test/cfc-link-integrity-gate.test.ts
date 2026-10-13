@@ -19,7 +19,7 @@ describe("CFC link-write integrity gate", () => {
   // schema-derived labels; an author could persist a forged InjectionSafe
   // through a link's carried label view (or embedded link schema) and later
   // satisfy an InjectionSafe requiredIntegrity gate. Author-influenced link
-  // labels must be gated too; only the runtime-minted LinkReference survives.
+  // labels must be gated too.
 
   it("filters a forged InjectionSafe carried on a link's label view", async () => {
     const storageManager = StorageManager.emulate({ as: signer });

@@ -116,6 +116,7 @@ export class UnknownCfcMetadataVersionError extends StoredCfcMetadataError {
 const KNOWN_CFC_METADATA_VERSIONS: readonly StoredCfcMetadata["version"][] = [
   1,
   2,
+  3,
 ];
 
 /** Whether `value` is an envelope `version` this build interprets. */
@@ -193,7 +194,7 @@ const isReadableStoredEntry = (
   entry: unknown,
 ): boolean =>
   isStoredLabelMapEntry(entry) &&
-  (version === 2 || !isCfcLabelReference(entry.label)) &&
+  (version !== 1 || !isCfcLabelReference(entry.label)) &&
   (!isLabelMetadataTemplateEntry(entry) ||
     isWellFormedLabelMetadataTemplateEntry(entry));
 

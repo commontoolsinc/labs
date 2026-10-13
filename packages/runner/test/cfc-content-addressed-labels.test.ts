@@ -434,7 +434,7 @@ describe("CFC content-addressed labels", () => {
   });
 
   describe("persist path", () => {
-    it("writes a version-2 envelope that resolves to the inline labels", async () => {
+    it("writes a version-3 envelope that resolves to the inline labels", async () => {
       await withRuntime(async (runtime) => {
         const { id, cidWrites, stored } = await declaredWrite(
           runtime,
@@ -442,7 +442,7 @@ describe("CFC content-addressed labels", () => {
           { secret: "classified", note: "n" },
           true,
         );
-        expect(stored?.version).toBe(2);
+        expect(stored?.version).toBe(3);
         const entries = stored!.labelMap.entries;
         const referenced = entries.filter((entry) =>
           isCfcLabelReference(entry.label)
@@ -460,7 +460,7 @@ describe("CFC content-addressed labels", () => {
 
         const tx = runtime.edit();
         const resolved = readStoredCfcMetadata(tx, { space, id });
-        expect(resolved?.version).toBe(2);
+        expect(resolved?.version).toBe(3);
         for (const entry of resolved!.labelMap.entries) {
           expect(isCfcLabelReference(entry.label)).toBe(false);
         }
@@ -472,7 +472,7 @@ describe("CFC content-addressed labels", () => {
       });
     });
 
-    it("stores fewer envelope bytes than the version-1 spelling of the same labels", async () => {
+    it("stores fewer envelope bytes than the inline spelling of the same labels", async () => {
       await withRuntime(async (runtime) => {
         const inline = await declaredWrite(
           runtime,
@@ -486,8 +486,8 @@ describe("CFC content-addressed labels", () => {
           { secret: "classified", note: "n" },
           true,
         );
-        expect(inline.stored?.version).toBe(1);
-        expect(referenced.stored?.version).toBe(2);
+        expect(inline.stored?.version).toBe(3);
+        expect(referenced.stored?.version).toBe(3);
         expect(bytesOf(referenced.stored)).toBeLessThan(
           bytesOf(inline.stored),
         );
@@ -510,35 +510,53 @@ describe("CFC content-addressed labels", () => {
       });
     });
 
-    it("rewrites a version-1 envelope in version 2 on its next persist, once", async () => {
+    it("rewrites a version-1 envelope at version 3 on its next persist, once", async () => {
       await withRuntime(async (runtime) => {
         const first = await declaredWrite(runtime, "migrate", {
           secret: "classified",
           note: "n",
-        }, false);
-        expect(first.stored?.version).toBe(1);
+        }, true);
+        await runtime.storageManager.synced();
+        // The same labels in the earliest spelling, as a store written
+        // before either later version holds them.
+        {
+          const tx = runtime.edit();
+          const resolved = readStoredCfcMetadata(tx, { space, id: first.id })!;
+          tx.tx.write({
+            space,
+            id: first.id as URI,
+            type: "application/json",
+            path: ["cfc"],
+          }, {
+            version: 1,
+            schemaHash: resolved.schemaHash,
+            labelMap: { version: 1, entries: resolved.labelMap.entries },
+          });
+          expect((await tx.commit().settled).error).toBeUndefined();
+        }
+        expect(replicaOf(runtime).getDocument(first.id)?.cfc?.version).toBe(1);
         await runtime.storageManager.synced();
         const second = await declaredWrite(runtime, "migrate", {
           secret: "classified",
           note: "n",
         }, true);
         expect(second.envelopeWritten).toBe(true);
-        expect(second.stored?.version).toBe(2);
+        expect(second.stored?.version).toBe(3);
         await runtime.storageManager.synced();
         const third = await declaredWrite(runtime, "migrate", {
           secret: "classified",
           note: "n",
         }, true);
         expect(third.envelopeWritten).toBe(false);
-        // The migration runs one way: a writer with the flag off leaves a
-        // stored version 2 alone rather than rewriting it back.
+        // A writer with the flag off spells the same version, so it leaves
+        // the stored envelope alone as well.
         await runtime.storageManager.synced();
         const fourth = await declaredWrite(runtime, "migrate", {
           secret: "classified",
           note: "n",
         }, false);
         expect(fourth.envelopeWritten).toBe(false);
-        expect(fourth.stored?.version).toBe(2);
+        expect(fourth.stored?.version).toBe(3);
       });
     });
 
@@ -559,12 +577,12 @@ describe("CFC content-addressed labels", () => {
           secret: "classified",
           note: "n",
         }, true);
-        expect(second.stored?.version).toBe(2);
+        expect(second.stored?.version).toBe(3);
         expect(second.cidWrites).toEqual([]);
       });
     });
 
-    it("keeps the version-1 inline form with the flag off", async () => {
+    it("keeps the inline form with the flag off", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -576,7 +594,7 @@ describe("CFC content-addressed labels", () => {
           note: "n",
         }, runtime.cfcContentAddressedLabels);
         expect(runtime.cfcContentAddressedLabels).toBe(false);
-        expect(stored?.version).toBe(1);
+        expect(stored?.version).toBe(3);
         expect(
           stored!.labelMap.entries.some((entry) =>
             isCfcLabelReference(entry.label)
@@ -836,7 +854,7 @@ describe("CFC content-addressed labels", () => {
       const tx = {
         readOrThrow: () => ({
           cfc: {
-            version: 3,
+            version: 4,
             schemaHash: "future-format",
             labelMap: { version: 1, entries: [] },
           },

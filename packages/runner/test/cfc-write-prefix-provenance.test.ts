@@ -267,7 +267,7 @@ describe("CFC write-prefix provenance (D4, doc §4/§5)", () => {
       await seedLabeledDoc(runtime, "d4-prov-lookup", "lookup", {
         integrity: [
           { kind: "represents-principal", subject: signer.did() },
-          { type: "https://commonfabric.org/cfc/atom/LinkReference" },
+          { type: "https://commonfabric.org/cfc/atom/Origin" },
         ],
       });
 

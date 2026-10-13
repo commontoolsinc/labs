@@ -28,10 +28,10 @@ confidentiality is the reference restriction conjoined with the target's
 current labels; integrity is the target's plus the link's own endorsements,
 §3.7.2). What the runtime persists at the link path in space B is the
 reference's own label (`linkSlotLabel`, `prepare.ts`): the link schema's
-declarations, the restriction the written handle carried, the creating
-attempt's flow join where flow labels persist, and a runtime-minted
-`LinkReference` endorsement recording **both** spaces. The persisted entry is
-stamped `origin: "link"`. Nothing of the source's labels is copied into it
+declarations and the restriction the written handle carried, stamped
+`origin: "link"`, beside the creating attempt's flow join where flow labels
+persist. No evidence atom is minted for the reference (§15.4, the retired
+`LinkReference`). Nothing of the source's labels is copied into the entry
 (§8.2.5, §8.12.8): a public, independently acquired reference to confidential
 content is public to hold and compare, and confidential to read through.
 

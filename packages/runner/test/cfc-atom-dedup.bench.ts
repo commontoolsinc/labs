@@ -24,8 +24,8 @@ import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "../src/cfc/observation.ts";
 
 /** The atom shape a persisted flow label carries: one per written path. */
-const linkReferenceAtom = (index: number) => ({
-  type: CFC_ATOM_TYPE.LinkReference,
+const originAtom = (index: number) => ({
+  type: CFC_ATOM_TYPE.Origin,
   source: {
     space: "did:key:z6MkfixtureSpace",
     id: "of:fixture-document",
@@ -34,11 +34,11 @@ const linkReferenceAtom = (index: number) => ({
 });
 
 const distinct = (size: number) =>
-  Array.from({ length: size }, (_, index) => linkReferenceAtom(index));
+  Array.from({ length: size }, (_, index) => originAtom(index));
 
 /** Four atoms repeated to fill `size`, so the join keeps four of them. */
 const repeated = (size: number) =>
-  Array.from({ length: size }, (_, index) => linkReferenceAtom(index % 4));
+  Array.from({ length: size }, (_, index) => originAtom(index % 4));
 
 const SIZES = [8, 64, 512] as const;
 

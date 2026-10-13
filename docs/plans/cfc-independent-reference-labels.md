@@ -267,6 +267,17 @@ mechanizes the atom. The ruling's correspondence note says so.
 
 ### Stage 4: the runtime stops minting and reading the atom (labs companion)
 
+Implemented, against the ruling merged as specs commit `132653b3`
+(commonfabric/specs#66), with the snapshot regenerated. The vintage is the
+envelope version: every envelope is now written at version 3, spelled as
+version 2 with the labels inline or by reference as the
+`contentAddressedLabels` flag selects, and an envelope of an earlier version
+is rewritten once on its next persist. `slotStampPredatesPlacementRule` in
+`cfc/prepare.ts` withholds the witness of a value stamp at a reference slot
+of an earlier-version envelope, and `carriedStampLabel` drops such a stamp's
+`TransformedBy` when the envelope is re-persisted. The link entry holds the
+reference's declared and carried restriction and nothing minted.
+
 Depends on stages 2 and 3.
 
 - Remove the two mint sites (`linkReferenceIntegrity` and the `rootReferences`

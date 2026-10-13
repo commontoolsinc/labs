@@ -226,6 +226,17 @@ entity's root, and not a write redirect. So:
 - a `Cell.set` destination whose value holds such references, a record
   holding a list of objects, say, is stamped whole.
 
+A slot's stamp describes the reference the slot holds only in an envelope
+written at version 3 or later (`cfc-stored-envelope.md`), the vintage from
+which the runtime re-derives an attempt's labels against the committed
+placement (spec §8.10.2.2): before that, an append landed at the live tail
+while its envelope described the list the attempt read, so a stamp could sit
+beside another writer's reference. A value stamp at a reference slot of an
+earlier-version envelope is therefore no witness at all (spec §18.7,
+`slotStampPredatesPlacementRule` in `prepare.ts`), and the next persist of
+that envelope drops the stamp's `TransformedBy` and keeps its
+confidentiality (`carriedStampLabel`).
+
 A slot's stamp says who stored the reference there and nothing about what it
 refers to. A reader that follows it reads the entity as well, and each
 location it reads there is a confidential input location of its own, resolved
@@ -312,8 +323,8 @@ Each of these refuses an honest release rather than admitting a crafted one:
 - **References the writer did not supply.** A reference stored any way other
   than by anchoring an object the writer put in an array — a cell set into a
   slot, a reference copied from another list — earns its slot no value stamp,
-  and its link entry (the reference's own restriction and `LinkReference`
-  provenance) has no `TransformedBy`. A transformation that reads such a
+  and its link entry (the reference's own restriction) has no
+  `TransformedBy`. A transformation that reads such a
   slot retains no witness, whoever wrote it. So does a standalone reference
   probe, which consumes the link entry alone.
 - **A list whose own node is confidential, grown by collection operations.** A

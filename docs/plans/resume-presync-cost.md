@@ -264,7 +264,8 @@ where the pre-sync was no longer the whole cost.
       drop a stored slot the schema leaves unused on replay, so the label
       maps grow with the message count once, not twice.
 - [ ] The remaining label map of a row is its 25 fixed entries, about
-      9 KB, of which the `LinkReference` atoms are the largest share: each
+      9 KB, of which the `LinkReference` atoms, since retired by
+      `cfc-independent-reference-labels.md`, were the largest share: each
       spells its source and its target in full, and on an in-place link
       entry both restate the link stored beside it. Shrinking that is a
       change to the atom's registered shape, which the Contextual Flow

@@ -80,7 +80,7 @@ describe("CFC decomposed envelopes", () => {
         runtime,
         "decomposed-target",
       );
-      expect(stored?.version).toBe(1);
+      expect(stored?.version).toBe(3);
       expect(stored?.labelMap.entries.length).toBeGreaterThan(0);
       // The root rides the transaction, and so does the `$defs` member the
       // decomposition split out — at least two distinct documents.
@@ -105,7 +105,7 @@ describe("CFC decomposed envelopes", () => {
     const runtime = makeRuntime(storageManager);
     try {
       const first = await declaredWrite(runtime, "decomposed-idempotent");
-      expect(first.stored?.version).toBe(1);
+      expect(first.stored?.version).toBe(3);
       await storageManager.synced();
 
       // The same declared write again: the stored envelope loads through
@@ -210,7 +210,7 @@ describe("CFC decomposed envelopes", () => {
     }
   });
 
-  it("keeps the version-1 inline form with the flag off", async () => {
+  it("keeps the inline form with the flag off", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -226,7 +226,7 @@ describe("CFC decomposed envelopes", () => {
       const stored = (runtime.storageManager.open(space).replica as unknown as {
         getDocument(id: string): { cfc?: CfcMetadata } | undefined;
       }).getDocument(targetId);
-      expect(stored?.cfc?.version).toBe(1);
+      expect(stored?.cfc?.version).toBe(3);
       const envDoc = (runtime.storageManager.open(space).replica as unknown as {
         getDocument(id: string): { value?: unknown } | undefined;
       }).getDocument(`cid:${stored!.cfc!.schemaHash}`);

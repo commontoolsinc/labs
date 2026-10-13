@@ -30,7 +30,6 @@ export type PropagationClass = "hereditary" | "value-bound" | "provenance";
 const CLASS_BY_TYPE = new Map<string, PropagationClass>([
   [CFC_ATOM_TYPE.PolicyCertified, "hereditary"],
   [CFC_ATOM_TYPE.InjectionSafe, "value-bound"],
-  [CFC_ATOM_TYPE.LinkReference, "value-bound"],
   [CFC_ATOM_TYPE.Caveat, "value-bound"],
   // Screening evidence makes exact-current-value claims (its value-stage form
   // binds via `valueRef`), so it is value-bound (spec §15.4) — any

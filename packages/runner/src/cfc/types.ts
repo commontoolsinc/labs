@@ -378,7 +378,7 @@ export type LabelMapEntry = {
  * union is an envelope the build cannot interpret, and every reader fails
  * closed on it rather than treating the document as unlabeled.
  */
-export type CfcMetadataVersion = 1 | 2;
+export type CfcMetadataVersion = 1 | 2 | 3;
 
 /**
  * A label held by reference in a stored version-2 envelope: a single-member
@@ -399,7 +399,10 @@ export type StoredLabelMapEntry = Omit<LabelMapEntry, "label"> & {
  * A CFC envelope as it is stored at a document's reserved `cfc` member,
  * discriminated by version: version 1 holds every label inline, and a
  * reference in one is a spelling it does not define; version 2 may hold a
- * label by reference. Readers resolve either to a {@link CfcMetadata} —
+ * label by reference; version 3 is spelled as version 2 and marks an
+ * envelope written under the placement rule of CFC §8.10.2.2, so that a
+ * value stamp it holds at a slot describes the value the committed document
+ * holds there. Readers resolve each to a {@link CfcMetadata} —
  * every label inline — before any consumer walks it; the stored spelling
  * is visible only to the persist path, which needs to know which version
  * a document holds.
@@ -412,6 +415,11 @@ export type StoredCfcMetadata =
   }
   | {
     version: 2;
+    schemaHash: string;
+    labelMap: { version: 1; entries: Array<StoredLabelMapEntry> };
+  }
+  | {
+    version: 3;
     schemaHash: string;
     labelMap: { version: 1; entries: Array<StoredLabelMapEntry> };
   };

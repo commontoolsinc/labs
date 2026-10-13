@@ -4458,63 +4458,42 @@ const isRuntimeTemplateBeneath = (
 };
 
 /**
- * Whether a stamp names the reference `target` names: whether its
- * `LinkReference` names the document `target` is in, at a path at or above
- * `target`'s.
+ * The envelope version from which a value stamp at a slot describes the
+ * value the committed document holds there (CFC §8.10.2.2): the runtime
+ * re-derives an attempt's per-value labels against the committed placement,
+ * so a stamp beside a reference is the stamp of the attempt that placed it.
  */
-const stampNamesReference = (
-  entry: LabelMapEntry,
-  target: CfcAddress,
-): boolean =>
-  (entry.label.integrity ?? []).some((atom) => {
-    if (
-      !isObjectNotArray(atom) ||
-      (atom as { type?: unknown }).type !== CFC_ATOM_TYPE.LinkReference
-    ) return false;
-    const source = (atom as {
-      source?: { space?: unknown; id?: unknown; path?: unknown };
-    }).source;
-    return source !== undefined && source.space === target.space &&
-      source.id === target.id && Array.isArray(source.path) &&
-      isPrefix(
-        canonicalizeLogicalPath(source.path as string[]),
-        canonicalizeLogicalPath(target.path),
-      );
-  });
+const PLACEMENT_RULED_ENVELOPE_VERSION = 3;
 
 /**
- * Whether a stamp at exactly `slot` names its writer but describes a
- * reference other than `target`, the one the slot holds, or none. A slot a writer
- * stored a reference at is stamped with that reference named beside the
- * writer (`assertedValueRootPaths`), so the stamp describes one pointer. An
- * append lands at the list's live tail, while the label envelope its
- * transaction wrote describes the list it read, so under concurrent appends a
- * slot's stamp can sit beside another writer's reference.
+ * Whether a stamp at exactly `slot` names its writer in an envelope written
+ * before the placement rule held. An append lands at the list's live tail,
+ * while the label envelope its transaction wrote described the list it read,
+ * so in such an envelope a slot's stamp can sit beside another writer's
+ * reference, and nothing in it says which reference it describes (§18.7).
  */
-const slotStampDescribesAnother = (
+const slotStampPredatesPlacementRule = (
   metadata: CfcMetadata,
   slot: readonly string[],
-  target: CfcAddress,
 ): boolean => {
+  if (metadata.version >= PLACEMENT_RULED_ENVELOPE_VERSION) return false;
   const key = pathKey(slot);
   // Every entry a value read of the slot takes as witness evidence counts,
   // an untagged one written before entries carried an origin or an
-  // observation class included: a stamp that names a writer at the slot but
-  // no reference, or another one, cannot vouch for the pointer there.
+  // observation class included.
   return metadata.labelMap.entries.some((entry) =>
     isWitnessEvidence(entry) &&
     (entry.observes === undefined || entry.observes === "value") &&
     pathKey(entry.path) === key &&
-    (entry.label.integrity ?? []).some(isTransformedByAtom) &&
-    !stampNamesReference(entry, target)
+    (entry.label.integrity ?? []).some(isTransformedByAtom)
   );
 };
 
 /**
  * The input witnesses a followed reference holds at its slot: the retained
- * atoms of the value stamps that resolve there, and none when a stamp at the
- * slot describes another reference. Which reference sits at a slot decides
- * which document a reader reads, so a reader that follows one to
+ * atoms of the value stamps that resolve there, and none when the stamp at
+ * the slot predates the placement rule. Which reference sits at a slot
+ * decides which document a reader reads, so a reader that follows one to
  * confidential content consumed the choice as an input, whatever the slot's
  * own label says. A reference link writes put in place carries no
  * value stamp of its own, so it retains nothing unless its writer's stamp
@@ -4523,10 +4502,9 @@ const slotStampDescribesAnother = (
 const followedReferenceWitnesses = (
   metadata: CfcMetadata | undefined,
   slot: readonly string[],
-  target: CfcAddress,
 ): CfcAtom[] => {
   if (metadata === undefined) return [];
-  if (slotStampDescribesAnother(metadata, slot, target)) return [];
+  if (slotStampPredatesPlacementRule(metadata, slot)) return [];
   const evidence = consumedEntriesForRead(metadata, slot, {
     nonRecursive: true,
     consumes: "value",
@@ -4928,7 +4906,7 @@ const deriveFlowJoinImpl = (
       // hereditary meet quantifies over the transformation's CONTENT inputs
       // (§8.9.3 derives certification for what the tx computed from);
       // pointer-topology observations are transport, whose integrity
-      // evidence is the LinkReference chain on the link entry itself.
+      // evidence is the value stamp at the followed slot, taken above.
       // Letting them into the meet would empty it on every terminal
       // resolution probe (probes rarely resolve a label), silently ending
       // TransformedBy/PolicyCertified propagation everywhere.
@@ -5061,13 +5039,14 @@ const deriveFlowJoinImpl = (
           "application/json",
         );
     };
-    // A slot whose stamp describes another reference than the one it holds
-    // witnesses nothing, whether its reference is followed or only observed.
-    for (const { slot, target } of references) {
+    // A slot whose stamp predates the placement rule witnesses nothing,
+    // whether its reference is followed or only observed: the stamp does
+    // not say which reference it describes.
+    for (const { slot } of references) {
       const metadata = metadataOf(slot);
       if (
         metadata !== undefined &&
-        slotStampDescribesAnother(metadata, slot.path, target)
+        slotStampPredatesPlacementRule(metadata, slot.path)
       ) {
         noteInputWitnesses([]);
         break;
@@ -5118,11 +5097,9 @@ const deriveFlowJoinImpl = (
         }
       }
     }
-    for (const { slot, target } of followed) {
+    for (const { slot } of followed) {
       const metadata = metadataOf(slot);
-      noteInputWitnesses(
-        followedReferenceWitnesses(metadata, slot.path, target),
-      );
+      noteInputWitnesses(followedReferenceWitnesses(metadata, slot.path));
       if (inputWitnesses?.length === 0) break;
     }
   }
@@ -6814,7 +6791,6 @@ const createPrefixProvenanceSummary = (): CfcPrefixProvenanceSummary => ({
 // dereferenced / fetched. They describe HOW a value was obtained, never an
 // endorsement an author can require via requiredIntegrity.
 const STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES = new Set<string>([
-  CFC_ATOM_TYPE.LinkReference,
   CFC_ATOM_TYPE.Origin,
 ]);
 
@@ -6832,7 +6808,7 @@ const isNonEndorsementProvenanceAtom = (atom: unknown): boolean =>
 // not gate a requiredIntegrity write: the quantification would otherwise
 // false-reject an unrelated protected write (audit S7 — e.g.
 // cfc-group-chat-demo's admin grant reads adminRegistry.bootstrapAdmin.subject,
-// label [represents-principal, LinkReference], and that lookup fails the admins
+// label [represents-principal, Origin], and that lookup fails the admins
 // list's requiredIntegrity:[group-chat-admin]). A read carrying ANY
 // confidentiality, or any genuine endorsement integrity atom, stays in the gate
 // — that keeps the cross-cell prompt-injection screen sound (its briefing reads
@@ -7863,7 +7839,6 @@ const installCarriedPolicyManifests = (
 const RUNTIME_MINTED_INTEGRITY_ATOM_TYPES = new Set<string>([
   CFC_ATOM_TYPE.InjectionSafe,
   CFC_ATOM_TYPE.Builtin,
-  CFC_ATOM_TYPE.LinkReference,
   CFC_ATOM_TYPE.Origin,
   // Hereditary certification must come from the certification process, not
   // a pattern-authored schema — forging it would survive every combination.
@@ -8020,20 +7995,6 @@ const mergeLabels = (
   left: IFCLabel | undefined,
   right: IFCLabel | undefined,
 ): IFCLabel => joinLabels([left, right]);
-
-const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
-  type: CFC_ATOM_TYPE.LinkReference,
-  source: {
-    space: input.source.space,
-    id: input.source.id,
-    path: canonicalizeLogicalPath(input.source.path),
-  },
-  target: {
-    space: input.target.space,
-    id: input.target.id,
-    path: canonicalizeLogicalPath(input.target.path),
-  },
-});
 
 const rootLabelFromSchema = (
   tx: IExtendedStorageTransaction,
@@ -8644,9 +8605,8 @@ const linkedSourceEvidence = (
   // The rest is author-influenceable — a link value can carry a forged link
   // schema or label view, and a schema this transaction writes the source
   // under is the writer's own — so runtime-minted evidence atoms are gated
-  // out of it unless a trusted builtin authored the link write. The
-  // runtime-minted LinkReference is then added, never filtered: it is the
-  // only evidence atom a link write legitimately mints (audit S4 review).
+  // out of it unless a trusted builtin authored the link write. A link write
+  // mints no evidence atom of its own (CFC §15.4).
   const gatedIntegrity = mergeLabelValues(
     storedLabel?.integrity,
     storedSource?.principalClaims,
@@ -8679,10 +8639,7 @@ const linkedSourceEvidence = (
       sourceLabel.confidentiality,
       boundLinkConfidentiality,
     ),
-    integrity: mergeLabelValues(
-      gatedIntegrity,
-      [linkReferenceIntegrity(input)],
-    ),
+    integrity: gatedIntegrity,
   };
   return { label, sourceView };
 };
@@ -8694,7 +8651,7 @@ const linkedSourceEvidence = (
  * names the current one, joined with the restriction the written handle
  * carries at its root, which is how the handle was acquired. Its integrity is
  * the link schema's, gated against runtime-minted evidence an author could
- * forge, plus the runtime's own `LinkReference`. Nothing of the source's
+ * forge; no evidence atom of the runtime's own (§15.4). Nothing of the source's
  * labels is in it: the source's labels stay with the source and are consumed
  * when the reference is followed (§8.2.4), and the persist loop stamps the
  * creating attempt's flow join at the slot beside the entry where flow
@@ -8792,19 +8749,9 @@ const linkSlotLabel = (
     ),
     integrity: gatedIntegrity,
   };
-  // A reference with no restriction of its own persists no entry: the
-  // runtime's endorsement restates the link beside it, and an entry holding
-  // only that would say nothing a reader of the slot does not already see.
+  // A reference with no restriction of its own persists no entry.
   if (!hasLabelValues(own)) return {};
-  return {
-    label: {
-      ...own,
-      integrity: mergeLabelValues(
-        own.integrity,
-        [linkReferenceIntegrity(input)],
-      ),
-    },
-  };
+  return { label: own };
 };
 
 /** Result of resolving a link write through its pending reference sources. */
@@ -11989,6 +11936,28 @@ export function* prepareBoundaryCommitSteps(
       entryPath: readonly string[],
     ): IFCLabel => {
       const integrity = entry.label.integrity;
+      // A value stamp carried forward from an envelope written before the
+      // placement rule held, at a slot that holds a reference, does not say
+      // which reference it describes (CFC §18.7): it keeps its
+      // confidentiality and loses its witness, and the rewritten envelope
+      // carries the vintage from which a stamp at a slot describes the
+      // reference the slot holds.
+      if (
+        existing !== undefined &&
+        existing.version < PLACEMENT_RULED_ENVELOPE_VERSION &&
+        isWitnessEvidence(entry) &&
+        (entry.observes === undefined || entry.observes === "value") &&
+        integrity !== undefined && integrity.some(isTransformedByAtom) &&
+        isPrimitiveCellLink(
+          tx.readValueOrThrow({ space, id, scope, path: [...entryPath] }, {
+            meta: INTERNAL_VERIFIER_META,
+          }),
+        )
+      ) {
+        const kept = integrity.filter((atom) => !isTransformedByAtom(atom));
+        const { integrity: _dropped, ...rest } = entry.label;
+        return kept.length > 0 ? { ...rest, integrity: kept } : rest;
+      }
       if (
         !flowPersist ||
         (entry.origin !== "derived" && entry.origin !== "structure") ||
@@ -12630,12 +12599,6 @@ export function* prepareBoundaryCommitSteps(
       // write as pure link structure; its whole value is not, so it stamps
       // here all the same, and the membership stamps beneath it give way.
       const derivedStampKeys = new Set(derivedStampPaths.map(pathKey));
-      // A root that is itself a slot holding a reference anchoring stored
-      // names that reference beside its writer, so the stamp describes one
-      // pointer (`slotStampDescribesAnother`).
-      const rootReferences = assertedRoots.length === 0
-        ? new Map<string, CfcAddress>()
-        : recordedReferences(tx, { space, id, scope });
       for (const root of assertedRoots) {
         if (derivedStampKeys.has(pathKey(root))) continue;
         derivedStampKeys.add(pathKey(root));
@@ -12668,26 +12631,15 @@ export function* prepareBoundaryCommitSteps(
         // reader consuming both as covering entries sees today's label or
         // a wider one — additively safe, no dial (C0 §9).
         if (flowHasLabels) {
-          const reference = rootReferences.get(pathKey(path));
-          const integrity = reference === undefined ? flowIntegrity : [
-            ...flowIntegrity,
-            {
-              type: CFC_ATOM_TYPE.LinkReference,
-              source: {
-                space: reference.space,
-                id: reference.id,
-                path: canonicalizeLogicalPath(reference.path),
-              },
-              target: { space, id, path: [...path] },
-            },
-          ];
           persistedLabelEntries.push(markFlowStampEntry({
             path,
             label: {
               ...(flowConfidentiality.length > 0
                 ? { confidentiality: [...flowConfidentiality] }
                 : {}),
-              ...(integrity.length > 0 ? { integrity: [...integrity] } : {}),
+              ...(flowIntegrity.length > 0
+                ? { integrity: [...flowIntegrity] }
+                : {}),
             },
             origin: "derived",
             observes: "value",
@@ -13096,7 +13048,7 @@ export function* prepareBoundaryCommitSteps(
     // version 1 holds every label inline, and reading resolves either to
     // the same metadata (`docs/specs/content-addressed-cfc-labels.md`).
     let metadata: CfcMetadata = {
-      version: state.contentAddressedLabels ? 2 : 1,
+      version: PLACEMENT_RULED_ENVELOPE_VERSION,
       schemaHash: envelopeRoot?.rootHash ?? schemaAndHash.taggedHashString,
       labelMap: {
         version: 1,
@@ -13127,14 +13079,17 @@ export function* prepareBoundaryCommitSteps(
     // content-verified) via loadSchemaDocument above — it exists, so there is
     // nothing to ensure.
     //
-    // One exception to the skip, in one direction: a version-1 envelope
-    // whose labels are unchanged is rewritten in version 2 when the flag
-    // selects it, which is how a store migrates — each document at most
-    // once, on its next persist. A stored version 2 is left alone by a
-    // writer selecting version 1, so writers on either setting sharing a
-    // document do not rewrite it at each other (SC-11).
-    const migrates = existing !== undefined && existing.version === 1 &&
-      metadata.version === 2;
+    // One exception to the skip: an envelope of an earlier version whose
+    // labels are unchanged is rewritten in the current one, which is how a
+    // store migrates — each document at most once, on its next persist —
+    // and how an envelope comes to carry the placement-rule vintage. Whether
+    // its labels are then spelled inline or by reference is the
+    // content-addressed-labels flag's choice, and both spellings are the
+    // current version, so writers on either setting sharing a document do
+    // not rewrite it at each other (SC-11).
+    const migrates = existing !== undefined &&
+      existing.version < PLACEMENT_RULED_ENVELOPE_VERSION &&
+      metadata.version === PLACEMENT_RULED_ENVELOPE_VERSION;
     // A preserved runtime output does not carry the migration: its waiver
     // holds only while nothing about the envelope changes, and a version-1
     // envelope spells the same labels as its version-2 rewrite. Refusing
@@ -13256,20 +13211,22 @@ export function* prepareBoundaryCommitSteps(
       ...metadata.labelMap.entries,
       ...(metadata.labelMap.documentEntries ?? []),
     ];
-    const storedEnvelope: StoredCfcMetadata = metadata.version === 2
+    const storedEnvelope: StoredCfcMetadata = metadata.version !== 1
       ? {
-        version: 2,
+        version: metadata.version,
         schemaHash: metadata.schemaHash,
         labelMap: {
           version: 1,
-          entries: storedLabelMapEntries(
-            storedEntries,
-            (content) =>
-              tx.stageContentAddressedDocument(
-                space,
-                content as unknown as FabricValue,
-              ),
-          ),
+          entries: state.contentAddressedLabels
+            ? storedLabelMapEntries(
+              storedEntries,
+              (content) =>
+                tx.stageContentAddressedDocument(
+                  space,
+                  content as unknown as FabricValue,
+                ),
+            )
+            : storedEntries,
         },
       }
       : {

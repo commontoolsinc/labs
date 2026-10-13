@@ -28,12 +28,6 @@ describe("CFC label-field classification (inv-12 / SC-25)", () => {
       classifyLabelField({ type: CFC_ATOM_TYPE.Space }, ["id"]),
     ).toBe("public");
     expect(
-      classifyLabelField({ type: CFC_ATOM_TYPE.LinkReference }, ["source"]),
-    ).toBe("commitment");
-    expect(
-      classifyLabelField({ type: CFC_ATOM_TYPE.LinkReference }, ["target"]),
-    ).toBe("commitment");
-    expect(
       classifyLabelField({ type: CFC_ATOM_TYPE.TransformedBy }, [
         "identity",
         "sourceFile",
