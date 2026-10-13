@@ -7,7 +7,19 @@ import { Database } from "@db/sqlite";
 
 import { GuardError } from "../v2/sqlite/guard.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
-import { ensureTables, runQuery, runWrite } from "../v2/sqlite/exec.ts";
+import {
+  ensureTables,
+  runInterruptibly,
+  runQuery,
+  runWrite,
+} from "../v2/sqlite/exec.ts";
+import {
+  ensureNativeSymbols,
+  nativeSymbols,
+} from "../v2/sqlite/native-symbols.ts";
+
+// `sqlite3_interrupt` is bound from the library image `@db/sqlite` loaded.
+await ensureNativeSymbols();
 
 describe("engine-side exec", () => {
   let db: Database;
@@ -76,5 +88,34 @@ describe("engine-side exec", () => {
 
   it("rejects references to core tables", () => {
     expect(() => runQuery(db, "SELECT * FROM commit")).toThrow(GuardError);
+  });
+
+  describe("runInterruptibly()", () => {
+    // `interrupt()` here is what another thread does to a read running on a
+    // read worker. Calling it from `started`, before the read's statement has
+    // taken its first step, is the moment SQLite would otherwise clear it.
+
+    const COUNT = "SELECT count(*) AS n FROM messages";
+    const interrupt = () => nativeSymbols()?.sqlite3_interrupt(db.unsafeHandle);
+
+    it("throws `interrupted` from a read interrupted once `started` is called", () => {
+      expect(() => runInterruptibly(db, interrupt, () => runQuery(db, COUNT)))
+        .toThrow("interrupted");
+    });
+
+    it("returns the read's rows when nothing interrupts it", () => {
+      expect(runInterruptibly(db, () => {}, () => runQuery(db, COUNT)))
+        .toEqual([{ n: 0 }]);
+    });
+
+    it("leaves no interrupt pending for the statement after it", () => {
+      const rows = runInterruptibly(db, () => {}, () => {
+        const counted = runQuery(db, COUNT);
+        interrupt();
+        return counted;
+      });
+      expect(rows).toEqual([{ n: 0 }]);
+      expect(runQuery(db, COUNT)).toEqual([{ n: 0 }]);
+    });
   });
 });

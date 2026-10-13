@@ -18,7 +18,12 @@ import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 import { DiskSourceRegistry } from "../v2/sqlite/disk-source.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
-import type { SqliteDbRef } from "../v2.ts";
+import type {
+  ResponseMessage,
+  SqliteDbRef,
+  SqliteQueryRequest,
+  SqliteQueryWireResult,
+} from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
@@ -197,5 +202,106 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
     // rows. No cross-space read of the injected file.
     const r = await session2.sqliteQuery(dbRef(), "SELECT v FROM lookup");
     expect(r.rows).toEqual([]);
+  });
+});
+
+/** What the first `sqliteQuery()` an {@link ObservedServer} ran was handed. */
+type ObservedQuery = {
+  /** The signal the connection passed with the read. */
+  signal: AbortSignal | undefined;
+
+  /** The response the server returned for the read. */
+  response: Promise<ResponseMessage<SqliteQueryWireResult>>;
+};
+
+/** A `Server` that reports the first `sqliteQuery()` it runs. */
+class ObservedServer extends Server {
+  firstQuery = Promise.withResolvers<ObservedQuery>();
+
+  override sqliteQuery(
+    message: SqliteQueryRequest,
+    signal?: AbortSignal,
+  ): Promise<ResponseMessage<SqliteQueryWireResult>> {
+    const response = super.sqliteQuery(message, signal);
+    this.firstQuery.resolve({ signal, response });
+    return response;
+  }
+}
+
+describe("server reads an injected source off its event loop", () => {
+  // The read here counts to fifty million in a recursive CTE, seconds of CPU
+  // against the milliseconds the other client's request takes, and the
+  // reading connection is closed once the other request has been answered.
+  // Every assertion that turns on the read still running is made after
+  // `firstQuery` reports that the server has begun it.
+
+  const LONG_READ =
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c " +
+    "LIMIT 50000000) SELECT count(*) AS n FROM c";
+
+  let server: ObservedServer;
+  let client: Awaited<ReturnType<typeof connect>>;
+  let diskPath: string;
+  let handleId: string;
+
+  beforeEach(() => {
+    diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+    seedDiskDb(diskPath);
+    handleId = `of:disk-${crypto.randomUUID()}`;
+    server = new ObservedServer({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://sqlite-disk-source-off-loop-test"),
+    });
+  });
+
+  afterEach(async () => {
+    await client.close();
+    await server.close();
+    Deno.removeSync(diskPath);
+  });
+
+  it("answers another client while it reads an injected source", async () => {
+    client = await connect({ transport: loopback(server) });
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    await session.registerSqliteDiskSource(handleId, diskPath);
+    const other = await connect({ transport: loopback(server) });
+    try {
+      const otherSession = await other.mount(
+        "did:key:z6Mk-sqlite-disk-source-test-other",
+        {},
+        testSessionOpenAuthFactory,
+      );
+
+      let readSettled = false;
+      const reading = session.sqliteQuery({ id: handleId }, LONG_READ);
+      reading.then(() => readSettled = true, () => readSettled = true);
+      await server.firstQuery.promise;
+      const answer = await otherSession.sqliteQuery(
+        { id: "of:never-written" },
+        "SELECT 1 AS one",
+      );
+      expect(answer.rows).toEqual([]);
+      expect(readSettled).toBe(false);
+
+      await client.close();
+      await expect(reading).rejects.toThrow();
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("cancels the read when the reading connection closes", async () => {
+    client = await connect({ transport: loopback(server) });
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    await session.registerSqliteDiskSource(handleId, diskPath);
+    const reading = session.sqliteQuery({ id: handleId }, LONG_READ);
+    const { signal, response } = await server.firstQuery.promise;
+
+    await client.close();
+    expect(signal?.aborted).toBe(true);
+    const answered = await response;
+    expect(answered.ok).toBeUndefined();
+    expect(answered.error?.name).toBe("AbortError");
+    await expect(reading).rejects.toThrow();
   });
 });

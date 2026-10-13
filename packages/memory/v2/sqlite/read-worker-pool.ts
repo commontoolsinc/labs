@@ -93,7 +93,7 @@ export class ReadWorkerPool {
   #nextId = 1;
   #terminations: Promise<void>[] = [];
   #closing: Promise<void> | undefined;
-  #warnedUninterruptible = false;
+  #symbols: Promise<void> | undefined;
 
   /** Constructs an instance which runs at most `maxWorkers` reads at once. */
   constructor(maxWorkers = 4) {
@@ -121,14 +121,6 @@ export class ReadWorkerPool {
     options: ReadWorkerQueryOptions,
   ): Promise<ReadWorkerQueryResult<Row>> {
     assertReadOnly(sql);
-    if (!(await ensureNativeSymbols()) && !this.#warnedUninterruptible) {
-      this.#warnedUninterruptible = true;
-      console.warn(
-        "[memory-sqlite] SQLite reads cannot be interrupted, so a cancelled " +
-          "or closing read runs to its end: " +
-          `${nativeSymbolsUnavailableReason()}`,
-      );
-    }
     const result = await this.#enqueue({
       type: "query",
       id: this.#nextId++,
@@ -220,15 +212,34 @@ export class ReadWorkerPool {
 
   /** Helper for `#dispatch()`, which starts a worker. */
   #start(): ReadWorker {
-    const worker = new ReadWorker({
+    // A worker takes no read before the interrupt symbol is bound, so that a
+    // read can always be interrupted once it is running.
+    this.#symbols ??= ensureNativeSymbols().then((bound) => {
+      if (!bound) {
+        console.warn(
+          "[memory-sqlite] SQLite reads cannot be interrupted, so a " +
+            "cancelled or closing read runs to its end: " +
+            `${nativeSymbolsUnavailableReason()}`,
+        );
+      }
+    });
+    const worker = new ReadWorker(this.#symbols, {
       onReady: () => this.#dispatch(),
       onSettled: () => this.#dispatch(),
       onStarted: (job) => {
         if (job.cancelled !== undefined) interrupt(job);
       },
-      onFailed: (failed) => {
+      onFailed: (failed, error, started) => {
         this.#workers.delete(failed);
         this.#terminations.push(failed.terminate());
+        if (!started) {
+          // A worker that fails before it can receive anything (its module
+          // missing from a compiled binary, a permission it lacks) is how the
+          // next one would fail too, so the reads waiting for it fail with it
+          // rather than starting worker after worker. A later read tries again.
+          for (const job of this.#queue.splice(0)) job.reject(error);
+          return;
+        }
         if (this.#closing === undefined) this.#dispatch();
       },
     });
@@ -274,8 +285,11 @@ type ReadWorkerEvents = {
   /** The worker's read settled, and the worker is idle again. */
   onSettled: (job: ReadJob) => void;
 
-  /** The worker failed; its read, if it had one, was rejected. */
-  onFailed: (worker: ReadWorker) => void;
+  /**
+   * The worker failed with `error`, before it announced itself unless
+   * `started`; its read, if it had one, was rejected.
+   */
+  onFailed: (worker: ReadWorker, error: Error, started: boolean) => void;
 };
 
 /** One worker of a {@link ReadWorkerPool}, and the read it is running. */
@@ -287,6 +301,7 @@ class ReadWorker {
   job: ReadJob | undefined;
 
   #worker: Worker;
+  #symbols: Promise<void>;
   #events: ReadWorkerEvents;
   #lifetimeLock: string | undefined;
   #recentPaths: string[] = [];
@@ -295,8 +310,12 @@ class ReadWorker {
   #settled: PromiseWithResolvers<void> | undefined;
   #closed: PromiseWithResolvers<void> | undefined;
 
-  /** Constructs an instance which starts its worker and reports to `events`. */
-  constructor(events: ReadWorkerEvents) {
+  /**
+   * Constructs an instance which starts its worker and reports to `events`,
+   * taking reads once the worker has announced itself and `symbols` settled.
+   */
+  constructor(symbols: Promise<void>, events: ReadWorkerEvents) {
+    this.#symbols = symbols;
     this.#events = events;
     this.#worker = new Worker(new URL("./read-worker.ts", import.meta.url), {
       type: "module",
@@ -361,9 +380,12 @@ class ReadWorker {
     switch (reply.type) {
       case "ready":
         this.#lifetimeLock = reply.lifetimeLock;
-        this.ready = true;
-        this.#announced.resolve();
-        this.#events.onReady();
+        void this.#symbols.then(() => {
+          if (this.#failed) return;
+          this.ready = true;
+          this.#announced.resolve();
+          this.#events.onReady();
+        });
         return;
       case "started":
         if (this.job?.request.id !== reply.id) return;
@@ -375,13 +397,17 @@ class ReadWorker {
         return;
       case "failed":
         this.#settle(reply.id, (job) => {
-          if (job.cancelled !== undefined) {
-            job.reject(job.cancelled);
-            return;
-          }
           const error = new Error(reply.message);
           error.name = reply.name;
-          job.reject(error);
+          if (job.cancelled === undefined) {
+            job.reject(error);
+            return;
+          }
+          // Cancelled, so the read most likely ended because it was
+          // interrupted; why it was cancelled is what the caller asked about.
+          const cancelled = new Error(job.cancelled.message, { cause: error });
+          cancelled.name = job.cancelled.name;
+          job.reject(cancelled);
         });
         return;
       case "closed":
@@ -404,14 +430,16 @@ class ReadWorker {
   #fail(message: string): void {
     if (this.#failed) return;
     this.#failed = true;
+    const started = this.ready;
     this.ready = false;
+    const error = new Error(message);
     const job = this.job;
     this.job = undefined;
-    job?.reject(new Error(message));
+    job?.reject(error);
     this.#announced.resolve();
     this.#settled?.resolve();
     this.#closed?.resolve();
-    this.#events.onFailed(this);
+    this.#events.onFailed(this, error, started);
   }
 
   /** Helper for the worker's requests, which posts `request` to it. */
@@ -421,10 +449,11 @@ class ReadWorker {
 }
 
 /**
- * Interrupts the running read `job`. A stale interrupt cannot reach a later
- * read: the connection stays open until the worker's next request, which the
- * pool sends only after this read's reply, and SQLite clears the flag when the
- * next statement on an idle connection starts.
+ * Interrupts the running read `job`, which its worker keeps pending until the
+ * read's statement sees it (see `read-worker.ts`). The connection stays open
+ * until the worker's next request, which the pool sends only after this read's
+ * reply, and an interrupt arriving once the read is done is cleared when the
+ * next read starts, so it cannot reach a later read.
  */
 function interrupt(job: ReadJob): void {
   if (job.connection === undefined) return;

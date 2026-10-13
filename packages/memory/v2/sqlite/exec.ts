@@ -155,6 +155,32 @@ export function runNativeQuery(
   }
 }
 
+/**
+ * Calls `started`, then `read`, on `db`, so that a `sqlite3_interrupt` sent to
+ * `db` once `started` has been called stops `read`'s statement, and returns
+ * what `read` returns.
+ *
+ * SQLite clears a pending interrupt when a statement starts on a connection
+ * running no other, so without help an interrupt sent after `started` and
+ * before `read`'s first step would be lost. A statement held running across
+ * `read` keeps it pending until `read`'s statement sees it. An interrupt sent
+ * once this has returned is cleared by the next statement to start on `db`.
+ */
+export function runInterruptibly<T>(
+  db: Database,
+  started: () => void,
+  read: () => T,
+): T {
+  const held = db.prepare("SELECT 1");
+  try {
+    held.iter().next();
+    started();
+    return read();
+  } finally {
+    held.finalize();
+  }
+}
+
 /** Converts a {@link NativeQueryResult}'s values to rows keyed by output name. */
 export function rowsFromNative<Row extends SqliteNativeRow = SqliteNativeRow>(
   result: NativeQueryResult,

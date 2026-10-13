@@ -12,7 +12,7 @@
 
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
 import { ensureColumnOriginAvailable } from "./column-origin.ts";
-import { runNativeQuery } from "./exec.ts";
+import { runInterruptibly, runNativeQuery } from "./exec.ts";
 import { ReadConnectionPool } from "./read-pool.ts";
 import {
   CONNECTIONS_PER_WORKER,
@@ -39,16 +39,15 @@ async function query(
     // A labeled read fails loudly in `columnOrigins()` when this returns false.
     if (request.labeled) await ensureColumnOriginAvailable();
     const db = connections.connection(request.path, request.labeled);
-    reply({
-      type: "started",
-      id,
-      connection: Deno.UnsafePointer.value(db.unsafeHandle),
-    });
-    const result = runNativeQuery(
+    const result = runInterruptibly(
       db,
-      request.sql,
-      request.args,
-      request.labeled,
+      () =>
+        reply({
+          type: "started",
+          id,
+          connection: Deno.UnsafePointer.value(db.unsafeHandle),
+        }),
+      () => runNativeQuery(db, request.sql, request.args, request.labeled),
     );
     reply({ type: "rows", id, result }, blobBuffers(result.values));
   } catch (error) {
