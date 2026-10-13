@@ -57,6 +57,7 @@ import {
   commitObliterate,
   commitSend,
   commitSendReaction,
+  commitSetTitle,
   commitWindow,
   compareEntries,
   type ComposerState,
@@ -74,7 +75,10 @@ import {
   type RequestsCell,
   type RoomStreamEvent,
   type RoomWindowEvent,
+  type SetTitleEvent,
   type StoredAbout,
+  TITLE_KEY,
+  type TitlesCell,
   type UsedTimesCell,
   type WindowsCell,
   type WindowsValue,
@@ -88,6 +92,8 @@ import {
   type AddMemberRefusalCode,
   CHAT_ADD_MEMBER_ACTION,
   CHAT_ADD_MEMBER_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
@@ -102,6 +108,7 @@ import {
   type ChatRoomPolicy,
   isPrincipalDID,
   type ProfileCell,
+  type SetTitleOutcome,
 } from "./schemas.tsx";
 
 /**
@@ -866,6 +873,17 @@ export interface ChatRoomView {
    * the member was told of the room once that is decided.
    */
   addRequests: Record<string, AddMemberOutcome>;
+
+  /**
+   * Sets the room's title, which every member shares, from a trusted gesture
+   * on the rendering's `ChatRetitleSurface`, or from a client's own control
+   * through the sanctioned issuing path. Any member who can write in the room
+   * may, in a group room or a direct one.
+   */
+  setTitle: Stream<SetTitleEvent>;
+
+  /** The outcome of each of this reader's retitles, by its `requestId`. */
+  titleRequests: Record<string, SetTitleOutcome>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -908,6 +926,12 @@ export interface FabriChatRoomCoreInput {
 
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
+
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
 
   /** Those who joined the room; absent for a room nobody can join. */
   roster?: ParticipantRosterCell;
@@ -967,6 +991,7 @@ export const FabriChatRoomCore = pattern<
     usedTimes,
     activity,
     counters,
+    titles,
     roster,
     addRequests,
     startsDirect,
@@ -1061,9 +1086,13 @@ export const FabriChatRoomCore = pattern<
   const isOwner = computed(() => isOwnerOf(messages));
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
+  // The title a member last set outranks the one the room was created with.
+  const title = computed((): string | undefined =>
+    titles?.elementById(TITLE_KEY).get()?.title ?? about?.get()?.title
+  );
   const aboutView = {
     kind,
-    title: computed(() => about?.get()?.title),
+    title,
     createdAt: computed(() => about?.get()?.createdAt),
     policy,
     // The stored record itself, as a link, so a reader can read its label.
@@ -1073,8 +1102,31 @@ export const FabriChatRoomCore = pattern<
     ((counters.elementById(NUMBERING_KEY).get() ??
       NO_ACTIVITY) as ActivityCounters).expiredThrough
   );
-  const title = computed(() =>
-    about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  const name = computed(() =>
+    title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  );
+  // The sender's retitles' outcomes, which follow them, and only them, across
+  // sessions, and why the session's latest was refused, which the rendered
+  // control shows.
+  const titleRequests = new Writable.perUser<
+    Record<string, SetTitleOutcome>
+  >({});
+  const titleRefusal = new Writable.perSession<string>("");
+  const setTitle = commitSetTitle({
+    titles,
+    ownSpace,
+    messages,
+    outcomes: titleRequests,
+    refusal: titleRefusal,
+  });
+  // Who may retitle differs by viewer, and what came of a retitle by session,
+  // so both are hidden by a prop rather than built as a different tree (see
+  // `FabriChatMessageRow`).
+  const retitleDisplay = computed((): ChatDisplay =>
+    ownSpace && titles !== undefined && canSend ? "flex" : "none"
+  );
+  const titleRefusalDisplay = computed((): ChatDisplay =>
+    titleRefusal.get() === "" ? "none" : "block"
   );
   // The key of the session's open thread's root; `""` while no thread is
   // open.
@@ -1171,18 +1223,47 @@ export const FabriChatRoomCore = pattern<
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
+    setTitle,
+    titleRequests,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
 
   return {
-    [NAME]: title,
+    [NAME]: name,
     [UI]: (
       <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "720px" }}>
         <cf-hstack justify="between" align="center" gap="4">
-          <cf-heading level={3}>{title}</cf-heading>
+          <cf-heading level={3}>{name}</cf-heading>
           <cf-profile-badge $profile={myProfile} size="sm" />
         </cf-hstack>
+        <cf-vstack
+          id="fabrichat-retitle"
+          gap="1"
+          hidden
+          style={{ display: retitleDisplay }}
+        >
+          <div
+            data-ui-pattern={CHAT_RETITLE_SURFACE}
+            data-ui-event-integrity={CHAT_RETITLE_SURFACE}
+          >
+            <cf-submit-input
+              data-ui-action={CHAT_RETITLE_ACTION}
+              inputId="fabrichat-title"
+              placeholder="New title"
+              buttonText="Rename"
+              onClick={setTitle}
+            />
+          </div>
+          <cf-text
+            id="fabrichat-retitle-refusal"
+            variant="caption"
+            hidden
+            style={{ display: titleRefusalDisplay }}
+          >
+            {titleRefusal}
+          </cf-text>
+        </cf-vstack>
 
         {
           /* A plain flex row, not `cf-hstack`, whose host clips overflow
@@ -1356,6 +1437,12 @@ export interface FabriChatRoomInput {
   counters?: ActivityCountersCell;
 
   /**
+   * The room's title as a member last set it. It changes only through
+   * `setTitle`.
+   */
+  titles?: TitlesCell;
+
+  /**
    * Those who joined the room. It changes only through `addParticipant`, the
    * one writer its write contract admits.
    */
@@ -1376,6 +1463,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     usedTimes,
     activity,
     counters,
+    titles,
     participants,
     // The room itself, the link another member's manager lists it by.
     [SELF]: self,
@@ -1408,6 +1496,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         usedTimes,
         activity,
         counters,
+        titles,
         roster: participants,
         addRequests,
         startsDirect,
@@ -1439,6 +1528,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
+      setTitle: room.setTitle,
+      titleRequests: room.titleRequests,
       [UI]: (
         <cf-screen>
           {room[UI]}
