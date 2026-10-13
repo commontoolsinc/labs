@@ -32,10 +32,11 @@ remove the atom that the over-approximation left behind.
 
 ## The atom and what reads it
 
-Every link write mints a `LinkReference` integrity atom naming the pointee and
-the slot (`linkReferenceIntegrity` in `prepare.ts`), and a second mint site adds
-one to the writer's value stamp at a slot the runtime recorded storing a
-reference at. The atom restates the link value beside it: for an entry at a
+Until stage 4, every link write minted a `LinkReference` integrity atom naming
+the pointee and the slot, and a second mint site added one to the writer's
+value stamp at a slot the runtime recorded storing a reference at; the rest of
+this section describes the runtime as that stage found it. The atom restates
+the link value beside it: for an entry at a
 slot, its `source` is the link stored there and its `target` is the document
 plus the entry's own path. The specification itself says what this proves:
 "Merely recording 'this reference was written' proves no semantic property"
@@ -268,51 +269,61 @@ mechanizes the atom. The ruling's correspondence note says so.
 ### Stage 4: the runtime stops minting and reading the atom (labs companion)
 
 Implemented, against the ruling merged as specs commit `132653b3`
-(commonfabric/specs#66), with the snapshot regenerated. The vintage is the
-envelope version: every envelope is now written at version 3, spelled as
-version 2 with the labels inline or by reference as the
-`contentAddressedLabels` flag selects, and an envelope of an earlier version
-is rewritten once on its next persist. `slotStampPredatesPlacementRule` in
-`cfc/prepare.ts` withholds the witness of a value stamp at a reference slot
-of an earlier-version envelope, and `carriedStampLabel` drops such a stamp's
-`TransformedBy` when the envelope is re-persisted. The link entry holds the
-reference's declared and carried restriction and nothing minted.
+(commonfabric/specs#66), with the snapshot regenerated. Depends on stages 2
+and 3. What it leaves behind:
 
-Depends on stages 2 and 3.
-
-- Remove the two mint sites (`linkReferenceIntegrity` and the `rootReferences`
-  addition in the flow persist), `recordedReferences`, `stampNamesReference`,
-  `slotStampDescribesAnother`, and the `LinkReference` rows of
-  `STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES`, `RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`,
-  `cfc/atom-classes.ts` and `cfc/label-field-classification.ts`. The
-  cross-space persist transform has one fewer commitment field; its tests in
-  `cfc-label-metadata-protection.test.ts` drop the atom case.
-- `followedReferenceWitnesses` keeps the value stamps that resolve at the slot
-  and withholds nothing by binding. The legacy rule from stage 3 is applied
-  where an envelope is re-persisted: a carried-forward value stamp at a slot
-  holding a reference that still carries a `LinkReference` not naming the
-  slot's current pointer, or that carries none and predates the stage 2
-  runtime, loses its `TransformedBy` and keeps its confidentiality. The
-  envelope version is the vintage; a bump to version 3 marks envelopes written
-  under the invariant, and `cfc/metadata.ts` reads all three.
-- `packages/api/cfc.ts` keeps the constant for one release so stored legacy
-  atoms display under their name in `cf label`; the pattern-facing ambient
-  type in `packages/static/assets/types/cfc.ts` drops it, since no pattern can
-  mint it or require it. `atomPropagationClass` already reads an unregistered
-  atom as value-bound, so a legacy atom in a stored label is inert.
-- The thirteen test files naming the atom are updated; the ones that only use
-  it as a stand-in for "some runtime-minted atom"
-  (`cfc-required-integrity-provenance.test.ts`, the benches) switch to
-  `Origin`.
-- Live documents: `docs/specs/cfc-transformed-by-input-witnesses.md`,
-  `docs/specs/cfc-observation-classes.md` §6.1 (the comment that "the
-  integrity evidence is the LinkReference chain" goes with the code comment at
-  the `followRef` branch of `deriveFlowJoin`),
-  `docs/specs/cfc-protected-initialization.md`,
-  `docs/development/EXPERIMENTAL_OPTIONS.md`. `docs/specs/cfc-spec-changes.md`
-  is frozen and is left alone.
-- `deno task cfc-spec-snapshot` after the specs ruling merges, and the
-  manifest rows that moved.
+- No link write mints the atom. `linkReferenceIntegrity`, the atom the
+  asserted-root stamp named its pointer with, `stampNamesReference` and
+  `slotStampDescribesAnother` are gone, and a link entry holds the
+  reference's declared and carried restriction and nothing minted.
+  `recordedReferences` stays: `assertedValueRootPaths` still asks it which
+  references anchoring stored, and the persist loop asks it which stamped
+  roots are slots holding one.
+- The atom stays registered as retired, which is a deviation from this
+  plan's first draft, where its rows were to be removed. It stays in
+  `RUNTIME_MINTED_INTEGRITY_ATOM_TYPES`, so that a pattern spelling its URI
+  in a schema has it stripped and cannot persist evidence a stored floor or
+  guard once took from the runtime alone; in
+  `STRUCTURAL_LINK_PROVENANCE_ATOM_TYPES`, so that a label stored before the
+  retirement, whose integrity is the atom and a principal claim, still does
+  not gate a `requiredIntegrity` write; and in `cfc/atom-classes.ts` and
+  `cfc/label-field-classification.ts`, so that a stored one keeps its class
+  and its `source` and `target` are still committed when a label crosses
+  spaces. `packages/api/cfc.ts` keeps the constant, under which `cf label`
+  shows a stored one; the pattern-facing ambient type in
+  `packages/static/assets/types/cfc.ts` drops it.
+- Which reference a writer's stamp at a slot describes is answered by the
+  envelope and not by an atom. An envelope carries `stampPlacement:
+  "committed"` when its writers' stamps at reference slots were persisted
+  beside the references their attempts anchored: the stored envelope said so
+  or this transaction stamped such a slot, and no stamp carried over from an
+  envelope that did not say it stands at a slot holding a reference.
+  `slotStampPlacementUnknown` in `cfc/prepare.ts` withholds the witness of a
+  writer's stamp at a reference slot of an envelope that does not say it
+  (§18.7). The member sits beside the ones the envelope's version defines
+  and is no version of its own, which is the second deviation from the first
+  draft's "bump to version 3": a version this build's predecessors do not
+  know makes every labeled document unreadable to them, where a member they
+  do not read leaves the document readable and is dropped by a writer that
+  rewrites the envelope without knowing it, which is the conservative
+  outcome (`docs/specs/cfc-stored-envelope.md`). Envelopes that hold no such
+  stamp are written byte for byte as before.
+- A document stored before this stage is read as it stands and is not
+  rewritten for it. Its link entries keep their atoms and the copies beneath
+  them as conservative restrictions until the pointer at each slot is
+  replaced. Its writers' stamps at reference slots are no input witness, and
+  an append beside them does not make them one: the envelope says where its
+  stamps sit only once none of them stands at a reference slot. An exchange
+  rule that pins a witness through such a list refuses until the endorsed
+  step has rewritten the slots.
+- The tests that named the atom as what a link write mints are updated.
+  The ones that seed it into a stored label, to hold the S7 exemption and
+  the mint gate to it, keep it: `cfc-required-integrity-provenance.test.ts`,
+  `cfc-write-prefix-provenance.test.ts`,
+  `cfc-prefix-provenance-stats.test.ts` and
+  `cfc-label-field-classification.test.ts`.
+  `cfc-transformed-by-input-witness-concurrent-append.test.ts` pins the
+  envelope's statement and the legacy rule.
 
 ### Stage 5: a handle carries its acquisition, not the target's labels
 

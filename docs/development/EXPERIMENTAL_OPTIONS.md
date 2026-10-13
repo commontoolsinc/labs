@@ -1109,33 +1109,31 @@ the per-epic implementation notes).
   boolean).
 - **Added by.** Bernhard Seefeld, in "content-addressed CFC labels"
   (2026-09-15).
-- **Purpose.** When on, each `labelMap` entry of a persisted envelope keeps
-  its `path`, `origin`, and `observes` inline and holds its `label` as a
-  reference to a content-addressed label document whenever the label's
-  canonical JSON exceeds the inline limit, so every envelope carrying the
-  same label shares one document per space
-  (`docs/specs/content-addressed-cfc-labels.md`). Off stores every label
-  inline. Either spelling is written at the current envelope version, 3
-  (`docs/specs/cfc-stored-envelope.md`); version 1 defines no reference and
-  version 2 does, and reading resolves every version to the same metadata,
-  space-first with content verification and the realm's label registry
-  supplying what the space does not hold, failing closed on a reference
-  nothing backs; the storage commit boundary refuses a commit whose
-  envelope references a label document it neither includes nor the space
-  stores. A stored envelope of an earlier version is rewritten at the
-  current version on its next persist even when its labels are unchanged,
-  whatever this flag selects, which is how a store migrates without a data
-  migration, and a stored current-version envelope is left as it is by a
-  writer on either setting.
+- **Purpose.** When on, the envelope persist path stores version-2
+  envelopes: each `labelMap` entry keeps its `path`, `origin`, and
+  `observes` inline and holds its `label` as a reference to a
+  content-addressed label document whenever the label's canonical JSON
+  exceeds the inline limit, so every envelope carrying the same label
+  shares one document per space
+  (`docs/specs/content-addressed-cfc-labels.md`). Off stores version 1,
+  every label inline. Reading resolves either version to the same
+  metadata, space-first with content verification and the realm's label
+  registry supplying what the space does not hold, and fails closed on a
+  reference nothing backs; the storage commit boundary refuses a commit
+  whose envelope references a label document it neither includes nor the
+  space stores. With the flag on, a stored version-1 envelope is rewritten
+  in version 2 on its next persist even when its labels are unchanged,
+  which is how a store migrates without a data migration; with it off, a
+  stored version 2 is left as it is.
 - **Current default and planned end state.** `false` by default. The target
-  is `true`; envelopes of earlier versions remain readable indefinitely.
+  is `true`; version-1 envelopes remain readable indefinitely.
 - **Status on 2026-09-15.** Implemented, off by default. The flip is gated
-  on deployment reach: a reader that predates the reference spelling fails
-  closed on a referencing envelope through `UnknownCfcMetadataVersionError`
-  or `UnresolvableCfcLabelDocumentError`, which is correct and also unusable,
-  so every deployed reader must interpret it before any space sees one.
-- **Path to removal.** Once the default flips, the dial retires and the
-  reference spelling becomes the only one the persist path emits.
+  on deployment reach: a reader that predates version 2 fails closed on a
+  version-2 envelope through `UnknownCfcMetadataVersionError`, which is
+  correct and also unusable, so every deployed reader must interpret
+  version 2 before any space sees one.
+- **Path to removal.** Once the default flips, the dial retires and version
+  2 becomes the only spelling the persist path emits.
 
 ### `cfcPolicyEvaluation`
 
@@ -1225,8 +1223,8 @@ the per-epic implementation notes).
   `{digestOf: …}` commitment forms (or verbatim where the classification table
   says `public`), identically at the `["cfc"]` envelope and the sigil-carried
   label views, so a destination space's replicas stop disclosing source-space
-  principal identities (`Caveat.source`, clause DIDs). Values are `off`,
-  `observe`, and `enforce`: `observe` computes the
+  principal identities (`Caveat.source`, clause DIDs, `LinkReference`
+  addresses). Values are `off`, `observe`, and `enforce`: `observe` computes the
   transformed form and emits a structured divergence diagnostic while persisting
   today's bytes (the rollout metric); `enforce` persists the transformed form.
   Enforcement matching is commitment-aware in both directions (read gating

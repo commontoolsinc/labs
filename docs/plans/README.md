@@ -34,8 +34,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   envelope beside a mergeable append describes the committed list, and a
   specs ruling retires the `LinkReference` atom, after which the runtime
   stopped minting and reading it. Legacy entries stay as conservative
-  restrictions; an envelope is rewritten once at the current version on its
-  next persist.
+  restrictions; no migration runs.
 - [Release gates without an integrity union](cfc-release-gate-integrity.md)
   keeps one consumed value's evidence from releasing another value's clause:
   the write, sink and display gates run value-intrinsic rules at each location

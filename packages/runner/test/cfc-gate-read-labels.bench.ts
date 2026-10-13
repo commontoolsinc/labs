@@ -128,7 +128,7 @@ const seedLabeledSources = async (
               // joins as many atoms as the map has entries — the shape a
               // document accumulates under persisted flow labels.
               integrity: [{
-                type: CFC_ATOM_TYPE.Origin,
+                type: CFC_ATOM_TYPE.LinkReference,
                 source: { space: signer.did(), id, path: [field] },
               }],
             },

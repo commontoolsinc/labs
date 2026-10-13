@@ -6,17 +6,9 @@ document holds. The envelope names the schema its labels were derived
 against and carries a label map: one entry per labeled path, each entry
 holding the path and the label that applies there. Its stored shapes are
 `StoredCfcMetadata` in
-[types.ts](../../packages/runner/src/cfc/types.ts), discriminated by
-`version`. Version 1 holds every label inline. Version 2 may hold a label as
-a reference to a content-addressed label document
-([content-addressed-cfc-labels.md](content-addressed-cfc-labels.md)).
-Version 3 is spelled as version 2, with the labels inline or by reference as
-the `cfcContentAddressedLabels` flag selects, and marks an envelope written
-under the placement rule of CFC §8.10.2.2: a value stamp it holds at a slot
-describes the value the committed document holds there, which the runtime's
-input-witness derivation relies on and which no earlier version promises
-(`cfc-transformed-by-input-witnesses.md`). The persist path writes version 3
-and rewrites an envelope of an earlier version once, on its next persist.
+[types.ts](../../packages/runner/src/cfc/types.ts), and version 2's
+content-addressed labels are
+[content-addressed-cfc-labels.md](content-addressed-cfc-labels.md).
 
 This document says what a reader of that envelope does with a value it
 cannot interpret.
@@ -62,8 +54,8 @@ outcomes a stored value gets:
 - **Fail closed.** Everything else, as a `StoredCfcMetadataError`:
   `UnknownCfcMetadataVersionError` for a `version` outside the list this
   build knows, `UnreadableCfcMetadataError` for a label map it cannot walk,
-  and `UnresolvableCfcLabelDocumentError` for a version-2 or version-3 entry
-  naming a label document nothing can back.
+  and `UnresolvableCfcLabelDocumentError` for a version-2 entry naming a
+  label document nothing can back.
 
 Three consequences of that classification are worth stating, because each
 one is a place a looser reader would read a labeled document as unlabeled:
@@ -83,8 +75,8 @@ one is a place a looser reader would read a labeled document as unlabeled:
 - **A label carrying a member this build does not know is not a label.**
   Every label this build writes carries `confidentiality` and `integrity`
   alone, so a third member is a format this build postdates, and reading
-  the two it knows would drop whatever the third carries. A label document
-  is held to the same shape for a second reason: its content hash
+  the two it knows would drop whatever the third carries. A version-2 label
+  document is held to the same shape for a second reason: its content hash
   is its identity, so the shape check is what stops a record that merely
   hashes correctly from registering as a label.
 - **A template-origin entry that is not keyed and classed as a template is
@@ -105,6 +97,17 @@ the ones the profile defines, and gives an entry view-specific refinements
 beside its label (spec §4.6.4). Refusing those would read a labeled document
 as unreadable with its labels sitting right there, which costs availability
 and buys no confidentiality.
+
+`stampPlacement` is such a member, and the reason it is one. An envelope
+carrying `stampPlacement: "committed"` says that each writer's stamp at a
+slot holding a reference was persisted beside the reference its attempt
+placed, which is what lets such a stamp count as an input witness
+(`cfc-transformed-by-input-witnesses.md`). A reader that predates the member
+reads the envelope and its labels as it always did. A writer that predates it
+rewrites the envelope without it, and the envelope then says nothing of its
+stamps, which is the conservative reading. A version of its own would have
+made every document carrying it unreadable to those builds for the sake of a
+statement they lose nothing by ignoring.
 
 A member this build does not read is also one the resolved envelope does not
 carry. The reader builds its answer from the members it validated, so a

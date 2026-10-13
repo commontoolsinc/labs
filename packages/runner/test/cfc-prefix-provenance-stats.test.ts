@@ -447,7 +447,7 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
       await seedLabeledDoc(runtime, "d4-s7-lookup", "lookup", {
         integrity: [
           { kind: "represents-principal", subject: signer.did() },
-          { type: "https://commonfabric.org/cfc/atom/Origin" },
+          { type: "https://commonfabric.org/cfc/atom/LinkReference" },
         ],
       });
 

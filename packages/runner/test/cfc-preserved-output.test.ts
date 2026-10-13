@@ -151,30 +151,13 @@ describe("protected runtime output preservation", () => {
     await expectRefusal(tx);
   });
 
-  // An envelope stored in an earlier version is rewritten in the current
-  // one on its next persist (SC-11's one exception). Both spell the same
-  // labels, so a preserved output still changes nothing: it must pass, and
-  // the document migrates on its next authorized write. Refusing instead
-  // would refuse every re-run of the initializer, since a refused commit
-  // never migrates the envelope.
+  // An envelope stored in version 1 is rewritten in version 2 on its next
+  // persist once content-addressed labels are selected (SC-11's one
+  // exception). Both spell the same labels, so a preserved output still
+  // changes nothing: it must pass, and the document migrates on its next
+  // authorized write. Refusing instead would refuse every re-run of the
+  // initializer, since a refused commit never migrates the envelope.
   it("preserves an output whose envelope only differs in version", async () => {
-    // The same labels in the earliest spelling, as a store written before
-    // the current version holds them.
-    {
-      const downgrade = runtime.edit();
-      const current = readStoredCfcMetadata(downgrade, output)!;
-      downgrade.tx.write({
-        space: output.space,
-        id: output.id,
-        type: "application/json",
-        path: ["cfc"],
-      }, {
-        version: 1,
-        schemaHash: current.schemaHash,
-        labelMap: { version: 1, entries: current.labelMap.entries },
-      });
-      expect((await downgrade.commit().settled).error).toBeUndefined();
-    }
     const tx = runtime.edit();
     const stored = readStoredCfcMetadata(tx, output);
     expect(stored?.version).toBe(1);
