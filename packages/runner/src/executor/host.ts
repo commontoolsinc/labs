@@ -247,8 +247,9 @@ export class ExecutorHost {
     // un-claim `derived` while the other still serves.
     this.#releaseServerExecution = acquireServerExecutionEnabler();
     // The memory server calls these from whichever session's request it is
-    // handling, so each enters the serving context: what the host starts
-    // from here is the serving loop's work.
+    // handling, so the two that start work enter the serving context: what
+    // the host starts from here is the serving loop's work. A demand change
+    // only wakes a loop already running in it.
     options.server.setServerExecutionObserver({
       commitAdmitted: (notice) =>
         runInServingContext(true, () => this.#onCommitAdmitted(notice)),
@@ -263,13 +264,12 @@ export class ExecutorHost {
       // not client demand — counting it in `pushGrowthWakes` and waking
       // the loop spins an extra cycle and demand pass that finds no
       // client delta (W1 review MINOR-4).
-      demandChanged: (space, reason, principal) =>
-        runInServingContext(true, () => {
-          if (this.#closed) return;
-          if (principal === this.#options.serviceIdentity) return;
-          const existing = this.#spaces.get(space);
-          if (existing?.active) existing.noteDemandChanged(reason);
-        }),
+      demandChanged: (space, reason, principal) => {
+        if (this.#closed) return;
+        if (principal === this.#options.serviceIdentity) return;
+        const existing = this.#spaces.get(space);
+        if (existing?.active) existing.noteDemandChanged(reason);
+      },
     });
     registerServingLoopStatsProvider(() => this.stats());
   }
