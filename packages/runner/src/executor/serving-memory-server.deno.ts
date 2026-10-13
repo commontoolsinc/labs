@@ -46,7 +46,10 @@ export interface ServingMemoryServer extends AsyncDisposable {
   /** The serving loop attached to {@link ServingMemoryServer.server}. */
   readonly host: ExecutorHost;
 
-  /** The identity the serving runtimes open their sessions as. */
+  /**
+   * The identity the serving runtimes sign their sessions' opens as. Under an
+   * access-list mode the sessions read as the space's owner, not as it.
+   */
   readonly serviceIdentity: Identity;
 
   /**
