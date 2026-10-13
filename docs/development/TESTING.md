@@ -604,10 +604,16 @@ reaches it as an `errored` outcome of the event, which the runner records as
 a runtime error marked `[served]`, under the same policy as any other —
 `allowRuntimeErrors` tolerates it, and `expectRuntimeErrors` counts it. It is
 left out when the same event's speculative run recorded an error with the
-same text, so a throw both runs hit is counted once. Logger warnings and errors are counted per process, so a single-user
-run, whose serving loop shares its process, counts the serving loop's as
-well. A served handler runs under the serving runtime's CFC posture rather
-than the test's.
+same text, so a throw both runs hit is counted once. Logger warnings and
+errors are counted per process, and a single-user run's serving loop shares
+the test's process, so the runner tells the loop's apart by the serving
+context described below. A logger error the loop logs fails the file as a
+console error marked `[served]`, under `allowConsoleErrors`. A logger warning
+it logs is listed under the file as a serving-loop warning and fails nothing,
+since the loop warns about work it goes on to recover from, a dropped wave
+contribution among them. A multi-user run's serving loop runs in the
+orchestrator, where no counts are taken. A served handler runs under the
+serving runtime's CFC posture rather than the test's.
 
 `@commonfabric/runner/executor/serving-memory-server.deno` supplies the pair:
 a memory server over a fresh non-persistent store, with an `ExecutorHost`
@@ -636,6 +642,14 @@ and `ensureSpaceRoots`, which defaults to `false` here, the switch the serving
 loop keeps for tests. `prepareStorageManager` hands the test each serving
 runtime's storage manager before the runtime is built, which is where a stub on
 one of its providers goes.
+
+The serving loop's work runs in the serving context, which the runner carries
+per async context and `inServingContext()` reports, so a test whose clients
+share the loop's realm can tell their output apart. The host enters it for
+everything the memory server calls it for, the serving runtimes' sessions take
+each server frame in it, and an emulated client session takes each one outside
+it. The memory server's own work runs in the context of the session whose
+request it is handling.
 
 ```ts
 // Shown at module scope.

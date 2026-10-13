@@ -3,6 +3,7 @@ import type { MemoryProtocolFlags } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { authorizeLoopbackSessionOpen } from "@commonfabric/memory/v2/session-open-auth";
+import { runInServingContext } from "../executor/serving-context.ts";
 import type { SpaceHostRegistration } from "../space-host.ts";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 
@@ -41,6 +42,25 @@ export const newLoopbackServer = (options?: {
     ...(options?.sessions !== undefined ? { sessions: options.sessions } : {}),
   });
 
+/**
+ * A loopback transport for an emulated client session, which takes each
+ * server frame outside any serving loop's context. The memory server sends
+ * a frame on a turn armed by whichever session's request caused it, which
+ * may be a co-hosted serving runtime's.
+ */
+const clientLoopback = (
+  server: MemoryV2Server.Server,
+): MemoryV2Client.Transport => {
+  const inner = MemoryV2Client.loopback(server);
+  return {
+    ...inner,
+    setReceiver: (next) =>
+      inner.setReceiver((payload) =>
+        runInServingContext(false, () => next(payload))
+      ),
+  };
+};
+
 class EmulatedSessionFactory implements SessionFactory {
   readonly #getServer: () => MemoryV2Server.Server;
 
@@ -55,7 +75,7 @@ class EmulatedSessionFactory implements SessionFactory {
     signer?: Signer,
     mountOptions: MemoryV2Client.MountOptions = {},
   ) {
-    const transport = MemoryV2Client.loopback(this.#getServer());
+    const transport = clientLoopback(this.#getServer());
     const client = await MemoryV2Client.connect({ transport });
     const session = await client.mount(
       space,

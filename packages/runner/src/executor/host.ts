@@ -40,6 +40,7 @@ import {
   type ParkedRuntimeHandle,
   ParkedServingRuntime,
 } from "./parked-runtime.ts";
+import { runInServingContext } from "./serving-context.ts";
 import {
   awaitDisposeTimeboxed,
   LIFECYCLE_VERB_SPACE_PARKED,
@@ -245,9 +246,14 @@ export class ExecutorHost {
     // count lives beside the flag), so neither owner's teardown can
     // un-claim `derived` while the other still serves.
     this.#releaseServerExecution = acquireServerExecutionEnabler();
+    // The memory server calls these from whichever session's request it is
+    // handling, so each enters the serving context: what the host starts
+    // from here is the serving loop's work.
     options.server.setServerExecutionObserver({
-      commitAdmitted: (notice) => this.#onCommitAdmitted(notice),
-      sessionOpened: (space) => this.#onSessionOpened(space),
+      commitAdmitted: (notice) =>
+        runInServingContext(true, () => this.#onCommitAdmitted(notice)),
+      sessionOpened: (space) =>
+        runInServingContext(true, () => this.#onSessionOpened(space)),
       // Fan-out stage B: a watch-set change on an ACTIVE space wakes its
       // demand pass (the arrival re-arm's trigger); an inactive space
       // waits for the session-open / admission activation triggers.
@@ -257,12 +263,13 @@ export class ExecutorHost {
       // not client demand — counting it in `pushGrowthWakes` and waking
       // the loop spins an extra cycle and demand pass that finds no
       // client delta (W1 review MINOR-4).
-      demandChanged: (space, reason, principal) => {
-        if (this.#closed) return;
-        if (principal === this.#options.serviceIdentity) return;
-        const existing = this.#spaces.get(space);
-        if (existing?.active) existing.noteDemandChanged(reason);
-      },
+      demandChanged: (space, reason, principal) =>
+        runInServingContext(true, () => {
+          if (this.#closed) return;
+          if (principal === this.#options.serviceIdentity) return;
+          const existing = this.#spaces.get(space);
+          if (existing?.active) existing.noteDemandChanged(reason);
+        }),
     });
     registerServingLoopStatsProvider(() => this.stats());
   }
@@ -342,7 +349,18 @@ export class ExecutorHost {
    * Throws {@link SpaceNotServedError} when this process cannot serve the
    * space — the host is closed, or another process holds the space's lease.
    */
-  async runLifecycleVerb<T>(
+  runLifecycleVerb<T>(
+    space: MemorySpace,
+    verb: LifecycleVerb<T>,
+  ): Promise<T> {
+    return runInServingContext(
+      true,
+      () => this.#runLifecycleVerbInner(space, verb),
+    );
+  }
+
+  /** Helper for `runLifecycleVerb()`, which does all its work. */
+  async #runLifecycleVerbInner<T>(
     space: MemorySpace,
     verb: LifecycleVerb<T>,
   ): Promise<T> {
@@ -894,7 +912,12 @@ export class ExecutorHost {
    * park has finished; a park that failed is rethrown then, several as an
    * `AggregateError`.
    */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return runInServingContext(true, () => this.#closeInner());
+  }
+
+  /** Helper for `close()`, which does all its work. */
+  async #closeInner(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#options.server.setServerExecutionObserver(undefined);

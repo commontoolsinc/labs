@@ -171,3 +171,9 @@ All are importable from `@commonfabric/utils/logger` and also registered on
 `globalThis.commonfabric` for browser console access. See
 [debugging/console-commands](../development/debugging/console-commands.md) for interactive
 usage.
+
+`setLoggerCountObserver()`, importable only, sets the process's one function
+told of every call a logger counts, with the logger's name, the message key
+and the level. It runs inside the logging call, so it can read the caller's
+async context, which is how `cf test` tells a co-hosted serving loop's counts
+apart from its test's.

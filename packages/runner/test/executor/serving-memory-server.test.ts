@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
+  inServingContext,
   listenServingMemoryServer,
   startServingMemoryServer,
 } from "../../src/executor/serving-memory-server.deno.ts";
@@ -37,6 +38,15 @@ const bump = handler<Record<string, never>, { count: Writable<number> }>(
 export default pattern<{ count?: PerUser<Writable<number | Default<0>>> }>(
   ({ count }) => ({ count, bump: bump({ count: count! }) }),
 );
+`;
+
+/** A fetch of a URL a client writes, which on the ON arm the loop makes. */
+const FETCH_SOURCE = `
+import { fetchJson, pattern, Writable } from "commonfabric";
+export default pattern<{ url: Writable<string> }>(({ url }) => {
+  const fetched = fetchJson<{ v: number }>({ url });
+  return { url, v: fetched.result.v };
+});
 `;
 
 /**
@@ -155,6 +165,75 @@ describe("serving-memory-server", () => {
         for (const cancel of cancels) cancel();
         await serving.host.close();
         for (const runtime of runtimes) await runtime.dispose();
+      }
+    });
+
+    it("runs the serving loop's work in the serving context, and delivers a client's frames outside it", async () => {
+      // Three crossings, each its own record. The host activates the space
+      // when the client's session opens it. The client's write reaches the
+      // serving runtime as a server frame, and the derivation that reads it
+      // makes the fetch. The served result reaches the client as a frame the
+      // serving runtime's commit caused.
+      const activations: boolean[] = [];
+      const fetches: boolean[] = [];
+      const deliveries: boolean[] = [];
+      await using serving = await startServingMemoryServer({
+        apiUrl: new URL(import.meta.url),
+        prepareStorageManager: () => {
+          activations.push(inServingContext());
+        },
+        fetch: () => {
+          fetches.push(inServingContext());
+          return Promise.resolve(
+            new Response('{"v":7}', {
+              headers: { "content-type": "application/json" },
+            }),
+          );
+        },
+      });
+      const client = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: EmulatedStorageManager.connectTo(serving.server, {
+          as: alice,
+        }),
+        experimental: { serverExecution: true },
+      });
+      const space = alice.did() as MemorySpace;
+      const cancels: Array<() => void> = [];
+      try {
+        const pattern = await client.patternManager.compilePattern({
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: FETCH_SOURCE }],
+        }, { space });
+        const result = client.getCell<{ url: string; v?: number }>(
+          space,
+          "fetcher",
+          pattern.resultSchema,
+        );
+        const start = client.edit();
+        client.run(start, pattern, { url: "" }, result);
+        expect((await start.commit().settled).error).toBeUndefined();
+        cancels.push(result.sink((value) => {
+          if (value?.v === 7) deliveries.push(inServingContext());
+        }));
+        const point = client.edit();
+        result.withTx(point).key("url").set("https://example.test/v");
+        expect((await point.commit().settled).error).toBeUndefined();
+        await waitForCellValue<{ v?: number }>(
+          client,
+          result,
+          (value) => value?.v === 7,
+        );
+
+        expect(activations.length).toBeGreaterThan(0);
+        expect(activations.every((serving) => serving)).toBe(true);
+        expect(fetches).toStrictEqual([true]);
+        expect(deliveries.length).toBeGreaterThan(0);
+        expect(deliveries.every((serving) => !serving)).toBe(true);
+      } finally {
+        for (const cancel of cancels) cancel();
+        await serving.host.close();
+        await client.dispose();
       }
     });
 

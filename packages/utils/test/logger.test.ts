@@ -16,6 +16,7 @@ import {
   resetAllTimingStats,
   resetTimingMeasureBudget,
   setGlobalLogFloor,
+  setLoggerCountObserver,
   setTimingMeasuresEnabled,
   TIMING_MEASURE_PREFIX,
 } from "../src/logger.ts";
@@ -866,6 +867,45 @@ describe("logger", () => {
       // Counts should work normally after reset
       captureConsole("log", () => logger.info("test-key", "test"));
       expect(logger.counts.info).toBe(1);
+    });
+  });
+
+  describe("setLoggerCountObserver()", () => {
+    afterEach(() => setLoggerCountObserver(undefined));
+
+    it("reports each counted call with its logger, key and level, disabled or not", () => {
+      const counted: string[] = [];
+      setLoggerCountObserver((moduleName, key, level) => {
+        counted.push(`${moduleName}/${key}/${level}`);
+      });
+      const logger = getLogger("count-observer-test", { enabled: false });
+
+      logger.debug("a", "x");
+      logger.warn("b", "x");
+      logger.error("a", "x");
+
+      expect(counted).toStrictEqual([
+        "count-observer-test/a/debug",
+        "count-observer-test/b/warn",
+        "count-observer-test/a/error",
+      ]);
+    });
+
+    it("reports nothing once given `undefined`", () => {
+      const counted: string[] = [];
+      setLoggerCountObserver((_moduleName, key) => {
+        counted.push(key);
+      });
+      const logger = getLogger("count-observer-removal-test", {
+        enabled: false,
+      });
+
+      logger.warn("before", "x");
+      setLoggerCountObserver(undefined);
+      logger.warn("after", "x");
+
+      expect(counted).toStrictEqual(["before"]);
+      expect(logger.countsByKey["after"].warn).toBe(1);
     });
   });
 
