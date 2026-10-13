@@ -1,10 +1,10 @@
 # `compact-space` — shrinking one space's history after a write storm
 
-**Status:** stages 1–4 landed (the bounded base search, the basis guard,
-the dry run, the write path with its verification); stage 6, the rehearsal,
-ran on 2026-10-12 and passed its verification, with one acceptance check,
-the served edit's round trip, still open; stage 5, documentation, in review
-with its numbers; stages 7–8 open. Design
+**Status:** stages 1–5 landed (the bounded base search, the basis guard,
+the dry run, the write path with its verification, the documentation and
+inspector); stage 6, the rehearsal, ran on 2026-10-12 and passed its
+verification, and its last acceptance check, the served edit, closed on
+2026-10-13 with the server-side instrument; stages 7–8 open. Design
 written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
@@ -633,11 +633,15 @@ Each check fails differently and the order goes from cheap to expensive:
    the cold board load in `/api/health/stats` do not exceed the baseline's,
    and fall where the selection reaches (a `computed:`-only selection leaves
    the authored documents' history, so the global counter still climbs by
-   their replays); and a topic edit through the served API, timed as a round
-   trip with the same client-side instrument on both files (the storm
-   record's 180 ms was a browser-side `transact` timing with the watch in
-   place; a `cf cell set` round trip carries the session's watch add and is
-   not that number), is no slower on the compacted file.
+   their replays); and a topic edit through the served API, with the same
+   client-side instrument on both files and judged by the server's
+   `transact` frame for it in `/api/health/stats` with
+   `CF_SLOW_QUERY_THRESHOLD_MS=0` (the storm record's 180 ms was that frame,
+   for commits from browser sessions holding the board's watch; a client's
+   round trip adds its own watch add and process time and is not that
+   number), is no slower on the compacted file — measured also with a
+   browser's board session holding its watch, so the board session's refresh
+   per edit is read beside the frame.
 8. On the host after install, the two checks `staging-space-copy.md` ends
    with: the space is listed, and a read through the API returns the content.
 
@@ -986,7 +990,12 @@ operator took.
   history but keeps every instance, because a resumed session may still read
   one. Collecting instances of sessions that will never resume is a different
   tool with a different question (when is a session dead?), and is not
-  designed here.
+  designed here. After the rehearsal's `computed:` compaction it is the
+  largest thing left in the file: 887,520 of 1.68 million revision rows,
+  2.95 of 4.55 GB of document data and 872,700 of 1.20 million heads belong
+  to 54,929 session scopes, and the selection removed 13% of those rows
+  against 72% of the space-scoped ones (census of the rehearsal clones,
+  2026-10-13).
 - **Label history as audit trail.** A compacted document keeps its current
   labels and loses the record of which label each earlier revision carried.
   Whether that record has value under the CFC model is for the CFC review that
@@ -1016,8 +1025,8 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 through 4 have landed, stage 6 has
-run, stage 5 is in review, and stage 7 onward is open. Two engine changes came first, and both have landed: the
+Each stage is a pull request. Stages 1 through 5 have landed, stage 6 has
+run and closed its acceptance checks, and stage 7 onward is open. Two engine changes came first, and both have landed: the
 base search, because it preserves history, helps the uncompacted store from
 the deploy that carries it, and is the measurement the compaction decision
 was made against; and the basis guard, because no store may be compacted
@@ -1069,7 +1078,8 @@ until the engine can tell compacted history from absence.
    a store with a second branch is refused; a run interrupted after the first
    instance resumes to the same result as an uninterrupted one, with two
    compaction commits.
-5. **Documentation and the spec amendment** — in review. The `cf space
+5. **Documentation and the spec amendment** — done ([labs#8786](https://github.com/commonfabric/labs/pull/8786),
+   merged 2026-10-13). The `cf space
    compact` section of `packages/cli/README.md` (the command-docs gate
    requires it; landed with stage 4), the §7.1 paragraph in `02-storage.md`,
    the state inspector learning the `compaction` member (the ACL document's
@@ -1085,13 +1095,18 @@ until the engine can tell compacted history from absence.
    the board's cold load 15.5 s against 20.2 s and the patch replays behind
    it 14,273 against 44,928, with the traversal still the bound; writes 1–5
    ms at the engine, as after stage 1; a topic edit through the served API
-   via `cf cell set`, seven warm samples a side, 3.3 s median on the
-   compacted file against 2.7 s on the uncompacted, the two cold edits 10.7 s
-   and 8.9 s against 9.0 s and 9.2 s, the session's watch add being the time
-   in both — an
-   inconclusive comparison, so the served-edit acceptance check of §3 step 7
-   stays open until a browser-side `transact` timing is taken against both
-   files.
+   via `cf cell set`, judged by the server's `transact` frame with the
+   threshold at zero: 2–6 ms on both files with lock wait 0, and with a
+   browser's board session holding its watch 1–2 ms compacted against 2–6
+   ms uncompacted, the board session's refresh per edit 1–2 ms against 2–3
+   ms — no slower, so the served-edit acceptance check of §3 step 7 is
+   closed (the earlier seconds were the client session's broad watch add,
+   932 watches delivering 5,613 documents; the single-topic watch of 314
+   documents took 214–224 ms in those sessions and 31–105 ms in the
+   follow-up's, where a board read had warmed them). The same session showed what a browser's
+   board page costs the server, which the `cf` instrument understates five
+   times over; that is recorded in the runbook and taken up outside this
+   plan.
 7. **The production run**, by the operator, from the rehearsed flag set, with
    the owner's agreement. Stage 1's measurement left disk as the reason:
    22.7 GB, of which 13.6 GB is commit payloads that I6 reaches outside the
