@@ -239,6 +239,14 @@ plans read again after a load they kicked landed, without saying which plans
 or in how many rounds; `runner/start/syncCellsForRunningPattern` counts the name-syncs a load
 paid, one per family named, which a cold resume of a nested tree pays once for
 the root and once more for each child start that found something absent.
+`scheduler/execute/yield` is one macrotask turn the settle loop handed back
+between two actions because its slice of continuous work was spent
+(`packages/runner/src/scheduler/cooperative-yield.ts`). Its count is the turns
+a pass took, and its time is what they cost the pass: each turn's own timer
+latency, and whatever else the event loop ran before returning, frames applied
+and timers fired among it. That time is inside `scheduler/execute/settle`, so
+a settle span compared across a change to the yield compares different things
+unless this row is taken out of it.
 
 ## 4. Split until an explosion has an origin
 

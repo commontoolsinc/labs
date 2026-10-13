@@ -528,7 +528,13 @@ async function runPullSettleOrder(
     // environment move, not its plan. A spent slice is the only reason
     // to await; otherwise the loop keeps its microtask shape.
     const turn = state.yieldBetweenRuns();
-    if (turn !== undefined) await turn;
+    if (turn !== undefined) {
+      // What the turn costs the pass: the timer's own latency plus whatever
+      // else the event loop ran before coming back.
+      const yielded = performance.now();
+      await turn;
+      logger.time(yielded, "scheduler", "execute", "yield");
+    }
     actionsRun += await runPullSettleAction(
       state,
       fn,
