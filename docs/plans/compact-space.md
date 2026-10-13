@@ -623,9 +623,16 @@ Each check fails differently and the order goes from cheap to expensive:
    local toolshed on it with the workspace's port offset, open the Topics
    board cold, and read the board and a handful of topics through `cf`. The
    acceptance checks are the ones `space-clone-rehearsal.md` lists plus two
-   for this tool: `/api/health/stats` for the space shows `patchReplays` not
-   climbing on a cold board load, and `transact` round trips on a topic edit
-   are below the storm's 180 ms.
+   for this tool, each judged against the same workload on the uncompacted
+   file: the cold and warm read times and the `patchReplays` delta behind
+   the cold board load in `/api/health/stats` do not exceed the baseline's,
+   and fall where the selection reaches (a `computed:`-only selection leaves
+   the authored documents' history, so the global counter still climbs by
+   their replays); and a topic edit through the served API, timed as a round
+   trip with the same client-side instrument on both files (the storm
+   record's 180 ms was a browser-side `transact` timing with the watch in
+   place; a `cf cell set` round trip carries the session's watch add and is
+   not that number), is no slower on the compacted file.
 8. On the host after install, the two checks `staging-space-copy.md` ends
    with: the space is listed, and a read through the API returns the content.
 
