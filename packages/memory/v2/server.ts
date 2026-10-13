@@ -5021,16 +5021,30 @@ export class Server {
         ? undefined
         : this.#sessions.get(message.space, message.session.sessionId)
           ?.ownerConnectionId;
-      const opened = this.#sessions.open(
-        message.space,
-        message.session,
-        Engine.serverSeq(engine),
-        connection.id,
-        principal,
-        actingPrincipal,
-        connection.routed,
-        connection.elidedVerdicts,
-      );
+      let opened: ReturnType<SessionRegistry["open"]>;
+      try {
+        opened = this.#sessions.open(
+          message.space,
+          message.session,
+          Engine.serverSeq(engine),
+          connection.id,
+          principal,
+          actingPrincipal,
+          connection.routed,
+          connection.elidedVerdicts,
+        );
+      } catch (error) {
+        // The client ends a session refused here as taken over, and logs
+        // nothing that says which resume was refused.
+        if (error instanceof Error && error.name === "SessionRevokedError") {
+          console.warn(
+            `[memory-session] refused to resume session ` +
+              `${message.session.sessionId} on ${message.space} for ` +
+              `connection ${connection.id}: ${error.message}`,
+          );
+        }
+        throw error;
+      }
       if (connection.routed) {
         if (priorOwner !== connection.id) {
           this.#sessions.clearRoutedInterests(message.space, opened.sessionId);
@@ -5041,6 +5055,11 @@ export class Server {
           connection.allowsRoutedSession(message.space, opened.sessionId);
       }
       if (opened.revokedConnectionId !== undefined) {
+        console.warn(
+          `[memory-session] session ${opened.sessionId} on ${message.space} ` +
+            `moved from connection ${opened.revokedConnectionId} to ` +
+            `${connection.id}, which revokes it there as taken over`,
+        );
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
           message.space,
           opened.sessionId,
