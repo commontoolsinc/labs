@@ -446,7 +446,8 @@ type argument, which the action strategy now carries into the lowered
 `handler` call — is applied in `contract` mode
 (`CapabilitySummaryApplicationMode` in `type-shrinking.ts`). The authored
 TypeNode serves VERBATIM in structure — objects, unions, intersections,
-arrays, and primitives alike, `$defs` identities and prose intact — and
+arrays, tuples, `readonly` types, and primitives alike, `$defs` identities and
+prose intact — and
 `overlayContractCapabilities` (`type-shrinking.ts`) rewrites only
 capability-bearing positions: a cell-like wrapper takes the capability the
 body's usage earns (writable where it writes, read-only where it reads,
@@ -481,15 +482,20 @@ object is built from its properties, with their optionality and the type's
 index signatures as the instantiation has them. Each property is written as its
 declaration's annotation where that still denotes the property's type, and is
 printed from its type where an argument replaced what the annotation names, so
-`v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
-cell is built from its parts, each printed from its own type. A tuple is kept
-as written, as a tuple written out is, and so is a type that carries a scope,
-since only a scope wrapper names its scope: a scoped cell keeps the capability
-written for it. An optional member's node is read at the member's type without
+`v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, a
+tuple, or a cell is built from its parts, each printed from its own type; a
+tuple keeps its optional and rest elements and leaves out its labels, which
+schema generation does not read. A type that carries a scope is kept as
+written, since only a scope wrapper names its scope: a scoped cell keeps the
+capability written for it. The walk reads inside a tuple and a `readonly`
+type, written out or built, so `Pair<string>`, for
+`type Pair<T> = [Writable<T>, T]`, is served as `[OpaqueCell<string>, string]`
+to a callback that never touches the cell, as the same tuple written out is. An optional member's node is read at the member's type without
 the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
 holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
 with `undefined`. A printed node is overlaid on its
-unfolding (`unfoldPrint()`) and never taken apart, since schema generation
+unfolding (`unfoldPrint()`), a printed tuple's among them, and never taken
+apart, since schema generation
 reads a print by the type it was printed from; it goes through the same
 expansion a reference does, after the identity-only comparison that wraps a
 plain position `comparable`, so a recursion through prints is cut where one

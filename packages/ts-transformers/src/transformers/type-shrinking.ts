@@ -2976,8 +2976,9 @@ function contractCapabilityAt(
 /**
  * The contract half of docs/history/plans/verb-input-contract.md, applied to a verb's
  * event: the authored TypeNode is served VERBATIM in structure — objects,
- * unions, intersections, arrays, and primitives alike — and only cell-like
- * positions are rewritten, to the capability the body's usage earns:
+ * unions, intersections, arrays, tuples, `readonly` types, and primitives
+ * alike — and only cell-like positions are rewritten, to the capability the
+ * body's usage earns:
  * writable where it writes, read-only where it reads, comparable where it
  * only compares, and OPAQUE where it never touches the position, so a
  * declared-but-unread reference confers no exercised authority while the
@@ -3007,10 +3008,10 @@ function contractCapabilityAt(
  * level deep (`unfoldReferencedType()`): an object as its properties, each
  * written as its declaration's annotation where that still denotes the
  * property's type and printed where an argument replaced what the annotation
- * names; a union, an array, or a cell as its printed parts. A tuple, and a
- * type that carries a scope, are kept as written, as a tuple written out is,
- * and as only a scope wrapper names its scope. A printed node is overlaid on
- * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
+ * names; a union, an array, a tuple, or a cell as its printed parts. A type
+ * that carries a scope is kept as written, as only a scope wrapper names its
+ * scope. A printed node is overlaid on its unfolding (`unfoldPrint()`), a
+ * printed tuple's among them, never taken apart, by the same expansion a
  * reference takes, cut where a recursion is, and only once a position the
  * body compares by identity alone has been wrapped `comparable`, as a
  * reference is. An optional member's node is read at
@@ -3095,9 +3096,10 @@ export function overlayContractCapabilities(
     }
 
     // A printed node is not taken apart: capabilities inside it are overlaid
-    // on its unfolding, or not at all.
+    // on its unfolding, or not at all. This walk reads inside a tuple, which
+    // no other pass does, so a printed tuple unfolds here too.
     const printedType = state?.printedFrom(current);
-    if (printedType && isUnfoldableKind(current)) {
+    if (printedType && (isUnfoldableKind(current) || isTupleKind(current))) {
       return expand(
         current,
         printedType,
@@ -3172,6 +3174,26 @@ export function overlayContractCapabilities(
       return walked === current.elementType
         ? current
         : factory.createArrayTypeNode(walked);
+    }
+
+    if (
+      ts.isTypeOperatorNode(current) &&
+      current.operator === ts.SyntaxKind.ReadonlyKeyword
+    ) {
+      const walked = walk(current.type, currentType, path);
+      return walked === current.type
+        ? current
+        : factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, walked);
+    }
+
+    if (ts.isTupleTypeNode(current)) {
+      let changed = false;
+      const elements = current.elements.map((element, index) => {
+        const walked = walkTupleElement(element, path, index);
+        if (walked !== element) changed = true;
+        return walked;
+      });
+      return changed ? factory.createTupleTypeNode(elements) : current;
     }
 
     if (ts.isUnionTypeNode(current) || ts.isIntersectionTypeNode(current)) {
@@ -3268,6 +3290,46 @@ export function overlayContractCapabilities(
       visiting.delete(type);
       expansions.pop();
     }
+  };
+
+  /**
+   * Walks the element of a tuple at `index`. A rest element's node is an
+   * array of the elements from there on, whose items the walk reads at an
+   * index of their own.
+   */
+  const walkTupleElement = (
+    element: ts.TypeNode,
+    path: readonly string[],
+    index: number,
+  ): ts.TypeNode => {
+    const inner = ts.isNamedTupleMember(element) ||
+        ts.isOptionalTypeNode(element) || ts.isRestTypeNode(element)
+      ? element.type
+      : element;
+    const rest = ts.isRestTypeNode(element) ||
+      (ts.isNamedTupleMember(element) && !!element.dotDotDotToken);
+    const walked = walk(
+      inner,
+      getTypeFromTypeNodeWithFallback(inner, checker, typeRegistry),
+      rest ? path : [...path, String(index)],
+    );
+    if (walked === inner) return element;
+    if (ts.isNamedTupleMember(element)) {
+      return factory.updateNamedTupleMember(
+        element,
+        element.dotDotDotToken,
+        element.name,
+        element.questionToken,
+        walked,
+      );
+    }
+    if (ts.isOptionalTypeNode(element)) {
+      return factory.updateOptionalTypeNode(element, walked);
+    }
+    if (ts.isRestTypeNode(element)) {
+      return factory.updateRestTypeNode(element, walked);
+    }
+    return walked;
   };
 
   return walk(node, type, []);
@@ -3931,14 +3993,23 @@ function isUnfoldableKind(node: ts.TypeNode): boolean {
     isCellLikeTypeNode(node);
 }
 
+/** Returns `true` for a tuple, or a `readonly` one. */
+function isTupleKind(node: ts.TypeNode): boolean {
+  return ts.isTupleTypeNode(node) ||
+    (ts.isTypeOperatorNode(node) &&
+      node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+      ts.isTupleTypeNode(node.type));
+}
+
 /**
  * Returns a node standing for `type`, which `node` was printed from, built one
  * level deep: a node of the print's own kind, each type node below it printed
  * from its own type (`unfoldTypeAs()`). A pass reading the structure of a print
  * reads its unfolding in its place, so nothing the pass builds holds a piece of
- * the print, and each part it keeps is read by its type. Returns `undefined`
- * for a print whose kind no pass looks inside (`isUnfoldableKind()`), or whose
- * type says something only as a whole.
+ * the print, and each part it keeps is read by its type. A tuple unfolds as
+ * one for the contract overlay, which reads inside it. Returns `undefined` for
+ * a print of any other kind no pass looks inside (`isUnfoldableKind()`), or
+ * whose type says something only as a whole.
  */
 function unfoldPrint(
   node: ts.TypeNode,
@@ -3961,6 +4032,8 @@ function unfoldPrint(
     ? "readonly array"
     : ts.isTypeReferenceNode(node) && isCellLikeTypeNode(node)
     ? "cell"
+    : isTupleKind(node)
+    ? "tuple"
     : undefined;
   return shape &&
     unfoldTypeAs(
@@ -3981,8 +4054,8 @@ function unfoldPrint(
  * denotes the property's type at `type`. An annotation is written in its
  * declaration's type parameters, which `type` may have replaced with
  * arguments, as `Box<string>` replaces `T` in `v: T`; such a property is
- * printed from its type. Returns `undefined` for a tuple, for a type that
- * carries a scope, and for a type that says something only as a whole.
+ * printed from its type. Returns `undefined` for a type that carries a scope,
+ * and for a type that says something only as a whole.
  */
 function unfoldReferencedType(
   type: ts.Type,
@@ -4002,7 +4075,7 @@ function unfoldReferencedType(
     : !isArrayShapeType(type, checker)
     ? "object"
     : !isHomogeneousArrayType(type, checker)
-    ? undefined
+    ? "tuple"
     : type.getSymbol()?.getName() === "ReadonlyArray"
     ? "readonly array"
     : "array";
@@ -4019,13 +4092,23 @@ function unfoldReferencedType(
 }
 
 /** The structure an unfolding builds one level of. */
-type UnfoldedShape = "object" | "union" | "array" | "readonly array" | "cell";
+type UnfoldedShape =
+  | "object"
+  | "union"
+  | "array"
+  | "readonly array"
+  | "tuple"
+  | "cell";
 
 /**
  * Helper for `unfoldPrint()` and `unfoldReferencedType()`, which returns a
  * node of `shape` standing for `type`, each type node below it printed from
  * its own type: an object's properties and index signatures, a union's
- * members, an array's element, or a cell's value. Where `annotated` is set, an
+ * members, an array's element, a tuple's elements, or a cell's value. A
+ * tuple's labels are left out, as schema generation reads none, and its
+ * elements are each required, optional, or a rest element: an event's types
+ * are instantiated, so none is the variadic spread of a type parameter. Where
+ * `annotated` is set, an
  * object's property is written instead as its declaration's annotation where
  * that denotes the property's type (`readMemberAnnotation()`). Returns
  * `undefined` where `type` says something only as a whole: a union with a
@@ -4074,6 +4157,30 @@ function unfoldTypeAs(
       return shape === "readonly array"
         ? factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, array)
         : array;
+    }
+    case "tuple": {
+      const tuple = type as ts.TypeReference;
+      const target = tuple.target as ts.TupleType;
+      const elements = checker.getTypeArguments(tuple);
+      const node = factory.createTupleTypeNode(
+        target.elementFlags.map((flags, index) => {
+          const element = elements[index]!;
+          if (flags & ts.ElementFlags.Optional) {
+            return factory.createOptionalTypeNode(
+              printOptionalSlotType(element, print, factory),
+            );
+          }
+          if (flags & ts.ElementFlags.Rest) {
+            return factory.createRestTypeNode(
+              factory.createArrayTypeNode(print(element)),
+            );
+          }
+          return print(element);
+        }),
+      );
+      return target.readonly
+        ? factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, node)
+        : node;
     }
     case "cell": {
       const wrapper = getCellWrapperInfo(type, checker);
@@ -4131,21 +4238,14 @@ function unfoldObjectType(
     const annotation = annotated
       ? readMemberAnnotation(property, propertyType, checker)
       : undefined;
-    // An optional property is written without the `undefined` its
-    // optionality adds to its type, as the printer writes it.
-    const written = optional && propertyType.isUnion()
-      ? propertyType.types.filter((member) =>
-        (member.flags & ts.TypeFlags.Undefined) === 0
-      )
-      : [propertyType];
     members.push(factory.createPropertySignature(
       undefined,
       createPropertyName(property.getName(), factory),
       optional ? factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
       annotation ??
-        (written.length === 1
-          ? print(written[0]!)
-          : factory.createUnionTypeNode(written.map(print))),
+        (optional
+          ? printOptionalSlotType(propertyType, print, factory)
+          : print(propertyType)),
     ));
   }
   for (const index of checker.getIndexInfosOfType(type)) {
@@ -4162,6 +4262,26 @@ function unfoldObjectType(
     ));
   }
   return factory.createTypeLiteralNode(members);
+}
+
+/**
+ * Helper for `unfoldTypeAs()` and `unfoldObjectType()`, which returns `type`,
+ * the type of an optional property or tuple element, printed without the
+ * `undefined` its optionality adds to it, as the printer writes it.
+ */
+function printOptionalSlotType(
+  type: ts.Type,
+  print: (printable: ts.Type) => ts.TypeNode,
+  factory: ts.NodeFactory,
+): ts.TypeNode {
+  const written = type.isUnion()
+    ? type.types.filter((member) =>
+      (member.flags & ts.TypeFlags.Undefined) === 0
+    )
+    : [type];
+  return written.length === 1
+    ? print(written[0]!)
+    : factory.createUnionTypeNode(written.map(print));
 }
 
 function createIdentityOnlyReplacementTypeNode(

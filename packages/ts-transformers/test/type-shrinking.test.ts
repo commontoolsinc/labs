@@ -378,6 +378,29 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
       });
     }
 
+    it("gives a cell a tuple alias holds the capability the callback earns, and every other cell, past the cut too, opaque", async () => {
+      const { event, reported } = await eventSchema(
+        "type Tup<T> = [Writable<T>, Tup<T[]>?];",
+        "Tup<string>",
+        "(e, { c }) => { c.set(e[0].get().length); }",
+      );
+      const [cell] = (event.items as { anyOf: Record<string, unknown>[] })
+        .anyOf;
+
+      expect(cell).toEqual({ type: "string", asCell: ["readonly"] });
+      expect(
+        capabilitiesOf(event).filter((capability) =>
+          JSON.stringify(capability) !== '["opaque"]'
+        ),
+      ).toEqual([["readonly"]]);
+      for (const diagnostic of reported) {
+        expect(diagnostic).toEqual({
+          type: "schema-type:unread",
+          severity: "warning",
+        });
+      }
+    });
+
     it("gives a cell the event holds the capability the callback earns, and every other cell, past the cut too, opaque", async () => {
       const { event, reported } = await eventSchema(
         "type Nest<T> = { c: Writable<number>; v: T; children: Nest<T[]>[] };",
@@ -694,7 +717,7 @@ type Box = { c: Writable<number>; v?: Identity<Writable<number> | string> };`,
       ]));
     });
 
-    it("keeps a reference to a generic tuple alias as written, as a tuple written out is", async () => {
+    it("reads a reference to a generic tuple alias as the tuple, as a tuple written out is read", async () => {
       const generic = await eventSchema(
         "type Tup<T> = [Writable<number>, T];",
         "Tup<string>",
@@ -775,6 +798,151 @@ interface Ev { c: Writable<number>; r?: Reply }`,
       required: ["message", "shownIn"],
     });
     expect(event).toEqual(written.event);
+  });
+
+  describe("an event alias of an array or a tuple holding a cell", () => {
+    // A reference to an array or a tuple expands to the array or the tuple
+    // it names, each element printed from its type and read by that type, and
+    // a tuple an alias writes out is walked as written.
+
+    for (
+      const [capability, use, callback, asCell] of [
+        [
+          "opaque",
+          "leaves unread",
+          "(e, { c }) => { c.set(e.length); }",
+          "opaque",
+        ],
+        [
+          "read-only",
+          "reads",
+          "(e, { c }) => { c.set(e[0].get().length); }",
+          "readonly",
+        ],
+        ["writable", "writes", '(e) => { e[0].set("x"); }', "cell"],
+      ] as const
+    ) {
+      it(`overlays ${capability} on a cell a generic tuple alias holds that the callback ${use}`, async () => {
+        const { event, reported } = await eventSchema(
+          "type Pair<T> = [Writable<T>, T];",
+          "Pair<string>",
+          callback,
+        );
+
+        expect(event).toEqual({
+          type: "array",
+          items: {
+            anyOf: [{ type: "string", asCell: [asCell] }, { type: "string" }],
+          },
+        });
+        expect(reported).toEqual([]);
+      });
+    }
+
+    const opaqueString = { type: "string", asCell: ["opaque"] };
+    for (
+      const [shape, declaration, event, items] of [
+        [
+          "a tuple",
+          "type Pair = [Writable<string>, string];",
+          "Pair",
+          { anyOf: [opaqueString, { type: "string" }] },
+        ],
+        [
+          "a generic tuple with optional and rest elements",
+          "type Mixed<T> = [T, Writable<T>?, (T | number)?, ...Writable<T>[]];",
+          "Mixed<string>",
+          {
+            anyOf: [
+              { type: "string" },
+              opaqueString,
+              { type: "undefined" },
+              { type: ["number", "string"] },
+            ],
+          },
+        ],
+        [
+          "a tuple with labeled optional and rest elements",
+          "type Named = [label: string, cell?: Writable<string>, ...rest: Writable<string>[]];",
+          "Named",
+          { anyOf: [{ type: "string" }, opaqueString, { type: "undefined" }] },
+        ],
+        [
+          "a read-only tuple",
+          "type Pair = readonly [Writable<string>, string];",
+          "Pair",
+          { anyOf: [opaqueString, { type: "string" }] },
+        ],
+        [
+          "a generic read-only tuple",
+          "type Pair<T> = readonly [Writable<T>, readonly T[]];",
+          "Pair<string>",
+          {
+            anyOf: [opaqueString, { type: "array", items: { type: "string" } }],
+          },
+        ],
+        [
+          "a generic tuple in a tuple",
+          "type Outer<T> = [[Writable<T>, T]];",
+          "Outer<string>",
+          {
+            type: "array",
+            items: { anyOf: [opaqueString, { type: "string" }] },
+          },
+        ],
+        [
+          "a generic read-only array",
+          "type List<T> = readonly Writable<T>[];",
+          "List<string>",
+          opaqueString,
+        ],
+      ] as const
+    ) {
+      it(`overlays opaque on each cell an event alias of ${shape} holds that the callback leaves unread`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          "(e, { c }) => { c.set(e.length); }",
+        );
+
+        expect(schema).toEqual({ type: "array", items });
+        expect(reported).toEqual([]);
+      });
+    }
+
+    for (
+      const [shape, declaration, event] of [
+        [
+          "a generic tuple",
+          "type Rest<T> = [T, ...Writable<T>[]];",
+          "Rest<string>",
+        ],
+        [
+          "a tuple",
+          "type Rest = [label: string, ...rest: Writable<string>[]];",
+          "Rest",
+        ],
+      ] as const
+    ) {
+      it(`overlays read-only on a cell the rest element of an event alias of ${shape} holds that the callback reads`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          "(e, { c }) => { c.set(e[2]!.get().length); }",
+        );
+
+        expect(schema).toEqual({
+          type: "array",
+          items: {
+            anyOf: [
+              { type: "string" },
+              { type: "string", asCell: ["readonly"] },
+            ],
+          },
+        });
+        expect(reported).toEqual([]);
+      });
+    }
   });
 });
 
