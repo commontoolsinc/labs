@@ -5037,10 +5037,14 @@ export class Server {
         // The client ends a session refused here as taken over, and logs
         // nothing that says which resume was refused.
         if (error instanceof Error && error.name === "SessionRevokedError") {
+          // Quoted: the id, the space and the message (which repeats the id)
+          // are the peer's text, and a line break in one would read as a log
+          // record of its own.
           console.warn(
             `[memory-session] refused to resume session ` +
-              `${message.session.sessionId} on ${message.space} for ` +
-              `connection ${connection.id}: ${error.message}`,
+              `${JSON.stringify(message.session.sessionId)} on ` +
+              `${JSON.stringify(message.space)} for connection ` +
+              `${connection.id}: ${JSON.stringify(error.message)}`,
           );
         }
         throw error;
@@ -5056,9 +5060,10 @@ export class Server {
       }
       if (opened.revokedConnectionId !== undefined) {
         console.warn(
-          `[memory-session] session ${opened.sessionId} on ${message.space} ` +
-            `moved from connection ${opened.revokedConnectionId} to ` +
-            `${connection.id}, which revokes it there as taken over`,
+          `[memory-session] session ${JSON.stringify(opened.sessionId)} on ` +
+            `${JSON.stringify(message.space)} moved from connection ` +
+            `${opened.revokedConnectionId} to ${connection.id}, which ` +
+            "revokes it there as taken over",
         );
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
           message.space,

@@ -108,11 +108,15 @@ const logger = getLogger("memory.v2.client", {
   level: "warn",
 });
 
-/** Names an error by its name and message, for a log line. */
+/**
+ * Names an error by its name and message, for a log line. The message is
+ * JSON-quoted: it can carry text a peer chose, such as a session id, and a
+ * line break in it would read as a log record of its own.
+ */
 const describeError = (error: unknown): string =>
   error instanceof Error
-    ? `${error.name}: ${error.message}`
-    : String(error ?? "no error");
+    ? `${JSON.stringify(error.name)}: ${JSON.stringify(error.message)}`
+    : JSON.stringify(String(error ?? "no error"));
 
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
@@ -3359,8 +3363,8 @@ export class SpaceSession {
     // Terminal: nothing on this session works again, and the replica above it
     // reports the error only when asked. This line is the record of why.
     logger.error("session-terminated", () => [
-      `session ${this.#sessionId} on ${this.space} ended: ` +
-      describeError(error),
+      `session ${JSON.stringify(this.#sessionId)} on ` +
+      `${JSON.stringify(this.space)} ended: ${describeError(error)}`,
     ]);
     this.#closed = true;
     this.#closeError = error;

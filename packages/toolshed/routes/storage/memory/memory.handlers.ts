@@ -329,6 +329,11 @@ export const attachMemorySocketPipeline = (
         },
         onClose: closeConnection,
         onError(error) {
+          console.error(
+            `memory websocket: closing connection ${connection.id} after ` +
+              "its socket failed",
+            error,
+          );
           safeSocketClose(
             error.message.startsWith("Memory websocket expects") ? 1003 : 1011,
             error.message,
