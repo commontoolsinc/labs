@@ -342,7 +342,13 @@ rather than refused: a slot whose stored value is a link that cannot be
 dereferenced in that transaction (a nested piece's argument lives in its host's
 document, and "not yet synced" is not "invalid"), and a root carrying no
 completion marker at all, which gets one unvalidated setup because absence
-cannot be distinguished from a pending apply.
+cannot be distinguished from a pending apply. A link stored in a slot the new
+schema types as a cell handle (`Writable`, `Cell`, `Stream`) is judged as a
+handle: validation reads only the top level of what it reaches, without
+descending, and holds it to the type the slot's schema allows. What lies below
+is checked by the reactive reads that follow the handle, and leaving it unread
+keeps its labels out of the transaction that writes the piece's own stores. A
+write to a piece's input validates the input it lands in the same way.
 
 A nested piece is set up again the same way when its code changes, over its
 existing argument document, with the argument its parent's expression supplies
@@ -372,7 +378,17 @@ before its first start. This lets an obsolete pattern that cannot load be
 replaced before bootstrap without reading unsynchronized owned cells as their
 schema defaults. If the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
-the **same result cell**.
+the **same result cell**. The watcher reads from storage before it does: the
+writer authority the new pattern inherits, and any document the new pattern
+reads that the replica lacks. `ensureDefaultPattern` waits for that
+re-instantiation, through the runner's `patternPointerFollowed()`, so the root
+it returns runs the new pattern whether or not the root was running when it
+was opened. A runtime that seals its writes into a serving wave is the
+exception. There the watcher re-instantiates once the wave carrying the new
+pattern's setup has settled, so that a withdrawn setup leaves the old graph in
+place, and a wave settles after the cycle that sealed into it has ended. A call
+made within that cycle cannot wait for the settlement, so on such a runtime
+`ensureDefaultPattern` returns with the old pattern's graph still running.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
