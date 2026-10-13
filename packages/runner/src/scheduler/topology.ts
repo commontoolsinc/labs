@@ -140,11 +140,19 @@ export function topologicalSort(
 
   // Add parent-child edges only when no opposing data dependency exists.
   // Structural creation order is a fallback; semantic read/write dependencies
-  // should win once a parent actually reads a child's result.
+  // should win once a parent actually reads a child's result. The parents
+  // within the work set are kept for the cycle fallback below, which prefers
+  // an action whose parent has run.
+  const parents = new Map<Action, Action>();
+  const children = new Map<Action, Action[]>();
   if (nodes) {
     for (const child of actions) {
       const parent = nodes.parentActionOf(child);
       if (parent && actions.has(parent)) {
+        parents.set(child, parent);
+        const siblings = children.get(parent);
+        if (siblings === undefined) children.set(parent, [child]);
+        else siblings.push(child);
         const graphParent = graph.get(parent)!;
         const graphChild = graph.get(child)!;
         if (!graphParent.has(child) && !graphChild.has(parent)) {
@@ -175,34 +183,24 @@ export function topologicalSort(
   }
   queue.sort(byRegistrationOrder);
 
+  // A read/write cycle leaves the queue empty with actions unvisited. The
+  // break prefers an action with no unvisited parent, so a parent runs
+  // before its child even when the two form a cycle, then the lowest
+  // remaining in-degree, then registration order. The candidates are kept
+  // in a heap under that key from the first break on, since a work set of
+  // thousands of actions can break thousands of cycles in one pass and a
+  // sort of the unvisited set at each break is quadratic in the pass.
+  let candidates: CycleBreakCandidates | undefined;
   while (queue.length > 0 || visited.size < actions.size) {
     if (queue.length === 0) {
-      // Handle cycle: prefer parents over children, then lowest in-degree
-      // This ensures parent runs before child even when they form a read/write cycle
-      const unvisited = Array.from(actions).filter(
-        (action) => !visited.has(action),
+      candidates ??= new CycleBreakCandidates(
+        actions,
+        visited,
+        inDegree,
+        parents,
+        byRegistrationOrder,
       );
-
-      // Sort by: prefer no unvisited parent, then by in-degree
-      unvisited.sort((a, b) => {
-        const aParent = nodes?.parentActionOf(a);
-        const bParent = nodes?.parentActionOf(b);
-        const aHasUnvisitedParent = aParent && !visited.has(aParent) &&
-          actions.has(aParent);
-        const bHasUnvisitedParent = bParent && !visited.has(bParent) &&
-          actions.has(bParent);
-
-        // Prefer nodes whose parent is already visited (or have no parent)
-        if (aHasUnvisitedParent && !bHasUnvisitedParent) return 1; // b first
-        if (!aHasUnvisitedParent && bHasUnvisitedParent) return -1; // a first
-
-        // Fall back to in-degree, then registration order (rule 3)
-        const byDegree = (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
-        if (byDegree !== 0) return byDegree;
-        return byRegistrationOrder(a, b);
-      });
-
-      queue.push(unvisited[0]);
+      queue.push(candidates.take());
     }
 
     const current = queue.shift()!;
@@ -212,14 +210,133 @@ export function topologicalSort(
     visited.add(current);
 
     for (const neighbor of graph.get(current) || []) {
-      inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
-      if (inDegree.get(neighbor) === 0) {
+      const degree = inDegree.get(neighbor)! - 1;
+      inDegree.set(neighbor, degree);
+      if (degree === 0) {
         insertReadyAction(queue, neighbor, byRegistrationOrder);
+      } else {
+        candidates?.refresh(neighbor);
       }
+    }
+    for (const child of children.get(current) ?? []) {
+      candidates?.refresh(child);
     }
   }
 
   return result;
+}
+
+/** One candidate for a cycle break, under the key it was pushed with. */
+type CycleBreakEntry = {
+  readonly action: Action;
+  /** Whether the action's parent in the work set was unvisited. */
+  readonly blocked: boolean;
+  readonly degree: number;
+};
+
+/**
+ * The unvisited actions a cycle break chooses among, ordered by the break's
+ * preference. An action's key only falls as the sort visits actions: its
+ * in-degree drops, and its parent goes from unvisited to visited. So the
+ * action is pushed again under its new key whenever one changes, and an
+ * entry whose key is no longer the action's current one, or whose action
+ * has since been visited, is dropped when it reaches the top. The first
+ * current entry at the top is then the least unvisited action, since every
+ * entry an action still has sorts at or above its current one.
+ */
+class CycleBreakCandidates {
+  readonly #heap: CycleBreakEntry[] = [];
+  readonly #visited: ReadonlySet<Action>;
+  readonly #inDegree: ReadonlyMap<Action, number>;
+  readonly #parents: ReadonlyMap<Action, Action>;
+  readonly #byRegistrationOrder: (a: Action, b: Action) => number;
+
+  constructor(
+    actions: ReadonlySet<Action>,
+    visited: ReadonlySet<Action>,
+    inDegree: ReadonlyMap<Action, number>,
+    parents: ReadonlyMap<Action, Action>,
+    byRegistrationOrder: (a: Action, b: Action) => number,
+  ) {
+    this.#visited = visited;
+    this.#inDegree = inDegree;
+    this.#parents = parents;
+    this.#byRegistrationOrder = byRegistrationOrder;
+    for (const action of actions) this.refresh(action);
+  }
+
+  /** Records `action` under its current key, unless it has been visited. */
+  refresh(action: Action): void {
+    if (this.#visited.has(action)) return;
+    this.#push({
+      action,
+      blocked: this.#blocked(action),
+      degree: this.#inDegree.get(action)!,
+    });
+  }
+
+  /** The least unvisited action, which the caller then visits. */
+  take(): Action {
+    for (;;) {
+      const top = this.#pop();
+      if (top === undefined) {
+        throw new Error("Cycle break found no unvisited action.");
+      }
+      if (
+        this.#visited.has(top.action) ||
+        top.blocked !== this.#blocked(top.action) ||
+        top.degree !== this.#inDegree.get(top.action)
+      ) {
+        continue;
+      }
+      return top.action;
+    }
+  }
+
+  #blocked(action: Action): boolean {
+    const parent = this.#parents.get(action);
+    return parent !== undefined && !this.#visited.has(parent);
+  }
+
+  #before(a: CycleBreakEntry, b: CycleBreakEntry): boolean {
+    if (a.blocked !== b.blocked) return !a.blocked;
+    if (a.degree !== b.degree) return a.degree < b.degree;
+    return this.#byRegistrationOrder(a.action, b.action) < 0;
+  }
+
+  #push(entry: CycleBreakEntry): void {
+    const heap = this.#heap;
+    heap.push(entry);
+    let index = heap.length - 1;
+    while (index > 0) {
+      const parentIndex = (index - 1) >> 1;
+      if (!this.#before(entry, heap[parentIndex])) break;
+      heap[index] = heap[parentIndex];
+      index = parentIndex;
+    }
+    heap[index] = entry;
+  }
+
+  #pop(): CycleBreakEntry | undefined {
+    const heap = this.#heap;
+    const top = heap[0];
+    const last = heap.pop();
+    if (last === undefined || heap.length === 0) return top;
+    let index = 0;
+    for (;;) {
+      const left = 2 * index + 1;
+      if (left >= heap.length) break;
+      const right = left + 1;
+      const child = right < heap.length && this.#before(heap[right], heap[left])
+        ? right
+        : left;
+      if (!this.#before(heap[child], last)) break;
+      heap[index] = heap[child];
+      index = child;
+    }
+    heap[index] = last;
+    return top;
+  }
 }
 
 function insertReadyAction(

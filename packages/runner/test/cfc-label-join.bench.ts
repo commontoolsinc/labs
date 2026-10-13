@@ -95,7 +95,7 @@ const seedLabeledSource = async (entries: number): Promise<Fixture> => {
           label: {
             confidentiality: [USER_CLAUSE],
             integrity: [{
-              type: CFC_ATOM_TYPE.Origin,
+              type: CFC_ATOM_TYPE.LinkReference,
               source: { space: signer.did(), id, path: [field] },
             }],
           },

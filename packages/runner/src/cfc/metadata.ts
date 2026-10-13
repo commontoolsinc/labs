@@ -116,7 +116,6 @@ export class UnknownCfcMetadataVersionError extends StoredCfcMetadataError {
 const KNOWN_CFC_METADATA_VERSIONS: readonly StoredCfcMetadata["version"][] = [
   1,
   2,
-  3,
 ];
 
 /** Whether `value` is an envelope `version` this build interprets. */
@@ -194,7 +193,7 @@ const isReadableStoredEntry = (
   entry: unknown,
 ): boolean =>
   isStoredLabelMapEntry(entry) &&
-  (version !== 1 || !isCfcLabelReference(entry.label)) &&
+  (version === 2 || !isCfcLabelReference(entry.label)) &&
   (!isLabelMetadataTemplateEntry(entry) ||
     isWellFormedLabelMetadataTemplateEntry(entry));
 
@@ -438,6 +437,11 @@ const resolveStoredCfcMetadata = (
     version: stored.version,
     schemaHash: stored.schemaHash,
     labelMap,
+    // Read as the one value this build knows; any other is an envelope that
+    // says nothing of its stamps' placement.
+    ...(stored.stampPlacement === "committed"
+      ? { stampPlacement: stored.stampPlacement }
+      : {}),
   };
 };
 

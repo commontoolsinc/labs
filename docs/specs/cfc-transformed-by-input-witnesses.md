@@ -227,15 +227,19 @@ entity's root, and not a write redirect. So:
   holding a list of objects, say, is stamped whole.
 
 A slot's stamp describes the reference the slot holds only in an envelope
-written at version 3 or later (`cfc-stored-envelope.md`), the vintage from
-which the runtime re-derives an attempt's labels against the committed
-placement (spec §8.10.2.2): before that, an append landed at the live tail
-while its envelope described the list the attempt read, so a stamp could sit
-beside another writer's reference. A value stamp at a reference slot of an
-earlier-version envelope is therefore no witness at all (spec §18.7,
-`slotStampPredatesPlacementRule` in `prepare.ts`), and the next persist of
-that envelope drops the stamp's `TransformedBy` and keeps its
-confidentiality (`carriedStampLabel`).
+that says where its stamps sit, with `stampPlacement: "committed"`
+(`cfc-stored-envelope.md`). The runtime re-derives an attempt's labels
+against the committed placement (spec §8.10.2.2), and writes the member when
+the stored envelope carried it or the transaction stamped a slot beside a
+reference it anchored, and no stamp carried over from an envelope without it
+stands at a slot holding a reference. Before that rule, an append landed at
+the live tail while its envelope described the list the attempt read, so a
+stamp could sit beside another writer's reference. A writer's stamp at a
+reference slot of an envelope that does not carry the member is therefore
+no witness at all (spec §18.7, `slotStampPlacementUnknown` in `prepare.ts`),
+and an append beside such a stamp does not make it one: the list witnesses
+again once the endorsed step has rewritten the slots the earlier envelope
+stamped.
 
 A slot's stamp says who stored the reference there and nothing about what it
 refers to. A reader that follows it reads the entity as well, and each

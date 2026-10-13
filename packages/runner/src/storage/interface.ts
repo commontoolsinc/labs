@@ -497,6 +497,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   authorizationError?(space: MemorySpace): Error | undefined;
 
+  /**
+   * The terminal error of a space's remote subscription. Ordinary reconnects
+   * and reads supplied by an authoritative local store return `undefined`.
+   */
+  spaceSessionError?(space: MemorySpace): Error | undefined;
+
   /** The latest authoritative access loss for a space, cleared on reopening. */
   spaceAccessError?(space: MemorySpace): Error | undefined;
 

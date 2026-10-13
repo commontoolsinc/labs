@@ -263,7 +263,7 @@ describe("stored CFC envelope gathering", () => {
       fakeTxOverDocuments({
         "of:doc": {
           cfc: {
-            version: 4,
+            version: 3,
             schemaHash: "whatever-format-that-year-uses",
             labelMap: { version: 1, entries: [] },
           },

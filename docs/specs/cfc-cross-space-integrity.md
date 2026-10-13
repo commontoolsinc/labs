@@ -169,8 +169,7 @@ deployment.
 ## Provenance
 
 Runner seams: `linkSlotLabel` / `linkedSourceEvidence` /
-`linkReferenceIntegrity` / `derivePersistedLabel` /
-`verifyExactCopyRequirements` /
+`derivePersistedLabel` / `verifyExactCopyRequirements` /
 `unsupportedTrustSensitiveReason` / `gateRuntimeMintedIntegrity`
 (`cfc/prepare.ts`); `ExchangeRule` / `buildCfcPolicySnapshot` (`cfc/policy.ts`);
 `evaluateExchangeRules` + home-clause locality (`cfc/exchange-eval.ts`);

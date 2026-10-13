@@ -433,18 +433,20 @@ flags it adopts from the deployment it runs against.
   entry here, and a delta in the plan's live coordination block; workflow
   job topology, probes, skip placement, coverage ownership, test record
   variants, and every other document follow automatically.
-  Single-process harnesses do not
-  read the constant: a bare `new Runtime` and the `patternTest` /
-  `localDev` / `unitTest` presets have no serving host, so they resolve the
-  ambient baseline (OFF) by construction — the unit suites and `cf test`
-  run the derive-and-commit model (which is why the flip does not reach
-  the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
-  the lane-posture item the topics measurement report recorded for the
-  flip decision). `cf test` also refuses an explicit
-  `EXPERIMENTAL_SERVER_EXECUTION=true`, since it hosts no serving loop and
-  its clients' events would go unserved. A test that runs ON in one process
-  needs a serving loop beside its memory server, or the events its clients
-  append are admitted and never delivered;
+  A bare `new Runtime` and the `patternTest` / `localDev` / `unitTest`
+  presets do not read the constant: they have no serving host, so they
+  resolve the ambient baseline (OFF) by construction, and the unit suites
+  run the derive-and-commit model. A single-process harness that hosts a
+  serving loop does read it. `cf test` builds its runtimes with
+  `patternTest`, but resolves the posture itself as a deployed entry point
+  does, and hosts a serving loop beside its memory server when that is ON.
+  The integration runner sets the flag OFF for its `pattern-tests` and
+  `generated-patterns` targets, which is why the flip does not reach the
+  pattern-tests lane and its `topics/multi-user.test.tsx`, the lane-posture
+  item the topics measurement report recorded for the flip decision. A test
+  that runs ON in one process needs a serving loop beside its memory
+  server, or the events its clients append are admitted and never
+  delivered;
   `@commonfabric/runner/executor/serving-memory-server.deno` supplies one,
   in-process (`startServingMemoryServer`) or on a localhost websocket for
   `remoteClient` runtimes (`listenServingMemoryServer`), with its serving
@@ -1109,33 +1111,31 @@ the per-epic implementation notes).
   boolean).
 - **Added by.** Bernhard Seefeld, in "content-addressed CFC labels"
   (2026-09-15).
-- **Purpose.** When on, each `labelMap` entry of a persisted envelope keeps
-  its `path`, `origin`, and `observes` inline and holds its `label` as a
-  reference to a content-addressed label document whenever the label's
-  canonical JSON exceeds the inline limit, so every envelope carrying the
-  same label shares one document per space
-  (`docs/specs/content-addressed-cfc-labels.md`). Off stores every label
-  inline. Either spelling is written at the current envelope version, 3
-  (`docs/specs/cfc-stored-envelope.md`); version 1 defines no reference and
-  version 2 does, and reading resolves every version to the same metadata,
-  space-first with content verification and the realm's label registry
-  supplying what the space does not hold, failing closed on a reference
-  nothing backs; the storage commit boundary refuses a commit whose
-  envelope references a label document it neither includes nor the space
-  stores. A stored envelope of an earlier version is rewritten at the
-  current version on its next persist even when its labels are unchanged,
-  whatever this flag selects, which is how a store migrates without a data
-  migration, and a stored current-version envelope is left as it is by a
-  writer on either setting.
+- **Purpose.** When on, the envelope persist path stores version-2
+  envelopes: each `labelMap` entry keeps its `path`, `origin`, and
+  `observes` inline and holds its `label` as a reference to a
+  content-addressed label document whenever the label's canonical JSON
+  exceeds the inline limit, so every envelope carrying the same label
+  shares one document per space
+  (`docs/specs/content-addressed-cfc-labels.md`). Off stores version 1,
+  every label inline. Reading resolves either version to the same
+  metadata, space-first with content verification and the realm's label
+  registry supplying what the space does not hold, and fails closed on a
+  reference nothing backs; the storage commit boundary refuses a commit
+  whose envelope references a label document it neither includes nor the
+  space stores. With the flag on, a stored version-1 envelope is rewritten
+  in version 2 on its next persist even when its labels are unchanged,
+  which is how a store migrates without a data migration; with it off, a
+  stored version 2 is left as it is.
 - **Current default and planned end state.** `false` by default. The target
-  is `true`; envelopes of earlier versions remain readable indefinitely.
+  is `true`; version-1 envelopes remain readable indefinitely.
 - **Status on 2026-09-15.** Implemented, off by default. The flip is gated
-  on deployment reach: a reader that predates the reference spelling fails
-  closed on a referencing envelope through `UnknownCfcMetadataVersionError`
-  or `UnresolvableCfcLabelDocumentError`, which is correct and also unusable,
-  so every deployed reader must interpret it before any space sees one.
-- **Path to removal.** Once the default flips, the dial retires and the
-  reference spelling becomes the only one the persist path emits.
+  on deployment reach: a reader that predates version 2 fails closed on a
+  version-2 envelope through `UnknownCfcMetadataVersionError`, which is
+  correct and also unusable, so every deployed reader must interpret
+  version 2 before any space sees one.
+- **Path to removal.** Once the default flips, the dial retires and version
+  2 becomes the only spelling the persist path emits.
 
 ### `cfcPolicyEvaluation`
 
@@ -1225,8 +1225,8 @@ the per-epic implementation notes).
   `{digestOf: …}` commitment forms (or verbatim where the classification table
   says `public`), identically at the `["cfc"]` envelope and the sigil-carried
   label views, so a destination space's replicas stop disclosing source-space
-  principal identities (`Caveat.source`, clause DIDs). Values are `off`,
-  `observe`, and `enforce`: `observe` computes the
+  principal identities (`Caveat.source`, clause DIDs, `LinkReference`
+  addresses). Values are `off`, `observe`, and `enforce`: `observe` computes the
   transformed form and emits a structured divergence diagnostic while persisting
   today's bytes (the rollout metric); `enforce` persists the transformed form.
   Enforcement matching is commitment-aware in both directions (read gating
@@ -1860,10 +1860,11 @@ they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
-LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
-deployment to ask, and do read the environment alone, through this same
-mapping. `cf test` refuses an environment that turns `serverExecution` on,
-because nothing in it serves the events its clients commit.
+LOCAL modes (`cf test`, `cf check`) run against storage of their own, have
+no deployment to ask, and do read the environment alone, through this same
+mapping. `cf test` then applies the first-party default where the
+environment leaves `serverExecution` unset, and on the ON arm hosts the
+serving loop a deployment would run.
 
 ### Browser-side (build-time defines)
 
