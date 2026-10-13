@@ -1046,10 +1046,12 @@ export interface Options {
    *  (protocol.md §2's grant-scoped read design, RULED 2026-08-13) —
    *  a serving runtime's foreign scoped read would otherwise resolve
    *  against the delegating service envelope and silently read an
-   *  empty instance. A serving manager's sessions also carry the
-   *  delegated READ binding (`#servingActingAs()`), so their reads are
-   *  authorized as the space's owner and not as the identity that signs
-   *  them. Absent on every non-serving manager. */
+   *  empty instance. A serving manager's ordinary session mounts also
+   *  ask for the delegated READ binding (`#servingActingAs()`), under
+   *  which a memory server authorizes their reads as the space's owner
+   *  and not as the identity that signs them. The fresh-space bootstrap
+   *  session, which signs as the space's own identity, does not. Absent
+   *  on every non-serving manager. */
   servingHomeSpace?: MemorySpace;
 }
 

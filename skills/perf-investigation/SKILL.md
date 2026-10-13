@@ -138,17 +138,19 @@ keeps reporting faithfully, and what it reports is a configuration that ships in
 neither arm, with both ends deriving. Probe both ends before the run and record
 what they said beside the number, the way a board size is recorded.
 
-**The serving process is not a second reader.** Its sessions are opened by the
-service identity, so that DID is what a server log or a frame trace shows on
-reads the user's own client makes too. It is the envelope of derived writes and
-not who a served run reads as: the memory server authorizes a serving session's
-reads as the space's owner, and the `serverExecution` entry in
-`docs/development/EXPERIMENTAL_OPTIONS.md` states the rule on both arms. So
-narrower access is never why a served run came back without a document. What a
-served run does lack is scoped instances: another user's or session's, and any
-user- or session-scoped document of a space its runtime does not serve, which it
-refuses with a `ForeignScopedReadRefusedError`. That error in a serving log
-identifies the case.
+**The serving process is not a second reader.** Its sessions are signed by the
+service identity, the process's own DID, which toolshed logs at startup. That
+DID is the envelope of derived writes and not who a served run reads as: the
+memory server authorizes a serving session's reads as the space's owner. No
+instrument here settles the question by inspection, since `CF_MEMORY_FRAME_LOG`
+records no principal on any frame; the `serverExecution` entry in
+`docs/development/EXPERIMENTAL_OPTIONS.md` states the rule on both arms and the
+configurations that bind nothing. Under the binding, narrower access is not why
+a served run came back without a document. What a served run does lack is scoped
+instances: another user's or session's, and any user- or session-scoped document
+of a space its runtime does not serve, which it refuses with a
+`ForeignScopedReadRefusedError`. That error in a serving log identifies the
+case.
 
 **Read the server's instruments before adding any.** The health route already
 reports the serving process's own logger statistics, under the same key names

@@ -507,10 +507,12 @@ boundary.
 With [`serverExecution`](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution)
 on, handlers and derivations run in a serving runtime on the server, one per
 space, and clients send events. A served run is not a second reader with access
-of its own. Its reads of a space are authorized as that space's owner, and the
-server's own identity reads nothing of a space but its access list. So access
-never explains a served run missing what the person it runs for can read, and a
-pattern has no narrower "server view" to design around.
+of its own. On a deployment that enforces access lists, its reads of a space
+that names an owner are authorized as that owner, and the server's own identity
+reads nothing of such a space but its access list. The registry entry lists the
+configurations where no owner is bound; in none of them does the server read
+less. So access does not explain a served run missing what the person it runs
+for can read, and a pattern has no narrower "server view" to design around.
 
 What a served run can't reach is a scoped instance that belongs to someone
 else, which is the scope rule above and not an access rule:

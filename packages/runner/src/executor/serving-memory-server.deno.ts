@@ -47,8 +47,9 @@ export interface ServingMemoryServer extends AsyncDisposable {
   readonly host: ExecutorHost;
 
   /**
-   * The identity the serving runtimes sign their sessions' opens as. Under an
-   * access-list mode the sessions read as the space's owner, not as it.
+   * The identity the serving runtimes sign their sessions' opens as. Under
+   * `aclMode` `observe` or `enforce`, the sessions read a space whose access
+   * list names a concrete owner as that owner, not as this identity.
    */
   readonly serviceIdentity: Identity;
 

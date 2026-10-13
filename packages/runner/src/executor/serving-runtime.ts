@@ -6,9 +6,10 @@
  * builds its host with it serves its spaces the way a deployment does.
  *
  * The service identity is not who a serving runtime reads as. Its sessions
- * carry `actingAs: "space-owner"`, and a memory server that lists the
- * identity in `acl.delegatingDids` makes their `READ` decisions as the
- * space's owner.
+ * carry `actingAs: "space-owner"`. A memory server that lists the identity
+ * in `acl.delegatingDids`, in an access-list mode other than `off`, makes
+ * their `READ` decisions as the owner the space's access list names, and as
+ * the service identity for a space whose list names no concrete owner.
  */
 
 import type { Server as MemoryServer } from "@commonfabric/memory/v2/server";
@@ -39,7 +40,8 @@ export type ServingRuntimeFactoryOptions = {
 
   /**
    * Signs the serving sessions' `session.open`; the host's service identity.
-   * The sessions read as the space's owner, not as this identity.
+   * Whom the sessions read as is the memory server's decision, as this
+   * module's header describes.
    */
   identity: Signer;
 

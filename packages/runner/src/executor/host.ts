@@ -109,9 +109,9 @@ export type ExecutorHostOptions = {
   /**
    * The service identity (DID) DR1 holders are minted from, and the
    * envelope principal of the loopback sessions, which the explicit-instance
-   * read row matches (protocol.md §2). It is not who a served run reads as:
-   * those sessions' `READ` decisions are made as the space's owner
-   * (`SessionDescriptor.actingAs`).
+   * read row matches (protocol.md §2). It is not who a served run reads as
+   * where the memory server binds those sessions' `READ` decisions to the
+   * space's owner (`SessionDescriptor.actingAs`).
    */
   serviceIdentity: string;
 
