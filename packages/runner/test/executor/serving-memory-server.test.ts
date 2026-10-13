@@ -10,6 +10,7 @@ import {
   startServingMemoryServer,
 } from "../../src/executor/serving-memory-server.deno.ts";
 import { Runtime } from "../../src/runtime.ts";
+import type { StorageNotification } from "../../src/storage/interface.ts";
 import { StorageManager } from "../../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../../src/storage/v2-emulate.ts";
 
@@ -168,19 +169,29 @@ describe("serving-memory-server", () => {
       }
     });
 
-    it("runs the serving loop's work in the serving context, and delivers a client's frames outside it", async () => {
-      // Three crossings, each its own record. The host activates the space
-      // when the client's session opens it. The client's write reaches the
-      // serving runtime as a server frame, and the derivation that reads it
-      // makes the fetch. The served result reaches the client as a frame the
-      // serving runtime's commit caused.
+    it("runs the serving loop's work in the serving context, and a client's frames outside it", async () => {
+      // Each record is one crossing. The host activates the space when the
+      // client's session opens it. Each side integrates what the other
+      // committed from a server frame, which the memory server sends on a
+      // turn the committing side's request armed. The served derivation that
+      // reads the client's write makes the fetch.
       const activations: boolean[] = [];
+      const servingIntegrations: boolean[] = [];
+      const clientIntegrations: boolean[] = [];
       const fetches: boolean[] = [];
-      const deliveries: boolean[] = [];
+      const recordIntegrations = (into: boolean[]) => ({
+        next: (notification: StorageNotification) => {
+          if (notification.type === "integrate") {
+            into.push(inServingContext());
+          }
+          return undefined;
+        },
+      });
       await using serving = await startServingMemoryServer({
         apiUrl: new URL(import.meta.url),
-        prepareStorageManager: () => {
+        prepareStorageManager: (manager) => {
           activations.push(inServingContext());
+          manager.subscribe(recordIntegrations(servingIntegrations));
         },
         fetch: () => {
           fetches.push(inServingContext());
@@ -191,11 +202,13 @@ describe("serving-memory-server", () => {
           );
         },
       });
+      const storageManager = EmulatedStorageManager.connectTo(serving.server, {
+        as: alice,
+      });
+      storageManager.subscribe(recordIntegrations(clientIntegrations));
       const client = new Runtime({
         apiUrl: new URL(import.meta.url),
-        storageManager: EmulatedStorageManager.connectTo(serving.server, {
-          as: alice,
-        }),
+        storageManager,
         experimental: { serverExecution: true },
       });
       const space = alice.did() as MemorySpace;
@@ -213,9 +226,7 @@ describe("serving-memory-server", () => {
         const start = client.edit();
         client.run(start, pattern, { url: "" }, result);
         expect((await start.commit().settled).error).toBeUndefined();
-        cancels.push(result.sink((value) => {
-          if (value?.v === 7) deliveries.push(inServingContext());
-        }));
+        cancels.push(result.sink(() => {}));
         const point = client.edit();
         result.withTx(point).key("url").set("https://example.test/v");
         expect((await point.commit().settled).error).toBeUndefined();
@@ -227,9 +238,11 @@ describe("serving-memory-server", () => {
 
         expect(activations.length).toBeGreaterThan(0);
         expect(activations.every((serving) => serving)).toBe(true);
+        expect(servingIntegrations.length).toBeGreaterThan(0);
+        expect(servingIntegrations.every((serving) => serving)).toBe(true);
+        expect(clientIntegrations.length).toBeGreaterThan(0);
+        expect(clientIntegrations.every((serving) => !serving)).toBe(true);
         expect(fetches).toStrictEqual([true]);
-        expect(deliveries.length).toBeGreaterThan(0);
-        expect(deliveries.every((serving) => !serving)).toBe(true);
       } finally {
         for (const cancel of cancels) cancel();
         await serving.host.close();
