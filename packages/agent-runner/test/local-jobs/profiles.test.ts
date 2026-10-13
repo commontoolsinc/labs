@@ -375,6 +375,37 @@ describe("local-jobs/profiles", () => {
         );
       });
 
+      it("refuses a space-qualified input it cannot compare with the profile's space as written", async () => {
+        // A space named by DID and one named by name are compared only once a
+        // session resolves the name, so the enqueue refuses the pair rather
+        // than admitting what the run would later refuse.
+        const named = (await read({
+          carry: { ...CARRY, fabric: { ...CARRY.fabric, space: "my-space" } },
+        })).get("carry")!;
+        const byDid = (await read({ carry: CARRY })).get("carry")!;
+
+        const didUnderName = narrowLocalJobProfile(named, {
+          inputs: { focus: ELSEWHERE },
+        });
+        const nameUnderDid = narrowLocalJobProfile(byDid, {
+          inputs: { focus: "pattern:other-space/tracker" },
+        });
+
+        for (const narrowed of [didUnderName, nameUnderDid]) {
+          expect((narrowed as { refusal: string }).refusal).toContain(
+            "`focus`",
+          );
+          expect((narrowed as { refusal: string }).refusal).toContain(
+            "/of:<id>",
+          );
+        }
+        expect(
+          narrowLocalJobProfile(named, {
+            inputs: { focus: "pattern:my-space/tracker", bare: "tracker" },
+          }),
+        ).toEqual({ profile: named });
+      });
+
       it("refuses an input whose name the harness does not admit", async () => {
         const carry = (await read({ carry: CARRY })).get("carry")!;
 

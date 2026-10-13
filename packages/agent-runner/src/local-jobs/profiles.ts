@@ -28,7 +28,11 @@ import {
   type HarnessToolBackingAvailability,
   withheldToolIds,
 } from "@commonfabric/cf-harness/contracts/tool-descriptor";
-import { checkInputCellSpec } from "@commonfabric/cf-harness/input-cells";
+import { parseHandleRef } from "@commonfabric/cf-harness/handle-table";
+import {
+  checkInputCellSpec,
+  parseNamedPieceAddress,
+} from "@commonfabric/cf-harness/input-cells";
 import { isDID } from "@commonfabric/identity/did";
 import type { MemorySpace } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -358,7 +362,10 @@ export const readLocalJobProfiles = async (
  * held to the rule the harness mints an input cell under, against the
  * profile's own space, so a piece in any other space is refused here rather
  * than when the job starts. A space the profile names by name rather than by
- * DID is compared as a name, as the harness compares it.
+ * DID is compared as a name, as the harness compares it, and an input naming
+ * its space the other way — a DID under a profile naming its space by name, a
+ * name under one naming it by DID — is refused, because the two can only be
+ * compared once a session has resolved the name.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
@@ -381,6 +388,17 @@ const refuseInputs = (
       );
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
+    }
+    const named = parseNamedPieceAddress(ref);
+    const qualifiedOtherWay = named !== undefined
+      ? byDid && named.spaceName !== undefined
+      : !byDid && parseHandleRef(ref).space !== undefined;
+    if (qualifiedOtherWay) {
+      return `Input \`${name}\` names its space ${
+        byDid ? "by name" : "by DID"
+      }, and the profile names its space ${
+        byDid ? "by DID" : "by name"
+      }, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
   return undefined;

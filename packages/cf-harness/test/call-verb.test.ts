@@ -246,6 +246,41 @@ describe("call-verb", () => {
       expect(await readField(ref, "minutes")).toBe(10);
     });
 
+    it("returns a piece the verb returns inside a union result as that piece's handle", async () => {
+      // The declared result is a union, so the reference sits under one of
+      // its branches rather than under the result's own properties.
+      const source = [
+        "import { action, Default, pattern, Stream, Writable } from 'commonfabric';",
+        "interface ItemOutput { title: string; }",
+        "const Item = pattern<{ title: string }, ItemOutput>(({ title }) => ({ title }));",
+        "type AddResult = { absent: true } | { item: ItemOutput };",
+        "interface Board { items: ItemOutput[]; addItem: Stream<{ title: string }, AddResult>; }",
+        "export default pattern<{ items?: Writable<ItemOutput[] | Default<[]>> }, Board>(({ items }) => {",
+        "  const addItem = action<{ title: string }, AddResult>((event) => {",
+        "    const item = Item({ title: event.title });",
+        "    items.push(item);",
+        "    return { item };",
+        "  });",
+        "  return { items, addItem };",
+        "});",
+        "",
+      ].join("\n");
+      const board = (await runPatternTool.invoke(contextWith(session), {
+        sourceText: source,
+      }) as RunPatternToolSuccessOutput).resultRef;
+
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: board,
+        verb: "addItem",
+        event: { title: "Ship" },
+      });
+
+      expect(output).toMatchObject({
+        status: "ok",
+        result: { item: { "@link": expect.any(String) } },
+      });
+    });
+
     it("returns a string the result carries as a reference rather than as text", async () => {
       // A string is free text, which the release boundary withholds unless a
       // schema bounds it; the reference addresses the position instead, so a

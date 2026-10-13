@@ -204,12 +204,42 @@ const replacedAt = (
   return value;
 };
 
+/** The keywords whose members a value is judged against as well. */
+const COMBINATORS = ["anyOf", "oneOf", "allOf"] as const;
+
+/**
+ * Whether `schema` declares the step `head` of a path — a property of that
+ * name, any property through `additionalProperties`, or an array element —
+ * itself or in any member of a combinator. `root` is the document local
+ * references resolve against.
+ */
+const declaresStep = (
+  schema: JSONSchema,
+  root: JSONSchema,
+  head: string | number,
+): boolean => {
+  const node = localRefTarget(schema, root);
+  if (!isObjectNotArray(node)) return false;
+  const declaredByMember = COMBINATORS.some((key) => {
+    const members = node[key];
+    return Array.isArray(members) &&
+      members.some((member) => declaresStep(member as JSONSchema, root, head));
+  });
+  if (declaredByMember) return true;
+  if (typeof head === "number") return node.items !== undefined;
+  return (isObjectNotArray(node.properties) &&
+    Object.hasOwn(node.properties, head)) ||
+    isObjectNotArray(node.additionalProperties);
+};
+
 /**
  * `schema` declaring an opaque link at `path`, so the result sanitizer keeps
  * the `{"@link": …}` object a reference is handed back as instead of judging
  * it against the shape of what it points at. An array's elements share one
  * schema, so an element position admits the link beside what it already
- * admitted. `root` is the document local references resolve against.
+ * admitted. A position declared inside a combinator is rewritten in every
+ * member that declares it, so a union whose branch holds the reference admits
+ * it there. `root` is the document local references resolve against.
  */
 const withOpaqueLinkAt = (
   schema: JSONSchema,
@@ -220,29 +250,49 @@ const withOpaqueLinkAt = (
   const node = localRefTarget(schema, root);
   if (!isObjectNotArray(node)) return schema;
   const [head, ...rest] = path;
+  const rewritten: Record<string, unknown> = { ...node };
+  let hasMembers = false;
+  for (const key of COMBINATORS) {
+    const members = node[key];
+    if (!Array.isArray(members)) continue;
+    hasMembers = true;
+    rewritten[key] = members.map((member) =>
+      declaresStep(member as JSONSchema, root, head)
+        ? withOpaqueLinkAt(member as JSONSchema, root, path)
+        : member
+    );
+  }
   if (typeof head === "number") {
     const items = node.items as JSONSchema | undefined;
-    if (items === undefined) return schema;
-    const element = withOpaqueLinkAt(items, root, rest);
-    return {
-      ...node,
-      items: rest.length === 0 ? { anyOf: [items, element] } : element,
-    } as JSONSchema;
+    if (items !== undefined) {
+      const element = withOpaqueLinkAt(items, root, rest);
+      rewritten.items = rest.length === 0
+        ? { anyOf: [items, element] }
+        : element;
+    }
+    return rewritten as JSONSchema;
   }
   const properties = isObjectNotArray(node.properties)
     ? node.properties as Record<string, JSONSchema>
     : {};
-  const child = properties[head] ??
-    (isObjectNotArray(node.additionalProperties)
-      ? node.additionalProperties as JSONSchema
-      : {});
-  return {
-    ...node,
-    properties: {
+  const additional = isObjectNotArray(node.additionalProperties)
+    ? node.additionalProperties as JSONSchema
+    : undefined;
+  // A position only a combinator member declares is left to that member: a
+  // property added here would hold every branch to it.
+  if (
+    Object.hasOwn(properties, head) || additional !== undefined || !hasMembers
+  ) {
+    rewritten.properties = {
       ...properties,
-      [head]: withOpaqueLinkAt(child, root, rest),
-    },
-  } as JSONSchema;
+      [head]: withOpaqueLinkAt(
+        properties[head] ?? additional ?? {},
+        root,
+        rest,
+      ),
+    };
+  }
+  return rewritten as JSONSchema;
 };
 
 export const callVerbTool: HarnessToolDefinition<
