@@ -289,14 +289,15 @@ onSchemaRegistryClear(() => {
  * Helper for {@link linkSchemaDeclaresPolicy}, which reports whether one
  * `ifc` declaration holds anything: a label atom, or a policy field of any
  * other name. An `ifc` that is empty, or whose label lists are, declares
- * nothing. A field besides the label counts whatever it holds, since an empty
- * `maxConfidentiality` is still a ceiling.
+ * nothing, and neither does `observes` alone, which only says which reads a
+ * declared label answers to. A field besides those counts whatever it holds,
+ * since an empty `maxConfidentiality` is still a ceiling.
  */
 const ifcHoldsPolicy = (ifc: Readonly<Record<string, unknown>>): boolean =>
   Object.entries(ifc).some(([field, value]) =>
     field === "confidentiality" || field === "integrity"
       ? Array.isArray(value) && value.length > 0
-      : value !== undefined
+      : field !== "observes" && value !== undefined
   );
 
 /**
@@ -404,7 +405,10 @@ const recordLinkWritePolicyInput = (
   // The reference is labeled all the same: a handle to one acquired under a
   // restriction, or written under a link schema that declares one, carries
   // that at its slot, and is recorded for it. A bare pointer to one has
-  // nothing to persist and no slot policy to meet, and records nothing.
+  // nothing to persist and records nothing. A claim or a floor at the
+  // receiving slot still meets the write: the write-policy pass reads the
+  // transaction's attempted writes, and a link no record names is a plain
+  // value written at its path.
   if (source.id.startsWith("cid:") && !referenceRelevant) {
     return;
   }
