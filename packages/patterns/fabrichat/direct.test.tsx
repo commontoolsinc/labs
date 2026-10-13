@@ -6,6 +6,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   pattern,
   TESTS,
   Writable,
@@ -51,7 +52,7 @@ const obliterateGesture = {
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 // Each message's body, or how it was taken away.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string"
       ? message.body
