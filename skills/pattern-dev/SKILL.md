@@ -167,9 +167,14 @@ with the square of the list, and a change to one element re-runs the scan in
 every row. Derive what is true of the list as a whole once, in the pattern that
 maps it, as a record keyed by element, and give each child that record as a
 cell: `ReadonlyCell<Record<string, T>>`, read as `facts.key(ownKey).get()`. A
-computation that keys the cell that way reads one entry and re-runs when that
-entry changes; the same record taken as a plain value is read whole by every
-child. `packages/patterns/fabrichat/room.tsx` derives `places` this way and
+computation that keys the cell that way reads one entry when it runs and re-runs
+when that entry changes; the same record taken as a plain value is read whole by
+every child. The key exists only at run time, so the transformer cannot declare
+which entry that is: `--show-transformed` shows the record's whole schema on
+that `lift`, as a cell, and no `completeSchedulerScopeSummary`. What narrows is
+the read the run makes, and the read-cost report of
+`cf test --verbose --stats-threshold 0` counts it per step.
+`packages/patterns/fabrichat/room.tsx` derives `places` this way and
 `packages/patterns/fabrichat/message-row.tsx` reads its own.
 
 How much of a value a `computed()` reads depends on what the value passes
