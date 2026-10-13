@@ -2193,6 +2193,9 @@ type WatcherFollows = {
 
   /** Resolves when the registration is cancelled. */
   cancelled: Promise<void>;
+
+  /** Whether the registration has been cancelled. */
+  isCancelled: boolean;
 };
 
 export class Runner {
@@ -5387,8 +5390,15 @@ export class Runner {
     const setupPatternWatcher = () => {
       const { promise: cancelled, resolve: markCancelled } = Promise
         .withResolvers<void>();
-      const follows: WatcherFollows = { pending: new Set(), cancelled };
-      addCancel(markCancelled);
+      const follows: WatcherFollows = {
+        pending: new Set(),
+        cancelled,
+        isCancelled: false,
+      };
+      addCancel(() => {
+        follows.isCancelled = true;
+        markCancelled();
+      });
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -10115,7 +10125,10 @@ export class Runner {
       );
       for (const id of this.#demandRootChains.get(piece.id) ?? [piece.id]) {
         const key = `${piece.space}/${scopeKey}/${id}`;
-        if (this.#watcherFollowsByPiece.has(key)) keys.add(key);
+        // A cancelled registration's follows run on to no effect.
+        if (this.#watcherFollowsByPiece.get(key)?.isCancelled === false) {
+          keys.add(key);
+        }
       }
     }
     if (keys.size === 0) return undefined;

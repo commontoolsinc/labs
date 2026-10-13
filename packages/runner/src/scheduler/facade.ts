@@ -101,6 +101,7 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  endPatternChangeWaits,
   endPieceStartWaits,
   eventHandlerImplementations,
   isHeadEventParked as isHeadEventParkedState,
@@ -510,6 +511,12 @@ export class Scheduler {
 
   /** Set once `endPieceStartWaits()` has run; no new wait begins after it. */
   #pieceStartWaitsEnded = false;
+
+  /** The heads held for their piece's pattern change. */
+  readonly #patternChangeWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPatternChangeWaits()` has run; no head is held after it. */
+  #patternChangeWaitsEnded = false;
 
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
@@ -1863,6 +1870,18 @@ export class Scheduler {
     endPieceStartWaits(this.#eventQueueState);
   }
 
+  /**
+   * Ends the wait of every queued event held for its piece's pattern change,
+   * each then dispatching as it would have without the wait. A runtime being
+   * disposed calls this before it waits for the scheduler to go idle: such a
+   * wait can be held by a pattern load that only the disposal's later
+   * cancellation of the piece would release.
+   */
+  endPatternChangeWaits(): void {
+    this.#patternChangeWaitsEnded = true;
+    endPatternChangeWaits({ patternChangeWaits: this.#patternChangeWaits });
+  }
+
   onConsole(fn: ConsoleHandler): void {
     this.#consoleHandler = fn;
   }
@@ -2608,6 +2627,7 @@ export class Scheduler {
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.endPieceStartWaits();
+    this.endPatternChangeWaits();
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -3320,6 +3340,8 @@ export class Scheduler {
       eventHandlers: this.#eventHandlers,
       eventQueue: this.#eventQueue,
       trackBackgroundTask: (work) => this.trackBackgroundTask(work),
+      patternChangeWaits: this.#patternChangeWaits,
+      patternChangeWaitsEnded: () => this.#patternChangeWaitsEnded,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),

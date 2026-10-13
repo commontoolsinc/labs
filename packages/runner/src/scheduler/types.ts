@@ -443,6 +443,12 @@ export type QueuedEvent = {
   patternChangePending?: boolean;
 
   /**
+   * Ends the wait of a head held for its piece's pattern change. Present only
+   * while that wait is in progress.
+   */
+  endPatternChangeWait?: () => void;
+
+  /**
    * The FIFO slot is held while the stale-basis retry that requeued this
    * event waits for the state it will re-run against (the conflict's
    * catch-up and the pull of the document it names). The head parks the

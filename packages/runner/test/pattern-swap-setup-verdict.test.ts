@@ -65,8 +65,11 @@ describe("pattern-swap-setup-verdict", () => {
   let server: ReturnType<typeof newLoopbackServer>;
   let runtime: Runtime;
   let prepare: Runtime["prepareTxForCommit"];
+  // Set by a case that disposes the runtime itself, keeping its storage.
+  let disposedKeepingStorage: boolean;
 
   beforeEach(() => {
+    disposedKeepingStorage = false;
     server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
@@ -78,10 +81,14 @@ describe("pattern-swap-setup-verdict", () => {
 
   afterEach(async () => {
     runtime.prepareTxForCommit = prepare;
-    await runtime.idle();
-    await runtime.patternManager.flushCompileCacheWrites();
-    await runtime.storageManager.synced();
-    await runtime.dispose();
+    if (disposedKeepingStorage) {
+      await runtime.storageManager.close();
+    } else {
+      await runtime.idle();
+      await runtime.patternManager.flushCompileCacheWrites();
+      await runtime.storageManager.synced();
+      await runtime.dispose();
+    }
     await server.close();
   });
 
@@ -146,6 +153,26 @@ describe("pattern-swap-setup-verdict", () => {
       prepare.call(runtime, tx);
     };
     return settle;
+  };
+
+  /**
+   * Resolves the returned promise once the scheduler finds a piece
+   * mid-change, which is when it holds the head event for it. Restore with
+   * the returned `restore`.
+   */
+  const whenHeld = () => {
+    const held = Promise.withResolvers<void>();
+    const runner = runtime.runner;
+    const consult = runner.pendingPatternChangeFor.bind(runner);
+    runner.pendingPatternChangeFor = (pieces) => {
+      const change = consult(pieces);
+      if (change !== undefined) held.resolve();
+      return change;
+    };
+    return {
+      held: held.promise,
+      restore: () => runner.pendingPatternChangeFor = consult,
+    };
   };
 
   it("keeps the running graph reactive when the setup a pointer move needs is refused", async () => {
@@ -378,5 +405,60 @@ describe("pattern-swap-setup-verdict", () => {
     await runtime.idle();
     expect(await piece.key("list").pull()).toEqual(["after"]);
     cancel();
+  });
+
+  it("delivers a held event to the outgoing pattern's handler when its piece stops", async () => {
+    // Stopping the piece ends the wait without a swap, so the event keeps the
+    // handler it was queued with, as an event for a stopped piece does.
+    const { piece, v2Ref, cancel } = await runAppending();
+    const outgoingList = piece.key("list").resolveAsCell();
+    const outgoingAdd = piece.key("add").resolveAsCell();
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
+    const { held, restore } = whenHeld();
+    try {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        v2Ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+      outgoingAdd.send({ add: "queued" });
+      await held;
+      runtime.runner.stop(piece);
+      await runtime.idle();
+      expect(await outgoingList.pull()).toEqual(["before", "queued"]);
+    } finally {
+      settle.resolve();
+      restore();
+      runtime.prepareTxForCommit = prepare;
+    }
+    cancel();
+  });
+
+  it("ends a held event's wait when the runtime is disposed keeping its storage", async () => {
+    // The swap's setup never settles while the runtime is disposed, so only
+    // the disposal can end the event's wait.
+    const { piece, v2Ref, cancel } = await runAppending();
+    const outgoingAdd = piece.key("add").resolveAsCell();
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
+    const { held, restore } = whenHeld();
+    try {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        v2Ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+      outgoingAdd.send({ add: "queued" });
+      await held;
+      cancel();
+      await runtime.dispose({ closeStorage: false });
+      disposedKeepingStorage = true;
+    } finally {
+      settle.resolve();
+      restore();
+    }
   });
 });

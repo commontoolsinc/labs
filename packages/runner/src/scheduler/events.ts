@@ -1239,6 +1239,12 @@ export interface SchedulerEventExecutionState {
 
   /** Holds `idle()` open until `work` settles (`Scheduler.trackBackgroundTask`). */
   readonly trackBackgroundTask: (work: Promise<unknown>) => void;
+
+  /** The heads held for a pattern change, while each waits. */
+  readonly patternChangeWaits: Set<QueuedEvent>;
+
+  /** Whether `endPatternChangeWaits()` has run; no hold begins after it. */
+  readonly patternChangeWaitsEnded: () => boolean;
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -1719,12 +1725,23 @@ function holdHeadEventForPatternChange(
   logger.debug("scheduler", () => [
     `event ${queuedEvent.id} waits for its piece's pattern change`,
   ]);
-  const task = change.then(() => {
+  const { promise: ended, resolve: end } = Promise.withResolvers<void>();
+  queuedEvent.endPatternChangeWait = end;
+  state.patternChangeWaits.add(queuedEvent);
+  const task = Promise.race([change, ended]).then(() => {
+    state.patternChangeWaits.delete(queuedEvent);
+    delete queuedEvent.endPatternChangeWait;
     if (
       queuedEvent.finalOutcomeNotified ||
       !state.eventQueue.includes(queuedEvent)
     ) return;
-    if (!followRegisteredHandler(state, queuedEvent)) {
+    // The wait also ends when the piece stops, or when the scheduler is
+    // disposed, and then the event keeps the handler it was queued with, as
+    // a stopped piece's event does on the ordinary path.
+    if (
+      !followRegisteredHandler(state, queuedEvent) &&
+      isReplacedGraphHandler(state, queuedEvent.handler)
+    ) {
       // The pattern the piece settled on registered nothing for this
       // stream: events.md §5's drop predicate ("no runnable handler").
       state.dropEvent(
@@ -1736,6 +1753,20 @@ function holdHeadEventForPatternChange(
     delete queuedEvent.patternChangePending;
   }).finally(() => state.queueExecution());
   state.trackBackgroundTask(task);
+}
+
+/**
+ * Ends every pattern-change wait, for a scheduler being disposed: such a wait
+ * can be held by a pattern load that only the watcher's cancellation, later
+ * in the disposal, would release. The caller also makes
+ * `patternChangeWaitsEnded()` report `true`, so that no head is held again.
+ */
+export function endPatternChangeWaits(
+  state: Pick<SchedulerEventExecutionState, "patternChangeWaits">,
+): void {
+  for (const event of [...state.patternChangeWaits]) {
+    event.endPatternChangeWait?.();
+  }
 }
 
 export async function processPullQueuedEventDuringExecute(
@@ -1795,7 +1826,9 @@ export async function processPullQueuedEventDuringExecute(
 
   delete queuedEvent.notBefore;
 
-  const change = patternChangeHolding(state.runtime, queuedEvent.handler);
+  const change = state.patternChangeWaitsEnded()
+    ? undefined
+    : patternChangeHolding(state.runtime, queuedEvent.handler);
   if (change !== undefined) {
     holdHeadEventForPatternChange(state, queuedEvent, change);
     return;
