@@ -286,7 +286,9 @@ Normative behavior:
    returns under a writer policy — a literal, an object or array literal, a
    spread, a constant, a plain call's result: any value that is not a reactive
    reference — is the exception: the result document holds that data itself,
-   so its schema defines the document there. A view reads a
+   so its schema defines the document there. A cell or a stream within it is
+   still a link, and a writer policy inside the type it links to is the
+   linked document's. A view reads a
    writer policy whole or not at all: where its writer cannot be read, the
    principal claims that need a writer, an `ownerPrincipal` and integrity
    naming the current principal, are left out with it, since either alone

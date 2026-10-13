@@ -505,6 +505,277 @@ type Ev<T> = { near: Step<[1, 1, 1, 1, 1, 1, 1]>; far: Step<[]>; v: T };`,
       expect(capabilitiesOf(event)).toEqual([["readonly"], ["opaque"]]);
     });
   });
+
+  describe("a reference to a generic declaration", () => {
+    // The reference's type is the declaration instantiated with the
+    // reference's arguments, and the overlay reads that type, not the nodes
+    // the declaration writes in its own type parameters.
+
+    it("reads a member written as the alias's type parameter as the argument the reference gives", async () => {
+      const { event, reported } = await eventSchema(
+        "type Box<T> = { c: Writable<number>; v: T };",
+        "Box<string>",
+        "(e, { c }) => { c.set(e.c.get()); }",
+      );
+
+      expect(event).toEqual({
+        type: "object",
+        properties: {
+          c: { type: "number", asCell: ["readonly"] },
+          v: { type: "string" },
+        },
+        required: ["c", "v"],
+      });
+      expect(reported).toEqual([]);
+    });
+
+    it("overlays the capability the callback earns on a cell the reference gives as an argument", async () => {
+      const { event, reported } = await eventSchema(
+        "type Pair<T> = { v: T };",
+        "Pair<Writable<number>>",
+        "(e, { c }) => { c.set(e.v.get()); }",
+      );
+
+      expect(event).toEqual({
+        type: "object",
+        properties: { v: { type: "number", asCell: ["readonly"] } },
+        required: ["v"],
+      });
+      expect(reported).toEqual([]);
+    });
+
+    for (
+      const [shape, declaration, event, written] of [
+        [
+          "a generic interface",
+          "interface Box<T> { c: Writable<number>; v: T }",
+          "Box<string>",
+          "interface Box { c: Writable<number>; v: string }",
+        ],
+        [
+          "an interface extending a generic one",
+          `interface Base<T> { v: T }
+interface Box extends Base<string> { c: Writable<number> }`,
+          "Box",
+          "interface Box { c: Writable<number>; v: string }",
+        ],
+        [
+          "a cell written around the type parameter",
+          "type Box<T> = { c: Writable<T>; v: T[] };",
+          "Box<number>",
+          "type Box = { c: Writable<number>; v: number[] };",
+        ],
+        [
+          "an optional member",
+          "type Box<T> = { c: Writable<number>; v?: T };",
+          "Box<string | null>",
+          "type Box = { c: Writable<number>; v?: string | null };",
+        ],
+        [
+          "a generic alias the member instantiates in turn",
+          `type Inner<U> = { w: Writable<U> };
+type Box<T> = { c: Writable<number>; i: Inner<T> };`,
+          "Box<string>",
+          "type Box = { c: Writable<number>; i: { w: Writable<string> } };",
+        ],
+        [
+          "a mapped type",
+          "type Box<T> = { [K in keyof T]: Writable<T[K]> };",
+          "Box<{ c: number; v: string }>",
+          "type Box = { c: Writable<number>; v: Writable<string> };",
+        ],
+        [
+          "a mapped type that makes members optional",
+          "type Ev = { c: Writable<number>; v: string };",
+          "Partial<Ev>",
+          "type Box = { c?: Writable<number>; v?: string };",
+        ],
+        [
+          "an index signature",
+          "type Box<T> = { c: Writable<number>; [key: string]: T | Writable<number> };",
+          "Box<string>",
+          "type Box = { c: Writable<number>; [key: string]: string | Writable<number> };",
+        ],
+        [
+          "an alias of a cell",
+          `type Ref<T> = Writable<T>;
+type Box = { c: Writable<number>; r: Ref<string> };`,
+          "Box",
+          "type Box = { c: Writable<number>; r: Writable<string> };",
+        ],
+        [
+          "an alias of an array",
+          `type List<T> = T[];
+type Box = { c: Writable<number>; l: List<Writable<string>> };`,
+          "Box",
+          "type Box = { c: Writable<number>; l: Writable<string>[] };",
+        ],
+      ] as const
+    ) {
+      it(`gives ${shape} the event schema of the same type written out`, async () => {
+        const callback = event === "Partial<Ev>"
+          ? "(e, { c }) => { c.set(e.c?.get() ?? 0); }"
+          : "(e, { c }) => { c.set(e.c.get()); }";
+        const generic = await eventSchema(declaration, event, callback);
+        const plain = await eventSchema(written, "Box", callback);
+
+        expect(capabilitiesOf(plain.event)).toContainEqual(["readonly"]);
+        expect(generic.event).toEqual(plain.event);
+        expect(generic.reported).toEqual(plain.reported);
+      });
+    }
+
+    for (
+      const [shape, argument, written] of [
+        ["an object", "{ name: string }", "{ name: string }"],
+        ["an array", "string[]", "string[]"],
+      ] as const
+    ) {
+      it(`marks ${shape} the reference gives as an argument \`comparable\` where the callback only compares its identity, as written out`, async () => {
+        const callback = "(e, { c }) => { c.set(equals(e.v, e.v) ? 1 : 0); }";
+        const generic = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box<T> = { c: Writable<number>; v: T };`,
+          `Box<${argument}>`,
+          callback,
+        );
+        const plain = await eventSchema(
+          `import { equals } from "commonfabric";
+type Box = { c: Writable<number>; v: ${written} };`,
+          "Box",
+          callback,
+        );
+        const v = (schema: Record<string, unknown>) =>
+          (schema.properties as Record<string, Record<string, unknown>>).v!;
+
+        expect(v(plain.event).asCell).toEqual(["comparable"]);
+        expect(generic.event).toEqual(plain.event);
+      });
+    }
+
+    it("reads an optional member whose generic alias denotes a union of several members without the `undefined` its `?` adds", async () => {
+      const callback = "(e, { c }) => { c.set(e.c.get()); }";
+      const generic = await eventSchema(
+        `type Identity<T> = T;
+type Box = { c: Writable<number>; v?: Identity<Writable<number> | string> };`,
+        "Box",
+        callback,
+      );
+      const plain = await eventSchema(
+        "type Box = { c: Writable<number>; v?: Writable<number> | string };",
+        "Box",
+        callback,
+      );
+      const alternatives = (schema: Record<string, unknown>) =>
+        (schema.properties as Record<string, Record<string, unknown>>).v!
+          .anyOf as unknown[];
+
+      expect(alternatives(generic.event)).toHaveLength(2);
+      expect(alternatives(generic.event)).toEqual(
+        expect.arrayContaining(alternatives(plain.event)),
+      );
+    });
+
+    it("reads a reference to a generic union alias as the union, overlaying the cell in a member", async () => {
+      const { event } = await eventSchema(
+        "type Maybe<T> = T | undefined;",
+        "Maybe<{ c: Writable<number> }>",
+        "(e, { c }) => { c.set(e?.c.get() ?? 0); }",
+      );
+
+      expect(event.anyOf).toHaveLength(2);
+      expect(event.anyOf).toEqual(expect.arrayContaining([
+        { type: "undefined" },
+        {
+          type: "object",
+          properties: { c: { type: "number", asCell: ["readonly"] } },
+          required: ["c"],
+        },
+      ]));
+    });
+
+    it("keeps a reference to a generic tuple alias as written, as a tuple written out is", async () => {
+      const generic = await eventSchema(
+        "type Tup<T> = [Writable<number>, T];",
+        "Tup<string>",
+        "(e, { c }) => { c.set(e[0].get()); }",
+      );
+      const plain = await eventSchema(
+        "type Tup = [Writable<number>, string];",
+        "Tup",
+        "(e, { c }) => { c.set(e[0].get()); }",
+      );
+      const items = (schema: Record<string, unknown>) =>
+        (schema.items as Record<string, unknown>).anyOf;
+
+      expect(generic.event.type).toBe("array");
+      expect(items(generic.event)).toHaveLength(2);
+      expect(items(generic.event)).toEqual(
+        expect.arrayContaining(items(plain.event) as unknown[]),
+      );
+    });
+  });
+
+  describe("a scoped cell", () => {
+    // Only the scope wrapper names the scope, so the overlay does not rebuild
+    // the cell inside it, and the cell keeps the capability written for it.
+
+    for (
+      const [spelling, declaration, event] of [
+        [
+          "written out",
+          "type Ev = { c: Writable<number>; s: PerUser<Writable<number>> };",
+          "Ev",
+        ],
+        [
+          "given as a generic alias's argument",
+          "type Box<T> = { c: Writable<number>; s: T };",
+          "Box<PerUser<Writable<number>>>",
+        ],
+      ] as const
+    ) {
+      it(`keeps a scoped cell ${spelling} as written, with its scope`, async () => {
+        const { event: schema } = await eventSchema(
+          `import type { PerUser } from "commonfabric";\n${declaration}`,
+          event,
+          "(e, { c }) => { c.set(e.c.get()); }",
+        );
+
+        expect(schema.properties).toEqual({
+          c: { type: "number", asCell: ["readonly"] },
+          s: { type: "number", asCell: [{ kind: "cell", scope: "user" }] },
+        });
+      });
+    }
+  });
+
+  it("reads an optional member at its type without the `undefined` its `?` adds", async () => {
+    const callback = "(e, { c }) => { c.set(e.c.get()); }";
+    const { event } = await eventSchema(
+      `interface Reply { message: Writable<number>; shownIn: string }
+interface Ev { c: Writable<number>; r?: Reply }`,
+      "Ev",
+      callback,
+    );
+    const written = await eventSchema(
+      `type Ev = {
+  c: Writable<number>;
+  r?: { message: Writable<number>; shownIn: string };
+};`,
+      "Ev",
+      callback,
+    );
+
+    expect((event.properties as Record<string, unknown>).r).toEqual({
+      type: "object",
+      properties: {
+        message: { type: "number", asCell: ["opaque"] },
+        shownIn: { type: "string" },
+      },
+      required: ["message", "shownIn"],
+    });
+    expect(event).toEqual(written.event);
+  });
 });
 
 describe("applyShrinkAndWrap()", () => {

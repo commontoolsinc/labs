@@ -310,16 +310,28 @@ where the pre-sync was no longer the whole cost.
       Link serialization interns the stripped schema it builds and a
       reference it builds per call, 5,839 times a reload
       (`externalizeLinkSchema`, `packages/runner/src/link-utils.ts`).
+- [x] A preparation seals a frozen snapshot of the transaction's activity
+      and computes its digest only when something reads it. A commit whose
+      activity epoch stands where the preparation left it accepts the
+      snapshot by identity; one whose epoch moved snapshots again, hashes
+      both and compares (`docs/specs/cfc-commit-preparation.md`, "The
+      prepared digest and the commit-time recheck"). The snapshot's records
+      are frozen without entering the deep-frozen cache. On the thirty-row
+      room's reload each of the 1,223 prepared commits had hashed a digest
+      and none does; the digest fell from 3.2–4.2% of the load's profiler
+      samples to 0.5–0.6%, and preparation from 6.1–7.8% to 3.5–4.4%, over
+      three base and two changed runs interleaved on one machine at a load
+      average between 250 and 500. The shares count samples: at that load
+      most of the time between two samples is time descheduled.
 - [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
-      transaction elides as equal to what is stored, read 345 documents
-      each on average, and take nine tenths of what preparation still
-      costs. An elided write is still an attempt the gates answer to
-      (the Contextual Flow Control specification's §8.10.2.1), so such a
-      commit cannot skip preparation without changing what is refused.
-      What it mostly pays is the prepared digest, built and
-      hashed over every read for a comparison that the unchanged activity
-      epoch already answers at commit; hashing it only when the epoch has
-      moved is the next cut, and the flow join after it.
+      transaction elides as equal to what is stored, and read 345 documents
+      each on average. An elided write is still an attempt the gates answer
+      to (the Contextual Flow Control specification's §8.10.2.1), so such a
+      commit cannot skip preparation without changing what is refused. What
+      it still pays toward a digest is the snapshot, one record per read,
+      which is taken where the preparation ends: taken any later, it would
+      rest on every activity site reporting itself before the journal
+      changes. The flow join is the next cut.
 - [x] The storage manager keeps each data URI's hash and decoded value in a
       weight-bounded memo, and does not sync a link that declares a stream:
       its document holds no value a read uses, and the sync had sent one
@@ -338,6 +350,18 @@ where the pre-sync was no longer the whole cost.
       stream under its event schema, one root carrying that schema per
       stream, for an absence record. A reload of the thirty-row room sends
       6.1 MB of watch frames instead of 10 MB.
+- [x] A fourth path had survived those three: setup writes each derived
+      internal cell's `result` pointer, and that meta write starts a load of
+      the cell's document under the cell's link schema, which for a
+      handler's stream is its event schema. One root carrying that schema
+      per stream, 4.5 KB each, about 25 per message row and 848 per load of
+      the thirty-row room, at the resume wave and again after the settle,
+      each answered with an absence record. The storage manager now loads
+      every cell declared a stream as the whole document
+      (`StorageManager.syncCell`), the rule the owned-cells wave had
+      applied for itself; the roots stay, at 26 bytes each. On a
+      three-row room the watch frames of a reload went from 1.5 MB to
+      1.1 MB, and the stream-event selector is gone from the frame log.
 - [x] A link schema written into an ordinary document is stored as a
       reference when the reference is the shorter wire form; a trivial
       schema, one decomposition refuses, and a bare handle stamp stay
