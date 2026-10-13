@@ -2967,13 +2967,10 @@ interface ContractObservation {
   /** Every path a use reaches, as the summary observed it: no prefix taken,
    * and a numeric segment as the index it names. A path whose whole value left
    * the function is one, since whatever received it may read anything
-   * beneath. */
+   * beneath; so is a wildcard's prefix, below which the body reaches members
+   * the summary does not name, and the root where the body passes the value
+   * on whole. */
   readonly used: readonly (readonly string[])[];
-
-  /** Whether the body uses the value in a way the summary names no path for:
-   * a wildcard, as a destructuring or a rest element records, a pass-through,
-   * or a cell use it cannot verify. Such a use may reach any position. */
-  readonly untracked: boolean;
 }
 
 function contractObservationFrom(
@@ -3011,9 +3008,9 @@ function contractObservationFrom(
     summary.identityPaths,
     summary.identityCellPaths,
     summary.escapedPaths,
+    summary.wildcardPaths,
+    summary.passthrough ? [[]] : [],
   ].flatMap((paths) => paths ?? []);
-  const untracked = summary.wildcard || summary.passthrough ||
-    summary.hasUnverifiedCellUse === true;
   return {
     write,
     read,
@@ -3022,7 +3019,6 @@ function contractObservationFrom(
     escaped,
     reachedBelow,
     used,
-    untracked,
   };
 }
 
@@ -3147,26 +3143,23 @@ export function overlayContractCapabilities(
   };
 
   /**
-   * Whether a use the body makes reaches `path`: a use at it or below it, one
-   * above it that reads the whole value there, as a key the body computes or
-   * a value it passes on whole does, or one the summary names no path for.
+   * Whether a use the body makes reaches `path`: a use at it or below it, or
+   * one above it that reaches the whole value there, as a key the body
+   * computes, a wildcard, or a value it passes on whole does.
    */
   const reachedByUse = (path: readonly string[]): boolean =>
-    observation.untracked ||
     observation.used.some((used) => onOnePath(used, path));
 
   /**
    * Whether a use the body makes reaches a position below `path` that only an
    * index signature types: one under a key that `declared`, the property
-   * names the object at `path` declares, does not hold, one above or at
-   * `path` that reads the whole value there, or one the summary names no path
-   * for.
+   * names the object at `path` declares, does not hold, or one above or at
+   * `path` that reaches the whole value there.
    */
   const usedUndeclaredWithin = (
     path: readonly string[],
     declared: ReadonlySet<string>,
   ): boolean =>
-    observation.untracked ||
     observation.used.some((used) =>
       onOnePath(used, path) &&
       (used.length <= path.length || !declared.has(used[path.length]!))

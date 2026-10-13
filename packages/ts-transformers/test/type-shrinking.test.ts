@@ -1021,6 +1021,75 @@ type Holder = { c: Writable<number>; t: [Writable<number>, string] };`,
       expect(capabilitiesOf(event)).toEqual([["cell"]]);
     });
 
+    it("keeps a tuple as written where the body reads its parent under a key it computes", async () => {
+      const { event } = await eventSchema(
+        `type Ev = {
+  box: { pair: [Writable<number>]; other: [Writable<number>] };
+  key: "pair" | "other";
+};`,
+        "Ev",
+        "(e, { c }) => { c.set(e.box[e.key][0].get()); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["cell"], ["cell"]]);
+    });
+
+    it("keeps a tuple as written where the body reads it at an index of the array holding it", async () => {
+      const { event } = await eventSchema(
+        "type Ev = { list: { t: [Writable<number>] }[] };",
+        "Ev",
+        "(e, { c }) => { c.set(e.list[1]!.t[0].get()); }",
+      );
+
+      expect(capabilitiesOf(event)).toEqual([["cell"]]);
+    });
+
+    it("makes the cells of a tuple `opaque` where a rest element reaches only a value beside it", async () => {
+      const { event } = await eventSchema(
+        `type Ev = {
+  dict: { a: Writable<number>; b: Writable<number> };
+  t: [Writable<number>];
+};`,
+        "Ev",
+        "(e, { c }) => { const { a, ...rest } = e.dict; c.set(a.get() + rest.b.get()); }",
+      );
+
+      expect((event.properties as Record<string, unknown>).t).toEqual({
+        type: "array",
+        items: opaqueNumber,
+      });
+    });
+
+    for (
+      const [where, callback, expected] of [
+        [
+          "on the object the index signature is in, keeps them as written",
+          `(e, { c }) => { const { ...rest } = e.m; c.set(rest["k"]?.get() ?? 0); }`,
+          { type: "number", asCell: ["cell"] },
+        ],
+        [
+          "only beside it, makes them `opaque`",
+          "(e, { c }) => { const { a, ...rest } = e.d; c.set(a + rest.b); }",
+          opaqueNumber,
+        ],
+      ] as const
+    ) {
+      it(`reads the cells an index signature types where a rest element is ${where}`, async () => {
+        const { event } = await eventSchema(
+          `type Ev = {
+  m: { [key: string]: Writable<number> };
+  d: { a: number; b: number };
+};`,
+          "Ev",
+          callback,
+        );
+        const m = (event.properties as Record<string, Record<string, unknown>>)
+          .m!;
+
+        expect(m.additionalProperties).toEqual(expected);
+      });
+    }
+
     it("keeps a cell an index signature types as written where a use reaches an undeclared key", async () => {
       const { event } = await eventSchema(
         "type Ev = { c: Writable<number>; [key: string]: Writable<number> };",

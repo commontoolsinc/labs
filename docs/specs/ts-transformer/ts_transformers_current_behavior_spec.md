@@ -507,10 +507,10 @@ it (`reachedByUse()`), so a scoped cell the body reads keeps the capability
 written for it, and is otherwise read with every cell in it `opaque`
 (`keptAsWritten()`): a cell kept at the capability its author wrote would
 confer authority no use exercises. A use reaches a node where the summary
-observes one at the node, below it, or above it on a value read whole (a key the
-body computes, or a value that leaves the function), and anywhere where the
-summary names no path for a use (a destructuring, a rest element, a
-pass-through, or a cell use it cannot verify). The same holds for a cell an
+observes one at the node, below it, or above it on a value reached whole (a key
+the body computes, a wildcard's prefix, as a destructuring or a rest element
+records, or a value that leaves the function), and anywhere where the body
+passes the event on whole. The same holds for a cell an
 index signature types, where no use reaches a key the literal does not declare,
 compared as written so that a declared `0` does not declare `1`, and for an
 event the body never reads at all; the schema generator honors that `opaque`
