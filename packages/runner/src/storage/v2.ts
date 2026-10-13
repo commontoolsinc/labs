@@ -6237,8 +6237,14 @@ export class SpaceReplica
     // A live replica's covered selector relies on its session for updates.
     // Terminal session failures invalidate that promise even when the local
     // document remains available; ordinary reconnects keep the session open.
+    // An authorization denial takes the refresh path below instead, which
+    // records a refused load for `repullRefused()` to make again once a
+    // retry is admitted.
     const sessionError = this.sessionError();
-    if (!this.#closed && sessionError !== undefined) {
+    if (
+      !this.#closed && sessionError !== undefined &&
+      sessionError.name !== "AuthorizationError"
+    ) {
       return { error: toPullError(sessionError) };
     }
 
