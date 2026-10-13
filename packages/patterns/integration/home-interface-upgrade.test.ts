@@ -15,6 +15,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { PiecesController } from "@commonfabric/piece/ops";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
   type Cell,
   getDerivedInternalCellLink,
@@ -30,6 +31,13 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 
 const owner = await Identity.fromPassphrase("Home interface state retention");
+
+/**
+ * Counts the stored argument slots a pattern's setup has dropped, across every
+ * runtime in this process. The count is kept even when the warning is filtered.
+ */
+const droppedSlots = (): number =>
+  getLoggerCountsBreakdown().runner?.["setup-stored-slot-dropped"]?.total ?? 0;
 
 describe("Home interface upgrade", () => {
   for (
@@ -304,6 +312,11 @@ describe("Home interface upgrade", () => {
             path: [],
           },
         }]);
+        // A child whose position in Home shifts is set up on the stored state of
+        // the child that held that position, and drops the slots its argument
+        // schema refuses. The field comparisons below cover the manager and
+        // Home's own state, not each child's, so the update must drop none.
+        const droppedBefore = droppedSlots();
         const identity = getPatternIdentityRef(home)?.identity;
         const rootLink = home.getAsNormalizedFullLink();
         if (mode === "explicit") {
@@ -344,6 +357,7 @@ describe("Home interface upgrade", () => {
         const after = await storedFields(runtime, rolled);
         expect(after).toEqual(before);
         expect(await ownedFields(runtime, rolled)).toEqual(ownedBefore);
+        expect(droppedSlots()).toBe(droppedBefore);
         if (mode !== "explicit") {
           expect(getPatternSource(rolled)).toBe("system:system/home.tsx");
           expect(getPatternIdentityRef(rolled)?.identity).toBe(
@@ -381,6 +395,7 @@ describe("Home interface upgrade", () => {
           expect(reopenedFields.slice(0, 2)).toEqual(before.slice(0, 2));
           expect(await noticeRecords(reopened)).toEqual(noticesBefore);
           expect(await ownedFields(peer, reopened)).toEqual(ownedBefore);
+          expect(droppedSlots()).toBe(droppedBefore);
         } finally {
           await peerController.dispose();
           await peer.dispose();
