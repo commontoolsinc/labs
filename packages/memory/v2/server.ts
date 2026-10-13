@@ -2471,8 +2471,8 @@ export class Server {
 
   /**
    * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
-   * is attached read-only from its descriptor path instead of the cell-derived
-   * per-(space, id) file. In-memory only: a registration does not survive a
+   * is read from its descriptor path, read-only and on a read worker, instead
+   * of the cell-derived per-(space, id) file. In-memory only: a registration does not survive a
    * restart.
    */
   #diskSources = new DiskSourceRegistry();
@@ -4754,8 +4754,8 @@ export class Server {
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
    * link <piece> <field> sqlite:<absPath>` issues this so subsequent reads for the
-   * handle id resolve against the on-disk file (attached read-only) instead of the
-   * cell-derived db. The descriptor is server-side state — never the cell value.
+   * handle id resolve against the on-disk file (read-only, on a read worker)
+   * instead of the cell-derived db. The descriptor is server-side state — never the cell value.
    */
   async sqliteRegisterDiskSource(
     message: SqliteRegisterDiskSourceRequest,

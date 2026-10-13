@@ -70,14 +70,19 @@ during design are marked **[resolved]** with the decision.
    a behind db, truncate orphaned in-doubt writes for an ahead one. Rejected:
    per-commit checkpoint+fsync of both files (doesn't actually close the crash
    window and kills WAL throughput).
-8. **[resolved — read pool]** Connection contention. `@db/sqlite` is a single
-   synchronous connection per `Database`, so a long read on the engine
-   connection blocked the space. **Resolved** by routing **all reads** —
-   cell-derived and injected on-disk — onto a separate path-keyed **read-only
-   connection pool** (`ReadConnectionPool`), unattached from the engine; only
-   writes use the engine connection (Section
+8. **[open for cell-dbs]** Connection contention. `@db/sqlite` steps a
+   statement synchronously on the thread that calls it. **All reads** —
+   cell-derived and injected on-disk — run on a separate path-keyed
+   **read-only connection pool** (`ReadConnectionPool`), unattached from the
+   engine; only writes use the engine connection (Section
    [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
-   A statement timeout against a single runaway read remains a worthwhile guard.
+   A read of an injected source runs on a read worker, off the server's main
+   thread, and is interrupted when its connection closes. A read of a
+   cell-derived db still runs on the main thread, so a heavy one holds every
+   connection of every space while it runs. Moving those reads to the workers
+   needs cell-db files in WAL mode, so that a worker's read does not hold a
+   lock a main-thread commit to the same file would wait on (Section
+   [04](./04-server-execution-and-transactions.md#which-thread-runs-a-read)).
 8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
    - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
      `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10).
