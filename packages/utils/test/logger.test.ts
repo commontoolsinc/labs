@@ -905,7 +905,7 @@ describe("logger", () => {
       logger.warn("after", "x");
 
       expect(counted).toStrictEqual(["before"]);
-      expect(logger.countsByKey["after"].warn).toBe(1);
+      expect(logger.countsByKey["after"]?.warn).toBe(1);
     });
   });
 
