@@ -80,9 +80,11 @@ returns beside it the value to walk under that identifier. A caller that holds
 and not `data`. A link in `data` that names no document takes its identifier
 from the address it is read under. Under the minted address that is the `data:`
 identifier itself, so the link's path would be read inside the snapshot and not
-in the document that stores the link. The returned value is `data` with each
-such link given the identifier of `base`; every other link is left as `data`
-holds it, schema included.
+in the document that stores the link. Where `base` has an identifier, the
+returned value is `data` with each such link given that identifier; every other
+link is left as `data` holds it, schema included. Without a `base`, or with one
+that has no identifier, there is nothing to give such a link, and the returned
+value is `data` as given.
 
 The walk rebuilds a container only when a link under it was rewritten;
 everything else it hands back by identity, so a value carrying no link at all

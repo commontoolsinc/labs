@@ -93,7 +93,7 @@ export function dataUriFromValueWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
-  return dataUriSnapshotWithResolvedLinks(data, base).id;
+  return mintWithResolvedLinks(data, baseLinkOf(base)).id;
 }
 
 /**
@@ -120,16 +120,9 @@ export function dataUriSnapshotWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): { id: URI; value: FabricValue } {
-  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  const baseLink = baseLinkOf(base);
+  const { id, namesNoDocument } = mintWithResolvedLinks(data, baseLink);
   const baseId = baseLink?.id;
-  let namesNoDocument = false;
-  const encoded = mapLinks(data, (link) => {
-    if (linkRefPayload(link).id === undefined) namesNoDocument = true;
-    return createSigilLinkFromParsedLink(parseLink(link, baseLink), {
-      includeSchema: true,
-      keepAsCell: KeepAsCell.All,
-    });
-  });
   const value = namesNoDocument && baseId !== undefined
     ? mapLinks(data, (link) => {
       const payload = linkRefPayload(link);
@@ -138,13 +131,41 @@ export function dataUriSnapshotWithResolvedLinks(
         : link;
     })
     : data;
-  return { id: dataUriFromValue(encoded), value };
+  return { id, value };
+}
+
+/** Returns the link a `base` argument of this module's mint functions names. */
+function baseLinkOf(
+  base: Cell | NormalizedLink | undefined,
+): NormalizedLink | undefined {
+  return isCell(base) ? base.getAsNormalizedFullLink() : base;
 }
 
 /**
- * Helper for {@link dataUriSnapshotWithResolvedLinks}, which returns `value`
- * with each primitive cell link in it replaced by what `rewrite` returns for
- * it.
+ * Helper for the two mint functions, which encodes `data` with each link in
+ * it rewritten to a full sigil link resolved against `baseLink`, and reports
+ * as `namesNoDocument` whether any link in `data` named no document.
+ *
+ * @throws If `data` contains a reference cycle.
+ */
+function mintWithResolvedLinks(
+  data: FabricValue,
+  baseLink: NormalizedLink | undefined,
+): { id: URI; namesNoDocument: boolean } {
+  let namesNoDocument = false;
+  const encoded = mapLinks(data, (link) => {
+    if (linkRefPayload(link).id === undefined) namesNoDocument = true;
+    return createSigilLinkFromParsedLink(parseLink(link, baseLink), {
+      includeSchema: true,
+      keepAsCell: KeepAsCell.All,
+    });
+  });
+  return { id: dataUriFromValue(encoded), namesNoDocument };
+}
+
+/**
+ * Helper for the two mint functions, which returns `value` with each
+ * primitive cell link in it replaced by what `rewrite` returns for it.
  *
  * @throws If `value` contains a reference cycle.
  */
