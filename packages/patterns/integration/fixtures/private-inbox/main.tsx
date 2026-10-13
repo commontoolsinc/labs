@@ -13,8 +13,9 @@
  * `olderHome` stands in for a Home of the vintage whose ensure takes no
  * refusal, and `unreadableHome` for one whose profile keeps its pointer per
  * user. `requestingHome` and `profilelessHome` are Homes whose inboxes a
- * client requests, as a loom daemon does, the second with no profiles. Fixture
- * for `private-inbox-multi-runtime.test.ts`.
+ * client requests, as a loom daemon does, the second with no profiles, and a
+ * profile of the first's may be of a vintage without `setInbox`. Fixture for
+ * `private-inbox-multi-runtime.test.ts`.
  */
 
 import {
@@ -44,10 +45,11 @@ import PrivateInbox, {
   type OfferEvent,
   pointProfilesAtPrivateInbox,
   type PointTarget,
-  type PrivateInboxAnswer,
+  PrivateInboxAnswering,
   type PrivateInboxHolder,
   type PrivateInboxOutput,
   type PrivateInboxPiece,
+  type PrivateInboxReceipt,
   type PrivateInboxRefusalHolder,
   type PrivateInboxReplacementHolder,
   type PrivateInboxRequest,
@@ -139,6 +141,45 @@ const createEarlierProfile = handler<
   profiles.push(
     asProfile(
       EarlierProfile.inSpace(undefined, { grants: { "*": "WRITE" } })({}),
+    ),
+  );
+});
+
+/** The result of {@link PointerOnlyProfile}. */
+interface PointerOnlyProfileOutput {
+  [NAME]: string;
+
+  /** The stand-in's name, which every profile vintage holds. */
+  name: string;
+
+  /** Where the stand-in points, which nothing here sets. */
+  inbox: { piece?: Cell<PrivateInboxPiece> };
+}
+
+/**
+ * Stands in for a profile of a vintage without `setInbox`, the stream through
+ * which alone Home points a profile: a name and a pointer.
+ */
+const PointerOnlyProfile = pattern<
+  Record<never, never>,
+  PointerOnlyProfileOutput
+>(() => ({
+  [NAME]: "Pointer-only profile",
+  name: "Pointer-only profile",
+  inbox: new Writable<{ piece?: Cell<PrivateInboxPiece> }>({}).for("inbox"),
+}));
+
+/**
+ * Creates a profile of a vintage without `setInbox`, in a space of its own that
+ * grants anyone `WRITE`.
+ */
+const createPointerOnlyProfile = handler<
+  void,
+  { profiles: Writable<ProfileHomeOutput[]> }
+>((_event, { profiles }) => {
+  profiles.push(
+    asProfile(
+      PointerOnlyProfile.inSpace(undefined, { grants: { "*": "WRITE" } })({}),
     ),
   );
 });
@@ -306,7 +347,7 @@ export interface HomeStandInOutput {
    * Has the Home ensure its inbox and answers with it, as Home's own stream
    * does.
    */
-  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxAnswer>;
+  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxReceipt>;
 
   /** Replaces the inbox the Home was refused, as Home's own stream does. */
   replaceRefusedPrivateInbox: Stream<void>;
@@ -361,9 +402,13 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
       setDefaultProfile: setDefaultProfile({ profiles, defaultProfile }),
       ensurePrivateInbox: ensure,
       requestPrivateInbox: requestPrivateInbox({
-        privateInbox,
         // deno-lint-ignore no-explicit-any
         profiles: profiles as any,
+        answers: PrivateInboxAnswering({
+          privateInbox,
+          // deno-lint-ignore no-explicit-any
+          profiles: profiles as any,
+        }).answers,
         ensure,
       }),
       replaceRefusedPrivateInbox: replaceRefusedPrivateInbox({
@@ -709,6 +754,12 @@ export interface MainOutput {
   /** Creates one of `requestingHome`'s profiles. */
   createRequestingProfile: Stream<void>;
 
+  /** Creates a profile of `requestingHome`'s without `setInbox`. */
+  createRequestingPointerOnlyProfile: Stream<void>;
+
+  /** Points one of `requestingHome`'s profiles at the loom-shaped inbox. */
+  pointRequestingProfileAtLoom: Stream<PointElsewhereRequest>;
+
   /** A Home with no profiles, whose inbox a client requests. */
   profilelessHome: HomeStandInOutput;
 }
@@ -874,6 +925,13 @@ export default pattern<MainInput, MainOutput>((
     }),
     ensureUnreadable: unreadableHome.ensurePrivateInbox,
     createRequestingProfile: requestingHome.createProfile,
+    createRequestingPointerOnlyProfile: createPointerOnlyProfile({
+      profiles: requestingHome.profiles,
+    }),
+    pointRequestingProfileAtLoom: pointProfileAt({
+      profiles: requestingHome.profiles,
+      inbox: loomInbox,
+    }),
     createProfileThroughSurface: ProfileCreate({
       // deno-lint-ignore no-explicit-any
       profiles: profiles as any,

@@ -18,61 +18,42 @@ import {
 const identity = await Identity.fromPassphrase("private inbox request");
 
 // A Home pattern reduced to the stream a client requests its inbox through.
-// Its handler records the profile each request names and answers with a
-// pattern over `stage` and `held`, as Home answers with one over its holder
-// and the profile's pointer, so the test moves the answer by writing `stage`.
-// The handler throws while `failRequest` is set.
+// Its handler records the profile each request names and answers with a link
+// to Home's `answer`, as Home answers with a link to its answer for the
+// profile, so the test moves the answer by writing `answer`. The handler
+// throws while `failRequest` is set.
 const program: RuntimeProgram = {
   main: "/home.tsx",
   files: [{
     name: "/home.tsx",
     contents: `
-import { type Cell, computed, handler, pattern, Writable } from "commonfabric";
+import { type Cell, handler, pattern, Writable } from "commonfabric";
 
-type Pointer = { piece?: Cell<{ name?: string }> };
-
-type Answer = { status: string; inbox?: Cell<{ name?: string }> };
-
-const Answerer = pattern<{ stage: string; held: Pointer }, Answer>(
-  ({ stage, held }) => {
-    const answer = computed((): Answer =>
-      stage === "ensured" ? { status: stage, inbox: held?.piece } : { status: stage }
-    );
-    return { status: answer.status, inbox: answer.inbox };
-  },
-);
+type Answer = { status: string };
 
 const requestPrivateInbox = handler<
   { from?: Cell<unknown> },
   {
-    stage: Writable<string>;
-    held: Writable<Pointer>;
+    answer: Writable<Answer>;
     named: Writable<{ piece?: Cell<unknown> }>;
     failRequest: Writable<boolean>;
   },
-  Answer
->((event, { stage, held, named, failRequest }) => {
+  Cell<Answer>
+>((event, { answer, named, failRequest }) => {
   if (failRequest.get()) throw new Error("Home fails the request");
   named.set(event?.from === undefined ? {} : { piece: event.from });
-  return Answerer({ stage, held });
+  return answer;
 });
 
 export default pattern(() => {
-  const stage = new Writable("pending").for("stage");
-  const held = new Writable<Pointer>({}).for("held");
+  const answer = new Writable<Answer>({ status: "pending" }).for("answer");
   const named = new Writable<{ piece?: Cell<unknown> }>({}).for("named");
   const failRequest = new Writable(false).for("failRequest");
   return {
-    stage,
-    held,
+    answer,
     named,
     failRequest,
-    requestPrivateInbox: requestPrivateInbox({
-      stage,
-      held,
-      named,
-      failRequest,
-    }),
+    requestPrivateInbox: requestPrivateInbox({ answer, named, failRequest }),
   };
 });`,
   }],
@@ -154,7 +135,7 @@ describe("requestPrivateInboxOf()", () => {
 
   it("sends Home the profile the request names", async () => {
     const profile = await documentIn(identity.did(), {});
-    await setHome("stage", "unlisted");
+    await setHome("answer", { status: "unlisted" });
 
     await requestPrivateInboxOf(runtime, home, profile);
 
@@ -166,33 +147,49 @@ describe("requestPrivateInboxOf()", () => {
       .toEqual(addressOf(profile));
   });
 
-  it("waits while Home's answer is `pending`, and returns the inbox once it is `ensured`", async () => {
-    const profile = await documentIn(identity.did(), {});
+  it("waits while Home's answer is `pending`, and returns the inbox the profile points at once it is `ensured`", async () => {
     const inbox = await documentIn(identity.did(), { name: "inbox" });
-    await setHome("held", { piece: inbox });
+    const profile = await documentIn(identity.did(), {
+      inbox: { piece: inbox },
+    });
 
     const request = startRequest(profile);
     await runtime.idle();
 
     expect(request.settled()).toBe(false);
-    await setHome("stage", "ensured");
+    await setHome("answer", { status: "ensured" });
     const outcome = await request.outcome;
     expect(outcome.status).toBe("ensured");
     expect("inbox" in outcome ? addressOf(outcome.inbox) : undefined)
       .toEqual(addressOf(inbox));
   });
 
-  it("returns `unlisted` and `not-held` as Home answers them", async () => {
+  it("waits, once Home's answer is `ensured`, for the profile's pointer to name an inbox", async () => {
+    const inbox = await documentIn(identity.did(), { name: "inbox" });
+    const profile = await documentIn(identity.did(), {});
+    await setHome("answer", { status: "ensured" });
+
+    const request = startRequest(profile);
+    await runtime.idle();
+
+    expect(request.settled()).toBe(false);
+    await runtime.editWithRetry((tx) =>
+      profile.withTx(tx).set({ inbox: { piece: inbox } } as never)
+    );
+    const outcome = await request.outcome;
+    expect("inbox" in outcome ? addressOf(outcome.inbox) : undefined)
+      .toEqual(addressOf(inbox));
+  });
+
+  it("returns `unlisted`, `unpointable` and `not-held` as Home answers them", async () => {
     const profile = await documentIn(identity.did(), {});
 
-    await setHome("stage", "unlisted");
-    expect(await requestPrivateInboxOf(runtime, home, profile)).toEqual({
-      status: "unlisted",
-    });
-    await setHome("stage", "not-held");
-    expect(await requestPrivateInboxOf(runtime, home, profile)).toEqual({
-      status: "not-held",
-    });
+    for (const status of ["unlisted", "unpointable", "not-held"]) {
+      await setHome("answer", { status });
+      expect(await requestPrivateInboxOf(runtime, home, profile)).toEqual({
+        status,
+      });
+    }
   });
 
   it("returns `abandoned` once the signal aborts while Home's answer is `pending`", async () => {
@@ -217,7 +214,7 @@ describe("requestPrivateInboxOf()", () => {
 
   it("rejects when Home answers with a status it does not know", async () => {
     const profile = await documentIn(identity.did(), {});
-    await setHome("stage", "postponed");
+    await setHome("answer", { status: "postponed" });
 
     await expect(requestPrivateInboxOf(runtime, home, profile)).rejects
       .toThrow("postponed");

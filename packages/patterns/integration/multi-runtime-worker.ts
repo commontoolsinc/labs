@@ -34,7 +34,11 @@ import {
 } from "@commonfabric/data-model/codecs";
 import type { FabricKeyPair } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "@commonfabric/api";
-import type { Cell, MemorySpace } from "@commonfabric/runner";
+import type {
+  Cell,
+  MemorySpace,
+  NormalizedFullLink,
+} from "@commonfabric/runner";
 import {
   cellRuntime,
   convertCellsToLinks,
@@ -43,6 +47,7 @@ import {
   parseLink,
   type RuntimeTelemetry,
   type RuntimeTelemetryEvent,
+  sendEvent,
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
@@ -1147,6 +1152,40 @@ const handlers: Record<
       ...("inbox" in answer ? { inbox: addressOf(answer.inbox) } : {}),
       ...(isCell(pointer?.piece) ? { pointer: addressOf(pointer.piece) } : {}),
     };
+  },
+
+  /**
+   * Sends the request `requestPrivateInbox` does, and answers with the
+   * document and path the handling's receipt holds a link to, as it stands
+   * once the send has completed, or nothing when it holds no link.
+   */
+  async requestReceipt({ path, profile, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    const cellAt = async (segments: unknown) => {
+      let cell = target;
+      for (const segment of (segments ?? []) as (string | number)[]) {
+        cell = cell.key(segment as never);
+      }
+      await cell.sync();
+      return cell.resolveAsCell();
+    };
+    const home = await cellAt(path);
+    const named = await cellAt(profile);
+    const link = await new Promise<NormalizedFullLink>((resolve, reject) =>
+      sendEvent(home.key("requestPrivateInbox"), { from: named }, (tx) => {
+        const receipt = tx.handlingReceiptLink;
+        if (tx.status().status === "error" || receipt === undefined) {
+          reject(new Error("The request's handling wrote no receipt"));
+        } else resolve(receipt);
+      })
+    );
+    const receipt = controller().runtime.getCellFromLink(link);
+    await receipt.sync();
+    const linked = parseLink(receipt.getRaw());
+    return linked === undefined
+      ? undefined
+      : { id: linked.id, path: [...linked.path] };
   },
 
   /**

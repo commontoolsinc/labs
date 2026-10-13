@@ -221,10 +221,10 @@ the list as a value too, for the same reason. A profile of any vintage with a
 the runtime logs a warning that no handler took it.
 
 The host, the handler, the pointing and re-pointing steps, the seed step and
-the answer to a request for the inbox read each profile's pointer, and the
+the answers to requests for the inbox read each profile's pointer, and the
 handlers read the inbox the event names to adopt, the inbox Home holds, the ones
-it retains, the one its refusal record names, the one its replacement record
-names and the one it answers a request with, as a typed link,
+it retains, the one its refusal record names and the one its replacement record
+names, as a typed link,
 `Cell<ShareInboxPiece>`; the host reads it through `inboxPieceLinkSchema` in
 `packages/piece/src/ops/private-inbox.ts`, the same type as a schema. A link
 that names the inbox's own result document, as `setInbox` and an adoption write
@@ -253,8 +253,7 @@ says, reads the record's `reason` and `refusedAt` and never its `inbox`.
 `private-inbox.pointer-type.test.ts` fails to compile if any reader's pointer
 type, the host's, the ensure's and the pointing step's, the seed step's, the
 profile's own, the event's refused inbox or Home's holder, retained list,
-refusal record, replacement record and answer to a request, becomes
-unconstrained, or names a member
+refusal record and replacement record, becomes unconstrained, or names a member
 of the inbox's result other than its name. For the event's refused inbox, the
 second of those is the one the measurement above bears out.
 
@@ -301,28 +300,40 @@ Home's handler, `requestPrivateInbox` in `private-inbox.tsx`, sends Home's
 creates one when it holds none and no profile advertises one, and points every
 profile in its list that points at no inbox at its own, as "Creating or
 adopting it" says. It adopts nothing: adopting an inbox a profile advertises
-waits on the host's vetting, at the next ensure the host sends. The handler
-then answers, and its answer is the result of its handling of the event, which
-is that handling's receipt. The answer holds `status`, and with `ensured`, an
-`inbox`:
+waits on the host's vetting, at the next ensure the host sends.
+
+The handler's result, which is its handling's receipt, is a link into Home's
+answers, which `PrivateInboxAnswering` computes once for all of Home's
+profiles, with `privateInboxAnswersOf()`: an answer for each profile in Home's
+list, in list order, and one each for a request naming no listed profile and
+for one naming a profile without `setInbox`. So a request leaves nothing
+running, however many are sent, and the receipt reads whatever the answer it
+links to reads now. An answer holds `status`:
 
 | `status` | The profile `from` names | Final |
 | --- | --- | --- |
-| `pending` | is in Home's list and points at no inbox, and Home is pointing it at the inbox it holds or creates | no |
-| `ensured` | points at the inbox Home holds, which `inbox` links as the profile's pointer does, to the inbox's own result document | yes |
+| `pending` | is in Home's list and points at no inbox, or at another piece in the space of the inbox Home holds, and Home is pointing it at the inbox it holds or creates | no |
+| `ensured` | points at the inbox Home holds | yes |
 | `unlisted` | is not in Home's list, or the event names none, so Home points it at nothing | yes |
-| `not-held` | points at an inbox Home does not hold, or points at none while Home holds none and creates none, because another profile advertises an inbox that awaits the host's vetting | yes |
+| `unpointable` | has no `setInbox`, through which alone Home points a profile | yes |
+| `not-held` | points at an inbox in another space than the one Home holds, as when something other than Home sets its pointer first, or points anywhere while Home holds none, or points at none while Home holds none and creates none, because another profile advertises an inbox that awaits the host's vetting | yes |
 
-The handler decides the answer from Home's holder and its profiles as its run
-reads them, the list as a value, as `privateInboxAnswerOf()` decides it. A
-final answer is written as it is. The profile is pointed in events after the
-handler's run, Home's pointing step and then the profile's own `setInbox`, so a
-`pending` answer is a pattern instead, `PrivateInboxAnswerer`, which goes on
-writing the receipt: it reads `pending` until the profile points at the inbox
-Home holds, and then `ensured`, and never anything else. So an `ensured` answer
-arrives only once the profile's pointer is set, and a read of the pointer that
-syncs sees it. A profile of a vintage without `setInbox` is never pointed, and
-its answer stays `pending`.
+The profile is pointed in events after the handler's run, Home's pointing step
+and then the profile's own `setInbox`, so `ensured` comes only once the
+profile's pointer names Home's inbox, and every way that pointer can come to
+name something else is a final status rather than a `pending` that never ends.
+A pointer to another piece in the space of the inbox Home holds reads
+`pending`, since only Home's own inboxes are there, and a reader whose view of
+Home's holder and of the pointer lag one behind the other can see one. The
+answer holds no link to the inbox: a link to an inbox carries the label its
+owner gives its offers, and a handler that linked its receipt to such an
+answer would consume it, which the writer-fit check refuses. Once a request is
+`ensured`, the client reads the inbox from the profile's pointer.
+
+The link names the answer at the profile's position in Home's list when the
+request is handled. A profile added later goes at the end, and leaves it
+naming the same profile; one removed ahead of it moves the position to the
+profile after it.
 
 A client reads the answer without polling. It sends the event through
 `sendEvent()` with a completion callback, reads `handlingReceiptLink` from the
@@ -331,19 +342,24 @@ until the answer is not `pending`, as the share intake reads the result of
 Home's `registerSharedSpace`. The callback's transaction reports a failure of
 the send or of Home's handling as an error status, and carries no receipt
 address unless the runtime writes receipts, which it does with commit
-preconditions or server execution on. The answer's `inbox` is read through the
-typed link `inboxPieceLinkSchema` in `packages/piece/src/ops/private-inbox.ts`,
-for the reason the pointer is, as "Creating or adopting it" says. Under server
-execution a client runs its own copy of Home's handling, and of the pattern a
-`pending` answer launches, so it reads the answer its own replica computes,
-which can stay `pending` for longer than the serving runtime's does.
+preconditions or server execution on. For `ensured`, the client then reads the
+profile's `inbox.piece`, through the typed link `inboxPieceLinkSchema` in
+`packages/piece/src/ops/private-inbox.ts`, for the reason every reader of the
+pointer does, as "Creating or adopting it" says, and waits for its own view of
+the pointer to name an inbox.
+
+Under server execution, the serving runtime runs Home's handler, writes the
+receipt and runs `PrivateInboxAnswering`, as part of Home, so it is the
+serving runtime's answers the receipt links to. A client whose runtime runs
+Home too computes them as well, over its own view of the profiles, and reads
+its own answer until the served one arrives.
 
 `requestPrivateInboxOf()` in `packages/piece/src/ops/private-inbox.ts` is the
 host's implementation of that client. It returns `ensured` with the inbox,
-`unlisted` or `not-held`; `unavailable`, sending nothing, for a Home without
-the stream; and `abandoned` once the caller's signal aborts while it waits. It
-rejects when the send or Home's handling fails, when the handling writes no
-receipt, or when Home answers with a status the host does not know.
+`unlisted`, `unpointable` or `not-held`; `unavailable`, sending nothing, for a
+Home without the stream; and `abandoned` once the caller's signal aborts while
+it waits. It rejects when the send or Home's handling fails, when the handling
+writes no receipt, or when Home answers with a status the host does not know.
 
 A client tells the cases apart by what Home has and what it answers:
 
@@ -352,23 +368,31 @@ A client tells the cases apart by what Home has and what it answers:
   root holds nothing. The client sends nothing, and goes on as it would
   without a Home: a loom daemon creates its own inbox, and the race in
   "Creating or adopting it" applies to it.
-- **`ensured`**: the client reads the inbox the answer links, which the
-  profile advertises and Home holds.
-- **`unlisted` or `not-held`**: Home will not have that profile advertise its
-  inbox. The client goes on as it would without a Home, a loom daemon adopting
-  the inbox the profile advertises, if it is usable, and creating its own when
-  the profile advertises none.
+- **`ensured`**: the client reads the inbox the profile points at, which Home
+  holds.
+- **`unlisted`, `unpointable` or `not-held`**: Home will not have that profile
+  advertise its inbox. The client goes on as it would without a Home, a loom
+  daemon adopting the inbox the profile advertises, if it is usable, and
+  creating its own when the profile advertises none.
 - **A failure** of the send or of Home's handling: nothing about the inbox is
   decided. Sending the request again is safe, since the ensure it sends creates
   and re-points nothing more once it has run.
 
+Two requests in flight at once over a Home holding no inbox send two ensures,
+and with server execution off the second one's commit, across Home's space and
+the inbox's, can find the first one's changes. The runtime logs that under
+`storage.v2.multi-space-commit` as an error, and both requests still end at the
+one inbox.
+
 `packages/patterns/system/private-inbox-request.test.tsx` tests the answers,
 `packages/piece/test/ops/requestPrivateInboxOf.test.ts` the host's client, and
 `packages/patterns/integration/private-inbox-multi-runtime.test.ts`, with
-server execution on and off, a request through the receipt: answered with the
-inbox the profile points at, two at once answered with one inbox, one to a Home
-with no profiles answered `unlisted` while the Home creates its inbox, and one
-to a Home without the stream sending nothing.
+server execution on and off, requests through the receipt: two at once
+answered with the one inbox both profiles point at, each linking to Home's one
+answer for its profile; one for a profile something else pointed elsewhere
+answered `not-held`, one for a profile without `setInbox` `unpointable`, one to
+a Home with no profiles `unlisted` while the Home creates its inbox, and one to
+a Home without the stream sending nothing.
 
 ## When the host refuses an inbox
 

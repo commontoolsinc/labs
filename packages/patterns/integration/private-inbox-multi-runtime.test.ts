@@ -22,9 +22,11 @@
  * profile at it, including when the refused inbox's space has stopped letting
  * the owner read it. A client requests a Home's inbox, as a loom daemon does,
  * for two of its profiles at once, and reads, from each handling's receipt,
- * the one inbox Home creates and both profiles point at; a request to a Home
- * with no profiles reads `unlisted`, and one to a Home without the stream sends
- * nothing.
+ * the one inbox Home creates and both profiles point at; each receipt links to
+ * Home's one answer for its profile. A request for a profile pointed elsewhere
+ * reads `not-held`, one for a profile without `setInbox` `unpointable`, one to
+ * a Home with no profiles `unlisted`, and one to a Home without the stream
+ * sends nothing.
  *
  * The inbox's space grants every principal `WRITE` in both server-execution
  * postures: the serving loop makes a sender's write where server execution is
@@ -139,6 +141,9 @@ describe("private inbox across runtimes", () => {
   };
   let markedReplacementRefusals: number;
   let requested: RequestAnswer[];
+  let receipts: unknown[];
+  let contestedRequest: RequestAnswer;
+  let pointerOnlyRequest: RequestAnswer;
   let profilelessRequest: RequestAnswer;
   let olderRequest: RequestAnswer;
   let olderHandledBefore: unknown;
@@ -487,6 +492,38 @@ describe("private inbox across runtimes", () => {
       requestInbox(["requestingHome"], ["requestingHome", "profiles", 0]),
       requestInbox(["requestingHome"], ["requestingHome", "profiles", 1]),
     ]);
+    // Two more requests, read back as stored, and the second profile pointed
+    // at the loom-shaped inbox and requested for again, as when something
+    // other than Home wins its pointer. A third profile, of a vintage without
+    // `setInbox`, is added and requested for.
+    receipts = [];
+    for (const index of [0, 1]) {
+      receipts.push(
+        await owner.client().call("requestReceipt", {
+          path: ["requestingHome"],
+          profile: ["requestingHome", "profiles", index],
+        }),
+      );
+    }
+    const loom = await owner.link(["loomInbox", "piece"]);
+    await owner.send("pointRequestingProfileAtLoom", { index: 1 });
+    await harness.settleUntil(async () =>
+      (await owner.link(["requestingHome", "profiles", 1, "inbox", "piece"]))
+        .id === loom.id
+    );
+    contestedRequest = await requestInbox(
+      ["requestingHome"],
+      ["requestingHome", "profiles", 1],
+    );
+    await owner.send("createRequestingPointerOnlyProfile");
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["requestingHome", "profiles"])) as unknown[])
+        .length === 3
+    );
+    pointerOnlyRequest = await requestInbox(
+      ["requestingHome"],
+      ["requestingHome", "profiles", 2],
+    );
     profilelessRequest = await requestInbox(
       ["profilelessHome"],
       ["requestingHome", "profiles", 0],
@@ -821,6 +858,31 @@ describe("private inbox across runtimes", () => {
     expect(requested[1].status).toBe("ensured");
     expect(requested[1].inbox).toEqual(requested[0].inbox);
     expect(requested[1].pointer).toEqual(requested[0].inbox);
+  });
+
+  it("links each request's receipt to Home's one answer for the profile, launching nothing per request", () => {
+    expect(receipts).toHaveLength(2);
+    const [forFirst, forSecond] = receipts as (
+      | { id: string; path: unknown[] }
+      | undefined
+    )[];
+    expect(forFirst?.id).toBeDefined();
+    expect(forSecond?.id).toBe(forFirst?.id);
+    expect(forFirst?.path).toEqual(["profiles", "0"]);
+    expect(forSecond?.path).toEqual(["profiles", "1"]);
+  });
+
+  it("answers `not-held` for a profile something other than Home has pointed at another inbox", async () => {
+    const loom = await owner.link(["loomInbox", "piece"]);
+    expect(contestedRequest).toEqual({
+      status: "not-held",
+      pointer: { id: loom.id, space: loom.space },
+    });
+  });
+
+  it("answers `unpointable` for a profile without `setInbox`", () => {
+    expect(pointerOnlyRequest.status).toBe("unpointable");
+    expect(pointerOnlyRequest.inbox).toBeUndefined();
   });
 
   it("answers a request to a Home with no profiles as unlisted, and creates the Home's inbox", async () => {

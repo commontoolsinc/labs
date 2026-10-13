@@ -152,26 +152,25 @@ export async function ensurePrivateInboxOf(
 /**
  * What {@link requestPrivateInboxOf} learned from Home: `ensured` once the
  * profile the request named points at the inbox Home holds, which `inbox`
- * names; `unlisted` when that profile is not in Home's list; `not-held` when
- * it points at an inbox Home does not hold, or Home holds none and creates
- * none because another profile advertises one. `unavailable` is a Home
- * without the stream, which is sent nothing, and `abandoned` a request whose
- * caller stopped waiting before Home answered.
+ * links as the profile's pointer does; `unlisted` when that profile is not in
+ * Home's list; `unpointable` when it has no `setInbox`, so Home never points
+ * it; `not-held` when it points at an inbox Home does not hold, or Home holds
+ * none and creates none because another profile advertises one.
+ * `unavailable` is a Home without the stream, which is sent nothing, and
+ * `abandoned` a request whose caller stopped waiting before Home answered.
  */
 export type PrivateInboxRequestOutcome =
   | { status: "unavailable" }
   | { status: "abandoned" }
   | { status: "ensured"; inbox: Cell<unknown> }
   | { status: "unlisted" }
+  | { status: "unpointable" }
   | { status: "not-held" };
 
 /** How {@link requestPrivateInboxOf} reads Home's answer in its receipt. */
 const answerSchema = {
   type: "object",
-  properties: {
-    status: { type: "string" },
-    inbox: inboxPieceLinkSchema,
-  },
+  properties: { status: { type: "string" } },
 } as const satisfies JSONSchema;
 
 /**
@@ -184,10 +183,13 @@ const answerSchema = {
  * and no profile advertises one, and adopts none.
  *
  * Home answers in the handling's receipt, whose address the send's completion
- * carries, and goes on writing it as the profile's pointer changes; this
- * subscribes to the receipt and settles on the first answer that is not
- * `pending`. Returns `unavailable`, sending nothing, for a Home without the
- * stream, and `abandoned`, once `signal` aborts, while it waits.
+ * carries: a final answer, or a link to Home's answer for the profile, which
+ * changes as Home's holder and the profile's pointer do. This subscribes to
+ * the receipt, through the link, and settles on the first answer that is not
+ * `pending`; for `ensured`, it then reads the inbox from the profile's pointer,
+ * waiting for this runtime's view of it to name one. Returns `unavailable`,
+ * sending nothing, for a Home without the stream, and `abandoned`, once
+ * `signal` aborts, while it waits.
  *
  * @throws When the send fails, when Home's handling of it fails or writes no
  *   receipt, or when Home answers with a status this host does not know.
@@ -210,58 +212,66 @@ export async function requestPrivateInboxOf(
       } else resolve(tx.handlingReceiptLink);
     })
   );
-  return await settledAnswer(
+  const status = await firstPicked(
     runtime.getCellFromLink(receipt, answerSchema),
+    (answer) =>
+      answer?.status === undefined || answer.status === "pending"
+        ? undefined
+        : answer.status,
     signal,
   );
+  switch (status) {
+    case undefined:
+      return { status: "abandoned" };
+    case "unlisted":
+    case "unpointable":
+    case "not-held":
+      return { status };
+    case "ensured": {
+      const inbox = await firstPicked(
+        profile.key("inbox").asSchema(pointerSchema),
+        (pointer) => isCell(pointer?.piece) ? pointer.piece : undefined,
+        signal,
+      );
+      return inbox === undefined
+        ? { status: "abandoned" }
+        : { status: "ensured", inbox };
+    }
+    default:
+      throw new Error(debugStr`Home answered the request with $quote${status}`);
+  }
 }
 
 /**
- * Helper for {@link requestPrivateInboxOf}, which waits for the first value of
- * `answer` whose status is not `pending`, or for `signal` to abort.
+ * Helper for {@link requestPrivateInboxOf}, which subscribes to `cell` and
+ * resolves with what `pick` makes of the first of its values that `pick`
+ * makes anything of, or with `undefined` once `signal` aborts.
  */
-function settledAnswer(
-  answer: Cell<{ status?: string; inbox?: Cell<unknown> }>,
+function firstPicked<T, R>(
+  cell: Cell<T>,
+  pick: (value: Readonly<T>) => R | undefined,
   signal?: AbortSignal,
-): Promise<PrivateInboxRequestOutcome> {
-  const { promise, resolve, reject } = Promise.withResolvers<
-    PrivateInboxRequestOutcome
-  >();
+): Promise<R | undefined> {
+  const { promise, resolve } = Promise.withResolvers<R | undefined>();
   // Where `sink()`'s cancel is kept: a callback can run before it returns.
   const subscription: { cancel?: Cancel } = {};
   let settled = false;
-  const settle = (settleWith: () => void) => {
+  const settle = (picked: R | undefined) => {
     if (settled) return;
     settled = true;
     signal?.removeEventListener("abort", abandon);
     subscription.cancel?.();
-    settleWith();
+    resolve(picked);
   };
-  const abandon = () => settle(() => resolve({ status: "abandoned" }));
+  const abandon = () => settle(undefined);
   if (signal?.aborted) {
     abandon();
     return promise;
   }
   signal?.addEventListener("abort", abandon);
-  subscription.cancel = answer.sink((value) => {
-    const status = value?.status;
-    if (status === undefined || status === "pending") return;
-    if (status === "ensured") {
-      const inbox = value.inbox;
-      settle(() =>
-        isCell(inbox)
-          ? resolve({ status, inbox })
-          : reject(new Error("Home answered the request naming no inbox"))
-      );
-    } else if (status === "unlisted" || status === "not-held") {
-      settle(() => resolve({ status }));
-    } else {
-      settle(() =>
-        reject(
-          new Error(debugStr`Home answered the request with $quote${status}`),
-        )
-      );
-    }
+  subscription.cancel = cell.sink((value) => {
+    const picked = pick(value);
+    if (picked !== undefined) settle(picked);
   });
   if (settled) subscription.cancel();
   return promise;

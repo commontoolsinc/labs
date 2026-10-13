@@ -51,8 +51,9 @@ import {
   ensurePrivateInbox,
   type EnsurePrivateInboxEvent,
   pointProfilesAtPrivateInbox,
-  type PrivateInboxAnswer,
+  PrivateInboxAnswering,
   type PrivateInboxHolder,
+  type PrivateInboxReceipt,
   type PrivateInboxRefusalHolder,
   type PrivateInboxReplacementHolder,
   type PrivateInboxRequest,
@@ -189,9 +190,10 @@ export type HomeOutput = {
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
   // For a client, such as a loom daemon, that would otherwise create an inbox
   // of its own: has Home ensure its inbox, as `ensurePrivateInbox` does for an
-  // event naming nothing, and answers, in the handling's receipt, with the
-  // inbox Home holds once the profile the request names points at it.
-  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxAnswer>;
+  // event naming nothing, and links the handling's receipt to Home's answer
+  // for the profile the request names, which reads `ensured` once that profile
+  // points at Home's inbox, or a final status saying why it never will.
+  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxReceipt>;
   // For the owner, from the button on Home's refusal notice: replaces the
   // refused inbox with the one Home holds, or with one it creates when it holds
   // none, and points the profiles that point at the refused inbox at Home's.
@@ -479,6 +481,14 @@ const Home = pattern(
     // the Profile tab. Owns its own durable cell (seeded via Default<>).
     const selfComponent = Self({});
     const activeTab = new Writable("spaces").for("activeTab");
+    // Home's answers to requests for its inbox, which `requestPrivateInbox`
+    // links a request's receipt to. It is Home's last child: a child inserted
+    // ahead of an existing one shifts the positions of a deployed Home's
+    // existing children, as the chat manager's note says.
+    const privateInboxAnswering = PrivateInboxAnswering({
+      privateInbox,
+      profiles: profiles as any,
+    });
 
     return {
       [NAME]: `Home`,
@@ -680,8 +690,8 @@ const Home = pattern(
       createProfile: createProfileStream,
       ensurePrivateInbox: ensurePrivateInboxStream,
       requestPrivateInbox: requestPrivateInbox({
-        privateInbox,
         profiles: profiles as any,
+        answers: privateInboxAnswering.answers,
         ensure: ensurePrivateInboxStream,
       }),
       replaceRefusedPrivateInbox: replaceRefusedInboxStream,
