@@ -238,15 +238,17 @@ where the pre-sync was no longer the whole cost.
       order against one another, 32,220 edges per `messages` document.
       Passing the helpers a read-only view of the list, or an analysis that
       follows the helper, would remove the component.
-- [ ] The cycle break prefers the lowest remaining in-degree, which picks an
-      action downstream of the cycle before the cycle's own members: a
-      render effect with one unmet input against a computation with 179.
-      1,812 of the room's 1,991 breaks were such picks, each running an
-      effect before the computation it reads, which then runs again.
-      The specification names the parent preference and registration order
-      (`../specs/scheduler-v2/README.md` §7.4); the in-degree preference is
-      the implementation's, and limiting the break's choice to the actions
-      that are on a cycle is a change to the run order.
+- [x] The sort breaks a cycle at one of its own members: a member of a
+      strongly connected component of the unplaced actions that no unplaced
+      action outside it feeds (`../specs/scheduler-v2/README.md` §7.4,
+      `packages/runner/src/scheduler/topology.ts`). The break had ranked
+      every unplaced action by in-degree, which put a render effect with
+      one unmet input ahead of a computation on a cycle of 180 with 179:
+      1,812 of the room's 1,991 breaks in one settle placed an action ahead
+      of the computation it reads. That settle now takes 179 breaks, all in
+      the one cycle. A load runs 2,177 actions where it ran 2,237, and
+      reports no action started on an argument its input had not yet
+      produced, where it reported sixty.
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
       the document they name, once per transaction, so the two checks a
       written path makes read the inputs about its document
