@@ -32,7 +32,9 @@ manager creates, is its space's root, and reads only its own roster: its
 `#default` is itself. `roster` is computed from those who joined alone.
 `messages` (its `count`, `oldestAt`, `newestAt`, and
 `latest`) is computed from the messages, and `canSend` from the reader's access
-and profile, when they're read. Neither is stored.
+and profile, when they're read. Neither is stored. `viewer` and `messageRights`
+are computed for each reader too, `viewer` from their profile and access, and
+`messageRights` from those and the messages, for every message at once.
 
 `participantEntries` is computed from `participants`, reading the
 `represents-principal` label on each profile with `principalOf()`, and
@@ -98,16 +100,19 @@ and without it a late redelivery of the original send would send the message
 again. The two bounds of its window for proposed times are constants of the
 pattern, documented beside it.
 
-`commitEdit` and `commitDelete` are admitted only for the message's own sender.
-`commitEdit` moves the current version into `earlierVersions` before recording
+`commitEdit` is admitted only for the message's own sender, and `commitDelete`
+for its sender or an OWNER of the room's space. `commitEdit` moves the current version into `earlierVersions` before recording
 the new one. `commitDelete` records the deletion and clears the reactions, or,
 when the room's `deletionIsObliteration` setting is on, does exactly what
 `commitObliterate` does. They have the same kind of write policy as
 `commitSend`.
 
-`commitObliterate` is admitted for an OWNER in a group room or a space's own
-chat, when the room's `ownersMayObliterate` setting is on, and for a message's
-own sender in a direct room. It rewrites the message to its tombstone and clears
+`commitObliterate` is admitted for an OWNER of the room's space, in any room,
+and for a message's own sender in a direct room. One function,
+`messageRightsOf()`, states who may edit, delete, and obliterate a message:
+the three handlers admit an act by it, and `messageRights` and the rendering's
+controls offer one by it, so what a reader is offered is what the room takes.
+It rewrites the message to its tombstone and clears
 its reactions. So the message's write policy admits it alongside `commitSend`,
 `commitEdit`, and `commitDelete`, and the reactions' write policy admits both it
 and `commitDelete` alongside the reaction handlers.
@@ -160,7 +165,6 @@ built at first. The first build fixes each setting at an initial value:
 
 | Setting | `ChatRoomPolicy` key | Initial value |
 | --- | --- | --- |
-| OWNERs may obliterate messages | `ownersMayObliterate` | yes |
 | An edit or a plain deletion keeps the version it replaces | `keepsHistory` | yes, every version |
 | A sender's deletion obliterates their message | `deletionIsObliteration` | no |
 | How far before the clock a proposed time is accepted | `proposedTimeMaxAgeNsec` | 10 minutes |

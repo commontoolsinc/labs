@@ -87,7 +87,8 @@ const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
  * Every room's policy. Each setting is read by the handlers it governs, and
- * `about.policy` states it, so the two cannot disagree.
+ * `about.policy` states it, so the two cannot disagree. `ownersMayObliterate`
+ * states a rule rather than a setting, which `messageRightsOf()` keeps.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -629,6 +630,52 @@ const SHOWN_IN: readonly ShownIn[] = ["main", "thread", "both"];
 export const isOwnerOf = (cell: Cell<unknown>): boolean =>
   spaceAccess(cell) === "OWNER";
 
+/** What one person may do to one message. */
+export interface MessageRights {
+  /** Whether they may record a new version of it. */
+  canEdit: boolean;
+
+  /** Whether they may delete it. */
+  canDelete: boolean;
+
+  /** Whether they may obliterate it. */
+  canObliterate: boolean;
+}
+
+/** The rights of someone who may do nothing to a message. */
+export const NO_MESSAGE_RIGHTS: MessageRights = {
+  canEdit: false,
+  canDelete: false,
+  canObliterate: false,
+};
+
+/**
+ * What the person acting under `profile` may do to the message `record` in a
+ * room of `kind`, given whether they hold OWNER in the room's space. The
+ * message's author may edit and delete it, and in a direct room obliterate
+ * it; an OWNER may delete and obliterate any message, whoever sent it. A
+ * deleted message takes nothing further but obliteration, and an obliterated
+ * one, which names no author, takes nothing. The room's handlers admit an act
+ * by this, and the room's view and rendering offer one by it.
+ */
+export const messageRightsOf = (
+  record: MessageRecord | undefined,
+  profile: ProfileCell | undefined,
+  kind: ChatRoomKind,
+  isOwner: boolean,
+): MessageRights => {
+  const author = record?.authorProfile;
+  const isAuthor = author !== undefined && profile !== undefined &&
+    equals(author, profile);
+  const live = !isDeleted(record);
+  return {
+    canEdit: live && isAuthor,
+    canDelete: live && (isAuthor || isOwner),
+    canObliterate: author !== undefined &&
+      (isOwner || (kind === "direct" && isAuthor)),
+  };
+};
+
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose
  * messages are `messages`: their profile resolves, and the room's space grants
@@ -913,18 +960,12 @@ const performMessageAct = (
   const entry = entryFor(entries, target);
   if (target === undefined || entry === undefined) return;
   const current = entry.record;
-  const isAuthor = current.authorProfile !== undefined &&
-    equals(current.authorProfile, profile);
+  const rights = messageRightsOf(current, profile, kind, isOwnerOf(messages));
   const deletionObliterates = op === "delete" &&
     FABRICHAT_POLICY.deletionIsObliteration;
 
   if (op === "obliterate" || deletionObliterates) {
-    if (current.authorProfile === undefined) return;
-    const allowed = op === "delete" || kind === "direct"
-      ? isAuthor
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwnerOf(messages);
-    if (!allowed) return;
-    if (op === "delete" && isDeleted(current)) return;
+    if (!(op === "delete" ? rights.canDelete : rights.canObliterate)) return;
     const editedAt = claimTime(usedTimes, clock);
     if (editedAt === undefined) return;
     const loggedAt = claimTime(usedTimes, clock);
@@ -950,7 +991,7 @@ const performMessageAct = (
     return;
   }
 
-  if (!isAuthor || isDeleted(current)) return;
+  if (!(op === "delete" ? rights.canDelete : rights.canEdit)) return;
   const kept: ChatMessageVersion[] = FABRICHAT_POLICY.keepsHistory
     ? [...(current.earlierVersions ?? []), {
       body: current.body as string,
@@ -1073,7 +1114,7 @@ export const commitEdit = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("edit", event, state),
 );
 
-/** Deletes the sender's message, from `ChatDeleteSurface`. */
+/** Deletes a message, from `ChatDeleteSurface`. */
 export const commitDelete = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("delete", event, state),
 );

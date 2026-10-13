@@ -1,9 +1,10 @@
 /**
  * A FabriChat group room, as its space's access list decides who may do what
- * in it: its OWNER obliterates anyone's messages; a member with WRITE sends
- * but can't obliterate someone else's; a reader with READ is offered no way to
- * write; and someone the list leaves out sees a placement of the room as not
- * theirs. Who is in the space is the space's business, not the room's.
+ * in it: its OWNER deletes and obliterates anyone's messages; a member with
+ * WRITE sends but can't delete or obliterate someone else's; a reader with
+ * READ is offered no way to write; and someone the list leaves out sees a
+ * placement of the room as not theirs. Who is in the space is the space's
+ * business, not the room's.
  *
  * The test lane doesn't enforce the list, so what this checks is what the room
  * decides from the level `spaceAccess()` reports, not what the memory server
@@ -33,6 +34,8 @@ import {
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
+  CHAT_DELETE_ACTION,
+  CHAT_DELETE_SURFACE,
   CHAT_OBLITERATE_ACTION,
   CHAT_OBLITERATE_SURFACE,
   CHAT_SEND_ACTION,
@@ -51,6 +54,10 @@ type TestProfile = AddIntegrity<
 >;
 
 const sendGesture = { surface: CHAT_SEND_SURFACE, action: CHAT_SEND_ACTION };
+const deleteGesture = {
+  surface: CHAT_DELETE_SURFACE,
+  action: CHAT_DELETE_ACTION,
+};
 const obliterateGesture = {
   surface: CHAT_OBLITERATE_SURFACE,
   action: CHAT_OBLITERATE_ACTION,
@@ -73,10 +80,15 @@ interface Setup {
   records: Records;
 }
 
-// The messages' bodies, in the order they were recorded.
+// The messages' bodies, or how each was taken away, in the order they were
+// recorded.
 const bodies = (messages: Writable<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
-    typeof message?.body === "string" ? message.body : "<gone>"
+    typeof message?.body === "string"
+      ? message.body
+      : message?.authorProfile === undefined
+      ? "<obliterated>"
+      : "<deleted>"
   ).join(" | ");
 
 // Whether the reaction field of a room's first message row, one of the row's
@@ -118,8 +130,7 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
   );
-  const onBobs = FabriChatMessageRow({
-    message: setup.records.messages.key(1),
+  const rowRecords = {
     myProfile: profile,
     inThread: false,
     kind: "group" as const,
@@ -129,6 +140,14 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     cannotWrite: false,
     isOwner: false,
     ...records,
+  };
+  const onBobs = FabriChatMessageRow({
+    message: setup.records.messages.key(1),
+    ...rowRecords,
+  } as RowArg);
+  const onBobsSecond = FabriChatMessageRow({
+    message: setup.records.messages.key(2),
+    ...rowRecords,
   } as RowArg);
 
   return {
@@ -140,21 +159,28 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { label: "alice-sent" },
       { await: "bob-tried" },
-      // Bob, with WRITE, couldn't obliterate her message.
+      // Bob, with WRITE, couldn't delete or obliterate her message.
       {
         assertion: assert(() =>
-          bodies(setup.records.messages) === "From Alice | From Bob"
+          bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again"
         ),
       },
-      // The OWNER may obliterate anyone's message in a group room.
+      // The OWNER may delete and obliterate anyone's message in a group room.
       {
-        action: onBobs.obliterateMessage,
+        action: onBobs.deleteMessage,
+        event: {},
+        trustedUi: deleteGesture,
+      },
+      {
+        action: onBobsSecond.obliterateMessage,
         event: {},
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          bodies(setup.records.messages) === "From Alice | <gone>"
+          bodies(setup.records.messages) ===
+            "From Alice | <deleted> | <obliterated>"
         ),
       },
       { assertion: assert(() => room.canSend === true) },
@@ -205,13 +231,24 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         trustedUi: sendGesture,
       },
       {
+        action: room.composerSend,
+        event: typed("Bob again"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: onAlices.deleteMessage,
+        event: {},
+        trustedUi: deleteGesture,
+      },
+      {
         action: onAlices.obliterateMessage,
         event: {},
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          bodies(setup.records.messages) === "From Alice | From Bob"
+          bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again"
         ),
       },
       { label: "bob-tried" },

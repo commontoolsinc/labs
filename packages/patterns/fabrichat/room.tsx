@@ -32,6 +32,7 @@ import {
   principalOf,
   SELF,
   spaceAccess,
+  type SpaceAccessLevel,
   spaceOf,
   Stream,
   UI,
@@ -67,8 +68,11 @@ import {
   type MessageCell,
   messageEntries,
   type MessageEntry,
+  type MessageRights,
+  messageRightsOf,
   type MessagesCell,
   NO_ACTIVITY,
+  NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
   type ReactionListsCell,
   type RequestsCell,
@@ -773,6 +777,36 @@ export interface ChatMessageList {
   closeWindow: Stream<RoomWindowEvent>;
 }
 
+/** Who is reading a room. */
+export interface ChatRoomViewer {
+  /**
+   * The reader's profile, as a link to the profile itself, which is the form
+   * a message's `authorProfile` takes; absent until it resolves.
+   */
+  profile?: ProfileCell;
+
+  /**
+   * The principal the reader's profile's `represents-principal` label attests;
+   * absent when it attests none, or the label can't be read.
+   */
+  principal?: string;
+
+  /**
+   * The reader's access to the room's space, as its access list grants it;
+   * absent while that isn't known.
+   */
+  role?: SpaceAccessLevel;
+}
+
+/**
+ * The reader's profile, as a link to the profile itself, which `myProfile`
+ * may reach only through another link; `undefined` while it holds no value.
+ */
+const viewerProfileOf = (
+  myProfile: ProfileCell | undefined,
+): ProfileCell | undefined =>
+  myProfile?.get() === undefined ? undefined : myProfile.resolveAsCell();
+
 /** A room's data face, for hosts that draw it natively. */
 export interface ChatRoomView {
   /** What the room says about itself. */
@@ -828,13 +862,22 @@ export interface ChatRoomView {
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
+  /** Who is reading the room: their profile, its principal, and their access. */
+  viewer: ChatRoomViewer;
+
+  /**
+   * What this reader may do to each message, by the message's key: `t`, then
+   * its `sentAt` in nanoseconds. Nothing at all while `canSend` doesn't hold.
+   */
+  messageRights: Record<string, MessageRights>;
+
   /** Sends a message. */
   sendMessage: Stream<RoomStreamEvent>;
 
   /** Records a new version of one of the sender's messages. */
   editMessage: Stream<RoomStreamEvent>;
 
-  /** Records one of the sender's messages as deleted. */
+  /** Records a message as deleted: the sender's own, or any, from an OWNER. */
   deleteMessage: Stream<RoomStreamEvent>;
 
   /** Reduces a message to a tombstone. */
@@ -1059,6 +1102,31 @@ export const FabriChatRoomCore = pattern<
   });
   const cannotSend = computed(() => !canSend);
   const isOwner = computed(() => isOwnerOf(messages));
+  const viewer = computed((): ChatRoomViewer => {
+    const profile = viewerProfileOf(myProfile);
+    const principal = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    const role = spaceAccess(messages);
+    return {
+      ...(profile === undefined ? {} : { profile }),
+      ...(principal === undefined ? {} : { principal }),
+      ...(role === undefined ? {} : { role }),
+    };
+  });
+  // Every message's rights for the reader, by the rule the handlers admit an
+  // act by, derived once for the whole list as `places` is.
+  const messageRights = computed((): Record<string, MessageRights> => {
+    const profile = viewerProfileOf(myProfile);
+    return Object.fromEntries(
+      entries.map((entry) => [
+        entry.key,
+        canSend && profile !== undefined
+          ? messageRightsOf(entry.record, profile, kind, isOwner)
+          : NO_MESSAGE_RIGHTS,
+      ]),
+    );
+  });
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
   const aboutView = {
@@ -1167,6 +1235,8 @@ export const FabriChatRoomCore = pattern<
     addParticipant: join,
     messages: messageList,
     canSend,
+    viewer,
+    messageRights,
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
@@ -1430,6 +1500,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addParticipant: room.addParticipant,
       messages: room.messages,
       canSend: room.canSend,
+      viewer: room.viewer,
+      messageRights: room.messageRights,
       sendMessage: room.sendMessage,
       editMessage: room.editMessage,
       deleteMessage: room.deleteMessage,

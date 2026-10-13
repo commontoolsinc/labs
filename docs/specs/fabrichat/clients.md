@@ -77,7 +77,8 @@ A client that draws natively MUST:
   can't be read shows as a neutral placeholder (see
   [`ChatProfile.md`](ChatProfile.md#when-a-profile-cant-be-read)).
 - **Identify people by their profile links**, compared with `equals()`, and
-  never by display name.
+  never by display name. The reader's own is the room's `viewer.profile`, the
+  same link a message the reader sent holds as its `authorProfile`.
 - **Show members from the room's space.** A room's `participants` are its
   space's participants, as claims, plus its authors. None of them is proof that
   someone can read the room. To name each of them, and to tell which one is the
@@ -128,6 +129,11 @@ gesture on the reviewed surface its policy names:
 | remove a reaction | room | `deleteReaction` | `ChatReactSurface` |
 | start a conversation | manager | `openDirect`, `createGroup` | `ChatStartSurface` |
 | add a member | room | `addMember` | `ChatAddMemberSurface` |
+
+Which of editing, deleting, and obliterating the room takes on each message,
+from the reader, is in the room's `messageRights`, decided by the same rules the
+room admits those acts by. A client reads it there rather than deciding for
+itself, since the room refuses any other silently.
 
 A client that draws natively sends `addMember` through
 [the sanctioned issuing path](#the-sanctioned-issuing-path) on

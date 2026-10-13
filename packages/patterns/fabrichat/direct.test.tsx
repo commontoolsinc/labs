@@ -1,28 +1,38 @@
 /**
- * Obliteration in a FabriChat direct room: either person may obliterate their
- * own messages, and neither may obliterate the other's, the room's creator
- * included.
+ * Deleting and obliterating in a FabriChat direct room: either of its two
+ * people, each an OWNER of its space, may delete and obliterate the other's
+ * messages as well as their own. Someone the space admits with WRITE alone,
+ * as a direct room whose space has grown may, may obliterate their own
+ * messages, as anyone in a direct room may, and nobody else's.
+ *
+ * The test lane doesn't enforce the access list, so what this checks is what
+ * the room decides from the level `spaceAccess()` reports.
  */
 import {
   type AddIntegrity,
   assert,
+  equals,
+  multiUserTest,
   pattern,
   TESTS,
+  VIEWS,
   Writable,
 } from "commonfabric";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
-  type ComposerState,
   type MessageRecord,
   type MessagesValue,
   type ReactionList,
   type RequestMemo,
   type SentActivity,
   type UsedTime,
+  viewKeyOf,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
+  CHAT_DELETE_ACTION,
+  CHAT_DELETE_SURFACE,
   CHAT_OBLITERATE_ACTION,
   CHAT_OBLITERATE_SURFACE,
   CHAT_SEND_ACTION,
@@ -39,9 +49,10 @@ type TestProfile = AddIntegrity<
   readonly ["fabrichat-test-profile"]
 >;
 
-const sendGesture = {
-  surface: CHAT_SEND_SURFACE,
-  action: CHAT_SEND_ACTION,
+const sendGesture = { surface: CHAT_SEND_SURFACE, action: CHAT_SEND_ACTION };
+const deleteGesture = {
+  surface: CHAT_DELETE_SURFACE,
+  action: CHAT_DELETE_ACTION,
 };
 const obliterateGesture = {
   surface: CHAT_OBLITERATE_SURFACE,
@@ -50,7 +61,34 @@ const obliterateGesture = {
 
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
-// Each message's body, or how it was taken away.
+/** The room's records, which every participant's room shares. */
+interface Records {
+  messages: Writable<MessagesValue>;
+  reactionLists: Writable<ReactionList[]>;
+  requests: Writable<RequestMemo[]>;
+  usedTimes: Writable<UsedTime[]>;
+  activity: Writable<SentActivity[]>;
+  counters: Writable<ActivityCounters[]>;
+}
+
+/** What every session receives from the setup. */
+interface Setup {
+  records: Records;
+}
+
+export const setup = pattern(() => ({
+  records: {
+    messages: Writable.of<MessagesValue>([] as MessagesValue),
+    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
+    requests: Writable.of<RequestMemo[]>([]),
+    usedTimes: Writable.of<UsedTime[]>([]),
+    activity: Writable.of<SentActivity[]>([]),
+    counters: Writable.of<ActivityCounters[]>([]),
+  },
+}));
+
+// Each message's body, or how it was taken away, in the order they were
+// recorded.
 const bodies = (messages: Writable<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string"
@@ -60,106 +98,233 @@ const bodies = (messages: Writable<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-export default pattern(() => {
-  const messages = Writable.of<MessagesValue>([] as MessagesValue);
-  const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
-  const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
-  // Alice and Bob run here as this lane's one principal, which holds OWNER in
-  // the room's space, so what tells them apart is their profiles alone.
+// The stored message at `index` of `messages`.
+const messageAt = (
+  messages: Writable<MessagesValue>,
+  index: number,
+): MessageRecord | undefined =>
+  ((messages.get() ?? []) as MessageRecord[])[index];
+
+/** What makes the shared room a direct room of its own. */
+const directRoom = { about: { kind: "direct" as const } };
+
+// The room's creator, an OWNER, who sends first and obliterates Bob's second
+// message.
+export const alice = pattern<{ setup: Setup }>(({ setup }) => {
+  const profile = Writable.of<TestProfile>({ name: "Alice" });
   const records = {
-    about: { kind: "direct" as const },
-    messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
+    messages: setup.records.messages,
+    reactionLists: setup.records.reactionLists,
+    requests: setup.records.requests,
+    usedTimes: setup.records.usedTimes,
+    activity: setup.records.activity,
+    counters: setup.records.counters,
   };
-  const alice = FabriChatRoomCore(
-    { myProfile: aliceProfile, ...records } as RoomArg,
+  const room = FabriChatRoomCore(
+    { myProfile: profile, ...directRoom, ...records } as RoomArg,
   );
-  const bob = FabriChatRoomCore(
-    { myProfile: bobProfile, ...records } as RoomArg,
-  );
-  const rowRecords = {
+  const onBobsSecond = FabriChatMessageRow({
+    message: setup.records.messages.key(2),
+    myProfile: profile,
     inThread: false,
     kind: "direct" as const,
-    composer: Writable.of<ComposerState>({}),
+    composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
+    ...records,
+  } as RowArg);
+
+  return {
+    [TESTS]: [
+      {
+        action: room.composerSend,
+        event: typed("From Alice"),
+        trustedUi: sendGesture,
+      },
+      { label: "alice-sent" },
+      { await: "bob-deleted" },
+      {
+        action: onBobsSecond.obliterateMessage,
+        event: {},
+        trustedUi: obliterateGesture,
+      },
+      {
+        assertion: assert(() =>
+          bodies(setup.records.messages) ===
+            "<deleted> | From Bob | <obliterated> | <obliterated>"
+        ),
+      },
+      // Bob's deletion of her message keeps her as its author.
+      {
+        assertion: assert(() =>
+          equals(messageAt(setup.records.messages, 0)?.authorProfile, profile)
+        ),
+      },
+      { label: "alice-done" },
+    ],
+  };
+});
+
+// The other person, also an OWNER, who deletes Alice's message.
+export const bob = pattern<{ setup: Setup }>(({ setup }) => {
+  const profile = Writable.of<TestProfile>({ name: "Bob" });
+  const records = {
+    messages: setup.records.messages,
+    reactionLists: setup.records.reactionLists,
+    requests: setup.records.requests,
+    usedTimes: setup.records.usedTimes,
+    activity: setup.records.activity,
+    counters: setup.records.counters,
+  };
+  const room = FabriChatRoomCore(
+    { myProfile: profile, ...directRoom, ...records } as RoomArg,
+  );
+  const onAlices = FabriChatMessageRow({
+    message: setup.records.messages.key(0),
+    myProfile: profile,
+    inThread: false,
+    kind: "direct" as const,
+    composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
+    ...records,
+  } as RowArg);
+
+  return {
+    [TESTS]: [
+      { await: "alice-sent" },
+      {
+        action: room.composerSend,
+        event: typed("From Bob"),
+        trustedUi: sendGesture,
+      },
+      {
+        action: room.composerSend,
+        event: typed("Bob again"),
+        trustedUi: sendGesture,
+      },
+      { label: "bob-sent" },
+      { await: "carol-done" },
+      // An OWNER's view offers him deleting and obliterating Alice's message,
+      // but not editing it.
+      {
+        assertion: assert(() => {
+          const key = viewKeyOf(setup.records.messages.key(0)) ?? "";
+          const hers = room[VIEWS].room.messageRights[key];
+          return hers?.canEdit === false && hers?.canDelete === true &&
+            hers?.canObliterate === true;
+        }),
+      },
+      {
+        action: onAlices.deleteMessage,
+        event: {},
+        trustedUi: deleteGesture,
+      },
+      {
+        assertion: assert(() =>
+          bodies(setup.records.messages) ===
+            "<deleted> | From Bob | Bob again | <obliterated>"
+        ),
+      },
+      { label: "bob-deleted" },
+      { await: "alice-done" },
+    ],
+  };
+});
+
+// Someone the space admits with WRITE, who may take away only her own
+// message.
+export const carol = pattern<{ setup: Setup }>(({ setup }) => {
+  const profile = Writable.of<TestProfile>({ name: "Carol" });
+  const records = {
+    messages: setup.records.messages,
+    reactionLists: setup.records.reactionLists,
+    requests: setup.records.requests,
+    usedTimes: setup.records.usedTimes,
+    activity: setup.records.activity,
+    counters: setup.records.counters,
+  };
+  const room = FabriChatRoomCore(
+    { myProfile: profile, ...directRoom, ...records } as RoomArg,
+  );
+  const rowRecords = {
+    myProfile: profile,
+    inThread: false,
+    kind: "direct" as const,
+    composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
     cannotWrite: false,
     isOwner: false,
     ...records,
   };
-  const aliceOnHers = FabriChatMessageRow({
-    message: messages.key(0),
-    myProfile: aliceProfile,
+  const onAlices = FabriChatMessageRow({
+    message: setup.records.messages.key(0),
     ...rowRecords,
   } as RowArg);
-  const bobOnHers = FabriChatMessageRow({
-    message: messages.key(0),
-    myProfile: bobProfile,
-    ...rowRecords,
-  } as RowArg);
-  const aliceOnHis = FabriChatMessageRow({
-    message: messages.key(1),
-    myProfile: aliceProfile,
-    ...rowRecords,
-  } as RowArg);
-  const bobOnHis = FabriChatMessageRow({
-    message: messages.key(1),
-    myProfile: bobProfile,
+  const onHers = FabriChatMessageRow({
+    message: setup.records.messages.key(3),
     ...rowRecords,
   } as RowArg);
 
   return {
     [TESTS]: [
+      { await: "bob-sent" },
       {
-        action: alice.sendMessage,
-        event: typed("From Alice"),
+        action: room.composerSend,
+        event: typed("From Carol"),
         trustedUi: sendGesture,
       },
       {
-        action: bob.sendMessage,
-        event: typed("From Bob"),
-        trustedUi: sendGesture,
-      },
-      // Neither may obliterate the other's message, OWNER access
-      // notwithstanding.
-      {
-        action: bobOnHers.obliterateMessage,
+        action: onAlices.deleteMessage,
         event: {},
-        trustedUi: obliterateGesture,
+        trustedUi: deleteGesture,
       },
       {
-        action: aliceOnHis.obliterateMessage,
-        event: {},
-        trustedUi: obliterateGesture,
-      },
-      {
-        assertion: assert(() => bodies(messages) === "From Alice | From Bob"),
-      },
-      // Each may obliterate their own.
-      {
-        action: aliceOnHers.obliterateMessage,
+        action: onAlices.obliterateMessage,
         event: {},
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          bodies(messages) === "<obliterated> | From Bob"
+          bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again | From Carol"
         ),
       },
       {
-        action: bobOnHis.obliterateMessage,
+        assertion: assert(() => {
+          const key = viewKeyOf(setup.records.messages.key(0)) ?? "";
+          const hers = room[VIEWS].room.messageRights[key];
+          return hers?.canEdit === false && hers?.canDelete === false &&
+            hers?.canObliterate === false;
+        }),
+      },
+      {
+        action: onHers.obliterateMessage,
         event: {},
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          bodies(messages) === "<obliterated> | <obliterated>"
+          bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again | <obliterated>"
         ),
       },
+      { label: "carol-done" },
+      { await: "alice-done" },
     ],
   };
+});
+
+export default multiUserTest({
+  setup,
+  participants: {
+    alice,
+    bob: { pattern: bob, access: "OWNER" },
+    carol,
+  },
 });

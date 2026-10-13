@@ -8,7 +8,7 @@ choice to the implementation. A room states it in its
 ```ts
 // Shown for illustration only.
 interface ChatRoomPolicy {
-  /** Whether an OWNER may obliterate messages. */
+  /** Always `true`: an OWNER may obliterate any message. */
   ownersMayObliterate: boolean;
 
   /** Whether an edit or a plain deletion keeps the version it replaces. */
@@ -54,8 +54,10 @@ The policy document is labeled `authored-by` the principal who wrote it (see
 
 ## Keys
 
-- **`ownersMayObliterate`**: whether an OWNER may obliterate messages in a group
-  room. A room under a retention requirement may say no.
+- **`ownersMayObliterate`**: always `true`. An OWNER of a room's space may
+  obliterate any message in it, which is a rule of every room rather than a
+  choice (see
+  [`ChatRoomOutput`](ChatRoomOutput.md#implementation-defined-behavior)).
 - **`keepsHistory`**: whether an edit, or a deletion that isn't obliteration,
   keeps the version it replaces in `earlierVersions`
   ([`ChatMessage`](ChatMessage.md)). A room under a retention requirement says

@@ -163,11 +163,6 @@ export default pattern(() => {
     myProfile: bobProfile,
     ...rowRecords,
   } as RowArg);
-  const aliceOnSecond = FabriChatMessageRow({
-    message: messages.key(1),
-    myProfile: aliceProfile,
-    ...rowRecords,
-  } as RowArg);
   const aliceOnThird = FabriChatMessageRow({
     message: messages.key(2),
     myProfile: aliceProfile,
@@ -286,12 +281,8 @@ export default pattern(() => {
         }),
       },
 
-      // Deletion: only the sender's, and the deleted text stays in history.
-      {
-        action: aliceOnSecond.deleteMessage,
-        event: {},
-        trustedUi: deleteGesture,
-      },
+      // Deletion keeps the deleted text in history; `members.test.tsx`
+      // covers who may delete someone else's message.
       {
         action: bobOnSecond.deleteMessage,
         event: {},
