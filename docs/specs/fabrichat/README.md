@@ -395,11 +395,9 @@ design, as below.
   Nothing delivers a notice yet (see
   [first contact](FabriChatManager.md#first-contact)), so the manager's
   rendering shows each queued notice with a link to its room, for the room's
-  creator to send on. And a room shows a viewer whose manager doesn't list it a
-  control that asks the manager to `accept` it, so whoever opens the room's link
-  can add it to their chats. Writing in such a room joins it: the room sends
-  the writer's manager `joinRoom`, which lists the room, or lists a forgotten
-  one again.
+  creator to send on. Whoever opens the room's link, and whoever forgot the
+  room, joins it by writing in it: the room sends the writer's manager
+  `joinRoom`, which lists the room, or lists a forgotten one again.
 - **The index is the catalog's.** The manager's `rooms` lists the
   `fabrichat-room` entries the user's Home shared-space catalog keeps as saved,
   each room found as its space's root. Creating a room registers its space in
