@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
+  type ExperimentalOptions,
   type MemorySpace,
   Runtime,
   type RuntimeProgram,
@@ -71,12 +72,16 @@ describe("requestPrivateInboxOf()", () => {
   let controller: PiecesController;
   let home: Cell<unknown>;
 
-  beforeEach(async () => {
+  /**
+   * Opens a runtime with the `experimental` options given over new storage,
+   * with Home installed as its space's root.
+   */
+  async function openRuntime(experimental: ExperimentalOptions): Promise<void> {
     storage = StorageManager.emulate({ as: identity });
     runtime = new Runtime({
       apiUrl: new URL("https://home.example"),
       storageManager: storage,
-      experimental: { serverExecution: false },
+      experimental,
     });
     controller = new PiecesController(
       createSession({ identity, spaceDid: identity.did() }),
@@ -84,12 +89,17 @@ describe("requestPrivateInboxOf()", () => {
     );
     await controller.synced();
     home = await installCustomRoot(runtime, controller, program);
-  });
+  }
 
-  afterEach(async () => {
+  /** Disposes of what {@link openRuntime} opened. */
+  async function closeRuntime(): Promise<void> {
     await controller.dispose();
     await storage.close();
-  });
+  }
+
+  beforeEach(() => openRuntime({ serverExecution: false }));
+
+  afterEach(() => closeRuntime());
 
   /** A document in `space` holding `value`. */
   async function documentIn(
@@ -197,7 +207,7 @@ describe("requestPrivateInboxOf()", () => {
     const controller = new AbortController();
 
     const request = startRequest(profile, controller.signal);
-    await runtime.idle();
+    await runtime.scheduler.idleWithPendingCommits();
     expect(request.settled()).toBe(false);
     controller.abort();
 
@@ -247,6 +257,18 @@ describe("requestPrivateInboxOf()", () => {
 
     await expect(requestPrivateInboxOf(runtime, home, profile)).rejects
       .toThrow();
+  });
+
+  it("rejects when Home's handling of the request writes no receipt", async () => {
+    // A runtime without commit preconditions writes no handling receipt, and
+    // so hands a sender none to read Home's answer from.
+
+    await closeRuntime();
+    await openRuntime({ serverExecution: false, commitPreconditions: false });
+    const profile = await documentIn(identity.did(), {});
+
+    await expect(requestPrivateInboxOf(runtime, home, profile)).rejects
+      .toThrow("wrote no receipt");
   });
 
   it("rejects when Home answers with a status it does not know", async () => {
