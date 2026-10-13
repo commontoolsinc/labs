@@ -2220,6 +2220,15 @@ export class Runner {
   #pendingWatcherPatternLoads = new Set<Promise<unknown>>();
 
   /**
+   * The entries of `#pendingWatcherPatternLoads`, by the doc key of the piece
+   * whose watcher started each. A caller that moved a running piece's pattern
+   * pointer waits on that piece's entries alone (see
+   * `patternPointerFollowed()`), so that another piece's slow load does not
+   * hold it. A piece with nothing in flight has no entry.
+   */
+  #watcherPatternLoadsByPiece = new Map<string, Set<Promise<unknown>>>();
+
+  /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
    * its basis to the serving side's own first-hydration materialization (see
    * `#catchUpAndStartOnStaleRead()`). _Never_ awaited by `dispose()`, for
@@ -5606,8 +5615,7 @@ export class Runner {
                 err,
               );
             });
-          this.#pendingWatcherPatternLoads.add(named);
-          named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
+          this.#trackWatcherPatternLoad(pieceKey, named);
           return;
         }
         // Async load for a pattern change after initial start. Errors are
@@ -5795,10 +5803,7 @@ export class Runner {
               err,
             );
           });
-        this.#pendingWatcherPatternLoads.add(watcherLoad);
-        watcherLoad.finally(() =>
-          this.#pendingWatcherPatternLoads.delete(watcherLoad)
-        );
+        this.#trackWatcherPatternLoad(pieceKey, watcherLoad);
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5828,10 +5833,7 @@ export class Runner {
             }
             followPointer(newRef, newKey);
           });
-          this.#pendingWatcherPatternLoads.add(followed);
-          followed.finally(() =>
-            this.#pendingWatcherPatternLoads.delete(followed)
-          );
+          this.#trackWatcherPatternLoad(pieceKey, followed);
         }),
       );
     };
@@ -10242,6 +10244,31 @@ export class Runner {
   }
 
   /**
+   * Helper for the pattern watcher, which records `load` as in flight for the
+   * piece `pieceKey` names until it settles.
+   */
+  #trackWatcherPatternLoad(pieceKey: string, load: Promise<unknown>): void {
+    this.#pendingWatcherPatternLoads.add(load);
+    let loads = this.#watcherPatternLoadsByPiece.get(pieceKey);
+    if (loads === undefined) {
+      loads = new Set();
+      this.#watcherPatternLoadsByPiece.set(pieceKey, loads);
+    }
+    const ofPiece = loads;
+    ofPiece.add(load);
+    load.finally(() => {
+      this.#pendingWatcherPatternLoads.delete(load);
+      ofPiece.delete(load);
+      if (
+        ofPiece.size === 0 &&
+        this.#watcherPatternLoadsByPiece.get(pieceKey) === ofPiece
+      ) {
+        this.#watcherPatternLoadsByPiece.delete(pieceKey);
+      }
+    });
+  }
+
+  /**
    * Settle in-flight pointer roll-forward COMMITS — bounded local work,
    * awaited by dispose() before the storage sessions they write through
    * close. Deliberately excludes watcher pattern LOADS: a load can be
@@ -10251,6 +10278,41 @@ export class Runner {
   async settlePointerCommits(): Promise<void> {
     while (this.#pendingPointerCommits.size > 0) {
       await Promise.allSettled([...this.#pendingPointerCommits]);
+    }
+  }
+
+  /**
+   * Resolves once the pattern watcher of the running piece `resultCell` names
+   * has finished following every move of the piece's pattern pointer it has
+   * observed. The piece then runs the pattern its pointer names, unless a
+   * follow failed, which is logged and leaves the piece on the pattern it was
+   * running. Resolves at once when nothing is in flight, as for a piece that
+   * is not running. A subpath cell stands for its root document.
+   *
+   * The watcher observes a move in a scheduler pass, so a caller that has
+   * just committed one awaits `Runtime.idle()` before calling this. Following
+   * a move reads from storage, which `idle()` does not wait for: the writer
+   * authority the incoming pattern inherits, and the documents the incoming
+   * pattern reads that this replica lacks. A pattern this runtime does not
+   * hold is also loaded, so this waits as long as that load takes.
+   *
+   * Not covered: the commit that rolls back a pointer naming a pattern that
+   * cannot be loaded, and, on a runtime that seals its writes into a serving
+   * wave, the re-instantiation, which follows the wave's settlement.
+   */
+  async patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+    const key = this.#getDocKey(rootCell);
+    // A settled load's continuation can start another, so the entry is read
+    // again after each wait.
+    let loads: Set<Promise<unknown>> | undefined;
+    while (
+      (loads = this.#watcherPatternLoadsByPiece.get(key)) !== undefined
+    ) {
+      await Promise.allSettled([...loads]);
     }
   }
 

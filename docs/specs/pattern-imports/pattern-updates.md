@@ -372,7 +372,12 @@ before its first start. This lets an obsolete pattern that cannot load be
 replaced before bootstrap without reading unsynchronized owned cells as their
 schema defaults. If the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
-the **same result cell**.
+the **same result cell**. The watcher reads from storage before it does: the
+writer authority the new pattern inherits, and any document the new pattern
+reads that the replica lacks. `ensureDefaultPattern` waits for that
+re-instantiation, through the runner's `patternPointerFollowed()`, so the root
+it returns runs the new pattern whether or not the root was running when it
+was opened.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
