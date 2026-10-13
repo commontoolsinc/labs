@@ -27,11 +27,13 @@ import {
   getEntityId,
   handler,
   spaceAccess,
+  type Stream,
   type TrustedActionWrite,
   Writable,
   type WriteAuthorizedBy,
   type WritePolicyAnyOf,
 } from "commonfabric";
+import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
 import {
   chooseRecordedTime,
   isInMain,
@@ -54,6 +56,7 @@ import {
   CHAT_OBLITERATE_SURFACE,
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
@@ -64,6 +67,7 @@ import {
   type ChatReaction,
   type ChatRoomActivity,
   type ChatRoomKind,
+  type ChatRoomLink,
   type ChatRoomPolicy,
   CLOCK_TICK_NSEC,
   durationNsec,
@@ -536,17 +540,42 @@ export interface MessageEntry extends ViewItem {
   record: MessageRecord;
 }
 
-/** The key a message has in the views: its `sentAt`, unique in the room. */
-const timeKeyOf = (time: FabricEpochNsec): string => String(nsecOf(time));
+/**
+ * The key a message has in the views: its `sentAt`, unique in the room. It
+ * starts with a letter, so that a record keyed by it has no key that reads as
+ * an array index.
+ */
+const timeKeyOf = (time: FabricEpochNsec): string => `t${nsecOf(time)}`;
+
+/**
+ * The key the stored message `message` links has in the views, or `undefined`
+ * while it links none. It reads the message's `sentAt` and nothing else of
+ * it.
+ */
+export const viewKeyOf = (message: MessageCell): string | undefined => {
+  const sentAt = message.key("sentAt").get();
+  return sentAt === undefined ? undefined : timeKeyOf(sentAt);
+};
 
 /** A link to the stored message at `index` of `messages`. */
-const cellAt = (messages: MessagesCell, index: number): MessageCell => {
+const cellAt = (
+  messages: Cell<MessagesValue>,
+  index: number,
+): MessageCell => {
   const cell: MessageCell = messages.key(index);
   return cell;
 };
 
-/** Every stored message of `messages`, as a view item. */
-export const messageEntries = (messages: MessagesCell): MessageEntry[] =>
+/**
+ * Every stored message of `messages`, as a view item. It reads the list and
+ * writes nothing, which its parameter declares by being a `Cell` where
+ * `MessagesCell` is a `Writable`: a computation that hands a cell to a
+ * helper of another module is scheduled as a writer of that cell when the
+ * helper's parameter is a `Writable`.
+ */
+export const messageEntries = (
+  messages: Cell<MessagesValue>,
+): MessageEntry[] =>
   ((messages.get() ?? []) as MessageRecord[]).flatMap((record, index) => {
     if (record?.sentAt === undefined) return [];
     const target = record.replyTo?.message?.get();
@@ -604,9 +633,11 @@ export const isOwnerOf = (cell: Cell<unknown>): boolean =>
  * Whether the viewer can send, edit, delete, and react in the room whose
  * messages are `messages`: their profile resolves, and the room's space grants
  * them WRITE or OWNER. A level not known yet (`undefined`) is not a grant.
+ * `messages` only names the room's space, and is a `Cell` for the reason
+ * `messageEntries()` gives.
  */
 export const canActIn = (
-  messages: MessagesCell,
+  messages: Cell<unknown>,
   myProfile: ProfileCell | undefined,
 ): boolean => {
   const level = spaceAccess(messages);
@@ -678,6 +709,25 @@ export type ComposerCell = Writable<
 /** The acts on a message, each performed by a handler of its own. */
 type MessageAct = "send" | "edit" | "delete" | "obliterate";
 
+/** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
+export interface JoinRoomRequest {
+  /** The room the viewer has joined. */
+  room: Cell<ChatRoomLink>;
+}
+
+/**
+ * Whether `catalog` keeps the room in `space` as one of its user's chats; a
+ * catalog that doesn't read as one keeps none.
+ */
+export const listsRoomIn = (
+  catalog: unknown,
+  space: string | undefined,
+): boolean => {
+  if (!isSharedSpaceCatalog(catalog) || space === undefined) return false;
+  const entry = catalog.entries[space];
+  return entry?.kind === CHAT_ROOM_OFFER_KIND && entry.state === "saved";
+};
+
 /**
  * The room's records, and a rendered control's bindings, as every handler
  * that changes the room is bound to them.
@@ -733,7 +783,31 @@ export interface RoomActState {
 
   /** Whether this binding closes `pickerOpen`, which only a picker binds. */
   closesPicker?: boolean;
+
+  /**
+   * Whether the viewer's manager can take the viewer into the room: the
+   * viewer has a manager, and the room is its space's own, which it can name
+   * itself to the manager by. Absent, it can't.
+   */
+  canJoin?: boolean;
+
+  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
+  joinRoom?: Stream<JoinRoomRequest>;
+
+  /** The room itself, as the viewer's manager links it. */
+  self?: Cell<ChatRoomLink>;
 }
+
+/**
+ * Tells the viewer's manager the viewer has joined the room. The manager's
+ * own event checks its private catalog and leaves an already listed room
+ * unchanged, so catalog reads stay in the manager's event.
+ */
+const joinForViewer = (state: RoomActState): void => {
+  const { canJoin, joinRoom, self } = state;
+  if (canJoin !== true || joinRoom === undefined || self === undefined) return;
+  joinRoom.send({ room: self });
+};
 
 /**
  * Performs one message act: send, edit, delete, or obliterate. Each act is
@@ -831,6 +905,7 @@ const performMessageAct = (
     if (state.replyFrom === "replyTo" && composing?.replyTo !== undefined) {
       composer.key("replyTo").set(undefined);
     }
+    joinForViewer(state);
     return;
   }
 
@@ -971,6 +1046,7 @@ const performReactionAct = (
     mine.set({ reactorProfile: profile, emoji, sentAt } as SentReaction);
     list.addUnique(mine);
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
+    joinForViewer(state);
   }
   if (op === "remove" && present) {
     const loggedAt = claimTime(usedTimes, clock);

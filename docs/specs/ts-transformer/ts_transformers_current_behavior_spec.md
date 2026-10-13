@@ -460,8 +460,43 @@ recursive event type — stays the reference it is. A named reference whose
 subtree holds no cell-like position passes through untouched; one
 expands only when a capability inside it must change, and a self-referential
 type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. Observed
+accepted residual, since a literal cannot spell its own recursion. A recursion
+that instantiates its declaration without end, as `Nest<T[]>` inside
+`Nest<T>` does, never meets its own type again. The schema generator's
+`cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
+`MAX_OVERLAY_NESTING`, or once the overlay has spent its budget of readings
+made inside such a recursion, which bounds one that branches: the search for a cell-like position takes the remainder
+past the cut to hold one, and the expansion stops there unless a use the body
+makes reaches below. The remainder is printed from its instantiation and marked
+`SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
+cell no use reaches earns; a finite chain deeper than the cut reads the same as
+reading it to its end would. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
+
+A reference the alias reading above does not see through — to an interface, or
+to a type alias that takes type parameters — expands as the type it denotes,
+which for a generic declaration is the declaration instantiated with the
+reference's arguments, built one level deep (`unfoldReferencedType()`). An
+object is built from its properties, with their optionality and the type's
+index signatures as the instantiation has them. Each property is written as its
+declaration's annotation where that still denotes the property's type, and is
+printed from its type where an argument replaced what the annotation names, so
+`v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
+cell is built from its parts, each printed from its own type. A tuple is kept
+as written, as a tuple written out is, and so is a type that carries a scope,
+since only a scope wrapper names its scope: a scoped cell keeps the capability
+written for it. An optional member's node is read at the member's type without
+the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
+holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
+with `undefined`. A printed node is overlaid on its
+unfolding (`unfoldPrint()`) and never taken apart, since schema generation
+reads a print by the type it was printed from; it goes through the same
+expansion a reference does, after the identity-only comparison that wraps a
+plain position `comparable`, so a recursion through prints is cut where one
+through references is, and a print compared only by identity keeps its
+`comparable` marker. The tests under
+`overlayContractCapabilities()` in `test/type-shrinking.test.ts` hold each
+generic shape to the schema of the same type written out.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
 structure to serve and keeps the `full` usage shrink, as does a handler with
@@ -1045,8 +1080,11 @@ bindings through the checker rather than by scanning the rewritten file. It
 resolves through type aliases and interfaces wherever they are declared (this
 file, an import, or a declaration file; the schema generator resolves a
 reference the same way, so a policy any alias carries must be validated too)
-and type-parameter substitution
-(`findWriteAuthorizedByReferences`). For each reference it emits
+and type-parameter substitution, a parameter the reference leaves out read as
+its default (`findWriteAuthorizedByReferences`). A CFC carrier's tag,
+`CfcTag<T, Meta>` in the body of the `Cfc` alias declared beside it, holds its
+payload again beside the metadata, so only its metadata is walked there, and
+each policy in the payload is reported once. For each reference it emits
 **`cfc-write-authorized-by`** when usage is malformed:
 
 - the second type argument is not a `typeof` binding (`TypeQueryNode`)
@@ -2511,7 +2549,8 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   type (`unfoldPrint` in `transformers/type-shrinking.ts`). Node-driven
   shrinking and the application of identity-only paths unfold a literal, a union
   (into one print for each of its members), an array (`T[]` or `readonly T[]`,
-  as the printer writes one), and a cell reference. The narrowing of cells to
+  as the printer writes one), and a cell reference, and so does the contract
+  overlay of an event (§6.3a). The narrowing of cells to
   their observed capability unfolds a literal, and reads the value of a printed
   cell, or of each cell in a printed nullable union, printed from the type
   arguments its wrapper was given. A union carrying a `Default` brand, and an

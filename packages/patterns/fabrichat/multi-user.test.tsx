@@ -167,6 +167,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     messages: setup.records.messages,
     reactionLists: setup.records.reactionLists,
     requests: setup.records.requests,

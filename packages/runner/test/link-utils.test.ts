@@ -43,6 +43,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+const otherSpace = (await Identity.fromPassphrase("test other space")).did();
 
 describe("link-utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -79,6 +80,24 @@ describe("link-utils", () => {
       const first = schemaForSpaceCrossing(tx, space, reference);
       expect(first).toEqual(schema);
       expect(schemaForSpaceCrossing(tx, space, { ...reference })).toBe(first);
+    });
+
+    it("loads the closure from the space it is given and from no other", () => {
+      // The document is written as a store holds it, without registering it,
+      // so the first call can find it nowhere and the second only in `space`.
+      const schema = {
+        type: "string",
+        title: "crossing closure residency",
+      } as const;
+      const hash = internSchemaAsTaggedHashString(schema);
+      const reference = { $ref: `cid:${hash}` };
+      tx.writeOrThrow(
+        { space, id: `cid:${hash}`, type: "application/json", path: [] },
+        { value: schema },
+      );
+
+      expect(schemaForSpaceCrossing(tx, otherSpace, reference)).toBe(false);
+      expect(schemaForSpaceCrossing(tx, space, reference)).toEqual(schema);
     });
 
     it("requires the closure again after the storage manager's registry lease ends", async () => {

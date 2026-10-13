@@ -315,6 +315,14 @@ These rules hold for every stream:
 - `sendMessage`, `editMessage`, and `sendReaction` record the sender's profile,
   and refuse an event that arrives before it resolves. The
   other streams don't depend on a profile.
+- Writing in a room is joining it. When `sendMessage` appends a message, or
+  `sendReaction` adds a reaction, to a room in a space of its own, the room
+  sends the sender's manager's
+  [`joinRoom`](ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput),
+  so a room the sender reached by its link, or forgot, becomes one of their
+  chats. The manager checks membership in its own Home-space event and leaves
+  an already saved room unchanged. The room reads no private catalog and sends
+  nothing for a sender with no manager.
 - A refusal is silent: the room records no outcome, so a sender can't tell a
   refused event from one that hasn't taken effect yet. A room could record
   outcomes, as the manager does in `requests`, but a room's record is shared by

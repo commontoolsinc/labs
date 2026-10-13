@@ -279,6 +279,13 @@ export type ErrorWithContext = Error & {
   space: MemorySpace;
   patternId: string;
   spellId: string | undefined;
+
+  /**
+   * The event whose handling failed, when the error is an event handler's.
+   * On the server-execution arm the same id names the event's intent
+   * outcome.
+   */
+  eventId?: string;
 };
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
@@ -967,6 +974,21 @@ export interface CfcRuntimeStats {
   /** Containers receiving child templates from flow persistence. */
   flowTemplateContainers: number;
 
+  /**
+   * Input-requirement verifications for which a boundary pass copied the
+   * transaction's reads. A written target takes one verification per schema
+   * that applies to it, so this counts verifications, not targets. It counts
+   * the copy of the reads alone: resolving the stored envelopes again after a
+   * write retires one is not counted.
+   */
+  inputReadViewsBuilt: number;
+
+  /**
+   * Input-requirement verifications that reused the copy of the reads a
+   * boundary pass already held.
+   */
+  inputReadViewsReused: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -1021,6 +1043,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   stagedReferenceCacheHits: 0,
   flowTemplateEntriesMinted: 0,
   flowTemplateContainers: 0,
+  inputReadViewsBuilt: 0,
+  inputReadViewsReused: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -2478,6 +2502,10 @@ export class Runtime {
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
     this.#viewReplication?.dispose();
+    // Before either drain below, each of which waits for the scheduler to go
+    // idle: a queued event waiting for its piece to become startable waits on
+    // another participant's commit, not on work of this runtime's own.
+    this.scheduler.endPieceStartWaits();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or
@@ -2667,6 +2695,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
+    wrapped.setCfcServingIdentity(
+      this.servingPosture ? this.userIdentityDID : undefined,
+    );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
     );
@@ -4263,10 +4294,10 @@ export class Runtime {
     // is the link it names, not a container to descend into -- and an
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
-    // Links serialized into a `data:` document carry their schemas inline
-    // (see inlineExternalSchemaRefsInValue): the document is its id, so a
-    // content-addressed reference inside it has no carrying write to install
-    // its closure.
+    // No write has stored the links in this data, so `space` holds no
+    // closure for a content-addressed reference among their schemas to name,
+    // and each link carries its schema inline (see
+    // `inlineExternalSchemaRefsInValue()`).
     const asDataURI = dataUriFromValue(
       inlineExternalSchemaRefsInValue(
         fabricFromConvertibleJsValue(

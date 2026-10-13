@@ -85,6 +85,10 @@ export default pattern(() => {
     inThread: false,
     kind: "direct" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   };
   const aliceOnHers = FabriChatMessageRow({

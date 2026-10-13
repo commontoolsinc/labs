@@ -1121,6 +1121,12 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
     ["space compact"],
     () => Promise.resolve(values(ID_PREFIX_CANDIDATES)),
   ),
+  // `cf space compact --verify --against` names the backup a result was
+  // compacted from: a store file, like the positional.
+  against: onlyOn(
+    ["space compact"],
+    () => Promise.resolve(directive({ kind: "files", glob: "*.sqlite" })),
+  ),
 };
 
 /** The scope kinds `cf space compact --scope` restricts a selection to. */

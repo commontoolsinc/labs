@@ -197,4 +197,29 @@ describe("storage space access retry", () => {
       [guest.did()]: "READ",
     });
   });
+
+  it("repeats a load refused after a revocation ended the session", async () => {
+    await setAccess(true);
+    const provider = manager.open(space);
+    expect((await provider.sync("of:retry-first-read")).error)
+      .toBeUndefined();
+    const loss = Promise.withResolvers<void>();
+    const cancel = manager.subscribeSpaceAccessLoss(() => loss.resolve());
+    cleanups.push(() => Promise.resolve(cancel()));
+    await setAccess(false);
+    await loss.promise;
+    expect(guestSessions[0].closeError?.name).toBe("AuthorizationError");
+
+    const refused = await provider.sync(`of:${space}`);
+    expect(refused.error?.name).toBe("AuthorizationError");
+    expect(provider.replica.getDocument(`of:${space}`)).toBeUndefined();
+
+    await setAccess(true);
+    await manager.retrySpaceAccess(space);
+    expect(guestMounts).toBe(2);
+    expect(provider.replica.getDocument(`of:${space}`)?.value).toEqual({
+      [owner.did()]: "OWNER",
+      [guest.did()]: "READ",
+    });
+  });
 });

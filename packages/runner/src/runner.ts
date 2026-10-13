@@ -43,6 +43,7 @@ import {
 
 import { isAliasBinding } from "./alias-binding.ts";
 import { runInFrameContext } from "./builder/frame-context.ts";
+import { instanceNameOfPartialCause } from "./builder/instance-name.ts";
 import {
   patternFromFrame,
   popFrame,
@@ -918,6 +919,119 @@ function resumesIndependently(child: Cell<any>, parent: Cell<any>): boolean {
 }
 
 /**
+ * The partial cause a node's raw output binding names at this level, when it
+ * is a single derived internal cell, and `undefined` otherwise.
+ */
+function nodeOutputPartialCause(outputs: unknown): JSONValue | undefined {
+  if (!isAliasBinding(outputs)) return undefined;
+  const alias = outputs.$alias;
+  if ((alias.defer ?? 0) !== 0 || alias.path.length !== 0) return undefined;
+  return alias.partialCause;
+}
+
+/**
+ * The instance name a sub-pattern node's raw output binding carries, when the
+ * node is a named instance, and `undefined` otherwise.
+ */
+function instanceNameOfNodeOutputs(outputs: unknown): string | undefined {
+  return instanceNameOfPartialCause(nodeOutputPartialCause(outputs));
+}
+
+/**
+ * Whether `partialCause` is one the pattern builder numbers by position: a
+ * bare `{ $generated: N }`.
+ */
+function isPositionalPartialCause(partialCause: unknown): boolean {
+  return isObjectNotArray(partialCause) &&
+    typeof partialCause.$generated === "number" &&
+    Object.keys(partialCause).length === 1;
+}
+
+/**
+ * The manifest of derived internal cells `cell` holds, as setup recorded it.
+ */
+function storedManifestOf(cell: Cell<any>): InternalCellDescriptor[] {
+  const stored = convertibleJsFromFabricValue(
+    cell.getMetaRaw("internal", { meta: ignoreReadForScheduling }),
+  );
+  return Array.isArray(stored) ? stored as InternalCellDescriptor[] : [];
+}
+
+/**
+ * The numbers of the positional spots, `{ $generated: N }`, that a parent's
+ * stored `manifest` records: the spots at which a child of the parent can
+ * already be set up.
+ */
+function recordedPositionalSpots(
+  manifest: readonly InternalCellDescriptor[],
+): Set<number> {
+  const spots = new Set<number>();
+  for (const entry of manifest) {
+    if (isPositionalPartialCause(entry.partialCause)) {
+      spots.add(positionalNumber(entry.partialCause));
+    }
+  }
+  return spots;
+}
+
+/**
+ * The names of the named instances whose spots a parent's stored `manifest`
+ * records: the instances whose child can already be set up.
+ */
+function recordedInstanceNames(
+  manifest: readonly InternalCellDescriptor[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const entry of manifest) {
+    const name = instanceNameOfPartialCause(entry.partialCause);
+    if (name !== undefined) names.add(name);
+  }
+  return names;
+}
+
+/** The number in the positional partial cause `partialCause`. */
+function positionalNumber(partialCause: unknown): number {
+  return (partialCause as { $generated: number }).$generated;
+}
+
+/** The sub-pattern nodes of `pattern`, each with its child's partial cause. */
+function subPatternNodes(
+  pattern: Pattern,
+): { module: Module; partialCause: JSONValue }[] {
+  const found: { module: Module; partialCause: JSONValue }[] = [];
+  for (const node of pattern.nodes) {
+    const module = node.module;
+    if (!isModule(module) || module.type !== "pattern") continue;
+    if (!isPattern(module.implementation)) continue;
+    const partialCause = nodeOutputPartialCause(node.outputs);
+    if (partialCause === undefined) continue;
+    found.push({ module, partialCause });
+  }
+  return found;
+}
+
+/** The instance name stamped on the child `child`, if any. */
+function getInstanceNameStamp(child: Cell<any>): string | undefined {
+  const raw = child.getMetaRaw("instanceName", {
+    meta: ignoreReadForScheduling,
+  });
+  return typeof raw === "string" ? raw : undefined;
+}
+
+/** A key naming the document `link` addresses: its space, id and scope. */
+function documentKey(link: NormalizedFullLink): string {
+  return `${link.space}\0${link.id}\0${link.scope}`;
+}
+
+/** Whether two `{ identity, symbol }` pattern references name one pattern. */
+function samePatternRef(
+  a: { identity: string; symbol: string },
+  b: { identity: string; symbol: string },
+): boolean {
+  return a.identity === b.identity && a.symbol === b.symbol;
+}
+
+/**
  * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
  * both of `#collectResumeOwnedCells`'s skip exits so a console trace names the
  * same things either way: the result cell being resumed and enough about the
@@ -1147,6 +1261,30 @@ const pieceOwnedStores = (
     getDerivedInternalCellLink(resultCell, descriptor)
   ),
 ];
+
+/**
+ * Hands a deferred start the trust snapshot of the transaction it was deferred
+ * from, when it initializes on that transaction's behalf. The start runs in a
+ * transaction of its own, and on a serving runtime the stamp that gives it a
+ * run context leaves it the runtime's ambient snapshot, which names the
+ * service. A run the serving loop attached a principal's snapshot to, such as
+ * the owner the space-root ensure resolves, would otherwise hand the start's
+ * initializations to the service rather than to that principal. Called after
+ * the start is stamped and before its first read. A start no serving loop
+ * stamped takes its trust from the runtime it runs in, as its parent did.
+ */
+const carryDeferredStartTrust = (
+  from: IExtendedStorageTransaction,
+  start: IExtendedStorageTransaction,
+): void => {
+  const trustSnapshot = from.getCfcState().trustSnapshot;
+  if (
+    start.getCfcState().attributedInitialization &&
+    waveRunContextOf(start) !== undefined && trustSnapshot !== undefined
+  ) {
+    setCfcTrustSnapshot(start, trustSnapshot);
+  }
+};
 
 /**
  * Name this piece's stores for the transaction setting it up. Setup fills them
@@ -1603,6 +1741,9 @@ type PatternNodeBinding = Omit<BoundNodeIO, "inputsCell"> & {
   child: Pattern;
   childResultCell: Cell<any> | undefined;
   sendToBindings: boolean;
+
+  /** The instance name of a named instance, which no other node shares. */
+  instanceName?: string;
 };
 
 /**
@@ -2045,6 +2186,15 @@ type PieceVariantRegistration = {
   selection: ImplementationSelection;
 };
 
+/** The in-flight follows of one registration of a piece's pattern watcher. */
+type WatcherFollows = {
+  /** Follows that have not settled. */
+  pending: Set<Promise<unknown>>;
+
+  /** Resolves when the registration is cancelled. */
+  cancelled: Promise<void>;
+};
+
 export class Runner {
   /** Scoped defaults in a caller-owned setup share its commit or abort. */
   readonly #callerOwnedSetupTransactions = new WeakSet<
@@ -2079,12 +2229,15 @@ export class Runner {
   #pendingWatcherPatternLoads = new Set<Promise<unknown>>();
 
   /**
-   * Per piece root id, the change of pattern a running piece is making: from
-   * the moment its watcher sees the pointer move until the piece runs the
-   * incoming pattern or keeps the one it runs. Recorded only off a serving
-   * runtime. See `pendingPatternChangeFor()`.
+   * The entries of `#pendingWatcherPatternLoads`, by the doc key of the piece
+   * whose watcher started each, under the watcher registration that did. A
+   * caller that moved a running piece's pattern pointer waits on that piece's
+   * entries alone (see `patternPointerFollowed()`), so that another piece's
+   * slow load does not hold it. A piece with nothing in flight has no entry.
+   * A cancelled registration's entry stays until its loads settle, which
+   * takes as long as their storage reads do, and is not waited on.
    */
-  #pendingPatternChanges = new Map<string, Promise<void>>();
+  #watcherFollowsByPiece = new Map<string, WatcherFollows>();
 
   /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
@@ -2311,6 +2464,13 @@ export class Runner {
     | undefined;
 
   /**
+   * Observer of every child document the displaced-child guard reads, by
+   * document id, for a test of which children a setup reads. Unset outside
+   * tests.
+   */
+  #displacedChildReadRecorder: ((child: string) => void) | undefined;
+
+  /**
    * The macrotask yield the resume pre-sync takes between the syncs of a
    * wave. Issuing a sync sends its watch frame, and the walk that prepares
    * each is synchronous work, so a wave of hundreds would otherwise send
@@ -2486,6 +2646,7 @@ export class Runner {
     presyncPlanRecorder:
       | ((piece: string, node: Node, site: "node" | "owned") => void)
       | undefined;
+    displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
       cells: readonly Cell<any>[],
@@ -2600,6 +2761,12 @@ export class Runner {
       },
       set presyncPlanRecorder(value) {
         outerThis.#presyncPlanRecorder = value;
+      },
+      get displacedChildReadRecorder() {
+        return outerThis.#displacedChildReadRecorder;
+      },
+      set displacedChildReadRecorder(value) {
+        outerThis.#displacedChildReadRecorder = value;
       },
       get resumeYield() {
         return outerThis.#resumeYield;
@@ -3664,6 +3831,9 @@ export class Runner {
     const previousInternal = resultCell.withTx(tx).getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
+    // Refused here, before anything commits, a displaced child leaves the
+    // piece as it was: a refusal from setup is the one no path applies.
+    this.#refuseDisplacedChildren(tx, pattern, resultCell);
     const internalManifest = this.#materializeDerivedInternalCells(
       tx,
       pattern,
@@ -4760,7 +4930,6 @@ export class Runner {
     const registrations: Map<string, PieceRegistration> =
       options.variantRegistration?.registrations ?? this.#cancels;
     const pieceKey = this.#getDocKey(resultCell);
-    const pieceRootId = resultCell.getAsNormalizedFullLink().id;
     const key = options.variantRegistration?.selection.key ??
       this.#getDocKey(resultCell);
     // Before the registration below is set, so that a listener reads the
@@ -5216,24 +5385,10 @@ export class Runner {
     // (the only pattern pointer); a keyless pattern writes none, so its watcher
     // is inert by design (keyless patterns change only via a fresh run()).
     const setupPatternWatcher = () => {
-      // Records `work`, which settles once this piece runs the pattern its
-      // pointer moved to or keeps the one it runs, as the piece's pending
-      // change. A newer change replaces it. A serving runtime records none:
-      // its swap waits for the wave its setup seals into, and a wave commits
-      // only once the scheduler is idle, so an event held on the swap would
-      // hold that wave to its deadline.
-      const trackPatternChange = (work: Promise<unknown> | undefined) => {
-        if (work === undefined || this.#runtime.sealDestinationInstalled) {
-          return;
-        }
-        const change = work.then(() => {}, () => {});
-        this.#pendingPatternChanges.set(pieceRootId, change);
-        change.finally(() => {
-          if (this.#pendingPatternChanges.get(pieceRootId) === change) {
-            this.#pendingPatternChanges.delete(pieceRootId);
-          }
-        });
-      };
+      const { promise: cancelled, resolve: markCancelled } = Promise
+        .withResolvers<void>();
+      const follows: WatcherFollows = { pending: new Set(), cancelled };
+      addCancel(markCancelled);
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -5243,7 +5398,7 @@ export class Runner {
       const swapToPattern = (
         loaded: Pattern | NodeFactory<unknown, unknown>,
         newRef: { identity: string; symbol: string },
-      ): Promise<void> | undefined => {
+      ) => {
         const pattern = this.#resolveToPattern(loaded as Pattern);
         const swap = {};
         latestSwap = swap;
@@ -5370,11 +5525,18 @@ export class Runner {
             error,
           );
         });
-        this.#pendingWatcherPatternLoads.add(setupWork);
-        setupWork.finally(() =>
-          this.#pendingWatcherPatternLoads.delete(setupWork)
-        );
-        return setupWork;
+        // A serving runtime's setup waits for its wave, which settles after
+        // the cycle that sealed into it ends, so a caller in that cycle could
+        // not wait for it (`patternPointerFollowed()`), and an event held on it
+        // would hold the wave (`pendingPatternChangeFor()`).
+        if (this.#runtime.sealDestinationInstalled) {
+          this.#pendingWatcherPatternLoads.add(setupWork);
+          setupWork.finally(() =>
+            this.#pendingWatcherPatternLoads.delete(setupWork)
+          );
+        } else {
+          this.#trackWatcherPatternLoad(pieceKey, follows, setupWork);
+        }
       };
       // The session-swap half of the watcher (see `#sessionPatternSwaps`):
       // exactly the sinkMeta arm's semantics, driven directly with a live
@@ -5388,7 +5550,7 @@ export class Runner {
         const newKey = patternIdentityKey(newRef);
         if (newKey === currentPatternKey) return; // No change
         currentPatternKey = newKey;
-        trackPatternChange(swapToPattern(pattern, newRef));
+        swapToPattern(pattern, newRef);
       };
       this.#sessionPatternSwaps.set(pieceKey, sessionSwapHandler);
       addCancel(() => {
@@ -5401,7 +5563,7 @@ export class Runner {
       const followPointer = (
         newRef: { identity: string; symbol: string },
         newKey: string,
-      ): Promise<void> | undefined => {
+      ): void => {
         // In-memory fast path: the module is usually live this session.
         const live = this.#runtime.patternManager.artifactFromIdentitySync(
           newRef.identity,
@@ -5424,7 +5586,8 @@ export class Runner {
               resultCell,
             )
           ) {
-            return swapToPattern(live, newRef);
+            swapToPattern(live, newRef);
+            return;
           }
           const named = this.#prepareCellsForRunningPattern(
             resultCell,
@@ -5446,7 +5609,7 @@ export class Runner {
               ) {
                 return;
               }
-              return swapToPattern(live, newRef);
+              swapToPattern(live, newRef);
             })
             .catch((err) => {
               logger.error(
@@ -5455,9 +5618,8 @@ export class Runner {
                 err,
               );
             });
-          this.#pendingWatcherPatternLoads.add(named);
-          named.finally(() => this.#pendingWatcherPatternLoads.delete(named));
-          return named;
+          this.#trackWatcherPatternLoad(pieceKey, follows, named);
+          return;
         }
         // Async load for a pattern change after initial start. Errors are
         // logged here since there's no caller to propagate to. The whole
@@ -5630,7 +5792,7 @@ export class Runner {
                 ) {
                   return;
                 }
-                return swapToPattern(loaded, newRef);
+                swapToPattern(loaded, newRef);
               },
             );
           })
@@ -5644,11 +5806,7 @@ export class Runner {
               err,
             );
           });
-        this.#pendingWatcherPatternLoads.add(watcherLoad);
-        watcherLoad.finally(() =>
-          this.#pendingWatcherPatternLoads.delete(watcherLoad)
-        );
-        return watcherLoad;
+        this.#trackWatcherPatternLoad(pieceKey, follows, watcherLoad);
       };
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
@@ -5666,7 +5824,7 @@ export class Runner {
           // a runtime that does not hold it reads it before swapping.
           const owed = this.#readInheritedAuthority(resultCell, newRef);
           if (owed === undefined) {
-            trackPatternChange(followPointer(newRef, newKey));
+            followPointer(newRef, newKey);
             return;
           }
           const followed = owed.then(() => {
@@ -5676,13 +5834,9 @@ export class Runner {
             ) {
               return;
             }
-            return followPointer(newRef, newKey);
+            followPointer(newRef, newKey);
           });
-          this.#pendingWatcherPatternLoads.add(followed);
-          followed.finally(() =>
-            this.#pendingWatcherPatternLoads.delete(followed)
-          );
-          trackPatternChange(followed);
+          this.#trackWatcherPatternLoad(pieceKey, follows, followed);
         }),
       );
     };
@@ -6516,6 +6670,7 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
+      carryDeferredStartTrust(tx, startTx);
       // A deferred start minted from an EVENT-HANDLER run carries that run's
       // event context across to the start tx, so a navigateTo instantiated
       // under it can address the firing session (builtins.md §4;
@@ -6608,20 +6763,13 @@ export class Runner {
 
   /**
    * Load one family document under the identity captured before awaiting.
-   * A cell declared a stream is loaded whole: its document holds no value
-   * a read uses, so a selector carrying the event schema would ask the
-   * store to walk a shape that is never there, and the gate's probe of the
-   * document reads its record, which the whole document brings.
+   * A cell declared a stream is loaded whole, as the storage manager loads
+   * every such cell (`StorageManager.syncCell`).
    */
   #syncFamilyCell<T>(
     cell: Cell<T>,
     identity: ScopeKeyIdentity | undefined,
   ): Promise<Cell<T>> {
-    if (ContextualFlowControl.declaresStream(cell.schema)) {
-      return syncCellForIdentity(cell.asSchema(undefined), identity) as Promise<
-        Cell<T>
-      >;
-    }
     return syncCellForIdentity(cell, identity);
   }
 
@@ -7118,6 +7266,7 @@ export class Runner {
           startTx,
           speculationContext ?? { actionId, kind: "bookkeeping" },
         );
+        carryDeferredStartTrust(tx, startTx);
         if (navigateContext !== undefined) {
           setNavigateEventContext(startTx, navigateContext);
         }
@@ -7607,6 +7756,7 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
+      carryDeferredStartTrust(tx, startTx);
       // Carry the instantiating event-handler run's event context to the start
       // tx (builtins.md §4) — capture point 1, as in startAfterSuccessfulCommit
       // above.
@@ -9936,29 +10086,41 @@ export class Runner {
   }
 
   /**
-   * The change of pattern that a piece among `pieceRootIds`, or a piece that
-   * instantiated one of them, is making, or `undefined` when none is. It
-   * settles once that piece runs the pattern its pointer moved to, or keeps
-   * the one it runs because that pattern's setup did not land. Until then the
+   * The change of pattern that a piece among `pieces`, or a piece that
+   * instantiated one of them, is making on this runtime, or `undefined` when
+   * none is: the follow its pattern watcher has in flight from seeing the
+   * pointer move until the piece runs the incoming pattern, or keeps the one
+   * it runs because that pattern's setup did not land. Until it settles, the
    * handlers registered for those pieces may be about to be replaced, so the
-   * scheduler holds an event for them on it.
+   * scheduler holds an event for them on it. A serving runtime reports none:
+   * its swap waits for the wave its setup seals into, and a wave commits only
+   * once the scheduler is idle.
    *
-   * @param pieceRootIds - The raw result-cell ids of the pieces a handler
-   *   belongs to, as its `schedulerObservationIdentity` names them.
+   * @param pieces - The result cells of the pieces a handler belongs to.
    */
   pendingPatternChangeFor(
-    pieceRootIds: readonly string[],
+    pieces: readonly NormalizedFullLink[],
   ): Promise<void> | undefined {
-    if (this.#pendingPatternChanges.size === 0) return undefined;
-    const changes = new Set<Promise<void>>();
-    for (const id of pieceRootIds) {
-      for (const root of this.#demandRootChains.get(id) ?? [id]) {
-        const change = this.#pendingPatternChanges.get(root);
-        if (change !== undefined) changes.add(change);
+    if (
+      this.#watcherFollowsByPiece.size === 0 ||
+      this.#runtime.sealDestinationInstalled
+    ) {
+      return undefined;
+    }
+    const keys = new Set<string>();
+    for (const piece of pieces) {
+      const scopeKey = resolveScopeKey(
+        piece.scope,
+        this.#runtime.scopeKeyIdentity,
+      );
+      for (const id of this.#demandRootChains.get(piece.id) ?? [piece.id]) {
+        const key = `${piece.space}/${scopeKey}/${id}`;
+        if (this.#watcherFollowsByPiece.has(key)) keys.add(key);
       }
     }
-    if (changes.size === 0) return undefined;
-    return Promise.all(changes).then(() => {});
+    if (keys.size === 0) return undefined;
+    return Promise.all([...keys].map((key) => this.#watcherFollowsSettled(key)))
+      .then(() => {});
   }
 
   /**
@@ -10116,6 +10278,31 @@ export class Runner {
   }
 
   /**
+   * Helper for the pattern watcher, which records `load` as in flight until
+   * it settles, for the watcher registration `follows` of the piece
+   * `pieceKey` names.
+   */
+  #trackWatcherPatternLoad(
+    pieceKey: string,
+    follows: WatcherFollows,
+    load: Promise<unknown>,
+  ): void {
+    this.#pendingWatcherPatternLoads.add(load);
+    follows.pending.add(load);
+    this.#watcherFollowsByPiece.set(pieceKey, follows);
+    load.finally(() => {
+      this.#pendingWatcherPatternLoads.delete(load);
+      follows.pending.delete(load);
+      if (
+        follows.pending.size === 0 &&
+        this.#watcherFollowsByPiece.get(pieceKey) === follows
+      ) {
+        this.#watcherFollowsByPiece.delete(pieceKey);
+      }
+    });
+  }
+
+  /**
    * Settle in-flight pointer roll-forward COMMITS — bounded local work,
    * awaited by dispose() before the storage sessions they write through
    * close. Deliberately excludes watcher pattern LOADS: a load can be
@@ -10125,6 +10312,56 @@ export class Runner {
   async settlePointerCommits(): Promise<void> {
     while (this.#pendingPointerCommits.size > 0) {
       await Promise.allSettled([...this.#pendingPointerCommits]);
+    }
+  }
+
+  /**
+   * Resolves once the pattern watcher of the running piece `resultCell` names
+   * has finished following every move of the piece's pattern pointer it has
+   * observed. The piece then runs the pattern its pointer names, unless a
+   * follow failed, which is logged and leaves the piece on the pattern it was
+   * running. Resolves at once when nothing is in flight, as for a piece that
+   * is not running, and resolves when the piece is stopped with a follow in
+   * flight, whose remaining work has no effect. A subpath cell stands for its
+   * root document.
+   *
+   * The watcher observes a move in a scheduler pass, so a caller that has
+   * just committed one awaits `Runtime.idle()` before calling this. Following
+   * a move reads from storage, which `idle()` does not wait for: the writer
+   * authority the incoming pattern inherits, and the documents the incoming
+   * pattern reads that this replica lacks. A pattern this runtime does not
+   * hold is also loaded, so this waits as long as that load takes.
+   *
+   * Not covered: the commit that rolls back a pointer naming a pattern that
+   * cannot be loaded, and, on a runtime that seals its writes into a serving
+   * wave, the re-instantiation. That one follows the wave's settlement, and a
+   * wave settles after the cycle that sealed into it has ended, so a caller
+   * running within that cycle could not wait for it.
+   */
+  patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
+    const link = resultCell.getAsNormalizedFullLink();
+    const rootCell = link.path.length > 0
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
+      : resultCell;
+    return this.#watcherFollowsSettled(this.#getDocKey(rootCell));
+  }
+
+  /**
+   * Helper for `patternPointerFollowed()` and `pendingPatternChangeFor()`,
+   * which resolves once the piece whose doc key is `key` has no follow in
+   * flight, or once the watcher registration that started them is cancelled.
+   */
+  async #watcherFollowsSettled(key: string): Promise<void> {
+    // A settled follow's continuation can start another, so the entry is read
+    // again after each wait. A cancelled registration's follows run on to no
+    // effect, so the wait ends with the cancellation.
+    let follows: WatcherFollows | undefined;
+    while ((follows = this.#watcherFollowsByPiece.get(key)) !== undefined) {
+      const cancelled = await Promise.race([
+        Promise.allSettled([...follows.pending]).then(() => false),
+        follows.cancelled.then(() => true),
+      ]);
+      if (cancelled) return;
     }
   }
 
@@ -13296,6 +13533,7 @@ export class Runner {
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
+    const instanceName = instanceNameOfNodeOutputs(outputBindings);
     return {
       ...io,
       childResultCell: this.#mintChildResultCell(
@@ -13306,6 +13544,7 @@ export class Runner {
         resultCell,
       ),
       sendToBindings: true,
+      ...(instanceName !== undefined && { instanceName }),
     };
   }
 
@@ -13347,6 +13586,196 @@ export class Runner {
       );
     }
     return childResultCell;
+  }
+
+  /**
+   * The result cell of the child the sub-pattern node with module `module`
+   * runs on the parent `resultCell` under the partial cause `partialCause`.
+   */
+  #childAtPartialCause(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
+    module: Module,
+    partialCause: JSONValue,
+  ): Cell<any> {
+    const spot = getDerivedInternalCellLink(resultCell, { partialCause });
+    return this.#mintChildResultCell(
+      tx,
+      module,
+      module.implementation as Pattern,
+      { ...spot, path: [] },
+      resultCell,
+    );
+  }
+
+  /**
+   * Throws, naming the pattern identities it knows, when a positional or
+   * named sub-pattern node of `pattern` would set its child up over a child
+   * the parent `resultCell` keeps elsewhere (`#refuseDisplacedChild()`), for
+   * each such node whose child this parent owns: not a child that is its
+   * space's root, nor one managed in a space of its own.
+   *
+   * Only a parent its updater has pointed at `pattern` is judged: its stored
+   * `patternIdentity` already names `pattern`, while its setup marker names
+   * another pattern or none. A parent that runs whichever pattern a
+   * computation returns is set up with a pattern its pointer does not yet
+   * name, and an unrelated pattern there is no sign that children moved. So a
+   * parent set up as part of an update of an enclosing pattern is not judged
+   * either, and a root an updater points at an unrelated pattern is judged as
+   * though it ran a newer version of its own. Only spots the parent's stored
+   * manifest records are read, since no child can be set up at any other.
+   */
+  #refuseDisplacedChildren(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    resultCell: Cell<any>,
+  ): void {
+    const parent = resultCell.withTx(tx);
+    const incoming = this.#runtime.patternManager.getArtifactEntryRef(pattern);
+    const pointer = getPatternIdentityRef(parent);
+    const marker = getPatternSetupIdentityRef(parent);
+    if (
+      incoming === undefined || pointer === undefined ||
+      !samePatternRef(pointer, incoming) ||
+      (marker !== undefined && samePatternRef(marker, incoming))
+    ) {
+      return;
+    }
+    const manifest = storedManifestOf(parent);
+    const recorded = recordedPositionalSpots(manifest);
+    const recordedInstances = recordedInstanceNames(manifest);
+    for (const { module, partialCause } of subPatternNodes(pattern)) {
+      // Only a spot the stored manifest records can hold a child already, and
+      // only a positional or named one can hold another's: a spot a result
+      // key, a node input or `.for()` names does not shift with its siblings,
+      // and no instance stamps the child there.
+      const instanceName = instanceNameOfPartialCause(partialCause);
+      const judged = isPositionalPartialCause(partialCause)
+        ? recorded.has(positionalNumber(partialCause))
+        : instanceName !== undefined && recordedInstances.has(instanceName);
+      if (!judged) continue;
+      // A space's root sits where its space's genesis reserved it, whatever
+      // the node's cause, so no shift between this parent's spots moves it.
+      if (module.targetSpaceRoot) continue;
+      const child = this.#childAtPartialCause(
+        tx,
+        resultCell,
+        module,
+        partialCause,
+      );
+      if (resumesIndependently(child, resultCell)) continue;
+      this.#refuseDisplacedChild(
+        tx,
+        resultCell,
+        pattern,
+        module.implementation as Pattern,
+        child,
+        partialCause,
+        recorded,
+      );
+    }
+  }
+
+  /**
+   * Throws rather than let the child of `childPattern`, at the positional or
+   * named spot `partialCause` names, set up over `storedChild` when that cell
+   * holds a different child the parent `resultCell` keeps elsewhere: a child
+   * stamped with another instance's name, or, where `partialCause` is
+   * positional, a sign that the parent's positional children have moved
+   * spots, which is `storedChild` running another pattern identity while
+   * either a child of `childPattern`'s identity runs at another positional
+   * spot, or another positional spot of `pattern` sets up the identity
+   * `storedChild` runs. A child is looked for only at the positional spots in
+   * `recorded`, the ones the parent's stored manifest records, and no spot
+   * whose node sets up a space's root is counted. A child whose identity
+   * differs with no such sign is the same child under a newer version of its
+   * own source.
+   */
+  #refuseDisplacedChild(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
+    pattern: Pattern,
+    childPattern: Pattern,
+    storedChild: Cell<any>,
+    partialCause: JSONValue,
+    recorded: ReadonlySet<number>,
+  ): void {
+    this.#displacedChildReadRecorder?.(
+      storedChild.getAsNormalizedFullLink().id,
+    );
+    const instanceName = instanceNameOfPartialCause(partialCause);
+    const positional = isPositionalPartialCause(partialCause);
+    const stored = getPatternSetupIdentityRef(storedChild) ??
+      getPatternIdentityRef(storedChild);
+    const incoming = this.#runtime.patternManager.getArtifactEntryRef(
+      childPattern,
+    );
+    const describe = (ref: { identity: string; symbol: string }) =>
+      `${ref.identity}#${ref.symbol}`;
+    // The stamp alone decides this refusal, so it holds for a child whose
+    // pattern identity was never stored; the identities only name the two
+    // sides in the message.
+    const stamped = getInstanceNameStamp(storedChild);
+    if (stamped !== undefined && stamped !== instanceName) {
+      const holder = instanceName !== undefined
+        ? `instance "${instanceName}"`
+        : "a positional spot";
+      const settingUp = incoming !== undefined
+        ? describe(incoming)
+        : "a pattern with no identity";
+      const over = stored !== undefined
+        ? `the child of ${describe(stored)}`
+        : "a child with no stored pattern identity";
+      throw new Error(
+        `refusing to set up ${settingUp} for ${holder} over ${over} that ` +
+          `instance "${stamped}" set up`,
+      );
+    }
+    if (stored === undefined || incoming === undefined) return;
+    if (!positional || samePatternRef(stored, incoming)) return;
+    const storedKey = documentKey(storedChild.getAsNormalizedFullLink());
+    for (const { module, partialCause } of subPatternNodes(pattern)) {
+      // A space's root child sits at its space's genesis address rather than
+      // at a spot of this parent, so it shows nothing about how the parent's
+      // spots have moved.
+      if (!isPositionalPartialCause(partialCause) || module.targetSpaceRoot) {
+        continue;
+      }
+      const other = this.#childAtPartialCause(
+        tx,
+        resultCell,
+        module,
+        partialCause,
+      );
+      if (documentKey(other.getAsNormalizedFullLink()) === storedKey) continue;
+      // A child is set up only at a spot the stored manifest records, so the
+      // child at any other spot is not read.
+      let otherRef: { identity: string; symbol: string } | undefined;
+      if (recorded.has(positionalNumber(partialCause))) {
+        this.#displacedChildReadRecorder?.(other.getAsNormalizedFullLink().id);
+        otherRef = getPatternSetupIdentityRef(other) ??
+          getPatternIdentityRef(other);
+      }
+      const wanted = this.#runtime.patternManager.getArtifactEntryRef(
+        module.implementation as Pattern,
+      );
+      if (otherRef !== undefined && samePatternRef(otherRef, incoming)) {
+        throw new Error(
+          `refusing to set up ${describe(incoming)} for a positional spot ` +
+            `over the child of ${describe(stored)}: a child of ` +
+            `${describe(incoming)} runs at another positional spot of its ` +
+            "parent, so the children have moved spots",
+        );
+      }
+      if (wanted !== undefined && samePatternRef(wanted, stored)) {
+        throw new Error(
+          `refusing to set up ${describe(incoming)} for a positional spot ` +
+            `over the child of ${describe(stored)}: another positional spot ` +
+            `of its parent sets up ${describe(stored)}, so the children have ` +
+            "moved spots",
+        );
+      }
+    }
   }
 
   #instantiatePatternNode(
@@ -13415,6 +13844,16 @@ export class Runner {
         if (plan.module.targetSpaceRoot) {
           this.#linkSpaceRootIfAbsent(instanceTx, childResultCell);
         }
+      }
+      if (
+        !resumeExisting && plan.instanceName !== undefined &&
+        getInstanceNameStamp(storedChild) !== plan.instanceName
+      ) {
+        storedChild.setMetaRaw(
+          "instanceName",
+          plan.instanceName,
+          rawMetaWriteAuthorization,
+        );
       }
       // Only a child in a space of its own claims one: an in-space nested
       // node is part of its parent's graph and is re-instantiated from the

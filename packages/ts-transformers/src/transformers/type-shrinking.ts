@@ -1,15 +1,24 @@
 import ts from "typescript";
 import type { SchemaScope } from "@commonfabric/api";
 import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
-import { cfcCarrierProperty } from "@commonfabric/schema-generator/cfc-carrier";
+import {
+  cfcCarrierProperty,
+  isCfcCarrierMember,
+  memberValueType,
+} from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
   resolvesToCommonFabricSymbol,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-brand";
+import {
+  cutsExpansion,
+  type ExpansionBudget,
+} from "@commonfabric/schema-generator/expanding-recursion";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
+  isScopeBrandMember,
   SCOPE_WRAPPER_FOR_SCOPE,
   scopeForWrapperName,
 } from "@commonfabric/schema-generator/scope-brand";
@@ -375,15 +384,42 @@ function choosePreferredShrinkCandidate(
     : nodeDriven;
 }
 
-function typeIncludesUndefined(type: ts.Type): boolean {
-  if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
-    return true;
-  }
+function typeIncludesUndefined(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const union = type as ts.UnionType;
-    return union.types.some((member) => typeIncludesUndefined(member));
+    return union.types.some((member) => typeIncludesUndefined(member, checker));
   }
-  return false;
+  const nullish = nullishMemberOf(type, checker);
+  return nullish !== undefined &&
+    (nullish.flags & ts.TypeFlags.Undefined) !== 0;
+}
+
+/**
+ * The `null`, `undefined` or `void` that `type` is: the type itself, or the
+ * one member of an intersection whose other members are carriers alone. While
+ * `T` is a type parameter, `PerUser<Confidential<T | undefined, L>>` holds its
+ * `undefined` beside the deferred `ScopeTag` and `CfcTag`, and it is that
+ * `undefined` once the tags resolve. `undefined` for any other type.
+ */
+function nullishMemberOf(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const nullish = ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+    ts.TypeFlags.Void;
+  if ((type.flags & nullish) !== 0) return type;
+  if (!type.isIntersection()) return undefined;
+  const values = type.types.filter((member) => (member.flags & nullish) !== 0);
+  return values.length === 1 &&
+      type.types.every((member) =>
+        values.includes(member) || isScopeBrandMember(member, checker) ||
+        isCfcCarrierMember(member)
+      )
+    ? values[0]
+    : undefined;
 }
 
 function isNullishType(type: ts.Type): boolean {
@@ -1164,13 +1200,11 @@ function shrinkTypeToNode(
       const nullishMembers: ts.TypeNode[] = [];
       if (type.isUnion()) {
         for (const constituent of type.types) {
-          if (
-            constituent.flags &
-            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
-          ) {
+          const nullish = nullishMemberOf(constituent, checker);
+          if (nullish) {
             nullishMembers.push(
               typeToTypeNodeWithRegistry(
-                constituent,
+                nullish,
                 { checker, factory, sourceFile, state },
                 typeRegistry,
                 TYPE_NODE_FLAGS,
@@ -1212,7 +1246,7 @@ function shrinkTypeToNode(
         sourceFile;
       propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
       isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-        (propType ? typeIncludesUndefined(propType) : false);
+        (propType ? typeIncludesUndefined(propType, checker) : false);
     } else {
       // Numeric/unknown-key accesses can be represented via index signatures
       // rather than named properties. Use the index type when available.
@@ -2831,14 +2865,28 @@ function addPrefixKeys(
   }
 }
 
-/** Whether any data position in `type`'s subtree is cell-like — the test for
- * whether a named reference must be expanded to overlay capabilities inside
- * it. Cycles end the search: a cell beyond a self-reference is not found,
- * which the caller documents as the accepted residual. */
+/**
+ * How many instantiations of one declaration, each newer than the one it is
+ * read within, the contract overlay reads one inside another before it takes
+ * the recursion for one without end (`cutsExpansion()`). The cut bounds
+ * the overlay's work and decides no capability: past it, a cell no use
+ * reaches is opaque, as reading on would make it, and a use that reaches
+ * past it carries the expansion along its path.
+ */
+const MAX_OVERLAY_NESTING = 8;
+
+/** Whether any data position in `type`'s subtree may be cell-like — the test
+ * for whether a named reference must be expanded to overlay capabilities
+ * inside it. Cycles end the search. A recursion that instantiates its
+ * declaration without end is cut where `cutsExpansion()` finds it, read
+ * inside `path` and spending `budget`, and may hold a cell past the cut, so
+ * the search takes it to; the expansion that follows ends at the same cut. */
 function typeSubtreeContainsCellLike(
   type: ts.Type,
   checker: ts.TypeChecker,
   visited: Set<ts.Type>,
+  path: ts.Type[],
+  budget: ExpansionBudget,
 ): boolean {
   if (visited.has(type)) return false;
   visited.add(type);
@@ -2850,29 +2898,31 @@ function typeSubtreeContainsCellLike(
     const kind = getCellKind(type, checker);
     return kind !== "stream" && kind !== "sqlite";
   }
+  const within = (inner: ts.Type) =>
+    typeSubtreeContainsCellLike(inner, checker, visited, path, budget);
   if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
-    return (type as ts.UnionOrIntersectionType).types.some((member) =>
-      typeSubtreeContainsCellLike(member, checker, visited)
-    );
+    return (type as ts.UnionOrIntersectionType).types.some(within);
   }
   if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  if (isArrayShapeType(type, checker)) {
-    const element = getArrayElementType(type, checker);
-    return !!element && typeSubtreeContainsCellLike(element, checker, visited);
+  if (cutsExpansion(type, path, budget, checker, MAX_OVERLAY_NESTING)) {
+    return true;
   }
-  for (const property of checker.getPropertiesOfType(type)) {
-    if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
-    const declaration = property.valueDeclaration ?? property.declarations?.[0];
-    if (!declaration) continue;
-    const propertyType = checker.getTypeOfSymbolAtLocation(
-      property,
-      declaration,
-    );
-    if (typeSubtreeContainsCellLike(propertyType, checker, visited)) {
-      return true;
+  path.push(type);
+  try {
+    if (isArrayShapeType(type, checker)) {
+      const element = getArrayElementType(type, checker);
+      return !!element && within(element);
     }
+    return checker.getPropertiesOfType(type).some((property) => {
+      if ((property.flags & ts.SymbolFlags.Method) !== 0) return false;
+      const declaration = property.valueDeclaration ??
+        property.declarations?.[0];
+      return !!declaration &&
+        within(checker.getTypeOfSymbolAtLocation(property, declaration));
+    });
+  } finally {
+    path.pop();
   }
-  return false;
 }
 
 /** The observation record the contract overlay consults, built once per
@@ -2944,7 +2994,28 @@ function contractCapabilityAt(
  * untouched, keeping its `$defs` identity and its prose. One expands only
  * when a capability inside it must change, and a self-referential type ends
  * that expansion at the cycle with the node kept as authored — the accepted
- * residual, since a literal cannot spell its own recursion.
+ * residual, since a literal cannot spell its own recursion. A recursion that
+ * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
+ * does, never meets itself. Its expansion is cut where `cutsExpansion()`
+ * finds it (`MAX_OVERLAY_NESTING`), unless a use the body makes reaches below,
+ * and the remainder is read as its instantiation with every cell in it opaque
+ * (`SchemaHint.cellsOpaque`): no use reaches those cells, so opaque is the
+ * capability each would earn.
+ *
+ * A reference expands as the type it denotes, which for a generic declaration
+ * is the declaration instantiated with the reference's arguments, built one
+ * level deep (`unfoldReferencedType()`): an object as its properties, each
+ * written as its declaration's annotation where that still denotes the
+ * property's type and printed where an argument replaced what the annotation
+ * names; a union, an array, or a cell as its printed parts. A tuple, and a
+ * type that carries a scope, are kept as written, as a tuple written out is,
+ * and as only a scope wrapper names its scope. A printed node is overlaid on
+ * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
+ * reference takes, cut where a recursion is, and only once a position the
+ * body compares by identity alone has been wrapped `comparable`, as a
+ * reference is. An optional member's node is read at
+ * the member's type without the `undefined` its `?` adds
+ * (`memberValueType()`, which leaves a type that also holds `null` whole).
  */
 export function overlayContractCapabilities(
   node: ts.TypeNode,
@@ -2958,7 +3029,36 @@ export function overlayContractCapabilities(
 ): ts.TypeNode {
   const observation = contractObservationFrom(summary);
   const visiting = new Set<ts.Type>();
+  const expansions: ts.Type[] = [];
+  // Shared by the expansion and every search for a cell it makes.
+  const budget: ExpansionBudget = { readingsInside: 0 };
   const expanding = new Set<ts.TypeNode>();
+
+  /** Whether a use the body makes reaches `path` or a position below it. */
+  const usedWithin = (path: readonly string[]): boolean => {
+    const key = contractPathKey(path);
+    return observation.write.has(key) || observation.read.has(key) ||
+      observation.comparable.has(key);
+  };
+
+  /**
+   * `type`, the remainder of a recursion cut at `current`, as a node read at
+   * its instantiation with every cell in it opaque; `current`, as written,
+   * where there is no state to record that reading in.
+   */
+  const opaqueRemainder = (
+    current: ts.TypeNode,
+    type: ts.Type,
+  ): ts.TypeNode => {
+    if (!state) return current;
+    const printed = typeToTypeNodeWithRegistry(
+      type,
+      { checker, factory, sourceFile, state },
+      typeRegistry,
+    );
+    state.recordSchemaHint(printed, { cellsOpaque: true });
+    return printed;
+  };
 
   const walk = (
     current: ts.TypeNode,
@@ -2994,6 +3094,27 @@ export function overlayContractCapabilities(
       return wrapTypeNodeWithCapability(current, "comparable", factory);
     }
 
+    // A printed node is not taken apart: capabilities inside it are overlaid
+    // on its unfolding, or not at all.
+    const printedType = state?.printedFrom(current);
+    if (printedType && isUnfoldableKind(current)) {
+      return expand(
+        current,
+        printedType,
+        path,
+        () =>
+          unfoldPrint(
+            current,
+            printedType,
+            checker,
+            sourceFile,
+            factory,
+            typeRegistry,
+            state,
+          ),
+      );
+    }
+
     if (namesCellWrapper(current, checker)) {
       if (preservedWrapperFor(current, currentType, checker)) return current;
       const innerNode = current.typeArguments?.[0];
@@ -3023,7 +3144,13 @@ export function overlayContractCapabilities(
             memberSymbol.valueDeclaration ?? member,
           )
           : undefined;
-        const walked = walk(member.type, memberType, [...path, name]);
+        const walked = walk(
+          member.type,
+          memberSymbol && memberType
+            ? memberValueType(memberSymbol, memberType, checker)
+            : memberType,
+          [...path, name],
+        );
         if (walked === member.type) return member;
         changed = true;
         return factory.updatePropertySignature(
@@ -3088,48 +3215,59 @@ export function overlayContractCapabilities(
       const resolvedType = currentType ??
         getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
       if (!resolvedType) return current;
-      if (visiting.has(resolvedType)) return current;
-      if (
-        !typeSubtreeContainsCellLike(resolvedType, checker, new Set())
-      ) {
-        return current;
-      }
-      visiting.add(resolvedType);
-      try {
-        const members: ts.TypeElement[] = [];
-        for (const property of checker.getPropertiesOfType(resolvedType)) {
-          if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
-          const declaration = property.declarations?.find(
-            ts.isPropertySignature,
-          );
-          const declaredNode = declaration?.type;
-          const propertyType = checker.getTypeOfSymbolAtLocation(
-            property,
-            declaration ?? current,
-          );
-          const memberNode = declaredNode ??
-            typeToTypeNodeWithRegistry(
-              propertyType,
-              { checker, factory, sourceFile, state },
-              typeRegistry,
-            );
-          if (!memberNode) continue;
-          members.push(factory.createPropertySignature(
-            undefined,
-            createPropertyName(property.getName(), factory),
-            declaration?.questionToken !== undefined
-              ? factory.createToken(ts.SyntaxKind.QuestionToken)
-              : undefined,
-            walk(memberNode, propertyType, [...path, property.getName()]),
-          ));
-        }
-        return factory.createTypeLiteralNode(members);
-      } finally {
-        visiting.delete(resolvedType);
-      }
+      return expand(
+        current,
+        resolvedType,
+        path,
+        () =>
+          unfoldReferencedType(
+            resolvedType,
+            checker,
+            sourceFile,
+            factory,
+            typeRegistry,
+            state,
+          ),
+      );
     }
 
     return current;
+  };
+
+  /**
+   * `current`, a node standing for `type`, overlaid on `unfold()`, the node
+   * `type` unfolds to one level deep, which a reference and a print both
+   * reach: `current` itself where `type` is already being expanded, where it
+   * holds no cell-like position, or where nothing in the unfolding changes;
+   * the remainder read with its cells opaque where the expansion is cut.
+   */
+  const expand = (
+    current: ts.TypeNode,
+    type: ts.Type,
+    path: readonly string[],
+    unfold: () => ts.TypeNode | undefined,
+  ): ts.TypeNode => {
+    if (visiting.has(type)) return current;
+    if (
+      cutsExpansion(type, expansions, budget, checker, MAX_OVERLAY_NESTING) &&
+      !usedWithin(path)
+    ) {
+      return opaqueRemainder(current, type);
+    }
+    if (!typeSubtreeContainsCellLike(type, checker, new Set(), [], budget)) {
+      return current;
+    }
+    const unfolded = unfold();
+    if (!unfolded) return current;
+    visiting.add(type);
+    expansions.push(type);
+    try {
+      const walked = walk(unfolded, type, path);
+      return walked === unfolded ? current : walked;
+    } finally {
+      visiting.delete(type);
+      expansions.pop();
+    }
   };
 
   return walk(node, type, []);
@@ -3796,12 +3934,11 @@ function isUnfoldableKind(node: ts.TypeNode): boolean {
 /**
  * Returns a node standing for `type`, which `node` was printed from, built one
  * level deep: a node of the print's own kind, each type node below it printed
- * from its own type. A pass reading the structure of a print reads its
- * unfolding in its place, so nothing the pass builds holds a piece of the
- * print, and each part it keeps is read by its type. Returns `undefined` for a
- * print whose kind no pass looks inside (`isUnfoldableKind()`), or whose type
- * says something only as a whole: a union with a `Default` brand, or an object
- * with a property keyed by a symbol.
+ * from its own type (`unfoldTypeAs()`). A pass reading the structure of a print
+ * reads its unfolding in its place, so nothing the pass builds holds a piece of
+ * the print, and each part it keeps is read by its type. Returns `undefined`
+ * for a print whose kind no pass looks inside (`isUnfoldableKind()`), or whose
+ * type says something only as a whole.
  */
 function unfoldPrint(
   node: ts.TypeNode,
@@ -3812,14 +3949,22 @@ function unfoldPrint(
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
 ): ts.TypeNode | undefined {
-  const print = (printable: ts.Type) =>
-    typeToTypeNodeWithRegistry(
-      printable,
-      { checker, factory, sourceFile, state },
-      typeRegistry,
-    );
-  if (ts.isTypeLiteralNode(node)) {
-    return unfoldPrintedObjectType(
+  const shape: UnfoldedShape | undefined = ts.isTypeLiteralNode(node)
+    ? "object"
+    : ts.isUnionTypeNode(node) && type.isUnion()
+    ? "union"
+    : ts.isArrayTypeNode(node)
+    ? "array"
+    : ts.isTypeOperatorNode(node) &&
+        node.operator === ts.SyntaxKind.ReadonlyKeyword &&
+        ts.isArrayTypeNode(node.type)
+    ? "readonly array"
+    : ts.isTypeReferenceNode(node) && isCellLikeTypeNode(node)
+    ? "cell"
+    : undefined;
+  return shape &&
+    unfoldTypeAs(
+      shape,
       type,
       checker,
       sourceFile,
@@ -3827,70 +3972,151 @@ function unfoldPrint(
       typeRegistry,
       state,
     );
-  }
-  if (ts.isUnionTypeNode(node) && type.isUnion()) {
-    if (type.types.some((member) => getDefaultMarkerPayload(member, checker))) {
-      return undefined;
-    }
-    return factory.createUnionTypeNode(type.types.map(print));
-  }
-  const readonlyArray = ts.isTypeOperatorNode(node) &&
-    node.operator === ts.SyntaxKind.ReadonlyKeyword &&
-    ts.isArrayTypeNode(node.type);
-  if (ts.isArrayTypeNode(node) || readonlyArray) {
-    const element = getArrayElementType(type, checker);
-    if (!element) return undefined;
-    const array = factory.createArrayTypeNode(print(element));
-    return readonlyArray
-      ? factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, array)
-      : array;
-  }
-  if (ts.isTypeReferenceNode(node) && isCellLikeTypeNode(node)) {
-    const wrapper = getCellWrapperInfo(type, checker);
-    const [argument, ...rest] = cellTypeArguments(type, checker);
-    // The value is printed expanded, so a pass can read inside it, unless
-    // the printer cannot write the expansion: then it is the argument the
-    // wrapper was given, which keeps an alias's name.
-    const value = unwrapCellLikeType(type, checker);
-    const expanded = value && print(value);
-    const printed = expanded &&
-        (expanded.kind !== ts.SyntaxKind.UnknownKeyword ||
-          isAnyOrUnknownType(value!))
-      ? expanded
-      : argument && print(argument);
-    return wrapper && printed
-      ? createHelperWrapperTypeNode(
-        printed,
-        wrapper.kind,
-        factory,
-        rest.map(print),
-      )
-      : undefined;
-  }
-  return undefined;
 }
 
 /**
- * Helper for `unfoldPrint()`, which returns a type literal holding the
- * properties and index signatures of `type`, the object type a literal was
- * printed from, each printed from its own type. Methods are left out, as
- * schema generation reads none. Returns `undefined` for a type with a property
- * keyed by a symbol, which has no name to write it under.
+ * Returns a node standing for `type`, the type a reference denotes, built one
+ * level deep in the type's own structure (`unfoldTypeAs()`), with each property
+ * of an object written as its declaration's annotation where that still
+ * denotes the property's type at `type`. An annotation is written in its
+ * declaration's type parameters, which `type` may have replaced with
+ * arguments, as `Box<string>` replaces `T` in `v: T`; such a property is
+ * printed from its type. Returns `undefined` for a tuple, for a type that
+ * carries a scope, and for a type that says something only as a whole.
  */
-function unfoldPrintedObjectType(
+function unfoldReferencedType(
   type: ts.Type,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
-): ts.TypeLiteralNode | undefined {
+): ts.TypeNode | undefined {
+  // Only a scope wrapper names its scope, so a node built from what it wraps
+  // would drop it.
+  if (getScopeBrand(type, checker)) return undefined;
+  const shape: UnfoldedShape | undefined = type.isUnion()
+    ? "union"
+    : isCellLikeType(type, checker)
+    ? "cell"
+    : !isArrayShapeType(type, checker)
+    ? "object"
+    : !isHomogeneousArrayType(type, checker)
+    ? undefined
+    : type.getSymbol()?.getName() === "ReadonlyArray"
+    ? "readonly array"
+    : "array";
+  return shape && unfoldTypeAs(
+    shape,
+    type,
+    checker,
+    sourceFile,
+    factory,
+    typeRegistry,
+    state,
+    true,
+  );
+}
+
+/** The structure an unfolding builds one level of. */
+type UnfoldedShape = "object" | "union" | "array" | "readonly array" | "cell";
+
+/**
+ * Helper for `unfoldPrint()` and `unfoldReferencedType()`, which returns a
+ * node of `shape` standing for `type`, each type node below it printed from
+ * its own type: an object's properties and index signatures, a union's
+ * members, an array's element, or a cell's value. Where `annotated` is set, an
+ * object's property is written instead as its declaration's annotation where
+ * that denotes the property's type (`readMemberAnnotation()`). Returns
+ * `undefined` where `type` says something only as a whole: a union with a
+ * `Default` brand, or an object with a property keyed by a symbol.
+ */
+function unfoldTypeAs(
+  shape: UnfoldedShape,
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
+  state: CrossStageState | undefined,
+  annotated = false,
+): ts.TypeNode | undefined {
   const print = (printable: ts.Type) =>
     typeToTypeNodeWithRegistry(
       printable,
       { checker, factory, sourceFile, state },
       typeRegistry,
     );
+  switch (shape) {
+    case "object":
+      return unfoldObjectType(
+        type,
+        checker,
+        sourceFile,
+        factory,
+        print,
+        annotated,
+      );
+    case "union": {
+      if (!type.isUnion()) return undefined;
+      if (
+        type.types.some((member) => getDefaultMarkerPayload(member, checker))
+      ) {
+        return undefined;
+      }
+      return factory.createUnionTypeNode(type.types.map(print));
+    }
+    case "array":
+    case "readonly array": {
+      const element = getArrayElementType(type, checker);
+      if (!element) return undefined;
+      const array = factory.createArrayTypeNode(print(element));
+      return shape === "readonly array"
+        ? factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, array)
+        : array;
+    }
+    case "cell": {
+      const wrapper = getCellWrapperInfo(type, checker);
+      const [argument, ...rest] = cellTypeArguments(type, checker);
+      // The value is printed expanded, so a pass can read inside it, unless
+      // the printer cannot write the expansion: then it is the argument the
+      // wrapper was given, which keeps an alias's name.
+      const value = unwrapCellLikeType(type, checker);
+      const expanded = value && print(value);
+      const printed = expanded &&
+          (expanded.kind !== ts.SyntaxKind.UnknownKeyword ||
+            isAnyOrUnknownType(value!))
+        ? expanded
+        : argument && print(argument);
+      return wrapper && printed
+        ? createHelperWrapperTypeNode(
+          printed,
+          wrapper.kind,
+          factory,
+          rest.map(print),
+        )
+        : undefined;
+    }
+  }
+}
+
+/**
+ * Helper for `unfoldTypeAs()`, which returns a type literal holding the
+ * properties and index signatures of `type`, an object type, each printed
+ * from its own type, or, for a property where `annotated` is set, written as
+ * its declaration's annotation where that denotes the property's type
+ * (`readMemberAnnotation()`). Methods are left out, as schema generation reads
+ * none. Returns `undefined` for a type with a property keyed by a symbol,
+ * which has no name to write it under.
+ */
+function unfoldObjectType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  print: (printable: ts.Type) => ts.TypeNode,
+  annotated: boolean,
+): ts.TypeLiteralNode | undefined {
   const members: ts.TypeElement[] = [];
   for (const property of checker.getPropertiesOfType(type)) {
     if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
@@ -3902,6 +4128,9 @@ function unfoldPrintedObjectType(
       property,
       declaration,
     );
+    const annotation = annotated
+      ? readMemberAnnotation(property, propertyType, checker)
+      : undefined;
     // An optional property is written without the `undefined` its
     // optionality adds to its type, as the printer writes it.
     const written = optional && propertyType.isUnion()
@@ -3913,9 +4142,10 @@ function unfoldPrintedObjectType(
       undefined,
       createPropertyName(property.getName(), factory),
       optional ? factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
-      written.length === 1
-        ? print(written[0]!)
-        : factory.createUnionTypeNode(written.map(print)),
+      annotation ??
+        (written.length === 1
+          ? print(written[0]!)
+          : factory.createUnionTypeNode(written.map(print))),
     ));
   }
   for (const index of checker.getIndexInfosOfType(type)) {

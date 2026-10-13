@@ -1524,6 +1524,34 @@ The collector and scheduler effects are tracked by
 `packages/runner/test/cfc-consumed-source-dedup.bench.ts` and
 `packages/runner/test/scheduler-invalid-causes.bench.ts` respectively.
 
+## JSON codec escapes over linked inputs
+
+The `links` groups of `packages/data-model/bench/codec-json.bench.ts` measure
+encoding and decoding the inputs of a computation bound to 1, 10, and 100
+links. Each link is written the way a `data:` document carries one: a plain
+object under a `/` key, holding its schema inline. A link comes to about 470
+values, eight of them further `/`-keyed objects nested inside it. Every subject
+is built before any measurement, so the timed interval is the one call.
+
+The JSON format escapes a `/`-keyed object, and here each escape covers a large
+plain subtree, where the other subjects of that file escape objects of a
+handful of values. The `plain-links` groups are the control: the same trees
+with each link under a key the format does not reserve, so that nothing in them
+is escaped. A `links` encode row and the `plain-links` encode row of the same
+size differ by what choosing and applying the escape costs, and by nothing
+else. The encoder decides an escape from a count it keeps while walking, and
+replaces a nested escape where it sits, so a `links` row is expected within
+about a tenth of its control. A `links` row well above that means the encoder
+is walking an escaped subtree more than once.
+
+The `realm-links` groups of `packages/data-model/bench/codec-realm.bench.ts`
+measure the `links` subjects under the format that carries a `/` key as an
+ordinary key. Run with:
+
+```sh
+deno bench --no-check --allow-read packages/data-model/bench/codec-json.bench.ts --filter links
+```
+
 ## Cold-runtime piece operations
 
 `packages/piece/test/piece-cold-runtime.bench.ts` measures two

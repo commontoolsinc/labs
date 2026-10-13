@@ -74,6 +74,18 @@ throws if `data` contains a reference cycle. It lives in the runner rather than
 in the codec because it needs the cell and link machinery, which `data-model`
 does not have.
 
+`dataUriSnapshotWithResolvedLinks(data, base?)` mints the same identifier and
+returns beside it the value to walk under that identifier. A caller that holds
+`data` and goes on to read it under the identifier it minted walks that value
+and not `data`. A link in `data` that names no document takes its identifier
+from the address it is read under. Under the minted address that is the `data:`
+identifier itself, so the link's path would be read inside the snapshot and not
+in the document that stores the link. Where `base` has an identifier, the
+returned value is `data` with each such link given that identifier; every other
+link is left as `data` holds it, schema included. Without a `base`, or with one
+that has no identifier, there is nothing to give such a link, and the returned
+value is `data` as given.
+
 The walk rebuilds a container only when a link under it was rewritten;
 everything else it hands back by identity, so a value carrying no link at all
 reaches `dataUriFromValue` as the objects the caller passed in. A value that
@@ -102,13 +114,54 @@ Representative places that mint one:
   on that mutable inline element, because its content determines the snapshot's
   identity. Changes to the element cause a reactive reader to resolve it again;
   changes to another array element do not require that reader to rerun.
-- Query traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
-  document for an array element it needs to read recursively.
+- Traversal in `packages/runner/src/traverse.ts` substitutes a `data:`
+  document for an inline array element it needs to read recursively. It
+  continues over the value `dataUriSnapshotWithResolvedLinks` returns, so a link
+  inside the element that names no document resolves against the document
+  storing the element.
 - The lazy schema view in `packages/runner/src/schema-view.ts` does the same for
   an array element that is an inline object, when the reader touches it. The
   element's value is already in hand, so the identifier costs no read. Without
   it `toCell` on such an element would name the array's INDEX, and writing that
   link anywhere else would follow whatever landed at that index next.
+
+### A link's schema is encoded as given
+
+Neither mint function changes the schema a link carries. With
+[content-addressed schemas](../specs/content-addressed-schemas.md) a stored
+link's schema is a `cid:` reference to schema documents, and a link copied
+into a `data:` identifier keeps that reference. The identifier therefore
+depends on the value alone, and not on which schema documents the minting
+runtime happened to have at hand.
+
+A reference needs its schema documents to be read, and a `data:` document is
+stored nowhere that could hold them. The rule is that a link inside a `data:`
+document resolves its schema's references in the space carried by the address
+that names the document — the same rule, through the same gates, as a link
+inside a stored document. `schemaForSpaceCrossing` and
+`ensureExternalSchemaClosure` in `packages/runner` take that space from the
+caller, and `loadExternalSchemaDocs` in `packages/runner/src/traverse.ts` takes
+it from the document's address.
+
+That places an obligation on whoever mints one from a value holding links:
+
+- The snapshot mints above — `resolveAsCell()`, query traversal, the lazy
+  schema view — take the value out of a stored document and address the
+  result in that document's space. The space already holds every schema
+  document those links reference, because the write that stored a link
+  stored its schema documents with it.
+- `Runtime.getImmutableCell()` takes a caller's value, whose links no write
+  has stored, and a space the caller chooses. It has no space to point a
+  reference at, so it rewrites each link's schema to the inline form before
+  encoding (`inlineExternalSchemaRefsInValue` in
+  `packages/runner/src/link-utils.ts`).
+
+`findAndInlineDataUriLinks` and the storage manager's `data:` sync walk have
+no transaction to read a space through. Where either narrows a link's schema
+to a path below the link, it resolves the reference through the realm's
+schema-document registry, which holds every schema document a session has
+written or been delivered. A reference the registry does not hold cannot be
+narrowed, and the narrowing throws.
 
 ## Reading one
 

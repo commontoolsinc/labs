@@ -192,9 +192,9 @@ describe("runtime", () => {
     });
 
     it("carries a link's schema inline in the id", () => {
-      // A `data:` document is its id, so nothing writes it and nothing
-      // persists the closure a reference-form schema inside it would name;
-      // the id carries each link's schema in its recomposed form instead.
+      // No write has stored this link, so no space holds the closure its
+      // reference-form schema names; the id carries the schema in its
+      // recomposed form instead.
       const target = runtime.getCell(
         space,
         "immutable-target",

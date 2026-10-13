@@ -37,9 +37,10 @@ function scaling(factor: number) {
 /**
  * A piece whose `add` stream appends to a list made with `.for(listCause)`,
  * and which exposes that list as `list`. Two versions that differ only in that
- * cause bind the stream to two different cells.
+ * cause bind the stream to two different cells. With `stream` false the piece
+ * exposes the list alone.
  */
-function appending(listCause: string) {
+function appending(listCause: string, stream = true) {
   return {
     main: "/main.tsx",
     files: [{
@@ -53,7 +54,7 @@ function appending(listCause: string) {
         );
         export default pattern<Record<string, never>>(() => {
           const list = new Writable<string[]>([]).for("${listCause}");
-          return { list, add: add({ list }) };
+          return ${stream ? "{ list, add: add({ list }) }" : "{ list }"};
         });
       `,
     }],
@@ -109,6 +110,33 @@ describe("pattern-swap-setup-verdict", () => {
     return refused;
   };
 
+  /**
+   * Holds the settlement of the setup the pattern watcher stages for
+   * `pieceId` until the returned resolver's promise resolves. The setup still
+   * applies locally when it commits.
+   */
+  const holdWatcherSetup = (pieceId: string) => {
+    const settle = Promise.withResolvers<void>();
+    runtime.prepareTxForCommit = (tx: IExtendedStorageTransaction) => {
+      const stagesSetup = [...tx.getWriteDetails?.(space) ?? []].some((
+        { address },
+      ) =>
+        address.id === pieceId && address.path[0] === "patternSetupIdentity"
+      );
+      if (stagesSetup) {
+        const commit = tx.commit.bind(tx);
+        tx.commit = (...args) => {
+          const receipt = commit(...args);
+          return Object.create(receipt, {
+            settled: { value: settle.promise.then(() => receipt.settled) },
+          });
+        };
+      }
+      prepare.call(runtime, tx);
+    };
+    return settle;
+  };
+
   it("keeps the running graph reactive when the setup a pointer move needs is refused", async () => {
     expect(runtime.sealDestinationInstalled).toBe(false);
     const v1 = await runtime.patternManager.compilePattern(scaling(2), {
@@ -154,17 +182,17 @@ describe("pattern-swap-setup-verdict", () => {
 
   /**
    * Runs the `tags` version of `appending`, appends `before` through its
-   * stream, and returns the piece with the `labels` version's reference.
+   * stream, and returns the piece with the reference of `incoming`, by default
+   * the `labels` version.
    */
-  const runAppending = async () => {
+  const runAppending = async (incoming = appending("labels")) => {
     const v1 = await runtime.patternManager.compilePattern(
       appending("tags"),
       { space },
     );
-    const v2 = await runtime.patternManager.compilePattern(
-      appending("labels"),
-      { space },
-    );
+    const v2 = await runtime.patternManager.compilePattern(incoming, {
+      space,
+    });
     const seed = runtime.edit();
     const piece = runtime.run(
       seed,
@@ -227,29 +255,11 @@ describe("pattern-swap-setup-verdict", () => {
     // the piece's `list` names the incoming pattern's cell by then, and the
     // running pattern's list is watched where it lives.
     const { piece, v2Ref, cancel } = await runAppending();
-    const pieceId = piece.getAsNormalizedFullLink().id;
-    const settle = Promise.withResolvers<void>();
-    runtime.prepareTxForCommit = (tx: IExtendedStorageTransaction) => {
-      const stagesSetup = [...tx.getWriteDetails?.(space) ?? []].some((
-        { address },
-      ) =>
-        address.id === pieceId && address.path[0] === "patternSetupIdentity"
-      );
-      if (stagesSetup) {
-        const commit = tx.commit.bind(tx);
-        tx.commit = (...args) => {
-          const receipt = commit(...args);
-          return Object.create(receipt, {
-            settled: { value: settle.promise.then(() => receipt.settled) },
-          });
-        };
-      }
-      prepare.call(runtime, tx);
-    };
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
     const runner = runtime.runner;
     const consult = runner.pendingPatternChangeFor.bind(runner);
-    runner.pendingPatternChangeFor = (roots) => {
-      const change = consult(roots);
+    runner.pendingPatternChangeFor = (pieces) => {
+      const change = consult(pieces);
       if (change !== undefined) settle.resolve();
       return change;
     };
@@ -274,6 +284,80 @@ describe("pattern-swap-setup-verdict", () => {
       watch();
     }
 
+    expect(await piece.key("list").pull()).toEqual(["after"]);
+    cancel();
+  });
+
+  it("drops events the incoming pattern registers no handler for", async () => {
+    // Both events are queued while the swap's setup is held, so both hold the
+    // outgoing pattern's handler, which nothing replaces. The first reaches
+    // the queue's head while the swap is in flight and waits for it, which
+    // releases the setup; the second reaches it once the swap has finished.
+    // If nothing holds the first, the outgoing handler's write releases it.
+    const { piece, v2Ref, cancel } = await runAppending(
+      appending("labels", false),
+    );
+    const outgoingList = piece.key("list").resolveAsCell();
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
+    const runner = runtime.runner;
+    const consult = runner.pendingPatternChangeFor.bind(runner);
+    runner.pendingPatternChangeFor = (pieces) => {
+      const change = consult(pieces);
+      if (change !== undefined) settle.resolve();
+      return change;
+    };
+    const watch = outgoingList.sink((list) => {
+      if (Array.isArray(list) && list.length > 1) settle.resolve();
+    });
+    try {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        v2Ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+      piece.key("add").send({ add: "during" });
+      piece.key("add").send({ add: "after" });
+      await settle.promise;
+      await runtime.idle();
+    } finally {
+      runtime.prepareTxForCommit = prepare;
+      runner.pendingPatternChangeFor = consult;
+      watch();
+    }
+
+    expect(await outgoingList.pull()).toEqual(["before"]);
+    expect(await piece.key("list").pull()).toEqual([]);
+    cancel();
+  });
+
+  it("resolves `patternPointerFollowed()` only once the incoming pattern's setup settles", async () => {
+    const { piece, v2Ref, cancel } = await runAppending();
+    const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
+    let released = false;
+    try {
+      const move = runtime.edit();
+      piece.withTx(move).setMetaRaw(
+        "patternIdentity",
+        v2Ref,
+        rawMetaWriteAuthorization,
+      );
+      expect((await move.commit().settled).error).toBeUndefined();
+      await runtime.idle();
+      const followed = runtime.runner.patternPointerFollowed(piece).then(() =>
+        released
+      );
+      await runtime.idle();
+      released = true;
+      settle.resolve();
+      expect(await followed).toBe(true);
+    } finally {
+      runtime.prepareTxForCommit = prepare;
+    }
+
+    piece.key("add").send({ add: "after" });
+    await runtime.idle();
     expect(await piece.key("list").pull()).toEqual(["after"]);
     cancel();
   });

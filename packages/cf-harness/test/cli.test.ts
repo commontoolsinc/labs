@@ -4731,7 +4731,7 @@ Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after gu
       systemPrompt: "Use bash and read_file only. Do not modify files.",
     }),
     [
-      buildCfHarnessBaseSystemPrompt(),
+      buildCfHarnessBaseSystemPrompt({ patternIndex: false }),
       "",
       "Operator guidance for cf-harness runs:",
       "- Prefer exploration within /workspace/packages/cf-harness.",
@@ -4758,6 +4758,27 @@ Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch m
       systemPrompt: "You are a Loom batch worker.",
     }),
   );
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt offers the pattern index only to a run configured with one", () => {
+  const config = {
+    workspace: "/tmp/project",
+    focusRoot: "/tmp/project/packages/cf-harness",
+    outputMode: "batch" as const,
+  };
+  const indexed = resolveCfHarnessCliSystemPrompt({
+    ...config,
+    patternIndex: { baseUrl: "https://index.example" },
+  });
+  const unindexed = resolveCfHarnessCliSystemPrompt(config);
+
+  assertStringIncludes(indexed!, "Search the pattern index");
+  assertStringIncludes(
+    indexed!,
+    "The parent can run an indexed pattern with run_pattern",
+  );
+  assertEquals(unindexed?.includes("pattern index"), false);
+  assertEquals(unindexed?.includes("indexed pattern"), false);
 });
 
 Deno.test("buildCfHarnessBatchSystemPrompt omits submit_result guidance when the tool is not allowed", () => {

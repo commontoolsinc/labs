@@ -652,6 +652,33 @@ Topological sort over the work set with:
    which is sound.
 3. Deterministic fallback on remaining ties (registration order).
 
+**Where a cycle is broken.** When nodes remain to place and none is ready,
+the unplaced nodes hold at least one cycle, and the sort places one node
+ahead of an input it reads. That node is always a member of a cycle that no
+unplaced node outside it feeds: a strongly connected component of the graph
+over the unplaced nodes that has more than one node and no edge arriving
+from an unplaced node outside it. A node is never a cycle alone, since a
+node's read of its own output is not an edge.
+
+So a break reorders edges inside a cycle and no others, which is what rule 1
+requires of it:
+
+- A node that only reads from a cycle is not a candidate. It becomes ready
+  once the nodes it reads are placed, and is placed after them. Placed ahead
+  of them, it would run on inputs the same pass then replaces, or be passed
+  over as clean and wait for another pass.
+- A cycle that another cycle feeds is broken after the one feeding it has
+  been placed.
+- The components are those of the nodes unplaced at the time of the break.
+  A node that an earlier break left outside every cycle, reading from what
+  remains of the one it was a member of, is not a candidate at a later
+  break.
+
+Among the candidates the order of preference is rule 2, then the fewest
+unplaced inputs, then rule 3. The choice is a function of the graph and of
+registration order alone, so it does not depend on the order in which nodes
+entered the work set.
+
 ### 7.5 Events
 
 Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
@@ -760,7 +787,10 @@ Implemented behavior:
   move until the piece runs the incoming pattern or keeps the one it ran, the
   head event for it waits in its position (`Runner.pendingPatternChangeFor`),
   and then runs the handler of the pattern the piece settled on, or is dropped
-  when that pattern registered none for the stream.
+  when that pattern registered none for the stream. An event that reaches the
+  head after its piece replaced its graph, holding a handler of the replaced
+  graph that nothing re-registered, is dropped the same way; a stopped piece's
+  handler still runs.
 - The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
   collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
   last-wins into the last pending same-origin entry, so a same-origin flood

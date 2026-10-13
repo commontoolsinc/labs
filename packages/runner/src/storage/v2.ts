@@ -2465,6 +2465,11 @@ export class StorageManager implements IStorageManager {
   }
 
   /** @inheritDoc */
+  spaceSessionError(space: MemorySpace): Error | undefined {
+    return this.#providers.get(space)?.replica.sessionError();
+  }
+
+  /** @inheritDoc */
   spaceAccessError(space: MemorySpace): Error | undefined {
     return this.#spaceAccessErrors.get(space);
   }
@@ -2877,13 +2882,22 @@ export class StorageManager implements IStorageManager {
       id,
       ...(instance !== undefined ? { scopeKey: instance } : {}),
     });
+    // A cell declared a stream is loaded whole. Its document holds no value a
+    // read uses, so a selector carrying the event schema would ask the store
+    // to walk a shape that is never there, at the cost of a root carrying
+    // that schema per stream. A load of such a cell serves a meta write,
+    // which retries a conflict against the document's record, or the resume
+    // gate, which probes that record, and the whole document carries it.
+    const selectorSchema = ContextualFlowControl.declaresStream(schema)
+      ? false
+      : schema ?? false;
     let loadFailure: unknown;
     try {
       const result = await provider.sync(
         id,
         {
           path: cell.path.map((segment) => segment.toString()),
-          schema: schema ?? false,
+          schema: selectorSchema,
         },
         scope,
         instance,
@@ -5019,6 +5033,12 @@ export class SpaceReplica
     return undefined;
   }
 
+  /** The terminal error of the remote subscription supplying this replica. */
+  sessionError(): Error | undefined {
+    if (this.#storeReadThrough() !== undefined) return undefined;
+    return this.#sessionSession?.closeError;
+  }
+
   /**
    * Record the authorization status a watch refresh result implies. A permanent
    * (non-retriable) AuthorizationError becomes the sticky failure
@@ -6222,6 +6242,20 @@ export class SpaceReplica
     // returned SUCCESS carrying the pre-revocation value. Idempotent and
     // cheap — a bare boolean test when nothing is owed.
     this.#consumeOwedSessionRemount();
+
+    // A live replica's covered selector relies on its session for updates.
+    // Terminal session failures invalidate that promise even when the local
+    // document remains available; ordinary reconnects keep the session open.
+    // An authorization denial takes the refresh path below instead, which
+    // records a refused load for `repullRefused()` to make again once a
+    // retry is admitted.
+    const sessionError = this.sessionError();
+    if (
+      !this.#closed && sessionError !== undefined &&
+      sessionError.name !== "AuthorizationError"
+    ) {
+      return { error: toPullError(sessionError) };
+    }
 
     const normalizedEntries = normalizeSyncEntries(entries);
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
@@ -9442,25 +9476,33 @@ export class SpaceReplica
     if (entries.length === 0) {
       return;
     }
-    const read = this.#storeReadThrough();
-    if (read !== undefined) {
-      const upserts: SessionSyncUpsert[] = [];
-      for (const [address] of entries) {
-        const instance = this.instanceKey(
-          address.scope,
-          undefined,
-          address.scopeKey,
-        );
-        if (!isScopeKey(instance)) continue;
-        const upsert = read({ id: address.id, scopeKey: instance });
-        if (upsert !== undefined) upserts.push(upsert);
-      }
-      if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
-      return;
-    }
+    // A failure of either arm, thrown or returned, must not escape: the drop
+    // that follows is what settles the refused commit. One document's
+    // failing read costs that document alone; the others read are
+    // integrated.
     let failure: unknown;
     try {
-      failure = (await this.pull(entries)).error;
+      const read = this.#storeReadThrough();
+      if (read === undefined) {
+        failure = (await this.pull(entries)).error;
+      } else {
+        const upserts: SessionSyncUpsert[] = [];
+        for (const [address] of entries) {
+          const instance = this.instanceKey(
+            address.scope,
+            undefined,
+            address.scopeKey,
+          );
+          if (!isScopeKey(instance)) continue;
+          try {
+            const upsert = read({ id: address.id, scopeKey: instance });
+            if (upsert !== undefined) upserts.push(upsert);
+          } catch (error) {
+            failure ??= error;
+          }
+        }
+        if (upserts.length > 0) this.#integrateReadThrough(upserts, "pull");
+      }
     } catch (error) {
       failure = error;
     }
