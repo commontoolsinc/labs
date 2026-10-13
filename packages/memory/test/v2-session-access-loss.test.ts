@@ -41,7 +41,12 @@ describe("memory session access loss", () => {
       const late: Error[] = [];
       session.subscribeAccessLoss((error) => late.push(error));
       expect(late).toEqual(observed);
-      expect(reported.calls.map((call) => call.args)).toEqual([
+      // The client also logs the session's end through `console.error`.
+      expect(
+        reported.calls.map((call) => call.args).filter((args) =>
+          args[0] === "session-access-loss subscriber threw:"
+        ),
+      ).toEqual([
         ["session-access-loss subscriber threw:", failure],
         ["session-access-loss subscriber threw:", failure],
       ]);

@@ -776,6 +776,200 @@ interface Ev { c: Writable<number>; r?: Reply }`,
     });
     expect(event).toEqual(written.event);
   });
+
+  describe("a cell the callback uses in a way its summary does not record", () => {
+    // A use the capability analysis does not follow member by member gives no
+    // capability narrower than the one written to show sufficient, so a cell
+    // it reaches keeps the one written, and a cell it does not reach still
+    // earns its own.
+
+    const cell = (asCell: string) => ({ type: "number", asCell: [asCell] });
+    for (
+      const [use, declaration, event, callback, expected] of [
+        [
+          "a rest element of an object destructuring",
+          `import type { ReadonlyCell } from "commonfabric";
+type Ev = { a: Writable<number>; b: ReadonlyCell<number> };`,
+          "Ev",
+          "(e, { c }) => { const { ...rest } = e; c.set(rest.a.get()); }",
+          {
+            type: "object",
+            properties: { a: cell("cell"), b: cell("readonly") },
+            required: ["a", "b"],
+          },
+        ],
+        [
+          "an array destructuring",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "(e, { c }) => { const [, b] = e; c.set(b!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "an array destructuring of the parameter",
+          "type Ev = Writable<number>[];",
+          "Ev",
+          "([a], { c }) => { c.set(a!.get()); }",
+          { type: "array", items: cell("cell") },
+        ],
+        [
+          "a key that can name any element",
+          "type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(e.list[c.get()]!.v.get()); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
+          "a helper with no summary, handed the cell",
+          `declare function keep(value: unknown): boolean;
+type Ev = { x: Writable<number>; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { if (keep(e.x)) c.set(1); }",
+          {
+            type: "object",
+            properties: { x: cell("cell"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+        [
+          "a key that can name any element, in a helper",
+          `function pick(list: readonly { v: Writable<number> }[], i: number): number {
+  return list[i]!.v.get();
+}
+type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { c.set(pick(e.list, c.get())); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
+          "a traversal of the cell's value alone",
+          "type Ev = { x: Writable<number>; other: Writable<number> };",
+          "Ev",
+          "(e, { c }) => { c.set(JSON.stringify(e.x.get()).length); }",
+          {
+            type: "object",
+            properties: { x: cell("readonly"), other: cell("opaque") },
+            required: ["x", "other"],
+          },
+        ],
+      ] as const
+    ) {
+      it(`gives each cell what ${use} lets the callback do`, async () => {
+        const { event: schema, reported } = await eventSchema(
+          declaration,
+          event,
+          callback,
+        );
+
+        expect(schema).toEqual(expected);
+        expect(reported).toEqual([]);
+      });
+    }
+
+    describe("past the cut of a recursion", () => {
+      // The untracked use reaches cells past the depth where the overlay cuts
+      // a recursion and reads its remainder opaque; they keep the capability
+      // written for them all the same, and the untouched sibling does not.
+
+      const chain = (length: number) =>
+        `type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { next: Chain<R> }
+  : { v: Writable<number> };
+type Deep = Chain<[${Array.from({ length }, () => "1").join(", ")}]>;`;
+      const nexts = (length: number) => ".next".repeat(length);
+      for (
+        const [use, declaration, callback] of [
+          [
+            "a key that can name any element, twelve levels above the cell",
+            `${chain(12)}
+type Ev = { list: Deep[]; other: Writable<number> };`,
+            `(e, { c }) => { c.set(e.list[c.get()]!${nexts(12)}.v.get()); }`,
+          ],
+          [
+            "a helper with no summary, handed a value twelve levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(12)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a helper with no summary, handed a value four levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(4)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a rest element twelve levels down",
+            `${chain(13)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            `(e, { c }) => { const { ...rest } = e.x${
+              nexts(12)
+            }; c.set(rest.next.v.get()); }`,
+          ],
+        ] as const
+      ) {
+        it(`keeps the cell ${use} reaches as written`, async () => {
+          const { event: schema, reported } = await eventSchema(
+            declaration,
+            "Ev",
+            callback,
+          );
+
+          expect((schema.properties as Record<string, unknown>).other).toEqual(
+            cell("opaque"),
+          );
+          expect(
+            capabilitiesOf(schema).map((capability) =>
+              JSON.stringify(capability)
+            ).sort(),
+          ).toEqual(['["cell"]', '["opaque"]']);
+          expect(reported).toEqual([]);
+        });
+      }
+    });
+
+    it("keeps a cell beside one handed on under the empty key opaque", async () => {
+      const { event: schema } = await eventSchema(
+        `declare function keep(value: unknown): boolean;
+type Ev = { "": Writable<number>; other: Writable<number> };`,
+        "Ev",
+        '(e, { c }) => { if (keep(e[""])) c.set(1); }',
+      );
+
+      expect((schema.properties as Record<string, unknown>).other).toEqual(
+        cell("opaque"),
+      );
+    });
+  });
 });
 
 describe("applyShrinkAndWrap()", () => {
