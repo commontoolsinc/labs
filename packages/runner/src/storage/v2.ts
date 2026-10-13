@@ -2,6 +2,7 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   hashStringOf,
+  isDeepFrozen,
   isKeyableObjectOrArray,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
@@ -9,6 +10,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   verifySchemaDocument,
   walkSchemaDocumentClosure,
@@ -1322,6 +1324,12 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
+ * What `selectorSchemaForLink()` returned for each deep-frozen reader schema,
+ * by that schema's interned instance.
+ */
+const selectorSchemasForLinks = new WeakMap<object, JSONSchema>();
+
+/**
  * The selector schema a link target is asked for. Where the reader's schema
  * takes a handle at the link (`asCell` at its root, or at the root of an
  * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
@@ -1330,11 +1338,33 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
  * than as a reference it delivered once. Inner boundaries stay, as they do
  * on the handle's own schema, and a schema that takes no handle is asked for
  * as it is.
+ *
+ * A deep-frozen schema gets the interned result, the same one on every call
+ * and for every schema equal to it: each sync of a link's target normalizes a
+ * selector over the result, which interns it, and a schema built per sync
+ * would be hashed whole per sync. A schema that is not deep-frozen gets a
+ * schema of its own each time and is left as it was.
  */
-function selectorSchemaForLink(
+export function selectorSchemaForLink(
   schema: JSONSchema | undefined,
 ): JSONSchema | false {
   if (!isObjectOrArray(schema)) return schema ?? false;
+  if (!isDeepFrozen(schema)) return withoutOuterHandles(schema);
+  const interned = internSchema(schema);
+  let remembered = selectorSchemasForLinks.get(interned);
+  if (remembered === undefined) {
+    remembered = internSchema(withoutOuterHandles(interned));
+    selectorSchemasForLinks.set(interned, remembered);
+  }
+  return remembered;
+}
+
+/**
+ * Helper for `selectorSchemaForLink()`, which returns `schema` rebuilt
+ * without its outermost handle boundary, at its root and at the root of each
+ * `anyOf`/`oneOf` branch.
+ */
+function withoutOuterHandles(schema: JSONSchemaObj): JSONSchemaObj {
   const unwrapped = unwrapOuterHandle(schema);
   const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
     const list = unwrapped[key];
