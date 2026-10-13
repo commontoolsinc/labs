@@ -11,6 +11,7 @@
  * would refuse.
  */
 import {
+  action,
   type AddIntegrity,
   assert,
   multiUserTest,
@@ -20,11 +21,12 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import { findNodeByProp, propValue } from "../test/vnode-helpers.ts";
+import { findNodeByProp, propValue, readValue } from "../test/vnode-helpers.ts";
 import FabriChatPlacement from "./placement.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
   type ActivityCounters,
+  type ComposerState,
   type MessageRecord,
   type MessagesValue,
   type ReactionList,
@@ -36,6 +38,7 @@ import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_DELETE_ACTION,
   CHAT_DELETE_SURFACE,
+  CHAT_EDIT_SURFACE,
   CHAT_OBLITERATE_ACTION,
   CHAT_OBLITERATE_SURFACE,
   CHAT_SEND_ACTION,
@@ -95,6 +98,15 @@ const bodies = (messages: Writable<MessagesValue>): string =>
 // write controls, is disabled.
 const reactingDisabled = (room: unknown): unknown =>
   propValue(findNodeByProp(room, "placeholder", "Any emoji"), "disabled");
+
+// The display of a message row's editor.
+const editorDisplay = (row: unknown): unknown =>
+  readValue(
+    (propValue(
+      findNodeByProp(row, "data-ui-pattern", CHAT_EDIT_SURFACE),
+      "style",
+    ) as { display?: unknown })?.display,
+  );
 
 // Whether a room's main composer is disabled.
 const composerDisabled = (room: unknown): unknown =>
@@ -221,6 +233,22 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     isOwner: false,
     ...records,
   } as RowArg);
+  const composer = Writable.of<ComposerState>({});
+  const onHis = FabriChatMessageRow({
+    message: setup.records.messages.key(1),
+    myProfile: profile,
+    inThread: false,
+    kind: "group" as const,
+    composer,
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
+    ...records,
+  } as RowArg);
+  const action_start_edit = action(() =>
+    composer.key("editing").set(setup.records.messages.key(1))
+  );
 
   return {
     [TESTS]: [
@@ -273,8 +301,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             outcome.code === "not-allowed";
         }),
       },
+      // He opens the editor on his own message.
+      { action: action_start_edit },
+      { assertion: assert(() => editorDisplay(onHis[UI]) === "block") },
       { label: "bob-tried" },
       { await: "alice-done" },
+      // Alice deleted it, so the editor no longer offers him an edit.
+      { assertion: assert(() => editorDisplay(onHis[UI]) === "none") },
     ],
   };
 });

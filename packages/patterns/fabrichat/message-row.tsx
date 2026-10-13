@@ -332,8 +332,10 @@ export const FabriChatMessageRow = pattern<
   const obliterateDisplay = computed((): ChatDisplay =>
     rights.canObliterate ? "inline-flex" : "none"
   );
-  const editorDisplay = computed(
-    (): ChatDisplay => (isEditing ? "block" : "none"),
+  // An open editor closes once the message no longer takes an edit from the
+  // viewer, as when an OWNER deletes it.
+  const editorDisplay = computed((): ChatDisplay =>
+    isEditing && rights.canEdit ? "block" : "none"
   );
   const pickerDisplay = computed((): ChatDisplay =>
     pickerOpen.get() === true ? "flex" : "none"
