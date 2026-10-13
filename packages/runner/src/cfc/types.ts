@@ -1170,6 +1170,12 @@ export type CfcTxState = {
   // closed). Config identity is covered by TrustSnapshot.revision, not a
   // separate digest input.
   trustConfig?: CfcTrustConfig;
+  // The serving runtime's own identity, set once by the Runtime at tx
+  // creation on the serving posture and absent everywhere else. A trust
+  // snapshot naming it is the runtime's ambient one, which no
+  // current-principal claim or owner binding may resolve to unless a run is
+  // stamped as acting for that identity.
+  servingIdentity?: string;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything

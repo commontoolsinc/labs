@@ -2667,6 +2667,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
+    wrapped.setCfcServingIdentity(
+      this.servingPosture ? this.userIdentityDID : undefined,
+    );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
     );

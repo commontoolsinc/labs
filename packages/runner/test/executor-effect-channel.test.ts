@@ -71,7 +71,10 @@ import {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import type { MemorySpace } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { WaveAccumulator, waveRunContextOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -468,6 +471,50 @@ describe("Phase 4 client-effect channel", () => {
         annotation.actingSession === sessionId
       ),
     ).toBe(true);
+
+    cancelDemand();
+  });
+
+  it("hands the navigation target's deferred start the firing actor's trust snapshot, never the service's", async () => {
+    // The target starts in a transaction of its own once the handler's
+    // commits, on the handler's behalf, so what it initializes is the actor's.
+
+    ({ manager: clientManager, runtime: clientRuntime } = openClient(
+      aliceSigner,
+    ));
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, NAVIGATE_PATTERN, {
+      arg: "start-trust-arg",
+      result: "start-trust-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    const served: IExtendedStorageTransaction[] = [];
+    host = newHost(undefined, (runtime) => {
+      const edit = runtime.edit.bind(runtime);
+      runtime.edit = ((...args: Parameters<typeof edit>) => {
+        const tx = edit(...args);
+        served.push(tx);
+        return tx;
+      }) as typeof runtime.edit;
+    });
+    result.key("go").send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await settleServing(engine, clientRuntime);
+
+    const starts = served.filter((tx) =>
+      waveRunContextOf(tx)?.actionId?.startsWith("piece-start/") === true &&
+      tx.getCfcState().attributedInitialization
+    );
+    expect(starts.length).toBeGreaterThan(0);
+    for (const tx of starts) {
+      expect(tx.getCfcState().trustSnapshot?.actingPrincipal).toBe(
+        aliceSigner.did(),
+      );
+    }
 
     cancelDemand();
   });
