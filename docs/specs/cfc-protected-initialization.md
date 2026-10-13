@@ -20,11 +20,15 @@ same way, so its envelope commits with the seed and holds the cell to its writer
 from the first write. Without that seed the document would store no policy, and
 any code holding a link to it could write it. Only the pattern's own state is
 seeded so: a cell no node of the pattern fills, which its handlers write. A
-cell a node fills, such as a builtin's result, a lift's output or a
-sub-pattern's result, holds what that node produces, and the writers its schema
-names belong to the value it carries; a `wish` result's schema names the wished
-piece's writers, for one. Seeding it would store that policy as the cell's own,
-and the node's write would then have to reconcile with it. A cell whose schema
+cell a node fills, the node's output being the cell itself, such as a
+builtin's result, a lift's output or a sub-pattern's result, holds what that
+node produces, and the writers its schema names belong to the value it carries;
+a `wish` result's schema names the wished piece's writers, for one. Seeding it
+would store that policy as the cell's own, and the node's write would then have
+to reconcile with it. A node that fills only a position inside a cell, which the
+builder never emits, leaves the cell the pattern's state at its other
+positions: it is seeded, and the node's write into the `undefined` seed fails
+rather than the other positions' policy going unstored. A cell whose schema
 makes it a link (`asCell`), such as the slot a lift fills with a cell it
 constructs, is not seeded either: the policy belongs to the constructed cell,
 whose own seed stores it. The reference that exposes the

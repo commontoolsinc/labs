@@ -816,13 +816,15 @@ const declaresWriter = (schema: JSONSchema | undefined): boolean =>
   );
 
 /**
- * Whether `value`, a node's bindings, holds an alias to this pattern's derived
- * internal cell `partialCause`. An alias deferred to a nested pattern names
- * that pattern's cell, not this one's.
+ * Whether `value`, a node's bindings, holds an alias to the whole of this
+ * pattern's derived internal cell `partialCause`. An alias to a position inside
+ * the cell does not count, and neither does one deferred to a nested pattern,
+ * which names that pattern's cell, not this one's.
  */
 const bindsDerivedCell = (value: unknown, partialCause: JSONValue): boolean => {
   if (isAliasBinding(value)) {
     return (value.$alias.defer ?? 0) === 0 &&
+      value.$alias.path.length === 0 &&
       deepEqual(value.$alias.partialCause, partialCause);
   }
   if (Array.isArray(value)) {
@@ -834,9 +836,12 @@ const bindsDerivedCell = (value: unknown, partialCause: JSONValue): boolean => {
 
 /**
  * Whether one of `pattern`'s nodes fills the derived internal cell
- * `partialCause` names: a lift, a builtin or a sub-pattern that lists it under
- * its `outputs`. A handler lists nothing there, so a cell that only handlers
- * write is the pattern's own state.
+ * `partialCause` names: a lift, a builtin or a sub-pattern whose output is the
+ * cell. A handler lists nothing under its `outputs`, so a cell that only
+ * handlers write is the pattern's own state. A node that fills only a
+ * position inside a cell leaves the cell the pattern's state at its other
+ * positions; the builder never emits such an output, since every node it
+ * builds writes a cell of its own.
  */
 const nodeFillsDerivedCell = (
   pattern: Pattern,
@@ -854,7 +859,10 @@ const nodeFillsDerivedCell = (
  * the pattern's own state, a cell no node fills. A cell a node fills (a
  * builtin's result, a lift's output, a sub-pattern's result) holds what the
  * node produces, and the writers its schema names belong to what it carries,
- * so it is not seeded. Nor is a cell whose schema makes it a link (`asCell`):
+ * so it is not seeded. A cell a node fills only part of is seeded, so the
+ * policy of its other positions is stored; a seed of `undefined` leaves that
+ * node no object to write into, and its write fails rather than the policy
+ * going unstored. Nor is a cell whose schema makes it a link (`asCell`):
  * it holds a reference, and the policy it describes is the referenced cell's,
  * which that cell's own seed stores.
  */

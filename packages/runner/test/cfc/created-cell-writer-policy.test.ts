@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
+import type { Pattern } from "../../src/builder/types.ts";
+import { brandTrustedPattern } from "../../src/builder/pattern-metadata.ts";
 import type { Cell } from "../../src/cell.ts";
 import { loadStoredCfcEnvelope } from "../../src/cfc/prepare.ts";
 import type { RuntimeProgram } from "../../src/harness/types.ts";
@@ -23,7 +25,7 @@ const space = signer.did();
 // same unlabeled state type and are named by none, `h` clearing the cell.
 // Each cell is created with `undefined`, as the agent queue's `agentRunner`
 // is, except `init`, which is created with a value. `nested` declares its
-// policy on a field only.
+// policy on a field only, and `mixed` beside a field a node may fill.
 const program: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
@@ -38,11 +40,14 @@ const g = handler<string, { value: Writable<Entry | undefined> }>((event, { valu
 const h = handler<string, { value: Writable<Entry | undefined> }>((_event, { value }) => value.set(undefined));
 type Protected = WriteAuthorizedBy<Entry, typeof f>;
 type NestedProtected = { host: WriteAuthorizedBy<string, typeof f> };
+type MixedProtected = { host?: WriteAuthorizedBy<string, typeof f>; produced?: number };
 type Owned = RepresentsCurrentUser<Cfc<WriteAuthorizedBy<Entry, typeof f>, { ownerPrincipal: CurrentPrincipal }>>;
 export default pattern<{}, {
   undef: Protected; init: Protected; owned: Owned; nested: NestedProtected;
+  mixed: MixedProtected;
   fUndef: Stream<string>; gUndef: Stream<string>; hUndef: Stream<string>;
   fNested: Stream<string>; gNested: Stream<string>;
+  fMixed: Stream<string>; gMixed: Stream<string>;
   fInit: Stream<string>; gInit: Stream<string>;
   fOwned: Stream<string>;
 }>(() => {
@@ -50,10 +55,13 @@ export default pattern<{}, {
   const init = new Writable<Protected | undefined>({ host: "initial" }).for("init");
   const owned = new Writable<Owned | undefined>(undefined).for("owned");
   const nested = new Writable<NestedProtected | undefined>(undefined).for("nested");
+  const mixed = new Writable<MixedProtected | undefined>(undefined).for("mixed");
   return {
     undef: undef as any, init: init as any, owned: owned as any, nested: nested as any,
+    mixed: mixed as any,
     fUndef: f({ value: undef as any }), gUndef: g({ value: undef as any }), hUndef: h({ value: undef as any }),
     fNested: f({ value: nested as any }), gNested: g({ value: nested as any }),
+    fMixed: f({ value: mixed as any }), gMixed: g({ value: mixed as any }),
     fInit: f({ value: init as any }), gInit: g({ value: init as any }),
     fOwned: f({ value: owned as any }),
   };
@@ -69,9 +77,13 @@ describe("created cell writer policy", () => {
 
   /**
    * Sets the program up. A setup is the acting principal's act unless
-   * `attributeInitialization` is `false`.
+   * `attributeInitialization` is `false`. `rebuild`, given, replaces the
+   * compiled pattern with one built from it.
    */
-  const setUp = async (attributeInitialization?: false) => {
+  const setUp = async (
+    attributeInitialization?: false,
+    rebuild?: (compiled: Pattern) => Pattern,
+  ) => {
     const setup = runtime.edit();
     const compiled = await runtime.patternManager.compilePattern(program, {
       space,
@@ -79,7 +91,7 @@ describe("created cell writer policy", () => {
     });
     result = runtime.run(
       setup,
-      compiled,
+      rebuild?.(compiled) ?? compiled,
       {},
       runtime.getCell(space, "created-cell-writer-policy", undefined, setup),
       attributeInitialization === false ? { attributeInitialization } : {},
@@ -228,6 +240,45 @@ describe("created cell writer policy", () => {
       await setUp();
 
       expect(representedBy("owned")).toEqual([signer.did()]);
+    });
+  });
+
+  describe("on a cell a node fills only part of", () => {
+    // The builder never emits such a node, since every node it builds writes a
+    // cell of its own, so the graph is built by hand here: a node whose output
+    // is `mixed`'s `produced` field, beside the `host` field `f` writes.
+
+    /** Adds to `compiled` a node that fills `mixed`'s `produced` field. */
+    const withProducer = (compiled: Pattern): Pattern => {
+      const descriptor = compiled.derivedInternalCells?.find((candidate) =>
+        JSON.stringify(candidate.schema).includes('"produced"')
+      );
+      expect(descriptor).toBeDefined();
+      return brandTrustedPattern({
+        ...compiled,
+        nodes: [...compiled.nodes, {
+          module: { type: "javascript", implementation: () => 1 },
+          inputs: {},
+          outputs: {
+            $alias: {
+              partialCause: descriptor!.partialCause,
+              path: ["produced"],
+            },
+          },
+        }],
+      } as Pattern);
+    };
+
+    it("stores the policy of the positions the node does not fill, and refuses a handler it does not name", async () => {
+      await setUp(undefined, withProducer);
+
+      expect(stored("mixed").status).toBe("loaded");
+      const outcomes = await send("gMixed", "g");
+      expect(outcomes).toHaveLength(1);
+      expect(String(outcomes[0])).toContain("writeAuthorizedBy");
+      expect(host("mixed")).toBeUndefined();
+      expect(await send("fMixed", "f")).toEqual(["ok"]);
+      expect(host("mixed")).toBe("f");
     });
   });
 
