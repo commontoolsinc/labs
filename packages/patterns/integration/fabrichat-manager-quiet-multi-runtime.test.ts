@@ -7,7 +7,8 @@
  * are refused. A value the manager derives from what the room's space holds,
  * stored once for every reader, is one the stranger's runtime computes
  * differently from the others', and the runtimes then overwrite each other's
- * value without end.
+ * value without end. The fixture creates the manager per user, as a manager
+ * more than one principal reads is created, so each principal stores its own.
  *
  * Kept apart from `fabrichat-spaces-multi-runtime.test.ts`, whose test
  * selection record names that file's whole `describe()`, so that a lane

@@ -23,8 +23,8 @@ each, and a row in the built-in targets table of
 ## State
 
 The manager keeps `direct`, `requests`, and `outgoingNotices` in the home space.
-`rooms` it keeps nowhere: it is drawn from the user's shared-space catalog,
-Home's, which Home hands the manager
+`rooms` it derives rather than keeps: it is drawn from the user's shared-space
+catalog, Home's, which Home hands the manager
 ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)). The
 manager lists the entries of kind `fabrichat-room` the catalog keeps as saved,
 each the space of a room that is its space's root, found with `wish({ query:
@@ -33,8 +33,8 @@ and its `since` and `revision` are its entry's. A direct room's `counterpart` is
 the one `direct` holds the room under, for a room `direct` holds, or else the
 room's creator, as its `about.record` is labeled; a room whose label can't be
 read is listed with no counterpart. A room appears in `rooms` once its root
-resolves and its `about` reads. `people` is drawn from `rooms` in the same
-session: each listed room's `roster`, read through the room's link, with each
+resolves and its `about` reads. `people` is drawn from `rooms`: each listed
+room's `roster`, read through the room's link, with each
 profile keyed by the principal its own `represents-principal` label attests
 (`principalOf()`). `offerRoom` reads it, to offer a room to a member named by
 principal alone. `direct` holds one entry per counterpart, including forgotten
@@ -120,8 +120,8 @@ Someone a user adds to a room later is told of it through `offerRoom`, which
 the room's `addMember` sends once it has granted them access. It runs as an
 event of its own, after the add has committed, and offers the room through the
 same steps as step 3: through the profile the add named, or, for an add naming
-only an address, through the profiles `people` lists for that person, as the
-session sending it reads `people`. It records `offered` or `noticed` under the
+only an address, through the profiles `people` lists for that person. It
+records `offered` or `noticed` under the
 request's id, which the room reads back as the add's `delivery`.
 
 ## Prerequisites

@@ -11,7 +11,7 @@ binds every implementation.
 // Shown for illustration only.
 interface ChatManagerOutput {
   /** Every room this user belongs to and hasn't forgotten, newest first. */
-  rooms: PerSession<ChatIndexEntry[]>;
+  rooms: ChatIndexEntry[];
 
   /** The direct room this user shares with each counterpart, by principal. */
   direct: Record<string, ChatIndexEntry>;
@@ -43,7 +43,7 @@ interface ChatManagerOutput {
   }[];
 
   /** The people this user's rooms list, by principal. */
-  people: PerSession<Record<string, Cell<ChatProfile>[]>>;
+  people: Record<string, Cell<ChatProfile>[]>;
 
   openDirect: Stream<{ requestId: string; counterpart: string }>;
   createGroup: Stream<{
@@ -129,17 +129,25 @@ Everything a manager stores is `PerSpace` in the user's home space (see
 user, so `PerSpace` there means one instance for that user, which is why nothing
 it stores needs to be `PerUser` or `PerSession`.
 
-`rooms`, which the manager doesn't store, is `PerSession` all the same, and so
-is `people`, which is drawn from it, though each room's `roster` is shared by
-everyone the room's space admits: a profile lives in its owner's own space, and
-attests no principal to a reader that space refuses, so two readers can key the
-same roster differently. Each room in it is read under the reader's own access,
-so a manager more than one principal reads, as one outside a home space can be,
-lists different rooms to a principal a room's space refuses than to its members.
-Stored once for every reader, a value readers derive differently is one their
-runtimes overwrite without end. A stream reads neither, except `offerRoom`,
-which reads `people` for the session that sends it: every other request names a
-room's members by principal or by profile itself.
+`rooms`, which the manager derives rather than keeps, is stored once for that
+user too, and so is `people`, which is drawn from it. The contract declares no
+scope for either, and each is stored in the space's scope, or in the user's
+where it is derived from the user's profile, which `#profile` resolves per
+user. Every session of a home space is its user's, so each derives the same
+rooms and the same people, and a session starts from the ones the session
+before it stored.
+
+That holds only where every reader is the same principal. Each room is read
+under the reader's own access, and a profile lives in its owner's own space,
+and attests no principal to a reader that space refuses, so two readers can
+list different rooms and key the same roster differently. Stored once for
+every reader, a value readers derive differently is one their runtimes
+overwrite without end. A manager more than one principal reads, as one outside
+a home space can be, is therefore created in a scope that keeps each
+principal's own, `user` or `session`, with the pattern factory's `asScope()`.
+A stream reads neither `rooms` nor `people`, except `offerRoom`, which reads
+`people`: every other request names a room's members by principal or by
+profile itself.
 
 ## Facts
 
@@ -326,7 +334,7 @@ outcome back as the add's `delivery`.
 - **Effect:** offers the room to the person (see [offers](#offers)): through
   the share inbox `profile` points at, or, with no `profile`, through each
   distinct inbox the profiles `people` lists for `member` point at, once per
-  inbox, as this session reads `people`. The first profile the room is offered
+  inbox. The first profile the room is offered
   through is added to the room's participants. A person offered nothing, since
   no profile known for them points at an inbox, gets a notice instead. It
   grants nobody anything.
