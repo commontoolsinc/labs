@@ -200,6 +200,7 @@ import {
   mergeableOpRead,
   writeDestinationRead,
 } from "./storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
 ensureNotRenderThread();
@@ -1822,8 +1823,8 @@ export class CellImpl<T extends FabricValue>
    * `awaitDurability: true` keeps the read demanded through the runtime-wide
    * commit-aware barrier, including producers installed by pending commits.
    *
-   * Rejects with a terminal connection or takeover error in the backing space,
-   * including when the replica still holds a cached value. Authorization
+   * Rejects with a terminal connection or takeover error in any space the read
+   * reaches, including when its replica still holds a cached value. Authorization
    * denials retain their absent-value semantics and per-space access report.
    *
    * @returns The cell's reactive value after the selected readiness barrier.
@@ -1861,15 +1862,25 @@ export class CellImpl<T extends FabricValue>
         ? this.#runtime.scheduler.idleWithPendingCommits()
         : this.#runtime.scheduler.idle();
 
+    let readSpaces = new Set<MemorySpace>([this.space]);
     return new Promise((resolve, reject) => {
       const action: Action = (tx) => {
-        // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
+        try {
+          // Read the value inside the effect - this ensures dependencies are pulled
+          const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
 
-        // If no schema or TrueSchema, traverse the result to register all
-        // nested values as read dependencies.
-        if (needsTraversal && value !== undefined && value !== null) {
-          deepTraverse(value);
+          // If no schema or TrueSchema, traverse the result to register all
+          // nested values as read dependencies.
+          if (needsTraversal && value !== undefined && value !== null) {
+            deepTraverse(value);
+          }
+        } finally {
+          // Schemaless traversal can add reads in other spaces. Each effect
+          // run replaces the set so obsolete dependencies do not fail the pull.
+          readSpaces = new Set<MemorySpace>([this.space]);
+          for (const { space } of getTransactionReadActivities(tx)) {
+            readSpaces.add(space);
+          }
         }
       };
       // Name the action for debugging
@@ -1929,13 +1940,15 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
-        const sessionError = this.#runtime.storageManager.spaceSessionError?.(
-          this.space,
-        );
-        if (
-          sessionError !== undefined &&
-          sessionError.name !== "AuthorizationError"
-        ) throw sessionError;
+        for (const space of readSpaces) {
+          const sessionError = this.#runtime.storageManager.spaceSessionError?.(
+            space,
+          );
+          if (
+            sessionError !== undefined &&
+            sessionError.name !== "AuthorizationError"
+          ) throw sessionError;
+        }
         return validateAndTransform(this.#runtime, undefined, this.#viewRef);
       };
       ready().then(resolve, reject);

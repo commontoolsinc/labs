@@ -253,4 +253,170 @@ describe("storage session takeover", () => {
       }
     });
   }
+
+  for (const schemaless of [false, true]) {
+    for (const victim of ["home", "foreign", "unrelated"] as const) {
+      const description = victim === "unrelated"
+        ? "keeps a linked read available after an unrelated session is taken over"
+        : `rejects a linked read after its ${victim} session is taken over`;
+      it(`${description} (${schemaless ? "schemaless" : "schema"})`, async () => {
+        const owner = await Identity.fromPassphrase("linked inbox home");
+        const foreignOwner = await Identity.fromPassphrase(
+          "linked inbox foreign",
+        );
+        const unrelatedOwner = await Identity.fromPassphrase(
+          "linked inbox unrelated",
+        );
+        const home = owner.did();
+        const foreign = foreignOwner.did();
+        const unrelated = unrelatedOwner.did();
+        const homeDocument = "of:linked-inbox";
+        const foreignDocument = "of:linked-offers";
+        const server = new Server({
+          ...TEST_MEMORY_SERVER_AUTH,
+          store: new URL(
+            `memory://linked-session-takeover-${crypto.randomUUID()}`,
+          ),
+          subscriptionRefreshDelayMs: "manual",
+        });
+        const writer = await connect({ transport: loopback(server) });
+        const homeWriter = await writer.mount(
+          home,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const foreignWriter = await writer.mount(
+          foreign,
+          {},
+          testSessionOpenAuthFactory,
+        );
+        let localSeq = 0;
+        const writeOffers = (offers: string[]) =>
+          foreignWriter.transact({
+            localSeq: ++localSeq,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: foreignDocument,
+              value: { value: offers },
+            }],
+          });
+        const transport = new LostResumeTransport(server);
+        const reader = await connect({ transport });
+        const sessions = new Map<string, SpaceSession>();
+        const factory: SessionFactory = {
+          async create(target, _signer, options) {
+            const session = await reader.mount(
+              target,
+              options,
+              testSessionOpenAuthFactory,
+            );
+            sessions.set(target, session);
+            return { client: reader, session };
+          },
+        };
+        const manager = TestStorageManager.create({
+          as: owner,
+          memoryHost: new URL("memory://"),
+        }, factory);
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: manager,
+        });
+        const inbox = () => {
+          const cell = runtime.getCellFromEntityId(home, homeDocument);
+          return schemaless ? cell : cell.key("offers").asSchema({
+            type: "array",
+            items: { type: "string" },
+          });
+        };
+        let replacement: Awaited<ReturnType<typeof connect>> | undefined;
+        try {
+          await writeOffers(["first"]);
+          await homeWriter.transact({
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: homeDocument,
+              value: {
+                value: {
+                  offers: {
+                    "/": {
+                      "link@1": {
+                        id: foreignDocument,
+                        space: foreign,
+                        path: [],
+                      },
+                    },
+                  },
+                },
+              },
+            }],
+          });
+          const heldInbox = inbox();
+          const before = await heldInbox.pull();
+          expect(sessions.has(foreign)).toBe(true);
+          expect(before).toEqual(
+            schemaless ? { offers: ["first"] } : ["first"],
+          );
+          if (victim === "unrelated") {
+            expect((await manager.open(unrelated).sync("of:unrelated")).error)
+              .toBeUndefined();
+          }
+          const victimSpace = victim === "home"
+            ? home
+            : victim === "foreign"
+            ? foreign
+            : unrelated;
+          const session = sessions.get(victimSpace);
+          if (session === undefined) throw new Error("reader did not mount");
+          replacement = await connect({ transport: loopback(server) });
+          await replacement.mount(victimSpace, {
+            sessionId: session.sessionId,
+            sessionToken: session.sessionToken,
+          }, testSessionOpenAuthFactory);
+          await transport.delivered();
+          expect(manager.spaceSessionError(victimSpace)?.name)
+            .toBe("SessionRevokedError");
+
+          await writeOffers(["first", "second"]);
+          await server.flushSessions([home, foreign, unrelated]);
+          await transport.delivered();
+          const fresh = await foreignWriter.queryGraph({
+            roots: [{
+              id: foreignDocument,
+              selector: { path: [], schema: false },
+            }],
+          });
+          expect(
+            fresh.entities.find((entity) => entity.id === foreignDocument)
+              ?.document,
+          )
+            .toEqual({ value: ["first", "second"] });
+          expect(
+            manager.open(foreign).replica.getDocument(foreignDocument)?.value,
+          )
+            .toEqual(victim === "foreign" ? ["first"] : ["first", "second"]);
+          if (victim === "unrelated") {
+            const expected = schemaless
+              ? { offers: ["first", "second"] }
+              : ["first", "second"];
+            expect(await heldInbox.pull()).toEqual(expected);
+            expect(await inbox().pull()).toEqual(expected);
+          } else {
+            await expect(heldInbox.pull()).rejects.toThrow("taken-over");
+            await expect(inbox().pull()).rejects.toThrow("taken-over");
+          }
+        } finally {
+          await runtime.dispose({ closeStorage: false });
+          await manager.close();
+          await reader.close();
+          await replacement?.close();
+          await writer.close();
+          await server.close();
+        }
+      });
+    }
+  }
 });
