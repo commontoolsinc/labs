@@ -2,8 +2,9 @@
 
 **Status:** stages 1–4 landed (the bounded base search, the basis guard,
 the dry run, the write path with its verification); stage 6, the rehearsal,
-ran on 2026-10-12 and passed; stage 5, documentation, in review with its
-numbers; stages 7–8 open. Design
+ran on 2026-10-12 and passed its verification, with one acceptance check,
+the served edit's round trip, still open; stage 5, documentation, in review
+with its numbers; stages 7–8 open. Design
 written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
@@ -1069,9 +1070,12 @@ until the engine can tell compacted history from absence.
    the board's cold load 15.5 s against 20.2 s and the patch replays behind
    it 14,273 against 44,928, with the traversal still the bound; writes 1–5
    ms at the engine, as after stage 1; a topic edit through the served API
-   via `cf cell set` 10.7 s cold and 3.3 s warm against 9.0 s and 2.6–3.2 s
-   on the uncompacted file, single samples, the session's watch add being the
-   time in both.
+   via `cf cell set`, eight warm samples a side, 3.4 s median on the
+   compacted file against 2.7 s on the uncompacted, the cold edit 8.9 s
+   against 9.2 s, the session's watch add being the time in both — an
+   inconclusive comparison, so the served-edit acceptance check of §3 step 7
+   stays open until a browser-side `transact` timing is taken against both
+   files.
 7. **The production run**, by the operator, from the rehearsed flag set, with
    the owner's agreement. Stage 1's measurement left disk as the reason:
    22.7 GB, of which 13.6 GB is commit payloads that I6 reaches outside the

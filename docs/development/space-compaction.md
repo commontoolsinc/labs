@@ -122,7 +122,7 @@ against the same reads on the uncompacted snapshot with the same engine
 | board again, warm | 10,073 ms | 8,201 ms |
 | patch replays after the cold board load | 44,928 | 14,273 |
 | one patch on each of the six longest-tailed documents, through the engine | 1–5 ms | 1–5 ms |
-| a topic title edit through the served API, via `cf cell set` (one sample each) | 9.0 s cold, 3.2 s and 2.6 s warm | 10.7 s cold, 3.3 s and 3.3 s warm |
+| a topic title edit through the served API, via `cf cell set`: first sample, then the median and range of eight | 9.0 s cold; 2.7 s (2.6–3.1 s) warm | 10.7 s cold; 3.4 s (2.8–3.7 s) warm |
 
 The board's cold load is a traversal over 21,901 documents either way, which
 compaction does not touch; the replays that remain come from the authored
@@ -134,11 +134,17 @@ API is another matter: its seconds are the session's watch add over the
 topic's graph (6.4 s cold on the uncompacted file, 7.2 s on the compacted,
 2,864 traversals each, `session.watch.add` the only slow query), not the
 write, whose server-side frame is in the noise. Measured the same way on both
-files, single samples on a laptop, the two are equal within what such samples
-vary by, which is what the criterion asks: the compacted file is no slower.
-The storm record's 180 ms was a browser-side `transact` timing with the watch
-already in place, so `cf`'s round trip is not that number and is not judged
-against it. What the compaction buys is
+files, the comparison is **inconclusive**, and the plan's "no slower"
+acceptance check for the served edit is **open**: over eight warm edits a
+side, served in turn on one laptop, the compacted file's median is 0.6 s
+slower (3.4 s against 2.7 s) while its cold edit is 0.3 s faster, its series
+trends down through the run (3.5 s to 2.8 s), and `cf`'s own warm reads on
+that side run 0.1 s slower too — so the gap is as consistent with a colder
+server as with the file. Nothing here proves a regression, and nothing
+proves its absence. What would settle it is the instrument the storm record
+used, a browser-side `transact` timing with the watch already in place, run
+alternately against both files; `cf`'s round trip carries the watch add and
+is not that number. What the compaction buys is
 the file: 8.45 GB where there was 22.71 GB, and a history that no longer
 grows a reader's work with every storm.
 
