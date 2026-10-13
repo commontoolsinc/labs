@@ -287,7 +287,12 @@ export type CfcInstrumentationHooks = {
 
   onPreparedTx?(): void;
 
-  /** Whether the prepared digest was computed or reused at the activity epoch. */
+  /**
+   * One prepared digest was canonicalized and hashed (`computed`), or one
+   * use of the current activity's digest hashed nothing (`memo`): a read of
+   * a digest already hashed at this activity epoch, or a commit-time recheck
+   * that found the activity its preparation verified still standing.
+   */
   onPreparedDigest?(outcome: "computed" | "memo"): void;
 
   /** One structured refusal detail was recorded. Measurement only. */
@@ -345,6 +350,24 @@ export type CfcInstrumentationHooks = {
     reference: unknown,
     tx: IExtendedStorageTransaction,
   ): boolean;
+};
+
+/**
+ * A transaction's CFC activity as of one activity epoch, and the prepared
+ * digest of that activity once something has read it.
+ */
+type ActivitySnapshot = {
+  /** The activity epoch the snapshot was taken at. */
+  readonly epoch: number;
+
+  /**
+   * The activity, frozen at every level when the snapshot is taken, so that
+   * its digest is a function of the snapshot alone.
+   */
+  readonly input: PreparedDigestInput;
+
+  /** Digest of `input`, absent until `#digestOf()` hashes it. */
+  digest?: string;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -779,12 +802,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   #cfcActivityEpoch = 0;
 
-  /** Digest and input bound to one immutable activity snapshot. */
-  #preparedDigestMemo: {
-    epoch: number;
-    input: PreparedDigestInput;
-    digest: string;
-  } | undefined;
+  /** The snapshot of the activity at the epoch it names, once one is built. */
+  #activitySnapshotMemo: ActivitySnapshot | undefined;
+
+  /**
+   * The snapshot the standing preparation verified, which its digest is
+   * derived from. An invalidated preparation keeps the snapshot it had, and
+   * with it that digest; a refused preparation and an unprepared transaction
+   * have none.
+   */
+  #preparedSnapshot: ActivitySnapshot | undefined;
 
   /**
    * The last _negative_ flow-label probe verdict, with the activity epoch it
@@ -1665,21 +1692,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   invalidateCfc(reason: string): void {
-    this.#preparedDigestMemo = undefined;
+    this.#activitySnapshotMemo = undefined;
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
-    const previousDigest = this.#cfcState.prepare.status === "prepared"
-      ? this.#cfcState.prepare.digest
-      : this.#cfcState.prepare.status === "invalidated"
-      ? this.#cfcState.prepare.digest
-      : undefined;
     const reasons = this.#cfcState.prepare.status === "invalidated"
       ? [...this.#cfcState.prepare.reasons, reason]
       : [reason];
-    this.#cfcState.prepare = {
-      status: "invalidated",
-      digest: previousDigest,
-      reasons,
-    };
+    // The digest the preparation had stays readable, and reading it is what
+    // hashes it: an invalidation asks for no digest.
+    const prepared = this.#preparedSnapshot;
+    const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
+    this.#cfcState.prepare = prepared === undefined
+      ? { status: "invalidated", digest: undefined, reasons }
+      : {
+        status: "invalidated",
+        get digest() {
+          return digestOf(prepared);
+        },
+        reasons,
+      };
     if (wasPrepared) {
       this.#cfcInstrumentation.onDigestInvalidation?.(reason);
     }
@@ -2507,16 +2537,55 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.#postCommitEffects ?? Promise.resolve();
   }
 
-  #preparedDigest(): string {
-    if (this.#preparedDigestMemo?.epoch === this.#cfcActivityEpoch) {
-      this.#cfcInstrumentation.onPreparedDigest?.("memo");
-      return this.#preparedDigestMemo.digest;
+  /** Returns the snapshot of the activity at the current epoch, built once. */
+  #activitySnapshot(): ActivitySnapshot {
+    const memo = this.#activitySnapshotMemo;
+    if (memo?.epoch === this.#cfcActivityEpoch) return memo;
+    const snapshot: ActivitySnapshot = {
+      epoch: this.#cfcActivityEpoch,
+      input: this.#buildPreparedDigestInput(),
+    };
+    this.#activitySnapshotMemo = snapshot;
+    return snapshot;
+  }
+
+  /** Returns a snapshot's digest, canonicalizing and hashing it on first use. */
+  #digestOf(snapshot: ActivitySnapshot): string {
+    if (snapshot.digest === undefined) {
+      snapshot.digest = preparedDigestFor(snapshot.input);
+      this.#cfcInstrumentation.onPreparedDigest?.("computed");
     }
-    const input = this.#buildPreparedDigestInput();
-    const digest = preparedDigestFor(input);
-    this.#preparedDigestMemo = { epoch: this.#cfcActivityEpoch, input, digest };
-    this.#cfcInstrumentation.onPreparedDigest?.("computed");
-    return digest;
+    return snapshot.digest;
+  }
+
+  /** Returns the digest of the activity at the current epoch. */
+  #preparedDigest(): string {
+    const snapshot = this.#activitySnapshot();
+    if (snapshot.digest !== undefined) {
+      this.#cfcInstrumentation.onPreparedDigest?.("memo");
+    }
+    return this.#digestOf(snapshot);
+  }
+
+  /**
+   * Decides the commit-time recheck: whether the activity this transaction
+   * commits with has the digest of the activity its preparation verified
+   * (the CFC specification's §8.10.1, `08-10-validation-at-boundaries.md`,
+   * "a cheap recheck at *commit* time that the digest still matches").
+   *
+   * While the activity epoch stands where the preparation left it, the
+   * snapshot at the current epoch is the snapshot the preparation verified:
+   * one frozen input, whose digest equals itself, so neither side is hashed.
+   * Once the epoch has moved, the activity is snapshotted again and the two
+   * digests are computed and compared.
+   */
+  #preparedActivityStands(prepared: ActivitySnapshot): boolean {
+    const current = this.#activitySnapshot();
+    if (current === prepared) {
+      this.#cfcInstrumentation.onPreparedDigest?.("memo");
+      return true;
+    }
+    return this.#digestOf(current) === this.#digestOf(prepared);
   }
 
   #buildPreparedDigestInput(): PreparedDigestInput {
@@ -2607,7 +2676,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }));
     }
 
-    return {
+    return deepFreeze({
       consumedReads,
       attemptedWrites,
       writes,
@@ -2695,7 +2764,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           ],
         }
         : {}),
-    };
+    });
   }
 
   /**
@@ -2946,8 +3015,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Settle whether this transaction is CFC-relevant, and run `prepareCfc()`
-   * when it is.
+   * Settle whether this transaction is CFC-relevant, and run the verification
+   * `prepareCfc()` runs when it is. Nothing here reads the digest of what was
+   * verified, so none is hashed.
    *
    * `commit()` runs this itself, so a transaction reaches the enforcement
    * ladder prepared whether or not anything ran it earlier. Callers still run
@@ -2965,7 +3035,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * it; a transaction that admits no writes has nothing to stamp anyway.
    */
   prepareForCommit(): void {
-    if (this.#needsCfcPreparation()) this.prepareCfc();
+    if (!this.#needsCfcPreparation()) return;
+    const started = performance.now();
+    try {
+      this.#prepareCfcWithoutYielding();
+    } finally {
+      logger.time(started, "prepareCfc");
+    }
   }
 
   /** Prepares between cooperative yields, aborting canceled or changed work. */
@@ -2999,7 +3075,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.abort(signal.reason);
       }
     } finally {
-      steps.return("");
+      steps.return();
       logger.time(started, "prepareCfc");
     }
   }
@@ -3067,21 +3143,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.#cfcState.prepare.status === "unprepared";
   }
 
-  /** Evaluates CFC gates and records the complete preparation interval. */
+  /**
+   * Evaluates CFC gates and returns the digest of the activity they verified,
+   * or the empty string when they refused. Records the complete preparation
+   * interval, which includes hashing that digest.
+   */
   prepareCfc(): string {
     const started = performance.now();
     try {
-      const steps = this.#prepareCfc();
-      let step = steps.next();
-      while (!step.done) step = steps.next();
-      return step.value;
+      this.#prepareCfcWithoutYielding();
+      const prepare = this.#cfcState.prepare;
+      return prepare.status === "prepared" ? prepare.digest : "";
     } finally {
       logger.time(started, "prepareCfc");
     }
   }
 
-  /** Evaluates gates and seals preparation inputs for this transaction. */
-  *#prepareCfc(): Generator<void, string> {
+  /** Runs the boundary checks to completion in one synchronous pass. */
+  #prepareCfcWithoutYielding(): void {
+    const steps = this.#prepareCfc();
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+  }
+
+  /**
+   * Evaluates gates and seals the snapshot of the activity they verified.
+   * The digest of that snapshot is not computed here; see `#digestOf()`.
+   */
+  *#prepareCfc(): Generator<void, void> {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -3200,6 +3289,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // reject would silently fail open (same shape as the late-sink-request
       // hole, Codex P2 on #4070).
       this.markCfcRelevant("prepare-reasons");
+      this.#preparedSnapshot = undefined;
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
@@ -3209,20 +3299,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const reason of reasons) {
         this.#cfcState.diagnostics.push(plainReason(reason));
       }
-      return "";
+      return;
     }
-    const digest = this.#preparedDigest();
-    const preparedInput = this.#preparedDigestMemo!.input;
+    // The snapshot is taken here, by the pass that verified it, of the
+    // journal as that pass left it, and it is frozen at every level. Its
+    // digest is a function of the snapshot alone, so it is the same string
+    // whenever it is read.
+    const snapshot = this.#activitySnapshot();
+    this.#preparedSnapshot = snapshot;
+    const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
     this.#cfcState.prepare = {
       status: "prepared",
-      digest,
-      input: preparedInput,
+      get digest() {
+        return digestOf(snapshot);
+      },
+      input: snapshot.input,
     };
     if (!this.#reportedCfcPrepared) {
       this.#reportedCfcPrepared = true;
       this.#cfcInstrumentation.onPreparedTx?.();
     }
-    return digest;
   }
 
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
@@ -3720,7 +3816,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#statusOverride = undefined;
     this.#clearPostCommitOutbox();
     this.#cfcState.prepare = { status: "unprepared" };
-    this.#preparedDigestMemo = undefined;
+    this.#activitySnapshotMemo = undefined;
+    this.#preparedSnapshot = undefined;
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
     this.#cfcState.assertedValueRoots = [];
@@ -3953,8 +4050,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
 
       if (this.#cfcState.prepare.status === "prepared") {
-        const currentDigest = this.#preparedDigest();
-        if (currentDigest !== this.#cfcState.prepare.digest) {
+        if (!this.#preparedActivityStands(this.#preparedSnapshot!)) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.#cfcState.enforcementMode !== "observe") {
             reportCfcDenial(

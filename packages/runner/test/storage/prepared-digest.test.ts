@@ -1,14 +1,17 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
+import { preparedDigestFor } from "../../src/cfc/canonical.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import {
   ExtendedStorageTransaction,
   setCfcImplementationIdentity,
   setCfcTrustSnapshot,
 } from "../../src/storage/extended-storage-transaction.ts";
+import { markReadAsAttemptedWrite } from "../../src/storage/reactivity-log.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { runtimeWritePolicyAuthorization } from "../../src/cfc/types.ts";
 
@@ -96,6 +99,160 @@ describe("prepared digest transaction binding", () => {
     expect(outcomes).toEqual(["computed"]);
     expect((await tx.commit().settled).error).toBeUndefined();
     expect(outcomes).toEqual(["computed", "memo"]);
+  });
+
+  describe("hashing on demand", () => {
+    // A transaction as the runtime configures one, with the hook that
+    // reports each request for a digest: "computed" when it hashed, "memo"
+    // when it was answered without hashing.
+    const relevantTx = () => {
+      const outcomes: string[] = [];
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx, {
+        onPreparedDigest: (outcome) => outcomes.push(outcome),
+      });
+      tx.setCfcEnforcementMode("enforce-strict");
+      tx.writeValueOrThrow(address("output"), "one");
+      tx.markCfcRelevant("test");
+      return { tx, outcomes };
+    };
+
+    it("hashes nothing when the commit carries the activity it prepared over", async () => {
+      const { tx, outcomes } = relevantTx();
+      tx.prepareForCommit();
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect(outcomes).toEqual([]);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(outcomes).toEqual(["memo"]);
+    });
+
+    it("hashes nothing when commit() is what prepares", async () => {
+      const { tx, outcomes } = relevantTx();
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(outcomes).toEqual(["memo"]);
+    });
+
+    it("hashes nothing when the preparation was cooperative", async () => {
+      const { tx, outcomes } = relevantTx();
+      await tx.prepareForCommitCooperatively(new AbortController().signal);
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect(outcomes).toEqual([]);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(outcomes).toEqual(["memo"]);
+    });
+
+    it("hashes both snapshots and rejects when the activity moved after preparing", async () => {
+      const { tx, outcomes } = relevantTx();
+      tx.prepareForCommit();
+      // A batched write advances the activity without invalidating the
+      // preparation, so the commit's recheck is what refuses it.
+      tx.writeValuesOrThrow([{ address: address("output"), value: "two" }]);
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
+      expect(outcomes).toEqual([]);
+      const { error } = await tx.commit().settled;
+      expect(error?.name).toBe("StorageTransactionAborted");
+      expect((error as { reason?: Error }).reason?.message).toBe(
+        "cfc-prepared-digest-mismatch",
+      );
+      expect(outcomes).toEqual(["computed", "computed"]);
+    });
+
+    it("reads back the digest of the snapshot it sealed, hashing once", () => {
+      const { tx, outcomes } = relevantTx();
+      try {
+        tx.prepareForCommit();
+        const prepare = tx.getCfcState().prepare;
+        if (prepare.status !== "prepared") throw new Error("not prepared");
+        const expected = preparedDigestFor(prepare.input);
+        expect(prepare.digest).toBe(expected);
+        expect(prepare.digest).toBe(expected);
+        expect(tx.accessForTestingOnly.preparedDigest()).toBe(expected);
+        expect(outcomes).toEqual(["computed", "memo"]);
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("returns the digest from prepareCfc(), hashing once", async () => {
+      const { tx, outcomes } = relevantTx();
+      const digest = tx.prepareCfc();
+      const prepare = tx.getCfcState().prepare;
+      if (prepare.status !== "prepared") throw new Error("not prepared");
+      expect(digest).toBe(preparedDigestFor(prepare.input));
+      expect(prepare.digest).toBe(digest);
+      expect(outcomes).toEqual(["computed"]);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      expect(outcomes).toEqual(["computed", "memo"]);
+    });
+
+    it("keeps the sealed snapshot's digest on an invalidated preparation", () => {
+      const { tx, outcomes } = relevantTx();
+      try {
+        tx.prepareForCommit();
+        const prepared = tx.getCfcState().prepare;
+        if (prepared.status !== "prepared") throw new Error("not prepared");
+        const expected = preparedDigestFor(prepared.input);
+        tx.writeValueOrThrow(address("output"), "two");
+        const invalidated = tx.getCfcState().prepare;
+        expect(invalidated.status).toBe("invalidated");
+        // Invalidating reads no digest.
+        expect(outcomes).toEqual([]);
+        // The digest is of the activity that was prepared, which the write
+        // after it is no part of.
+        expect((invalidated as { digest?: string }).digest).toBe(expected);
+        expect(tx.accessForTestingOnly.preparedDigest()).not.toBe(expected);
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("has no digest on a preparation that was refused or never ran", () => {
+      const { tx } = relevantTx();
+      try {
+        tx.invalidateCfc("never prepared");
+        const state = tx.getCfcState().prepare;
+        expect(state.status).toBe("invalidated");
+        expect((state as { digest?: string }).digest).toBeUndefined();
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("holds the sealed snapshot immutable", () => {
+      // The digest is hashed from the snapshot after the preparation, so
+      // nothing reachable from it may change in between: neither a record
+      // nor what a record shares with the journal, a read's `meta` here.
+      const { tx } = relevantTx();
+      try {
+        const meta = { note: { nested: ["a"] } };
+        tx.readValueOrThrow(address("input"), { meta });
+        tx.readValueOrThrow(address("attempted"), {
+          meta: markReadAsAttemptedWrite,
+        });
+        tx.recordCfcDereferenceTrace({
+          source: address("input"),
+          target: address("output"),
+          kind: "value",
+        });
+        tx.recordCfcWritePolicyInput({ kind: "custom", name: "p", value: 1 });
+        tx.setCfcModuleDelegations(
+          new Map([[signer.did(), new Map([["module:a", ["module:b"]]])]]),
+        );
+        tx.prepareForCommit();
+        const prepare = tx.getCfcState().prepare;
+        if (prepare.status !== "prepared") throw new Error("not prepared");
+        const { input } = prepare;
+        expect(input.consumedReads.length).toBeGreaterThan(0);
+        expect(input.writes.length).toBeGreaterThan(0);
+        expect(input.attemptedWrites.length).toBeGreaterThan(0);
+        expect(input.writeAttemptLog.length).toBeGreaterThan(0);
+        expect(input.moduleDelegations?.length).toBe(1);
+        expect(isDeepFrozen(input)).toBe(true);
+        expect(Object.isFrozen(meta.note.nested)).toBe(true);
+      } finally {
+        tx.abort();
+      }
+    });
   });
 
   it("recomputes after a repeated trace while preserving the prepared token", async () => {

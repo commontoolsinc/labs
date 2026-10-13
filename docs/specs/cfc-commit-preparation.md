@@ -31,11 +31,11 @@ does two things before it reaches the CFC enforcement ladder:
    - **Probe the sink-request ceiling.** `gatedSinkRequestExists` asks whether
      the transaction assembled a request for a sink that declares a
      confidentiality ceiling.
-   - **Prepare.** A relevant transaction that is still unprepared runs
-     `prepareCfc()`, which derives and persists its label map and records the
-     reasons the boundary refused over, if any. `prepareCfc()` materializes
-     schema documents first, so the prepared digest covers the staged writes
-     wherever the prepare happened.
+   - **Prepare.** A relevant transaction that is still unprepared runs the
+     verification `prepareCfc()` runs, which derives and persists its label
+     map and records the reasons the boundary refused over, if any. That
+     verification materializes schema documents first, so the prepared digest
+     covers the staged writes wherever the prepare happened.
 
 The two probes exist because relevance is **computed, not declared**. Reading
 or writing a document that carries stored labels marks the transaction as it
@@ -62,7 +62,7 @@ same way, because nothing between two attempts changes what the transaction
 did.
 
 Preparing inside `commit()` turns that outcome into the verdict it always was.
-A transaction the ladder refuses has now run `prepareCfc()`, so its refusal
+A transaction the ladder refuses has now been prepared, so its refusal
 carries the reasons prepare recorded, and a refusal made of verdicts is
 terminal: the action runs once.
 
@@ -96,6 +96,66 @@ transaction is skipped so that both call sites reach the same answer about
 one — `commit()` takes none of the step for a read-only transaction — and a
 transaction that admits no writes has nothing to stamp in any case.
 
+## The prepared digest and the commit-time recheck
+
+The CFC specification's §8.10.1 (`08-10-validation-at-boundaries.md`) allows
+an implementation to split an attempt into "full verification at *prepare*
+time producing a canonical digest of the verified activity" and "a cheap
+recheck at *commit* time that the digest still matches", on four conditions.
+This runtime takes that split. What follows is how it holds the three
+conditions that concern the digest, and when the digest is computed. The
+fourth, that the verification's own reads remain commit dependencies,
+concerns the storage commit rather than this step.
+
+**What the digest is derived from.** The specification asks that the digest
+"be derived by the verifier itself from the canonicalized journal it
+verified", label-metadata writes the verification staged included. A
+successful preparation ends by taking a snapshot of the transaction's
+activity from the journal as the verification left it: the reads that were
+not the verifier's own, the attempted and the applied writes, the ordered
+write log, and the decision inputs recorded beside them. The snapshot is
+frozen at every level as it is taken, and `prepareCfc()` accepts no input, so
+no caller can supply one or change the one taken. The prepared digest is
+`preparedDigestFor()` of that snapshot
+([canonical.ts](../../packages/runner/src/cfc/canonical.ts)): its canonical
+form, hashed.
+
+**When the digest is computed.** The digest is a function of the snapshot
+alone, so its value is settled when the snapshot is taken and the transaction
+computes it when something first reads it: the string `prepareCfc()` returns,
+`digest` on the state `getCfcState().prepare` returns, or a recheck that has
+two snapshots to compare. A transaction prepared through `prepareForCommit()`
+and committed with the activity it prepared over reads none, so it
+canonicalizes and hashes nothing. An invalidated preparation keeps the
+snapshot it had, and its `digest` is computed the same way.
+
+**The recheck.** Every journaled read, every write, and every change to a
+recorded decision input advances the transaction's activity epoch, and a
+snapshot is kept with the epoch it was taken at. At commit, when the epoch is
+the one the preparation's snapshot was taken at, the activity being committed
+is that snapshot, whose digest matches itself. When the epoch has moved, the
+activity is snapshotted again, both digests are computed, and a difference
+invalidates the preparation. Outside the `observe` enforcement mode it also
+rejects the commit, as `StorageTransactionAborted` carrying
+`cfc-prepared-digest-mismatch`, which a caller may retry in a fresh
+transaction.
+
+**Activity after the preparation.** A read, a single write, or a newly
+recorded decision input after the preparation invalidates it where it
+happens, so the transaction reaches commit not prepared, and an enforcing
+mode refuses it there before any digest is compared. Two kinds of activity
+reach the recheck instead. A batched write
+advances the epoch without invalidating, and the recheck refuses it by
+digest. A dereference the transaction had already performed advances the
+epoch and leaves the digest where it was, since the digest binds the set of
+dereferences, and the recheck accepts it.
+
+Computing the digest on first read changes when the hash runs, and neither
+what it is nor which commits the recheck accepts.
+`packages/runner/test/storage/prepared-digest.test.ts` pins both halves: a
+commit whose activity stands hashes nothing, and one whose activity moved
+hashes both snapshots and is refused.
+
 ## Cooperative preparation for asynchronous completions
 
 `Runtime.editWithRetry` accepts an optional owner `AbortSignal`. With one, it
@@ -113,7 +173,7 @@ before a yield. If the transaction's activity epoch changes during that yield,
 the attempt aborts rather than sealing candidates collected before the change.
 The caller must await preparation before committing. Initial collections,
 individual flat label-map operations, other verification, and final ceiling,
-grant, and digest work remain synchronous. Suspension points do not impose a
+grant, and activity-snapshot work remain synchronous. Suspension points do not impose a
 transaction-size limit or a hard bound on event-loop latency.
 
 `sqliteQuery` supplies its builtin lifetime signal to completion and error
