@@ -6906,12 +6906,14 @@ type InputRead = Omit<IReadActivity, "journalIndex"> & {
 
 /** The reads an `InputReadView` holds, and what they were built from. */
 type InputReadSnapshot = {
-  // The transaction's records the reads were copied from, in order, and the
-  // metadata object each carried then. A record keeps its place in the
-  // transaction's list while its internal-verifier classification changes,
+  // What the reads were copied from: every record the transaction offered,
+  // in order, the metadata object each carried, and whether each distinct
+  // metadata object classed its reads as the verifier's own. A record keeps
+  // its place in the transaction's list while that classification changes,
   // by its metadata being replaced or changed in place.
-  sources: readonly IReadActivity[];
+  records: readonly IReadActivity[];
   metas: readonly IReadActivity["meta"][];
+  internalByMeta: ReadonlyMap<IReadActivity["meta"], boolean>;
   triggerCount: number;
   reads: readonly InputRead[];
   // The value path each read observes, or `undefined` for a read of one of
@@ -7196,14 +7198,19 @@ export class InputReadView {
       return this.#reads;
     }
     let clockLessReads = 0;
-    const sources: IReadActivity[] = [];
     const metas: IReadActivity["meta"][] = [];
+    const internalByMeta = new Map<IReadActivity["meta"], boolean>();
     const reads: InputRead[] = [];
     for (const read of rawList) {
-      if (isInternalVerifierRead(read.meta)) continue;
+      const meta = read.meta;
+      metas.push(meta);
+      let internal = internalByMeta.get(meta);
+      if (internal === undefined) {
+        internal = isInternalVerifierRead(meta);
+        internalByMeta.set(meta, internal);
+      }
+      if (internal) continue;
       if (read.journalIndex === undefined) clockLessReads += 1;
-      sources.push(read);
-      metas.push(read.meta);
       reads.push({ ...read, journalIndex: read.journalIndex ?? -Infinity });
     }
     for (const read of triggers) {
@@ -7216,8 +7223,12 @@ export class InputReadView {
       });
     }
     this.#reads = {
-      sources,
+      // A copy, so the records compared at the next ask are the ones this
+      // snapshot was built from even where the transaction hands out its
+      // own growing list.
+      records: [...rawList],
       metas,
+      internalByMeta,
       triggerCount: triggers.length,
       reads,
       gatePaths: reads.map((read) => canonicalizeDocumentPath(read.path)),
@@ -7237,26 +7248,29 @@ export class InputReadView {
 
   /**
    * Helper for `#current()`, which says whether `held` was built from
-   * exactly the records of `records` that are not the verifier's own, each
-   * with the metadata it carries now. The transaction keeps a record whose
-   * classification is not sealed so that a consumer reads its metadata
-   * again, so every record is classified on every ask, and a record that
-   * joined or left the inputs, or whose metadata object was replaced, ends
-   * the snapshot.
+   * exactly `records`, each classified as it is now. The transaction keeps a
+   * record whose classification is not sealed so that a consumer reads its
+   * metadata again, so every ask reads every record's metadata: a record
+   * carrying another metadata object ends the snapshot, and so does a
+   * metadata object that classes its reads otherwise than it did. The
+   * classification is the metadata object's, and a transaction's records
+   * share a few of them, so each distinct one is classified once per ask.
    */
   static #stands(
     held: InputReadSnapshot,
     records: readonly IReadActivity[],
   ): boolean {
-    let at = 0;
-    for (const read of records) {
-      if (isInternalVerifierRead(read.meta)) continue;
-      if (held.sources[at] !== read || held.metas[at] !== read.meta) {
+    if (records.length !== held.records.length) return false;
+    for (let index = 0; index < records.length; index++) {
+      const read = records[index];
+      if (read !== held.records[index] || read.meta !== held.metas[index]) {
         return false;
       }
-      at += 1;
     }
-    return at === held.sources.length;
+    for (const [meta, internal] of held.internalByMeta) {
+      if (isInternalVerifierRead(meta) !== internal) return false;
+    }
+    return true;
   }
 }
 
