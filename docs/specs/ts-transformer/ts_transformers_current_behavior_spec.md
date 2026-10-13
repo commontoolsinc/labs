@@ -182,7 +182,10 @@ present; no stage handles a missing one.
      data it returns under a writer policy is data its result document holds:
      a literal, an object or array literal (spreads and computed keys
      included, a member its type does not name read against the type's index
-     signature), a constant, a plain call's result, at any depth. That result
+     signature), a constant, a plain call's result, at any depth. A cell or a
+     stream such data holds is a link: a writer policy inside the type it
+     links to is that document's, so it does not make the data the result
+     document's own. That result
      is rebuilt from the returned object, and each such member's type node
      carries the `definesDocument` schema hint, which the generator reads the
      same way for that member alone. A returned value the rebuild cannot read
