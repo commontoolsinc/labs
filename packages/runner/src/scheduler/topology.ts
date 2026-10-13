@@ -228,8 +228,14 @@ export function topologicalSort(
  * actions each of which reaches every other over edges among the unplaced.
  */
 type CycleComponent = {
-  /** The actions' indices, as of when the component was found. */
+  /**
+   * The actions' indices. Those placed since the component was found stay
+   * listed, and are passed over wherever the members are read.
+   */
   readonly members: readonly number[];
+
+  /** How many of `members` are unplaced. */
+  size: number;
 
   /** Edges into the component from unplaced actions outside it. */
   feeders: number;
@@ -237,9 +243,15 @@ type CycleComponent = {
   /**
    * `fed` while an unplaced action outside feeds it, `unfed` once none
    * does, and `broken` from the first of its members to be placed, when
-   * `members` no longer says what is strongly connected.
+   * the rest may be strongly connected no longer.
    */
   status: "fed" | "unfed" | "broken";
+
+  /**
+   * The members placed since the component was last known to be strongly
+   * connected, in the order they were placed.
+   */
+  placed: number[];
 };
 
 /**
@@ -253,15 +265,19 @@ type CycleComponent = {
  * unplaced actions that have more than one action and no feeder. Placing an
  * action changes the components of no action outside its own component, so
  * the components are found once, over what is unplaced at the first break,
- * and after that only a component with a member placed is looked at again,
- * over its remaining members.
+ * and after that only a component with a member placed is looked at again.
  *
- * What that costs depends on what the break left. Remaining members that
- * are still one component are recognized by a traversal each way that stops
- * once it has reached them all, which for a densely connected component is
- * about its member count. Otherwise the components among them are searched
- * for, at the cost of the edges leaving them. Either way a break is bounded
- * by the cycle it fell in and not by the work set.
+ * What that costs depends on what the break left. The remaining members
+ * are still one component exactly when each of them that fed the action
+ * placed still reaches each of them that it, or an action placed after it,
+ * fed. Two traversals from one of the former settle that, and stop once
+ * they have reached the actions in question: a few steps where the action
+ * placed had near neighbors, and about the member count for a densely
+ * connected component. The component then stands, and only the members
+ * whose key the placing changed are put back among the candidates.
+ * Otherwise the components among the remaining members are searched for,
+ * at the cost of the edges leaving them. Either way a break is bounded by
+ * the cycle it fell in and not by the work set.
  */
 class CycleBreaks {
   /**
@@ -315,10 +331,11 @@ class CycleBreaks {
   readonly #key: Float64Array;
 
   // Working state of the traversals, kept across them. A traversal is
-  // numbered, and an index is in its scope, or reached by it, when the
-  // entry for the index holds that number.
+  // numbered, and an index is in its scope, reached by it, or wanted by it,
+  // when the entry for the index holds that number.
   readonly #scope: Int32Array;
   readonly #reached: Int32Array;
+  readonly #wanted: Int32Array;
   readonly #order: Int32Array;
   readonly #low: Int32Array;
   readonly #nextEdge: Int32Array;
@@ -396,6 +413,7 @@ class CycleBreaks {
     this.#key = new Float64Array(count);
     this.#scope = new Int32Array(count);
     this.#reached = new Int32Array(count);
+    this.#wanted = new Int32Array(count);
     this.#order = new Int32Array(count);
     this.#low = new Int32Array(count);
     this.#nextEdge = new Int32Array(count);
@@ -440,9 +458,12 @@ class CycleBreaks {
     const index = this.#indices.get(action)!;
     this.#placed[index] = 1;
     const own = this.#component[index];
-    if (own !== undefined && own.status !== "broken") {
-      own.status = "broken";
-      this.#broken.push(own);
+    if (own !== undefined) {
+      own.placed.push(index);
+      if (own.status !== "broken") {
+        own.status = "broken";
+        this.#broken.push(own);
+      }
     }
     const end = this.#firstTarget[index + 1];
     for (let edge = this.#firstTarget[index]; edge < end; edge++) {
@@ -453,29 +474,73 @@ class CycleBreaks {
   }
 
   /**
-   * Replaces `component`, a member of which has been placed, by the
-   * components among its unplaced members. The component was unfed: a
-   * break takes a member of an unfed component alone, and every other
-   * visit is of an action with no unplaced action feeding it, which is on
-   * no cycle. So nothing outside feeds its remaining members either, and
-   * where they are still one component, that component is unfed too.
+   * Brings `component`, members of which have been placed, up to date:
+   * either it stands with the members it has left, or the components
+   * among them replace it.
+   *
+   * The component was unfed, and the first of its members to be placed was
+   * the one a break took: a break takes a member of an unfed component
+   * alone, and every other visit is of an action that no unplaced action
+   * feeds, which is on no cycle. The members placed after it were visited
+   * that way. So nothing outside feeds the remaining members, and where
+   * they are still one component, that component is unfed too.
    */
   #renew(component: CycleComponent): void {
-    const rest = component.members.filter((index) => !this.#placed[index]);
-    if (rest.length < 2) return;
-    if (
-      this.#reachesAll(rest, this.#firstTarget, this.#targets) &&
-      this.#reachesAll(rest, this.#firstSource, this.#sources)
+    const gone = component.placed;
+    component.size -= gone.length;
+    if (component.size < 2) return;
+
+    // A path between two remaining members that ran through the placed
+    // ones entered them at the action the break took, from a remaining
+    // member with an edge to it, and left them at a remaining member one
+    // of them has an edge to. So the remaining members are one component
+    // exactly when each of the former still reaches each of the latter.
+    const mine = (index: number) =>
+      !this.#placed[index] && this.#component[index] === component;
+    const [taken] = gone;
+    const fromThem: number[] = [];
+    for (
+      let edge = this.#firstSource[taken];
+      edge < this.#firstSource[taken + 1];
+      edge++
     ) {
-      const whole: CycleComponent = {
-        members: rest,
-        feeders: 0,
-        status: "fed",
-      };
-      for (const index of rest) this.#component[index] = whole;
-      this.#free(whole);
+      if (mine(this.#sources[edge])) fromThem.push(this.#sources[edge]);
+    }
+    const toThem: number[] = [];
+    for (const index of gone) {
+      const end = this.#firstTarget[index + 1];
+      for (let edge = this.#firstTarget[index]; edge < end; edge++) {
+        if (mine(this.#targets[edge])) toThem.push(this.#targets[edge]);
+      }
+    }
+    if (
+      fromThem.length > 0 &&
+      this.#reachesEach(
+        component,
+        fromThem[0],
+        toThem,
+        this.#firstTarget,
+        this.#targets,
+      ) &&
+      this.#reachesEach(
+        component,
+        fromThem[0],
+        fromThem,
+        this.#firstSource,
+        this.#sources,
+      )
+    ) {
+      component.status = "unfed";
+      component.placed = [];
+      // The keys that changed: an in-degree fell where a placed member had
+      // an edge to the action, and a parent among the placed members has
+      // an edge to its child or one from it.
+      for (const index of toThem) this.#offer(index);
+      for (const index of fromThem) this.#offer(index);
       return;
     }
+
+    const rest = component.members.filter(mine);
     for (const members of this.#stronglyConnected(rest)) this.#adopt(members);
   }
 
@@ -485,7 +550,13 @@ class CycleBreaks {
    * less the edges that start at a member.
    */
   #adopt(members: readonly number[]): void {
-    const component: CycleComponent = { members, feeders: 0, status: "fed" };
+    const component: CycleComponent = {
+      members,
+      size: members.length,
+      feeders: 0,
+      status: "fed",
+      placed: [],
+    };
     for (const index of members) this.#component[index] = component;
     for (const index of members) {
       component.feeders += this.#inDegree.get(this.#actions[index])!;
@@ -509,50 +580,68 @@ class CycleBreaks {
    */
   #free(component: CycleComponent): void {
     component.status = "unfed";
-    const count = this.#actions.length;
-    for (const index of component.members) {
-      const parent = this.#parent[index];
-      const blocked = parent >= 0 && !this.#placed[parent] ? 1 : 0;
-      const degree = this.#inDegree.get(this.#actions[index])!;
-      const key = (blocked * count + degree) * count + this.#rank[index];
-      this.#key[index] = key;
-      this.#push(key);
-    }
+    for (const index of component.members) this.#offer(index);
   }
 
   /**
-   * Returns whether the first index of `scope` reaches every other over
-   * the edges given, staying within `scope`, which holds unplaced indices.
-   * With `#targets` that is the first reaching the rest, and with
-   * `#sources` the rest reaching the first; both together say `scope` is
-   * strongly connected. The traversal stops once it has reached them all.
+   * Puts the unplaced action at `index` among the candidates under its
+   * current key. An action may hold several entries under one key: an
+   * entry that reaches the top while the action's component is fed is
+   * dropped, so each time the action becomes a candidate it is given a
+   * fresh one.
    */
-  #reachesAll(
-    scope: readonly number[],
+  #offer(index: number): void {
+    const count = this.#actions.length;
+    const parent = this.#parent[index];
+    const blocked = parent >= 0 && !this.#placed[parent] ? 1 : 0;
+    const degree = this.#inDegree.get(this.#actions[index])!;
+    const key = (blocked * count + degree) * count + this.#rank[index];
+    this.#key[index] = key;
+    this.#push(key);
+  }
+
+  /**
+   * Returns whether `from` reaches every index of `wanted` over the edges
+   * given, through unplaced members of `component` alone. With `#targets`
+   * that is `from` reaching them, and with `#sources` them reaching
+   * `from`. The traversal stops once it has reached them all.
+   */
+  #reachesEach(
+    component: CycleComponent,
+    from: number,
+    wanted: readonly number[],
     firstEdge: Int32Array,
     ends: Int32Array,
   ): boolean {
     const traversal = ++this.#traversal;
-    const inScope = this.#scope;
     const reached = this.#reached;
-    for (const index of scope) inScope[index] = traversal;
-    const pending = [scope[0]];
-    reached[scope[0]] = traversal;
-    let count = 1;
-    while (count < scope.length && pending.length > 0) {
+    const isWanted = this.#wanted;
+    let missing = 0;
+    for (const index of wanted) {
+      if (isWanted[index] === traversal) continue;
+      isWanted[index] = traversal;
+      missing++;
+    }
+    reached[from] = traversal;
+    if (isWanted[from] === traversal) missing--;
+    const pending = [from];
+    while (missing > 0 && pending.length > 0) {
       const index = pending.pop()!;
       const end = firstEdge[index + 1];
       for (let edge = firstEdge[index]; edge < end; edge++) {
         const next = ends[edge];
-        if (inScope[next] !== traversal || reached[next] === traversal) {
+        if (
+          reached[next] === traversal || this.#placed[next] ||
+          this.#component[next] !== component
+        ) {
           continue;
         }
         reached[next] = traversal;
-        count++;
+        if (isWanted[next] === traversal) missing--;
         pending.push(next);
       }
     }
-    return count === scope.length;
+    return missing === 0;
   }
 
   /**

@@ -286,11 +286,19 @@ describe("topologicalSort()", () => {
       });
     });
 
-    it("orders random cyclic work sets as the rule stated directly does", () => {
-      for (let seed = 1; seed <= 60; seed++) {
-        const random = lcg(seed);
+    describe("against the rule stated directly", () => {
+      // Two kinds of random work set. One-way edges at random give cycles
+      // that a break mostly takes apart. Edges laid both ways give cycles
+      // that mostly stay whole when a member is placed, which is the case
+      // the sort recognizes without searching the cycle again.
+
+      const expectReferenceOrder = (
+        seed: number,
+        random: () => number,
+        count: number,
+        targetsOf: (index: number) => number[],
+      ) => {
         const nodes = new NodeRegistry();
-        const count = 30 + Math.floor(random() * 90);
         const actions = registerActions(
           nodes,
           count,
@@ -299,16 +307,13 @@ describe("topologicalSort()", () => {
               ? Math.floor(random() * index)
               : undefined,
         );
-        const pairs: [Action, Action[]][] = actions.map((from) => {
-          const to: Action[] = [];
-          const fanOut = Math.floor(random() * (3 + seed % 3));
-          for (let n = 0; n < fanOut; n++) {
-            const target = actions[Math.floor(random() * count)];
-            if (target !== from) to.push(target);
-          }
-          return [from, to];
-        });
-        const dependents = edges(pairs);
+        const lists = actions.map((_, index) => targetsOf(index));
+        const dependents = edges(
+          actions.map((from, index) => [
+            from,
+            lists[index].filter((to) => to !== index).map((to) => actions[to]),
+          ]),
+        );
         const shuffled = [...actions].sort(() => random() - 0.5);
 
         const order = topologicalSort(
@@ -322,7 +327,41 @@ describe("topologicalSort()", () => {
         expect(names(order), `seed ${seed}`).toEqual(
           names(referenceOrder(shuffled, dependents, nodes)),
         );
-      }
+      };
+
+      it("orders work sets of one-way edges as the rule does", () => {
+        for (let seed = 1; seed <= 60; seed++) {
+          const random = lcg(seed);
+          const count = 30 + Math.floor(random() * 90);
+          expectReferenceOrder(seed, random, count, () => {
+            const fanOut = Math.floor(random() * (3 + seed % 3));
+            return Array.from(
+              { length: fanOut },
+              () => Math.floor(random() * count),
+            );
+          });
+        }
+      });
+
+      it("orders work sets of two-way edges as the rule does", () => {
+        for (let seed = 1; seed <= 60; seed++) {
+          const random = lcg(seed + 1000);
+          const count = 20 + Math.floor(random() * 60);
+          const targets: number[][] = Array.from({ length: count }, () => []);
+          const pairs = Math.floor(count * (0.6 + random()));
+          for (let n = 0; n < pairs; n++) {
+            const a = Math.floor(random() * count);
+            // Mostly a near neighbor, so the pairs chain into paths and
+            // rings; sometimes any action, so some of them close up.
+            const b = random() < 0.7
+              ? (a + 1 + Math.floor(random() * 3)) % count
+              : Math.floor(random() * count);
+            targets[a].push(b);
+            if (random() < 0.85) targets[b].push(a);
+          }
+          expectReferenceOrder(seed, random, count, (index) => targets[index]);
+        }
+      });
     });
 
     it("reads each action's parent once while breaking thousands of cycles", () => {
@@ -348,6 +387,32 @@ describe("topologicalSort()", () => {
 
       expect(order).toEqual(actions);
       expect(nodes.parentLookups).toBe(count);
+    });
+
+    it("places the members of a ring with edges both ways in registration order", () => {
+      // The first break opens the ring into a path, and each break after
+      // it takes the path's earlier-registered end, which the break before
+      // left with one unmet input.
+      const nodes = new NodeRegistry();
+      const count = 2000;
+      const actions = registerActions(nodes, count);
+      const order = topologicalSort(
+        new Set([...actions].reverse()),
+        new WeakMap(),
+        new WeakMap(),
+        nodes,
+        edges(
+          actions.map((from, index) => [
+            from,
+            [
+              actions[(index + 1) % count],
+              actions[(index + count - 1) % count],
+            ],
+          ]),
+        ),
+      );
+
+      expect(order).toEqual(actions);
     });
 
     it("places the members of one fully connected cycle in registration order", () => {
