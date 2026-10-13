@@ -449,10 +449,12 @@ describe("data URI inlining", () => {
         );
       });
 
-      it("returns a `FabricError` below the root of a decoded payload as the same value", () => {
+      it("returns a `FabricError` below the root of a decoded payload as the same value, unless asked to refuse one", () => {
         // The refusal covers a value handed over and the root of a decoded
         // payload. Below that root an instance comes back whole, with
-        // whatever it holds left as it is.
+        // whatever it holds left as it is, for a caller whose destination
+        // stores an instance whole. A caller whose destination admits none
+        // asks for the refusal there too.
         const failure = new FabricError({
           type: "Error",
           message: "boom",
@@ -468,6 +470,13 @@ describe("data URI inlining", () => {
         const result = findAndInlineDataUriLinks(link);
         expect(result.failure).toBeInstanceOf(FabricError);
         expect(result.failure.message).toBe("boom");
+
+        expect(() =>
+          findAndInlineDataUriLinks(link, { refuseCarriedInstances: true })
+        ).toThrow(
+          "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+            "inlining `data:` URI links.",
+        );
       });
 
       it("keeps a special object whole while inlining a sibling", () => {

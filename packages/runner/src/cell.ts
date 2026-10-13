@@ -2165,8 +2165,14 @@ export class CellImpl<T extends FabricValue>
       // space and whichever runtime handles it there, and a `data:` id is
       // good only where it was minted: a link inside one resolves its
       // schema's references against documents this runtime holds.
+      //
+      // An event admits no `FabricInstance`. `convertCellsToLinks()` refuses
+      // one written into the event, and the dissolve refuses one inside the
+      // value a `data:` link carries, which would otherwise arrive in the
+      // event whole with any `data:` link in its state intact.
       const event = findAndInlineDataUriLinks(
         convertCellsToLinks(newValue as CellLinkInput),
+        { refuseCarriedInstances: true },
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 

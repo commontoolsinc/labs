@@ -174,21 +174,37 @@ export function dataUriFromValueWithResolvedLinks(
  * inline. A `FabricInstance` is refused, since passing one through would leave
  * a link inside it un-inlined. The refusal covers `value` and the root of the
  * value a `data:` link carries. A `FabricInstance` below that root comes back
- * as the same instance, with any link inside it left as it is.
+ * as the same instance, with any link inside it left as it is, unless
+ * `options.refuseCarriedInstances` asks for the refusal there as well.
  *
  * @param value - The value to find and inline data: URI links in.
+ * @param options.refuseCarriedInstances - Refuses a `FabricInstance` anywhere
+ *   in the value a `data:` link carries. For a caller whose destination admits
+ *   no instance, where returning one whole would put it there.
  * @returns The value with any data: URI links inlined.
+ * @throws If it reaches a `FabricInstance` it refuses.
  */
-export function findAndInlineDataUriLinks(value: any): any {
-  return inlineDataUriLinks(value, false);
+export function findAndInlineDataUriLinks(
+  value: any,
+  options: { refuseCarriedInstances?: boolean } = {},
+): any {
+  return inlineDataUriLinks(
+    value,
+    false,
+    options.refuseCarriedInstances === true,
+  );
 }
 
 /**
  * Recursive worker for {@link findAndInlineDataUriLinks}. `decoded` says
  * `value` lies inside the value a `data:` link carried, where a
- * `FabricInstance` is returned whole in place of being refused.
+ * `FabricInstance` is returned whole unless `refuseCarried` is set.
  */
-function inlineDataUriLinks(value: any, decoded: boolean): any {
+function inlineDataUriLinks(
+  value: any,
+  decoded: boolean,
+  refuseCarried: boolean,
+): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
@@ -224,7 +240,7 @@ function inlineDataUriLinks(value: any, decoded: boolean): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return inlineDataUriLinks(newSigilLink, decoded);
+          return inlineDataUriLinks(newSigilLink, decoded, refuseCarried);
         }
         if (path.length > 0) {
           // TODO(danfuzz): a path segment naming something inside a
@@ -254,7 +270,7 @@ function inlineDataUriLinks(value: any, decoded: boolean): any {
       // that was handed a snapshot's cell for one, so it is walked as well.
       // The descent ends: an id embedded in a payload is shorter than the id
       // that encodes the payload, so no id can contain itself.
-      return inlineDataUriLinks(dataValue, true);
+      return inlineDataUriLinks(dataValue, true, refuseCarried);
     } else {
       return value;
     }
@@ -263,7 +279,7 @@ function inlineDataUriLinks(value: any, decoded: boolean): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = inlineDataUriLinks(current, decoded);
+      const inlined = inlineDataUriLinks(current, decoded, refuseCarried);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -281,8 +297,9 @@ function inlineDataUriLinks(value: any, decoded: boolean): any {
     return value;
   } else if (value instanceof FabricInstance) {
     // Below the root of a decoded payload an instance is returned whole, and
-    // a link inside it survives as a link.
-    if (decoded) return value;
+    // a link inside it survives as a link, for a caller that has not asked
+    // for the refusal there.
+    if (decoded && !refuseCarried) return value;
 
     // Refused. An instance's state can carry a `data:` URI link, and inlining
     // those is what this walk is for, so passing the value through would hand
@@ -307,7 +324,7 @@ function inlineDataUriLinks(value: any, decoded: boolean): any {
   } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = inlineDataUriLinks(entry, decoded);
+      const inlined = inlineDataUriLinks(entry, decoded, refuseCarried);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

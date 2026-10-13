@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -133,6 +134,30 @@ describe("stream-send-data-uri", () => {
     const event = queued[0] as { boxed: { input: { label: string } } };
     expect(event.boxed.input.label).toBe("one");
     expect(linkIdsIn(event)).toEqual([targetId]);
+  });
+
+  it("throws for an immutable cell holding a `FabricError`", () => {
+    // An event admits no `FabricInstance`: one written into the event itself
+    // is refused where its cells become links, and one inside the value a
+    // `data:` link carries is refused where that link is dissolved.
+    const failure = new FabricError({
+      type: "Error",
+      message: "boom",
+      stack: undefined,
+      cause: undefined,
+      extras: undefined,
+    });
+    const immutable = runtime.getImmutableCell(space, { failure });
+
+    expect(() => sendEvent(stream, { boxed: immutable })).toThrow(
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+        "inlining `data:` URI links.",
+    );
+    expect(() => sendEvent(stream, { failure })).toThrow(
+      "Cannot yet handle `FabricError` (a `FabricInstance`) when " +
+        "converting cells to links.",
+    );
+    expect(queued).toEqual([]);
   });
 
   it("carries a cell stored in a space as a link to it", async () => {

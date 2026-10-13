@@ -551,9 +551,10 @@ A `data:` document is stored in no space: it is its own identifier, and
 nothing writes it. Nor does the identifier reach a space inside another
 value: a stored write and a stream send both dissolve a `data:` link into
 the value it carries, so no runtime receives one from another through
-storage. A link inside one resolves its schema's `cid:` references in the
-space carried by the address that names the document, by the same rule and
-through the same gates as a link inside a stored document. Two kinds of
+storage (a link held in a `FabricInstance`'s state excepted, which neither
+walk reaches). A link inside one resolves its schema's `cid:` references in
+the space carried by the address that names the document, by the same rule
+and through the same gates as a link inside a stored document. Two kinds of
 `data:` document differ in what that space holds:
 
 - A snapshot of a value read out of a stored document — an array element
