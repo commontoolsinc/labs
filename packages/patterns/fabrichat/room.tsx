@@ -46,7 +46,7 @@ import {
   rosterProfiles,
 } from "../loom/participants.tsx";
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
-import { isInMain, type ShownIn } from "./logic.ts";
+import { isInMain, type ShownIn, viewPlaces } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCounters,
@@ -63,6 +63,7 @@ import {
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
+  isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
   messageEntries,
@@ -1020,6 +1021,14 @@ export const FabriChatRoomCore = pattern<
   const windows = new Writable.perSession<WindowsValue>();
 
   const entries = computed(() => messageEntries(messages));
+  // Every message's place in the views, derived once for the whole list. Each
+  // row reads its own message's entry, so no row scans the list, and a change
+  // to one message re-runs only the rows whose entries changed.
+  const places = computed(() =>
+    viewPlaces(
+      entries.map(({ key, sentAt, replyTo }) => ({ key, sentAt, replyTo })),
+    )
+  );
   const mainEntries = computed(() =>
     entries.filter(isInMain).sort(compareEntries)
   );
@@ -1069,6 +1078,7 @@ export const FabriChatRoomCore = pattern<
     present: participantPrincipals,
   });
   const cannotSend = computed(() => !canSend);
+  const isOwner = computed(() => isOwnerOf(messages));
   // The policy is a document of its own, which `about` links.
   const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
   const aboutView = {
@@ -1086,10 +1096,14 @@ export const FabriChatRoomCore = pattern<
   const title = computed(() =>
     about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
   );
-  const hasThread = computed(() => {
+  // The key of the session's open thread's root, which each row compares its
+  // own message's place against; `""` while no thread is open.
+  const openThreadKey = computed(() => {
     const root = composer.get()?.thread;
-    return root?.get() !== undefined && entryFor(entries, root) !== undefined;
+    return (root?.get() === undefined ? undefined : entryFor(entries, root))
+      ?.key ?? "";
   });
+  const hasThread = computed(() => openThreadKey !== "");
   const replyingTo = computed(() => bodyText(composer.get()?.replyTo?.get()));
   // Per-session and per-viewer parts are hidden by a prop, never built as a
   // different tree (see `FabriChatMessageRow`).
@@ -1217,6 +1231,10 @@ export const FabriChatRoomCore = pattern<
               myProfile={myProfile}
               kind={kind}
               composer={composer}
+              places={places}
+              openThreadKey={openThreadKey}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1292,6 +1310,10 @@ export const FabriChatRoomCore = pattern<
               myProfile={myProfile}
               kind={kind}
               composer={composer}
+              places={places}
+              openThreadKey={openThreadKey}
+              cannotWrite={cannotSend}
+              isOwner={isOwner}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
