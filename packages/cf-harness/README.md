@@ -167,12 +167,29 @@ What works today:
     host-owned result file)
   - `describe_handle` (shape and labels of a handle's referent, and the tables
     of one that is a database together with how full each of them is, never its
-    data; see [Inspecting a handle's shape](#inspecting-a-handles-shape))
+    data; a piece's handle also lists the piece's verbs, each with its author's
+    description, the event schema it takes and the result schema it returns; see
+    [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `resolve_piece` (parent-only exact slug resolution in the session's space;
     returns a handle for child source reads and revisions, without source or
     values; requires a Fabric session)
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
+  - `call_verb` (present only when the run configures a fabric session; sends an
+    event to a handler verb on the result of a piece in the session's own space,
+    or of a piece the run was handed as an input in an admitted foreign space; a
+    piece merely discovered in a foreign space stays read-only. The piece, and
+    every piece the event names, must be behind a handle the run holds; an
+    address written out in full is refused unless the run holds it. The verb is
+    found among the result-side handlers `cf piece verbs` lists, and the event
+    judged by the gate `cf piece call` uses, so an undeclared field, a missing
+    required field, a copy where a reference is declared, or a name that is not
+    a verb is refused before anything is sent; a handle at a reference position
+    reaches the verb as the address it stands for. The call is awaited to its
+    settlement. The result returns the way a `run_pattern` value does: numbers,
+    booleans and nulls as themselves, a piece the verb returns as that piece's
+    handle, every other position as a handle into the handling's receipt; a
+    handler that throws returns its message)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import

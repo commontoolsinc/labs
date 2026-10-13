@@ -310,6 +310,21 @@ repository owns along with the ones whose order is the test.
 workflow, or a shell script writes without `--no-check`; a lane passes the flag
 to every `deno test` it builds whatever the task says.
 
+### Browser windows
+
+`ShellIntegration` launches browsers headlessly when `HEADLESS` is unset or
+empty. `HEADLESS=1` and `HEADLESS=true` also select headless mode. To watch a
+shell integration test in a visible browser, explicitly set `HEADLESS=0` or
+`HEADLESS=false`:
+
+```bash
+HEADLESS=0 deno task integration shell
+```
+
+`Browser.launch()` defaults to headless mode independently of the environment;
+its `headless` option selects a different mode. `deno-web-test` also defaults
+to headless mode, with its override in `deno-web-test.config.ts`.
+
 ### Browser tests in agent sandboxes
 
 Headless Chrome registers with AppKit and needs Launch Services and

@@ -19,6 +19,7 @@ import {
   type RepairRow,
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
+import { listFlags } from "@commonfabric/piece/refusal";
 import ports from "@commonfabric/ports" with { type: "json" };
 import { isSlugAddress, parseCellPath, UI } from "@commonfabric/runner";
 import {
@@ -43,7 +44,6 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
-import { listFlags } from "../lib/refusal.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
 import { suppressDeferredSkewNote } from "../lib/version-check.ts";
 import {
