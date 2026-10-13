@@ -105,8 +105,18 @@ const connectionLostWhileRestoring = (): Error =>
 
 const logger = getLogger("memory.v2.client", {
   enabled: true,
-  level: "error",
+  level: "warn",
 });
+
+/**
+ * Names an error by its name and message, for a log line. The message is
+ * JSON-quoted: it can carry text a peer chose, such as a session id, and a
+ * line break in it would read as a log record of its own.
+ */
+const describeError = (error: unknown): string =>
+  error instanceof Error
+    ? `${JSON.stringify(error.name)}: ${JSON.stringify(error.message)}`
+    : JSON.stringify(String(error ?? "no error"));
 
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
@@ -1649,6 +1659,11 @@ export class Client {
   restartConnection(error: Error): void {
     // A closed or failed client is never connected.
     if (!this.#connected) return;
+    logger.warn("connection-restart", () => [
+      "discarding the connection, and every session's requests in flight " +
+      `on it, after a held session's retried restore failed: ` +
+      describeError(error),
+    ]);
     if (!this.#discardConnection(error)) return;
     this.#restartDelayMs = reconnectDelayMs(this.#restarts++);
     // A discarded connection reports no close, so the reconnect starts here.
@@ -1966,6 +1981,10 @@ export class Client {
     if (this.#closed) {
       return;
     }
+    logger.warn("connection-closed", () => [
+      `connection closed with ${this.#spaces.size} session(s) open, ` +
+      `reconnecting: ${describeError(error)}`,
+    ]);
     this.#connected = false;
     this.#endRenewals(toConnectionError(error));
     this.#noteStateChange();
@@ -2051,6 +2070,10 @@ export class Client {
    * the connection after `err` and reports whether a reconnect can follow.
    */
   #discardConnection(err: Error): boolean {
+    logger.warn("connection-discarded", () => [
+      `discarding the connection with ${this.#spaces.size} session(s) ` +
+      `open: ${describeError(err)}`,
+    ]);
     this.#connected = false;
     this.#endRenewals(toConnectionError(err));
     this.#noteStateChange();
@@ -3359,6 +3382,12 @@ export class SpaceSession {
    * a permanent connection failure.
    */
   #terminateSession(error: Error): void {
+    // Terminal: nothing on this session works again, and the replica above it
+    // reports the error only when asked. This line is the record of why.
+    logger.error("session-terminated", () => [
+      `session ${JSON.stringify(this.#sessionId)} on ` +
+      `${JSON.stringify(this.space)} ended: ${describeError(error)}`,
+    ]);
     this.#closed = true;
     this.#closeError = error;
     this.#endHold();
