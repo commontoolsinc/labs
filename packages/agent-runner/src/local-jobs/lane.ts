@@ -1,16 +1,12 @@
 /**
  * The local lane: runs the runner's local jobs, at most `maxConcurrent` at
  * once, independently of the Fabric lane. A job is claimed from the store,
- * run through `runHarnessJob` under its profile's authority, and ended in
- * the store. A job runs with no fabric unless its profile names a fabric
- * session; one that does opens it as the profile's identity, read-capped at
- * the ceiling the host grants that identity in that space, with the
- * profile's pattern index and subagent profiles beside it; a request can
- * grant none of these. While a job runs, the transcript events the harness
- * persists become `step` events (the tool the job is using, and then the
- * same step marked `returned` once the calls of its turn have returned and
- * its loop's model has the turn) and `command` events (each command the host
- * ran for it). A job that declared a browser host, under a profile that
+ * run through `runHarnessJob` under its profile's authority, with a fabric
+ * only where the profile names one, and ended in the store; while it runs,
+ * the transcript events the harness persists become `step` events (the tool
+ * the job is using, and then the same step marked `returned` once the calls
+ * of its turn have returned and its loop's model has the turn) and `command`
+ * events (each command the host ran for it). A job that declared a browser host, under a profile that
  * admits one, browses through it: the lane holds the job's
  * {@link LocalJobBrowserHost} from the first attach or the run's start,
  * whichever is first, until the job ends.
@@ -24,7 +20,6 @@ import { join } from "@std/path";
 import type { HarnessTranscriptEvent } from "@commonfabric/cf-harness/contracts/transcript";
 import { Identity } from "@commonfabric/identity";
 import type { ACL } from "@commonfabric/memory/acl";
-import type { CfcObservationMaxConfidentiality } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { agentRunObservationCeiling } from "../agent-run-harness.ts";
@@ -74,14 +69,12 @@ export interface LocalJobLaneOptions {
   model?: string;
 
   /**
-   * Reads a space's current ACL as the identity whose key is at
-   * `identityKeyPath`, for a profile whose fabric space is not that
-   * identity's own.
+   * Reads a space's ACL as the identity at `identityKeyPath`, for a profile
+   * whose fabric space is not that identity's own.
    *
-   * SHORTCUT: the runner's CLI supplies none today, so such a job reads at
-   * the identity's personal ceiling alone, never a space's: narrower than
-   * the host could grant, never wider. To harden, pass the CLI's `getAcl`
-   * through `startLocalJobs` here, as the Fabric lane's executor has it.
+   * SHORTCUT: the runner's CLI supplies none, so such a job reads at its
+   * identity's personal ceiling alone: narrower than the host could grant,
+   * never wider. To harden, pass the CLI's `getAcl` through `startLocalJobs`.
    */
   readSpaceAcl?: (
     host: string,
@@ -108,35 +101,28 @@ export interface LocalJobLaneOptions {
  * profile's role, never as anything the request says. Screen context and
  * other plain values the caller sends ride in the system prompt as data. A
  * profile narrowed to a browser host adds the tool and the subagent profile
- * the browser runs under, for this job alone, beside the subagent profiles
- * the profile itself grants. A profile naming a fabric session gives the
- * job that session, read-capped at `fabricCeiling`, which the caller
- * resolves for it (`localJobFabricCeiling`).
+ * the browser runs under, for this job alone. A profile's fabric session is
+ * read-capped at the ceiling the host grants its identity in its space, as
+ * the Fabric lane resolves it, with nothing narrower requested.
  *
  * SHORTCUT: context reaches the model inside the system prompt, marked as
  * data rather than instructions, because a batch job has one prompt slot and
  * one system prompt. A value there is read with the system prompt's weight.
  * To harden, give the harness a prompt slot of role `quote` for caller data.
+ *
+ * @throws Error when the profile's identity key cannot be read.
  */
-export const localJobSpecOf = (
+export const localJobSpecOf = async (
   job: LocalJob,
   profile: LocalJobProfile,
-  runner: Pick<LocalJobLaneOptions, "loomRetrievalConfigPath" | "model">,
-  fabricCeiling?: NonNullable<CfcObservationMaxConfidentiality>,
-): HarnessJobSpec => {
+  options: Pick<
+    LocalJobLaneOptions,
+    "loomRetrievalConfigPath" | "model" | "readSpaceAcl" | "report"
+  >,
+): Promise<HarnessJobSpec> => {
   const { request } = job;
   const { fabric } = profile;
-  if (fabric !== undefined && fabricCeiling === undefined) {
-    throw new Error(
-      "A local job's fabric session needs the read ceiling its caller resolved.",
-    );
-  }
-  const subagentProfiles = [
-    ...(profile.subagentProfiles ?? []),
-    ...(profile.browserHost === true
-      ? [LOCAL_JOB_BROWSER_SUBAGENT_PROFILE]
-      : []),
-  ];
+  const browser = profile.browserHost === true;
   const framing = [
     ...(request.instructions !== undefined ? [request.instructions] : []),
     ...(request.context !== undefined
@@ -146,78 +132,49 @@ export const localJobSpecOf = (
       ]
       : []),
   ];
-  const loomRetrievalConfigPath = profile.loomRetrievalConfig ??
-    runner.loomRetrievalConfigPath;
-  const model = profile.model ?? runner.model;
   return {
     task: request.task,
     commandJobId: job.id,
     taskRole: profile.taskRole,
     resultSchema: request.resultSchema as HarnessJobSpec["resultSchema"],
-    tools: profile.browserHost === true &&
-        !profile.tools.includes(LOCAL_JOB_DELEGATE_TOOL)
-      ? [...profile.tools, LOCAL_JOB_DELEGATE_TOOL]
-      : profile.tools,
-    ...(subagentProfiles.length > 0 ? { subagentProfiles } : {}),
+    tools: [
+      ...new Set([
+        ...profile.tools,
+        ...(browser ? [LOCAL_JOB_DELEGATE_TOOL] : []),
+      ]),
+    ],
+    subagentProfiles: [
+      ...profile.subagentProfiles ?? [],
+      ...(browser ? [LOCAL_JOB_BROWSER_SUBAGENT_PROFILE] : []),
+    ],
     maxModelTurns: profile.maxModelTurns,
-    ...(framing.length > 0 ? { instructions: framing.join("\n\n") } : {}),
-    ...(model !== undefined ? { model } : {}),
-    ...(loomRetrievalConfigPath !== undefined
-      ? { loomRetrievalConfigPath }
-      : {}),
-    ...(profile.loomCommandsConfig !== undefined
-      ? { loomCommandsConfigPath: profile.loomCommandsConfig }
-      : {}),
-    ...(fabric !== undefined
-      ? {
-        fabric: {
-          ...fabric,
-          maxConfidentiality: fabricCeiling,
-          inputs: {},
+    instructions: framing.length > 0 ? framing.join("\n\n") : undefined,
+    model: profile.model ?? options.model,
+    loomRetrievalConfigPath: profile.loomRetrievalConfig ??
+      options.loomRetrievalConfigPath,
+    loomCommandsConfigPath: profile.loomCommandsConfig,
+    fabric: fabric && {
+      ...fabric,
+      maxConfidentiality: await agentRunObservationCeiling(
+        {
+          identityKeyPath: fabric.identityKeyPath,
+          requester: (await Identity.fromPkcs8(
+            await Deno.readFile(fabric.identityKeyPath),
+          )).did(),
+          readSpaceAcl: (host, space) =>
+            options.readSpaceAcl?.(host, space, fabric.identityKeyPath) ??
+              Promise.resolve(null),
+          report: options.report,
         },
-      }
-      : {}),
-    ...(profile.patternIndexUrl !== undefined
-      ? {
-        patternIndexUrl: profile.patternIndexUrl,
-        patternIndexPublish: profile.patternIndexPublish !== false,
-      }
-      : {}),
-  };
-};
-
-/**
- * The read ceiling a profile's fabric session runs at: the one the host
- * grants the profile's identity in its space, as the Fabric lane resolves
- * it, with no narrower bound requested — a local job's request names none.
- *
- * @throws Error when the identity's key cannot be read.
- */
-export const localJobFabricCeiling = async (
-  fabric: NonNullable<LocalJobProfile["fabric"]>,
-  options: Pick<LocalJobLaneOptions, "readSpaceAcl" | "report">,
-): Promise<NonNullable<CfcObservationMaxConfidentiality>> => {
-  const identity = await Identity.fromPkcs8(
-    await Deno.readFile(fabric.identityKeyPath),
-  );
-  const { readSpaceAcl } = options;
-  const ceiling = await agentRunObservationCeiling(
-    {
-      identityKeyPath: fabric.identityKeyPath,
-      requester: identity.did(),
-      readSpaceAcl: (host, space) =>
-        readSpaceAcl === undefined
-          ? Promise.resolve(null)
-          : readSpaceAcl(host, space, fabric.identityKeyPath),
-      ...(options.report !== undefined ? { report: options.report } : {}),
+        fabric.host,
+        fabric.space,
+        undefined,
+      ),
+      inputs: {},
     },
-    fabric.host,
-    fabric.space,
-    undefined,
-  );
-  // With nothing requested, the ceiling is the host's, which always names
-  // the identity itself.
-  return ceiling!;
+    patternIndexUrl: profile.patternIndexUrl,
+    patternIndexPublish: profile.patternIndexPublish,
+  };
 };
 
 /**
@@ -483,12 +440,8 @@ export class LocalJobLane {
     };
     let result: HarnessJobResult;
     try {
-      const { fabric } = narrowed.profile;
-      const ceiling = fabric === undefined
-        ? undefined
-        : await localJobFabricCeiling(fabric, this.#options);
       result = await (this.#options.runJob ?? runHarnessJob)(
-        localJobSpecOf(job, narrowed.profile, this.#options, ceiling),
+        await localJobSpecOf(job, narrowed.profile, this.#options),
         {
           runRoot: join(this.#options.workRoot, job.id),
           signal,
