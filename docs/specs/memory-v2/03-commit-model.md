@@ -747,8 +747,8 @@ the server rotates the token. A client presenting a stale token receives
 `SessionRevokedError` and must not assume it can continue replaying retained
 commits on that session. The one exception is the client whose resume's
 response was lost: its next resume presents the token the lost one presented,
-under the same `resumeKey`, and the server accepts it (04-protocol.md section
-4.1.2).
+under the same `resumeKey` and a greater `resumeAttempt`, and the server
+accepts it (04-protocol.md section 4.1.2).
 
 On reconnect:
 

@@ -1428,10 +1428,20 @@ export type SessionDescriptor = {
    * after the server handles a resume and before its response reaches the
    * client, which then still holds only the token before. A resume from
    * another holder of that token carries a different key, or none, and is
-   * refused as before. Signed into the session.open invocation with the rest
-   * of this descriptor.
+   * refused as before. Only that fallback needs the key; the latest token
+   * resumes the session without one. Signed into the session.open invocation
+   * with the rest of this descriptor.
    */
   resumeKey?: string;
+
+  /**
+   * The number of this open among the opens of one session, counted by the
+   * client from 1 and sent with `resumeKey`. The fallback above is taken only
+   * by an attempt newer than the latest open's: a resume the client already
+   * gave up on carries the same key and token, and can reach the server after
+   * a newer resume has restored the session. Signed with the descriptor.
+   */
+  resumeAttempt?: number;
 
   /**
    * The read ceiling every `db.query` served for this session reads under

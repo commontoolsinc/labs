@@ -18,12 +18,13 @@ export type SessionState = {
   space: string;
   sessionToken: SessionToken;
   /**
-   * The `resumeKey` the latest open carried, and the token it presented.
-   * A resume with the same key may present that token instead of
-   * `sessionToken`: its client may never have received the response that
-   * carried `sessionToken` (`SessionDescriptor.resumeKey`).
+   * The `resumeKey` and `resumeAttempt` the latest open carried, and the
+   * token it presented. A newer attempt under the same key may present that
+   * token instead of `sessionToken`: its client may never have received the
+   * response that carried `sessionToken` (`SessionDescriptor.resumeKey`).
    */
   resumeKey?: string;
+  resumeAttempt?: number;
   presentedToken?: SessionToken;
 
   /** The read ceiling this session declared at its LAST open
@@ -215,8 +216,13 @@ export class SessionRegistry {
       !(
         existing.resumeKey !== undefined &&
         existing.presentedToken !== undefined &&
+        existing.resumeAttempt !== undefined &&
         session.resumeKey === existing.resumeKey &&
-        session.sessionToken === existing.presentedToken
+        session.sessionToken === existing.presentedToken &&
+        // A superseded attempt, still in flight when a newer one restored
+        // the session, must not take it back.
+        session.resumeAttempt !== undefined &&
+        session.resumeAttempt > existing.resumeAttempt
       )
     ) {
       throw revokedError(
@@ -239,6 +245,9 @@ export class SessionRegistry {
       sessionToken,
       ...(session.resumeKey !== undefined
         ? { resumeKey: session.resumeKey }
+        : {}),
+      ...(session.resumeAttempt !== undefined
+        ? { resumeAttempt: session.resumeAttempt }
         : {}),
       ...(session.sessionToken !== undefined
         ? { presentedToken: session.sessionToken }
