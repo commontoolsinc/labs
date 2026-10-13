@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { spy, stub } from "@std/testing/mock";
 import { expect } from "@std/expect";
 import {
   clearTimingMeasures,
@@ -2143,6 +2144,155 @@ describe("logger", () => {
         measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
       ).toBe(false);
       performance.clearMeasures("someone-elses-measure");
+    });
+
+    it("calls `performance.clearMeasures()` once to drain any number of spans", () => {
+      // Every span has a name of its own, and a host that keeps its timeline
+      // as a list reads all of it to remove one name. A removal per span
+      // therefore costs the square of the span count, which the number of
+      // calls shows without anything being timed.
+
+      setTimingMeasuresEnabled(true);
+      const logger = getLogger("measure-drain-calls");
+      for (let i = 0; i < 20; i++) {
+        logger.timeStart("phase", "drain-calls");
+        logger.timeEnd("phase", "drain-calls");
+      }
+      expect(getTimingMeasuresState().emitted).toBe(20);
+
+      using clear = spy(performance, "clearMeasures");
+      clearTimingMeasures();
+      expect(clear.calls.length).toBe(1);
+      expect(
+        measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+      ).toBe(false);
+    });
+
+    describe("beside a measure the host recorded", () => {
+      const HOST_MEASURE = "host/phase";
+      const BACKWARDS_MEASURE = "host/backwards";
+      const REFUSED_MEASURE = "host/refused";
+      const LATER_MEASURE = "host/later";
+
+      const measuresNamed = (name: string) =>
+        performance.getEntriesByName(name, "measure").map((entry) => ({
+          startTime: entry.startTime,
+          duration: entry.duration,
+          detail: "detail" in entry ? entry.detail : undefined,
+        }));
+
+      const emitOneSpan = (name: string) => {
+        setTimingMeasuresEnabled(true);
+        const logger = getLogger(name);
+        logger.timeStart("phase", name);
+        logger.timeEnd("phase", name);
+        expect(getTimingMeasuresState().emitted).toBe(1);
+      };
+
+      beforeEach(() => {
+        performance.measure(HOST_MEASURE, {
+          start: 100,
+          end: 350,
+          detail: { phase: "host" },
+        });
+      });
+
+      afterEach(() => {
+        for (
+          const name of [
+            HOST_MEASURE,
+            BACKWARDS_MEASURE,
+            REFUSED_MEASURE,
+            LATER_MEASURE,
+          ]
+        ) {
+          performance.clearMeasures(name);
+        }
+      });
+
+      it("calls `performance.clearMeasures()` once to drain any number of spans", () => {
+        setTimingMeasuresEnabled(true);
+        const logger = getLogger("measure-drain-calls-beside-host");
+        for (let i = 0; i < 20; i++) {
+          logger.timeStart("phase", "drain-calls-beside-host");
+          logger.timeEnd("phase", "drain-calls-beside-host");
+        }
+        expect(getTimingMeasuresState().emitted).toBe(20);
+
+        using clear = spy(performance, "clearMeasures");
+        clearTimingMeasures();
+        expect(clear.calls.length).toBe(1);
+        expect(
+          measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+        ).toBe(false);
+      });
+
+      it("keeps that measure's start, duration, and detail", () => {
+        emitOneSpan("measure-keep-host");
+
+        clearTimingMeasures();
+        expect(measuresNamed(HOST_MEASURE)).toEqual([
+          { startTime: 100, duration: 250, detail: { phase: "host" } },
+        ]);
+      });
+
+      it("keeps a measure that ends before it starts, and the one recorded after it", () => {
+        // A host admits a measure whose end precedes its start, and refuses
+        // the negative duration that measure then reports when it is handed
+        // back as a duration.
+
+        performance.measure(BACKWARDS_MEASURE, { start: 100, end: 50 });
+        performance.measure(LATER_MEASURE, { start: 400, end: 425 });
+        emitOneSpan("measure-keep-backwards");
+
+        clearTimingMeasures();
+        expect(measuresNamed(BACKWARDS_MEASURE)).toEqual([
+          { startTime: 100, duration: -50, detail: null },
+        ]);
+        expect(measuresNamed(LATER_MEASURE)).toEqual([
+          { startTime: 400, duration: 25, detail: null },
+        ]);
+      });
+
+      it("drops only the measure the host refuses to record again", () => {
+        performance.measure(REFUSED_MEASURE, { start: 200, end: 210 });
+        performance.measure(LATER_MEASURE, { start: 400, end: 425 });
+        emitOneSpan("measure-refused-host");
+
+        const realMeasure = performance.measure;
+        using _refusal = stub(performance, "measure", (...args) => {
+          if (args[0] === REFUSED_MEASURE) throw new TypeError("refused");
+          return realMeasure.apply(performance, args);
+        });
+        clearTimingMeasures();
+        expect(measuresNamed(HOST_MEASURE)).toEqual([
+          { startTime: 100, duration: 250, detail: { phase: "host" } },
+        ]);
+        expect(measuresNamed(REFUSED_MEASURE)).toEqual([]);
+        expect(measuresNamed(LATER_MEASURE)).toEqual([
+          { startTime: 400, duration: 25, detail: null },
+        ]);
+      });
+
+      it("leaves that measure's entry in place when it has no spans to drain", () => {
+        // A drain with nothing of its own to remove has no reason to touch a
+        // timeline it shares, so the host's entry is the same object after it.
+
+        expect(
+          measureNames().some((n) => n.startsWith(TIMING_MEASURE_PREFIX)),
+        ).toBe(false);
+        const [before] = performance.getEntriesByName(HOST_MEASURE, "measure");
+        expect(before).toBeDefined();
+
+        using clear = spy(performance, "clearMeasures");
+        using measure = spy(performance, "measure");
+        clearTimingMeasures();
+        expect(clear.calls.length).toBe(0);
+        expect(measure.calls.length).toBe(0);
+        expect(performance.getEntriesByName(HOST_MEASURE, "measure")[0]).toBe(
+          before,
+        );
+      });
     });
 
     it("emits again after something else clears the timeline", () => {
