@@ -574,7 +574,7 @@ export type AddMemberRefusalCode = "direct-room";
 /** The outcome of a retitle of a room, by its `requestId`. */
 export type SetTitleOutcome =
   | {
-    /** The room's title is now the one the request set. */
+    /** The request set the room's title. */
     status: "done";
   }
   | {
