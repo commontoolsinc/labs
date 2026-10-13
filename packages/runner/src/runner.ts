@@ -142,7 +142,6 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
@@ -2186,30 +2185,6 @@ type PieceVariantRegistration = {
   registrations: Map<string, PieceRegistration>;
   selection: ImplementationSelection;
 };
-
-/**
- * A pattern's authored argument schema as a deep-frozen, interned schema of
- * the same content. The binding walk narrows this schema at every slot it
- * binds, and `schemaAtPath` keeps a narrowing only for a deep-frozen schema.
- * A loaded pattern's is the parsed object as it came off the wire, which is
- * not frozen, so narrowing it directly walks its definitions at every slot.
- * The copy is made once per schema object and stands in wherever the walk
- * reads the authored declarations. It is a clone, not the pattern's own
- * object frozen in place: the pattern holds that object, and freezing it
- * would change what its other holders may do with it.
- */
-const internedArgumentSchemaOf = (pattern: Pattern): JSONSchema => {
-  const authored = pattern.argumentSchema;
-  if (!isObjectOrArray(authored) || isDeepFrozen(authored)) return authored;
-  let interned = internedArgumentSchemas.get(authored);
-  if (interned === undefined) {
-    interned = deepFrozenCloneAndInternSchema(authored);
-    internedArgumentSchemas.set(authored, interned);
-  }
-  return interned;
-};
-
-const internedArgumentSchemas = new WeakMap<object, JSONSchema>();
 
 export class Runner {
   /** Scoped defaults in a caller-owned setup share its commit or abort. */
@@ -10542,7 +10517,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: internedArgumentSchemaOf(pattern),
+        argumentCapSchema: pattern.argumentSchema,
       },
     );
     const outputs = unwrapOneLevelAndBindToDoc(
@@ -10551,7 +10526,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: internedArgumentSchemaOf(pattern),
+        argumentCapSchema: pattern.argumentSchema,
       },
     );
     return {
@@ -12898,7 +12873,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: internedArgumentSchemaOf(pattern),
+        argumentCapSchema: pattern.argumentSchema,
       },
     );
     const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
@@ -12907,7 +12882,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: internedArgumentSchemaOf(pattern),
+        argumentCapSchema: pattern.argumentSchema,
       },
     );
 
@@ -13346,7 +13321,7 @@ export class Runner {
           // schema is the only place those declarations still exist (the
           // meta link carries a sanitized schema). See
           // foldDeclaredScopeIntoLinkSchema.
-          sourceSchemas: { argument: internedArgumentSchemaOf(pattern) },
+          sourceSchemas: { argument: pattern.argumentSchema },
         },
       );
     // VALUE BIND (kind: the descriptor's). Binding WITH the manifest resolves a
@@ -13366,7 +13341,7 @@ export class Runner {
       resultCell,
       {
         derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: internedArgumentSchemaOf(pattern),
+        argumentCapSchema: pattern.argumentSchema,
       },
     );
     const io = {

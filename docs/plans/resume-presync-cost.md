@@ -254,17 +254,19 @@ where the pre-sync was no longer the whole cost.
 - [x] A boundary pass holds one view of the transaction's reads, the
       stored envelope behind each and the labeled set a protected entry
       quantifies over, built once and reused across the pass's targets
-      while the read list, the trigger reads and the resolved envelopes
-      stand; the reactivity log stands across a verifier read it does not
-      list; and a deep-frozen document's schema entries are kept by the
+      while the records it was copied from keep their classification and
+      the resolved envelopes stand; the reactivity log stands across a read
+      under the sealed verifier metadata, which it never lists; and a
+      deep-frozen document's schema entries are kept by the
       document, unless the walk lacked a schema document a reference
       names. On the thirty-row room's reload, preparation fell from 18% of
       the load to 6%, and its mean from 18 to 3 ms per commit, on a pair
       of runs at the same machine load. The binding walk's narrowing of a
       pattern's authored argument schema is its own cost outside
-      preparation, 6% of the same load: the walk now reads a deep-frozen
-      copy of the schema, so the narrowing is kept
-      (`packages/runner/src/runner.ts`).
+      preparation, 6% of the same load: that schema is a mutable root over
+      frozen members, and the walk narrows a deep-frozen stand-in for it,
+      made again when the root's members change, so the narrowing is kept
+      (`packages/runner/src/pattern-binding.ts`).
 - [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
       transaction elides as equal to what is stored, read 345 documents
       each on average, and take nine tenths of what preparation still
