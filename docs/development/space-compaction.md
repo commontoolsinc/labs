@@ -58,17 +58,25 @@ not main. An engine without the guard reopens the result without complaint,
 since the schema is unchanged, and takes a basis the compaction removed for a
 genuine absence, accepting a stale write through the identity exemption. The
 check is each instance's `/api/meta`, whose `gitSha` names its release; a
-release is current enough when the guard's merge commit is its ancestor:
+release is current enough when the guard's merge commit is its ancestor. An
+instance that does not answer within the bound, or answers without a
+40-digit `gitSha`, prints `NONE` and fails the check; the count at the end
+must read 21 of one sha before anything below is run:
 
 ```bash
-# On the host: every instance names its release. Expect one sha, 21 times;
-# an instance that answers nothing or another sha is checked on its own.
+# On the host: every instance names its release, or the check fails loudly.
 for p in $(seq 8001 8021); do
-  printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'
-done
+  sha=$(curl -s --max-time 5 "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]\{40\}"' | cut -d'"' -f4)
+  echo "$p ${sha:-NONE}"
+done | tee /tmp/releases.txt
+awk '{print $2}' /tmp/releases.txt | sort | uniq -c   # exactly one line, "21 <sha>"; a NONE or a second sha = stop here
 cf space compact --help    # on the host: an older cf has no such command
-# On a checkout with main fetched, for each sha the instances named:
-git merge-base --is-ancestor 174fc11ad208692c68337ee93732dea252811fa8 <gitSha> && echo guard-present
+
+# On a checkout with main fetched, with the one sha that line named
+# (quoted: a bare <sha> placeholder is a redirection to the shell).
+RELEASE='<the sha the instances named>'
+git merge-base --is-ancestor 174fc11ad208692c68337ee93732dea252811fa8 "$RELEASE" \
+  && echo guard-present || echo guard-ABSENT-deploy-first
 ```
 
 A release that fails the test is deployed first, through the `deploy-estuary`
@@ -206,7 +214,11 @@ show the gap.
 df -h /data
 ls -la /data/memory/engine-v3/engine-v3/ | grep '<did>'
 curl -s localhost:8020/api/health/stats | grep -c '<did>'
-for p in $(seq 8001 8021); do printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'; done
+for p in $(seq 8001 8021); do
+  sha=$(curl -s --max-time 5 "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]\{40\}"' | cut -d'"' -f4)
+  echo "$p ${sha:-NONE}"
+done | tee /tmp/releases.txt
+awk '{print $2}' /tmp/releases.txt | sort | uniq -c   # exactly one line, "21 <sha>"; a NONE or a second sha = stop here
 
 # 1. Dry run against a LIVE snapshot, with the instance still serving, and
 #    compare with the clone rehearsal's report. This snapshot is for the

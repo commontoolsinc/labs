@@ -844,8 +844,13 @@ curl -s localhost:8020/api/health/stats | grep -c '<did>'
 #    basis guard's merge (stage 2, 174fc11ad2), or the engine that reopens
 #    the result takes a compacted basis for an absence. The rehearsal on a
 #    checkout proves nothing about this; deploy first where it fails
-#    (the runbook's preflight has the ancestry test).
-for p in $(seq 8001 8021); do printf '%s ' "$p"; curl -s "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]*"'; done
+#    (the runbook's preflight has the ancestry test). An instance that does
+#    not answer prints NONE; the count must read 21 of one sha.
+for p in $(seq 8001 8021); do
+  sha=$(curl -s --max-time 5 "localhost:$p/api/meta" | grep -o '"gitSha":"[0-9a-f]\{40\}"' | cut -d'"' -f4)
+  echo "$p ${sha:-NONE}"
+done | tee /tmp/releases.txt
+awk '{print $2}' /tmp/releases.txt | sort | uniq -c   # exactly one line, "21 <sha>"; a NONE or a second sha = stop here
 
 # 1. Dry run against a LIVE snapshot, with the instance still serving, and
 #    compare with the clone rehearsal's report. This snapshot is for the
