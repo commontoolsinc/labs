@@ -2,7 +2,6 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
-import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ServerExecutionObserver } from "@commonfabric/memory/v2/server";
 import { defer } from "@commonfabric/utils/defer";
 import { ExecutorHost } from "../../src/executor/host.ts";
