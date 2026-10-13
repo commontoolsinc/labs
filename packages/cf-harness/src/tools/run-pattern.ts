@@ -891,7 +891,7 @@ const sealedInputRefusal = (key: string, path: string): string =>
  * rejection; the signal is the only cancellation source — no timeout puts an
  * upper bound on `work` completing.
  */
-export const raceWithAbort = async (
+const raceWithAbort = async (
   work: Promise<void>,
   signal: AbortSignal | undefined,
 ): Promise<"completed" | "aborted"> => {

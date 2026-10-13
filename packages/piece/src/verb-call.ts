@@ -289,6 +289,10 @@ export interface VerbCallSettled {
   /** True when this call collided on the create-only receipt: the handling
    * did not commit again, and {@link result} is the ORIGINAL outcome. */
   deduplicated?: true;
+
+  /** Why the result could not be read off the receipt, when it could not:
+   * the handling landed, and only its outcome is unknown here. */
+  unread?: string;
 }
 
 /** The refusal for a name `verbs` does not hold, naming the ones it does. */
@@ -373,7 +377,13 @@ export async function callVerb(
     };
   }
 
-  await runtime.start(cell);
+  if (!await runtime.start(cell)) {
+    return {
+      status: "refused",
+      message:
+        "the piece could not be started here: its start was superseded or it was stopped",
+    };
+  }
   const stream = cell.key(verb).asSchemaFromLinks() as Cell<unknown>;
   if (!isStream(stream)) {
     return {
@@ -410,7 +420,19 @@ export async function callVerb(
   };
   if (committed.receipt === undefined) return settled;
   const receipt = runtime.getCellFromLink(committed.receipt);
-  const value = await receipt.pull();
+  // The handling landed, so a read of its outcome that fails — a receipt the
+  // reader may not see, say — is said beside the receipt rather than turned
+  // into a failure of a call that succeeded.
+  let value: unknown;
+  try {
+    value = await receipt.pull();
+  } catch (error) {
+    return {
+      ...settled,
+      receipt: committed.receipt,
+      unread: error instanceof Error ? error.message : String(error),
+    };
+  }
   return {
     ...settled,
     receipt: committed.receipt,

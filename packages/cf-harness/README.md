@@ -176,15 +176,18 @@ What works today:
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `call_verb` (present only when the run configures a fabric session; sends an
-    event to a verb of a piece in the session's own space, behind a handle the
-    run holds. The verb is found and the event judged by the listing and gate
-    `cf piece call` uses, so an undeclared field, a missing required field, a
-    copy where a reference is declared, or a name that is not a verb is refused
-    before anything is sent; a handle at a reference position reaches the verb
-    as the address it stands for. The result returns the way a `run_pattern`
-    value does: numbers, booleans and nulls as themselves, a piece the verb
-    returns as that piece's handle, every other position as a handle into the
-    handling's receipt; a handler that throws returns its message)
+    event to a handler verb on the result of a piece in the session's own space.
+    The piece, and every piece the event names, must be behind a handle the run
+    holds; an address written out in full is refused unless the run holds it.
+    The verb is found among the result-side handlers `cf piece verbs` lists, and
+    the event judged by the gate `cf piece call` uses, so an undeclared field, a
+    missing required field, a copy where a reference is declared, or a name that
+    is not a verb is refused before anything is sent; a handle at a reference
+    position reaches the verb as the address it stands for. The call is awaited
+    to its settlement. The result returns the way a `run_pattern` value does:
+    numbers, booleans and nulls as themselves, a piece the verb returns as that
+    piece's handle, every other position as a handle into the handling's
+    receipt; a handler that throws returns its message)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import

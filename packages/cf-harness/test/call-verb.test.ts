@@ -19,6 +19,7 @@ import type {
   HarnessToolTranscriptMessage,
 } from "../src/contracts/transcript.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
+import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import {
   createHarnessHandleTable,
   mintAddressHandle,
@@ -102,7 +103,18 @@ describe("call-verb", () => {
   let session: HarnessFabricSession;
   let neighbour: PiecesController;
 
+  /** The run's handle table: what a model holding these handles holds. */
+  let held: HarnessHandleTable;
+
+  /** Records `ref` in {@link held}, as the outbound swap does when a tool
+   * hands a model the address, and returns it. */
+  const hold = async (ref: string): Promise<string> => {
+    held = (await mintAddressHandle(held, ref)).table;
+    return ref;
+  };
+
   beforeEach(async () => {
+    held = createHarnessHandleTable("run-call-verb");
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
@@ -139,7 +151,7 @@ describe("call-verb", () => {
       { sourceText: TIMER_PATTERN_SOURCE },
     ) as RunPatternToolSuccessOutput;
     expect(output.status).toBe("ok");
-    return output.resultRef;
+    return await hold(output.resultRef);
   };
 
   /** One field of the piece at `ref`, read back through the runtime. */
@@ -231,7 +243,7 @@ describe("call-verb", () => {
     it("runs the verb's handler and returns its declared result", async () => {
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { minutes: 10 },
@@ -268,8 +280,9 @@ describe("call-verb", () => {
       const board = (await runPatternTool.invoke(contextWith(session), {
         sourceText: source,
       }) as RunPatternToolSuccessOutput).resultRef;
+      await hold(board);
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: board,
         verb: "addItem",
         event: { title: "Ship" },
@@ -287,7 +300,7 @@ describe("call-verb", () => {
       // later step can still wire it onward.
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { minutes: 10, label: "deep work" },
@@ -302,7 +315,7 @@ describe("call-verb", () => {
     it("returns the message a failing handler threw", async () => {
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { minutes: 0 },
@@ -318,7 +331,7 @@ describe("call-verb", () => {
     it("runs a verb that takes no event", async () => {
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "stop",
       });
@@ -332,7 +345,7 @@ describe("call-verb", () => {
       // afterwards is what shows nothing was dispatched.
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { minutes: 10, colour: "red" },
@@ -347,7 +360,7 @@ describe("call-verb", () => {
     it("refuses an event missing a required field, before the event is sent", async () => {
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { label: "deep work" },
@@ -361,7 +374,7 @@ describe("call-verb", () => {
     it("refuses a property that is not a verb and names the verbs there are", async () => {
       const ref = await createTimer();
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "status",
         event: "running",
@@ -375,6 +388,26 @@ describe("call-verb", () => {
       expect(await readField(ref, "status")).toBe("idle");
     });
 
+    it("refuses a piece the run holds no handle to, without repeating its address", async () => {
+      // A model that writes an address out in full reaches nothing it was not
+      // handed; and the refusal names no address the outbound swap could mint
+      // a handle for.
+      const ref = await createTimer();
+      held = createHarnessHandleTable("run-call-verb");
+
+      const output = await callVerbTool.invoke(contextWith(session, held), {
+        token: ref,
+        verb: "start",
+        event: { minutes: 10 },
+      });
+
+      expect(output.status).toBe("error");
+      const message = (output as { message: string }).message;
+      expect(message).toContain("behind a handle this run holds");
+      expect(message).not.toContain(ref.slice(1));
+      expect(await readField(ref, "status")).toBe("idle");
+    });
+
     it("refuses a piece in a space other than the run's own", async () => {
       // The run may describe a piece in an admitted foreign space, which is a
       // read; sending it an event is a write, which reaches the run's own
@@ -382,10 +415,11 @@ describe("call-verb", () => {
       const foreign = await neighbour.create(TIMER_PATTERN_SOURCE, {
         input: {},
       });
-      const ref =
-        `//${neighbour.getSpace()}/${foreign.getCell().getAsNormalizedFullLink().id}`;
+      const ref = await hold(
+        `//${neighbour.getSpace()}/${foreign.getCell().getAsNormalizedFullLink().id}`,
+      );
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: ref,
         verb: "start",
         event: { minutes: 10 },
@@ -412,7 +446,7 @@ describe("call-verb", () => {
     /** Files a root item on `board` and returns the address `addItem` handed
      * back for it, which is where a run gets an item's handle from. */
     const fileItem = async (board: string, title: string): Promise<string> => {
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: board,
         verb: "addItem",
         event: { title },
@@ -421,7 +455,7 @@ describe("call-verb", () => {
       const item = (output as { result: { item: { "@link": string } } })
         .result.item;
       expect(item).toEqual({ "@link": expect.any(String) });
-      return item["@link"];
+      return await hold(item["@link"]);
     };
 
     /** The ids the stored `blockedOn` list of the item at `ref` links to. */
@@ -446,7 +480,7 @@ describe("call-verb", () => {
         { sourceText: await trackerSource() },
       ) as RunPatternToolSuccessOutput;
       expect(output.status).toBe("ok");
-      board = output.resultRef;
+      board = await hold(output.resultRef);
     });
 
     it("refuses an inline copy at a reference position, before the event is sent", async () => {
@@ -455,7 +489,7 @@ describe("call-verb", () => {
       // document rather than an edge.
       const item = await fileItem(board, "Ship");
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: item,
         verb: "blockOn",
         event: { on: { title: "Review" } },
@@ -471,7 +505,7 @@ describe("call-verb", () => {
     it("refuses a string that is not an address at a reference position", async () => {
       const item = await fileItem(board, "Ship");
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: item,
         verb: "blockOn",
         event: { on: "Review" },
@@ -484,12 +518,50 @@ describe("call-verb", () => {
       expect(await blockedOnIds(item)).toEqual([]);
     });
 
+    it("refuses an address at a reference position the run holds no handle to", async () => {
+      const item = await fileItem(board, "Ship");
+      const unheldItem = (await callVerbTool.invoke(
+        contextWith(session, held),
+        { token: board, verb: "addItem", event: { title: "Review" } },
+      ) as { result: { item: { "@link": string } } }).result.item["@link"];
+
+      const output = await callVerbTool.invoke(contextWith(session, held), {
+        token: item,
+        verb: "blockOn",
+        event: { on: unheldItem },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "<event>.on names a piece this run holds no handle to",
+      );
+      expect(await blockedOnIds(item)).toEqual([]);
+    });
+
+    it("refuses a link written out in full in the event", async () => {
+      const item = await fileItem(board, "Ship");
+      const other = await fileItem(board, "Review");
+      const id = parseLLMFriendlyLink(other, session.pieces.getSpace()).id;
+
+      const output = await callVerbTool.invoke(contextWith(session, held), {
+        token: item,
+        verb: "blockOn",
+        event: { on: { "/": { "link@1": { id } } } },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "link written out in full",
+      );
+      expect(await blockedOnIds(item)).toEqual([]);
+    });
+
     it("refuses a handle token the run does not hold", async () => {
       // A token the table holds reaches the tool as its address; one it does
       // not hold arrives as written.
       const item = await fileItem(board, "Ship");
 
-      const output = await callVerbTool.invoke(contextWith(session), {
+      const output = await callVerbTool.invoke(contextWith(session, held), {
         token: item,
         verb: "blockOn",
         event: { on: "cfh:a:zzzzz" },
@@ -497,7 +569,7 @@ describe("call-verb", () => {
 
       expect(output.status).toBe("error");
       expect((output as { message: string }).message).toContain(
-        "cfh:a:zzzzz is not a handle this run holds",
+        "cfh:a:zzzzz at <event>.on is not a handle this run holds",
       );
       expect(await blockedOnIds(item)).toEqual([]);
     });

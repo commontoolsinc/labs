@@ -103,7 +103,10 @@ export interface LocalJobLaneOptions {
  * profile narrowed to a browser host adds the tool and the subagent profile
  * the browser runs under, for this job alone. A profile's fabric session is
  * read-capped at the ceiling the host grants its identity in its space, as
- * the Fabric lane resolves it, with nothing narrower requested.
+ * the Fabric lane resolves it, with nothing narrower requested. The request's
+ * `inputs` become the run's input cells, each held by the model as a handle;
+ * `narrowLocalJobProfile` has already refused them under a profile with no
+ * fabric session, or naming a piece outside its space.
  *
  * SHORTCUT: context reaches the model inside the system prompt, marked as
  * data rather than instructions, because a batch job has one prompt slot and

@@ -11,12 +11,9 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import { piecePatternPointer } from "@commonfabric/piece/ops";
 import { pieceVerbs } from "@commonfabric/piece/verb-call";
-import {
-  type Cell,
-  getPatternIdentityRef,
-  readResultSchemaMeta,
-} from "@commonfabric/runner";
+import { type Cell, readResultSchemaMeta } from "@commonfabric/runner";
 import {
   type CfcLabelView,
   cfcLabelViewForCellFailClosedWithStatus,
@@ -807,7 +804,9 @@ const pieceVerbsOf = async (
   session: HarnessFabricSession,
   root: Cell<unknown>,
 ): Promise<HarnessCallableDescriptor[] | undefined> => {
-  if (getPatternIdentityRef(root) === undefined) return undefined;
+  if (piecePatternPointer(session.pieces.runtime, root) === undefined) {
+    return undefined;
+  }
   try {
     return (await pieceVerbs(session.pieces.runtime, root)).map((verb) => ({
       name: verb.name,
@@ -883,10 +882,10 @@ const describeInFabric = async (
       link.path,
       documentSchema,
     );
+    const verbs = link.path.length === 0
+      ? await pieceVerbsOf(session, root)
+      : undefined;
     if (declared !== undefined) {
-      const verbs = link.path.length === 0
-        ? await pieceVerbsOf(session, root)
-        : undefined;
       return {
         labels,
         schema: declared,
@@ -899,7 +898,12 @@ const describeInFabric = async (
     // contract can still be stated, and a database handle states one there.
     const { database, ref: db } = databaseOf(referent);
     if (database === undefined || db === undefined) {
-      return { labels, cfcLabel, cfcLabelAvailable };
+      return {
+        labels,
+        ...(verbs !== undefined ? { verbs } : {}),
+        cfcLabel,
+        cfcLabelAvailable,
+      };
     }
     // The counts are read after the contract rather than with it, so a
     // database that discloses its tables still discloses them when nothing

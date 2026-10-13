@@ -570,8 +570,8 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | finish_task | submit_result | run_pattern | assign_slug | resolve_piece | search_patterns | record_feedback | search_skills | acquire_skill | research | loom_compose | loom_inspect | loom_authoring_context | loom_search | loom_page_discover | loom_page_inspect | loom_page_read | loom_people | loom_calendar_list | loom_context | loom_profile | list_commands | run_command);
-                                run_pattern, assign_slug, resolve_piece, and acquire_skill additionally require the three --fabric-* session flags,
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | finish_task | submit_result | run_pattern | assign_slug | resolve_piece | call_verb | search_patterns | record_feedback | search_skills | acquire_skill | research | loom_compose | loom_inspect | loom_authoring_context | loom_search | loom_page_discover | loom_page_inspect | loom_page_read | loom_people | loom_calendar_list | loom_context | loom_profile | list_commands | run_command);
+                                run_pattern, assign_slug, resolve_piece, call_verb, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
                                 search_skills and acquire_skill require --skills-registry-url,
                                 research requires a documentation corpus or pattern index (query_docs is a deprecated input alias),
@@ -658,7 +658,7 @@ Options:
   --loom-retrieval-config <path> Absolute host-owned JSON file backing the read-only Loom tools
   --loom-commands-config <path> Absolute host-owned JSON file naming the command broker
                                 behind list_commands and run_command
-  --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug, resolve_piece)
+  --fabric-api-url <url>        Deployed Fabric API URL for the fabric-session tools (run_pattern, assign_slug, resolve_piece, call_verb)
   --fabric-identity <path>      PKCS#8 identity keyfile for the fabric session
   --fabric-space <space>        Target space (name or did:key) for the fabric-session tools;
                                 all three --fabric-* session flags go together

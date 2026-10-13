@@ -201,13 +201,13 @@ Current selectable parent tools are `bash`, `read_file`, `view_image`,
 tools `list_commands` and `run_command`, plus `submit_result`. Individual runs
 receive only their configured subset; `web_fetch` and `run_skill_script` are not
 in the ordinary default surface. Optional tools are gated on the backing a run
-can supply — a fabric session for `run_pattern`, `assign_slug`, and
-`acquire_skill`, the pattern index for `search_patterns` and `record_feedback`,
-configured skills.sh discovery for `search_skills`, and a resolved documentation
-corpus or pattern index for `research`, explicit host Loom authoring
-configuration for the three authoring tools, explicit host Loom retrieval
-configuration for the eight retrieval tools, explicit host command broker
-configuration for `list_commands` and `run_command`, and a configured
+can supply — a fabric session for `run_pattern`, `assign_slug`, `resolve_piece`,
+`call_verb`, and `acquire_skill`, the pattern index for `search_patterns` and
+`record_feedback`, configured skills.sh discovery for `search_skills`, and a
+resolved documentation corpus or pattern index for `research`, explicit host
+Loom authoring configuration for the three authoring tools, explicit host Loom
+retrieval configuration for the eight retrieval tools, explicit host command
+broker configuration for `list_commands` and `run_command`, and a configured
 structured-result schema for `submit_result` — and a tool the run cannot back is
 absent from the surface rather than present and failing, so an explicit
 allowlist naming it does not conjure it. `run_pattern` additionally requires the
@@ -242,7 +242,10 @@ Fabric identifiers. A referent that declares no schema and holds a SQLite
 database handle reports that database's tables, and the distinct labels its
 columns carry, through the same reduction, which is the one value the tool
 reads. An unknown or shapeless token remains an ordinary bounded tool result
-rather than a dereference path.
+rather than a dereference path. A handle to a piece also reports the piece's
+verbs: each one's name, its author's description, and the event and result
+schemas as the pattern declares them, descriptions included — the one schema
+this tool does not reduce to structure, marked as a shortcut where it is built.
 
 `run_pattern` accepts at most 256 KiB of inline source. It resolves whole-string
 LLM-friendly link inputs to live cells in the configured space and foreign

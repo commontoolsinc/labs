@@ -18,7 +18,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-import { callVerb, type VerbCall } from "@commonfabric/piece/verb-call";
+import { callVerb } from "@commonfabric/piece/verb-call";
 import { isLink } from "@commonfabric/runner";
 import { describeSinkReleaseRefusal } from "@commonfabric/runner/cfc";
 import { localRefTarget } from "@commonfabric/runner/cfc/schema-sanitization";
@@ -28,6 +28,7 @@ import {
   HANDLE_TOKEN_PATTERN,
   REFERENT_TOKEN_PATTERN,
 } from "../contracts/handle-table.ts";
+import { handleRefAddressKey, resolveHandleRef } from "../handle-table.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { errorMessage } from "../error-message.ts";
 import { scrubBareFabricIdentifiers } from "../fabric-identifier-scrub.ts";
@@ -37,11 +38,7 @@ import {
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
 import { resolvePiece, sessionPieces } from "./piece-source.ts";
-import {
-  asSerializableValue,
-  raceWithAbort,
-  sealedPositionLink,
-} from "./run-pattern.ts";
+import { asSerializableValue, sealedPositionLink } from "./run-pattern.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface CallVerbToolInput {
@@ -130,23 +127,45 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   tags: ["fabric", "piece", "verb"],
 };
 
-/** The first string in `event` that is a whole handle token, at any depth. */
-const firstTokenIn = (event: unknown): string | undefined => {
+/**
+ * Why `event` names a piece this run holds no handle to, or `undefined` when
+ * it names none. A string that is a whole handle token arrived unswapped, so
+ * the table does not hold it; a string that is an address is held only if the
+ * table holds that address; and a link written out as JSON is refused, since a
+ * reference reaches a verb from a model only as a handle. Nothing here repeats
+ * the address it refuses.
+ */
+const firstUnheldReference = (
+  event: unknown,
+  holds: (address: string) => boolean,
+  path = "<event>",
+): string | undefined => {
   if (typeof event === "string") {
     const whole = (pattern: RegExp) =>
       new RegExp(`^${pattern.source}$`).test(event);
-    return whole(HANDLE_TOKEN_PATTERN) || whole(REFERENT_TOKEN_PATTERN)
-      ? event
+    if (whole(HANDLE_TOKEN_PATTERN) || whole(REFERENT_TOKEN_PATTERN)) {
+      return `${event} at ${path} is not a handle this run holds`;
+    }
+    return handleRefAddressKey(event) !== undefined && !holds(event)
+      ? `${path} names a piece this run holds no handle to; pass its cfh:a: token`
       : undefined;
   }
+  if (isLink(event)) {
+    return `${path} is a link written out in full; pass the piece's cfh:a: token instead`;
+  }
   if (Array.isArray(event)) {
-    for (const element of event) {
-      const found = firstTokenIn(element);
+    for (const [index, element] of event.entries()) {
+      const found = firstUnheldReference(element, holds, `${path}[${index}]`);
       if (found !== undefined) return found;
     }
     return undefined;
   }
-  if (isObjectNotArray(event)) return firstTokenIn(Object.values(event));
+  if (isObjectNotArray(event)) {
+    for (const [key, value] of Object.entries(event)) {
+      const found = firstUnheldReference(value, holds, `${path}.${key}`);
+      if (found !== undefined) return found;
+    }
+  }
   return undefined;
 };
 
@@ -279,9 +298,13 @@ const withOpaqueLinkAt = (
     ? node.additionalProperties as JSONSchema
     : undefined;
   // A position only a combinator member declares is left to that member: a
-  // property added here would hold every branch to it.
+  // property added here would hold every branch to it. One the schema closes
+  // and does not declare stays closed, so the declared result still refuses
+  // a value there.
+  const closed = node.additionalProperties === false;
   if (
-    Object.hasOwn(properties, head) || additional !== undefined || !hasMembers
+    Object.hasOwn(properties, head) || additional !== undefined ||
+    (!hasMembers && !closed)
   ) {
     rewritten.properties = {
       ...properties,
@@ -315,43 +338,56 @@ export const callVerbTool: HarnessToolDefinition<
     if (name.length === 0) {
       return fail("call_verb requires the name of a verb");
     }
+    // This tool writes, so it reaches only what the run was handed: the piece
+    // and every piece the event names must be behind a handle the run holds.
+    // A held token reached this tool as the address it stands for; one the
+    // model wrote out in full is held only if the table holds that address.
+    // A refusal never repeats the address, which the outbound swap would
+    // otherwise mint a handle for.
+    const table = context.handleTable;
+    const holds = (address: string): boolean => {
+      const entry = table === undefined
+        ? undefined
+        : resolveHandleRef(table, address);
+      return entry !== undefined && entry.capability === undefined;
+    };
+    if (!holds(ref)) {
+      return fail(
+        "call_verb can only reach a piece behind a handle this run holds; pass the cfh:a: token run_pattern, resolve_piece, a verb's result or an input gave you",
+      );
+    }
+    const unheld = firstUnheldReference(input.event, holds);
+    if (unheld !== undefined) {
+      return fail(
+        `the event for "${name}" was refused before it was sent: ${unheld}`,
+      );
+    }
+
     const session = await sessionPieces("call_verb", context);
     if (!session.ok) return fail(session.message);
     const { pieces } = session;
     const piece = await resolvePiece("call_verb", pieces, ref);
     if (!piece.ok) return fail(piece.message);
 
-    // A token the run holds reached this tool as the address it stands for,
-    // so one still written as a token is one the run does not hold.
-    const unheld = firstTokenIn(input.event);
-    if (unheld !== undefined) {
-      return fail(
-        `the event for "${name}" was refused before it was sent: ${unheld} is not a handle this run holds`,
-      );
-    }
-
+    // Awaited to its settlement rather than raced with the run's abort: a
+    // handler that commits after the tool had answered "cancelled" would be
+    // a write the run reported as not made.
     const { runtime } = pieces;
-    let called: VerbCall | undefined;
-    const calling = callVerb(
+    const called = await callVerb(
       runtime,
       piece.cell.getAsNormalizedFullLink(),
       name,
       input.event,
-    ).then((value) => {
-      called = value;
-    });
-    if (await raceWithAbort(calling, context.signal) === "aborted") {
-      return fail("call_verb was cancelled before the verb's handling settled");
-    }
+    );
     // SHORTCUT (2026-10-12): a failing handler's message, its thrown text
     // included, reaches the model as written. A handler over data the model
     // cannot read may carry that data in what it throws, and a pattern's
     // author can write instructions there. To harden, measure the failure
     // against the release ceiling as the result below is, and withhold it
     // where the ceiling refuses it.
-    if (called!.status !== "settled") return fail(called!.message);
+    if (called.status !== "settled") return fail(called.message);
 
-    const receipt = called!.receipt;
+    const receipt = called.receipt;
     if (receipt === undefined) return { outputId, status: "ok", verb: name };
     const space = pieces.getSpace();
     const resultRef = createLLMFriendlyLink(receipt, space);
@@ -359,6 +395,16 @@ export const callVerbTool: HarnessToolDefinition<
     // The receipt is read through a transaction of its own, so what it read
     // is exactly what the ceiling is measured against, and the transaction is
     // abandoned once it has been measured.
+    const unreadable = (why: string): CallVerbToolSuccessOutput => ({
+      outputId,
+      status: "ok",
+      verb: name,
+      resultRef,
+      message: scrubBareFabricIdentifiers(
+        `the verb ran, and its result could not be returned: ${why}`,
+      ),
+    });
+    if (called.unread !== undefined) return unreadable(called.unread);
     const releaseTx = runtime.edit();
     let raw: unknown;
     let value: unknown;
@@ -377,10 +423,12 @@ export const callVerbTool: HarnessToolDefinition<
             CALL_VERB_ANSWER_SINK,
             [],
           ) !== undefined;
+    } catch (error) {
+      return unreadable(errorMessage(error));
     } finally {
       releaseTx.abort("call_verb release measurement");
     }
-    if (value === undefined || called!.result === undefined) {
+    if (value === undefined || called.result === undefined) {
       return { outputId, status: "ok", verb: name, resultRef };
     }
     if (withheld) {
@@ -400,7 +448,7 @@ export const callVerbTool: HarnessToolDefinition<
       // reference the verb returned, and goes back as the address of what it
       // points at — the piece a verb created comes back as that piece's
       // handle, not as a copy of its fields.
-      const declared = schemaShapeOnly(called!.outputSchema ?? {});
+      const declared = schemaShapeOnly(called.outputSchema ?? {});
       let shaped = declared;
       for (const path of storedLinkPaths(raw)) {
         const target = runtime.getCellFromLink({
@@ -432,17 +480,7 @@ export const callVerbTool: HarnessToolDefinition<
         resultRef,
       };
     } catch (error) {
-      return {
-        outputId,
-        status: "ok",
-        verb: name,
-        resultRef,
-        message: scrubBareFabricIdentifiers(
-          `the verb's result does not match its declared result: ${
-            errorMessage(error)
-          }`,
-        ),
-      };
+      return unreadable(errorMessage(error));
     }
   },
 };
