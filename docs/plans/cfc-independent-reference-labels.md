@@ -290,8 +290,9 @@ and 3. What it leaves behind:
   `cfc/label-field-classification.ts`, so that a stored one keeps its class
   and its `source` and `target` are still committed when a label crosses
   spaces. `packages/api/cfc.ts` keeps the constant, under which `cf label`
-  shows a stored one; the pattern-facing ambient type in
-  `packages/static/assets/types/cfc.ts` drops it.
+  shows a stored one, and the pattern-facing ambient type generated from it
+  (`packages/static/assets/types/cfc.ts`) lists it still; a pattern that
+  names it has it stripped by the mint gate.
 - Which reference a writer's stamp at a slot describes is answered by the
   envelope and not by an atom. An envelope carries `stampPlacement:
   "committed"` when its writers' stamps at reference slots were persisted

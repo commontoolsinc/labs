@@ -107,9 +107,9 @@ export const CFC_ATOM_TYPE = {
   // access from `Space(...)` confidentiality via exchange rules.
   HasRole: "https://commonfabric.org/cfc/atom/HasRole",
   InjectionSafe: "https://commonfabric.org/cfc/atom/InjectionSafe",
-  // Retired (CFC §15.4): a link write mints no evidence atom. The name is
-  // kept for one release so a stored legacy atom displays under it in
-  // `cf label`; nothing mints, requires or reads it.
+  // Retired (CFC §15.4): no link write mints it. A label stored before the
+  // retirement still carries it, under this name, and it stays
+  // non-authorable: a schema that spells it has it stripped.
   LinkReference: "https://commonfabric.org/cfc/atom/LinkReference",
   // Runtime-minted LLM-derivation provenance: these bytes were produced by a
   // model (assistant content, or a tool result entering the dialog
