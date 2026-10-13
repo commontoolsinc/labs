@@ -1,7 +1,12 @@
-import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  JSONSchema,
+  JSONSchemaObj,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import {
   hashSchema,
   internPathSelector,
+  internSchema,
   REJECTING_SELECTOR,
 } from "@commonfabric/data-model-schema";
 import {
@@ -18,6 +23,7 @@ import type {
 
 import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import {
+  type DecomposedSchema,
   decomposeSchema,
   recomposeSchema,
   SchemaNotDecomposableError,
@@ -76,6 +82,51 @@ export class SelectorClosureUnavailableError extends Error {
 }
 
 /**
+ * The two forms a decomposition's schema goes to the wire in, each interned
+ * and built on first use: the reference to its root, and its closure
+ * recomposed inline.
+ */
+type ExternalizedForms = { reference?: JSONSchema; inline?: JSONSchema };
+
+/**
+ * The externalized forms of each decomposition, by the decomposition. A
+ * decomposition `decomposeSchema()` keeps is handed out again for the same
+ * schema, so every sync of one schema reads its forms here; one it does not
+ * keep is a new object per call, and builds its form again.
+ */
+const externalizedForms = new WeakMap<DecomposedSchema, ExternalizedForms>();
+
+/** Helper for the two form readers, which returns `decomposed`'s entry. */
+const externalizedFormsOf = (
+  decomposed: DecomposedSchema,
+): ExternalizedForms => {
+  let forms = externalizedForms.get(decomposed);
+  if (forms === undefined) {
+    forms = {};
+    externalizedForms.set(decomposed, forms);
+  }
+  return forms;
+};
+
+/** The interned reference to `decomposed`'s root. */
+const referenceFormOf = (decomposed: DecomposedSchema): JSONSchema =>
+  externalizedFormsOf(decomposed).reference ??= internSchema({
+    $ref: decomposed.rootRef,
+  });
+
+/**
+ * The interned inline form of `decomposed`: its closure recomposed into one
+ * self-contained schema.
+ */
+const inlineFormOf = (decomposed: DecomposedSchema): JSONSchema =>
+  externalizedFormsOf(decomposed).inline ??= internSchema(
+    recomposeSchema(
+      decomposed.rootRef,
+      (hash) => decomposed.documents.get(hash) ?? lookupSchemaDocument(hash),
+    ),
+  );
+
+/**
  * Normalizes a selector's schema for the wire
  * (`docs/specs/content-addressed-schemas.md`, Phase 2; the
  * `contentAddressedSchemas` flag, shared with the link writer — the two
@@ -121,9 +172,10 @@ export const externalizeSyncSelector = (
   const carriesRefs = containsExternalSchemaRef(schema);
   if (!carriesRefs && !getContentAddressedSchemasConfig()) return selector;
   try {
-    const { rootRef, documents } = decomposeSchema(schema as JSONSchemaObj, {
+    const decomposed = decomposeSchema(schema as JSONSchemaObj, {
       resolveDocument: lookupSchemaDocument,
     });
+    const { documents } = decomposed;
     for (const [hash, document] of documents) {
       registerSchemaDocument(hash, document);
     }
@@ -133,16 +185,13 @@ export const externalizeSyncSelector = (
     if (persisted && getContentAddressedSchemasConfig()) {
       return internPathSelector({
         path: selector.path,
-        schema: { $ref: rootRef },
+        schema: referenceFormOf(decomposed),
       });
     }
     if (!carriesRefs) return selector;
     return internPathSelector({
       path: selector.path,
-      schema: recomposeSchema(
-        rootRef,
-        (hash) => documents.get(hash) ?? lookupSchemaDocument(hash),
-      ),
+      schema: inlineFormOf(decomposed),
     });
   } catch (error) {
     if (error instanceof SchemaNotDecomposableError) {
