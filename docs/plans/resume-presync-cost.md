@@ -243,9 +243,42 @@ where the pre-sync was no longer the whole cost.
       counts are in
       [`../history/development/performance/2026-10-12-cycle-break-room-counts.md`](../history/development/performance/2026-10-12-cycle-break-room-counts.md).
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
-      the document they name, once per transaction, so the two checks a
-      written path makes read the inputs about its document
+      the document they name, once per transaction, so every check a
+      written path makes reads the inputs about its document
       (`packages/runner/src/cfc/prepare.ts`).
+- [x] A boundary pass holds one view of the transaction's reads, the
+      stored envelope behind each and the labeled set a protected entry
+      quantifies over, built once and reused across the pass's targets
+      while the transaction's input records, and the metadata object each
+      carries, are the ones it was copied from and the resolved envelopes
+      stand; the reactivity log stands across a read under the sealed
+      verifier metadata, which it never lists; and a deep-frozen document's
+      schema entries are kept by the document, unless the walk lacked a
+      schema document a reference names. On the thirty-row room's reload,
+      preparation fell from 15.5% of the load to 4.4%, and its mean from 52
+      to 12 ms per commit, on a pair of runs at the same machine load.
+- [x] The binding walk narrows a deep-frozen stand-in for a pattern's
+      authored argument schema where the schema is a mutable root over
+      deep-frozen members, made again when the root's members change
+      (`packages/runner/src/pattern-binding.ts`). `schemaAtPath` keeps a
+      narrowing only for a deep-frozen schema, and 42,296 of a reload's
+      86,398 narrowings, over six schemas, are of an authored schema that
+      is not one: a cost of its own outside preparation, 6 to 8% of the
+      same load. The stand-in takes a quarter to a third off it.
+- [ ] The rest of that cost is the authored schemas the builder hands out
+      as fully mutable trees. It goes when `factoryFromPattern` produces a
+      deep-frozen argument schema, which changes every pattern and is a
+      change of its own.
+- [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
+      transaction elides as equal to what is stored, read 345 documents
+      each on average, and take nine tenths of what preparation still
+      costs. An elided write is still an attempt the gates answer to
+      (the Contextual Flow Control specification's §8.10.2.1), so such a
+      commit cannot skip preparation without changing what is refused.
+      What it mostly pays is the prepared digest, built and
+      hashed over every read for a comparison that the unchanged activity
+      epoch already answers at commit; hashing it only when the epoch has
+      moved is the next cut, and the flow join after it.
 - [x] The storage manager keeps each data URI's hash and decoded value in a
       weight-bounded memo, and does not sync a link that declares a stream:
       its document holds no value a read uses, and the sync had sent one
