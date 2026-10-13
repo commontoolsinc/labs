@@ -451,6 +451,32 @@ export function getGlobalLogFloor(): LogLevel | undefined {
 }
 
 /**
+ * Function told of each call a logger counts, with the logger's module name
+ * (`undefined` for the unnamed global {@link log}), the message key, and the
+ * level. It runs synchronously inside the logging call, so it can read the
+ * caller's async context.
+ */
+export type LoggerCountObserver = (
+  moduleName: string | undefined,
+  key: string,
+  level: ActiveLogLevel,
+) => void;
+
+/** The process's one {@link LoggerCountObserver}, if one is set. */
+let _countObserver: LoggerCountObserver | undefined;
+
+/**
+ * Sets the process's one {@link LoggerCountObserver}, replacing any earlier
+ * one. Pass `undefined` to remove it. A count taken under the reserved key
+ * `total`, which the loggers refuse, is not reported.
+ */
+export function setLoggerCountObserver(
+  observer: LoggerCountObserver | undefined,
+): void {
+  _countObserver = observer;
+}
+
+/**
  * Returns the log level named by the `CF_LOG_LEVEL` environment variable, or
  * `undefined` when it is unset, is not a valid level, or cannot be read.
  * Always `undefined` outside Deno.
@@ -1243,6 +1269,7 @@ export class Logger {
       this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
     }
     this.#countsByKey[key][level]++;
+    _countObserver?.(this.#moduleName, key, level);
   }
 
   /**
