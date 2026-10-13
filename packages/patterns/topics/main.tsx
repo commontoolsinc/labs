@@ -518,8 +518,13 @@ export interface CardSource {
  * no card rather than a junk one; it appears on the next run.
  *
  * The parameter is an array of CELLS, as `mentionableIndex`'s is, so each
- * row's `topic` is the member's identity and writes as a link: an unchanged
- * board recomputes to the same rows and writes nothing.
+ * row's `topic` is the member's identity and writes as a link. Each row is
+ * addressed by the topic it describes — `Writable.for(topic)`, as the
+ * crossref table's rows are — so a card keeps its identity wherever its row
+ * sits in the order: an activity reorder moves rows, and the mapped card
+ * subtrees move with them rather than being re-addressed across the shifted
+ * range. An unchanged row recomputes to the same strings at the same address
+ * and writes nothing.
  */
 export function cardRowsOf(
   topics: readonly (
@@ -533,15 +538,21 @@ export function cardRowsOf(
     if (value) read.push({ topic, value });
   }
   read.sort((a, b) => activityOrderOf(b.value) - activityOrderOf(a.value));
-  return read.map(({ topic, value }) => ({
-    topic,
-    badge: value.shortName ?? "",
-    title: value.title || "(untitled topic)",
-    snippet: value.body ? snippet(value.body, 120) : "",
-    caption: `${value.commentCount ?? 0} comments · by ${
-      topicAuthorLabel(value.createdBy)
-    } · ${whenLabel(value.lastActivityAt ?? 0)}`,
-  }));
+  const rows: unknown[] = [];
+  for (const { topic, value } of read) {
+    rows.push(
+      Writable.for<CardRow>(topic).set({
+        topic,
+        badge: value.shortName ?? "",
+        title: value.title || "(untitled topic)",
+        snippet: value.body ? snippet(value.body, 120) : "",
+        caption: `${value.commentCount ?? 0} comments · by ${
+          topicAuthorLabel(value.createdBy)
+        } · ${whenLabel(value.lastActivityAt ?? 0)}`,
+      }),
+    );
+  }
+  return rows as CardRow[];
 }
 
 const cardRowsByActivity = lift(
