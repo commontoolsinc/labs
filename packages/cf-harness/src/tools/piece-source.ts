@@ -296,7 +296,7 @@ const provenanceOf = (state: PieceSourceState): PieceSourceProvenance => {
  * the session has no authority in, and a position inside a piece rather than
  * a piece are three different mistakes and each is said by name.
  */
-const resolvePiece = async (
+export const resolvePiece = async (
   toolId: string,
   pieces: PiecesController,
   ref: string,
@@ -348,7 +348,7 @@ const resolvePiece = async (
 };
 
 /** The session's piece controller, or the refusal that says why there is none. */
-const sessionPieces = async (
+export const sessionPieces = async (
   toolId: string,
   context: HarnessToolContext,
 ): Promise<

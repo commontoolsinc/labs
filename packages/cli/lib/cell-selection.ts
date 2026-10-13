@@ -8,6 +8,14 @@
 import type { Cell } from "@commonfabric/api";
 import { containsExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 import { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
+import {
+  declaredFieldNames,
+  declaredFieldsAt,
+  isSchemaObject,
+  schemaIsArrayShaped,
+  schemaIsObjectShaped,
+} from "@commonfabric/piece/declared-fields";
+import { nearestName } from "@commonfabric/piece/refusal";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import {
   ContextualFlowControl,
@@ -43,14 +51,6 @@ import {
   isObjectOrArray,
 } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
-import {
-  declaredFieldNames,
-  declaredFieldsAt,
-  isSchemaObject,
-  schemaIsArrayShaped,
-  schemaIsObjectShaped,
-} from "./declared-fields.ts";
-import { nearestName } from "./refusal.ts";
 import { timeCliPhase } from "./trace-timing.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";

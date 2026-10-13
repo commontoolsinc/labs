@@ -46,6 +46,7 @@ import {
   resolvePieceReference,
   SlugResolutionError,
 } from "@commonfabric/piece";
+import type { PieceCallableListing } from "@commonfabric/piece/verb-listing";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import {
@@ -70,7 +71,6 @@ import {
   LinkValidationError,
   listPieceCallables,
   partitionVerbListing,
-  type PieceCallableListing,
   type PieceConfig,
   type PieceResolutionDeps,
   setCellValue,

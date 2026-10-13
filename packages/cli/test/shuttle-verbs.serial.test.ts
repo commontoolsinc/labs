@@ -30,6 +30,7 @@ import { describe, it } from "@std/testing/bdd";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { SlugResolutionError } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
+import type { PieceCallableListing } from "@commonfabric/piece/verb-listing";
 
 import { UI } from "@commonfabric/runner";
 
@@ -47,7 +48,6 @@ import {
 import { LinkValidationError } from "../lib/piece.ts";
 import type {
   GetCellValueOptions,
-  PieceCallableListing,
   PieceConfig,
   SpaceConfig,
 } from "../lib/piece.ts";

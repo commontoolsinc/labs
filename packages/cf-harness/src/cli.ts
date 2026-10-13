@@ -786,6 +786,7 @@ const CLI_PARENT_TOOL_IDS = [
   "run_pattern",
   "assign_slug",
   "resolve_piece",
+  "call_verb",
   "search_patterns",
   "record_feedback",
   "search_skills",
@@ -2015,11 +2016,16 @@ export const parseCfHarnessCliArgs = async (
   // An allowlisted fabric-session tool with no session to run it against is
   // a configuration contradiction, surfaced here rather than as a tool that
   // is silently absent from the run.
-  const sessionTool =
-    (["run_pattern", "assign_slug", "resolve_piece", "acquire_skill"] as const)
-      .find(
-        (toolId) => allowedToolIds?.includes(toolId) === true,
-      );
+  const sessionTool = ([
+    "run_pattern",
+    "assign_slug",
+    "resolve_piece",
+    "call_verb",
+    "acquire_skill",
+  ] as const)
+    .find(
+      (toolId) => allowedToolIds?.includes(toolId) === true,
+    );
   if (sessionTool !== undefined && fabricSession === undefined) {
     throw new Error(
       `--allow-tool ${sessionTool} requires a fabric session; missing --fabric-api-url, --fabric-identity, and --fabric-space`,
