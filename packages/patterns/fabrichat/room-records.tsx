@@ -27,17 +27,13 @@ import {
   getEntityId,
   handler,
   spaceAccess,
-  spaceOf,
   type Stream,
   type TrustedActionWrite,
   Writable,
   type WriteAuthorizedBy,
   type WritePolicyAnyOf,
 } from "commonfabric";
-import {
-  isSharedSpaceCatalog,
-  type SharedSpaceCatalogStorage,
-} from "../system/shared-space-catalog.ts";
+import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
 import {
   chooseRecordedTime,
   isInMain,
@@ -771,23 +767,18 @@ export interface RoomActState {
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
 
-  /** The shared-space catalog the viewer's manager lists its rooms from. */
-  catalog?: SharedSpaceCatalogStorage;
-
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
 }
 
 /**
- * Tells the viewer's manager the viewer has joined the room, when its catalog
- * doesn't keep the room as one of their chats already. Writing in a room is
- * joining it, so a room the viewer reached by its link becomes one of their
- * chats, and one they forgot becomes one again.
+ * Tells the viewer's manager the viewer has joined the room. The manager's
+ * own event checks its private catalog and leaves an already listed room
+ * unchanged, so catalog reads stay in the manager's event.
  */
 const joinForViewer = (state: RoomActState): void => {
-  const { canJoin, joinRoom, catalog, self } = state;
+  const { canJoin, joinRoom, self } = state;
   if (canJoin !== true || joinRoom === undefined || self === undefined) return;
-  if (listsRoomIn(catalog, spaceOf(self))) return;
   joinRoom.send({ room: self });
 };
 

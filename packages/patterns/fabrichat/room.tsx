@@ -45,7 +45,6 @@ import {
   type ParticipantRosterCell,
   rosterProfiles,
 } from "../loom/participants.tsx";
-import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import { isInMain, type ShownIn } from "./logic.ts";
 import {
   type ActivityCell,
@@ -333,9 +332,6 @@ export interface RoomManager {
 
   /** Makes a room the viewer has joined one of their chats. */
   joinRoom?: Stream<JoinRoomRequest>;
-
-  /** The shared-space catalog the manager lists the viewer's rooms from. */
-  sharedSpaceCatalog?: SharedSpaceCatalogStorage;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
@@ -998,7 +994,6 @@ export const FabriChatRoomCore = pattern<
     counters,
     canJoin,
     joinRoom: manager?.joinRoom,
-    catalog: manager?.sharedSpaceCatalog,
     self,
   };
   const alsoToMain = new Writable.perSession(false);
@@ -1204,7 +1199,6 @@ export const FabriChatRoomCore = pattern<
               counters={counters}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
-              catalog={manager?.sharedSpaceCatalog}
               self={self}
             />
           ))}
@@ -1269,7 +1263,6 @@ export const FabriChatRoomCore = pattern<
               counters={counters}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
-              catalog={manager?.sharedSpaceCatalog}
               self={self}
             />
           ))}
