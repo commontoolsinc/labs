@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { isDeepFrozen } from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
-import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import {
   resetServerExecutionConfig,
@@ -23,21 +22,19 @@ import {
   withLinkCfcLabelView,
 } from "../src/cfc/link-label-view.ts";
 import { createCell, isCell } from "../src/cell.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaCell,
-  KeepAsCell,
   parseLink,
-  sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   causalFormOfBinding,
   findAllWriteRedirectCells,
-  frozenSchemaStandIn,
   opaqueArgumentKeys,
   sendValueToBinding,
   unwrapOneLevelAndBindToDoc,
@@ -51,9 +48,9 @@ import type {
   FabricExecPlainObject,
   FabricExecValue,
   JSONSchema,
-  JSONSchemaObj,
   Pattern,
 } from "../src/builder/types.ts";
+import { isPattern } from "../src/builder/types.ts";
 import type { AnyCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -928,6 +925,72 @@ describe("pattern-binding", () => {
       expect(() => bind({ err, aliased: alias() })).toThrow("FabricError");
     });
 
+    it("returns a nested pattern bound over the deep-frozen argument schema its graph holds", () => {
+      // The schema a nested pattern's nodes are bound under is the deep-frozen
+      // one the graph holds, which is what lets `schemaAtPath()` keep the
+      // narrowings a bind makes of it.
+      const argumentSchema = () =>
+        ({
+          type: "object",
+          properties: {
+            item: { $ref: "#/$defs/Item" },
+            count: { type: "number" },
+          },
+          $defs: {
+            Item: { type: "object", properties: { title: { type: "string" } } },
+          },
+        }) as JSONSchema;
+      const resultSchema = () =>
+        ({
+          type: "object",
+          properties: { doubled: { type: "number" } },
+        }) as JSONSchema;
+      const frame = pushFrame({
+        runtime,
+        tx,
+        space,
+        cause: { test: "nested pattern bound over its built schema" },
+      });
+      try {
+        const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
+        const double = lift<number>((x) => x * 2);
+        const Inner = pattern<{ count: number }, { doubled: number }>(
+          ({ count }) => ({ doubled: double(count) }),
+          argumentSchema(),
+          resultSchema(),
+        );
+        const Outer = pattern<{ count: number }, { doubled: number }>(
+          ({ count }) => ({ doubled: Inner({ count }).doubled }),
+          argumentSchema(),
+          resultSchema(),
+        );
+        const nested = Outer.nodes
+          .map((node) => node.module.implementation)
+          .find((implementation) => isPattern(implementation)) as Pattern;
+
+        const child = bind(nested);
+        expect(child).not.toBe(nested);
+        expect(child.argumentSchema).toBe(nested.argumentSchema);
+        expect(child.argumentSchema).toEqual(Inner.argumentSchema);
+        expect(isDeepFrozen(child.argumentSchema)).toBe(true);
+        const narrowed = ContextualFlowControl.schemaAtPath(
+          child.argumentSchema,
+          ["item"],
+        );
+        expect(narrowed).toEqual({
+          $ref: "#/$defs/Item",
+          $defs: {
+            Item: { type: "object", properties: { title: { type: "string" } } },
+          },
+        });
+        expect(
+          ContextualFlowControl.schemaAtPath(child.argumentSchema, ["item"]),
+        ).toBe(narrowed);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
     it("hands an Array subclass's species the same length `map()` would", () => {
       // Regression: an earlier lazy copy used `slice(0, i)`, which passes the
       // PREFIX length to `ArraySpeciesCreate`, where `map()` passes the full
@@ -1402,64 +1465,6 @@ describe("pattern-binding", () => {
       expect(links[0].path).toEqual(["foo"]);
       expect(links[0].id).toBeDefined();
       expect(links[0].space).toBe(space);
-    });
-  });
-
-  describe("frozenSchemaStandIn()", () => {
-    // A pattern's authored argument schema is a mutable root over frozen
-    // members, which is the shape `sanitizeSchemaForLinks()` returns.
-    const authoredSchema = () =>
-      sanitizeSchemaForLinks(
-        internSchema({
-          type: "object",
-          properties: { title: { type: "string" } },
-        }),
-        KeepAsCell.All,
-      ) as JSONSchemaObj;
-
-    it("returns a deep-frozen schema equal to a mutable root over frozen members", () => {
-      const authored = authoredSchema();
-      expect(isDeepFrozen(authored)).toBe(false);
-      const standIn = frozenSchemaStandIn(authored);
-      expect(standIn).not.toBe(authored);
-      expect(isDeepFrozen(standIn)).toBe(true);
-      expect(standIn).toEqual(authored);
-      expect(Object.isFrozen(authored)).toBe(false);
-    });
-
-    it("returns the same schema for a root whose members have not changed", () => {
-      const authored = authoredSchema();
-      expect(frozenSchemaStandIn(authored)).toBe(frozenSchemaStandIn(authored));
-    });
-
-    it("returns a schema with the root's members as they are at each call", () => {
-      const authored = authoredSchema() as Record<string, unknown>;
-      const before = frozenSchemaStandIn(authored as JSONSchema);
-      authored.required = Object.freeze(["title"]);
-      const added = frozenSchemaStandIn(authored as JSONSchema);
-      expect(added).not.toBe(before);
-      expect(added).toEqual(authored);
-
-      authored.type = "array";
-      const changed = frozenSchemaStandIn(authored as JSONSchema);
-      expect((changed as JSONSchemaObj).type).toBe("array");
-
-      delete authored.required;
-      const removed = frozenSchemaStandIn(authored as JSONSchema);
-      expect(removed).toEqual(authored);
-      expect("required" in (removed as object)).toBe(false);
-    });
-
-    it("returns a schema with a mutable member as it is", () => {
-      const mutable = { type: "object", properties: { title: {} } };
-      expect(frozenSchemaStandIn(mutable as JSONSchema)).toBe(mutable);
-    });
-
-    it("returns a deep-frozen schema, a boolean schema and `undefined` as they are", () => {
-      const frozen = internSchema({ type: "string" });
-      expect(frozenSchemaStandIn(frozen)).toBe(frozen);
-      expect(frozenSchemaStandIn(true)).toBe(true);
-      expect(frozenSchemaStandIn(undefined)).toBeUndefined();
     });
   });
 

@@ -256,18 +256,28 @@ where the pre-sync was no longer the whole cost.
       schema document a reference names. On the thirty-row room's reload,
       preparation fell from 15.5% of the load to 4.4%, and its mean from 52
       to 12 ms per commit, on a pair of runs at the same machine load.
-- [x] The binding walk narrows a deep-frozen stand-in for a pattern's
-      authored argument schema where the schema is a mutable root over
-      deep-frozen members, made again when the root's members change
-      (`packages/runner/src/pattern-binding.ts`). `schemaAtPath` keeps a
-      narrowing only for a deep-frozen schema, and 42,296 of a reload's
-      86,398 narrowings, over six schemas, are of an authored schema that
-      is not one: a cost of its own outside preparation, 6 to 8% of the
-      same load. The stand-in takes a quarter to a third off it.
-- [ ] The rest of that cost is the authored schemas the builder hands out
-      as fully mutable trees. It goes when `factoryFromPattern` produces a
-      deep-frozen argument schema, which changes every pattern and is a
-      change of its own.
+- [x] A pattern holds its argument and result schemas deep-frozen from the
+      time the builder makes it, and so does each copy of its graph that the
+      builder puts into a pattern nesting it. `schemaAtPath` keeps a
+      narrowing only for a deep-frozen schema, and binding a pattern's nodes
+      narrows the pattern's argument schema for every argument alias it
+      binds, so every such narrowing is one `schemaAtPath` keeps.
+      `factoryFromPattern` takes the two schemas deep-frozen from the
+      sanitizer (`sanitizeAndFreezeSchemaForLinks`,
+      `packages/runner/src/link-utils.ts`), and the builder's binding walk
+      freezes the schemas of each pattern graph it rebuilds
+      (`packages/runner/src/builder/to-encodable-form.ts`). Each schema
+      stays an object of its own and is not the interned instance:
+      `createRef()` hashes an object it reaches twice in one cause as
+      `null`, so two positions of a graph sharing one schema object derive
+      other ids than two positions holding equal ones. The thirty-row
+      room's counts and profile shares are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md).
+- [ ] Interning a schema is 8 to 10% of the same reload's profile samples
+      (the record above has the split). About a quarter of it is the
+      selectors a sync interns, about a fifth `asSchema` under
+      `#cellsNodePlanReads`, and about a fifth the schema pairs
+      `combineSchemaForLink` and `mergeSchemaFlags` key their memos by.
 - [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
       transaction elides as equal to what is stored, read 345 documents
       each on average, and take nine tenths of what preparation still
