@@ -146,7 +146,7 @@ cause shares, and not only on what the cause holds. A node's cause holds its
 bound inputs and outputs, a handler's holds its bound inputs, and either can
 hold a pattern's graph with its schemas.
 
-Twenty-three ids were derived with `createRef()` from eleven built patterns:
+Twenty-three ids were derived with `createRef()` from ten built patterns:
 one from each pattern's schemas, result and nodes, and one from each node's
 inputs and outputs. The patterns were built from mutable and from deep-frozen
 schemas, from one object given as both schemas, from equal schemas, with a
