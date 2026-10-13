@@ -9,7 +9,6 @@ import type { Cancel } from "../cancel.ts";
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
-  areNormalizedLinksSame,
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
@@ -103,6 +102,7 @@ import {
   dropQueuedEvent,
   endPieceStartWaits,
   eventHandlerImplementations,
+  EventHandlerRegistry,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
@@ -312,7 +312,7 @@ export {
 
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
-  #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  #eventHandlers = new EventHandlerRegistry();
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason, quiet) =>
       this.#dropEvent(event, reason, { quiet }),
@@ -1772,16 +1772,13 @@ export class Scheduler {
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.#eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        return shaperInstanceGroupKey(
-          (handler as {
-            schedulerObservationIdentity?: SchedulerObservationIdentity;
-          }).schedulerObservationIdentity,
-        );
-      }
-    }
-    return undefined;
+    const handler = this.#eventHandlers.get(eventLink);
+    if (handler === undefined) return undefined;
+    return shaperInstanceGroupKey(
+      (handler as {
+        schedulerObservationIdentity?: SchedulerObservationIdentity;
+      }).schedulerObservationIdentity,
+    );
   }
 
   /**
