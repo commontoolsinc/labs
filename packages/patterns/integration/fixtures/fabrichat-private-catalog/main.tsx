@@ -26,6 +26,8 @@ export default pattern<Input, ChatRoomOutput>((input) => {
     offerRoom: offer({}),
     requests: {},
     people: {},
+    // The producer carries private data outside the room's narrow manager
+    // contract. Keeping it here tests that room writes never load that data.
     sharedSpaceCatalog: input.catalog,
   };
   return FabriChatRoomCore({
