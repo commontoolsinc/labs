@@ -2474,6 +2474,14 @@ export class PiecesController<T = unknown> {
    * simultaneously, the first successful commit wins and others gracefully
    * discover the existing pattern on retry.
    *
+   * An existing root follows its origin before it is started. A root that was
+   * already running when its origin moved it has been re-instantiated on the
+   * incoming pattern by the time this resolves, as one started here has. The
+   * exception is a runtime that seals its writes into a serving wave: there
+   * the re-instantiation follows the wave's settlement, which a call made
+   * within the wave's cycle cannot wait for, and this resolves with the
+   * outgoing pattern's graph still running.
+   *
    * @returns The default pattern piece, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
@@ -2774,6 +2782,20 @@ export class PiecesController<T = unknown> {
     await timePiecePhase(
       "ensureDefaultPattern.runtime.idle",
       () => this.runtime.idle(),
+    );
+    // A root that was already running when its origin moved it keeps its
+    // graph through the start above, and the runner's pattern watcher swaps
+    // in the incoming pattern. The watcher has observed the move by the time
+    // the runtime is idle, and what it does next reads from storage, which
+    // `idle()` does not wait for. Until the swap the root runs the outgoing
+    // pattern's graph: a field the incoming pattern adds is unset, and a
+    // stream it adds has no handler.
+    await timePiecePhase(
+      "ensureDefaultPattern.patternPointerFollowed",
+      async () => {
+        await this.runtime.runner.patternPointerFollowed(rootToStart);
+        await this.runtime.idle();
+      },
     );
     await timePiecePhase(
       "ensureDefaultPattern.synced",
