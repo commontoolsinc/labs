@@ -4,9 +4,10 @@
  * for the cell/link machinery: everything that can be expressed against
  * `data-model` alone lives in the codec (in that package); this module
  * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
- * which rewrites relative links against a base before encoding, and
- * {@link findAndInlineDataUriLinks}, which dissolves `data:` URI links
- * back into the values they carry.
+ * which rewrites relative links against a base before encoding (and whose
+ * companion {@link dataUriSnapshotWithResolvedLinks} also returns the value
+ * to walk under the result), and {@link findAndInlineDataUriLinks}, which
+ * dissolves `data:` URI links back into the values they carry.
  *
  * The payload encodes the cell's VALUE, and the codec's decode entry
  * points return that value. The document view that the address grammar
@@ -29,6 +30,7 @@ import {
   type FabricValue,
   refuseFabricInstance,
 } from "@commonfabric/data-model";
+import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import {
   dataUriFromValue,
   isFabricDataUri,
@@ -38,7 +40,11 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
+import {
+  isPrimitiveCellLink,
+  type NormalizedLink,
+  type PrimitiveCellLink,
+} from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,
   isCellLink,
@@ -87,76 +93,142 @@ export function dataUriFromValueWithResolvedLinks(
   data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
-  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  return mintWithResolvedLinks(data, baseLinkOf(base)).id;
+}
 
-  function traverseAndAddBaseIdToRelativeLinks(
-    value: FabricValue,
-    seen: Set<object>,
-  ): FabricValue {
-    if (!isObjectOrArray(value)) return value;
-    if (seen.has(value)) {
-      throw new Error(`Cycle detected when creating data URI`);
-    }
-    seen.add(value);
-    try {
-      if (isPrimitiveCellLink(value)) {
-        const link = parseLink(value, baseLink);
-        return createSigilLinkFromParsedLink(link, {
-          includeSchema: true,
-          keepAsCell: KeepAsCell.All,
-        });
-      } else if (value instanceof FabricPrimitive) {
-        // A `FabricPrimitive` is a leaf; the value encoding represents it
-        // via its codec.
-        return value;
-      } else if (value instanceof FabricInstance) {
-        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
-        // carry cell links, which need the same relative-to-absolute
-        // rewriting as everything else. That requires codec-mediated
-        // traversal into instance state; until that exists, the instance
-        // passes through unrewritten (encoded correctly in form, but any
-        // relative link within it stays relative).
-        return value;
-      } else if (Array.isArray(value)) {
-        // Copy on write, here and in the object branch below: a container
-        // whose members all come back by identity is returned by identity
-        // too, so the encoder that reads the result gets the caller's own
-        // containers. A value carrying no link anywhere within it comes
-        // through this walk without an allocation.
-        let next: FabricValue[] | undefined;
-        for (let index = 0; index < value.length; index++) {
-          if (!(index in value)) continue;
-          const current = value[index];
-          const rewritten = traverseAndAddBaseIdToRelativeLinks(current, seen);
-          if (next) {
-            next[index] = rewritten;
-          } else if (!Object.is(rewritten, current)) {
-            next = value.slice();
-            next[index] = rewritten;
-          }
-        }
-        return next ?? value;
-      } else { // not an array
-        let next: Record<string, FabricValue> | undefined;
-        for (const [key, entry] of Object.entries(value)) {
-          const rewritten = traverseAndAddBaseIdToRelativeLinks(entry, seen);
-          if (next) {
-            next[key] = rewritten;
-          } else if (!Object.is(rewritten, entry)) {
-            next = { ...value };
-            next[key] = rewritten;
-          }
-        }
-        return next ?? value;
-      }
-    } finally {
-      seen.delete(value);
-    }
+/**
+ * Like {@link dataUriFromValueWithResolvedLinks}, except that it also returns
+ * the value a reader walks under the URI.
+ *
+ * That value is `data` with one change: a link that names no document is
+ * given the id of `base`. Such a link takes its id from the address it is
+ * read under, which under the `data:` address is the snapshot itself, so
+ * `data` walked there as given would read the link's path inside the
+ * snapshot. Every other link is `data`'s own, schema included, and `data`
+ * itself is returned where it holds no such link or `base` has no id.
+ *
+ * The returned value shares the containers of `data` it did not rewrite, so
+ * it is to be read and not written.
+ *
+ * @param data The value to encode. Must be acyclic.
+ * @param base Optional base link; relative links within `data` are resolved
+ *   against it.
+ * @returns The `data:` URI as `id`, and the value to walk under it as `value`.
+ * @throws If `data` contains a reference cycle.
+ */
+export function dataUriSnapshotWithResolvedLinks(
+  data: FabricValue,
+  base?: Cell | NormalizedLink,
+): { id: URI; value: FabricValue } {
+  const baseLink = baseLinkOf(base);
+  const { id, namesNoDocument } = mintWithResolvedLinks(data, baseLink);
+  const baseId = baseLink?.id;
+  const value = namesNoDocument && baseId !== undefined
+    ? mapLinks(data, (link) => {
+      const payload = linkRefPayload(link);
+      return payload.id === undefined
+        ? linkRefFrom({ ...payload, id: baseId })
+        : link;
+    })
+    : data;
+  return { id, value };
+}
+
+/** Returns the link a `base` argument of this module's mint functions names. */
+function baseLinkOf(
+  base: Cell | NormalizedLink | undefined,
+): NormalizedLink | undefined {
+  return isCell(base) ? base.getAsNormalizedFullLink() : base;
+}
+
+/**
+ * Helper for the two mint functions, which encodes `data` with each link in
+ * it rewritten to a full sigil link resolved against `baseLink`, and reports
+ * as `namesNoDocument` whether any link in `data` named no document.
+ *
+ * @throws If `data` contains a reference cycle.
+ */
+function mintWithResolvedLinks(
+  data: FabricValue,
+  baseLink: NormalizedLink | undefined,
+): { id: URI; namesNoDocument: boolean } {
+  let namesNoDocument = false;
+  const encoded = mapLinks(data, (link) => {
+    if (linkRefPayload(link).id === undefined) namesNoDocument = true;
+    return createSigilLinkFromParsedLink(parseLink(link, baseLink), {
+      includeSchema: true,
+      keepAsCell: KeepAsCell.All,
+    });
+  });
+  return { id: dataUriFromValue(encoded), namesNoDocument };
+}
+
+/**
+ * Helper for the two mint functions, which returns `value` with each
+ * primitive cell link in it replaced by what `rewrite` returns for it.
+ *
+ * @throws If `value` contains a reference cycle.
+ */
+function mapLinks(
+  value: FabricValue,
+  rewrite: (link: PrimitiveCellLink) => FabricValue,
+  seen: Set<object> = new Set(),
+): FabricValue {
+  if (!isObjectOrArray(value)) return value;
+  if (seen.has(value)) {
+    throw new Error(`Cycle detected when creating data URI`);
   }
-
-  return dataUriFromValue(
-    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  );
+  seen.add(value);
+  try {
+    if (isPrimitiveCellLink(value)) {
+      return rewrite(value);
+    } else if (value instanceof FabricPrimitive) {
+      // A `FabricPrimitive` is a leaf; the value encoding represents it
+      // via its codec.
+      return value;
+    } else if (value instanceof FabricInstance) {
+      // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
+      // carry cell links, which need the same relative-to-absolute
+      // rewriting as everything else. That requires codec-mediated
+      // traversal into instance state; until that exists, the instance
+      // passes through unrewritten (encoded correctly in form, but any
+      // relative link within it stays relative).
+      return value;
+    } else if (Array.isArray(value)) {
+      // Copy on write, here and in the object branch below: a container
+      // whose members all come back by identity is returned by identity
+      // too, so the encoder that reads the result gets the caller's own
+      // containers. A value carrying no link anywhere within it comes
+      // through this walk without an allocation.
+      let next: FabricValue[] | undefined;
+      for (let index = 0; index < value.length; index++) {
+        if (!(index in value)) continue;
+        const current = value[index];
+        const rewritten = mapLinks(current, rewrite, seen);
+        if (next) {
+          next[index] = rewritten;
+        } else if (!Object.is(rewritten, current)) {
+          next = value.slice();
+          next[index] = rewritten;
+        }
+      }
+      return next ?? value;
+    } else { // not an array
+      let next: Record<string, FabricValue> | undefined;
+      for (const [key, entry] of Object.entries(value)) {
+        const rewritten = mapLinks(entry, rewrite, seen);
+        if (next) {
+          next[key] = rewritten;
+        } else if (!Object.is(rewritten, entry)) {
+          next = { ...value };
+          next[key] = rewritten;
+        }
+      }
+      return next ?? value;
+    }
+  } finally {
+    seen.delete(value);
+  }
 }
 
 /**
@@ -167,14 +239,44 @@ export function dataUriFromValueWithResolvedLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
+ * The value a `data:` link carries is searched in turn, so a `data:` link
+ * held inside it is inlined as well, to any depth.
+ *
  * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
  * inline. A `FabricInstance` is refused, since passing one through would leave
- * a link inside it un-inlined.
+ * a link inside it un-inlined. The refusal covers `value` and the root of the
+ * value a `data:` link carries. A `FabricInstance` below that root comes back
+ * as the same instance, with any link inside it left as it is, unless
+ * `options.refuseCarriedInstances` asks for the refusal there as well.
  *
  * @param value - The value to find and inline data: URI links in.
+ * @param options.refuseCarriedInstances - Refuses a `FabricInstance` anywhere
+ *   in the value a `data:` link carries. For a caller whose destination admits
+ *   no instance, where returning one whole would put it there.
  * @returns The value with any data: URI links inlined.
+ * @throws If it reaches a `FabricInstance` it refuses.
  */
-export function findAndInlineDataUriLinks(value: any): any {
+export function findAndInlineDataUriLinks(
+  value: any,
+  options: { refuseCarriedInstances?: boolean } = {},
+): any {
+  return inlineDataUriLinks(
+    value,
+    false,
+    options.refuseCarriedInstances === true,
+  );
+}
+
+/**
+ * Recursive worker for {@link findAndInlineDataUriLinks}. `decoded` says
+ * `value` lies inside the value a `data:` link carried, where a
+ * `FabricInstance` is returned whole unless `refuseCarried` is set.
+ */
+function inlineDataUriLinks(
+  value: any,
+  decoded: boolean,
+  refuseCarried: boolean,
+): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
@@ -210,7 +312,7 @@ export function findAndInlineDataUriLinks(value: any): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return findAndInlineDataUriLinks(newSigilLink);
+          return inlineDataUriLinks(newSigilLink, decoded, refuseCarried);
         }
         if (path.length > 0) {
           // TODO(danfuzz): a path segment naming something inside a
@@ -229,10 +331,6 @@ export function findAndInlineDataUriLinks(value: any): any {
       // over directly is refused, while the same one decoded out of a `data:`
       // URI leaves silently, and a guard with a way around it is worse than no
       // guard, since it reads as covering the case.
-      //
-      // Only the payload itself is checked, because a decoded payload is
-      // returned rather than walked -- nothing here descends one, so there is
-      // no descent for a nested instance to be caught by.
       if (dataValue instanceof FabricInstance) {
         refuseFabricInstance(
           dataValue,
@@ -240,7 +338,11 @@ export function findAndInlineDataUriLinks(value: any): any {
         );
       }
 
-      return dataValue;
+      // The payload can hold a `data:` link of its own, an immutable cell
+      // that was handed a snapshot's cell for one, so it is walked as well.
+      // The descent ends: an id embedded in a payload is shorter than the id
+      // that encodes the payload, so no id can contain itself.
+      return inlineDataUriLinks(dataValue, true, refuseCarried);
     } else {
       return value;
     }
@@ -249,7 +351,7 @@ export function findAndInlineDataUriLinks(value: any): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = findAndInlineDataUriLinks(current);
+      const inlined = inlineDataUriLinks(current, decoded, refuseCarried);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -266,6 +368,11 @@ export function findAndInlineDataUriLinks(value: any): any {
     // than an omission.
     return value;
   } else if (value instanceof FabricInstance) {
+    // Below the root of a decoded payload an instance is returned whole, and
+    // a link inside it survives as a link, for a caller that has not asked
+    // for the refusal there.
+    if (decoded && !refuseCarried) return value;
+
     // Refused. An instance's state can carry a `data:` URI link, and inlining
     // those is what this walk is for, so passing the value through would hand
     // it back _untransformed_ -- the link surviving as a link, the walk's
@@ -289,7 +396,7 @@ export function findAndInlineDataUriLinks(value: any): any {
   } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataUriLinks(entry);
+      const inlined = inlineDataUriLinks(entry, decoded, refuseCarried);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

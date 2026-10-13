@@ -570,6 +570,21 @@ runtime.runner.stop(result);
 The storage system provides persistence for cells and synchronization across
 clients.
 
+Storage synchronization and `Cell.pull()` depend on live space subscriptions. A
+terminated session makes storage synchronization return its failure even for
+documents already loaded into the replica, and `Cell.pull()` rejects terminal
+connection or takeover errors in any space the read reaches. A failed session in
+an unrelated space does not fail the pull. Authorization denials retain their
+absent-value semantics and per-space access report.
+`storageManager.spaceSessionError(space)` exposes a terminal session error
+without starting I/O. Ordinary reconnects keep the session open and restore its
+subscriptions; a takeover ends the session and requires a fresh client. An
+authoritative local store continues supplying reads independently of the remote
+session.
+
+Reactive reads through `get()`, `sink()`, and computations continue using cached
+documents; they do not surface terminal session errors through this check.
+
 Remote memory connections use native WebSockets in browsers and for plain `ws:`
 URLs. Deno `wss:` connections use the `ws` package through Deno's Node TLS stack
 to avoid the native TLS flush bug tracked in

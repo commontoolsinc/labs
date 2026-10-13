@@ -200,6 +200,7 @@ import {
   mergeableOpRead,
   writeDestinationRead,
 } from "./storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
 ensureNotRenderThread();
@@ -1822,6 +1823,10 @@ export class CellImpl<T extends FabricValue>
    * `awaitDurability: true` keeps the read demanded through the runtime-wide
    * commit-aware barrier, including producers installed by pending commits.
    *
+   * Rejects with a terminal connection or takeover error in any space the read
+   * reaches, including when its replica still holds a cached value. Authorization
+   * denials retain their absent-value semantics and per-space access report.
+   *
    * @returns The cell's reactive value after the selected readiness barrier.
    */
   pull(options: { awaitDurability?: boolean } = {}): Promise<Readonly<T>> {
@@ -1837,8 +1842,9 @@ export class CellImpl<T extends FabricValue>
       // a real network it does not, and pull() resolved from held,
       // not-yet-loaded state (measured: a same-id retry's receipt readback
       // returned undefined against a remote host while identical calls
-      // passed against a local toolshed). Failures are swallowed like
-      // link-resolution's kicks: the read still resolves from the replica.
+      // passed against a local toolshed). Load failures are swallowed like
+      // link-resolution's kicks. Ordinary load failures resolve from the
+      // replica; the terminal session check below rejects terminal failures.
       this.#runtime.storageManager.trackUntilSettled(
         this.#startLoad().catch(() => {}),
       );
@@ -1856,15 +1862,25 @@ export class CellImpl<T extends FabricValue>
         ? this.#runtime.scheduler.idleWithPendingCommits()
         : this.#runtime.scheduler.idle();
 
+    let readSpaces = new Set<MemorySpace>([this.space]);
     return new Promise((resolve, reject) => {
       const action: Action = (tx) => {
-        // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
+        try {
+          // Read the value inside the effect - this ensures dependencies are pulled
+          const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
 
-        // If no schema or TrueSchema, traverse the result to register all
-        // nested values as read dependencies.
-        if (needsTraversal && value !== undefined && value !== null) {
-          deepTraverse(value);
+          // If no schema or TrueSchema, traverse the result to register all
+          // nested values as read dependencies.
+          if (needsTraversal && value !== undefined && value !== null) {
+            deepTraverse(value);
+          }
+        } finally {
+          // Schemaless traversal can add reads in other spaces. Each effect
+          // run replaces the set so obsolete dependencies do not fail the pull.
+          readSpaces = new Set<MemorySpace>([this.space]);
+          for (const { space } of getTransactionReadActivities(tx)) {
+            readSpaces.add(space);
+          }
         }
       };
       // Name the action for debugging
@@ -1924,6 +1940,15 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
+        for (const space of readSpaces) {
+          const sessionError = this.#runtime.storageManager.spaceSessionError?.(
+            space,
+          );
+          if (
+            sessionError !== undefined &&
+            sessionError.name !== "AuthorizationError"
+          ) throw sessionError;
+        }
         return validateAndTransform(this.#runtime, undefined, this.#viewRef);
       };
       ready().then(resolve, reject);
@@ -2159,8 +2184,20 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
+      //
+      // A `data:` link is dissolved into the value it carries, as a stored
+      // write dissolves one. An event leaves this runtime, for the stream's
+      // space and whichever runtime handles it there, and a `data:` id is
+      // good only where it was minted: a link inside one resolves its
+      // schema's references against documents this runtime holds.
+      //
+      // An event admits no `FabricInstance`. `convertCellsToLinks()` refuses
+      // one written into the event, and the dissolve refuses one inside the
+      // value a `data:` link carries, which would otherwise arrive in the
+      // event whole with any `data:` link in its state intact.
+      const event = findAndInlineDataUriLinks(
+        convertCellsToLinks(newValue as CellLinkInput),
+        { refuseCarriedInstances: true },
       ) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 

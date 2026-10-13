@@ -47,6 +47,7 @@ import {
   type ConsoleHandler,
   ConsoleMethod,
   type Engine,
+  type ErrorWithContext,
   type Pattern,
   PatternCoverageCollector,
   patternCoverageOutputPath,
@@ -72,6 +73,12 @@ import {
 import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import { waitForMarkerCommit } from "./multi-user-marker-commit.ts";
 import { patternTestExperimentalOptions } from "./pattern-test-experimental-options.ts";
+import {
+  collectServedErrors,
+  type EventError,
+  servedRuntimeErrors,
+} from "./served-errors.ts";
+import { servedConsequences, settleServed } from "./served-settle.ts";
 import { buildActionEvent } from "./trusted-action-event.ts";
 
 export interface WorkerRequest {
@@ -161,7 +168,10 @@ let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
 let patternCoveragePath: string | undefined;
 let patternCoverageRoot: string | undefined;
-const runtimeErrors: string[] = [];
+const runtimeErrors: ErrorWithContext[] = [];
+
+/** Errors of served runs of this runtime's events; see `served-errors.ts`. */
+let servedErrors: EventError[] = [];
 
 /** Channel 1: console.error calls captured via the harness console event. */
 const consoleErrors: string[] = [];
@@ -184,13 +194,23 @@ function rt(): Runtime {
   return runtime;
 }
 
+/**
+ * Settles the runtime and its storage, until a round finds nothing to do,
+ * and on the server-execution arm until every event this runtime fired has
+ * its served consequence back here; see `served-settle.ts`.
+ */
 async function settle(maxIterations = 20): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    const start = performance.now();
-    await rt().idle();
-    await storageManager!.synced();
-    if (performance.now() - start < SETTLE_FAST_MS) return;
-  }
+  await settleServed(rt(), async () => {
+    for (let i = 0; i < maxIterations; i++) {
+      const start = performance.now();
+      await rt().idle();
+      await servedConsequences(rt());
+      await storageManager!.synced();
+      // What the sync delivered may have scheduled work of its own.
+      await rt().idle();
+      if (performance.now() - start < SETTLE_FAST_MS) return;
+    }
+  });
 }
 
 function markersCellFor(participant: string): Cell<Record<string, boolean>> {
@@ -348,7 +368,8 @@ const handlers: Record<
         }, not off, observe, or persist`,
       );
     }
-    // Resolved before anything is opened, so a refusal leaves nothing to close.
+    // The orchestrator resolves the same environment the same way, and hosts
+    // the serving loop this runtime's arm needs.
     const experimental = patternTestExperimentalOptions(Deno.env.get);
     const identity = await Identity.fromKeyPair(
       keyPairFromRealmValue(
@@ -392,7 +413,7 @@ const handlers: Record<
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager as never,
       experimental,
-      errorHandlers: [(error: Error) => runtimeErrors.push(String(error))],
+      errorHandlers: [(error) => runtimeErrors.push(error)],
       moduleByteCache: getDefaultModuleByteCache(),
       // The collector is the runtime's, which makes every compile an
       // instrumented one and names the instrumented variant wherever the
@@ -405,6 +426,9 @@ const handlers: Record<
         ? { cfcEnforcementMode: requestedMode }
         : {}),
     }));
+    if (experimental.serverExecution) {
+      servedErrors = collectServedErrors(runtime);
+    }
     if (args.noIdempotencyCheck !== true) runtime.enableIdempotencyCheck();
     if (args.cfcDenials === true) {
       // This worker runs one participant for its whole life, so nothing stops
@@ -668,7 +692,8 @@ const handlers: Record<
     );
     return Promise.resolve({
       runtimeErrors: [
-        ...runtimeErrors,
+        ...runtimeErrors.map((error) => String(error)),
+        ...servedRuntimeErrors(servedErrors, runtimeErrors),
         ...continuousUiErrors.map((error) =>
           `[continuous $UI] ${String(error)}`
         ),
