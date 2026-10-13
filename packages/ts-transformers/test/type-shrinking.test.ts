@@ -846,6 +846,30 @@ type Ev = { x: Writable<number>; other: Writable<number> };`,
           },
         ],
         [
+          "a key that can name any element, in a helper",
+          `function pick(list: readonly { v: Writable<number> }[], i: number): number {
+  return list[i]!.v.get();
+}
+type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };`,
+          "Ev",
+          "(e, { c }) => { c.set(pick(e.list, c.get())); }",
+          {
+            type: "object",
+            properties: {
+              list: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { v: cell("cell") },
+                  required: ["v"],
+                },
+              },
+              other: cell("opaque"),
+            },
+            required: ["list", "other"],
+          },
+        ],
+        [
           "a traversal of the cell's value alone",
           "type Ev = { x: Writable<number>; other: Writable<number> };",
           "Ev",
@@ -869,6 +893,19 @@ type Ev = { x: Writable<number>; other: Writable<number> };`,
         expect(reported).toEqual([]);
       });
     }
+
+    it("keeps a cell beside one handed on under the empty key opaque", async () => {
+      const { event: schema } = await eventSchema(
+        `declare function keep(value: unknown): boolean;
+type Ev = { "": Writable<number>; other: Writable<number> };`,
+        "Ev",
+        '(e, { c }) => { if (keep(e[""])) c.set(1); }',
+      );
+
+      expect((schema.properties as Record<string, unknown>).other).toEqual(
+        cell("opaque"),
+      );
+    });
   });
 });
 

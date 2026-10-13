@@ -2630,8 +2630,10 @@ computation's input schema:
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
   overlap it in either direction; disjoint paths survive. The summary carries
-  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a).
-  A root wildcard still suppresses `identityOnly`. This matters because closure captures share one
+  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a),
+  and a caller takes on a helper's at the path it handed the helper, as it
+  does the helper's reads, writes, and escapes. A root wildcard still
+  suppresses `identityOnly`. This matters because closure captures share one
   synthetic root: blanket erasure degraded disjoint `equals()`-only captures
   into unsatisfiable full-value self-demands
   (`test/policy/capability-analysis.test.ts`).

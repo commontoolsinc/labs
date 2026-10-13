@@ -2850,8 +2850,12 @@ export function validateShrinkCoverage(
 /** A serialized path key with numeric segments normalized to `*`, so an
  * element access observed at one index matches the element position. */
 function contractPathKey(segments: readonly string[]): string {
-  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment)
-    .join("\x00");
+  return contractPathSegments(segments).join("\x00");
+}
+
+/** `segments` with each array index read as any index, `*`. */
+function contractPathSegments(segments: readonly string[]): string[] {
+  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment);
 }
 
 function addPrefixKeys(
@@ -2939,13 +2943,13 @@ interface ContractObservation {
 
   /** Positions whose value escaped whole, a cell's handle among them, at
    * and below which the body's uses are not recorded one by one. */
-  readonly escaped: readonly string[];
+  readonly escaped: readonly (readonly string[])[];
 
   /** The prefixes of the body's wildcards, and of its reads through a key
    * that can name any member, below which its uses are not recorded one by
    * one. Its use of a prefix itself is: a `.get()` reads it, and a write
    * through such a key writes it. */
-  readonly reachedBelow: readonly string[];
+  readonly reachedBelow: readonly (readonly string[])[];
 }
 
 function contractObservationFrom(
@@ -2969,8 +2973,10 @@ function contractObservationFrom(
   for (const path of summary.identityCellPaths ?? []) {
     exactComparableCell.add(contractPathKey(path));
   }
-  const escaped = (summary.escapedPaths ?? []).map(contractPathKey);
-  const reachedBelow = (summary.wildcardPaths ?? []).map(contractPathKey);
+  const escaped = (summary.escapedPaths ?? []).map(contractPathSegments);
+  const reachedBelow = (summary.wildcardPaths ?? []).map(
+    contractPathSegments,
+  );
   return {
     write,
     read,
@@ -2990,12 +2996,15 @@ function usedUntracked(
   observation: ContractObservation,
   path: readonly string[],
 ): boolean {
-  const key = contractPathKey(path);
-  const below = (prefix: string) =>
-    prefix === "" ? key !== "" : key.startsWith(`${prefix}\x00`);
+  const segments = contractPathSegments(path);
+  const startsWith = (prefix: readonly string[]) =>
+    prefix.every((segment, index) => segments[index] === segment);
   return observation.escaped.some((prefix) =>
-    key === prefix || below(prefix)
-  ) || observation.reachedBelow.some(below);
+    prefix.length <= segments.length && startsWith(prefix)
+  ) ||
+    observation.reachedBelow.some((prefix) =>
+      prefix.length < segments.length && startsWith(prefix)
+    );
 }
 
 function contractCapabilityAt(
@@ -3017,7 +3026,9 @@ function contractCapabilityAt(
  * writable where it writes, read-only where it reads, comparable where it
  * only compares, and OPAQUE where it never touches the position, so a
  * declared-but-unread reference confers no exercised authority while the
- * contract still names it.
+ * contract still names it. A position the body may use in a way its summary
+ * does not record (`usedUntracked()`) keeps the capability written for it,
+ * since no narrower one can be shown to suffice.
  *
  * A reference to a type alias is walked as the node the alias names
  * (`readAuthoredTypeNode()`), so a cell declared through an alias is rewritten

@@ -4068,6 +4068,16 @@ export function analyzeFunctionCapabilities(
             for (const escapedPath of paramSummary.escapedPaths ?? []) {
               recordEscape(source.root, [...source.path, ...escapedPath]);
             }
+            // Where the callee read through a key that can name any member,
+            // the caller's value is reached below that prefix by an access
+            // neither names: its identity markings there are erased, as the
+            // callee's are, and the prefix reaches the caller's summary.
+            for (const wildcardPath of paramSummary.wildcardPaths ?? []) {
+              const path = [...source.path, ...wildcardPath];
+              if (!isSelfReference(source.root, path)) {
+                ensureState(source.root).wildcardPaths.add(encodePath(path));
+              }
+            }
             for (const writePath of paramSummary.writePaths) {
               trackWrite(source.root, [...source.path, ...writePath]);
             }

@@ -99,8 +99,9 @@ export type CapabilityParamSummary = {
   /**
    * The static path prefixes below which the body reaches members this
    * analysis does not name one by one: a wildcard's, and a read through a key
-   * that can name any member. `[]` is the whole parameter. A position at or
-   * below one may be used in any way the analysis did not record.
+   * that can name any member. `[]` is the whole parameter. A position below
+   * one may be used in any way the analysis did not record; the use of a
+   * prefix itself is recorded with the other paths.
    */
   readonly wildcardPaths?: readonly (readonly string[])[];
 
