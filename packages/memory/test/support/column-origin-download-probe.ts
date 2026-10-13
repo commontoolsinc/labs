@@ -4,6 +4,6 @@
  * download-failure catch in openSource.
  */
 
-import { openSource } from "../../v2/sqlite/column-origin.ts";
+import { openSource } from "../../v2/sqlite/native-symbols.ts";
 const result = await openSource({ kind: "release" });
 console.log(JSON.stringify("problem" in result));
