@@ -43,7 +43,7 @@ during that implementation are archived at
 
 ## Last Updated
 
-2026-08-27
+2026-10-12
 
 ## Motivation
 
@@ -379,20 +379,6 @@ re-instantiation, through the runner's `patternPointerFollowed()`, so the root
 it returns runs the new pattern whether or not the root was running when it
 was opened.
 
-Opening any other piece makes that promise for the pointer moves it can
-account for. `openPiece`, and a `getPieceCell` that reconciles, wait through
-the same `patternPointerFollowed()` before they start the piece. They wait for
-the move their own reconcile made, and for any earlier move the piece's watcher
-has already observed. The watcher observes a move in a scheduler pass, so an
-open whose reconcile moved the pointer first waits for the runtime to go idle.
-An open that moved nothing skips that wait, which would hold it until every
-other piece in the runtime is quiescent, and so does not wait for a move
-committed elsewhere that the watcher has yet to observe. The wait is for the
-opened piece's watcher alone, and lasts as long as its follow does. For a
-pointer another replica moved to a pattern this runtime has not compiled, that
-includes loading the pattern, which starting the same piece would wait for if
-it were not running.
-
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
   causes.
@@ -401,6 +387,29 @@ it were not running.
   must exercise representative prior state and verify that the proposed source
   still reads and preserves it. The deployment runtime does not try to infer
   stable-key or stable-cause compatibility.
+
+Opening any other piece that is already running waits the same way, through
+the same `patternPointerFollowed()`, for two kinds of pointer move. `openPiece`,
+and a `getPieceCell` that reconciles, wait for the move their own reconcile
+made, and for any earlier move the piece's watcher has already observed. They
+wait after the reconcile, and again after the start where the open starts the
+piece, since a start that was in flight before the pointer moved can
+instantiate the outgoing pattern.
+
+The watcher observes a move in a scheduler pass. An open whose reconcile moved
+the pointer therefore waits for the runtime to go idle first. An open that
+moved nothing does not, because that wait lasts until every piece in the
+runtime is quiescent. Such an open does not wait for a move committed
+elsewhere that the watcher has yet to observe.
+
+The wait is for the opened piece's watcher alone, and lasts as long as that
+watcher takes. For a pointer another replica moved to a pattern this runtime
+has not compiled, that includes loading the pattern, which starting the same
+piece would wait for if it were not running. A re-instantiation that fails is
+logged and leaves the piece on the pattern it was running, and the open
+resolves all the same. On a runtime that seals its writes into a serving wave
+the re-instantiation follows the wave's settlement, which the wait does not
+cover.
 
 An automatic update from a `system:` origin runs no structural comparison,
 because the release gate below is a better check than the runtime could make

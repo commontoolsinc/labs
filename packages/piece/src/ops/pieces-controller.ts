@@ -966,7 +966,8 @@ export class PiecesController<T = unknown> {
    *
    * An open that reconciles resolves once a piece that is already running
    * runs the pattern its pointer names, as {@link openPiece} does, whether
-   * or not the open also starts it.
+   * or not the open also starts it. As after any start, the piece's
+   * computations run when something demands their results.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
@@ -1047,6 +1048,11 @@ export class PiecesController<T = unknown> {
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
+      // A start that was in flight before the pointer moved may have
+      // instantiated the outgoing pattern. Its watcher begins the follow as
+      // it is installed, which the wait ahead of the start came too early
+      // to observe.
+      if (reconcile) await this.#patternPointerFollowed(piece, false);
     }
 
     // If caller provided a schema, use it
@@ -1857,35 +1863,45 @@ export class PiecesController<T = unknown> {
       () => this.#patternPointerFollowed(opened, outcome === "updated"),
     );
     await this.startPiece(opened);
+    // A start that was in flight before the pointer moved may have
+    // instantiated the outgoing pattern. Its watcher begins the follow as it
+    // is installed, which the wait ahead of the start came too early to
+    // observe.
+    await this.#patternPointerFollowed(opened, false);
   }
 
   /**
-   * Helper for the opens that follow a piece's origin, which resolves once a
-   * piece that is already running runs the pattern its pointer names. A start
-   * leaves such a piece's graph as it is, and the runner's pattern watcher
-   * swaps in the incoming pattern after reading from storage, so until the
-   * swap a field the incoming pattern adds is unset and a stream it adds has
-   * no handler. A piece that is not running has no follow to wait for: its
-   * start instantiates the pattern the pointer names.
+   * Helper for the opens that reconcile a piece with its origin, which
+   * resolves once a piece that is already running runs the pattern its
+   * pointer names. A start leaves such a piece's graph as it is, and the
+   * runner's pattern watcher swaps in the incoming pattern after reading from
+   * storage, so until the swap a field the incoming pattern adds is unset and
+   * a stream it adds has no handler. Resolves at once for a piece that is not
+   * running: it has no watcher, and its start instantiates the pattern the
+   * pointer names.
    *
    * `movedHere` says this open's own reconcile moved the pointer. The watcher
-   * observes a move in a scheduler pass, so that move is given one first. An
-   * open that moved nothing skips the pass, which would hold it until the
-   * whole runtime is quiescent, and so waits only for a move the watcher has
-   * already observed. A move committed elsewhere that the watcher has yet to
-   * observe is not waited for.
+   * observes a move in a scheduler pass, so for that move this awaits
+   * `Runtime.idle()` first. An open that moved nothing does not, because
+   * `idle()` waits for the whole runtime, and so it waits only for a move
+   * the watcher has already observed. A move committed elsewhere that the
+   * watcher has yet to observe is not waited for.
    *
-   * The wait is for this piece's watcher alone, and lasts as long as its
-   * follow does. Where another replica moved the pointer to a pattern this
-   * runtime has not compiled, the follow loads that pattern, which a start
-   * of the same piece would wait for as well were it not running.
+   * The wait is for this piece's watcher alone, and lasts as long as the
+   * watcher takes. Where another replica moved the pointer to a pattern this
+   * runtime has not compiled, the watcher loads that pattern, which a start
+   * of the same piece would wait for as well were it not running. A swap
+   * that fails is logged by the runner and leaves the piece on the pattern
+   * it was running.
    */
   async #patternPointerFollowed(
     piece: Cell<unknown>,
     movedHere: boolean,
   ): Promise<void> {
+    const runner = this.runtime.runner;
+    if (!runner.isRunning(piece)) return;
     if (movedHere) await this.runtime.idle();
-    await this.runtime.runner.patternPointerFollowed(piece);
+    await runner.patternPointerFollowed(piece);
   }
 
   /**
