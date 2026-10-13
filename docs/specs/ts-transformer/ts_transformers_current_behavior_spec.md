@@ -501,13 +501,18 @@ printed from its type where an argument replaced what the annotation names, so
 cell is built from its parts, each printed from its own type. A tuple, and a
 type that carries a scope, are not unfolded, since only a scope wrapper names
 its scope. Such a node is kept as written where a use the body makes reaches
-inside it, so a scoped cell the body reads keeps the capability written for it,
-and is otherwise read with every cell in it `opaque` (`keptAsWritten()`): a cell
-kept at the capability its author wrote would confer authority no use
-exercises. The same holds for a cell an index signature types, where no use
-reaches a key the literal does not declare, and for an event the body never
-reads at all; the schema generator honors that `opaque` reading at the root of
-a schema as well as at a member. An optional member's node is read at the member's type without
+it (`reachedByUse()`), so a scoped cell the body reads keeps the capability
+written for it, and is otherwise read with every cell in it `opaque`
+(`keptAsWritten()`): a cell kept at the capability its author wrote would
+confer authority no use exercises. A use reaches a node where the summary
+observes one at the node, below it, or above it on a value read whole (a key the
+body computes, or a value that leaves the function), and anywhere where the
+summary names no path for a use (a destructuring, a rest element, a
+pass-through, or a cell use it cannot verify). The same holds for a cell an
+index signature types, where no use reaches a key the literal does not declare,
+compared as written so that a declared `0` does not declare `1`, and for an
+event the body never reads at all; the schema generator honors that `opaque`
+reading at the root of a schema as well as at a member. An optional member's node is read at the member's type without
 the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
 holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
 with `undefined`. A printed node is overlaid on its

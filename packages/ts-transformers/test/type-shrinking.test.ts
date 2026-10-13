@@ -21,7 +21,10 @@ import {
   printTypeNode,
   wrapTypeNodeWithCapability,
 } from "../src/transformers/type-shrinking.ts";
-import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import {
+  COMMONFABRIC_TYPES,
+  commonfabricTypes,
+} from "./commonfabric-test-types.ts";
 import { callSchemas, collect, parseModule } from "./transformed-ast.ts";
 import { transformFiles } from "./utils.ts";
 
@@ -841,6 +844,41 @@ type Ev = { c: Writable<number>; x: Ix };`,
       expect(event.additionalProperties).toEqual(opaqueNumber);
     });
 
+    it("keeps an index signature that types no cell as written", async () => {
+      const { event } = await eventSchema(
+        "type Ev = { c: Writable<number>; [key: string]: unknown };",
+        "Ev",
+        callback,
+      );
+
+      expect(event.additionalProperties).toEqual({ type: "unknown" });
+    });
+
+    it("keeps an index signature's cells as written where there is no state to record their opaque reading in", () => {
+      const { sourceFile, checker } = createProgramWithFiles({
+        "/test.ts": `import { Writable } from "commonfabric";
+type Ev = { c: Writable<number>; [key: string]: Writable<number> };`,
+        "/commonfabric.d.ts": commonfabricTypes,
+      });
+      const alias = findTypeAlias(sourceFile, "Ev");
+      const written = alias.type as ts.TypeLiteralNode;
+
+      const result = overlayContractCapabilities(
+        written,
+        checker.getTypeAtLocation(written),
+        createParamSummary({ capability: "readonly", readPaths: [["c"]] }),
+        checker,
+        ts.factory,
+        sourceFile,
+      ) as ts.TypeLiteralNode;
+
+      // The overlay did read the literal: the cell `c` names is rewritten.
+      expect(result).not.toBe(written);
+      expect(result.members.find(ts.isIndexSignatureDeclaration)).toBe(
+        written.members.find(ts.isIndexSignatureDeclaration),
+      );
+    });
+
     it("keeps a cell an index signature types as written where the body reads it under a key it computes", async () => {
       const { event } = await eventSchema(
         "type Ev = { dict: { [key: string]: Writable<number> }; key: string };",
@@ -876,6 +914,43 @@ type Ev = { c: Writable<number>; x: Ix };`,
       });
       expect(declared.event.additionalProperties).toEqual(opaqueNumber);
     });
+
+    for (
+      const [use, event, callback] of [
+        [
+          "a destructured parameter",
+          "Tup",
+          "([a, b], { c }) => { c.set(a.get() + b.get().length); }",
+        ],
+        [
+          "a destructuring declaration",
+          "Tup",
+          "(e, { c }) => { const [a] = e; c.set(a.get()); }",
+        ],
+        [
+          "a rest element",
+          "Holder",
+          "({ c: x, ...rest }, { c }) => { c.set(x.get() + rest.t[0].get()); }",
+        ],
+        [
+          "a function that leaves no summary",
+          "Holder",
+          "(e, { c }) => { sink(e.t); c.set(e.c.get()); }",
+        ],
+      ] as const
+    ) {
+      it(`keeps the cells of a tuple as written where the body reaches them through ${use}`, async () => {
+        const { event: schema } = await eventSchema(
+          `declare function sink(value: unknown): void;
+type Tup = [Writable<number>, Writable<string>];
+type Holder = { c: Writable<number>; t: [Writable<number>, string] };`,
+          event,
+          callback,
+        );
+
+        expect(capabilitiesOf(schema)).not.toContainEqual(["opaque"]);
+      });
+    }
 
     it("keeps a tuple as written where the body reads the value above it under a key it computes", async () => {
       const { event } = await eventSchema(
