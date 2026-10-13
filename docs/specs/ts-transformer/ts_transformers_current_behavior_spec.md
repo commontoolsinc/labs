@@ -471,8 +471,8 @@ makes reaches below. The remainder is printed from its instantiation and marked
 `SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
 cell no use reaches earns; a finite chain deeper than the cut reads the same as
 reading it to its end would. A cell the body uses in a way its summary does not
-record one path at a time keeps the capability written for it, since no
-narrower one can be shown to suffice: one at or below a value that escaped whole
+record one path at a time keeps the capability written for it, past such a cut
+too, since no narrower one can be shown to suffice: one at or below a value that escaped whole
 (`escapedPaths`), a cell's handle passed to a helper with no summary among them,
 and one strictly below a wildcard's prefix (`wildcardPaths`), as a destructuring
 of an array, an object's rest element, or a key that can name any element

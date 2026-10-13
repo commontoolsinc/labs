@@ -3298,6 +3298,9 @@ export function overlayContractCapabilities(
     unfold: () => ts.TypeNode | undefined,
   ): ts.TypeNode => {
     if (visiting.has(type)) return current;
+    // Every cell a use the summary does not record may reach keeps the
+    // capability written for it, so the node serves as written.
+    if (usedUntracked(observation, path)) return current;
     if (
       cutsExpansion(type, expansions, budget, checker, MAX_OVERLAY_NESTING) &&
       !usedWithin(path)

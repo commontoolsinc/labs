@@ -894,6 +894,69 @@ type Ev = { list: { v: Writable<number> }[]; other: Writable<number> };`,
       });
     }
 
+    describe("past the cut of a recursion", () => {
+      // The untracked use reaches cells past the depth where the overlay cuts
+      // a recursion and reads its remainder opaque; they keep the capability
+      // written for them all the same, and the untouched sibling does not.
+
+      const chain = (length: number) =>
+        `type Chain<N extends unknown[]> = N extends [unknown, ...infer R]
+  ? { next: Chain<R> }
+  : { v: Writable<number> };
+type Deep = Chain<[${Array.from({ length }, () => "1").join(", ")}]>;`;
+      const nexts = (length: number) => ".next".repeat(length);
+      for (
+        const [use, declaration, callback] of [
+          [
+            "a key that can name any element, twelve levels above the cell",
+            `${chain(12)}
+type Ev = { list: Deep[]; other: Writable<number> };`,
+            `(e, { c }) => { c.set(e.list[c.get()]!${nexts(12)}.v.get()); }`,
+          ],
+          [
+            "a helper with no summary, handed a value twelve levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(12)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a helper with no summary, handed a value four levels above the cell",
+            `declare function keep(value: unknown): number;
+${chain(4)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            "(e, { c }) => { c.set(keep(e.x)); }",
+          ],
+          [
+            "a rest element twelve levels down",
+            `${chain(13)}
+type Ev = { x: Deep; other: Writable<number> };`,
+            `(e, { c }) => { const { ...rest } = e.x${
+              nexts(12)
+            }; c.set(rest.next.v.get()); }`,
+          ],
+        ] as const
+      ) {
+        it(`keeps the cell ${use} reaches as written`, async () => {
+          const { event: schema, reported } = await eventSchema(
+            declaration,
+            "Ev",
+            callback,
+          );
+
+          expect((schema.properties as Record<string, unknown>).other).toEqual(
+            cell("opaque"),
+          );
+          expect(
+            capabilitiesOf(schema).map((capability) =>
+              JSON.stringify(capability)
+            ).sort(),
+          ).toEqual(['["cell"]', '["opaque"]']);
+          expect(reported).toEqual([]);
+        });
+      }
+    });
+
     it("keeps a cell beside one handed on under the empty key opaque", async () => {
       const { event: schema } = await eventSchema(
         `declare function keep(value: unknown): boolean;
