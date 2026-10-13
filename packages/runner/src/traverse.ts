@@ -60,6 +60,7 @@ import {
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import { schemaTypesAreDisjoint } from "./schema-type-disjointness.ts";
 import type {
   CellScope,
   JSONObject,
@@ -75,7 +76,7 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
+import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
@@ -3562,29 +3563,6 @@ export function combineSchemaForLink(
   );
 }
 
-function schemaTypesAreDisjoint(
-  parentType: JSONSchemaObj["type"],
-  linkType: JSONSchemaObj["type"],
-): boolean {
-  if (parentType === undefined || linkType === undefined) return false;
-
-  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
-  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
-    return false;
-  }
-
-  return !parentTypes.some((parent) =>
-    linkTypes.some((link) =>
-      parent === link ||
-      (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number") ||
-      (parent === "object" && isFabricPrimitiveSchemaType(link)) ||
-      (link === "object" && isFabricPrimitiveSchemaType(parent))
-    )
-  );
-}
-
 export function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: JSONSchemaTypes,
@@ -5601,19 +5579,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // references in its schema.
         // Need to read recursively here
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+        // A link inside the element that names no document takes its id from
+        // the address it is read under, which under the `data:` address is
+        // the snapshot. The walk continues over the element with each such
+        // link given the id of the document storing the element.
+        const snapshot = dataUriSnapshotWithResolvedLinks(
+          curDoc.value,
+          elementLink,
+        );
         const elementAddress = curDoc.address;
         // TODO(@ubik2): ideally, we wouldn't use this path in query traversal.
         // Right now, we aren't passing both the link info and doc info, so we
         // will override the doc here.
-        // I could switch based off the traverseCells flag (true for queries),
-        // but I don't want to have that change behavior here.
         curDoc = {
           ...curDoc,
-          address: {
-            ...curDoc.address,
-            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
-            path: ["value"],
-          },
+          address: { ...curDoc.address, id: snapshot.id, path: ["value"] },
+          value: snapshot.value,
         };
         // Our selector's path needs to be updated to match the new doc
         curSelector.path = curDoc.address.path;
