@@ -592,7 +592,11 @@ describe("private inbox across runtimes", () => {
         .id === loomLink.id
     );
     await owner.send("dropLeavingFirstProfile");
-    await harness.settleUntil(async () => (await statuses())[0] !== "ensured");
+    await harness.settleUntil(async () =>
+      ((await owner.readRaw(["leavingHome", "profiles"])) as unknown[])
+        .length === 2
+    );
+    await harness.settle();
     leavingAnswers = { before, after: await statuses() };
 
     profilelessRequest = await requestInbox(
