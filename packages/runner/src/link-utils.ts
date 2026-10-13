@@ -1027,20 +1027,15 @@ export function getDerivedInternalCellLink(
   descriptor: DerivedInternalCellDescriptor,
 ): NormalizedFullLink {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
-  const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
     // The kind's ONLY representation is the URI scheme applied here by
     // toURI; the hash preimage is kind-free, so this mint site is the single
     // place a computed identity is established.
     id: toURI(
-      createRef(
-        {},
-        {
-          parent,
-          type: "internal",
-          cause: descriptor.partialCause,
-        },
+      cellRuntime(resultCell).derivedInternalCellIds.idFor(
+        resultCell,
+        descriptor.partialCause,
       ),
       descriptor.kind,
     ),

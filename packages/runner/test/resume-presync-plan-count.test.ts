@@ -269,6 +269,46 @@ describe("resume-presync-plan-count", () => {
     expect(bindings).toBe(expectedPairs);
   });
 
+  it("mints each derived internal cell's id once across a resume", async () => {
+    // The id of a derived internal cell is the hash of its result cell's
+    // entity and its partial cause. The pre-sync names every instance's
+    // owned cells, each node that binds one asks for its id again, and so
+    // does the scheduler summary of every action of the instance.
+
+    const cellId = "resume-presync-plan-count-derived-ids-root";
+    const compiled = await authorTree(cellId);
+
+    const resumer = replica();
+    await resumer.patternManager.compilePattern(TREE_PROGRAM, { space });
+    let mints = 0;
+    const minted = new Set<string>();
+    resumer.derivedInternalCellIds.accessForTestingOnly.mintRecorder = (
+      resultId,
+      partialCause,
+    ) => {
+      mints += 1;
+      minted.add(JSON.stringify([resultId, partialCause]));
+    };
+    const resumed = resumer.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+    );
+    expect(await resumer.runner.start(resumed)).toBe(true);
+    await resumed.pull();
+    await resumer.settled();
+    await resumer.storageManager.synced();
+    expect(
+      (resumed.key("rows").getAsQueryResult() as {
+        value: number;
+        badge: { label: string };
+      }[]).map((item) => [item.value, item.badge.label]),
+    ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
+
+    expect(minted.size).toBeGreaterThan(0);
+    expect(mints).toBe(minted.size);
+  });
+
   it("names a nested instance's family once when its argument links to a document nothing has written", async () => {
     const cellId = "resume-presync-plan-count-handed-root";
 
