@@ -4128,10 +4128,13 @@ export class CfHarnessPromptLoop {
         if (toolCalls.length === 0) {
           if (assistantMessage.content.trim().length === 0) {
             // A run that returns through `submit_result` is asked once to
-            // submit rather than failed on its first blank turn; a second
-            // blank turn fails it.
+            // submit rather than failed on its first blank turn, provided a
+            // turn that still offers tools follows; a second blank turn
+            // fails it.
+            const toolTurnFollows = modelTurns <
+              maxModelTurns - (this.#finalizeOnTurnLimit ? 1 : 0);
             if (
-              finalizing || emptyTurnNudged ||
+              !toolTurnFollows || emptyTurnNudged ||
               !this.#allowedToolIds.has("submit_result")
             ) {
               throw new HarnessControlError(

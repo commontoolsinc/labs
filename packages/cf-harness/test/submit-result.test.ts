@@ -182,7 +182,12 @@ describe("submit_result", () => {
   const run = async (
     runId: string,
     turns: readonly unknown[],
-    options: { schema?: boolean; allowedToolIds?: string[] } = {},
+    options: {
+      schema?: boolean;
+      allowedToolIds?: string[];
+      maxModelTurns?: number;
+      finalizeOnTurnLimit?: boolean;
+    } = {},
   ) => {
     const requests: ReturnType<typeof chatViewOfRequest>[] = [];
     const engine = new CfHarnessEngine({
@@ -199,6 +204,12 @@ describe("submit_result", () => {
       ...(options.allowedToolIds !== undefined
         // deno-lint-ignore no-explicit-any
         ? { allowedToolIds: options.allowedToolIds as any }
+        : {}),
+      ...(options.maxModelTurns !== undefined
+        ? { maxModelTurns: options.maxModelTurns }
+        : {}),
+      ...(options.finalizeOnTurnLimit !== undefined
+        ? { finalizeOnTurnLimit: options.finalizeOnTurnLimit }
         : {}),
       fetchFn: scriptedFetch(turns, { value: 0 }, requests),
     });
@@ -382,6 +393,23 @@ describe("submit_result", () => {
       message:
         "The model returned an empty assistant response with no tool calls",
     });
+  });
+
+  it("fails a blank turn at once where the turn after it is the reserved final one", async () => {
+    // The finalizing turn offers no tools, so a notice to call submit_result
+    // would ask for what that turn cannot do.
+    await expect(
+      run("run-blank-before-final", [finalTurn(""), finalTurn("Partial.")], {
+        maxModelTurns: 2,
+        finalizeOnTurnLimit: true,
+      }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("fails a blank turn at once where it is the last turn of the budget", async () => {
+    await expect(
+      run("run-blank-last-turn", [finalTurn("")], { maxModelTurns: 1 }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
   });
 
   it("fails a blank turn at once where the run takes no result", async () => {
