@@ -770,6 +770,16 @@ describe("compactStore", () => {
     expect(compactionCommits(partial.database)).toHaveLength(1);
     expect(rowsOf(partial.database, A)).toHaveLength(1);
     expect(rowsOf(partial.database, B)).toHaveLength(2);
+    // `created_at` counts whole seconds, and a window of zero keeps every
+    // commit created in a later second than the newest client commit. Dating
+    // the first run's commit to that client commit's second puts it outside
+    // the window whether or not the clock ticked over between the build and
+    // the interrupted run.
+    partial.database.prepare(
+      `UPDATE "commit" SET created_at =
+         (SELECT MAX(created_at) FROM "commit" WHERE session_id NOT LIKE ?1)
+       WHERE session_id LIKE ?1`,
+    ).run(`${COMPACTION_SESSION_PREFIX}%`);
     close(opened.pop()!);
 
     const second = await compactStore({
