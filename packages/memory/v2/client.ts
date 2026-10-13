@@ -208,6 +208,10 @@ export type MountOptions = {
   seenSeq?: number;
   sessionToken?: string;
 
+  /** See the wire `SessionDescriptor.resumeKey`. `mount()` makes one for
+   * each session, replacing any a caller passes. */
+  resumeKey?: string;
+
   /** The session-level delegated READ binding (OW31; see the wire
    * `SessionDescriptor.actingAs`): only the serving plane's loopback
    * managers set it; the server admits it for delegating-class
@@ -723,6 +727,9 @@ export class Client {
       ...(options.genesisRoot === undefined ? {} : {
         genesisRoot: cloneIfNecessary(options.genesisRoot, { frozen: false }),
       }),
+      // The session this mount makes is the key's holder, so a caller's key
+      // is replaced.
+      resumeKey: crypto.randomUUID(),
     };
     let opening: Promise<SessionOpenResult> | undefined;
     let result: SessionOpenResult;
@@ -768,6 +775,7 @@ export class Client {
       options.genesisRoot,
       options.spaceKind,
       declaredSpaceKindOf(result),
+      options.resumeKey,
     );
     this.#spaces.add(session);
     return session;
@@ -2242,6 +2250,8 @@ export class SpaceSession {
   readonly #genesisRoot?: GenesisRoot;
   readonly #spaceKindIntent?: string;
   #declaredSpaceKind?: DeclaredSpaceKind;
+  /** See the wire `SessionDescriptor.resumeKey`. */
+  readonly #resumeKey: string;
 
   constructor(
     client: Client,
@@ -2256,8 +2266,10 @@ export class SpaceSession {
     genesisRoot?: GenesisRoot,
     spaceKindIntent?: string,
     declaredSpaceKind?: DeclaredSpaceKind,
+    resumeKey: string = crypto.randomUUID(),
   ) {
     this.#client = client;
+    this.#resumeKey = resumeKey;
     this.#auth = auth;
     this.#routeSignal = routeSignal;
     this.#actingAs = actingAs;
@@ -3877,6 +3889,7 @@ export class SpaceSession {
       sessionId: this.#sessionId,
       seenSeq: this.#serverSeq,
       sessionToken: this.#sessionToken,
+      resumeKey: this.#resumeKey,
       // The delegated READ binding survives a route replacement (OW31):
       // a reopen without it would silently drop to envelope-only READ.
       ...(this.#actingAs !== undefined ? { actingAs: this.#actingAs } : {}),

@@ -133,10 +133,14 @@ describe("storage session takeover", () => {
       "ordinary reconnect",
     ]
   ) {
-    const terminal = cause !== "ordinary reconnect";
+    const terminal = cause === "server takeover";
     const description = terminal
       ? `returns an error for an already loaded document after ${cause}`
-      : "keeps an already loaded document subscribed through an ordinary reconnect";
+      : `keeps an already loaded document subscribed through ${
+        cause === "lost resume reply"
+          ? "a reconnect whose resume reply is lost"
+          : "an ordinary reconnect"
+      }`;
     it(description, async () => {
       const owner = await Identity.fromPassphrase("storage session takeover");
       const space = owner.did();
@@ -209,10 +213,12 @@ describe("storage session takeover", () => {
           }, testSessionOpenAuthFactory);
           await transport.delivered();
         } else if (cause === "lost resume reply") {
+          // The next resume carries the session's resume key, so the server
+          // takes the token the lost resume presented.
           transport.loseNextResume();
-          await expect(session.whenRestored()).rejects.toThrow("taken-over");
+          await session.whenRestored();
           expect(transport.lostReplies).toBe(1);
-          expect(transport.staleResumeRefusals).toBe(1);
+          expect(transport.staleResumeRefusals).toBe(0);
         } else {
           transport.reconnect();
           await session.whenRestored();

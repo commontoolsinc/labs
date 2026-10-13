@@ -39,6 +39,7 @@ function reconnectableTransport(
   let heldOnce = false;
   let holding = false;
   let lostOnce = false;
+  let loseOpenResponse = false;
   let refusedWrites = 0;
   const reset = () => {
     connection?.close();
@@ -95,6 +96,16 @@ function reconnectableTransport(
         closeReceiver(new Error("test connection dropped"));
         throw connectionError("Memory websocket changed before send");
       }
+      if (loseOpenResponse && message.type === "session.open") {
+        // The server handles this open, and the connection drops before its
+        // response reaches the client.
+        loseOpenResponse = false;
+        holding = true;
+        await connection.receive(payload);
+        reset();
+        closeReceiver(new Error("test connection dropped"));
+        return;
+      }
       const held = options.holdFirstTransact && !heldOnce &&
         message.type === "transact";
       if (held) {
@@ -134,6 +145,10 @@ function reconnectableTransport(
     drop() {
       reset();
       closeReceiver(new Error("test connection dropped"));
+    },
+    /** Loses the response to the next `session.open` the client sends. */
+    loseNextOpenResponse() {
+      loseOpenResponse = true;
     },
   };
 }
@@ -407,6 +422,45 @@ describe("v2-client-reconnect-recovery", () => {
     } finally {
       await client.close();
       await pending?.catch(() => {});
+      await server.close();
+    }
+  });
+
+  it("resumes a session, and lands a commit issued while disconnected, when the response to its reopen is lost", async () => {
+    // The server rotates the resume token as it handles the reopen, so the
+    // client, which never saw the response, resumes with the token before.
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://lost-reopen-response"),
+    });
+    const lossy = reconnectableTransport(server);
+    const client = await connect({ transport: lossy.transport });
+    try {
+      const session = await client.mount(
+        "did:key:z6Mk-lost-reopen-response",
+        {},
+        testSessionOpenAuthFactory,
+      );
+      await session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:x", value: { value: "A" } }],
+      });
+
+      lossy.loseNextOpenResponse();
+      lossy.drop();
+      const pending = session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:x", value: { value: "B" } }],
+      });
+      pending.catch(() => {});
+
+      await expect(pending).resolves.toMatchObject({ seq: 2 });
+      expect(session.closeError).toBeUndefined();
+      expect(lossy.connections).toBe(3);
+    } finally {
+      await client.close();
       await server.close();
     }
   });

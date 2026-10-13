@@ -1421,6 +1421,19 @@ export type SessionDescriptor = {
   sessionToken?: SessionToken;
 
   /**
+   * A random key the client makes for one session and sends on every open of
+   * it. The server keeps the key of a session's latest open, and resumes the
+   * session from the token that open presented, as well as from the token it
+   * issued, when the resume carries the same key: the connection can drop
+   * after the server handles a resume and before its response reaches the
+   * client, which then still holds only the token before. A resume from
+   * another holder of that token carries a different key, or none, and is
+   * refused as before. Signed into the session.open invocation with the rest
+   * of this descriptor.
+   */
+  resumeKey?: string;
+
+  /**
    * The read ceiling every `db.query` served for this session reads under
    * (`docs/specs/sqlite-builtin/06-cfc.md`, "Runtime read ceiling";
    * server-side execution `protocol.md` §1). A client runtime under server

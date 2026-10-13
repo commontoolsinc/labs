@@ -17,6 +17,14 @@ export type SessionState = {
   id: string;
   space: string;
   sessionToken: SessionToken;
+  /**
+   * The `resumeKey` the latest open carried, and the token it presented.
+   * A resume with the same key may present that token instead of
+   * `sessionToken`: its client may never have received the response that
+   * carried `sessionToken` (`SessionDescriptor.resumeKey`).
+   */
+  resumeKey?: string;
+  presentedToken?: SessionToken;
 
   /** The read ceiling this session declared at its LAST open
    * (`SessionDescriptor.readCeiling`); fresh per open, never inherited. */
@@ -203,7 +211,13 @@ export class SessionRegistry {
     }
     if (
       existing !== undefined &&
-      session.sessionToken !== existing.sessionToken
+      session.sessionToken !== existing.sessionToken &&
+      !(
+        existing.resumeKey !== undefined &&
+        existing.presentedToken !== undefined &&
+        session.resumeKey === existing.resumeKey &&
+        session.sessionToken === existing.presentedToken
+      )
     ) {
       throw revokedError(
         `session ${sessionId} resume token is no longer valid`,
@@ -223,6 +237,12 @@ export class SessionRegistry {
       id: sessionId,
       space,
       sessionToken,
+      ...(session.resumeKey !== undefined
+        ? { resumeKey: session.resumeKey }
+        : {}),
+      ...(session.sessionToken !== undefined
+        ? { presentedToken: session.sessionToken }
+        : {}),
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
