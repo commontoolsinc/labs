@@ -28,6 +28,7 @@ import {
   type HarnessToolBackingAvailability,
   withheldToolIds,
 } from "@commonfabric/cf-harness/contracts/tool-descriptor";
+import { validateHarnessForeignSpaces } from "@commonfabric/cf-harness/foreign-spaces";
 import { parseHandleRef } from "@commonfabric/cf-harness/handle-table";
 import {
   checkInputCellSpec,
@@ -125,6 +126,9 @@ export interface LocalJobNarrowing {
 
   /** The pieces the request hands the job, by name. */
   inputs?: Readonly<Record<string, string>>;
+
+  /** Where each space an input names outside the profile's is served. */
+  foreignSpaces?: Readonly<Record<string, string>>;
 }
 
 const ROLES: readonly PromptSlotRole[] = ["direct-command", "context", "quote"];
@@ -357,67 +361,123 @@ export const readLocalJobProfiles = async (
   );
 };
 
+/** The space a link input names by DID, or `undefined` for any other input. */
+const spaceOf = (ref: string): string | undefined => {
+  try {
+    if (parseNamedPieceAddress(ref) !== undefined) return undefined;
+    const space = parseHandleRef(ref).space;
+    return space !== undefined && isDID(space) ? space : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
- * The space each of `inputs` names by DID, mapped to `fabric`'s host: the
- * spaces a job handed those pieces is admitted to, beside its own. An input
- * in `ownSpace`, or one that names no space or names it by name, adds none.
+ * The space each of `inputs` names by DID, other than `ownSpace`: the spaces
+ * a job handed those pieces reaches beyond its own. An input naming no space,
+ * naming one by name, or not parsing at all adds none here; the input check
+ * reports the last.
  */
-export const localJobForeignSpaces = (
-  fabric: LocalJobFabric,
+const inputSpaces = (
   inputs: Readonly<Record<string, string>> | undefined,
-  ownSpace: string = fabric.space,
-): Record<string, string> => {
-  const spaces: Record<string, string> = {};
+  ownSpace: string,
+): Set<string> => {
+  const spaces = new Set<string>();
   for (const ref of Object.values(inputs ?? {})) {
-    if (parseNamedPieceAddress(ref) !== undefined) continue;
-    let space: string | undefined;
-    try {
-      space = parseHandleRef(ref).space;
-    } catch {
-      continue;
-    }
-    if (space !== undefined && isDID(space) && space !== ownSpace) {
-      spaces[space] = fabric.host;
-    }
+    const space = spaceOf(ref);
+    if (space !== undefined && space !== ownSpace) spaces.add(space);
   }
   return spaces;
 };
 
 /**
- * Why `profile` cannot hold `inputs`, or `undefined` when it can: each one is
- * held to the rule the harness mints an input cell under. A link may name a
- * piece in any space by DID — that space is admitted for the job, by
- * {@link localJobForeignSpaces} — while a piece address names a slug, which
- * resolves only in the profile's own space: one naming another space is
- * refused, as is one qualified by name under a profile naming its space by
- * DID, since only a session can resolve the name to compare them.
+ * The foreign spaces a job's session is admitted to: each space an input
+ * names outside `ownSpace`, routed to the origin the request names for it.
+ * Only those the inputs name are passed, so nothing the request lists beyond
+ * them widens the run — {@link narrowLocalJobProfile} has refused such a
+ * request already.
+ */
+export const localJobForeignSpaces = (
+  inputs: Readonly<Record<string, string>> | undefined,
+  foreignSpaces: Readonly<Record<string, string>> | undefined,
+  ownSpace: string,
+): Record<string, string> => {
+  const routes = validateHarnessForeignSpaces(foreignSpaces ?? {});
+  const admitted: Record<string, string> = {};
+  for (const space of inputSpaces(inputs, ownSpace)) {
+    if (Object.hasOwn(routes, space)) admitted[space] = routes[space];
+  }
+  return admitted;
+};
+
+/**
+ * Why `profile` cannot hold `inputs` with `foreignSpaces`, or `undefined`
+ * when it can: each input is held to the rule the harness mints an input cell
+ * under. A link may name a piece in another space by DID, provided the
+ * request says which origin serves that space — the profile's own host is
+ * never assumed to, since a space it does not serve reads as empty and
+ * nothing reports it — and every space `foreignSpaces` lists must be one an
+ * input names. A piece address names a slug, which resolves only in the
+ * profile's own space, so one naming another space is refused, as is one
+ * qualified by name under a profile naming its space by DID, since only a
+ * session can resolve the name to compare them.
  */
 const refuseInputs = (
   profile: LocalJobProfile,
   inputs: Readonly<Record<string, string>> | undefined,
+  foreignSpaces: Readonly<Record<string, string>> | undefined,
 ): string | undefined => {
-  if (inputs === undefined || Object.keys(inputs).length === 0) {
+  const listed = Object.keys(foreignSpaces ?? {});
+  if (
+    (inputs === undefined || Object.keys(inputs).length === 0) &&
+    listed.length === 0
+  ) {
     return undefined;
   }
   const { fabric } = profile;
   if (fabric === undefined) {
     return "The profile has no fabric session, so it can hold no inputs.";
   }
+  let routes: Readonly<Record<string, string>>;
+  try {
+    routes = validateHarnessForeignSpaces(foreignSpaces ?? {});
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  const named = inputSpaces(inputs, fabric.space);
+  const unused = listed.filter((space) => !named.has(space));
+  if (unused.length > 0) {
+    return `\`foreignSpaces\` lists ${
+      unused.map((space) => `\`${space}\``).join(", ")
+    }, which no input names.`;
+  }
   const byDid = isDID(fabric.space);
-  const foreign = localJobForeignSpaces(fabric, inputs);
-  for (const [name, ref] of Object.entries(inputs)) {
+  for (const [name, ref] of Object.entries(inputs ?? {})) {
+    // Asked first, in the request's own terms: the harness check below would
+    // otherwise refuse the same input in the vocabulary of its command line.
+    if (
+      named.has(spaceOf(ref) ?? "") && !Object.hasOwn(routes, spaceOf(ref)!)
+    ) {
+      return `Input \`${name}\` names a piece in \`${
+        spaceOf(ref)
+      }\`; pass the origin serving that space in \`foreignSpaces\`.`;
+    }
+    let address;
     try {
       checkInputCellSpec(
         { name, ref },
         byDid ? fabric.space as MemorySpace : undefined,
         byDid ? undefined : fabric.space,
-        foreign,
+        routes,
       );
+      address = parseNamedPieceAddress(ref);
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      return message.includes(`\`${name}\``)
+        ? message
+        : `Input \`${name}\`: ${message}`;
     }
-    const named = parseNamedPieceAddress(ref);
-    if (byDid && named?.spaceName !== undefined) {
+    if (byDid && address?.spaceName !== undefined) {
       return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; send the space-relative /of:<id> form.`;
     }
   }
@@ -452,7 +512,11 @@ export const narrowLocalJobProfile = (
   if (browserHost !== undefined && profile.browserHost !== true) {
     return { refusal: "The profile does not admit a browser host." };
   }
-  const inputRefusal = refuseInputs(profile, narrowing.inputs);
+  const inputRefusal = refuseInputs(
+    profile,
+    narrowing.inputs,
+    narrowing.foreignSpaces,
+  );
   if (inputRefusal !== undefined) return { refusal: inputRefusal };
   const { browserHost: _admitted, subagentProfiles, ...rest } = profile;
   // Narrowed away from `delegate_task`, a job has nothing to spawn its

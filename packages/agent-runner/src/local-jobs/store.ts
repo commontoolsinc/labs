@@ -59,6 +59,13 @@ export interface LocalJobRequest {
    * profile with a fabric session holds them, and only pieces in its space.
    */
   inputs?: Record<string, string>;
+
+  /**
+   * Where each space an input names outside the profile's own is served: a
+   * space DID mapped to its toolshed's origin. The job is routed there for
+   * that space and nowhere else.
+   */
+  foreignSpaces?: Record<string, string>;
 }
 
 /** One event of a job, in `seq` order. */

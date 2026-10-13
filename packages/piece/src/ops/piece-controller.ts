@@ -3828,6 +3828,12 @@ export async function loadPiecePattern(
 }> {
   if (projectResult) await piece.sync();
   else await piece.asSchema(undefined).sync();
+  // A space this runtime may not read serves the piece as empty, which would
+  // otherwise read as a piece with no pattern.
+  const denied = runtime.storageManager.authorizationError?.(
+    piece.getAsNormalizedFullLink().space,
+  );
+  if (denied !== undefined) throw denied;
   const ref = piecePatternPointer(runtime, piece);
   if (!ref) throw new Error("piece missing pattern identity");
   const pattern = await runtime.patternManager.loadPatternByIdentity(

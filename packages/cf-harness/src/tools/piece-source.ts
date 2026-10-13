@@ -341,6 +341,17 @@ export const resolvePiece = async (
       }`,
     };
   }
+  // A space this session may not read serves the piece as empty; say so
+  // rather than report a piece that is not one.
+  const denied = pieces.runtime.storageManager.authorizationError?.(
+    link.space,
+  );
+  if (denied !== undefined) {
+    return {
+      ok: false,
+      message: `${toolId} cannot read the piece's space: ${denied.message}`,
+    };
+  }
   const id = pieceId(cell);
   if (getPatternIdentityRef(cell) === undefined || id === undefined) {
     return {

@@ -33,6 +33,7 @@
     "./provenance": "./src/provenance.ts",
     "./result-writer": "./src/result-writer.ts",
     "./fabric-session": "./src/fabric-session.ts",
+    "./foreign-spaces": "./src/foreign-spaces.ts",
     "./handle-table": "./src/handle-table.ts",
     "./input-cells": "./src/input-cells.ts",
     "./gateway/openai-client": "./src/gateway/openai-client.ts",

@@ -1055,9 +1055,10 @@ describe("local-jobs/lane", () => {
         await Deno.remove(key.dir, { recursive: true });
       });
 
-      it("admits the space of an input in another space, on the profile's host", async () => {
-        // Each space a handed piece lives in is admitted for the run; an
-        // input in the profile's own space adds nothing.
+      it("admits the space of an input in another space, on the host the request names", async () => {
+        // The run is routed to where the request says the space is served,
+        // never to the profile's own host by assumption; an input in the
+        // profile's own space adds nothing.
         const key = await identityKey();
         const other =
           "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -1074,12 +1075,16 @@ describe("local-jobs/lane", () => {
           }]]),
         });
         lane.start();
-        enqueue("a", { ...REQUEST, inputs: { focus: foreign, own } }, "carry");
+        enqueue("a", {
+          ...REQUEST,
+          inputs: { focus: foreign, own },
+          foreignSpaces: { [other]: "https://estuary.example" },
+        }, "carry");
         const run = await nextRun(0);
 
         expect(run.spec.fabric?.inputs).toEqual({ focus: foreign, own });
         expect(run.spec.fabric?.foreignSpaces).toEqual({
-          [other]: "https://toolshed.example",
+          [other]: "https://estuary.example/",
         });
         run.settle({ outcome: "cancelled" });
         await Deno.remove(key.dir, { recursive: true });

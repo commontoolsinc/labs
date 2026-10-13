@@ -777,6 +777,8 @@ const databaseOf = (
 
 /** What the session can state about `ref`: its declared shape, and its labels. */
 interface DescribedReferent {
+  /** Why the session could not read the referent's space, when it could not. */
+  denied?: string;
   schema?: JSONSchema;
   verbs?: HarnessCallableDescriptor[];
   labels?: DescribeHandleLabel[];
@@ -865,6 +867,12 @@ const describeInFabric = async (
       schema: undefined,
     });
     await root.sync();
+    // A space this session may not read serves its documents as empty, which
+    // would read as a referent declaring nothing. The denial is the answer.
+    const denied = pieces.runtime.storageManager.authorizationError?.(
+      link.space,
+    );
+    if (denied !== undefined) return { denied: denied.message };
     // The labels are the synced document's own metadata, narrowed to the
     // referent's path by the view, so they cost no read beyond the one the
     // shape already needed.
@@ -1062,6 +1070,19 @@ const invokeDescribeHandle = async (
       // A session that cannot be established leaves the record to answer,
       // which is what a run without one does anyway.
     }
+  }
+  if (described.denied !== undefined) {
+    return {
+      output: {
+        outputId,
+        token: entry.token,
+        known: true,
+        hasSchema: false,
+        error:
+          `describe_handle cannot read the space this handle's referent is in: ${described.denied}`,
+      },
+      cfcLabelAvailable: false,
+    };
   }
   const schema = described.schema ??
     (entry.schemaSource === "harness" ? entry.schema : undefined);

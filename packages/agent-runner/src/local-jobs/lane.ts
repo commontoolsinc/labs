@@ -103,17 +103,22 @@ export interface LocalJobLaneOptions {
 /**
  * The `foreignSpaces` of a job's fabric part: the spaces of the pieces it was
  * handed that lie outside the profile's own, compared as DIDs — a profile
- * naming its space by name resolves it as its session does — or nothing when
- * every input is in the profile's space.
+ * naming its space by name resolves it as its session does — each routed to
+ * the origin the request names for it, or nothing when every input is in the
+ * profile's space.
  */
 const foreignSpacesOf = async (
   fabric: LocalJobFabric,
-  inputs: Readonly<Record<string, string>> | undefined,
+  request: LocalJob["request"],
 ): Promise<{ foreignSpaces?: Record<string, string> }> => {
   const own = isDID(fabric.space)
     ? fabric.space
     : await legacySpaceDid(fabric.space);
-  const foreignSpaces = localJobForeignSpaces(fabric, inputs, own);
+  const foreignSpaces = localJobForeignSpaces(
+    request.inputs,
+    request.foreignSpaces,
+    own,
+  );
   return Object.keys(foreignSpaces).length > 0 ? { foreignSpaces } : {};
 };
 
@@ -128,7 +133,7 @@ const foreignSpacesOf = async (
  * the Fabric lane resolves it, with nothing narrower requested. The request's
  * `inputs` become the run's input cells, each held by the model as a handle,
  * and the space of each one living outside the profile's is admitted for the
- * run on the profile's host; `narrowLocalJobProfile` has already refused them
+ * run on the host the request's `foreignSpaces` names for it; `narrowLocalJobProfile` has already refused them
  * under a profile with no fabric session.
  *
  * SHORTCUT: context reaches the model inside the system prompt, marked as
@@ -197,7 +202,7 @@ export const localJobSpecOf = async (
         undefined,
       ),
       inputs: { ...request.inputs },
-      ...await foreignSpacesOf(fabric, request.inputs),
+      ...await foreignSpacesOf(fabric, request),
     },
     patternIndexUrl: profile.patternIndexUrl,
     patternIndexPublish: profile.patternIndexPublish,

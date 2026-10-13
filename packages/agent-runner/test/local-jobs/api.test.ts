@@ -186,6 +186,10 @@ describe("local-jobs/api", () => {
       ["a fractional turn count", { ...BODY, maxModelTurns: 1.5 }],
       ["inputs that are not an object", { ...BODY, inputs: ["/of:x"] }],
       ["an input that is not an address", { ...BODY, inputs: { focus: 1 } }],
+      [
+        "foreign spaces that are not a map of hosts",
+        { ...BODY, foreignSpaces: { "did:key:z6Mk": 1 } },
+      ],
     ];
     for (const [what, body] of invalid) {
       it(`returns 400 for ${what}`, async () => {

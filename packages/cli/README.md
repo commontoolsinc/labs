@@ -1643,7 +1643,7 @@ The door is HTTP on the Unix socket, mode 0600, with a bearer token in
 authority. A caller enqueues
 `{caller, profile, idempotencyKey, task,
 instructions?, context?, resultSchema, tools?, maxModelTurns?, browserHost?,
-inputs?}`
+inputs?, foreignSpaces?}`
 with `POST /jobs`, reads a job with `GET /jobs/<id>` or the newest with
 `GET /jobs?limit=n`, stops one with `POST /jobs/<id>/cancel`, and watches one
 with `GET /jobs/<id>/events?after=<seq>`, a stream of server-sent events that
@@ -1679,9 +1679,11 @@ one, declare a browser host (below); leaving it out declines the browser. Under
 a profile with a fabric session it may hand the job pieces as
 `inputs: {<name>: <address>}`: each becomes an input cell the model holds as a
 handle from its first turn. An address naming another space by DID
-(`//<did>/of:<id>`) admits that space for the job, on the profile's host and
-under its identity, and the job may call the verbs of the piece it was handed
-there; a slug address naming another space is refused at enqueue as
+(`//<did>/of:<id>`) needs that space's host in
+`foreignSpaces: {<did>: <origin>}`; the job's session is routed there for that
+space, under the profile's identity, and may call the verbs of the piece it was
+handed. An input in another space with no host, a `foreignSpaces` entry no input
+names, or a slug address naming another space is refused at enqueue as
 `beyond_profile`. It may set nothing else. A job runs through the same
 `cf-harness` path as an agent run, with the fabric session its profile names, if
 any. Every tool call, including delegated calls, counts as progress, and so does

@@ -482,6 +482,35 @@ describe("call-verb", () => {
       expect(await readField(timer.ref, "status")).toBe("running");
     });
 
+    it("names the denial when the run cannot read a handed piece's space", async () => {
+      // A space this run may not read serves its documents as empty, which
+      // reads exactly like a piece with no schema and no verbs; the denial is
+      // what the model needs instead, or it builds a replacement.
+      const timer = await foreignTimer();
+      const inputs = [{ name: "timer", ...timer }];
+      const denied =
+        `Principal did:key:z6MkTest lacks READ on space ${neighbour.getSpace()}`;
+      const manager = runtime.storageManager as unknown as {
+        authorizationError?: (space: string) => Error | undefined;
+      };
+      manager.authorizationError = (space) =>
+        space === neighbour.getSpace() ? new Error(denied) : undefined;
+
+      const described = await describeHandleTool.invoke(
+        contextWith(admitted, held, inputs),
+        { token: timer.token },
+      );
+      const called = await callVerbTool.invoke(
+        contextWith(admitted, held, inputs),
+        { token: timer.ref, verb: "start", event: { minutes: 10 } },
+      );
+
+      expect(described.error).toContain("lacks READ");
+      expect(described.hasSchema).toBe(false);
+      expect(called.status).toBe("error");
+      expect((called as { message: string }).message).toContain("lacks READ");
+    });
+
     it("refuses a verb of a piece in an admitted space the run was not handed", async () => {
       // The run holds a handle to the second timer, and the space is
       // admitted; only the first was handed in, so the second stays readable

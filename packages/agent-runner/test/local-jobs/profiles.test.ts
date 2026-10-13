@@ -359,18 +359,78 @@ describe("local-jobs/profiles", () => {
           });
       });
 
-      it("admits an input naming a piece in another space by DID, whichever way the profile names its own", async () => {
+      /** The space of {@link ELSEWHERE}, and the host the request names. */
+      const OTHER = ELSEWHERE.slice(2, ELSEWHERE.indexOf("/of:"));
+      const OTHER_HOST = "https://estuary.example";
+
+      it("admits an input in another space whose host the request names, whichever way the profile names its own", async () => {
         // The host hands a job the piece it should act on, wherever that
-        // piece lives; the lane admits its space to the run.
+        // piece lives, and says where its space is served.
         const named = (await read({
           carry: { ...CARRY, fabric: { ...CARRY.fabric, space: "my-space" } },
         })).get("carry")!;
         const byDid = (await read({ carry: CARRY })).get("carry")!;
+        const narrowing = {
+          inputs: { focus: ELSEWHERE },
+          foreignSpaces: { [OTHER]: OTHER_HOST },
+        };
 
-        expect(narrowLocalJobProfile(byDid, { inputs: { focus: ELSEWHERE } }))
-          .toEqual({ profile: byDid });
-        expect(narrowLocalJobProfile(named, { inputs: { focus: ELSEWHERE } }))
-          .toEqual({ profile: named });
+        expect(narrowLocalJobProfile(byDid, narrowing)).toEqual({
+          profile: byDid,
+        });
+        expect(narrowLocalJobProfile(named, narrowing)).toEqual({
+          profile: named,
+        });
+      });
+
+      it("refuses an input in another space whose host the request does not name", async () => {
+        // The profile's own host is not assumed to serve another space: a
+        // space it does not serve reads as empty, which no refusal reports.
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { focus: ELSEWHERE },
+        });
+
+        const refusal = (narrowed as { refusal: string }).refusal;
+        expect(refusal).toContain("`focus`");
+        expect(refusal).toContain("foreignSpaces");
+      });
+
+      it("refuses a foreign space no input names", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { focus: PIECE },
+          foreignSpaces: { [OTHER]: OTHER_HOST },
+        });
+
+        expect((narrowed as { refusal: string }).refusal).toContain(
+          "no input names",
+        );
+      });
+
+      it("refuses a foreign space whose host is not an http(s) origin", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { focus: ELSEWHERE },
+          foreignSpaces: { [OTHER]: "ftp://estuary.example" },
+        });
+
+        expect(narrowed).toEqual({ refusal: expect.any(String) });
+      });
+
+      it("refuses a malformed piece address rather than throwing", async () => {
+        const carry = (await read({ carry: CARRY })).get("carry")!;
+
+        const narrowed = narrowLocalJobProfile(carry, {
+          inputs: { focus: "pattern:other-space/tracker/extra" },
+        });
+
+        expect((narrowed as { refusal: string }).refusal).toContain(
+          "`focus`",
+        );
       });
 
       it("refuses a piece address naming a space other than the profile's, naming the input", async () => {

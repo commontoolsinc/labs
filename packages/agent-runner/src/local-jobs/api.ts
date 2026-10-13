@@ -8,7 +8,9 @@
  * - `GET /health` — the lane is serving.
  * - `POST /jobs` — enqueue `{caller, profile, idempotencyKey, task,
  *   instructions?, context?, resultSchema, tools?, maxModelTurns?,
- *   browserHost?, inputs?}`, where `inputs` maps a name to a piece address;
+ *   browserHost?, inputs?, foreignSpaces?}`, where `inputs` maps a name to a
+ *   piece address and `foreignSpaces` a space DID an input names to the
+ *   origin serving it;
  *   answers `201` with the new job, or `200` with the one the key already
  *   names for the same request.
  * - `GET /jobs?limit=n` — the newest jobs, newest first.
@@ -118,6 +120,7 @@ const enqueueRequestOf = (
     maxModelTurns,
     browserHost,
     inputs,
+    foreignSpaces,
   } = value as Record<string, unknown>;
   const name = (field: unknown) =>
     typeof field === "string" && field.length > 0 &&
@@ -162,6 +165,15 @@ const enqueueRequestOf = (
   ) {
     return { error: "`inputs` must map names to piece addresses." };
   }
+  if (
+    foreignSpaces !== undefined &&
+    (!isObjectNotArray(foreignSpaces) ||
+      !Object.values(foreignSpaces).every((host) =>
+        typeof host === "string" && host.length > 0
+      ))
+  ) {
+    return { error: "`foreignSpaces` must map space DIDs to host origins." };
+  }
   return {
     caller: caller as string,
     profile: profile as string,
@@ -178,6 +190,9 @@ const enqueueRequestOf = (
         : {}),
       ...(inputs !== undefined
         ? { inputs: inputs as Record<string, string> }
+        : {}),
+      ...(foreignSpaces !== undefined
+        ? { foreignSpaces: foreignSpaces as Record<string, string> }
         : {}),
     },
   };
