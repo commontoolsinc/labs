@@ -955,7 +955,7 @@ selector is built as:
 // Shown for illustration only.
 const selector = {
   path: cell.path.map((p) => p.toString()),
-  schema: ContextualFlowControl.declaresStream(schema) ? false : schema ?? false,
+  schema: schema ?? false,
 };
 ```
 
@@ -963,10 +963,3 @@ When a cell has no schema (common for many cell types), the selector becomes
 `{ path: [...], schema: false }`. Per section 5.3.2, `schema: false` means
 "reject — skip this subtree." A traverser with `schema: false` will not follow
 any references or discover any linked entities.
-
-A cell whose schema declares a stream is asked for the same way. Its document
-holds no value a read uses: an event sent to it is appended beside the
-document, and the handler reads the event, never the document. A selector
-carrying the stream's event schema would walk a shape the document never
-holds, and would cost the request a root carrying that schema per stream; the
-whole document is what a meta write to it retries a conflict against.
