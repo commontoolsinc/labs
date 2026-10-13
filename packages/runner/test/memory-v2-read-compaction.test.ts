@@ -268,6 +268,86 @@ describe("memory-v2-read-compaction", () => {
       await storage.close();
     });
 
+    it("coarsens a group of more than sixteen reads of one document to one recursive read at their common prefix", async () => {
+      // A pattern setup committed with its own reads (a source swap) read
+      // fifty-odd paths of every member document; one recursive read at
+      // the prefix is a coarser precondition and a message the server
+      // takes (MAX_UNTRUSTED_MESSAGE_SLOTS).
+      const { signer, storage, runtime } = await createRuntime(
+        "memory-v2-read-compaction-coarsen-wide",
+      );
+      const space = signer.did();
+      const members = Array.from({ length: 17 }, (_, i) => `member${i}`);
+
+      const seed = runtime.edit();
+      seed.writeValueOrThrow(
+        { ...DOCUMENT_ADDRESS, space },
+        {
+          section: Object.fromEntries(members.map((m) => [m, { n: 1 }])),
+          other: "unread",
+        },
+      );
+      expect((await seed.commit().settled).ok).toEqual({});
+
+      const tx = runtime.edit();
+      for (const member of members) {
+        tx.readValueOrThrow(
+          { ...DOCUMENT_ADDRESS, space, path: ["section", member] },
+          { nonRecursive: true },
+        );
+      }
+
+      const replica = storage.open(space).replica as SpaceReplica;
+      const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
+
+      expect(reads.pending).toEqual([]);
+      expect(reads.confirmed.map(({ path, nonRecursive }) => ({
+        path,
+        nonRecursive,
+      }))).toEqual([
+        { path: toDocumentPath(["value", "section"]), nonRecursive: undefined },
+      ]);
+
+      await runtime.dispose();
+      await storage.close();
+    });
+
+    it("keeps sixteen reads of one document apart", async () => {
+      const { signer, storage, runtime } = await createRuntime(
+        "memory-v2-read-compaction-sixteen-apart",
+      );
+      const space = signer.did();
+      const members = Array.from({ length: 16 }, (_, i) => `member${i}`);
+
+      const seed = runtime.edit();
+      seed.writeValueOrThrow(
+        { ...DOCUMENT_ADDRESS, space },
+        {
+          section: Object.fromEntries(members.map((m) => [m, { n: 1 }])),
+          other: "unread",
+        },
+      );
+      expect((await seed.commit().settled).ok).toEqual({});
+
+      const tx = runtime.edit();
+      for (const member of members) {
+        tx.readValueOrThrow(
+          { ...DOCUMENT_ADDRESS, space, path: ["section", member] },
+          { nonRecursive: true },
+        );
+      }
+
+      const replica = storage.open(space).replica as SpaceReplica;
+      const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
+
+      expect(reads.confirmed.length).toBe(16);
+      expect(reads.confirmed.every((read) => read.nonRecursive === true))
+        .toBe(true);
+
+      await runtime.dispose();
+      await storage.close();
+    });
+
     it("keeps a shallow read where it merges an array element, so a shift of the array still conflicts", async () => {
       // An indexed removal before `list/1` shifts a different element into
       // it. The shallow read conflicts with that removal, and the recursive

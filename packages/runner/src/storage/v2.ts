@@ -1206,6 +1206,65 @@ const compactDependencyGroup = <
   compact(root, observed, false);
 };
 
+/**
+ * The most reads one dependency group — one document at one basis — may
+ * carry on a commit. Past it, `coarsenWideDependencyGroup` replaces the
+ * group's reads with one recursive read at their common prefix.
+ *
+ * A commit names every path a transaction read (03-commit-model.md §3.4),
+ * one `ConfirmedRead` or `PendingRead` per path, and the server refuses a
+ * message past `MAX_UNTRUSTED_MESSAGE_SLOTS`. A pattern setup that runs
+ * inside its own commit — a source swap, `runSyncedWithCommit` — reads
+ * every document its program touches, and on a board of nine hundred
+ * members that was 58 paths on each member's document: 139,441 reads over
+ * 40,095 documents, a 17 MB message, refused. The lossless compaction
+ * above cannot fold those, since the members' container was not read in
+ * full. One recursive read at the paths' common prefix is a strictly
+ * coarser precondition — `patchOverlapsRead` matches a touched leaf and a
+ * read path by prefix in either direction, so whatever overlapped any read
+ * under the prefix overlaps the prefix, and a shallow read's
+ * ancestor-touch rule is covered the same way — at the cost of conflicting
+ * with disjoint writes to the same document, which a commit that read it
+ * fifty ways over was not going to avoid for long either.
+ */
+const MAX_READS_PER_DEPENDENCY_GROUP = 16;
+
+const commonDocumentPathPrefix = (
+  paths: readonly DocumentPath[],
+): DocumentPath => {
+  let prefix: readonly string[] = paths[0] ?? [];
+  for (const path of paths) {
+    let length = 0;
+    while (
+      length < prefix.length && length < path.length &&
+      prefix[length] === path[length]
+    ) {
+      length++;
+    }
+    prefix = prefix.slice(0, length);
+    if (prefix.length === 0) break;
+  }
+  return toDocumentPath([...prefix]);
+};
+
+/**
+ * Replaces the reads `compacted` holds from index `start` on — one
+ * dependency group's — with a single recursive read at their common path
+ * prefix when there are more than `MAX_READS_PER_DEPENDENCY_GROUP` of
+ * them. The group's admission fields (`seq`, or `localSeq` and
+ * `basisSeq`) are shared by construction, so the one read keeps them.
+ */
+const coarsenWideDependencyGroup = <
+  Read extends ConfirmedCommitRead | PendingCommitRead,
+>(compacted: Read[], start: number): void => {
+  if (compacted.length - start <= MAX_READS_PER_DEPENDENCY_GROUP) return;
+  const group = compacted.slice(start);
+  const prefix = commonDocumentPathPrefix(group.map((read) => read.path));
+  const { nonRecursive: _shallow, ...statement } = group[0];
+  compacted.length = start;
+  compacted.push({ ...statement, path: prefix } as Read);
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -1248,7 +1307,9 @@ const compactCommitReads = <
 
   const compacted: Read[] = [];
   for (const group of grouped.values()) {
+    const start = compacted.length;
     compactDependencyGroup(group, observedDocument(group[0]), compacted);
+    coarsenWideDependencyGroup(compacted, start);
   }
 
   return compacted.toSorted((left, right) => {

@@ -2125,10 +2125,23 @@ describe("memory-v2-stacked-commit", () => {
           }))),
           3,
         );
-        expect(siblingReads.pending).toHaveLength(100);
-        expect(new Set(siblingReads.pending.map((read) => read.localSeq)).size)
-          .toBe(1);
-        expect(siblingReads.pending[0].localSeq).toEqual([1, 2]);
+        // A hundred sibling reads of one document, over one stack, are past
+        // the bound one dependency group may carry (`MAX_READS_PER_DEPENDENCY_GROUP`
+        // in storage/v2.ts), so they coarsen to one recursive read at their
+        // common prefix — still carrying the FULL dependency array.
+        expect(siblingReads.pending.map((read) => ({
+          id: read.id,
+          localSeq: read.localSeq,
+          path: [...read.path],
+          nonRecursive: read.nonRecursive,
+        }))).toEqual([
+          {
+            id: DOCS.A,
+            localSeq: [1, 2],
+            path: ["value"],
+            nonRecursive: undefined,
+          },
+        ]);
         const earlierReads = harness.replica.accessForTestingOnly.buildReads(
           sourceFromReads([{ id: DOCS.A, path: ["field-0"] }]),
           2,
