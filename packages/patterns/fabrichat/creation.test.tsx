@@ -133,7 +133,7 @@ const emptyCatalog = () =>
 
 /** The entries `catalog` holds, as Home's reader validates them. */
 const entriesOf = (
-  catalog: Writable<SharedSpaceCatalogStorage>,
+  catalog: Cell<SharedSpaceCatalogStorage>,
 ): SharedSpaceEntry[] => Object.values(readSharedSpaceCatalog(catalog).entries);
 
 /** A room's result, as the link an `accept` names it by. */

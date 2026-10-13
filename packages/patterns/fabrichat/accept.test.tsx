@@ -207,7 +207,7 @@ const forgetListed = handler<unknown, ForgetListedState>((
 
 /** The state of `catalog`'s entry for the held room. */
 const stateOf = (
-  catalog: Writable<SharedSpaceCatalogStorage>,
+  catalog: Cell<SharedSpaceCatalogStorage>,
   held: Cell<{ room?: Cell<HeldRoom> }>,
 ): string | undefined =>
   readSharedSpaceCatalog(catalog).entries[spaceOf(held.key("room")) ?? ""]
