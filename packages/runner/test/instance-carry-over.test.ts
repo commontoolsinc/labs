@@ -106,6 +106,16 @@ const NAMED_TWO = parentProgram([
   "  return { views: [a, b], aCount: a.count, bCount: b.count };",
 ].join("\n"));
 
+// `NAMED_TWO` under a newer version of `Counter`'s own source.
+const NAMED_TWO_NEWER_COUNTER = parentProgram(
+  [
+    "  const a = Counter({ label: 'a' });",
+    "  const b = Counter({ label: 'b' });",
+    "  return { views: [a, b], aCount: a.count, bCount: b.count };",
+  ].join("\n"),
+  `${COUNTER}// A newer version.\n`,
+);
+
 // An unrelated sibling `s` inserted ahead of `a`.
 const NAMED_WITH_SIBLING = parentProgram([
   "  const s = Other({ label: 's' });",
@@ -989,7 +999,9 @@ describe("instance-carry-over", () => {
   describe("a named instance's child", () => {
     it("refuses to set up for one instance over the child another instance set up", async () => {
       // A parent's `instanceChildren` pointing instance `a` at `b`'s child is
-      // what a wrong carry-over would leave.
+      // what a wrong carry-over would leave. The update is to a newer version
+      // of `Counter`, so the parent is one its updater pointed at a new
+      // pattern, which the guard judges.
 
       const named = await compile(NAMED_TWO);
       const tx = rt.edit();
@@ -1016,7 +1028,7 @@ describe("instance-carry-over", () => {
       }, rawMetaWriteAuthorization);
       expect((await wrong.commit().settled).error).toBeUndefined();
 
-      await expect(update(cell, NAMED_TWO)).rejects.toThrow(
+      await expect(update(cell, NAMED_TWO_NEWER_COUNTER)).rejects.toThrow(
         /refusing to set up .*#Counter for instance "a" over the child of .*#Counter that instance "b" set up/,
       );
     });

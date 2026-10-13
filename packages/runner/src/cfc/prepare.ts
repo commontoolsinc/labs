@@ -1,4 +1,4 @@
-import type { FabricValue } from "@commonfabric/api";
+import type { CellScope, FabricValue } from "@commonfabric/api";
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
@@ -227,6 +227,7 @@ import {
   type LabelObservationClass,
   runtimeWritePolicyAuthorization,
   type StoredCfcMetadata,
+  type TrustSnapshot,
   type WritePolicyInput,
 } from "./types.ts";
 import {
@@ -1895,6 +1896,59 @@ const writeIsRuntimeInitialization = (
 };
 
 /**
+ * The write-policy inputs that can bear on `target`'s document, by the
+ * documents an input names: its target, and for a structural-provenance
+ * claim its sources too. The index is built once per transaction for the
+ * inputs recorded so far and rebuilt when more are recorded, so a check at
+ * one of a commit's many written paths reads the inputs about that document
+ * rather than every input the transaction holds.
+ */
+const writePolicyInputsForDocument = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: string;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+): readonly WritePolicyInput[] => {
+  const inputs = tx.getCfcState().writePolicyInputs;
+  let indexed = writePolicyInputIndexes.get(tx);
+  if (indexed === undefined || indexed.length !== inputs.length) {
+    const byDocument = new Map<string, WritePolicyInput[]>();
+    const add = (
+      address: { space: MemorySpace; id: string; scope?: CellScope },
+      input: WritePolicyInput,
+    ) => {
+      const key = documentKeyOf(address);
+      const list = byDocument.get(key);
+      if (list === undefined) byDocument.set(key, [input]);
+      else if (list[list.length - 1] !== input) list.push(input);
+    };
+    for (const input of inputs) {
+      if ("target" in input && input.target !== undefined) {
+        add(input.target, input);
+      }
+      if (input.kind === "structural-provenance") {
+        for (const source of input.sources) add(source, input);
+      }
+    }
+    indexed = { length: inputs.length, byDocument };
+    writePolicyInputIndexes.set(tx, indexed);
+  }
+  return indexed.byDocument.get(documentKeyOf(target)) ?? [];
+};
+
+const writePolicyInputIndexes = new WeakMap<
+  IExtendedStorageTransaction,
+  { length: number; byDocument: Map<string, WritePolicyInput[]> }
+>();
+
+const documentKeyOf = (
+  address: { space: MemorySpace; id: string; scope?: CellScope },
+): string =>
+  `${address.space}\0${address.id}\0${normalizeCellScope(address.scope)}`;
+
+/**
  * Whether `path` lies at or under a capture or binding the runtime staged in
  * this transaction, with the slot still holding it. Staging writes nothing
  * the referenced value holds, so the integrity the receiving slot's schema
@@ -1912,7 +1966,7 @@ const pathHoldsStagedReference = (
 ): boolean => {
   const logicalPath = canonicalizeLogicalPath(path);
   const scope = normalizeCellScope(target.scope);
-  return tx.getCfcState().writePolicyInputs.some((input) =>
+  return writePolicyInputsForDocument(tx, target).some((input) =>
     input.kind === "initialization" &&
     (input.mode === "capture" || input.mode === "binding") &&
     tx.isRuntimeWritePolicyInput(input) &&
@@ -2016,7 +2070,7 @@ const pathHoldsUnattributedInitialization = (
     address.space === target.space && address.id === target.id &&
     normalizeCellScope(address.scope) === normalizeCellScope(target.scope) &&
     concretePathHasPrefix(logicalPath, canonicalizeLogicalPath(address.path));
-  const inputs = tx.getCfcState().writePolicyInputs;
+  const inputs = writePolicyInputsForDocument(tx, target);
   if (
     !tx.getCfcState().attributedInitialization &&
     inputs.some((input) => {
@@ -5555,6 +5609,33 @@ const storedRepresentedPrincipalsAt = (
   ];
 };
 
+/**
+ * Whether the run on `tx` acts for no one on a serving runtime, so that a
+ * claim or an owner binding resolved for it would name a principal it does not
+ * act for. A run acts for the actor its serving loop stamps on it. A run of
+ * the loop's own (`bookkeeping`) acts for the principal whose trust snapshot
+ * the loop attached to it, such as the owner the space-root ensure resolves or
+ * the parent of a start it defers, and for no one under the serving runtime's
+ * ambient snapshot, which names the runtime itself. Any other run with no
+ * stamped actor acts for no one whatever snapshot it carries: a demanded
+ * derivation carries its demander's for its reads, before the seal settles
+ * whether it acts for anyone. A transaction no serving loop stamped acts for
+ * no one under the ambient snapshot. Off the serving posture every run acts
+ * for the runtime's own user.
+ */
+const servedRunActsForNoOne = (
+  tx: IExtendedStorageTransaction,
+  trustSnapshot: TrustSnapshot,
+): boolean => {
+  const servingIdentity = tx.getCfcState().servingIdentity;
+  if (servingIdentity === undefined || waveRunActorOf(tx) !== undefined) {
+    return false;
+  }
+  const kind = waveRunContextOf(tx)?.kind;
+  if (kind !== undefined && kind !== "bookkeeping") return true;
+  return trustSnapshot.actingPrincipal === servingIdentity;
+};
+
 const currentPrincipalIntegrityReason = (
   tx: IExtendedStorageTransaction,
   target: {
@@ -5616,6 +5697,18 @@ const currentPrincipalIntegrityReason = (
       return `ownerPrincipal requires matching represents-principal integrity at /${
         path.join("/")
       }`;
+    }
+    // A run that acts for no one would match or bind an owner it does not
+    // act for, the service under the serving runtime's own snapshot. Only an
+    // initialization on nobody's behalf at a placeholder owner checks no
+    // owner and binds no one, so only that is left to admit.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/64
+    if (
+      servedRunActsForNoOne(tx, trustSnapshot) &&
+      (!isCurrentPrincipalPlaceholder(ownerPrincipalSpec) ||
+        !pathHoldsUnattributedInitialization(tx, target, path))
+    ) {
+      return `ownerPrincipal requires the run's actor at /${path.join("/")}`;
     }
     if (trustSnapshot.actingPrincipal !== ownerPrincipal) {
       return `ownerPrincipal mismatch at /${path.join("/")}`;
@@ -5680,10 +5773,10 @@ const currentPrincipalIntegrityReason = (
       path.join("/")
     }`;
   }
-  // A served run with no actor keeps the serving runtime's own trust
-  // snapshot, so a claim it minted would name the service.
+  // A run that acts for no one would mint a claim naming a principal it does
+  // not act for, the service under the serving runtime's own snapshot.
   if (
-    waveRunContextOf(tx) !== undefined && waveRunActorOf(tx) === undefined &&
+    servedRunActsForNoOne(tx, trustSnapshot) &&
     claimsCurrentPrincipalAt(tx, target, path)
   ) {
     return `current-principal integrity requires the run's actor at /${

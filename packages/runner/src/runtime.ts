@@ -2667,6 +2667,9 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
+    wrapped.setCfcServingIdentity(
+      this.servingPosture ? this.userIdentityDID : undefined,
+    );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
     );
@@ -4263,10 +4266,10 @@ export class Runtime {
     // is the link it names, not a container to descend into -- and an
     // artifact's encodable form is walked in turn, so a cell inside one is
     // reached as well.
-    // Links serialized into a `data:` document carry their schemas inline
-    // (see inlineExternalSchemaRefsInValue): the document is its id, so a
-    // content-addressed reference inside it has no carrying write to install
-    // its closure.
+    // No write has stored the links in this data, so `space` holds no
+    // closure for a content-addressed reference among their schemas to name,
+    // and each link carries its schema inline (see
+    // `inlineExternalSchemaRefsInValue()`).
     const asDataURI = dataUriFromValue(
       inlineExternalSchemaRefsInValue(
         fabricFromConvertibleJsValue(
