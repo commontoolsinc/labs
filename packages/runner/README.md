@@ -100,6 +100,18 @@ counts their three child templates (`shape`, `value`, and `followRef`). These
 counters measure work before final entry coalescing; they do not count distinct
 persisted entries.
 
+`inputReadViewsBuilt` and `inputReadViewsReused` count the input-requirement
+verifications of a boundary pass, by whether the pass copied the transaction's
+reads for that verification or reused the copy it held. A written target is
+verified once under each schema that applies to it — its candidate schema, the
+schema its document stores, and the stored envelope at each path the write went
+through — and a failure ends its verifications early, so the two counters sum to
+the verifications run, not to the targets written. A pass copies the reads again
+only when a read was recorded or reclassified since the last verification. The
+counters cover that copy alone. The stored envelope behind each read is resolved
+again when a write retires one, and the labeled reads are assembled again with
+them, and neither is counted here.
+
 ## Parsing untrusted CFC labels
 
 `parseIfcLabel` from `@commonfabric/runner/cfc` is the public boundary for a
