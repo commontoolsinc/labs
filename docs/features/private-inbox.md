@@ -670,6 +670,32 @@ refuses a duplicate in any case. The intake removes and marks nothing, so every
 offer stays in its inbox, and another reader, such as a loom daemon, reads them
 all.
 
+## Joining a room the user visits
+
+The labs shell counts a visit to a FabriChat room's page as joining the room.
+Each time a runtime shows a piece of a space other than the last one it showed,
+the shell waits for Home's bring-up to answer and for the view to settle, and
+then asks the worker, through `RuntimeClient.joinVisitedRoom()`, to join the
+user to the room in that space. The worker does nothing for a user with no
+Home, and creates none. Otherwise it vets the space as the share intake vets an
+offered one, with the same reasons for a refusal (`vetSpace()` in
+`packages/piece/src/ops/space-vetting.ts`, which both use): the user can write
+there, through an entry of their own or the grant to every principal, the space
+declares itself a `fabrichat-room`, and its root is the room at the address the
+space's genesis commit reserves. A space that passes has its root sent to
+Home's `chatManager.joinRoom`, when Home has that stream, with no `requestId`
+(`joinVisitedRoomOf()` in `packages/piece/src/ops/join-visited-room.ts`).
+
+The manager makes the room one of the user's chats, and, once the user's
+profile has resolved, adds them to its participants; a room their chats list
+already is left as it is, and nothing is recorded for it (see
+[`ChatManagerOutput`](../specs/fabrichat/ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput)).
+A join restores an archived entry, so visiting a room the user forgot lists it
+again. So a person who opens a joinable group's link, or a room they were
+admitted to and offered nothing, finds it among their chats without a step of
+their own. Which visits count as joining is the shell's choice: another host
+makes its own, and the room pattern makes none.
+
 ## What it does not protect
 
 - **The inbox is readable by anyone.** `WRITE` implies `READ`, and the label
