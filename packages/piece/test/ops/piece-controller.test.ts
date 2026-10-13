@@ -266,6 +266,22 @@ describe("piece-controller", () => {
       expect(await piece.input.get(["note"])).toBe("hello");
     });
 
+    it("still refuses a write beside a link that reaches a value of another type", async () => {
+      const counter = runtime.getCell<unknown>(space as never, "other-type");
+      const { error } = await runtime.editWithRetry((tx) => {
+        counter.withTx(tx).set("seven");
+      });
+      expect(error).toBeUndefined();
+      const piece = await pieces.create(
+        tallyProgram("Writable<Counter>"),
+        { input: { tally: counter } },
+      );
+
+      await expect(piece.input.set("hello", ["note"])).rejects.toThrow(
+        "tally: value does not match type object",
+      );
+    });
+
     it("writes through a handle slot into the document its link reaches", async () => {
       // The write path's own positions stay materialized: what is written
       // there lands in the linked document, which is judged as written.

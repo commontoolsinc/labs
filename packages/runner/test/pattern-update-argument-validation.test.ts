@@ -1437,6 +1437,30 @@ describe("pattern update validates the stored argument", () => {
       );
     });
 
+    it("refuses a roll-forward when the link reaches a value of another type", async () => {
+      // The top level of what the link reaches is read without descending,
+      // and held to the type the handle's schema allows.
+      const counter = rt.getCell<unknown>(space, "cell-slot-other-type");
+      const { error: writeError } = await rt.editWithRetry((tx) => {
+        counter.withTx(tx).set("seven");
+      });
+      expect(writeError?.message).toBeUndefined();
+      await rt.idle();
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: counter },
+        "cell-slot-other-type-link",
+      );
+
+      const { error, thrown } = await rollForward(cell, tallyHandle("v2"));
+
+      expect(error).toContain(
+        "updated arguments do not match the candidate schema",
+      );
+      expect(error).toContain("tally: value does not match type object");
+      expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+    });
+
     it("still refuses the same value stored in the slot itself", async () => {
       const { cell } = await setupVintage(
         openArgument("v1"),
