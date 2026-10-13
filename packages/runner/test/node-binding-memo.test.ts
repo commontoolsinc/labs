@@ -200,6 +200,49 @@ describe("node-binding-memo", () => {
     });
   });
 
+  describe("takeBindingFor()", () => {
+    it("returns the binding held and holds none for the subject afterwards", () => {
+      const bindings = memo();
+      const bound = subject();
+      const held = bindings.bindingFor(bound, () => ({ n: 1 }));
+      const taken = bindings.takeBindingFor(bound, () => ({ n: 2 }));
+
+      expect(taken).toBe(held);
+      expect(bindings.size).toBe(0);
+      expect(bindings.bindingFor(bound, () => ({ n: 3 })).n).toBe(3);
+    });
+
+    it("returns what `bind` computes for a subject it holds nothing for, and holds nothing", () => {
+      const bindings = memo();
+      const bound = subject();
+
+      expect(bindings.takeBindingFor(bound, () => ({ n: 4 })).n).toBe(4);
+      expect(bindings.size).toBe(0);
+    });
+
+    it("leaves the bindings of other subjects held", () => {
+      const bindings = memo();
+      const [taken, kept] = [subject(), subject()];
+      bindings.bindingFor(taken, () => ({ n: 1 }));
+      const held = bindings.bindingFor(kept, () => ({ n: 2 }));
+      bindings.takeBindingFor(taken, () => ({ n: 3 }));
+
+      expect(bindings.size).toBe(1);
+      expect(bindings.bindingFor(kept, () => ({ n: 4 }))).toBe(held);
+    });
+
+    it("computes a binding once the schema registry has cleared", () => {
+      const bindings = memo();
+      const bound = subject();
+      bindings.bindingFor(bound, () => ({ n: 1 }));
+      // The last lease out clears the registry, which starts a new epoch.
+      acquireSchemaRegistryLease()();
+
+      expect(bindings.takeBindingFor(bound, () => ({ n: 2 })).n).toBe(2);
+      expect(bindings.size).toBe(0);
+    });
+  });
+
   describe("clear()", () => {
     it("drops every binding held", () => {
       const bindings = memo();

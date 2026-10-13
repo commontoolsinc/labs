@@ -12,6 +12,7 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -304,20 +305,22 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
 const RESULT_SHORTCUT_LIMIT = 4096;
 
 /**
- * How many node bindings of each kind one runner keeps. A binding is kept
- * for the plans that follow its first: the resume pre-sync plans a node and
- * its instantiation plans it again. Sized for a piece of a few hundred
- * nested instances; past it the least recently used binding is computed
- * again when next asked for.
+ * How many node bindings of each kind one runner holds for instantiation.
+ * A resume pre-sync plans every node of a piece's tree before any of them
+ * is instantiated, and its bindings are held until each node's
+ * instantiation takes its own; the bound is sized for a tree of several
+ * hundred nested instances. Past it the least recently used binding is
+ * dropped, and computed again by whichever plan asks for it next.
  */
-const NODE_BINDING_LIMIT = 32_768;
+const NODE_BINDING_LIMIT = 65_536;
 
 /**
- * The most characters of key and inputs document the kept node bindings of
- * one kind hold between them. An inputs document carries a schema inline
- * for every link it holds, and runs to tens of thousands of characters.
+ * The most characters of key and inputs document the held node bindings of
+ * one kind have between them. An inputs document carries a schema inline
+ * for every link it holds, and runs to tens of thousands of characters, so
+ * this bound is the one a large tree reaches first.
  */
-const NODE_BINDING_WEIGHT_LIMIT = 64 * 1024 * 1024;
+const NODE_BINDING_WEIGHT_LIMIT = 256 * 1024 * 1024;
 
 /**
  * Presence probes `Runner.#patternToNameBeforeRun` may spend before it stops
@@ -821,6 +824,16 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     "output",
   );
 };
+
+/**
+ * Whether `argumentLink` names a stand-in: the `data:` document a pre-sync
+ * builds from the inputs of an instance that has no stored argument.
+ */
+function isStandInArgument(
+  argumentLink: NormalizedFullLink | undefined,
+): boolean {
+  return argumentLink !== undefined && hasDataUriScheme(argumentLink.id);
+}
 
 /**
  * What decides a node's binding beside the node, its pattern and the two
@@ -2513,8 +2526,9 @@ export class Runner {
     | undefined;
 
   /**
-   * The bindings of the javascript, passthrough and raw nodes this runner
-   * has planned, weighed by their inputs documents.
+   * The bindings of the javascript, passthrough and raw nodes a resume
+   * pre-sync of this runner has planned and no instantiation has taken yet,
+   * weighed by their inputs documents.
    */
   readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
     capacity: NODE_BINDING_LIMIT,
@@ -2522,7 +2536,10 @@ export class Runner {
     weigh: (binding) => binding.inputsCell.getAsNormalizedFullLink().id.length,
   });
 
-  /** The bindings of the pattern nodes this runner has planned. */
+  /**
+   * The bindings of the pattern nodes a resume pre-sync of this runner has
+   * planned and no instantiation has taken yet.
+   */
   readonly #patternNodeBindings = new NodeBindingMemo<PatternNodeBindingCore>({
     capacity: NODE_BINDING_LIMIT,
     maxWeight: NODE_BINDING_WEIGHT_LIMIT,
@@ -2641,9 +2658,9 @@ export class Runner {
    * syncer and deferred-start committer a test may supply, the setup,
    * storage-subscription, commit-gated run, ownership, key, sync, walk, and
    * retry steps, the implementation invoker, the node planner, which a
-   * test drives directly, the wave kick, the step that drops the node
-   * bindings held, and the pre-sync plan recorder, node binding recorder and
-   * resume yield a test installs.
+   * test drives directly, the wave kick, the count of node bindings held
+   * and the step that drops them, and the pre-sync plan recorder, node
+   * binding recorder and resume yield a test installs.
    */
   get accessForTestingOnly(): {
     scopedProgramCounts(): Array<{ piece: string; variants: number }>;
@@ -2722,6 +2739,7 @@ export class Runner {
       | undefined;
     nodeBindingRecorder: ((piece: string, node: Node) => void) | undefined;
     forgetNodeBindings(): void;
+    readonly heldNodeBindings: number;
     displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
@@ -2847,6 +2865,10 @@ export class Runner {
       forgetNodeBindings: () => {
         this.#nodeIOBindings.clear();
         this.#patternNodeBindings.clear();
+      },
+      get heldNodeBindings() {
+        return outerThis.#nodeIOBindings.size +
+          outerThis.#patternNodeBindings.size;
       },
       get displacedChildReadRecorder() {
         return outerThis.#displacedChildReadRecorder;
@@ -10445,7 +10467,7 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const plan = this.#nodePlan(tx, node, resultCell, pattern);
+    const plan = this.#nodePlan(tx, node, resultCell, pattern, undefined, true);
     if (plan === undefined) return;
     switch (plan.kind) {
       case "javascript":
@@ -10506,11 +10528,13 @@ export class Runner {
    * machinery-read boundary).
    *
    * A plan has two parts. The bindings read nothing through a transaction,
-   * and the runner keeps them from one plan of a node to the next
-   * (`#nodeIOBinding()`, `#bindPatternNode()`). What the bound outputs
-   * redirect to is read through `tx` on every call, so each caller's
-   * transaction records the reads its plan rests on, and a plan follows a
-   * redirect written since the last one.
+   * and the runner holds the ones a pre-sync computes until the node's
+   * instantiation plans it: a plan made with `forInstantiation` takes the
+   * bindings held and leaves none behind, since the node it starts keeps
+   * its own (`#nodeIOBinding()`, `#bindPatternNode()`). What the bound
+   * outputs redirect to is read through `tx` on every call, so each
+   * caller's transaction records the reads its plan rests on, and a plan
+   * follows a redirect written since the last one.
    */
   #nodePlan(
     tx: IExtendedStorageTransaction,
@@ -10518,6 +10542,7 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
+    forInstantiation = false,
   ): NodePlan | undefined {
     const nodeModule = node.module;
     if (!isModule(nodeModule)) {
@@ -10554,6 +10579,7 @@ export class Runner {
             resolved.type,
             moduleRefName,
             argumentLink ?? getMetaLink(resultCell, "argument")!,
+            forInstantiation,
           );
           return {
             kind: resolved.type as "javascript" | "passthrough",
@@ -10579,6 +10605,7 @@ export class Runner {
             pattern,
             moduleRefName,
             argumentLink,
+            forInstantiation,
           ),
         }));
       case "pattern":
@@ -10592,6 +10619,7 @@ export class Runner {
             resultCell,
             pattern,
             argumentLink,
+            forInstantiation,
           ),
         }));
       default:
@@ -10602,14 +10630,20 @@ export class Runner {
   /**
    * Binds the inputs and outputs of `node`, a javascript, passthrough or
    * raw node of `pattern`, on `resultCell` against `argumentCellLink`, or
-   * returns the binding already held for them. `moduleType` is the type of
-   * the module the node resolved to and `moduleRefName` the registry name
-   * it resolved from, when it resolved from one.
+   * returns the binding held for them. `moduleType` is the type of the
+   * module the node resolved to and `moduleRefName` the registry name it
+   * resolved from, when it resolved from one. With `take`, a binding held
+   * is given up to the caller and a binding computed is not held.
    *
    * The binding reads nothing through a transaction: it is a function of
    * the node, the pattern's manifest and argument schema, and the two
    * links. What a plan reads through its transaction, the redirect chains
    * its outputs write through, is resolved by each plan in its own.
+   *
+   * A binding against a stand-in argument, a `data:` document a pre-sync
+   * builds for an instance with no stored argument, is never held: the
+   * instance's instantiation binds against the argument document its setup
+   * writes, so no later plan has that argument link.
    */
   #nodeIOBinding(
     node: Node,
@@ -10618,14 +10652,9 @@ export class Runner {
     moduleType: Module["type"],
     moduleRefName: string | undefined,
     argumentCellLink: NormalizedFullLink | undefined,
+    take = false,
   ): NodeIOBinding {
-    return this.#nodeIOBindings.bindingFor({
-      node,
-      pattern,
-      resultLink: resultCell.getAsNormalizedFullLink(),
-      argumentLink: argumentCellLink,
-      variant: bindingVariant(moduleType, moduleRefName),
-    }, () => {
+    const bind = (): NodeIOBinding => {
       this.#nodeBindingRecorder?.(
         resultCell.getAsNormalizedFullLink().id,
         node,
@@ -10688,7 +10717,18 @@ export class Runner {
         );
       }
       return { inputs, outputs, inputsCell };
-    });
+    };
+    if (isStandInArgument(argumentCellLink)) return bind();
+    const subject = {
+      node,
+      pattern,
+      resultLink: resultCell.getAsNormalizedFullLink(),
+      argumentLink: argumentCellLink,
+      variant: bindingVariant(moduleType, moduleRefName),
+    };
+    return take
+      ? this.#nodeIOBindings.takeBindingFor(subject, bind)
+      : this.#nodeIOBindings.bindingFor(subject, bind);
   }
 
   #collectStaticRedirectWriteTargets(
@@ -13012,6 +13052,7 @@ export class Runner {
       resultCell,
       "argument",
     )!,
+    take = false,
   ): RawNodeInputs {
     const {
       inputs: mappedInputBindings,
@@ -13024,6 +13065,7 @@ export class Runner {
       "raw",
       moduleRefName,
       argumentCellLink,
+      take,
     );
 
     // outputCells tracks the static write surface for dependency ordering and
@@ -13379,6 +13421,7 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
+    take = false,
   ): PatternNodeBinding {
     // May be undefined: the owned-cell walk plans before setup writes the
     // meta on a fresh first run, and a child result cell is not synced yet
@@ -13392,13 +13435,7 @@ export class Runner {
       getMetaLink(resultCell, "argument");
     const implementation = module.implementation;
     if (!isPattern(implementation)) throw new Error(`Invalid pattern`);
-    const binding = this.#patternNodeBindings.bindingFor({
-      node,
-      pattern,
-      resultLink: resultCell.getAsNormalizedFullLink(),
-      argumentLink: argumentCellLink,
-      variant: bindingVariant("pattern", undefined),
-    }, () => {
+    const bind = (): PatternNodeBindingCore => {
       this.#nodeBindingRecorder?.(
         resultCell.getAsNormalizedFullLink().id,
         node,
@@ -13503,7 +13540,25 @@ export class Runner {
         ),
         instanceName: instanceNameOfNodeOutputs(node.outputs),
       };
-    });
+    };
+    // The child bound here is the pattern object the child's own nodes are
+    // held under, so a plan that takes this binding hands its instantiation
+    // the child the pre-sync planned, and the child's nodes find theirs.
+    let binding: PatternNodeBindingCore;
+    if (isStandInArgument(argumentCellLink)) {
+      binding = bind();
+    } else {
+      const subject = {
+        node,
+        pattern,
+        resultLink: resultCell.getAsNormalizedFullLink(),
+        argumentLink: argumentCellLink,
+        variant: bindingVariant("pattern", undefined),
+      };
+      binding = take
+        ? this.#patternNodeBindings.takeBindingFor(subject, bind)
+        : this.#patternNodeBindings.bindingFor(subject, bind);
+    }
     const { child, inputs, outputs, instanceName } = binding;
     const io = {
       child,

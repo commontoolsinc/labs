@@ -267,6 +267,8 @@ describe("resume-presync-plan-count", () => {
     ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
 
     expect(bindings).toBe(expectedPairs);
+    // Each node's instantiation took the binding the pre-sync held for it.
+    expect(resumer.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
   });
 
   it("mints each derived internal cell's id once across a resume", async () => {

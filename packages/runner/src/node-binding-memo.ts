@@ -30,8 +30,11 @@ export type NodeBindingSubject = {
  * part of a binding that reads nothing through a transaction: the node's
  * inputs and outputs bound to the piece's argument and result documents, and
  * what derives from those alone. Such a binding is a function of its
- * {@link NodeBindingSubject}, so one computed for the resume pre-sync is the
- * one instantiation needs, and the memo holds it between the two.
+ * {@link NodeBindingSubject}, so the one a resume pre-sync computes is the
+ * one the node's instantiation needs. The pre-sync asks with
+ * {@link bindingFor}, which holds the binding, and the instantiation with
+ * {@link takeBindingFor}, which stops holding it: a running node keeps its
+ * own bindings, so the memo holds one only between the two.
  *
  * A node and a pattern are keyed by identity, a link by the members a binding
  * reads from it: its address and its schema, the schema by content. A bound
@@ -77,12 +80,7 @@ export class NodeBindingMemo<Binding> {
    * which is then held. A `bind` that throws leaves nothing held.
    */
   bindingFor(subject: NodeBindingSubject, bind: () => Binding): Binding {
-    const epoch = schemaRegistryEpoch();
-    if (epoch !== this.#epoch) {
-      this.#entries.clear();
-      this.#epoch = epoch;
-    }
-    const key = this.#key(subject);
+    const key = this.#currentKey(subject);
     const held = this.#entries.get(key);
     if (held !== undefined) return held;
     const binding = bind();
@@ -90,9 +88,34 @@ export class NodeBindingMemo<Binding> {
     return binding;
   }
 
+  /**
+   * Returns the binding for `subject` and holds none for it afterwards: the
+   * one held, which is dropped, or the result of `bind`.
+   */
+  takeBindingFor(subject: NodeBindingSubject, bind: () => Binding): Binding {
+    const key = this.#currentKey(subject);
+    const held = this.#entries.get(key);
+    if (held === undefined) return bind();
+    this.#entries.delete(key);
+    return held;
+  }
+
   /** Drops every binding held. */
   clear(): void {
     this.#entries.clear();
+  }
+
+  /**
+   * Helper for the two lookups, which returns the key `subject`'s binding is
+   * held under after dropping every entry of an earlier registry epoch.
+   */
+  #currentKey(subject: NodeBindingSubject): string {
+    const epoch = schemaRegistryEpoch();
+    if (epoch !== this.#epoch) {
+      this.#entries.clear();
+      this.#epoch = epoch;
+    }
+    return this.#key(subject);
   }
 
   /**
