@@ -211,6 +211,15 @@ describe("v2 document reconstruction", () => {
     });
   });
 
+  it("keeps every snapshot when the retention is zero", async () => {
+    // A retention of zero turns the pruning off rather than pruning all:
+    // the run's snapshots all survive, oldest included.
+    await withEngine((engine) => {
+      installThenPatch(engine);
+      expect(snapshotSeqs(engine)).toEqual(SNAPSHOT_SEQS);
+    }, { snapshotRetention: 0 });
+  });
+
   it("materializes a snapshot every `snapshotInterval` patch commits", async () => {
     await withEngine((engine) => {
       installThenPatch(engine);

@@ -5,7 +5,9 @@ import ts from "typescript";
 import {
   carriesWriterPolicy,
   holdsWriterPolicy,
+  readWriterPolicy,
   writerPolicyHeldBy,
+  writerPolicyHeldWithin,
 } from "../../src/typescript/writer-policy.ts";
 import { createTestProgram } from "../utils.ts";
 
@@ -23,6 +25,27 @@ const DECLARATIONS = `
   function save() {}
   type Policy = WriteAuthorizedBy<string, typeof save>;
   interface Node { next: Node | null; value: string }
+  type Expanding<T> = { value: T; next?: Expanding<T[]> };
+  interface ExpandingNode<T> { value: T; next?: ExpandingNode<T[]> }
+  type ExpandingTuple<T> = [T, ExpandingTuple<T[]>?];
+  type ExpandingLabelled<T> = Confidential<
+    { value: T; next?: ExpandingLabelled<T[]> },
+    ["secret"]
+  >;
+  interface Pair<T> { first: T }
+  interface Cycle<A, B, C> { value: A; next?: Cycle<B, C, A> }
+  type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };
+  interface Chain<N extends unknown[]> {
+    value: string;
+    next?: N extends [unknown, ...infer R] ? Chain<R> : null;
+  }
+  type Branching<T> = { left?: Branching<[T, 1]>; right?: Branching<[T, 2]> };
+  type Tree<T, D extends unknown[]> = D extends [unknown, ...infer R]
+    ? { left: Tree<[T, 1], R>; right: Tree<[T, 2], R> }
+    : T;
+  type PolicyLast<T, D extends unknown[]> = D extends [unknown, ...infer R]
+    ? { left: Tree<[T, 1], R>; right: PolicyLast<[T, 2], R> }
+    : Policy;
 `;
 
 /**
@@ -109,6 +132,30 @@ describe("writer-policy", () => {
     });
   });
 
+  describe("writerPolicyHeldWithin", () => {
+    it("names the alias that writes the policy a value the type holds carries", async () => {
+      const { checker, types } = await typesOf({
+        single: "{ value: Policy }",
+        set:
+          "{ byIndex: { [index: number]: WritePolicyAnyOf<string, [Policy]> } }",
+        stamped:
+          "{ value: Stamped<string, { readonly writePolicyAnyOf: [Policy] }> }",
+        labelled: '{ value: Confidential<string, ["secret"]> }',
+      });
+
+      expect(writerPolicyHeldWithin(types.single, checker)).toBe(
+        "WriteAuthorizedBy",
+      );
+      expect(writerPolicyHeldWithin(types.set, checker)).toBe(
+        "WritePolicyAnyOf",
+      );
+      expect(writerPolicyHeldWithin(types.stamped, checker)).toBe(
+        "WritePolicyAnyOf",
+      );
+      expect(writerPolicyHeldWithin(types.labelled, checker)).toBeUndefined();
+    });
+  });
+
   describe("holdsWriterPolicy", () => {
     it("returns `true` for a writer policy the type carries or a value it holds carries", async () => {
       const { checker, types } = await typesOf({
@@ -150,6 +197,118 @@ describe("writer-policy", () => {
       for (const type of Object.values(types)) {
         expect(holdsWriterPolicy(type, checker)).toBe(false);
       }
+    });
+
+    it("returns `true` for a recursion that instantiates its declaration without end, whose remainder is unread", async () => {
+      const { checker, types } = await typesOf({
+        alias: "Expanding<string>",
+        labelled: "ExpandingLabelled<string>",
+      });
+
+      for (const type of Object.values(types)) {
+        expect(holdsWriterPolicy(type, checker)).toBe(true);
+      }
+    });
+  });
+
+  describe("readWriterPolicy", () => {
+    it('returns `"unread"` for a recursion that instantiates its declaration without end and holds no policy where it is read', async () => {
+      const { checker, types } = await typesOf({
+        alias: "Expanding<string>",
+        interface: "ExpandingNode<string>",
+        tuple: "ExpandingTuple<string>",
+        labelled: "ExpandingLabelled<string>",
+        member: "{ value: ExpandingLabelled<number> }",
+        branching: "Branching<string>",
+      });
+
+      for (const type of Object.values(types)) {
+        expect(readWriterPolicy(type, checker)).toBe("unread");
+      }
+    });
+
+    it('returns `"unread"` for a nesting that ends past the depth a reading stops at', async () => {
+      const { checker, types } = await typesOf({
+        chain: `Chain<[${Array(120).fill(1).join(", ")}]>`,
+      });
+
+      expect(readWriterPolicy(types.chain, checker)).toBe("unread");
+    });
+
+    it('returns `"unread"` for a policy read only after more types than a reading stops at', async () => {
+      // Each left subtree holds 2^13 distinct objects, read before the right
+      // spine that ends at the policy.
+      const { checker, types } = await typesOf({
+        policyLast: `PolicyLast<0, [${Array(14).fill(1).join(", ")}]>`,
+      });
+
+      expect(readWriterPolicy(types.policyLast, checker)).toBe("unread");
+    });
+
+    it("returns the alias of a writer policy beside a recursion it stops reading", async () => {
+      const { checker, types } = await typesOf({
+        before: "{ policy: Policy; rest: Expanding<string> }",
+        after: "{ rest: Expanding<string>; policy: Policy }",
+      });
+
+      for (const type of Object.values(types)) {
+        expect(readWriterPolicy(type, checker)).toBe("WriteAuthorizedBy");
+        expect(writerPolicyHeldWithin(type, checker)).toBe(
+          "WriteAuthorizedBy",
+        );
+      }
+    });
+
+    it("is answered by `writerPolicyHeldWithin` as holding no policy where it stops reading a recursion", async () => {
+      const { checker, types } = await typesOf({
+        alias: "Expanding<string>",
+      });
+
+      expect(writerPolicyHeldWithin(types.alias, checker)).toBeUndefined();
+    });
+
+    it("returns `undefined` for a nesting that ends within the bounds and holds no policy", async () => {
+      const { checker, types } = await typesOf({
+        pairs: `${"Pair<".repeat(10)}string${">".repeat(10)}`,
+        arrays: `{ value: string${"[]".repeat(10)} }`,
+        arraysOfObjects:
+          "{ a: { b: { c: { d: { e: { name: string }[] }[] }[] }[] }[] }",
+        records:
+          "{ a: Record<string, { b: Record<string, { c: Record<string, { d: 1 }> }> }> }",
+        mapped:
+          "DeepReadonly<{ a: { b: { c: { d: { e: { f: { g: { h: { i: string } } } } } } } } }>",
+        cycle: "Cycle<1, 2, 3>",
+        shrinking: `Chain<[${Array(30).fill(1).join(", ")}]>`,
+      });
+
+      for (const type of Object.values(types)) {
+        expect(readWriterPolicy(type, checker)).toBeUndefined();
+      }
+    });
+
+    it("reads an object literal's own type through the values it holds", async () => {
+      const { checker, sourceFile } = await createTestProgram(
+        `${DECLARATIONS}
+declare const policy: Policy;
+const held = { a: { b: policy } };
+const plain = { a: { b: 1 } };`,
+      );
+      const literals = Object.fromEntries(
+        sourceFile.statements.filter(ts.isVariableStatement).flatMap((
+          statement,
+        ) => statement.declarationList.declarations).filter((declaration) =>
+          declaration.initializer &&
+          ts.isObjectLiteralExpression(declaration.initializer)
+        ).map((declaration) => [
+          declaration.name.getText(sourceFile),
+          checker.getTypeAtLocation(declaration.initializer!),
+        ]),
+      );
+
+      expect(readWriterPolicy(literals.held!, checker)).toBe(
+        "WriteAuthorizedBy",
+      );
+      expect(readWriterPolicy(literals.plain!, checker)).toBeUndefined();
     });
   });
 });

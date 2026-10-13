@@ -6,65 +6,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 
-function installBrowserGlobals(): () => void {
-  const originals = new Map<string, PropertyDescriptor | undefined>();
-  function setGlobal(name: string, value: unknown): void {
-    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, {
-      configurable: true,
-      writable: true,
-      value,
-    });
-  }
-  class TestHTMLElement extends EventTarget {
-    attachShadow() {
-      return {
-        adoptedStyleSheets: [],
-        appendChild() {},
-        append() {},
-      };
-    }
-  }
-  setGlobal("window", globalThis);
-  setGlobal("HTMLElement", TestHTMLElement);
-  setGlobal("customElements", {
-    define() {},
-    get() {},
-    whenDefined: () => Promise.resolve(),
-  });
-  setGlobal("document", {
-    documentElement: { style: {} },
-    addEventListener() {},
-    removeEventListener() {},
-    createElement: () => ({
-      style: {},
-      setAttribute() {},
-      append() {},
-      appendChild() {},
-    }),
-    createTreeWalker: () => ({}),
-  });
-  setGlobal("devicePixelRatio", 1);
-  setGlobal("screen", { deviceXDPI: 1, logicalXDPI: 1 });
-  setGlobal("navigator", { platform: "", userAgent: "deno" });
-  setGlobal("location", {
-    protocol: "http:",
-    host: "localhost:8000",
-    hostname: "localhost",
-    href: "http://localhost:8000/named",
-  });
+import { installBrowserGlobals } from "./browser-globals.ts";
 
-  return () => {
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
-  };
-}
+const PAGE_HREF = "http://localhost:8000/named";
 
 describe("XAppView named-space loading", () => {
   it("renders the selected nested view rather than its document root", async () => {
-    const restore = installBrowserGlobals();
+    const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XBodyView } = await import("../src/views/BodyView.ts");
       const nested = { target: "nested view" };
@@ -99,7 +47,7 @@ describe("XAppView named-space loading", () => {
   });
 
   it("loads a named view's root from the space it was given", async () => {
-    const restore = installBrowserGlobals();
+    const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
       const space = "did:key:z6Mk-shell-app-view-named" as DID;
@@ -131,7 +79,7 @@ describe("XAppView named-space loading", () => {
   });
 
   it("loads nothing while the view's space is still being resolved", async () => {
-    const restore = installBrowserGlobals();
+    const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
       const space = "did:key:z6Mk-shell-app-view-second-space" as DID;
@@ -173,7 +121,7 @@ describe("XAppView named-space loading", () => {
   });
 
   it("does not request the space root for a piece-focused view", async () => {
-    const restore = installBrowserGlobals();
+    const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
       const space = "did:key:z6Mk-shell-piece-without-root" as DID;

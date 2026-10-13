@@ -1174,11 +1174,13 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
       }
     });
 
-    describe("a CFC alias whose type the checker reduced", () => {
-      // `Confidential<string | null, …>` is `string & carrier` once
-      // `null & carrier` is nothing, and the reduced type keeps no alias name.
-      // A written reference still names the policy; a type alone has only its
-      // carrier, which holds the labels but cannot spell a writer binding.
+    describe("a CFC alias around a nullable payload", () => {
+      // `Confidential<string | null, …>` is `(string & carrier) | null`: the
+      // carrier distributes over the payload's members and leaves `null`
+      // beside them, so the type keeps both `null` and the alias's name, and
+      // the result reads as the argument does. A writer binding is the
+      // exception, which only a written reference spells, so the result,
+      // read from its type, has none.
       const TITLE_AND_RANK = {
         type: "object",
         properties: { title: { type: "string" }, rank: { type: "number" } },
@@ -1194,7 +1196,10 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               anyOf: [{ type: "string" }, { type: "null" }],
               ifc: { confidentiality: ["secret"] },
             },
-            { type: "string", ifc: { confidentiality: ["secret"] } },
+            {
+              anyOf: [{ type: "string" }, { type: "null" }],
+              ifc: { confidentiality: ["secret"] },
+            },
           ],
           [
             "a nullable object written directly",
@@ -1212,9 +1217,14 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               ifc: { confidentiality: ["secret"] },
             },
             {
-              type: "object",
-              properties: { title: { type: "string" } },
-              required: ["title"],
+              anyOf: [
+                {
+                  type: "object",
+                  properties: { title: { type: "string" } },
+                  required: ["title"],
+                },
+                { type: "null" },
+              ],
               ifc: { confidentiality: ["secret"] },
             },
           ],
@@ -1233,7 +1243,7 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
                 },
               },
             },
-            { type: "string" },
+            { anyOf: [{ type: "string" }, { type: "null" }] },
           ],
           [
             "a nullable projection",
@@ -1251,9 +1261,14 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               ifc: { projection: { from: "/", path: "/x~1y/m~0n" } },
             },
             {
-              type: "object",
-              properties: { t: { type: "string" } },
-              required: ["t"],
+              anyOf: [
+                {
+                  type: "object",
+                  properties: { t: { type: "string" } },
+                  required: ["t"],
+                },
+                { type: "null" },
+              ],
               ifc: { projection: { from: "/", path: "/x~1y/m~0n" } },
             },
           ],
@@ -1265,7 +1280,10 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               anyOf: [{ type: "string" }, { type: "null" }],
               ifc: { confidentiality: ["secret"] },
             },
-            { type: "string", ifc: { confidentiality: ["secret"] } },
+            {
+              anyOf: [{ type: "string" }, { type: "null" }],
+              ifc: { confidentiality: ["secret"] },
+            },
           ],
           [
             "a nullable array in another label's payload",
@@ -1279,8 +1297,10 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
             {
-              type: "array",
-              items: { type: "string" },
+              anyOf: [
+                { type: "array", items: { type: "string" } },
+                { type: "null" },
+              ],
               ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
           ],
@@ -1292,7 +1312,10 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               anyOf: [TITLE_AND_RANK, { type: "null" }],
               ifc: { confidentiality: ["secret"] },
             },
-            { ...TITLE_AND_RANK, ifc: { confidentiality: ["secret"] } },
+            {
+              anyOf: [TITLE_AND_RANK, { type: "null" }],
+              ifc: { confidentiality: ["secret"] },
+            },
           ],
           [
             "a nullable intersection in another label's payload",
@@ -1303,7 +1326,7 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
               ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
             {
-              ...TITLE_AND_RANK,
+              anyOf: [TITLE_AND_RANK, { type: "null" }],
               ifc: { confidentiality: ["secret"], integrity: ["trusted"] },
             },
           ],
@@ -1329,7 +1352,7 @@ export default pattern<{ ${fields[order[0]]}; ${fields[order[1]]} }>(
                 },
               },
             },
-            TITLE_AND_RANK,
+            { anyOf: [TITLE_AND_RANK, { type: "null" }] },
           ],
         ] as const
       ) {
@@ -1341,8 +1364,6 @@ ${declaration}
 export default pattern<{ a: ${a} }>(({ a }) => ({ a }));`,
           }, { types: COMMONFABRIC_TYPES, typeCheck: true });
           const schemas = patternSchemas(parseModule(files["/main.tsx"]!));
-          // The argument is read from its written reference, which keeps
-          // `null`; the result from the reduced type, which has none.
           expect((schemas.input.properties as Schema).a).toEqual(input);
           expect((schemas.output.properties as Schema).a).toEqual(output);
         });
@@ -2708,6 +2729,21 @@ export default pattern<{ value: Secret }>(({ value }) => {
       ).toMatchObject({ ifc: { confidentiality: [policy] } });
     });
 
+    it("reads the policy of a scoped value captured whole once", async () => {
+      expect(
+        await captured({
+          "/main.tsx":
+            `import { computed, pattern, type Confidential, type PerUser } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { rules } from "./rules.ts";
+interface Secret { a: string; b: string; }
+export default pattern<{ secret: PerUser<Confidential<Secret, [PolicyOf<typeof rules>]>> }>(
+  ({ secret }) => ({ out: computed(() => ({ whole: secret })) }),
+);`,
+        }, "secret"),
+      ).toMatchObject({ ifc: { confidentiality: [policy] }, scope: "user" });
+    });
+
     it("reads the policy of a value an alias of a nullable union names", async () => {
       expect(
         await captured({
@@ -2855,6 +2891,142 @@ export default pattern(() => {
             ],
           },
         },
+      });
+    });
+  });
+
+  describe("an inferred result that reads a binding whose annotation names one", () => {
+    // `readers` and `writers` are declared with one type, so only the
+    // annotation each value is read at tells their policies apart.
+    const RULES =
+      `import { type CfcExchangeRulesDeclaration, exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+const release = (role: string) => exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: { integrity: [role] },
+  post: { dropClause: true },
+});
+export const readers: CfcExchangeRulesDeclaration = exchangeRules([release("reader")]);
+export const writers: CfcExchangeRulesDeclaration = exchangeRules([release("writer")]);`;
+
+    const policy = (binding: string) => ({
+      confidentiality: [{
+        type: "https://commonfabric.org/cfc/atom/Policy",
+        policyRefKind: "module",
+        __ctPolicyIdentityOf: { file: "/rules.ts", path: [binding] },
+      }],
+    });
+
+    /**
+     * The result schema of the one `computed()` in a module whose pattern
+     * takes `input` and returns `result`, and a reader of the pattern's own.
+     */
+    async function inferred(
+      input: string,
+      result: string,
+    ): Promise<{ lift?: Schema; pattern: () => Schema }> {
+      const output = await transformFiles({
+        "/rules.ts": RULES,
+        "/main.tsx":
+          `import { computed, pattern, type Confidential } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { readers, writers } from "./rules.ts";
+export default pattern<{ ${input} }>(({ a, b }) => (${result}));`,
+      }, { types: COMMONFABRIC_TYPES, typeCheck: true });
+      const root = parseModule(output["/main.tsx"]!);
+      const [lift] = callsNamed(root, "lift");
+      const resultSchema = lift?.arguments[2];
+      return {
+        ...(resultSchema && ts.isSatisfiesExpression(resultSchema) && {
+          lift: literalToValue(resultSchema.expression) as Schema,
+        }),
+        pattern: () => patternSchemas(root).output.properties as Schema,
+      };
+    }
+
+    it("reads the policy of a lift's result member written from a binding", async () => {
+      const { lift, pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: a, length: a.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+      expect(
+        ((pattern().out as Schema).properties as Schema).whole,
+      ).toMatchObject({ ifc: policy("readers") });
+    });
+
+    it("reads the policy of a lift's result member written from a nullable binding", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[] | null, [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: a, length: a?.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+    });
+
+    it("reads the policy of a lift's result that returns a binding", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => a) }",
+      );
+
+      expect(lift).toMatchObject({ ifc: policy("readers") });
+    });
+
+    for (
+      const [form, result] of [
+        ["in parentheses", "{ out: computed(() => (a)) }"],
+        [
+          "in parentheses from a block",
+          "{ out: computed(() => { return (a); }) }",
+        ],
+      ]
+    ) {
+      it(`reads the policy of a lift's result that returns a binding ${form}`, async () => {
+        const { lift } = await inferred(
+          "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+          result!,
+        );
+
+        expect(lift).toMatchObject({ ifc: policy("readers") });
+      });
+    }
+
+    it("reads the policy of a lift's result member written from a binding in parentheses", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: computed(() => ({ whole: (a), length: a.length })) }",
+      );
+
+      expect((lift!.properties as Schema).whole).toMatchObject({
+        ifc: policy("readers"),
+      });
+    });
+
+    it("reads the policy of a pattern's result member written from a binding", async () => {
+      const { pattern } = await inferred(
+        "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
+        "{ out: a }",
+      );
+
+      expect(pattern().out).toMatchObject({ ifc: policy("readers") });
+    });
+
+    it("reads each member at its own binding's policy where the two policies' rules share a type", async () => {
+      const { lift } = await inferred(
+        "a: Confidential<string, [PolicyOf<typeof readers>]>; b: Confidential<string, [PolicyOf<typeof writers>]>",
+        "{ out: computed(() => ({ r: a, w: b })) }",
+      );
+
+      expect((lift!.properties as Schema).r).toMatchObject({
+        ifc: policy("readers"),
+      });
+      expect((lift!.properties as Schema).w).toMatchObject({
+        ifc: policy("writers"),
       });
     });
   });

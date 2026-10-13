@@ -1,7 +1,10 @@
 import ts from "typescript";
 import type { SchemaScope } from "@commonfabric/api";
 import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
-import { cfcCarrierProperty } from "@commonfabric/schema-generator/cfc-carrier";
+import {
+  cfcCarrierProperty,
+  isCfcCarrierMember,
+} from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
   resolvesToCommonFabricSymbol,
@@ -10,15 +13,18 @@ import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
+  isScopeBrandMember,
   SCOPE_WRAPPER_FOR_SCOPE,
   scopeForWrapperName,
 } from "@commonfabric/schema-generator/scope-brand";
 import {
+  denotesSameType,
   entityNameRight,
   readAuthoredTypeNode,
   readMemberAnnotation,
   unwrapTypeParentheses,
 } from "@commonfabric/schema-generator/type-node";
+import { namesValueBinding } from "@commonfabric/schema-generator/value-annotation";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {
   createRegisteredTypeLiteral,
@@ -373,15 +379,42 @@ function choosePreferredShrinkCandidate(
     : nodeDriven;
 }
 
-function typeIncludesUndefined(type: ts.Type): boolean {
-  if ((type.flags & ts.TypeFlags.Undefined) !== 0) {
-    return true;
-  }
+function typeIncludesUndefined(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
   if ((type.flags & ts.TypeFlags.Union) !== 0) {
     const union = type as ts.UnionType;
-    return union.types.some((member) => typeIncludesUndefined(member));
+    return union.types.some((member) => typeIncludesUndefined(member, checker));
   }
-  return false;
+  const nullish = nullishMemberOf(type, checker);
+  return nullish !== undefined &&
+    (nullish.flags & ts.TypeFlags.Undefined) !== 0;
+}
+
+/**
+ * The `null`, `undefined` or `void` that `type` is: the type itself, or the
+ * one member of an intersection whose other members are carriers alone. While
+ * `T` is a type parameter, `PerUser<Confidential<T | undefined, L>>` holds its
+ * `undefined` beside the deferred `ScopeTag` and `CfcTag`, and it is that
+ * `undefined` once the tags resolve. `undefined` for any other type.
+ */
+function nullishMemberOf(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const nullish = ts.TypeFlags.Undefined | ts.TypeFlags.Null |
+    ts.TypeFlags.Void;
+  if ((type.flags & nullish) !== 0) return type;
+  if (!type.isIntersection()) return undefined;
+  const values = type.types.filter((member) => (member.flags & nullish) !== 0);
+  return values.length === 1 &&
+      type.types.every((member) =>
+        values.includes(member) || isScopeBrandMember(member, checker) ||
+        isCfcCarrierMember(member)
+      )
+    ? values[0]
+    : undefined;
 }
 
 function isNullishType(type: ts.Type): boolean {
@@ -1162,13 +1195,11 @@ function shrinkTypeToNode(
       const nullishMembers: ts.TypeNode[] = [];
       if (type.isUnion()) {
         for (const constituent of type.types) {
-          if (
-            constituent.flags &
-            (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void)
-          ) {
+          const nullish = nullishMemberOf(constituent, checker);
+          if (nullish) {
             nullishMembers.push(
               typeToTypeNodeWithRegistry(
-                constituent,
+                nullish,
                 { checker, factory, sourceFile, state },
                 typeRegistry,
                 TYPE_NODE_FLAGS,
@@ -1210,7 +1241,7 @@ function shrinkTypeToNode(
         sourceFile;
       propType = checker.getTypeOfSymbolAtLocation(prop, declaration);
       isOptional = !!(prop.flags & ts.SymbolFlags.Optional) ||
-        (propType ? typeIncludesUndefined(propType) : false);
+        (propType ? typeIncludesUndefined(propType, checker) : false);
     } else {
       // Numeric/unknown-key accesses can be represented via index signatures
       // rather than named properties. Use the index type when available.
@@ -1703,12 +1734,16 @@ function recordNarrowing(
  * built from a type, or rebuilt afresh, keeps no trace of the node it stands
  * for, and only that node's record says which value it narrows, or which
  * declaration spells what a print of its type cannot
- * (`CrossStageState.recordNarrowedFrom()`, `recordDeclaredValue()`).
+ * (`CrossStageState.recordNarrowedFrom()`, `recordDeclaredValue()`). A print
+ * of the whole value is read as the node spelling it, where that node names a
+ * value binding, and a print rebuilt from a print keeps its hint
+ * (`SchemaHint.spelledBy`).
  */
 function carryNarrowing(
   base: ts.TypeNode,
   result: ts.TypeNode | undefined,
   state: CrossStageState | undefined,
+  checker: ts.TypeChecker | undefined,
 ): void {
   if (!result || !state || result === base) return;
   const from = unwrapTypeParentheses(base);
@@ -1721,9 +1756,18 @@ function carryNarrowing(
   const printed = state.printedFrom(to);
   if (spelledBy && printed && printed === state.printedFrom(from)) {
     state.recordSchemaHint(to, { spelledBy });
+  } else if (
+    printed && checker && value?.typeNode &&
+    denotesSameType(value.type, printed) &&
+    namesValueBinding(value.typeNode, checker)
+  ) {
+    // A print of the whole value a node stands for is read as the node that
+    // spells the value, where that node names a value binding, as a print of
+    // a capture's value is (`SchemaHint.spelledBy`).
+    state.recordSchemaHint(to, { spelledBy: value.typeNode });
   }
   const carry = (fromPart: ts.TypeNode, toPart: ts.TypeNode | undefined) =>
-    carryNarrowing(fromPart, toPart, state);
+    carryNarrowing(fromPart, toPart, state, checker);
   if (ts.isTypeLiteralNode(from) && ts.isTypeLiteralNode(to)) {
     for (const member of to.members) {
       const name = ts.isPropertySignature(member) && member.type &&
@@ -4901,7 +4945,7 @@ export function applyShrinkAndWrap(
         context?.state,
         fullShapePaths,
       );
-      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state);
+      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state, checker);
       const nodeDriven = buildShrunkTypeNodeFromTypeNode(
         shrinkBaseTypeNode,
         retainedPaths,
@@ -4947,7 +4991,7 @@ export function applyShrinkAndWrap(
           fullShapePaths,
         )
         : undefined;
-      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state);
+      carryNarrowing(shrinkBaseTypeNode, typeDriven, context?.state, checker);
       shrunk = choosePreferredShrinkCandidate(
         "node",
         nodeDriven,
@@ -4965,7 +5009,7 @@ export function applyShrinkAndWrap(
   // Each pass below rebuilds the node it is handed, so each part of what it
   // returns narrows what the part it rebuilt narrowed.
   const carried = (from: ts.TypeNode, to: ts.TypeNode): ts.TypeNode => {
-    carryNarrowing(from, to, context?.state);
+    carryNarrowing(from, to, context?.state, checker);
     return to;
   };
   if (!identityOnlyRoot && identityPaths.length > 0) {

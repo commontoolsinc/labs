@@ -10,7 +10,10 @@
  * accepted on the user's behalf, as its share intake does, is found by a start
  * with its creator, again once it is forgotten, and an acceptance that keeps
  * an archived entry archived leaves it so. A later room accepted with the same
- * creator leaves the one `direct` holds in place.
+ * creator leaves the one `direct` holds in place. Joining a room the user's
+ * chats list changes nothing, and records nothing unless it names a request;
+ * joining a direct room the user created, which they can't accept, lists it
+ * again once they forget it, even when the join asks to keep it archived.
  */
 import {
   action,
@@ -165,6 +168,33 @@ const acceptAsHost = handler<unknown, AcceptAsHostState>((
   });
 });
 
+/** What `joinHeld` is bound to. */
+interface JoinHeldState {
+  /** The manager's `joinRoom`. */
+  joinRoom: Stream<ManagerStreamEvent>;
+
+  /** The room to join. */
+  held: Writable<{ room?: Cell<HeldRoom> }>;
+
+  /** The request's id; empty, the join names none. */
+  requestId: string;
+
+  /** Whether the join asks to leave an archived entry archived. */
+  keepArchived: boolean;
+}
+
+/** Joins the held room, as a room does once its viewer writes in it. */
+const joinHeld = handler<unknown, JoinHeldState>((
+  _event,
+  { joinRoom, held, requestId, keepArchived },
+) => {
+  joinRoom.send({
+    room: held.key("room").resolveAsCell(),
+    ...(requestId === "" ? {} : { requestId }),
+    ...(keepArchived ? { keepArchived } : {}),
+  });
+});
+
 /** What `forgetListed` is bound to. */
 interface ForgetListedState {
   /** The manager's `forget`. */
@@ -202,12 +232,14 @@ const stateOf = (
     ?.state;
 
 // Creates a direct room with Bob, and hands it to him through the setup, and
-// then a second one, from another manager.
+// then a second one, from another manager. Joins her own room, which can't be
+// accepted, and which a join lists again once she forgets it.
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const requests = Writable.of<Record<string, ChatRequestOutcome>>({});
+  const catalog = emptyCatalog();
   const manager = FabriChatManagerCore({
     myProfile: Writable.of<TestProfile>({ name: "Alice" }),
-    sharedSpaceCatalog: emptyCatalog(),
+    sharedSpaceCatalog: catalog,
     direct: Writable.of<Record<string, ChatIndexEntry>>({}),
     requests,
     outgoingNotices: Writable.of<ChatManagerNotice[]>([]),
@@ -230,6 +262,42 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       againRequests.key("d-2").key("entry").key("room").resolveAsCell(),
     )
   );
+  const action_join_unnamed = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "",
+    keepArchived: false,
+  });
+  const action_join_named = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "j-listed",
+    keepArchived: false,
+  });
+  const action_join_keeping = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "",
+    keepArchived: true,
+  });
+  const action_accept_own = acceptAsHost({
+    accept: manager.accept,
+    held: setup.held,
+    requestId: "a-own",
+    keepArchived: false,
+  });
+  const action_forget_own = forgetListed({
+    forget: manager.forget,
+    held: setup.held,
+    catalog,
+    requestId: "forget-own",
+  });
+  const action_forget_own_again = forgetListed({
+    forget: manager.forget,
+    held: setup.held,
+    catalog,
+    requestId: "forget-own-again",
+  });
 
   return {
     [TESTS]: [
@@ -251,6 +319,52 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { action: action_hand_over_again },
       { assertion: assert(() => again.rooms.length === 1) },
+      // Joining a room her chats list already changes nothing, and, naming no
+      // request, records nothing; naming one, it records the room's entry.
+      { action: action_join_unnamed },
+      {
+        assertion: assert(() =>
+          Object.keys(requests.get()).length === 1 &&
+          stateOf(catalog, setup.held) === "saved"
+        ),
+      },
+      { action: action_join_named },
+      {
+        assertion: assert(() => {
+          const outcome = requests.get()["j-listed"];
+          return outcome?.status === "done" &&
+            spaceOf(outcome.entry?.room) === spaceOf(setup.held.key("room"));
+        }),
+      },
+      // A room she created isn't hers to accept, but once she forgets it,
+      // joining it lists it again, and leaves the room `direct` holds for Bob.
+      { action: action_accept_own },
+      {
+        assertion: assert(() =>
+          reasonOf(requests, "a-own") === "The room was created by this user."
+        ),
+      },
+      { action: action_forget_own },
+      {
+        assertion: assert(() =>
+          stateOf(catalog, setup.held) === "archived" &&
+          manager.rooms.length === 0
+        ),
+      },
+      { action: action_join_unnamed },
+      {
+        assertion: assert(() =>
+          stateOf(catalog, setup.held) === "saved" &&
+          manager.rooms.length === 1 &&
+          manager.rooms[0]?.counterpart === setup.bobDid.get()
+        ),
+      },
+      // A join is always the user's own, so it lists a forgotten room again
+      // even when it asks to keep it archived.
+      { action: action_forget_own_again },
+      { assertion: assert(() => stateOf(catalog, setup.held) === "archived") },
+      { action: action_join_keeping },
+      { assertion: assert(() => stateOf(catalog, setup.held) === "saved") },
       { label: "alice-created" },
       { await: "bob-done" },
     ],

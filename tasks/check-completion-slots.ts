@@ -130,6 +130,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "a secret input path or stdin marker, supplied explicitly",
   ],
   // Numbers, durations and bounds. Nothing enumerates a count.
+  ["space compact:verify-sample", "an every-nth stride over the documents"],
   ["limit", "a row count"],
   ["depth", "a graph depth"],
   ["seq", "a revision sequence number"],
@@ -152,6 +153,10 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "how many local jobs one runner runs at once; a count",
   ],
   ["submission-after-seq", "a revision sequence number"],
+  ["before-seq", "a revision sequence number"],
+  ["before", "a timestamp"],
+  ["keep-last", "a row count"],
+  ["keep-payloads", "a duration"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
   ["as", "a DID whose view to approximate, pasted from elsewhere"],

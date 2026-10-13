@@ -125,6 +125,8 @@ import {
 } from "../runtime-secret.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { CooperativeYield } from "../scheduler/cooperative-yield.ts";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+import { externalizeLinkSchemasInValue } from "../link-utils.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
   deliverSchemaDocumentClosure,
@@ -132,6 +134,7 @@ import {
 } from "../schema-doc-delivery.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { URI } from "../sigil-types.ts";
+import { spaceCellId, SpaceRootMissingError } from "../space-root-slot.ts";
 import { createTransactionCommitReceipt } from "./commit-receipt.ts";
 import {
   type CommitError,
@@ -664,6 +667,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * enter the scope — a cast cannot touch a `#private` member.
    */
   #privilegedSystemWriteDepth = 0;
+
+  /**
+   * The space cells whose `defaultPattern` slot this transaction has written,
+   * by id. A batch applies its writes after checking them, so a write beneath
+   * a slot the same batch fills finds the slot still empty in the
+   * transaction; this is how the slot guard in `#noteSystemWrite()` knows it
+   * is filled.
+   */
+  readonly #filledRootSlots = new Set<string>();
 
   /**
    * The write-policy inputs the runtime recorded, by reference to the frozen
@@ -1452,6 +1464,57 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           `ACLManager, which replaces the whole document. A value-path write ` +
           `is emitted as a patch and rejected by the memory server.`,
       );
+    }
+    // A write beneath a space cell's `defaultPattern` slot while the slot is
+    // empty lands inline in the space cell, and a space written that way never
+    // gets its root, since the root's creation finds the slot taken. A write
+    // to the slot, or to the whole value, keeps `#filledRootSlots` in step
+    // with whether this transaction has left the slot filled, so that writes
+    // beneath a slot filled earlier in the same transaction pass. Otherwise
+    // the slot is read the way the meta seam reads: transaction-local, and
+    // kept out of the reactivity log and the conflict set. The space cell's id
+    // is worked out only for a write that can reach a slot.
+    if (
+      address.path[0] === "value" &&
+      (address.path.length === 1
+        ? this.#filledRootSlots.size > 0 ||
+          (value as { defaultPattern?: unknown } | undefined)
+              ?.defaultPattern !== undefined
+        : address.path[1] === "defaultPattern") &&
+      address.id === spaceCellId(address.space)
+    ) {
+      if (address.path.length <= 2) {
+        const filled = options?.delete === true
+          ? undefined
+          : address.path.length === 2
+          ? value
+          : (value as { defaultPattern?: unknown } | undefined)?.defaultPattern;
+        if (filled === undefined) {
+          this.#filledRootSlots.delete(address.id);
+        } else {
+          this.#filledRootSlots.add(address.id);
+        }
+      } else if (!this.#filledRootSlots.has(address.id)) {
+        const slot = this.tx.read({
+          ...address,
+          path: ["value", "defaultPattern"],
+        }, {
+          nonRecursive: true,
+          meta: {
+            ...ignoreReadForScheduling,
+            ...ignoreReadForCommit,
+            ...allowMutableTransactionRead,
+          },
+        }).ok?.value;
+        if (slot === undefined) {
+          // TODO(danfuzz): On a serving runtime, bring the demanding user's
+          // Home root up ahead of the write instead, stamped as the
+          // SpaceServer's root ensure stamps it, so that an app layered on a
+          // serving runtime can create a profile before its user has ever
+          // opened Home.
+          throw new SpaceRootMissingError(address.space);
+        }
+      }
     }
     // A path-[] write replaces the whole document envelope, so it reaches
     // every reserved sibling without naming one.
@@ -2667,6 +2730,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
+   * `value` with its inline link schemas stamped as references, which is
+   * what a link written into an ordinary document stores
+   * (`docs/specs/content-addressed-schemas.md`): the closure each reference
+   * names is staged with the write (`#stageSchemaDocsForValue`), so the
+   * stored form travels with its documents and a same-transaction read
+   * through the link resolves. A `data:` document is never written, and a
+   * `cid:` document's keywords may hold link-shaped data, so neither is
+   * rewritten; with the flag off the value is stored as given.
+   */
+  #storedLinkSchemaForm(
+    address: Pick<IMemorySpaceAddress, "id">,
+    value: FabricValue,
+  ): FabricValue {
+    if (!getContentAddressedSchemasConfig()) return value;
+    if (address.id.startsWith("cid:") || hasDataUriScheme(address.id)) {
+      return value;
+    }
+    return externalizeLinkSchemasInValue(value);
+  }
+
+  /**
    * Refuses a write that would land a `schema` metadata member in the
    * malformed form — a `cid:` reference outside a single root `$ref`, or a
    * value that is not a schema (`MalformedSchemaMetaError`). This runs
@@ -3373,6 +3457,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.#assertWritable("write()");
+    value = this.#storedLinkSchemaForm(address, value);
     this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
@@ -3397,6 +3482,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.#assertWritable("writeOrThrow()");
+    value = this.#storedLinkSchemaForm(address, value);
     this.#noteCfcActivity();
     this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
@@ -3545,6 +3631,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         address: IMemorySpaceAddress,
         value: FabricValue | undefined,
       ) => this.#refuseMalformedSchemaMeta(address, value);
+      const storedLinkSchemaForm = (
+        address: IMemorySpaceAddress,
+        value: FabricValue,
+      ) => this.#storedLinkSchemaForm(address, value);
       // The read caches go the same way: dropped ahead of the first write the
       // batch yields, and kept when it yields none. A `set()` whose diff
       // finds nothing to write arrives here as an empty batch, and a lift
@@ -3567,18 +3657,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
-            noteSystemWrite(address, write.value);
+            const value = storedLinkSchemaForm(address, write.value);
+            noteSystemWrite(address, value);
             noteWriteIdentity();
             if (!write.delete) {
-              refuseMalformedSchemaMeta(address, write.value);
+              refuseMalformedSchemaMeta(address, value);
               if (getContentAddressedSchemasConfig()) {
-                staged.push({ address, value: write.value });
+                staged.push({ address, value });
               }
             }
             // After the chokepoint, so a write it refuses leaves the caches
             // standing over a state it did not change.
             invalidateReadCaches();
-            yield { address, value: write.value, delete: write.delete };
+            yield { address, value, delete: write.delete };
           }
         })(),
       );

@@ -1288,12 +1288,14 @@ Mechanics:
   payload"), and end-to-end in ts-transformers
   `printed-type-node-schema.test.ts` ("a labeled payload merged into a larger
   value").
-- A policy's type can lose its alias name. A payload member its metadata
-  carrier cannot intersect is reduced away: `Confidential<string | null, L>` is
-  `string & carrier`, and `Confidential<null, L>` is `never`. A rewrite such as
-  `NonNullable<…>`, which intersects with `{}`, drops the name too. A written
-  reference that names the policy still lowers it from its own arguments,
-  `null` and a `typeof` writer binding included. A payload that is itself
+- A policy's type keeps its alias name beside `null` and `undefined`: the
+  carrier holds them beside its stamp (`CfcTag`, `packages/api/cfc.ts`), so
+  `Confidential<string | null, L>` is `(string & carrier) | null` and reads
+  as its reference does, `null` included. A policy around `null` alone,
+  `Confidential<null, L>`, is `null`, with no name or carrier left, and a
+  rewrite such as `NonNullable<…>`, which intersects with `{}`, drops the name
+  too. A written reference that names the policy still lowers it from its own
+  arguments, `null` and a `typeof` writer binding included. A payload that is itself
   `never`, as in `Confidential<never, L>` or `Confidential<string & number, L>`,
   accepts nothing, and lowers to `{ not: true, ifc }` like any payload whose
   schema is `false`, whether written directly or through an alias (`type Sec<T>
@@ -1668,8 +1670,15 @@ Mechanics:
   `cfc-write-authorized-by:unread` error, naming the policy
   (`WriteAuthorizedBy`, or `WritePolicyAnyOf` for a carrier holding a set).
   So is a number index signature beside a string one whose value type holds
-  a writer policy the string one's does not: the pair is lowered as the
-  string one alone, so the policy is lost.
+  a writer policy the string one's does not, naming the first policy its
+  values hold (`writerPolicyHeldWithin()`): the pair is lowered as the
+  string one alone, so the policy is lost. A reading of a type stops at a
+  bound, 100 object types deep or 10,000 types read, which a recursion that
+  instantiates its declaration without end always reaches and the types
+  patterns write do not (`readWriterPolicy()` is `"unread"`). It may miss a
+  policy past the bound, so it fails closed: on the number side it is
+  reported, naming `WriteAuthorizedBy`, and on the string side it does not
+  count as holding one.
   Any other schema views a document whose stored envelope binds its writers
   already, and reports nothing. It reads the policy whole or not at all.
   Where the writer went unread, the policy is marked as read in part
@@ -1762,7 +1771,10 @@ and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy` and
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`spelledBy` or `definesDocument` lookup reads the node (`formatChildType` in
+`definesDocument` lookup reads the node (`formatChildType` in
+`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
+or a printed generation root is formatted (`formatChildType` and
+`#generateSchemaInternal` in
 `schema-generator.ts`).
 
 - **`items: false`** — array-typed wrapper contents collapse to
@@ -1849,6 +1861,23 @@ the node, and the node inside its parentheses (`schema-generator.ts`); a
   neither definition can stand for the other.
 
   The node's own hints still apply.
+
+  The object formatter applies the same rule where it has no node for a
+  member: a member of an object literal, read from its type, is read at the
+  annotation of the binding or member its value reads, written `p: a`,
+  `p: x.a`, `p: (a)` or `{ a }`, a binding a nested pattern destructures
+  included, and a getter read at the type it returns, where that annotation
+  denotes the member's type and names a value binding
+  (`readBindingAnnotation` in `src/typescript/value-annotation.ts`, called
+  from `object-formatter.ts`). A
+  callback's inferred result is a print of such a type, so a result written
+  `{ whole: a }` keeps the policy `a`'s annotation names. Only an annotation
+  whose every `typeof` is a `PolicyOf`'s rules is read so
+  (`namesOnlyPolicyBindings`): one that names a writer leaves the value read
+  by its type, as the object views the document that stores the writer's
+  policy, and reads that policy in part (§11, `definesDocument`). A value
+  any other expression writes, such as an element of an array literal, has no
+  binding to read, and is read by its type.
 
 ## 14. Options
 

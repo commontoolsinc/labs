@@ -1,4 +1,5 @@
 import { unwrapTypeParentheses } from "@commonfabric/schema-generator/type-node";
+import { namesValueBinding } from "@commonfabric/schema-generator/value-annotation";
 import {
   carriesWriterPolicy,
   holdsWriterPolicy,
@@ -39,7 +40,6 @@ import {
   createRegisteredTypeLiteral,
   getConstructedCellTypeNode,
   getPreservedTypeForBindingElement,
-  namesValueBinding,
   type PreservedBindingType,
   reportUnknownReactiveType,
   typeToTypeNodeWithRegistry,

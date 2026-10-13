@@ -86,10 +86,14 @@ changes, and only for entities whose ids carry the computed scheme.
 ### Internal cell identity
 
 The pattern builder assigns each internal root cell a `partialCause` —
-the cell's declared name, or an anonymous `{ $generated: N }` counter, with
-`$kind: "stream"` mixed in for stream cells
-(`packages/runner/src/builder/pattern.ts`). At instantiation the runner
-mints the entity id from the piece's result cell and that partial cause:
+the cell's declared name, the instance name of a named sub-pattern instance,
+or an anonymous `{ $generated: N }` counter, with `$kind: "stream"` mixed in
+for stream cells (`packages/runner/src/builder/pattern.ts`). The counter
+numbers anonymous roots in the order the builder's walk reaches them, which
+is the pattern's inputs and then its result, `[UI]` tree included, so a
+`{ $generated: N }` cause moves when a cell is added ahead of it anywhere in
+that walk. At instantiation the runner mints the entity id from the piece's
+result cell and that partial cause:
 
 ```ts
 // Shown for illustration only.
@@ -109,6 +113,88 @@ scheme onto the tagged hash — historically always `of:`.
 The manifest of materialized internal cells is stored in result-cell
 metadata and matched by partial cause plus kind
 (`packages/runner/src/runner.ts`, `materializeDerivedInternalCells`).
+
+### Sub-pattern instance identity
+
+A sub-pattern instance runs under a child result cell minted from the
+instance's output spot, `{ resultFor: <spot> }`, and the spot is the
+parent's internal cell for the instance's partial cause. Everything the child
+holds hangs off that result cell, so the partial cause is the child's
+identity.
+
+An instance given a name by `nameInstance(Child(...), "child")`
+(`packages/runner/src/builder/instance-name.ts`) is a **named instance**. The
+builder takes that name as the instance's partial cause,
+`{ $generated: "instance", name: "child" }`, wherever no result key, node
+input or authored `.for()` names it already. The name sits under the
+reserved `$generated` key, so no authored cause can equal it. An instance
+name given to more than one root in a pattern names none of them, and each
+keeps a positional cause. A stream root never takes an instance name, and a
+name given to one does not count toward another root's. A named instance's
+child stays where it is however its siblings are rearranged, and moves only
+when the instance is renamed.
+
+A named instance also records, as its descriptor's `legacyPartialCause`, the
+`{ $generated: N }` it would take without its name. It still consumes that
+number, so every other anonymous root keeps the number it would have without
+instance names.
+
+A sub-pattern instance with a positional cause moves to another child's state
+when a cell is added ahead of it, since its child is the one minted from
+whatever number it now takes. A parent's setup refuses
+(`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
+naming both pattern identities, to set up a child at a positional spot over a
+stored child of another pattern identity when the parent shows its positional
+children have moved spots:
+
+- a child of the incoming pattern identity runs at another positional spot of
+  the parent; or
+- another positional spot of the pattern sets up the stored child's pattern
+  identity.
+
+A stored child of a different identity with neither sign is taken for the same
+child under a newer version of its own source, since a child's identity changes
+whenever its own source does, so neither rule blocks an ordinary update of a
+child's source. Only positional spots are judged: a spot a result key, a node
+input or `.for()` names does not shift. Nor is a child that is its space's
+root, which its space's genesis places whatever its cause, or a child managed
+independently in a space of its own, which its parent resumes rather than sets
+up. A spot whose node sets up a space's root is not counted as another
+positional spot either, since its child does not sit there.
+
+Only a parent its updater has pointed at a new pattern is judged: its stored
+`patternIdentity` already names the incoming pattern, while its setup marker,
+`patternSetupIdentity`, names another pattern or none. An updater moves the
+pointer before the setup it asks for, and a live update follows the pointer's
+move. A parent that runs whichever pattern a computation returns, such as a
+`computed` choosing among sub-pattern instances, is set up with a pattern its
+pointer does not yet name, and an unrelated pattern there is no sign that its
+children moved. The guard reads a child only at a positional spot the parent's
+stored manifest of internal cells records, since no child can be set up at any
+other, so a fresh parent's setup reads no child at all.
+
+The refusal comes before anything the setup stages commits, so a refused
+update changes none of the piece's state. A live update the guard refuses
+leaves the previous pattern running. The piece's pattern pointer still names
+the refused pattern, though, so a fresh start sets that pattern up, refuses
+again, and does not start the piece until the pointer names a pattern the guard
+accepts, such as the source the piece ran before.
+
+What this leaves open:
+
+- Where a child's own source changed in the same update that moved it, its
+  identity changed with it, so the rules have nothing to judge by and let the
+  setup through. A child can then take another's state.
+- When a positional root moves to a number nothing held, its children are
+  minted afresh and the old ones are orphaned with no refusal, since nothing
+  sets up over them.
+- A parent set up as part of an update of an enclosing pattern, rather than
+  pointed at its new pattern by an updater, is not judged, so its own
+  positional children can move onto each other's state.
+- A root its updater points at an unrelated pattern is judged as though it ran
+  a newer version of its own, so it can be refused where the new pattern sets
+  up a stored child's pattern at another positional spot. Pointing it back at
+  the pattern it ran before lets it start again.
 
 ### Transaction provenance
 

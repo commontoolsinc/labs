@@ -440,9 +440,11 @@ flags it adopts from the deployment it runs against.
   run the derive-and-commit model (which is why the flip does not reach
   the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
   the lane-posture item the topics measurement report recorded for the
-  flip decision). A test that runs ON in one process needs a serving loop
-  beside its memory server, or the events its clients append are admitted
-  and never delivered;
+  flip decision). `cf test` also refuses an explicit
+  `EXPERIMENTAL_SERVER_EXECUTION=true`, since it hosts no serving loop and
+  its clients' events would go unserved. A test that runs ON in one process
+  needs a serving loop beside its memory server, or the events its clients
+  append are admitted and never delivered;
   `@commonfabric/runner/executor/serving-memory-server.deno` supplies one,
   in-process (`startServingMemoryServer`) or on a localhost websocket for
   `remoteClient` runtimes (`listenServingMemoryServer`), with its serving
@@ -1480,7 +1482,17 @@ the per-epic implementation notes).
 >   runner's storage manager retries that space on being told. Either peer
 >   omitting it, which parses as `false`, leaves the connection without the
 >   notice, and a refused client then learns of a grant only by asking again.
->   It is permanent.
+> - **`elidedVerdicts`** is a build-inherent capability, hardwired to `true`
+>   on both peers. It advertises that the runner's replica promotes a pending
+>   layer whose accept the verdict reports as elided to the document its
+>   transaction computed rather than folding its operations over the
+>   confirmed base, which lets the memory server accept a stale positional
+>   write as an identity for that session (the memory commit model chapter's
+>   section 3.6.1). The waiver needs both peers: an older client omitting
+>   it, which parses as `false`, is held to both conditions of the identity
+>   proof, since its replica would fold such a write a second time, and an
+>   older server, which advertises nothing, holds every session to both
+>   conditions whatever the client advertises. It is permanent.
 > - **`spaceKind`** is a build-inherent capability, hardwired to `true`. It
 >   advertises that the server seals the kind a space's genesis commit
 >   declares, and reports it in every `session.open` result
@@ -1848,7 +1860,8 @@ supplies their overrides, not their starting point. Their wiring is
 server](#clients-that-are-not-built-alongside-their-server). The CLI's
 LOCAL modes (`cf test`, `cf check`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
-mapping.
+mapping. `cf test` refuses an environment that turns `serverExecution` on,
+because nothing in it serves the events its clients commit.
 
 ### Browser-side (build-time defines)
 

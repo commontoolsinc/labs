@@ -11,12 +11,17 @@
  * on the room's page; the second's manager then lists the room too. Last, the
  * first opens their manager again, creates a group from the group controls of
  * that new page, and starts another chat, whose row's link opens the new room.
+ * Then someone who shares a group with another person adds them to a second
+ * group from its page, by address alone; their manager offers it to the
+ * person through the profile it lists for them, the room's page shows it was
+ * offered, and the person's own manager lists it once they open it.
  */
 
 import type { DID } from "@commonfabric/identity";
 import { Identity } from "@commonfabric/identity";
 import { env, type Page, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { expect } from "@std/expect";
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import {
@@ -36,13 +41,20 @@ import { clickCellLink } from "./topics-navigation-helpers.ts";
 const { API_URL, FRONTEND_URL } = env;
 
 // Trusted action names: the runtime's profile create form, and FabriChat's
-// chat start and message write (`fabrichat/schemas.tsx`).
+// chat start, message write and member add (`fabrichat/schemas.tsx`).
 const PROFILE_CREATE_ACTION = "CreateProfile";
 const START_ACTION = "ChatStart";
 const SEND_ACTION = "ChatSend";
+const ADD_MEMBER_ACTION = "ChatAddMember";
 
 // What a direct room calls itself, which is also what a link to it shows.
 const DIRECT_ROOM_NAME = "Direct chat";
+
+// Whether this run's servers serve handlers from a serving loop.
+const SERVER_EXECUTION = (() => {
+  const raw = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION");
+  return raw === undefined ? SERVER_EXECUTION_DEFAULT_ENABLED : raw === "true";
+})();
 
 // What a room with no messages shows in place of them.
 const EMPTY_ROOM_TEXT = "No messages yet";
@@ -64,12 +76,18 @@ describe("fabrichat-join", () => {
   let groupOwnerIdentity: Identity;
   let groupMemberIdentity: Identity;
 
+  // Two people who share a group room, one of whom adds the other to a second.
+  let adderIdentity: Identity;
+  let addedIdentity: Identity;
+
   beforeAll(async () => {
     firstIdentity = await Identity.generate({ implementation: "noble" });
     secondIdentity = await Identity.generate({ implementation: "noble" });
     thirdIdentity = await Identity.generate({ implementation: "noble" });
     groupOwnerIdentity = await Identity.generate({ implementation: "noble" });
     groupMemberIdentity = await Identity.generate({ implementation: "noble" });
+    adderIdentity = await Identity.generate({ implementation: "noble" });
+    addedIdentity = await Identity.generate({ implementation: "noble" });
   });
 
   it("lets two people start a direct chat from home, join it from its link, and exchange a message", async () => {
@@ -209,7 +227,111 @@ describe("fabrichat-join", () => {
       `With ${groupOwnerIdentity.did()}`,
     );
   });
+
+  it("offers a group to someone its owner adds from the room, through the owner's manager", async () => {
+    const adder = firstShell.page();
+    const added = secondShell.page();
+
+    await gotoHome(secondShell, addedIdentity);
+    await createProfileAtHome(added, "Grace Hopper");
+    await openChatManager(secondShell, addedIdentity);
+    const addedAddress = await readChatAddress(added);
+
+    // The adder creates a group with the person they will add, who adds it to
+    // their chats, which puts them on its roster, and so among the adder's
+    // people.
+    const firstTitle = "Met team";
+    await gotoHome(firstShell, adderIdentity);
+    await createProfileAtHome(adder, "Ada Lovelace");
+    await openChatManager(firstShell, adderIdentity);
+    await fillCfInput(adder, "#fabrichat-group-title", firstTitle);
+    await fillCfTextarea(adder, "cf-textarea", addedAddress);
+    await clickButtonWithExactText(adder, "Create group");
+    await waitForSettledText(adder, "#fabrichat-rooms", firstTitle);
+    const firstRoomId = await clickCellLink(adder, firstTitle);
+    const firstRoomView = await waitForPieceSelected(adder, firstRoomId);
+    await secondShell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: firstRoomView,
+      identity: addedIdentity,
+    });
+    await waitForSettledText(added, "#fabrichat-messages", EMPTY_ROOM_TEXT);
+    await clickButtonWithExactText(added, "Add to my chats");
+    await waitForUnrendered(added, "#fabrichat-add-to-chats");
+
+    // The adder creates a second group, of their own alone, and opens it. Its
+    // add control offers the person from their chats.
+    const secondTitle = "Added team";
+    await openChatManager(firstShell, adderIdentity);
+    await fillCfInput(adder, "#fabrichat-group-title", secondTitle);
+    await clickButtonWithExactText(adder, "Create group");
+    await waitForSettledText(adder, "#fabrichat-rooms", secondTitle);
+    const secondRoomId = await clickCellLink(adder, secondTitle);
+    const secondRoomView = await waitForPieceSelected(adder, secondRoomId);
+    await waitForSettledText(
+      adder,
+      "#fabrichat-add-member-people",
+      "Grace Hopper",
+    );
+
+    // Added by their address alone, the person is offered the room through
+    // the profile the adder's manager lists for them, which points at their
+    // Home's private inbox, and the room's page, reading the manager's verdict
+    // from the adder's home, says so. A served handler can't read the
+    // manager's per-session `people`, so under server execution it finds no
+    // profile for them, and queues a notice instead.
+    // TODO(danfuzz): Expect `offered` under server execution too, and the
+    // room in the person's chats below, once a served handler can read a
+    // per-session instance of its user's.
+    await fillCfInput(adder, "#fabrichat-add-member-address", addedAddress);
+    await clickTrustedAction(adder, ADD_MEMBER_ACTION);
+    await waitForSettledText(
+      adder,
+      "#fabrichat-add-member-outcome",
+      SERVER_EXECUTION
+        ? `Added ${addedAddress}. Your chats remind you to send them this chat's link.`
+        : `Added ${addedAddress}, and offered them this chat.`,
+    );
+
+    // The adds the room records are the adder's own: the adder reads theirs
+    // through the room, and the person added, a member of the room now, reads
+    // none of them.
+    expect(
+      Object.values(
+        await addRequestsAs(adderIdentity, secondRoomView),
+      ).map((outcome) => (outcome as { delivery?: string }).delivery),
+    ).toEqual([SERVER_EXECUTION ? "noticed" : "offered"]);
+    expect(await addRequestsAs(addedIdentity, secondRoomView)).toEqual({});
+
+    // The person opens their manager in a page that never asks for their
+    // Home's root, and finds the room offered to them in their chats: the
+    // shell brings their Home up there once the page has settled, which starts
+    // the share intake that registers the offer for their manager to accept.
+    // A room that is only noticed has nothing to register.
+    if (!SERVER_EXECUTION) {
+      await openChatManager(secondShell, addedIdentity);
+      await waitForSettledText(added, "#fabrichat-rooms", secondTitle);
+    }
+  });
 });
+
+/** The room's `addRequests`, as `identity` reads it through the room. */
+async function addRequestsAs(
+  identity: Identity,
+  roomView: { spaceDid: DID; pieceId: string },
+): Promise<Record<string, unknown>> {
+  const controller = await initializePiecesController({
+    space: roomView.spaceDid,
+    apiUrl: new URL(API_URL),
+    identity,
+  });
+  try {
+    const room = await controller.get(roomView.pieceId, true);
+    return (await room.result.get(["addRequests"])) as Record<string, unknown>;
+  } finally {
+    await controller.dispose();
+  }
+}
 
 /** Opens `identity`'s home on `shell`. */
 async function gotoHome(

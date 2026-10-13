@@ -445,6 +445,59 @@ describe("share-intake", () => {
     });
   });
 
+  describe("isIdle()", () => {
+    it("returns `false` while the intake takes up the offers it started with, and `true` once `idle()` has resolved", async () => {
+      // The intake's first subscription publishes as it is made, so the scan
+      // of the inbox, and the registration it sends, are under way by the time
+      // the constructor returns.
+
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      await deliver([offerOf(space, "waiting")]);
+      const started = start();
+      expect(started.isIdle()).toBe(false);
+
+      await started.idle();
+      expect(started.isIdle()).toBe(true);
+      expect(registeredIds(await registeredNow())).toEqual(["waiting"]);
+    });
+
+    it("returns `false` while a registration it sent awaits Home's receipt, once the scan that sent it has ended", async () => {
+      // The runtime, but for a read by link of anything in Home's space, which
+      // is where Home's handler writes the receipt of each handling. That read
+      // is held until `receipt` resolves. It comes after Home's handler has
+      // committed, which is after the scan that sent the registration ended.
+
+      const space = await offeredSpace({ [sender]: "WRITE" });
+      const asked = Promise.withResolvers<void>();
+      const receipt = Promise.withResolvers<unknown>();
+      const held = new Proxy(runtime, {
+        get(target, name) {
+          if (name === "getCellFromLink") {
+            return (link: { space?: string }, ...rest: never[]) => {
+              if (link.space !== home.space) {
+                return target.getCellFromLink(link as never, ...rest);
+              }
+              asked.resolve();
+              return { pull: () => receipt.promise };
+            };
+          }
+          const value = Reflect.get(target, name, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const intake = startShareIntakeOf(held as never, home, identity.did());
+      if (intake === undefined) throw new Error("Home has no stream");
+      after = () => intake.stop();
+      await deliver([offerOf(space, "held")]);
+      await asked.promise;
+      expect(intake.isIdle()).toBe(false);
+
+      receipt.resolve(undefined);
+      await intake.idle();
+      expect(intake.isIdle()).toBe(true);
+    });
+  });
+
   describe("an offer that passes vetting", () => {
     it("is registered with its sender, `id`, `kind`, `host` and `title`", async () => {
       const space = await offeredSpace({ [sender]: "WRITE" });
