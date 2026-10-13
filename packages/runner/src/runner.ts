@@ -12,6 +12,7 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -135,6 +136,7 @@ import {
   type RawBuiltinReturnType,
   type RawNodeCause,
 } from "./module.ts";
+import { NodeBindingMemo } from "./node-binding-memo.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
@@ -183,6 +185,7 @@ import {
   InSpaceTargetUnresolved,
   RetryImmediately,
 } from "./scheduler/retry-immediately.ts";
+import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isSchemaMismatchError } from "./schema-view.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { combineOptionalSchema } from "./traverse.ts";
@@ -301,6 +304,35 @@ const triggerFlowLogger = getLogger("runner.trigger-flow", {
  * reached only by a pattern churning through results it will not revisit.
  */
 const RESULT_SHORTCUT_LIMIT = 4096;
+
+/**
+ * How many node bindings of each kind one runner holds for instantiation.
+ * A resume pre-sync plans every node of a piece's tree before any of them
+ * is instantiated, and its bindings are held until each node's
+ * instantiation takes its own; the bound is sized for a tree of several
+ * hundred nested instances. Past it the least recently used binding is
+ * dropped, and computed again by whichever plan asks for it next.
+ */
+const NODE_BINDING_LIMIT = 65_536;
+
+/**
+ * The most weight the held node bindings of one kind have between them, in
+ * characters: those of each binding's key, and of its inputs document or,
+ * for a pattern node, {@link BOUND_CHILD_NODE_WEIGHT} for each node of its
+ * bound child. An inputs document carries a schema inline for every link it
+ * holds, and runs to tens of thousands of characters, so this bound is the
+ * one a large tree reaches first.
+ */
+const NODE_BINDING_WEIGHT_LIMIT = 256 * 1024 * 1024;
+
+/**
+ * What one node of a pattern node's bound child counts toward
+ * {@link NODE_BINDING_WEIGHT_LIMIT}. Binding a child copies each of its
+ * nodes along the paths that hold an alias and shares the rest, schemas
+ * among it, with the pattern it was bound from, so the copy is not measured
+ * but taken to be a few thousand characters a node.
+ */
+const BOUND_CHILD_NODE_WEIGHT = 4096;
 
 /**
  * Presence probes `Runner.#patternToNameBeforeRun` may spend before it stops
@@ -825,6 +857,30 @@ const recordRawBuiltinResultSchemaPolicyInput = (
     "output",
   );
 };
+
+/**
+ * Whether `argumentLink` names a stand-in: the `data:` document a pre-sync
+ * builds from the inputs of an instance that has no stored argument.
+ */
+function isStandInArgument(
+  argumentLink: NormalizedFullLink | undefined,
+): boolean {
+  return argumentLink !== undefined && hasDataUriScheme(argumentLink.id);
+}
+
+/**
+ * What decides a node's binding beside the node, its pattern and the two
+ * links: the type of module the node resolved to, the registry name it
+ * resolved from, and whether a bound link carries its schema as a reference.
+ */
+function bindingVariant(
+  moduleType: Module["type"],
+  moduleRefName: string | undefined,
+): string {
+  return `${moduleType}:${moduleRefName ?? ""}:${
+    getContentAddressedSchemasConfig() ? "reference" : "inline"
+  }`;
+}
 
 /**
  * The kind-free ids of a pattern's derived internal cells on `resultCell` — the
@@ -1748,6 +1804,44 @@ type BoundNodeIO = {
 };
 
 /**
+ * What binding a javascript, passthrough or raw node produces before
+ * anything is read through a transaction. `Runner.#nodeIOBindings` holds the
+ * one a pre-sync computes for a node, result cell and argument link until
+ * the node's instantiation takes it, and every plan made meanwhile takes its
+ * members from that one, so no holder changes them.
+ */
+type NodeIOBinding = {
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
+
+  /** The bound inputs as an immutable document, bound to no transaction. */
+  inputsCell: Cell<any>;
+};
+
+/**
+ * What binding a pattern node produces before anything is read through a
+ * transaction, held by `Runner.#patternNodeBindings` the way a
+ * {@link NodeIOBinding} is held.
+ */
+type PatternNodeBindingCore = {
+  child: Pattern;
+  inputs: FabricExecValue;
+  outputs: FabricExecValue;
+
+  /**
+   * The outputs bound without the pattern's manifest. Their first write
+   * redirect names the spot the child's identity derives from.
+   */
+  identityOutputs: FabricExecValue;
+
+  /** The ids among `identityOutputs` that name a cause and hold no data. */
+  causeOnlyIds: ReadonlySet<string> | undefined;
+
+  /** The instance name of a named instance, which no other node shares. */
+  instanceName: string | undefined;
+};
+
+/**
  * A raw node's bound inputs and outputs as `#instantiateRawNode()` hands
  * them to the builtin.
  */
@@ -2491,6 +2585,36 @@ export class Runner {
     | undefined;
 
   /**
+   * The bindings of the javascript, passthrough and raw nodes a resume
+   * pre-sync of this runner has planned and no instantiation has taken yet,
+   * weighed by their inputs documents.
+   */
+  readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
+    capacity: NODE_BINDING_LIMIT,
+    maxWeight: NODE_BINDING_WEIGHT_LIMIT,
+    weigh: (binding) => binding.inputsCell.getAsNormalizedFullLink().id.length,
+  });
+
+  /**
+   * The bindings of the pattern nodes a resume pre-sync of this runner has
+   * planned and no instantiation has taken yet, weighed by the node count of
+   * their bound children.
+   */
+  readonly #patternNodeBindings = new NodeBindingMemo<PatternNodeBindingCore>({
+    capacity: NODE_BINDING_LIMIT,
+    maxWeight: NODE_BINDING_WEIGHT_LIMIT,
+    weigh: (binding) => binding.child.nodes.length * BOUND_CHILD_NODE_WEIGHT,
+  });
+
+  /**
+   * Observer of every node binding this runner computes, by the piece bound
+   * and the node, for a test counting bindings against the tree's
+   * `(instance, node)` pairs. A binding the runner already holds is not
+   * computed, and so not reported. Unset outside tests.
+   */
+  #nodeBindingRecorder: ((piece: string, node: Node) => void) | undefined;
+
+  /**
    * Observer of every child document the displaced-child guard reads, by
    * document id, for a test of which children a setup reads. Unset outside
    * tests.
@@ -2595,8 +2719,9 @@ export class Runner {
    * syncer and deferred-start committer a test may supply, the setup,
    * storage-subscription, commit-gated run, ownership, key, sync, walk, and
    * retry steps, the implementation invoker, the node planner, which a
-   * test drives directly, the wave kick, and the pre-sync plan recorder and
-   * resume yield a test installs.
+   * test drives directly, the wave kick, the count of node bindings held
+   * and the step that drops them, and the pre-sync plan recorder, node
+   * binding recorder and resume yield a test installs.
    */
   get accessForTestingOnly(): {
     scopedProgramCounts(): Array<{ piece: string; variants: number }>;
@@ -2673,6 +2798,9 @@ export class Runner {
     presyncPlanRecorder:
       | ((piece: string, node: Node, site: "node" | "owned") => void)
       | undefined;
+    nodeBindingRecorder: ((piece: string, node: Node) => void) | undefined;
+    forgetNodeBindings(): void;
+    readonly heldNodeBindings: number;
     displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
@@ -2788,6 +2916,20 @@ export class Runner {
       },
       set presyncPlanRecorder(value) {
         outerThis.#presyncPlanRecorder = value;
+      },
+      get nodeBindingRecorder() {
+        return outerThis.#nodeBindingRecorder;
+      },
+      set nodeBindingRecorder(value) {
+        outerThis.#nodeBindingRecorder = value;
+      },
+      forgetNodeBindings: () => {
+        this.#nodeIOBindings.clear();
+        this.#patternNodeBindings.clear();
+      },
+      get heldNodeBindings() {
+        return outerThis.#nodeIOBindings.size +
+          outerThis.#patternNodeBindings.size;
       },
       get displacedChildReadRecorder() {
         return outerThis.#displacedChildReadRecorder;
@@ -6172,7 +6314,7 @@ export class Runner {
         try {
           this.#instantiateNode(
             tx,
-            { ...node, module },
+            node,
             resultCell.withTx(tx),
             addAttemptCancel,
             pattern,
@@ -9298,14 +9440,7 @@ export class Runner {
     for (const node of pattern.nodes) {
       let plan: NodePlan | undefined;
       try {
-        plan = this.#nodePlan(
-          tx,
-          node,
-          resultCell,
-          pattern,
-          undefined,
-          argumentLink,
-        );
+        plan = this.#nodePlan(tx, node, resultCell, pattern, argumentLink);
       } catch (error) {
         logger.warn("resume-pre-sync", () => [
           "skipping a node whose bindings did not unwrap",
@@ -9729,8 +9864,7 @@ export class Runner {
               const { inputsCell } = this.#buildRawNodeInputs(
                 planTx,
                 resolved,
-                node.inputs,
-                node.outputs,
+                node,
                 resultCell,
                 pattern,
                 op,
@@ -9881,8 +10015,7 @@ export class Runner {
               const { inputsCell, outputBinding } = this.#buildRawNodeInputs(
                 planTx,
                 resolved,
-                node.inputs,
-                node.outputs,
+                node,
                 resultCell,
                 pattern,
                 op,
@@ -10041,14 +10174,7 @@ export class Runner {
       // setup mints rather than the unresolved head.
       let plan: NodePlan | undefined;
       try {
-        plan = this.#nodePlan(
-          tx,
-          node,
-          resultCell,
-          pattern,
-          undefined,
-          argumentLink,
-        );
+        plan = this.#nodePlan(tx, node, resultCell, pattern, argumentLink);
       } catch (error) {
         // A node whose outputs cannot be bound (e.g. they alias the argument
         // doc while the argument link is unavailable) or resolved contributes
@@ -10322,8 +10448,9 @@ export class Runner {
    * follow failed, which is logged and leaves the piece on the pattern it was
    * running. Resolves at once when nothing is in flight, as for a piece that
    * is not running, and resolves when the piece is stopped with a follow in
-   * flight, whose remaining work has no effect. A subpath cell stands for its
-   * root document.
+   * flight, whose remaining work has no effect. A piece started again by then
+   * has a watcher of its own, whose follows this goes on to wait for. A
+   * subpath cell stands for its root document.
    *
    * The watcher observes a move in a scheduler pass, so a caller that has
    * just committed one awaits `Runtime.idle()` before calling this. Following
@@ -10346,14 +10473,18 @@ export class Runner {
     const key = this.#getDocKey(rootCell);
     // A settled follow's continuation can start another, so the entry is read
     // again after each wait. A cancelled registration's follows run on to no
-    // effect, so the wait ends with the cancellation.
+    // effect, so the wait ends with the cancellation, unless the piece has
+    // been started again and its new registration has a follow in flight,
+    // which the entry then names.
     let follows: WatcherFollows | undefined;
     while ((follows = this.#watcherFollowsByPiece.get(key)) !== undefined) {
       const cancelled = await Promise.race([
         Promise.allSettled([...follows.pending]).then(() => false),
         follows.cancelled.then(() => true),
       ]);
-      if (cancelled) return;
+      if (cancelled && this.#watcherFollowsByPiece.get(key) === follows) {
+        return;
+      }
     }
   }
 
@@ -10435,6 +10566,8 @@ export class Runner {
     // Clear the result pattern cache as well, since the actions have been
     // canceled
     this.#resultPatternCache.clear();
+    this.#nodeIOBindings.clear();
+    this.#patternNodeBindings.clear();
     this.#locallyPreparedResults.clear();
     this.#presyncNamedInstances.clear();
     this.#locallyStoppedResults.clear();
@@ -10456,7 +10589,7 @@ export class Runner {
     pattern: Pattern,
     schedulerRehydration: SchedulerRehydrationSubscriptionOptions,
   ) {
-    const plan = this.#nodePlan(tx, node, resultCell, pattern);
+    const plan = this.#nodePlan(tx, node, resultCell, pattern, undefined, true);
     if (plan === undefined) return;
     switch (plan.kind) {
       case "javascript":
@@ -10515,136 +10648,209 @@ export class Runner {
    * containers' child paths, and those reads must not consume `*`-path
    * membership templates (machineryRead; template-population §6, the SC-8
    * machinery-read boundary).
+   *
+   * A plan has two parts. The bindings read nothing through a transaction,
+   * and the runner holds the ones a pre-sync computes until the node's
+   * instantiation plans it: a plan made with `forInstantiation` takes the
+   * bindings held and leaves none behind, since the node it starts keeps
+   * its own (`#nodeIOBinding()`, `#bindPatternNode()`). What the bound
+   * outputs redirect to is read through `tx` on every call, so each
+   * caller's transaction records the reads its plan rests on, and a plan
+   * follows a redirect written since the last one.
    */
   #nodePlan(
     tx: IExtendedStorageTransaction,
     node: Node,
     resultCell: Cell<any>,
     pattern: Pattern,
-    moduleRefName?: string,
     argumentLink?: NormalizedFullLink,
+    forInstantiation = false,
   ): NodePlan | undefined {
-    const module = node.module;
-    if (isModule(module)) {
-      switch (module.type) {
-        case "ref": {
-          const refName = module.implementation as string;
-          // `.asScope(scope)` records its scope on the *ref* module (the node's
-          // module), but resolving the ref swaps in the registry's module — so
-          // hand the declared default scope to the registry, or it is silently
-          // dropped and the node falls back to "space". The registry owns
-          // applying it, because the copy it takes to do so must also carry
-          // the module's `debugName` (its policy identity) across.
-          const resolved = this.#runtime.moduleRegistry.getModule(
-            refName,
-            module.defaultScope,
-          );
-          return this.#nodePlan(
-            tx,
-            { ...node, module: resolved },
+    const nodeModule = node.module;
+    if (!isModule(nodeModule)) {
+      if (isWriteRedirectLink(nodeModule) || isAliasBinding(nodeModule)) {
+        // TODO(seefeld): Implement, a dynamic node
+        return undefined;
+      }
+      throw new Error(debugStr`Unknown module: $quote${nodeModule}`);
+    }
+    // `.asScope(scope)` records its scope on the *ref* module (the node's
+    // module), but resolving the ref swaps in the registry's module — so
+    // hand the declared default scope to the registry, or it is silently
+    // dropped and the node falls back to "space". The registry owns
+    // applying it, because the copy it takes to do so must also carry
+    // the module's `debugName` (its policy identity) across.
+    let module = nodeModule;
+    let moduleRefName: string | undefined;
+    while (module.type === "ref") {
+      moduleRefName = module.implementation as string;
+      module = this.#runtime.moduleRegistry.getModule(
+        moduleRefName,
+        module.defaultScope,
+      );
+    }
+    const resolved = module;
+    switch (resolved.type) {
+      case "javascript":
+      case "passthrough":
+        return tx.runWithAmbientReadMeta(machineryRead, () => {
+          const binding = this.#nodeIOBinding(
+            node,
             resultCell,
             pattern,
-            refName,
-            argumentLink,
-          );
-        }
-        case "javascript":
-        case "passthrough":
-          return tx.runWithAmbientReadMeta(machineryRead, () => ({
-            kind: module.type as "javascript" | "passthrough",
-            module,
-            ...this.#bindNodeIO(
-              tx,
-              node.inputs,
-              node.outputs,
-              resultCell,
-              pattern,
-              argumentLink,
-            ),
-          }));
-        case "raw":
-          return tx.runWithAmbientReadMeta(machineryRead, () => ({
-            kind: "raw",
-            module,
+            resolved.type,
             moduleRefName,
-            ...this.#buildRawNodeInputs(
-              tx,
-              module,
-              node.inputs,
-              node.outputs,
-              resultCell,
-              pattern,
-              moduleRefName,
-              argumentLink,
-            ),
-          }));
-        case "pattern":
-          return tx.runWithAmbientReadMeta(machineryRead, () => ({
-            kind: "pattern",
-            module,
-            ...this.#bindPatternNode(
-              tx,
-              module,
-              node.inputs,
-              node.outputs,
-              resultCell,
-              pattern,
-              argumentLink,
-            ),
-          }));
-        default:
-          throw new Error(`Unknown module type: ${module.type}`);
-      }
-    } else if (isWriteRedirectLink(module) || isAliasBinding(module)) {
-      // TODO(seefeld): Implement, a dynamic node
-      return undefined;
-    } else {
-      throw new Error(debugStr`Unknown module: $quote${module}`);
+            argumentLink ?? getMetaLink(resultCell, "argument")!,
+            forInstantiation,
+          );
+          return {
+            kind: resolved.type as "javascript" | "passthrough",
+            module: resolved,
+            inputs: binding.inputs,
+            outputs: binding.outputs,
+            writes: findAllWriteRedirectCells(binding.outputs, resultCell, {
+              followRedirectChains: !usesLocalReads(cellTx(resultCell)),
+            }),
+            inputsCell: binding.inputsCell.withTx(tx),
+          };
+        });
+      case "raw":
+        return tx.runWithAmbientReadMeta(machineryRead, () => ({
+          kind: "raw",
+          module: resolved,
+          moduleRefName,
+          ...this.#buildRawNodeInputs(
+            tx,
+            resolved,
+            node,
+            resultCell,
+            pattern,
+            moduleRefName,
+            argumentLink,
+            forInstantiation,
+          ),
+        }));
+      case "pattern":
+        return tx.runWithAmbientReadMeta(machineryRead, () => ({
+          kind: "pattern",
+          module: resolved,
+          ...this.#bindPatternNode(
+            tx,
+            resolved,
+            node,
+            resultCell,
+            pattern,
+            argumentLink,
+            forInstantiation,
+          ),
+        }));
+      default:
+        throw new Error(`Unknown module type: ${resolved.type}`);
     }
   }
 
-  #bindNodeIO(
-    tx: IExtendedStorageTransaction,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+  /**
+   * Binds the inputs and outputs of `node`, a javascript, passthrough or
+   * raw node of `pattern`, on `resultCell` against `argumentCellLink`, or
+   * returns the binding held for them. `moduleType` is the type of the
+   * module the node resolved to and `moduleRefName` the registry name it
+   * resolved from, when it resolved from one. With `take`, a binding held
+   * is given up to the caller and a binding computed is not held.
+   *
+   * The binding reads nothing through a transaction: it is a function of
+   * the node, the pattern's manifest and argument schema, and the two
+   * links. What a plan reads through its transaction, the redirect chains
+   * its outputs write through, is resolved by each plan in its own.
+   *
+   * A binding against a stand-in argument, a `data:` document a pre-sync
+   * builds for an instance with no stored argument, is never held: the
+   * instance's instantiation binds against the argument document its setup
+   * writes, so no later plan has that argument link.
+   */
+  #nodeIOBinding(
+    node: Node,
     resultCell: Cell<any>,
     pattern: Pattern,
-    argumentCellLink: NormalizedFullLink = getMetaLink(
-      resultCell,
-      "argument",
-    )!,
-  ): BoundNodeIO {
-    const inputs = unwrapOneLevelAndBindToDoc(
-      inputBindings,
-      argumentCellLink,
-      resultCell,
-      {
+    moduleType: Module["type"],
+    moduleRefName: string | undefined,
+    argumentCellLink: NormalizedFullLink | undefined,
+    take = false,
+  ): NodeIOBinding {
+    const bind = (): NodeIOBinding => {
+      this.#nodeBindingRecorder?.(
+        resultCell.getAsNormalizedFullLink().id,
+        node,
+      );
+      const options = {
         derivedInternalCells: pattern.derivedInternalCells,
         argumentCapSchema: pattern.argumentSchema,
-      },
-    );
-    const outputs = unwrapOneLevelAndBindToDoc(
-      outputBindings,
-      argumentCellLink,
-      resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: pattern.argumentSchema,
-      },
-    );
-    return {
-      inputs,
-      outputs,
-      writes: findAllWriteRedirectCells(outputs, resultCell, {
-        followRedirectChains: !usesLocalReads(cellTx(resultCell)),
-      }),
-      inputsCell: this.#runtime.getImmutableCell(
+      };
+      const inputs = unwrapOneLevelAndBindToDoc(
+        node.inputs,
+        argumentCellLink,
+        resultCell,
+        options,
+      );
+      const outputs = unwrapOneLevelAndBindToDoc(
+        node.outputs,
+        argumentCellLink,
+        resultCell,
+        options,
+      );
+
+      // For the list builtins, replace a pattern-valued input (the `op`) with
+      // a compact `{ $patternRef }` sentinel when its content-addressed entry
+      // ref is known. This is the post-eval moment where the in-memory op
+      // object (linked to its original via `noteDerivedCopy`, preserved
+      // through binding) carries its `{ identity, symbol }`; the sentinel
+      // then survives the immutable-cell JSON round-trip, so the builtin
+      // resolves the live canonical pattern by identity instead of
+      // deserializing the embedded graph. A KEYLESS op is never substituted
+      // (its session identity must not land durably); the returned mint is
+      // registered below, once the inputs doc's address is known, as this
+      // session's resolution hint for the builtin.
+      const keylessOpRef = moduleType === "raw"
+        ? this.#substituteOpPatternRefs(moduleRefName, inputs)
+        : undefined;
+
+      // The input bindings are about to cross into the data model, and a
+      // pattern author can bind a builder artifact (a handler, a pattern) as
+      // an ordinary input value at any depth. Each is replaced with its
+      // serialized form on the way, so what crosses is representable -- by
+      // the walk INSIDE `getImmutableCell`, not by a call here. That it
+      // happens there and not alongside the `op` substitution above is what
+      // keeps it clear of `findAllWriteRedirectCells`, which walks the same
+      // bindings for a different purpose and must see them as bound.
+      const inputsCell = this.#runtime.getImmutableCell(
         resultCell.space,
         inputs,
         undefined,
-        tx,
-      ),
+      );
+      if (keylessOpRef !== undefined) {
+        // The keyless op's in-session resolution hint (see
+        // `#substituteOpPatternRefs`): the builtin reads the embedded graph
+        // from this immutable doc and resolves the pristine minted artifact
+        // through this registration instead (the embedded round-trip's defer
+        // corruption never engages in-session, and nothing keyless is
+        // durable).
+        this.#runtime.patternManager.registerKeylessOpResolution(
+          opInputsDocKey(inputsCell),
+          keylessOpRef,
+        );
+      }
+      return { inputs, outputs, inputsCell };
     };
+    if (isStandInArgument(argumentCellLink)) return bind();
+    const subject = {
+      node,
+      pattern,
+      resultLink: resultCell.getAsNormalizedFullLink(),
+      argumentLink: argumentCellLink,
+      variant: bindingVariant(moduleType, moduleRefName),
+    };
+    return take
+      ? this.#nodeIOBindings.takeBindingFor(subject, bind)
+      : this.#nodeIOBindings.bindingFor(subject, bind);
   }
 
   #collectStaticRedirectWriteTargets(
@@ -12996,8 +13202,7 @@ export class Runner {
   #buildRawNodeInputs(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    node: Node,
     resultCell: Cell<any>,
     pattern: Pattern,
     moduleRefName: string | undefined,
@@ -13005,40 +13210,20 @@ export class Runner {
       resultCell,
       "argument",
     )!,
+    take = false,
   ): RawNodeInputs {
-    const mappedInputBindings = unwrapOneLevelAndBindToDoc(
-      inputBindings,
-      argumentCellLink,
+    const {
+      inputs: mappedInputBindings,
+      outputs: mappedOutputBindings,
+      inputsCell,
+    } = this.#nodeIOBinding(
+      node,
       resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: pattern.argumentSchema,
-      },
-    );
-    const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-      outputBindings,
-      argumentCellLink,
-      resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: pattern.argumentSchema,
-      },
-    );
-
-    // For the list builtins, replace a pattern-valued input (the `op`) with a
-    // compact `{ $patternRef }` sentinel when its content-addressed entry ref
-    // is known. This is the post-eval moment where the in-memory op object
-    // (linked to its original via `noteDerivedCopy`, preserved through binding)
-    // carries its `{ identity, symbol }`; the sentinel then survives the
-    // immutable-cell JSON round-trip, so the builtin resolves the live
-    // canonical pattern by identity instead of deserializing the embedded
-    // graph. A KEYLESS op is never substituted (its session identity must not
-    // land durably); the returned mint is registered below, once the inputs
-    // doc's address is known, as this session's resolution hint for the
-    // builtin.
-    const keylessOpRef = this.#substituteOpPatternRefs(
+      pattern,
+      "raw",
       moduleRefName,
-      mappedInputBindings,
+      argumentCellLink,
+      take,
     );
 
     // outputCells tracks the static write surface for dependency ordering and
@@ -13047,32 +13232,6 @@ export class Runner {
       mappedOutputBindings,
       resultCell,
     );
-
-    // The input bindings are about to cross into the data model, and a
-    // pattern author can bind a builder artifact (a handler, a pattern) as an
-    // ordinary input value at any depth. Each is replaced with its serialized
-    // form on the way, so what crosses is representable -- by the walk INSIDE
-    // `getImmutableCell`, not by a call here. That it happens there and not
-    // alongside the `op` substitution above is what keeps it clear of
-    // `findAllWriteRedirectCells`, which walks the same bindings for a
-    // different purpose and must see them as bound.
-    const inputsCell = this.#runtime.getImmutableCell(
-      resultCell.space,
-      mappedInputBindings,
-      undefined,
-      tx,
-    );
-    if (keylessOpRef !== undefined) {
-      // The keyless op's in-session resolution hint (see
-      // `#substituteOpPatternRefs`): the builtin reads the embedded graph from
-      // this immutable doc and resolves the pristine minted artifact through
-      // this registration instead (the embedded round-trip's defer corruption
-      // never engages in-session, and nothing keyless is durable).
-      this.#runtime.patternManager.registerKeylessOpResolution(
-        opInputsDocKey(inputsCell),
-        keylessOpRef,
-      );
-    }
 
     // The output spot this node writes through is reserved for this node, so
     // its fully-resolved coordinates are a stable, position-derived,
@@ -13104,7 +13263,7 @@ export class Runner {
       outputs: mappedOutputBindings,
       writes: outputCells,
       argumentCellLink,
-      inputsCell,
+      inputsCell: inputsCell.withTx(tx),
       resolvedOutputSpot,
       outputBinding,
     };
@@ -13416,11 +13575,11 @@ export class Runner {
   #bindPatternNode(
     tx: IExtendedStorageTransaction,
     module: Module,
-    inputBindings: FabricExecValue,
-    outputBindings: FabricExecValue,
+    node: Node,
     resultCell: Cell<any>,
     pattern: Pattern,
     argumentLink?: NormalizedFullLink,
+    take = false,
   ): PatternNodeBinding {
     // May be undefined: the owned-cell walk plans before setup writes the
     // meta on a fresh first run, and a child result cell is not synced yet
@@ -13432,57 +13591,136 @@ export class Runner {
     // fresh run's pre-sync binds against.
     const argumentCellLink = argumentLink ??
       getMetaLink(resultCell, "argument");
-    if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    // The child's nodes are bound as the child's own start sees them: this
-    // bind crosses one `defer` boundary of every alias inside the
-    // implementation before the child instantiates it.
-    const child = unwrapOneLevelAndBindToDoc(
-      module.implementation,
-      argumentCellLink,
-      resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
-    );
-    // A node's inputs nearly always alias the argument document, so without
-    // the link they stay unbound: a walk that runs before setup writes the
-    // link wants the child's identity, which the outputs alone anchor, and
-    // instantiation never runs without it.
-    const inputs = argumentCellLink === undefined
-      ? inputBindings
-      : unwrapOneLevelAndBindToDoc(
-        inputBindings,
+    const implementation = module.implementation;
+    if (!isPattern(implementation)) throw new Error(`Invalid pattern`);
+    const bind = (): PatternNodeBindingCore => {
+      this.#nodeBindingRecorder?.(
+        resultCell.getAsNormalizedFullLink().id,
+        node,
+      );
+      // The child's nodes are bound as the child's own start sees them: this
+      // bind crosses one `defer` boundary of every alias inside the
+      // implementation before the child instantiates it.
+      const child = unwrapOneLevelAndBindToDoc(
+        implementation,
+        argumentCellLink,
+        resultCell,
+        { derivedInternalCells: pattern.derivedInternalCells },
+      );
+      // A node's inputs nearly always alias the argument document, so without
+      // the link they stay unbound: a walk that runs before setup writes the
+      // link wants the child's identity, which the outputs alone anchor, and
+      // instantiation never runs without it.
+      const inputs = argumentCellLink === undefined
+        ? node.inputs
+        : unwrapOneLevelAndBindToDoc(
+          node.inputs,
+          argumentCellLink,
+          resultCell,
+          {
+            targetSchema: child.argumentSchema,
+            derivedInternalCells: pattern.derivedInternalCells,
+            // The links serialized into the sub-piece's argument doc must
+            // keep the containing pattern's declared slot scopes; the
+            // authored schema is the only place those declarations still
+            // exist (the meta link carries a sanitized schema). See
+            // foldDeclaredScopeIntoLinkSchema.
+            sourceSchemas: { argument: pattern.argumentSchema },
+          },
+        );
+      // VALUE BIND (kind: the descriptor's). Binding WITH the manifest
+      // resolves a partialCause output to the descriptor's derived internal
+      // cell, so `getDerivedInternalCellLink` mints its id under the
+      // descriptor's kind: `computed:fid1:<hash>` for a descriptor classified
+      // `kind: "computed"`, and the same `of:fid1:<hash>` the identity bind
+      // below mints for a kindless one (the classifier declines the node, or
+      // `experimental.computedCellIds` is off). This is the binding the child
+      // link is SENT to (`sendValueToBinding` in `#instantiatePatternNode`),
+      // so this is where the child's value actually lives — at a DIFFERENT
+      // entity from the identity bind's only when the descriptor carries a
+      // kind. See the identity bind for the pairing.
+      const outputs = unwrapOneLevelAndBindToDoc(
+        node.outputs,
         argumentCellLink,
         resultCell,
         {
-          targetSchema: child.argumentSchema,
           derivedInternalCells: pattern.derivedInternalCells,
-          // The links serialized into the sub-piece's argument doc must keep
-          // the containing pattern's declared slot scopes; the authored
-          // schema is the only place those declarations still exist (the
-          // meta link carries a sanitized schema). See
-          // foldDeclaredScopeIntoLinkSchema.
-          sourceSchemas: { argument: pattern.argumentSchema },
+          argumentCapSchema: pattern.argumentSchema,
         },
       );
-    // VALUE BIND (kind: the descriptor's). Binding WITH the manifest resolves a
-    // partialCause output to the descriptor's derived internal cell, so
-    // `getDerivedInternalCellLink` mints its id under the descriptor's kind:
-    // `computed:fid1:<hash>` for a descriptor classified `kind: "computed"`,
-    // and the same `of:fid1:<hash>` the identity bind below mints for a kindless
-    // one (the classifier declines the node, or `experimental.computedCellIds`
-    // is off). This is the binding the child link is SENT to
-    // (`sendValueToBinding` in `#instantiatePatternNode`), so this is where
-    // the child's value actually lives — at a DIFFERENT entity from the
-    // identity bind's only when the descriptor carries a kind. See the
-    // identity bind for the pairing.
-    const outputs = unwrapOneLevelAndBindToDoc(
-      outputBindings,
-      argumentCellLink,
-      resultCell,
-      {
-        derivedInternalCells: pattern.derivedInternalCells,
-        argumentCapSchema: pattern.argumentSchema,
-      },
-    );
+      // Bind the output bindings first (as `#buildRawNodeInputs` does), so
+      // the `argument`/`internal`/`result` pseudo-cell aliases resolve to
+      // their DISTINCT concrete cells. Resolving the raw bindings would let
+      // pseudo cells at the same path (e.g. `internal.x` vs `result.x`)
+      // collapse onto the base result cell and collide on one shared child
+      // cell. `bindPatterns: false` — output bindings never carry
+      // sub-patterns to instantiate, so skip that work; we only need the
+      // pseudo-cell aliases resolved to their concrete links.
+      //
+      // IDENTITY BIND (kind: always `of:`). This omits
+      // `derivedInternalCells` where the value bind above passes it, and the
+      // manifest descriptor is what carries the entity kind. Same cause, same
+      // hash preimage — but no descriptor means no kind, so this mint always
+      // lands on the unkinded `of:fid1:<hash>`
+      // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
+      // URI scheme IS the kind). Whether that is a SECOND entity depends on
+      // the descriptor the value bind saw:
+      //   - descriptor with `kind: "computed"` — the value bind minted
+      //     `computed:fid1:<hash>`, so the two binds address two distinct
+      //     entities that differ only by scheme, and the child link lives on
+      //     the `computed:` one;
+      //   - kindless descriptor (the classifier declined the node, or
+      //     `experimental.computedCellIds` is off) — both binds land on this
+      //     same `of:` entity, and the child link is written here.
+      // The split is fine because both use the link purely as the
+      // `resultFor` CAUSE — a stable coordinate, never read for a value. But
+      // anything that wants to READ the child link must use the id the VALUE
+      // bind minted: where the descriptor was computed, reading the `of:` one
+      // returns undefined for a healthy piece.
+      const identityOutputs = unwrapOneLevelAndBindToDoc(
+        node.outputs,
+        argumentCellLink,
+        resultCell,
+      );
+      return {
+        child,
+        inputs,
+        outputs,
+        identityOutputs,
+        // The manifest-blind bind above renders a partialCause alias as its
+        // derived cell's kind-free id, which is cause-only — resolving it
+        // would read an entity the kinded data never lives at (and kick a
+        // doc pull nothing can satisfy), so the scan is told to take those
+        // coordinates as they stand.
+        causeOnlyIds: causeOnlySpotIds(
+          resultCell,
+          pattern.derivedInternalCells,
+        ),
+        instanceName: instanceNameOfNodeOutputs(node.outputs),
+      };
+    };
+    // The child bound here is the pattern object the child's own nodes are
+    // held under, so a plan that takes this binding hands its instantiation
+    // the child the pre-sync planned, and the child's nodes find theirs.
+    let binding: PatternNodeBindingCore;
+    if (isStandInArgument(argumentCellLink)) {
+      binding = bind();
+    } else {
+      const subject = {
+        node,
+        pattern,
+        // A node whose module is a registry reference keeps its identity
+        // when the registry puts another pattern under the name.
+        implementation,
+        resultLink: resultCell.getAsNormalizedFullLink(),
+        argumentLink: argumentCellLink,
+        variant: bindingVariant("pattern", undefined),
+      };
+      binding = take
+        ? this.#patternNodeBindings.takeBindingFor(subject, bind)
+        : this.#patternNodeBindings.bindingFor(subject, bind);
+    }
+    const { child, inputs, outputs, instanceName } = binding;
     const io = {
       child,
       inputs,
@@ -13511,57 +13749,16 @@ export class Runner {
     // we only borrow the resolved output link's coordinates as the cause. A
     // pattern node always writes through a write redirect, so the absence of
     // one leaves `childResultCell` undefined, which the instantiation refuses.
-    //
-    // Bind the output bindings first (as `#buildRawNodeInputs` does), so the
-    // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
-    // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
-    // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
-    // the base result cell and collide on one shared child cell.
-    // `bindPatterns: false` — output bindings never carry sub-patterns to
-    // instantiate, so skip that work; we only need the pseudo-cell aliases
-    // resolved to their concrete links.
-    //
-    // IDENTITY BIND (kind: always `of:`). This omits
-    // `derivedInternalCells` where the value bind above passes it, and the
-    // manifest descriptor is what carries the entity kind. Same cause, same
-    // hash preimage — but no descriptor means no kind, so this mint always
-    // lands on the unkinded `of:fid1:<hash>`
-    // (docs/specs/computed-cell-identity.md: the preimage is kind-free, the
-    // URI scheme IS the kind). Whether that is a SECOND entity depends on the
-    // descriptor the value bind saw:
-    //   - descriptor with `kind: "computed"` — the value bind minted
-    //     `computed:fid1:<hash>`, so the two binds address two distinct
-    //     entities that differ only by scheme, and the child link lives on
-    //     the `computed:` one;
-    //   - kindless descriptor (the classifier declined the node, or
-    //     `experimental.computedCellIds` is off) — both binds land on this
-    //     same `of:` entity, and the child link is written here.
-    // The split is fine because both use the link purely as the `resultFor`
-    // CAUSE — a stable coordinate, never read for a value. But anything that
-    // wants to READ the child link must use the id the VALUE bind minted:
-    // where the descriptor was computed, reading the `of:` one returns
-    // undefined for a healthy piece.
-    const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
-      outputBindings,
-      argumentCellLink,
-      resultCell,
-    );
-    // The manifest-blind bind above renders a partialCause alias as its
-    // derived cell's kind-free id, which is cause-only — resolving it
-    // would read an entity the kinded data never lives at (and kick a
-    // doc pull nothing can satisfy), so the scan is told to take those
-    // coordinates as they stand.
     const outputRedirect = firstResolvedOutputRedirect(
       this.#runtime,
       tx,
-      mappedOutputBindings,
+      binding.identityOutputs,
       resultCell,
-      causeOnlySpotIds(resultCell, pattern.derivedInternalCells),
+      binding.causeOnlyIds,
     );
     if (outputRedirect === undefined) {
       return { ...io, childResultCell: undefined, sendToBindings: true };
     }
-    const instanceName = instanceNameOfNodeOutputs(outputBindings);
     return {
       ...io,
       childResultCell: this.#mintChildResultCell(

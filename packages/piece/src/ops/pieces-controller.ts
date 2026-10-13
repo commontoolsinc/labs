@@ -968,6 +968,17 @@ export class PiecesController<T = unknown> {
    * Resolve a piece to its canonical result cell, optionally starting it.
    * In view-scoped mode, the narrow root watch demands server execution;
    * mounted renderers own local graph registration and deeper replication.
+   *
+   * An open that reconciles waits, as {@link openPiece} does, for a piece
+   * that is already running to be re-instantiated on the pattern its pointer
+   * moved to, whether or not the open also starts it. The wait covers the
+   * move this open's own reconcile made and any earlier move the piece's
+   * pattern watcher has observed. It does not cover a move committed
+   * elsewhere that the watcher has yet to observe, a re-instantiation that
+   * fails, or one that follows a serving wave's settlement, so in those cases
+   * this resolves with the outgoing pattern's graph still running. As after
+   * any start, the piece's computations run when something demands their
+   * results.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
@@ -1036,6 +1047,10 @@ export class PiecesController<T = unknown> {
         // just replaced — and reads through the returned cell describe it.
         piece = await piece.withTx().sync();
       }
+      await timePiecePhase(
+        "get.patternPointerFollowed",
+        () => this.#patternPointerFollowed(piece, outcome === "updated"),
+      );
     }
     if (start && !viewScoped) {
       // start() handles pattern loading and running. It's idempotent - no
@@ -1044,6 +1059,11 @@ export class PiecesController<T = unknown> {
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
+      // A start that was in flight before the pointer moved may have
+      // instantiated the outgoing pattern. Its watcher begins the follow as
+      // it is installed, which the wait ahead of the start came too early
+      // to observe.
+      if (reconcile) await this.#patternPointerFollowed(piece, false);
     }
 
     // If caller provided a schema, use it
@@ -1824,6 +1844,15 @@ export class PiecesController<T = unknown> {
    * moments ago from the source it was created with is started directly
    * through {@link startPiece} instead: following that origin again would only
    * fetch what it was just built from.
+   *
+   * A piece that is already running keeps its graph through a start, and the
+   * runner's pattern watcher re-instantiates it on the pattern its pointer
+   * moved to. This resolves once the watcher has, for the move this open's
+   * own reconcile made and for any earlier move the watcher has observed. A
+   * re-instantiation that fails is logged by the runner and leaves the piece
+   * on the pattern it was running. On a runtime that seals its writes into a
+   * serving wave, the re-instantiation follows the wave's settlement, and
+   * this resolves with the outgoing pattern's graph still running.
    */
   async openPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
     const piece = typeof pieceOrId === "string"
@@ -1841,9 +1870,51 @@ export class PiecesController<T = unknown> {
     // have handed us a cell bound to a read transaction older than it. Detach
     // and resync, or the start below loads the identity the origin just
     // replaced.
-    await this.startPiece(
-      outcome === "updated" ? await piece.withTx().sync() : piece,
+    const opened = outcome === "updated" ? await piece.withTx().sync() : piece;
+    await timePiecePhase(
+      "openPiece.patternPointerFollowed",
+      () => this.#patternPointerFollowed(opened, outcome === "updated"),
     );
+    await this.startPiece(opened);
+    // A start that was in flight before the pointer moved may have
+    // instantiated the outgoing pattern. Its watcher begins the follow as it
+    // is installed, which the wait ahead of the start came too early to
+    // observe.
+    await this.#patternPointerFollowed(opened, false);
+  }
+
+  /**
+   * Helper for the opens that reconcile a piece with its origin, which
+   * resolves once a piece that is already running runs the pattern its
+   * pointer names. A start leaves such a piece's graph as it is, and the
+   * runner's pattern watcher swaps in the incoming pattern after reading from
+   * storage, so until the swap a field the incoming pattern adds is unset and
+   * a stream it adds has no handler. Resolves at once for a piece that is not
+   * running: it has no watcher, and its start instantiates the pattern the
+   * pointer names.
+   *
+   * `movedHere` says this open's own reconcile moved the pointer. The watcher
+   * observes a move in a scheduler pass, so for that move this awaits
+   * `Runtime.idle()` first. An open that moved nothing does not, because
+   * `idle()` waits for the whole runtime, and so it waits only for a move
+   * the watcher has already observed. A move committed elsewhere that the
+   * watcher has yet to observe is not waited for.
+   *
+   * The wait is for this piece's watcher alone, and lasts as long as the
+   * watcher takes. Where another replica moved the pointer to a pattern this
+   * runtime has not compiled, the watcher loads that pattern, which a start
+   * of the same piece would wait for as well were it not running. A swap
+   * that fails is logged by the runner and leaves the piece on the pattern
+   * it was running.
+   */
+  async #patternPointerFollowed(
+    piece: Cell<unknown>,
+    movedHere: boolean,
+  ): Promise<void> {
+    const runner = this.runtime.runner;
+    if (!runner.isRunning(piece)) return;
+    if (movedHere) await this.runtime.idle();
+    await runner.patternPointerFollowed(piece);
   }
 
   /**

@@ -109,6 +109,7 @@ import {
 import { collectConsumedLabel, deriveFlowJoin } from "./cfc/prepare.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { memoryHostForForeignOrigin } from "./deployment-meta.ts";
+import { DerivedInternalCellIds } from "./derived-internal-cell-ids.ts";
 import {
   type DelegatedCarriage,
   waveRunActorOf,
@@ -1294,6 +1295,7 @@ export class Runtime {
   #tearingDownWrites = false;
   readonly #writeTeardown = new AbortController();
   readonly #transactions = new WeakSet<IExtendedStorageTransaction>();
+  readonly #derivedInternalCellIds = new DerivedInternalCellIds();
 
   readonly id: string;
   readonly scheduler: Scheduler;
@@ -1488,6 +1490,11 @@ export class Runtime {
    */
   get scopeKeyIdentity(): ScopeKeyIdentity {
     return this.storageManager.scopeKeyIdentity();
+  }
+
+  /** The ids of the derived internal cells this runtime's pieces own. */
+  get derivedInternalCellIds(): DerivedInternalCellIds {
+    return this.#derivedInternalCellIds;
   }
 
   /**

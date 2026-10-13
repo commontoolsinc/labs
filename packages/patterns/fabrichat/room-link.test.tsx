@@ -6,6 +6,7 @@ import {
   action,
   type AddIntegrity,
   assert,
+  type Cell,
   pattern,
   TESTS,
   Writable,
@@ -47,7 +48,7 @@ const sendGesture = {
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 /** What the room held in `held` says of its messages through the link. */
-const linkedMessages = (held: Writable<HeldLink>): string => {
+const linkedMessages = (held: Cell<HeldLink>): string => {
   const messages = held.key("room").get()?.get()?.messages;
   return `count:${messages?.count ?? "none"} ` +
     `newestAt:${messages?.newestAt === undefined ? "none" : "set"}`;
