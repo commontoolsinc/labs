@@ -37,6 +37,7 @@ import {
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
+  tellManagerJoined,
   type UsedTimesCell,
   viewKeyOf,
 } from "./room-records.tsx";
@@ -233,6 +234,7 @@ export const FabriChatMessageRow = pattern<
     joinRoom,
     self,
   } = input;
+  const joined = tellManagerJoined({ canJoin, joinRoom, self });
   const records = {
     kind,
     composer,
@@ -242,9 +244,7 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom,
-    self,
+    joined,
   };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
@@ -494,9 +494,7 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -525,9 +523,7 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -584,9 +580,7 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
-                    canJoin,
-                    joinRoom,
-                    self,
+                    joined,
                     message,
                     emoji,
                     pickerOpen,
