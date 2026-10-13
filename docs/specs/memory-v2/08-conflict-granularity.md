@@ -70,6 +70,13 @@ path captures only the touched index — so a recursive reader of a shifted sibl
 re-trigger via the (also leaf-only) reader-dirty index. That would be a silent
 stale read.
 
+A segment is an index because the container above it is an array, not because
+of how it is written. A plain object may be keyed by strings written as
+non-negative integers — ids, counters, timestamps — and an `add` or a `remove`
+at such a key shifts no sibling. Its leaf path is the whole of what it changed,
+and the parent injection of §2 reports the key-set change to a shape reader as
+it does for any other key, so leaf-only matching has no blind spot there.
+
 This is safe because **the runner never emits an indexed-array
 `add`/`remove`/`move`**. `buildArrayPatchCandidates`
 (runner `storage/v2-transaction.ts`) encodes every array change as one of three
@@ -86,13 +93,25 @@ reader-dirty index handle conservatively:
 engine as a `splice` or whole-array `replace` on the array path — never as an
 indexed structural op.
 
+The generator sends a write at or beneath an integer-like key of a plain object
+as an op at the written path where the key is past the range of array indices.
+Where the key is inside that range, or is `length`, and no array sits above it,
+the generator sends the record holding the key whole, as a `replace`, or as an
+`add` where the record is new. That is conservative for both matchers, and it
+costs that record the per-key granularity of §1: two writers of different keys
+of it conflict.
+
 Because the safety of leaf-only matching *depends* on this — and it is a
 whole-system property of the producer rather than something the engine enforces —
 it is guarded two ways:
 
 - a runtime assertion, `assertNoIndexedArrayStructuralOps`, runs at the sole
   patch-generator chokepoint (`buildPatchOperation`) and throws if a future
-  regression ever emits an indexed-array `add`/`remove`/`move`; and
+  regression ever emits an indexed-array `add`/`remove`/`move`. It reads the
+  container off the two documents the patch was diffed between: an op is
+  refused where its last segment is written as an index and the path above
+  that segment holds an array in either document, and an op at a key of a
+  plain object passes however the key is written; and
 - a generator test (`packages/runner/test/memory-v2-native-commit.test.ts`,
   "v2 patch generator never emits indexed-array add/remove/move") drives every
   array idiom through real cell writes and asserts the emitted ops.

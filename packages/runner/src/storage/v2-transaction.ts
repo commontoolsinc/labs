@@ -604,37 +604,57 @@ const buildArrayPatchCandidates = (
 // elements, so a leaf-only matcher handles it conservatively via the array path.
 const ARRAY_INDEX_SEGMENT = /^(0|[1-9]\d*)$/;
 
-const terminalSegmentIsArrayIndex = (pointer: string): boolean => {
+/**
+ * Indicates whether `pointer` names an array element by its index: its last
+ * segment is written as an index, and the path above that segment holds an
+ * array in `before` or in `after`. Beneath a plain object the same segment is
+ * a key of that object.
+ */
+const pointerNamesArrayElement = (
+  pointer: string,
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
+): boolean => {
   const segments = parsePointer(pointer);
   const last = segments[segments.length - 1];
-  return last !== undefined && ARRAY_INDEX_SEGMENT.test(last);
+  if (last === undefined || !ARRAY_INDEX_SEGMENT.test(last)) {
+    return false;
+  }
+  const parent = segments.slice(0, -1);
+  return Array.isArray(readValueAtPath(before, parent)) ||
+    Array.isArray(readValueAtPath(after, parent));
 };
 
-// Generator invariant guard (see docs/specs/memory-v2/08-conflict-granularity.md
-// §"Array writes and the leaf-only matcher"). The commit-conflict matcher and
-// the scheduler reader-dirty index are both LEAF-ONLY, which is sound only if
-// array element insert/remove/reorder reaches the engine as a `splice` on the
-// array path or a whole-array `replace` — never as a STRUCTURAL op (add / remove
-// / move, per the wire-op registry) at an array INDEX. Such an op SHIFTS sibling
-// elements, but its leaf path captures only the touched index, so a leaf-only
-// matcher would neither conflict (commit) nor re-trigger (reader-dirty) a reader
-// of a shifted sibling — a silent stale read. `buildArrayPatchCandidates` only
-// ever emits per-index `replace`, array-path `splice`, or whole-array `replace`,
-// so this assertion can never fire for real input; it converts a future
-// regression in the array diff path into a loud failure instead of silent data
-// loss. (A numeric *object* key is flagged too — the generator never emits a
-// structural op on one either.)
-//
-// The op set and pointer fields checked come from the registry
-// (`patchOpIsStructural` / `patchOpPointerFields`), so a new structural op is
-// covered here automatically rather than escaping a hardcoded list.
-//
-// Exported for direct unit testing: the throw and `move` paths are unreachable
-// through the generator (which is the invariant), so they can only be exercised
-// by calling this with hand-built patches.
+/**
+ * Throws where `patches` holds an indexed-array structural op: an `add`, a
+ * `remove` or a `move` that names an element of an array by its index.
+ * `before` and `after` are the document the patches were diffed from and the
+ * one they were diffed to, and they decide what an index is: a pointer's last
+ * segment names an element only where the path above it holds an array in one
+ * of the two. A structural op at a key of a plain object passes, however the
+ * key is written.
+ *
+ * The commit-conflict matcher and the scheduler's reader-dirty index match a
+ * recursive read against a patch's leaf paths alone. A structural op at an
+ * array index shifts the elements after it, and its leaf path names only the
+ * index it was given, so neither matcher would see that a reader of a shifted
+ * element is stale. A change to an array therefore travels as a `replace` at
+ * an index, a `splice` on the array's path, or a `replace` of the whole array,
+ * and this is the check that the diff produced nothing else. A key added to or
+ * removed from a plain object shifts no sibling, so the leaf path of that op
+ * is the whole of what it changed. See "Array writes and the leaf-only
+ * matcher" in `docs/specs/memory-v2/08-conflict-granularity.md`.
+ *
+ * Exported for direct unit testing.
+ */
 export const assertNoIndexedArrayStructuralOps = (
   patches: readonly PatchOp[],
+  before: FabricValue | undefined,
+  after: FabricValue | undefined,
 ): void => {
+  // The structural ops and their pointer fields are read off the wire-op
+  // registry (`patchOpIsStructural()`, `patchOpPointerFields()`), so an op
+  // added there is checked here with no list of its own to extend.
   for (const patch of patches) {
     if (!patchOpIsStructural(patch)) {
       continue;
@@ -642,7 +662,11 @@ export const assertNoIndexedArrayStructuralOps = (
     const pointers = patchOpPointerFields(patch).map((field) =>
       (patch as unknown as Record<string, string>)[field]
     );
-    if (!pointers.some(terminalSegmentIsArrayIndex)) {
+    if (
+      !pointers.some((pointer) =>
+        pointerNamesArrayElement(pointer, before, after)
+      )
+    ) {
       continue;
     }
     throw new Error(
@@ -3724,7 +3748,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (patches.length === 0) {
       return null;
     }
-    assertNoIndexedArrayStructuralOps(patches);
+    assertNoIndexedArrayStructuralOps(patches, base, doc.current.value);
 
     return { op: "patch", id, type, scope, patches, value: doc.current.value };
   }
