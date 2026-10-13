@@ -1332,23 +1332,6 @@ export interface FabriChatManagerInput {
   outgoingNotices?: NoticesCell;
 }
 
-/** Command bindings for product consumers; they carry no private observations. */
-export interface FabriChatManagerCommands {
-  openDirect: Stream<ManagerStreamEvent>;
-  createGroup: Stream<ManagerStreamEvent>;
-  offerRoom: Stream<ManagerStreamEvent>;
-  accept: Stream<ManagerStreamEvent>;
-  joinRoom: Stream<ManagerStreamEvent>;
-  forget: Stream<ManagerStreamEvent>;
-  delivered: Stream<ManagerStreamEvent>;
-}
-
-/** The private observations a room's UI uses, independently of its commands. */
-export interface FabriChatManagerObservations {
-  requests: Record<string, ChatRequestOutcome>;
-  people: PerSession<Record<string, ManagerProfileCell[]>>;
-}
-
 /** What a manager offers: `ChatManagerOutput`. */
 export interface FabriChatManagerOutput {
   /** The manager's name, for lists of pieces. */
@@ -1357,19 +1340,13 @@ export interface FabriChatManagerOutput {
   /** The manager's rendering. */
   [UI]: VNode;
 
-  /** Commands selected independently of catalog, room, and profile reads. */
-  commands: FabriChatManagerCommands;
-
-  /** Request outcomes and known people, for the viewer's private UI. */
-  observations: FabriChatManagerObservations;
-
   /** Every room this user belongs to and hasn't forgotten, newest first. */
   rooms: PerSession<ChatIndexEntry[]>;
 
   /**
-   * The user's shared-space catalog, as stored, from which `rooms` is drawn.
-   * Product consumers use Home's `sharedSpaces` interface for collection
-   * observations, and this manager's `commands` for room actions.
+   * The user's shared-space catalog, as stored, from which `rooms` is drawn. A
+   * reader in another piece finds a room's entry here by its space without
+   * this manager's view having been computed.
    */
   sharedSpaceCatalog: SharedSpaceCatalogStorage;
 
@@ -1672,8 +1649,6 @@ export const FabriChatManagerCore = pattern<
       delivered: commitManager({ act: "delivered", ...records }),
     };
     const view = {
-      commands: streams,
-      observations: { requests, people },
       rooms: newestFirst,
       sharedSpaceCatalog,
       direct,
@@ -1839,8 +1814,6 @@ const FabriChatManager = pattern<
     [NAME]: core[NAME],
     [UI]: core[UI],
     [VIEWS]: core[VIEWS],
-    commands: core.commands,
-    observations: core.observations,
     rooms: core.rooms,
     sharedSpaceCatalog: core.sharedSpaceCatalog,
     direct: core.direct,

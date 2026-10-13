@@ -5,6 +5,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## Audits and reports
 
 - [Home interface first pass](development/2026-10-12-home-space-interface-first-pass.md) — local Home collection and command roles, host projections, social-space browser, FabriChat role separation, strict CFC and source-update evidence, and remaining native integration, October 2026.
+- [Home interface review corrections](development/2026-10-13-home-interface-review-corrections.md) — the private-manager send regression, removal of the FabriChat role refactor after a dependency update reset stored records, and the Home-only upgrade retaining requests, direct counterparts, notices and storage addresses in a fresh runtime, October 2026.
 
 - [The Topics space write storm](development/performance/2026-10-07-topics-space-write-storm.md) — 2026-10-07; the Estuary toolshed instance owning the shared Topics space at 95% main-thread CPU for a day, with 19.4 of its 23 hours in `memory/frame/handle`, traced through the space's 2.29-million-commit history to four client sessions each re-persisting the same six computed documents with a value that differed only in the scope of a link, a link at session scope against the same link at space scope or its declared empty default, because output placement followed the narrowest instance a reader held rather than the narrowest scope its inputs declared; the storm began thirty minutes after the 2026-10-06 deploy and peaked at about 50 commits per second.
 

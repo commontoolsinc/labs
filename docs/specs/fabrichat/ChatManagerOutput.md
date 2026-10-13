@@ -91,18 +91,7 @@ space is next opened, and a custom home pattern holds one only if it says so;
 until then the wish reports an error naming both remedies, with no `result`.
 
 Everything a manager holds is private to its user, as the home space is: nobody
-else learns whom a user talks to by reading it. Consumers declare the narrow
-role they use rather than using `ChatManagerOutput` as their input schema.
-
-FabriChat publishes two additional roles. `commands` contains the seven streams
-below, and `observations` contains `requests` and `people`. They reference the
-same streams and observations as the flat fields. A room obtains these roles
-independently and passes only commands to shared-record write handlers; private
-observations belong to its rendering. A Home exposing only flat fields remains
-usable. Catalog observations use Home's
-[`sharedSpaces` interface](../../features/shared-space-catalog.md#product-interface).
-These roles are additive FabriChat surfaces; custom manager implementations may
-continue to satisfy the flat role above.
+else learns whom a user talks to by reading it.
 
 ## Admission to a room
 

@@ -83,11 +83,11 @@ no data. An application's rendered membership list reads the view privately and
 sends its observed revision to Home when the person chooses archive or restore.
 
 Structural role separation does not remove labels already declared on Home or
-manager documents. A root-private manager can still affect FabriChat's stream
-availability checks and manager-derived UI computeds that persist in the room's
-space. Those boundaries require independent verification and, where necessary,
-separate events or repair of stamped documents. Grouped command and observation
-roles alone do not establish that those reads are safe.
+manager documents. FabriChat sends through the flat wrapper-to-core manager link
+chain are covered under a root-private core. Manager-derived UI computations
+that persist in a room's shared space and direct bindings to a labeled manager
+remain separate limitations. Grouped command and observation roles alone do not
+establish that those reads are safe.
 
 Home's **Social spaces** tab browses the same validated collection. Search,
 kind, and membership filters are session-local. It lists saved and archived
@@ -169,11 +169,12 @@ room, restores its entry if it was archived. Asking to open or accept the room
 is the person's choice to have it listed, so that restore names the revision the
 handler reads.
 
-The manager exposes command bindings under `commands` and private request and
-people observations under `observations`. Room write handlers receive only the
-command role; the rendering receives observations separately. The flat fields
-remain available for an existing Home. New product consumers use the grouped
-roles rather than the manager's complete result or its stored catalog.
+FabriChat consumes the manager's flat fields through its room-specific schema.
+Shared-record handlers bind individual streams without materializing a manager
+selection. The manager's stored defaults and module are independent of the
+catalog interface; changing that module or its room dependency requires separate
+state-retention verification. New catalog consumers select Home's grouped roles
+rather than the manager's complete result or its stored catalog.
 
 New entries record `since`, the recipient's admission time in epoch
 milliseconds. Registration records it when admitting the entry; a migration may

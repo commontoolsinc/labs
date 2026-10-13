@@ -504,9 +504,9 @@ describe("Home shared-space catalog", () => {
     it(`writes shared records through command bindings without reading Home's private collection with serving ${serving}`, async () => {
       await withHome(serving, async (runtime, home, fresh, server) => {
         expect(runtime.cfcEnforcementMode).toBe("enforce-strict");
-        // Publish a private observation of the real Home alongside its real
-        // command bindings. The observation's own contract labels its data;
-        // Home's owned backing contract continues to govern Home's writes.
+        // The control supplies a synthetic privately labeled observation
+        // beside Home's real command streams. Reading it exercises the write
+        // boundary; the real Home collection projection is asserted below.
         const viewSchema = {
           type: "object",
           additionalProperties: true,

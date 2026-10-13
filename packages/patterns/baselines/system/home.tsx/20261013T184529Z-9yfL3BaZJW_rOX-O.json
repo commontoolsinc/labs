@@ -960,89 +960,6 @@
         ],
         "type": "object"
       },
-      "FabriChatManagerCommands": {
-        "properties": {
-          "accept": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "createGroup": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "delivered": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "forget": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "joinRoom": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "offerRoom": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          },
-          "openDirect": {
-            "$ref": "#/$defs/ManagerStreamEvent",
-            "asCell": [
-              "stream"
-            ]
-          }
-        },
-        "required": [
-          "openDirect",
-          "createGroup",
-          "offerRoom",
-          "accept",
-          "joinRoom",
-          "forget",
-          "delivered"
-        ],
-        "type": "object"
-      },
-      "FabriChatManagerObservations": {
-        "properties": {
-          "people": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/$defs/ChatManagerProfile"
-              },
-              "type": "array"
-            },
-            "properties": {},
-            "scope": "session",
-            "type": "object"
-          },
-          "requests": {
-            "additionalProperties": {
-              "$ref": "#/$defs/ChatRequestOutcome"
-            },
-            "properties": {},
-            "type": "object"
-          }
-        },
-        "required": [
-          "requests",
-          "people"
-        ],
-        "type": "object"
-      },
       "FabriChatManagerOutput": {
         "properties": {
           "$NAME": {
@@ -1072,10 +989,6 @@
             ],
             "description": "Records a room this user has been admitted to."
           },
-          "commands": {
-            "$ref": "#/$defs/FabriChatManagerCommands",
-            "description": "Commands selected independently of catalog, room, and profile reads."
-          },
           "createGroup": {
             "$ref": "#/$defs/ManagerStreamEvent",
             "asCell": [
@@ -1111,10 +1024,6 @@
               "stream"
             ],
             "description": "Makes a room this user has entered one of their chats: lists it, or\nlists it again once forgotten, and adds them to its participants. A room\ntheir chats list already is left as it is."
-          },
-          "observations": {
-            "$ref": "#/$defs/FabriChatManagerObservations",
-            "description": "Request outcomes and known people, for the viewer's private UI."
           },
           "offerRoom": {
             "$ref": "#/$defs/ManagerStreamEvent",
@@ -1167,12 +1076,10 @@
           },
           "sharedSpaceCatalog": {
             "$ref": "#/$defs/SharedSpaceCatalogStorage",
-            "description": "The user's shared-space catalog, as stored, from which `rooms` is drawn.\nProduct consumers use Home's `sharedSpaces` interface for collection\nobservations, and this manager's `commands` for room actions."
+            "description": "The user's shared-space catalog, as stored, from which `rooms` is drawn. A\nreader in another piece finds a room's entry here by its space without\nthis manager's view having been computed."
           }
         },
         "required": [
-          "commands",
-          "observations",
           "rooms",
           "sharedSpaceCatalog",
           "direct",
@@ -1201,10 +1108,6 @@
             ],
             "description": "Records a room this user has been admitted to."
           },
-          "commands": {
-            "$ref": "#/$defs/FabriChatManagerCommands",
-            "description": "Commands selected independently of catalog, room, and profile reads."
-          },
           "createGroup": {
             "$ref": "#/$defs/ManagerStreamEvent",
             "asCell": [
@@ -1240,10 +1143,6 @@
               "stream"
             ],
             "description": "Makes a room this user has entered one of their chats: lists it, or\nlists it again once forgotten, and adds them to its participants. A room\ntheir chats list already is left as it is."
-          },
-          "observations": {
-            "$ref": "#/$defs/FabriChatManagerObservations",
-            "description": "Request outcomes and known people, for the viewer's private UI."
           },
           "offerRoom": {
             "$ref": "#/$defs/ManagerStreamEvent",
@@ -1296,13 +1195,11 @@
           },
           "sharedSpaceCatalog": {
             "$ref": "#/$defs/SharedSpaceCatalogStorage",
-            "description": "The user's shared-space catalog, as stored, from which `rooms` is drawn.\nProduct consumers use Home's `sharedSpaces` interface for collection\nobservations, and this manager's `commands` for room actions."
+            "description": "The user's shared-space catalog, as stored, from which `rooms` is drawn. A\nreader in another piece finds a room's entry here by its space without\nthis manager's view having been computed."
           }
         },
         "required": [
           "sharedSpaceCatalog",
-          "commands",
-          "observations",
           "rooms",
           "direct",
           "requests",
