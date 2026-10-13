@@ -15,12 +15,7 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import {
-  isInMain,
-  threadReplyCounts,
-  threadRootOf,
-  type ViewItem,
-} from "./logic.ts";
+import { isInMain, threadReplyCounts } from "./logic.ts";
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import {
   type ActivityCell,
@@ -123,8 +118,9 @@ export interface FabriChatMessageRowInput {
 
   /**
    * Whether the row belongs to the open thread's list rather than the main
-   * conversation's. Every message has a row in each list, shown only where
-   * the message belongs.
+   * conversation's. Every message has a row in the main conversation's list,
+   * shown only where the message belongs there. The thread's list holds a row
+   * only for a message of the session's open thread, and shows each one.
    */
   inThread: boolean;
 
@@ -291,25 +287,8 @@ export const FabriChatMessageRow = pattern<
       replies: threadReplyCounts(entries).get(own.key) ?? 0,
     };
   });
-  // Whether the message is in the session's open thread, which only the
-  // session's own runtime computes.
-  const inOpenThread = computed(() => {
-    const openRoot = composer.get()?.thread;
-    if (openRoot?.get() === undefined) return false;
-    const entries = messageEntries(messages);
-    const own = entryFor(entries, message);
-    const root = entryFor(entries, openRoot);
-    if (own === undefined || root === undefined) return false;
-    const byKey = new Map<string, ViewItem>(
-      entries.map((entry) => [entry.key, entry]),
-    );
-    return own.key === root.key || threadRootOf(own, byKey) === root.key;
-  });
   const mainRowDisplay = computed((): ChatDisplay =>
     placement.inMain ? "block" : "none"
-  );
-  const threadRowDisplay = computed((): ChatDisplay =>
-    inOpenThread ? "block" : "none"
   );
   const threadLabel = computed(() =>
     placement.replies === 1 ? "1 reply" : `${placement.replies} replies`
@@ -396,11 +375,12 @@ export const FabriChatMessageRow = pattern<
     [UI]: (
       // A row of the main conversation takes its display from shared state
       // alone, never the session's, or a viewer whose runtime only renders
-      // the room would have the row hidden for good. A thread row's display
-      // is the session's, and stays hidden until the session runs the room.
+      // the room would have the row hidden for good. A thread row is built
+      // only for a message of the session's open thread, so it is shown
+      // wherever it exists.
       <div
         hidden
-        style={{ display: inThread ? threadRowDisplay : mainRowDisplay }}
+        style={{ display: inThread ? "block" : mainRowDisplay }}
       >
         <cf-hover-reveal revealed={pickerOpen}>
           <div

@@ -46,7 +46,7 @@ import {
   rosterProfiles,
 } from "../loom/participants.tsx";
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
-import { isInMain, type ShownIn } from "./logic.ts";
+import { isInMain, type ShownIn, threadRoots } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCounters,
@@ -1075,6 +1075,20 @@ export const FabriChatRoomCore = pattern<
     const root = composer.get()?.thread;
     return root?.get() !== undefined && entryFor(entries, root) !== undefined;
   });
+  // The session's open thread: its root, and every message in the thread the
+  // root starts, in the order the room recorded them. The thread's list maps
+  // it, so a session holds a thread row for each message of the thread it has
+  // open, and none while it has no thread open. The list is the session's
+  // own, as the open thread is, and the rows mapped from it are stored per
+  // session with it, so no viewer's rows replace another's.
+  const threadMessages = computed((): PerSession<MessageCell[]> => {
+    const root = entryFor(entries, composer.get()?.thread);
+    if (root === undefined) return [];
+    const roots = threadRoots(entries);
+    return entries.filter((entry) =>
+      entry.key === root.key || roots.get(entry.key) === root.key
+    ).map((entry) => entry.cell);
+  });
   const replyingTo = computed(() => bodyText(composer.get()?.replyTo?.get()));
   // Per-session and per-viewer parts are hidden by a prop, never built as a
   // different tree (see `FabriChatMessageRow`).
@@ -1254,7 +1268,7 @@ export const FabriChatRoomCore = pattern<
               Close
             </cf-button>
           </cf-hstack>
-          {messages.map((message) => (
+          {threadMessages.map((message) => (
             <FabriChatMessageRow
               message={message}
               inThread

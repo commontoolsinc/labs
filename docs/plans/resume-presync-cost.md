@@ -230,14 +230,14 @@ where the pre-sync was no longer the whole cost.
       of 3,900 actions with 1,991 breaks in one settle, and that pass had
       cost 4 to 5 s, nearly all of it the comparator
       (`packages/runner/src/scheduler/topology.ts`).
-- [ ] The room's one cycle is a component of 180 computations: each message
-      row's `placement`, `inOpenThread` and `cannotWrite` passes the
-      captured `messages` cell to a helper, so the transformer marks each a
-      writer of the list (`materializerWriteInputPaths: [["messages"]]`),
-      and each reads it. The sixty row instances' computations then all
-      order against one another, 32,220 edges per `messages` document.
-      Passing the helpers a read-only view of the list, or an analysis that
-      follows the helper, would remove the component.
+- [ ] The room's one cycle is a component of two computations per message
+      row: each row's `placement` and `cannotWrite` passes the captured
+      `messages` cell to a helper, so the transformer marks each a writer of
+      the list (`materializerWriteInputPaths: [["messages"]]`), and each
+      reads it. The rows' computations then all order against one another,
+      so the edges per `messages` document grow with the square of the row
+      count. Passing the helpers a read-only view of the list, or an
+      analysis that follows the helper, would remove the component.
 - [ ] The cycle break prefers the lowest remaining in-degree, which picks an
       action downstream of the cycle before the cycle's own members: a
       render effect with one unmet input against a computation with 179.
