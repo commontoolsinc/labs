@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { ValidationError } from "@cliffy/command";
 import type { JSONSchema } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
+import { schemaIsObjectShaped } from "@commonfabric/piece/declared-fields";
+import {
+  normalizeAbsentVerbPayload,
+  verbInputSchemaError,
+} from "@commonfabric/piece/verb-input";
 import {
   type Cell,
   entityIdFrom,
@@ -46,12 +51,9 @@ import {
   CF_RUNTIME_ERROR_LOG,
   collectInvocationResultLinks,
   executeResolvedCallable,
-  normalizeAbsentVerbPayload,
   runtimeErrorLog,
-  verbInputSchemaError,
   VerbInputValidationError,
 } from "../lib/callable.ts";
-import { schemaIsObjectShaped } from "../lib/declared-fields.ts";
 import {
   type CellSelection,
   CellSelectionError,

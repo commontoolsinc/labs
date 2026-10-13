@@ -259,7 +259,7 @@ import {
   sessionScopedArgumentKeys,
 } from "./data-updating.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
-import { bringUpHomeRootForHandler } from "./home-root.ts";
+import { bringUpHomeRootForRefusedWrite } from "./home-root.ts";
 import { setResultCell } from "./result-utils.ts";
 import {
   describePatternOrModule,
@@ -1263,20 +1263,25 @@ const pieceOwnedStores = (
 ];
 
 /**
- * Hands a deferred start the trust snapshot of the transaction it was deferred
- * from, when it initializes on that transaction's behalf. The start runs in a
- * transaction of its own, and on a serving runtime the stamp that gives it a
- * run context leaves it the runtime's ambient snapshot, which names the
- * service. A run the serving loop attached a principal's snapshot to, such as
- * the owner the space-root ensure resolves, would otherwise hand the start's
- * initializations to the service rather than to that principal. Called after
- * the start is stamped and before its first read. A start no serving loop
- * stamped takes its trust from the runtime it runs in, as its parent did.
+ * Stamps `start`, the transaction a deferred piece start runs in, with the run
+ * context `info` gives it (`Runtime.stampServerRun()`), and hands it the trust
+ * snapshot of `from`, the transaction it was deferred from, when it
+ * initializes on that transaction's behalf. The start runs in a transaction of
+ * its own, and on a serving runtime the stamp leaves it the runtime's ambient
+ * snapshot, which names the service. A run the serving loop attached a
+ * principal's snapshot to, such as the owner the space-root ensure resolves,
+ * would otherwise hand the start's initializations to the service rather than
+ * to that principal. Every deferred start is stamped here, before its first
+ * read, so none is stamped without that trust. A start no serving loop stamps
+ * takes its trust from the runtime it runs in, as its parent did.
  */
-const carryDeferredStartTrust = (
+const stampDeferredStart = (
+  runtime: Runtime,
   from: IExtendedStorageTransaction,
   start: IExtendedStorageTransaction,
+  info: Parameters<Runtime["stampServerRun"]>[1],
 ): void => {
+  runtime.stampServerRun(start, info);
   const trustSnapshot = from.getCfcState().trustSnapshot;
   if (
     start.getCfcState().attributedInitialization &&
@@ -1937,13 +1942,13 @@ const relaxedHandlerSchemaCache = new WeakMap<object, JSONSchema>();
  *   an absent event.
  *
  * Validation is the same composition the CLI's pre-dispatch gate applies
- * (`verbInputSchemaError`, packages/cli/lib/callable.ts): `required` lists are
- * relaxed for defaulted properties first (the runtime fills a present object's
- * missing defaulted properties before checking `required`, so judging the
- * unrelaxed schema would refuse payloads the verb accepts), then
- * `validateSchemaValue` judges the payload. Cell links inside the payload are
- * accepted opaquely: a link's target cannot be read here, and its schema check
- * belongs to the handler's own reactive reads — the same deferral the
+ * (`verbInputSchemaError`, packages/piece/src/verb-input.ts): `required`
+ * lists are relaxed for defaulted properties first (the runtime fills a
+ * present object's missing defaulted properties before checking `required`,
+ * so judging the unrelaxed schema would refuse payloads the verb accepts),
+ * then `validateSchemaValue` judges the payload. Cell links inside the payload
+ * are accepted opaquely: a link's target cannot be read here, and its schema
+ * check belongs to the handler's own reactive reads — the same deferral the
  * pattern-argument validator applies to unresolvable links. A link VALUE passes
  * unjudged; an undeclared KEY still rejects.
  *
@@ -6673,7 +6678,7 @@ export class Runner {
       // rule governs internal writes at the wave seal destination, which this
       // client-side start tx never reaches. The serving side and the OFF arm
       // keep bookkeeping.
-      this.#runtime.stampServerRun(startTx, {
+      stampDeferredStart(this.#runtime, tx, startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
           ? {
@@ -6682,7 +6687,6 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
-      carryDeferredStartTrust(tx, startTx);
       // A deferred start minted from an EVENT-HANDLER run carries that run's
       // event context across to the start tx, so a navigateTo instantiated
       // under it can address the firing session (builtins.md §4;
@@ -7274,11 +7278,12 @@ export class Runner {
         if (identity !== undefined) startTx.tx.scopeKeyIdentity = identity;
         // A speculative child's continuation keeps its origin across the
         // data load. Authored and served starts use piece bookkeeping.
-        this.#runtime.stampServerRun(
+        stampDeferredStart(
+          this.#runtime,
+          tx,
           startTx,
           speculationContext ?? { actionId, kind: "bookkeeping" },
         );
-        carryDeferredStartTrust(tx, startTx);
         if (navigateContext !== undefined) {
           setNavigateEventContext(startTx, navigateContext);
         }
@@ -7759,7 +7764,7 @@ export class Runner {
       // navigate-deferred start is a speculative handler CONSEQUENCE and
       // diverts to the overlay instead of racing the serving side's receipt
       // create).
-      this.#runtime.stampServerRun(startTx, {
+      stampDeferredStart(this.#runtime, tx, startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
           ? {
@@ -7768,7 +7773,6 @@ export class Runner {
           }
           : { kind: "bookkeeping" as const }),
       });
-      carryDeferredStartTrust(tx, startTx);
       // Carry the instantiating event-handler run's event context to the start
       // tx (builtins.md §4) — capture point 1, as in startAfterSuccessfulCommit
       // above.
@@ -11717,6 +11721,35 @@ export class Runner {
     );
   }
 
+  /**
+   * Brings up the user's Home root for a handler whose write beneath the
+   * Home's empty slot was refused with `error`, then throws
+   * {@link RetryImmediately} so the scheduler runs the handler again, and its
+   * write lands under the root. As with an `inSpace()` name, an unserved event
+   * sent with `retries: false` is not run again, so its write drops once the
+   * root exists. A creation that fails is reported as `error` itself, with the
+   * failure as its cause and the handler's `frame` attached, as a handler's
+   * other failures carry theirs. `undefined` when this runtime brings up no
+   * root for `error` (see `bringUpHomeRootForRefusedWrite()`).
+   */
+  #bringUpHomeRootAndRetry(
+    error: unknown,
+    frame: Frame,
+  ): Promise<never> | undefined {
+    const creation = bringUpHomeRootForRefusedWrite(this.#runtime, error);
+    if (creation === undefined) return undefined;
+    return creation.then(
+      () => {
+        throw new RetryImmediately("Bringing up the user's Home root");
+      },
+      (failure: unknown) => {
+        (error as Error & { frame?: Frame }).cause = failure;
+        (error as Error & { frame?: Frame }).frame = frame;
+        throw error;
+      },
+    );
+  }
+
   #handlerResultPatternHasNavigateTo(
     pattern: Pattern,
   ): boolean {
@@ -12146,7 +12179,12 @@ export class Runner {
         };
 
         const postRunResult = result instanceof Promise
-          ? result.then(postRun)
+          ? result.then(
+            postRun,
+            (error) =>
+              this.#bringUpHomeRootAndRetry(error, frame) ??
+                Promise.reject(error),
+          )
           : postRun(result);
         if (postRunResult instanceof Promise) {
           popFrameAfterReturn = false;
@@ -12167,6 +12205,13 @@ export class Runner {
             tx,
             this.#handlingReceiptCell(resultCell, cause, tx),
           ).finally(() => popFrame(frame));
+        }
+        // A write beneath the user's Home before Home has a root is refused;
+        // the root is brought up, and the handler runs again.
+        const retrying = this.#bringUpHomeRootAndRetry(error, frame);
+        if (retrying !== undefined) {
+          popFrameAfterReturn = false;
+          return retrying.finally(() => popFrame(frame));
         }
         (error as Error & { frame?: Frame }).frame = frame;
         throw error;
@@ -12240,12 +12285,7 @@ export class Runner {
           // apart from the body's own reads, and a read that dead-ends on a
           // link into another space kicks that document's load here rather
           // than in the body.
-          const materialized = inputsCell.asSchema(module.argumentSchema)
-            .withTx(tx).get();
-          // A handler holding a cell beneath the user's Home before Home has
-          // a root runs only once the root exists, so a write it makes there
-          // lands under the root.
-          await bringUpHomeRootForHandler(this.#runtime, materialized, tx);
+          inputsCell.asSchema(module.argumentSchema).withTx(tx).get();
         }
         : undefined;
 

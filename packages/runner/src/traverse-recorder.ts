@@ -58,6 +58,12 @@ export type TraverseFixtureInvocation = {
   /** `TraversalContext.traverseCells` (true on the query path). */
   traverseCells: boolean;
 
+  /**
+   * `TraversalContext.inlineArrayItemsInPlace`, written only when set. An
+   * invocation without it replays with the setting off.
+   */
+  inlineArrayItemsInPlace?: true;
+
   /** Invocations sharing this id shared one `TraversalContext`. */
   context: number;
 
@@ -158,7 +164,7 @@ export class TraverseCaptureRecorder {
     doc: { address: IMemorySpaceAddress },
     selector: SchemaPathSelector,
     link: NormalizedFullLink | undefined,
-    context: { traverseCells: boolean },
+    context: { traverseCells: boolean; inlineArrayItemsInPlace?: boolean },
     memo: object | undefined,
   ): void {
     if (this.#invocations.length >= this.#maxInvocations) {
@@ -183,6 +189,8 @@ export class TraverseCaptureRecorder {
       selector: this.#internSelector(selector),
       ...(link !== undefined && { link: this.#internLink(link) }),
       traverseCells: context.traverseCells,
+      ...(context.inlineArrayItemsInPlace &&
+        { inlineArrayItemsInPlace: true as const }),
       context: this.#idFor(
         this.#contextIds,
         context,
@@ -364,7 +372,7 @@ export function recordTraverseInvocation(
   doc: { address: IMemorySpaceAddress },
   selector: SchemaPathSelector,
   link: NormalizedFullLink | undefined,
-  context: { traverseCells: boolean },
+  context: { traverseCells: boolean; inlineArrayItemsInPlace?: boolean },
   memo: object | undefined,
 ): void {
   active?.recordInvocation(doc, selector, link, context, memo);

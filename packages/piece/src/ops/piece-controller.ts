@@ -49,6 +49,7 @@ import {
   readResultSchemaMeta,
   resolveCellPath,
   resolveLink,
+  type Runtime,
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
@@ -3794,6 +3795,68 @@ class PiecePropIo implements PieceCellIo {
   }
 }
 
+/**
+ * The pattern pointer of the piece whose result cell is `piece`: the durable
+ * meta, or — for a KEYLESS piece in the session that set it up — the runner's
+ * session-side pointer (the never-durable contract, L3(a) RULED 2026-08-27: a
+ * keyless piece stamps nothing durably; a fresh session correctly finds
+ * neither).
+ */
+export function piecePatternPointer(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  return getPatternIdentityRef(piece.asSchema(undefined)) ??
+    runtime.runner.sessionPatternPointerFor(piece);
+}
+
+/**
+ * The compiled pattern the piece whose result cell is `piece` is pinned to,
+ * loaded from `space`, beside the pointer that named it.
+ *
+ * By default the read also projects the result schema, loading every
+ * document it reaches; `projectResult: false` bounds the sync to the result
+ * document that carries the pattern pointer.
+ *
+ * @throws Error when the piece carries no pattern pointer, or its pattern
+ * does not load.
+ */
+export async function loadPiecePattern(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+  space: MemorySpace,
+  { projectResult = true, repairCache = true }: {
+    projectResult?: boolean;
+    repairCache?: boolean;
+  } = {},
+): Promise<{
+  pattern: Pattern;
+  ref: { identity: string; symbol: string };
+}> {
+  if (projectResult) await piece.sync();
+  else await piece.asSchema(undefined).sync();
+  // A space this runtime may not read serves the piece as empty, which would
+  // otherwise read as a piece with no pattern.
+  const denied = runtime.storageManager.authorizationError?.(
+    piece.getAsNormalizedFullLink().space,
+  );
+  if (denied !== undefined) throw denied;
+  const ref = piecePatternPointer(runtime, piece);
+  if (!ref) throw new Error("piece missing pattern identity");
+  const pattern = await runtime.patternManager.loadPatternByIdentity(
+    ref.identity,
+    ref.symbol,
+    space,
+    { repairCache },
+  );
+  if (!pattern) {
+    throw new Error(
+      `could not load pattern ${ref.identity}#${ref.symbol}`,
+    );
+  }
+  return { pattern, ref };
+}
+
 export class PieceController<T = unknown> {
   #cell: Cell<T>;
   #pieces: PiecesController;
@@ -3937,15 +4000,9 @@ export class PieceController<T = unknown> {
     return this.#cell.asSchema(undefined);
   }
 
-  /**
-   * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
-   * in the session that set it up — the runner's session-side pointer (the
-   * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
-   * nothing durably; a fresh session correctly finds neither).
-   */
+  /** The piece's pattern pointer, as {@link piecePatternPointer} reads it. */
   #patternPointer(): { identity: string; symbol: string } | undefined {
-    return getPatternIdentityRef(this.#metaView()) ??
-      this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
+    return piecePatternPointer(this.#pieces.runtime, this.#cell);
   }
 
   /** Return a stable reference to the pattern currently running this piece. */
@@ -4083,23 +4140,12 @@ export class PieceController<T = unknown> {
     pattern: Pattern;
     ref: { identity: string; symbol: string };
   }> {
-    if (projectResult) await this.#cell.sync();
-    else await this.#cell.asSchema(undefined).sync();
-    const ref = this.#patternPointer();
-    if (!ref) throw new Error("piece missing pattern identity");
-    const runtime = this.#pieces.runtime;
-    const pattern = await runtime.patternManager.loadPatternByIdentity(
-      ref.identity,
-      ref.symbol,
+    return await loadPiecePattern(
+      this.#pieces.runtime,
+      this.#cell,
       this.#pieces.getSpace(),
-      { repairCache },
+      { projectResult, repairCache },
     );
-    if (!pattern) {
-      throw new Error(
-        `could not load pattern ${ref.identity}#${ref.symbol}`,
-      );
-    }
-    return { pattern, ref };
   }
 
   /**

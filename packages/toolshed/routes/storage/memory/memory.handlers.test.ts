@@ -318,6 +318,47 @@ describe("memory.handlers", () => {
     });
   });
 
+  describe("attachMemorySocketPipeline failures", () => {
+    it("logs a socket failure after the handoff before closing with 1011", async () => {
+      // Found in review: this close said nothing about why, though it ends
+      // every session the connection carries.
+      const fake = new FakeSocket();
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+      fake.dispatchEvent(new MessageEvent("message", { data: HELLO }));
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(socket, negotiation, firstMessage!))
+        .toBe(true);
+      await handedOff.promise;
+
+      const reported: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => {
+        reported.push(args);
+      };
+      try {
+        fake.dispatchEvent(new Event("error"));
+      } finally {
+        console.error = original;
+      }
+      expect(fake.closedWith?.code).toBe(1011);
+      expect(
+        reported.some(([text, cause]) =>
+          String(text).includes("after its socket failed") &&
+          cause instanceof Error &&
+          cause.message === "Memory websocket receive failure"
+        ),
+      ).toBe(true);
+      fake.dispatchEvent(new CloseEvent("close"));
+    });
+  });
+
   describe("warnOnOversizedOutboundFrame", () => {
     const captureWarn = () => {
       const calls: { key: string; args: unknown[] }[] = [];
