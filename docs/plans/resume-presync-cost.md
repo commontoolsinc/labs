@@ -224,12 +224,9 @@ where the pre-sync was no longer the whole cost.
       the document they read, so a writer's ordering edges cost the readers
       of what it writes rather than the whole set
       (`packages/runner/src/scheduler/topology.ts`).
-- [x] The sort's cycle break chooses from a heap it keeps current under the
-      break's preference, in place of a filter and a sort of every unvisited
-      action at every break. A load of the thirty-row room sorts a work set
-      of 3,900 actions with 1,991 breaks in one settle, and that pass had
-      cost 4 to 5 s, nearly all of it the comparator
-      (`packages/runner/src/scheduler/topology.ts`).
+- [x] The sort's cycle break chooses from a heap of candidates kept under
+      the break's preference, so a break does not rank the unplaced actions
+      again (`packages/runner/src/scheduler/topology.ts`).
 - [x] No computation of the room or of a message row is a declared writer
       of the room's `messages`, so none orders against another through the
       list. The room derives what a row shows of the list as a whole once,
@@ -237,15 +234,13 @@ where the pre-sync was no longer the whole cost.
       hands the list take it as a `Cell`, which declares no write
       (`packages/patterns/fabrichat/room.tsx`, `message-row.tsx`,
       `room-records.tsx`).
-- [ ] The cycle break prefers the lowest remaining in-degree, which picks an
-      action downstream of the cycle before the cycle's own members: a
-      render effect with one unmet input against a computation with 179.
-      1,812 of the room's 1,991 breaks were such picks, each running an
-      effect before the computation it reads, which then runs again.
-      The specification names the parent preference and registration order
-      (`../specs/scheduler-v2/README.md` §7.4); the in-degree preference is
-      the implementation's, and limiting the break's choice to the actions
-      that are on a cycle is a change to the run order.
+- [x] The sort breaks a cycle at one of its own members: a member of a
+      strongly connected component of the unplaced actions that no unplaced
+      action outside it feeds, so an action that only reads from a cycle is
+      placed after what it reads (`../specs/scheduler-v2/README.md` §7.4,
+      `packages/runner/src/scheduler/topology.ts`). The thirty-row room's
+      counts are in
+      [`../history/development/performance/2026-10-12-cycle-break-room-counts.md`](../history/development/performance/2026-10-12-cycle-break-room-counts.md).
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
       the document they name, once per transaction, so every check a
       written path makes reads the inputs about its document
