@@ -657,19 +657,56 @@ Launch against local servers:
 ./scripts/start-local-dev.sh
 mkdir -p .cf
 test -e .cf/iframe-pattern.key || \
-deno task cf id new > .cf/iframe-pattern.key
-CF_API_URL=http://localhost:8000 \
-CF_IDENTITY=.cf/iframe-pattern.key \
+  deno task cf id new > .cf/iframe-pattern.key
+export CF_API_URL=http://localhost:8000
+export CF_IDENTITY=.cf/iframe-pattern.key
+export CF_SPACE="$(deno task cf space create --label "Iframe React notes")"
 deno task cf piece new packages/patterns/iframe-react-quick-notes/main.tsx \
-  --root . --space iframe-react-notes --slug react-notes
+  --root . --slug react-notes
 ```
 
 Never overwrite an existing key file because it selects the PerUser identity.
-Open `http://localhost:8000/iframe-react-notes/react-notes`. If the shell shows
-first-use login, choose **Register New Key**, enter and confirm a passphrase, and
-continue. Exercise every meaningful action and inspect the browser console. A
-successful bundle does not prove React mounted, a hook completed its pull, or a
-bridge write reached the worker.
+`cf piece new` does not create the space it names, so `cf space create` runs
+first. It prints the new space's DID, which `CF_SPACE` and `--space` accept.
+Run both commands once: each `cf space create` makes another space, and a
+second `cf piece new` leaves the slug with the first piece. `cf piece new`
+prints the page address under `Open in browser`, which is
+`$CF_API_URL/$CF_SPACE/react-notes`. It also prints the `cf piece setsrc`
+command that updates the piece after a source change.
+
+`start-local-dev.sh` serves on port 8000 and fails when that port or the
+shell's is taken, which is the usual case when another checkout has servers
+running. Start it with `--port-offset=<n>` then, and set `CF_API_URL` to the
+toolshed address it prints, `http://localhost:<8000 + n>`; a `cf` command left
+on port 8000 would deploy to the other checkout's server.
+[`LOCAL_DEV_SERVERS.md`](../../development/LOCAL_DEV_SERVERS.md) covers the
+scripts.
+
+Open the page address. A browser that has not signed in is shown the shell's
+login. Sign it in with the key the CLI used: choose **Register**, which a
+browser that has signed in before labels **Register New Key**, then
+**Import CLI Key**, and select `.cf/iframe-pattern.key`. The browser then acts
+as the identity that created the space, the only one the space admits, and `cf`
+commands read the PerUser values the page wrote.
+[`shared-identity.md`](../../features/shared-identity.md) covers that workflow.
+
+**Use Passphrase** on the same screen, followed by generating and confirming a
+passphrase, registers a new identity instead, and the space refuses it: the
+shell reports `Slug "react-notes" not found.`, and the console carries
+`AuthorizationError: Principal did:key:… lacks READ on space did:key:…`.
+Take that route only when the tool driving the browser cannot choose a file, or
+for the second identity the multi-user checks below need. The principal the
+error names is the browser's DID, which
+`globalThis.app.state().identity.did()` also returns in the page's console.
+Grant it access with the CLI key, then reload the page:
+
+```bash
+deno task cf acl set <browser DID> WRITE
+```
+
+Exercise every meaningful action and inspect the browser console. A successful
+bundle does not prove React mounted, a hook completed its pull, or a bridge
+write reached the worker.
 
 Verify at least these behaviors:
 
@@ -714,7 +751,8 @@ should drag through multiple visible frames, operate every embedded native
 control, and confirm that the browser console stays clean.
 
 For multi-user state, cover two sessions of one identity, a second identity,
-and a reload. PerSpace data agrees everywhere, PerUser data agrees only between
+and a reload. The second identity opens the piece only after the `cf acl set`
+grant above. PerSpace data agrees everywhere, PerUser data agrees only between
 the same identity's sessions, and PerSession data remains distinct. Exercise
 first use rather than only a warmed-up piece. When both runtime modes matter,
 run the same unskipped browser test with default execution and with
