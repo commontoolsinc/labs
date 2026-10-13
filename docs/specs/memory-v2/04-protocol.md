@@ -497,6 +497,9 @@ Rules:
   the session. Only this fallback needs the key; the latest token resumes the
   session without one
 - an open whose connection closes while the server admits it opens nothing
+- a resume whose connection closes during catch-up fails; the connection
+  detaches its session as it closes, so the session's grace period runs while
+  catch-up is pending
 - at most one connection may own a given `(space, sessionId)` at a time
 - a successful resume transfers ownership to the new connection, invalidates the
   old owner for that session, and MAY emit `session/revoked` to the previous

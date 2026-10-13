@@ -1858,13 +1858,6 @@ class Connection {
           return;
         }
         const response = await this.#server.openSession(parsed, this);
-        if (response.ok?.sessionId && !this.routed) {
-          this.addSession(
-            parsed.space,
-            response.ok.sessionId,
-            parsed.principal,
-          );
-        }
         this.#send(response);
         return;
       }
@@ -5071,6 +5064,10 @@ export class Server {
         const admitted = this.#sessions.get(message.space, opened.sessionId)!;
         admitted.routedAuthority = () =>
           connection.allowsRoutedSession(message.space, opened.sessionId);
+      } else {
+        // Catch-up awaits below. The connection must already track its
+        // session so closing it detaches this owner during that wait.
+        connection.addSession(message.space, opened.sessionId, named);
       }
       if (opened.revokedConnectionId !== undefined) {
         console.warn(
@@ -5123,12 +5120,16 @@ export class Server {
           opened.sessionId,
         )
         : null;
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during catch-up"),
+        );
+      }
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
-      // during that await, before Connection.#receiveOrdered has added its
-      // local handle. In active ACL modes, never return catch-up data or let
-      // the connection add a ghost handle unless this exact token is still
-      // owned by this connection. Off mode preserves the legacy session timing.
+      // during that await. In active ACL modes, only the connection that
+      // still owns this exact token may receive its catch-up data.
       const current = this.#sessions.get(message.space, opened.sessionId);
       if (
         (connection.routed &&
