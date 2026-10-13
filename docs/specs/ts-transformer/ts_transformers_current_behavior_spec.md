@@ -460,7 +460,17 @@ recursive event type — stays the reference it is. A named reference whose
 subtree holds no cell-like position passes through untouched; one
 expands only when a capability inside it must change, and a self-referential
 type ends that expansion at the cycle with the node kept as authored — the
-accepted residual, since a literal cannot spell its own recursion. Observed
+accepted residual, since a literal cannot spell its own recursion. A recursion
+that instantiates its declaration without end, as `Nest<T[]>` inside
+`Nest<T>` does, never meets its own type again. The schema generator's
+`cutsExpansion()` (`src/typescript/expanding-recursion.ts`) cuts it at
+`MAX_OVERLAY_NESTING`, or once the overlay has spent its budget of readings
+made inside such a recursion, which bounds one that branches: the search for a cell-like position takes the remainder
+past the cut to hold one, and the expansion stops there unless a use the body
+makes reaches below. The remainder is printed from its instantiation and marked
+`SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
+cell no use reaches earns; a finite chain deeper than the cut reads the same as
+reading it to its end would. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
@@ -1045,8 +1055,11 @@ bindings through the checker rather than by scanning the rewritten file. It
 resolves through type aliases and interfaces wherever they are declared (this
 file, an import, or a declaration file; the schema generator resolves a
 reference the same way, so a policy any alias carries must be validated too)
-and type-parameter substitution
-(`findWriteAuthorizedByReferences`). For each reference it emits
+and type-parameter substitution, a parameter the reference leaves out read as
+its default (`findWriteAuthorizedByReferences`). A CFC carrier's tag,
+`CfcTag<T, Meta>` in the body of the `Cfc` alias declared beside it, holds its
+payload again beside the metadata, so only its metadata is walked there, and
+each policy in the payload is reported once. For each reference it emits
 **`cfc-write-authorized-by`** when usage is malformed:
 
 - the second type argument is not a `typeof` binding (`TypeQueryNode`)

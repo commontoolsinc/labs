@@ -440,9 +440,10 @@ const Home = pattern(
     const favoritesComponent = FavoritesManager({});
     const agentQueue = AgentQueue({});
     // Its panel renders after every other panel. A panel inserted ahead of an
-    // existing one changes the arguments a deployed Home's existing children
-    // are offered when they update: the profile picker's update over Home's
-    // vintages is refused for want of `profiles` (`deno task pattern-vintage`).
+    // existing one shifts the positions of a deployed Home's existing
+    // children, so each child's update runs on the stored state of the child
+    // that held its position before, and a stored slot the child's argument
+    // schema refuses is dropped with a `setup-stored-slot-dropped` warning.
     const chatManager = FabriChatManager({ sharedSpaceCatalog: catalog });
     const ensurePrivateInboxStream = ensurePrivateInbox({
       privateInbox,

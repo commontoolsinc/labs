@@ -40,10 +40,11 @@ bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
 the `data:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
-and nothing writes a `data:` document, so a link inside one carries its
-schema inline (`packages/runner/src/link-utils.ts`). What costs is that
-recomposition built a fresh object graph per call, so the interned-schema
-cache never hit and every call deep-froze and hashed the same closure again.
+and no write has stored the links a plan binds, so a link inside the inputs
+cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
+costs is that recomposition built a fresh object graph per call, so the
+interned-schema cache never hit and every call deep-froze and hashed the
+same closure again.
 
 **The cross-space pass materializes to discover.** `#syncCrossSpaceReads`
 does a full schema-validated `get()` of every plan's inputs, in every round,
@@ -89,7 +90,7 @@ stage 0 is what every later stage reports against.
 
 Exit: a number per stage that a pull request can quote.
 
-### Stage 1. A `data:` document's inline schemas come from a memo
+### Stage 1. An immutable cell's inline schemas come from a memo
 
 - [x] `inlineExternalSchemaRefsInValue()` keeps the inline form each
       reference recomposed to, by reference, for the registry epoch
@@ -98,10 +99,9 @@ Exit: a number per stage that a pull request can quote.
       hashed the same few schemas again; a reference names one content, so
       the form it recomposed to once is the form it has.
 - [x] Tests: the inline form is the same object on a second call for the
-      same reference (`packages/runner/test/link-utils.test.ts`); a `data:`
-      cell carries each link's schema inline and a read through it resolves
-      the linked value (`packages/runner/test/runtime.test.ts`,
-      `packages/runner/test/data-uri-inlining.test.ts`).
+      same reference (`packages/runner/test/link-utils.test.ts`); an
+      immutable cell carries each link's schema inline and a read through it
+      resolves the linked value (`packages/runner/test/runtime.test.ts`).
 
 Exit: a schema is recomposed once per reference per registry epoch.
 
@@ -224,6 +224,29 @@ where the pre-sync was no longer the whole cost.
       the document they read, so a writer's ordering edges cost the readers
       of what it writes rather than the whole set
       (`packages/runner/src/scheduler/topology.ts`).
+- [x] The sort's cycle break chooses from a heap it keeps current under the
+      break's preference, in place of a filter and a sort of every unvisited
+      action at every break. A load of the thirty-row room sorts a work set
+      of 3,900 actions with 1,991 breaks in one settle, and that pass had
+      cost 4 to 5 s, nearly all of it the comparator
+      (`packages/runner/src/scheduler/topology.ts`).
+- [ ] The room's one cycle is a component of 180 computations: each message
+      row's `placement`, `inOpenThread` and `cannotWrite` passes the
+      captured `messages` cell to a helper, so the transformer marks each a
+      writer of the list (`materializerWriteInputPaths: [["messages"]]`),
+      and each reads it. The sixty row instances' computations then all
+      order against one another, 32,220 edges per `messages` document.
+      Passing the helpers a read-only view of the list, or an analysis that
+      follows the helper, would remove the component.
+- [ ] The cycle break prefers the lowest remaining in-degree, which picks an
+      action downstream of the cycle before the cycle's own members: a
+      render effect with one unmet input against a computation with 179.
+      1,812 of the room's 1,991 breaks were such picks, each running an
+      effect before the computation it reads, which then runs again.
+      The specification names the parent preference and registration order
+      (`../specs/scheduler-v2/README.md` §7.4); the in-degree preference is
+      the implementation's, and limiting the break's choice to the actions
+      that are on a cycle is a change to the run order.
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
       the document they name, once per transaction, so every check a
       written path makes reads the inputs about its document
