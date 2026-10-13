@@ -136,6 +136,22 @@ const tallyHandle = (marker: string): RuntimeProgram =>
   ].join("\n"));
 
 /**
+ * A candidate that types `tally` as a required handle or `undefined`, which
+ * generates `anyOf: [{ type: "undefined" }, { asCell: ["cell"], ... }]`: the
+ * spelling FabriChat's manager gives the profile it is handed.
+ */
+const tallyHandleOrUndefined = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern, Writable } from 'commonfabric';",
+    "interface Counter { count?: number }",
+    "interface Args { tally: Writable<Counter> | undefined; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
+/**
  * A version whose `stamp` is a `Date`, which generates `{ type: "object" }`
  * and is stored as a `FabricEpochNsec`.
  */
@@ -1409,6 +1425,59 @@ describe("pattern update validates the stored argument", () => {
       );
     });
 
+    it("leaves the linked document's confidentiality off what the update writes when the slot is a handle or undefined", async () => {
+      // A stored link is never `undefined`, so the `undefined` branch of the
+      // slot's union says nothing about it, and the slot holds a handle.
+
+      const counter = rt.getCell<Record<string, unknown>>(
+        space,
+        "cell-or-undefined-slot-labeled-counter",
+      );
+      const counterId = counter.getAsNormalizedFullLink().id;
+      const seed = rt.edit();
+      writeSeedEnvelopeDoc(seed, space);
+      seedStoredEnvelope(seed, {
+        space,
+        scope: "space",
+        id: counterId,
+        path: [],
+      }, {
+        value: { count: 3 },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["count"],
+              label: { confidentiality: [personalSpaceOf(space)] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: counter },
+        "cell-or-undefined-slot-labeled-link",
+      );
+
+      const { error } = await rollForward(cell, tallyHandleOrUndefined("v2"));
+
+      expect(error).toBeUndefined();
+      await cell.pull();
+      expect(cell.getRaw()).toEqual({ marker: "v2" });
+      expect(
+        await confidentialityOf(cell.getAsNormalizedFullLink().id),
+        "the update read the linked counter through the handle-or-undefined " +
+          "slot, and its transaction carried the counter's label onto the " +
+          "piece's root",
+      ).not.toContainEqual(personalSpaceOf(space));
+      expect(await confidentialityOf(counterId)).toContainEqual(
+        personalSpaceOf(space),
+      );
+    });
+
     it("rolls forward when the link reaches a value the handle's schema refuses", async () => {
       const counter = rt.getCell<Record<string, unknown>>(
         space,
@@ -1474,6 +1543,25 @@ describe("pattern update validates the stored argument", () => {
         "updated arguments do not match the candidate schema",
       );
       expect(error).toContain("count: value does not match type number");
+      expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+    });
+
+    it("still refuses the same value stored in a handle-or-undefined slot itself", async () => {
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: { count: "seven" } },
+        "cell-or-undefined-slot-wrong-type-inline",
+      );
+
+      const { error, thrown } = await rollForward(
+        cell,
+        tallyHandleOrUndefined("v2"),
+      );
+
+      expect(error).toContain(
+        "updated arguments do not match the candidate schema",
+      );
+      expect(error).toContain("tally: value does not match anyOf");
       expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
     });
   });
