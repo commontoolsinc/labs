@@ -1,0 +1,210 @@
+# Compacting a space's history on a host
+
+A **compaction** rewrites one space's SQLite store so that the history behind
+each selected document's head is gone from the live file and kept only in an
+archive. [`docs/plans/compact-space.md`](../plans/compact-space.md) is the
+design and the reasons; this is the procedure, as it was rehearsed on a clone
+of the Topics space's 2026-10-09 snapshot, written for the operator who will
+run it on Estuary.
+
+Two neighbors:
+
+- [`space-clone-rehearsal.md`](space-clone-rehearsal.md) makes the writable
+  copy the rehearsal runs on. Read it first; a compaction that has not been
+  rehearsed on a clone is not run on a host.
+- [`staging-space-copy.md`](staging-space-copy.md) is how a space's file is
+  snapshotted, moved aside and installed on a host. The swap below is its
+  steps 5 through 8 for one instance.
+
+The tool is `cf space compact`, described in
+[the CLI README](../../packages/cli/README.md#compacting-a-space-store). Three
+things about it decide the shape of everything below. It rewrites a store in
+place and writes the result as a fresh file, so it runs against a **copy of
+the backup**, never the backup and never a served file. It **refuses** a store
+whose schema the engine would migrate on opening, a store with a second branch,
+foreign-key violations, more than one ACL document, or a `-wal` beside it, and
+a result path that exists or sits in a served directory, so a refusal is a
+message to read and not a thing to route around. And its `--verify --against`
+is a second implementation of what the run claims, run on the result and the
+backup, which is the step that stands between the result and the install.
+
+## Before anything is stopped
+
+The space's owner has agreed to the compaction and to the archive's retention.
+The history being removed is theirs; the tool refuses nothing on that ground
+and the plan's ["What a user sees"](../plans/compact-space.md#what-a-user-sees)
+says what the space shows afterward.
+
+The clone rehearsal below has passed, on a snapshot of the space taken within
+the last few days, with the flag set the host run will use. The rehearsal's
+dry-run report is at hand to compare with the host's.
+
+## The rehearsal
+
+```bash
+# A snapshot of the live file, taken while the space is still served: fine
+# for the rehearsal and the dry run, not for the file that gets compacted.
+# On the host, into a directory with room (/tmp has none; see the staging
+# copy document), then copied down and checksummed.
+sqlite3 -readonly '/data/memory/engine-v3/engine-v3/<did>.sqlite' \
+  "VACUUM INTO '/data/replaced/<did>.dry-run-<date>.sqlite'"
+
+# Clone it, as space-clone-rehearsal.md says. Keep the working path it prints.
+deno task cf space clone <did> --from <snapshot> --to ~/clones/<name>
+CLONE=~/clones/<name>
+WORK=$CLONE/engine-v3/engine-v3/<did>.sqlite
+PRISTINE=$CLONE/pristine/<did>.sqlite
+
+# 1. Plan. Read the report; the `schema` line says whether a run would write
+#    this store at all.
+deno task cf space compact "$WORK" --documents computed: --dry-run
+
+# 2. Compact the WORKING copy. The result lands beside it unless --out says
+#    otherwise; the pristine copy is the clone's own backup and is not touched.
+deno task cf space compact "$WORK" --documents computed: \
+  --out ~/clones/<name>-compacted.sqlite
+
+# 3. Verify the result against the pristine copy. Exit code 1 on any failed
+#    check; the report names the property the result lost.
+deno task cf space compact ~/clones/<name>-compacted.sqlite \
+  --verify --against "$PRISTINE"
+
+# 4. Serve the result and read it. Clone it (the clone keeps the DID; HOST
+#    pins it to loopback), start a toolshed on the workspace's port offset,
+#    open the Topics board cold, read the board and a handful of topics
+#    through cf, then check the two things this tool promises:
+#    /api/health/stats shows patchReplays flat on the cold board load, and a
+#    topic edit's transact round trip is below the storm's 180 ms.
+deno task cf space clone <did> --from ~/clones/<name>-compacted.sqlite \
+  --to ~/clones/<name>-compacted
+HOST=127.0.0.1 MEMORY_DIR="file://$HOME/clones/<name>-compacted/" \
+  ./scripts/start-local-dev.sh --port-offset <N>
+```
+
+Only a flag set that passed on the clone is run on the host, and the host run's
+dry-run report is compared with the clone's before anything is written.
+
+### What the 2026-10-12 rehearsal measured
+
+On a clone of the Topics space's 2026-10-09 snapshot (22.71 GB, 2,482,226
+commits, 3,741,969 revision rows, 1,195,660 heads), on a laptop, with
+`--documents computed:` and the default cut and window:
+
+| Step | Took | What it said |
+| --- | --- | --- |
+| `cf space reset` of the clone | 35 min | content matches baseline |
+| dry run | 56 s | 384,602 instances matched, 232,853 lose rows, 2,064,934 revision rows (688.9 MB) and 1,552 snapshots to delete, 2,415,215 payloads (13.02 GB) to hollow, schema current |
+| compaction | 298 s | the plan's counts exactly; result 8.45 GB |
+| `--verify --against` the pristine copy | 50.5 min | 24 checks passed: every head at its address, 1,195,660 documents identical through the inspector's replay, 232,853 materialized boundaries equal to the backup's exact-row state, 2,415,215 markers hashed against the backup, fingerprint equal, 11 non-history tables identical |
+
+The compaction's time is the instance pass, at roughly 20,000 instances a
+minute, plus a hollowing pass over every commit row; the verification's time
+is two full reconstructions of every head and a hash of every hollowed payload,
+which is the price of the claim it makes. `--verify-sample` is the quick pass
+while flags are still being chosen.
+
+Served from a clone of the result on a laptop toolshed, read through `cf`,
+against the same reads on the uncompacted snapshot with the same engine
+(stage 1 of the plan):
+
+| Read | Uncompacted | Compacted |
+| --- | --- | --- |
+| Topics board, cold | 20,213 ms | 15,504 ms |
+| five topics, cold | 690–1,431 ms | 588–857 ms |
+| board again, warm | 10,073 ms | 8,201 ms |
+| patch replays after the cold board load | 44,928 | 14,273 |
+| one patch on each of the six longest-tailed documents, through the engine | 1–5 ms | 1–5 ms |
+
+The board's cold load is a traversal over 21,901 documents either way, which
+compaction does not touch; the replays that remain come from the authored
+documents the selection left alone. The write timings were already below the
+storm's 180 ms after stage 1's bounded base search, and stay there; after
+compaction the longest tails in the store are authored documents, since
+every compacted instance is down to its one row. What the compaction buys is
+the file: 8.45 GB where there was 22.71 GB, and a history that no longer
+grows a reader's work with every storm.
+
+## The host run
+
+Twenty-one systemd instances `toolshed-binary@8001` through `8021` serve
+`/data/memory`; nginx routes a space's websocket to one of them by a consistent
+hash of the space DID. The Topics space hashed to port 8020 in October 2026.
+Only the owning instance is stopped: every instance can open every file, but
+the hash sends the space's clients to one, and stopping all twenty-one, as the
+staging copy does for a store it treats as shared, is the conservative choice
+if the hash cannot be confirmed.
+
+Steps 2, 6 and 7 carry `sudo` and are the operator's to run by hand. The window
+in which the space is down is steps 2 through 7, and the backup that becomes the
+replacement is taken inside it: a snapshot from before the stop would silently
+drop every commit accepted between the two, and verifying against it would not
+show the gap.
+
+```bash
+# 0. Space, disk, and which instance owns it. Do not trust the record; check.
+df -h /data
+ls -la /data/memory/engine-v3/engine-v3/ | grep '<did>'
+curl -s localhost:8020/api/health/stats | grep -c '<did>'
+
+# 1. Dry run against a LIVE snapshot, with the instance still serving, and
+#    compare with the clone rehearsal's report. This snapshot is for the
+#    numbers only; it is not the one that gets compacted.
+sqlite3 -readonly '/data/memory/engine-v3/engine-v3/<did>.sqlite' \
+  "VACUUM INTO '/data/replaced/<did>.dry-run-<date>.sqlite'"
+cf space compact '/data/replaced/<did>.dry-run-<date>.sqlite' \
+  --documents computed: --dry-run
+
+# 2. Stop the owning instance. (sudo.) Nothing writes the space from here on.
+sudo systemctl stop toolshed-binary@8020
+
+# 3. The authoritative backup, AFTER the stop: read-only, into a directory
+#    with room, checksummed. This is the rollback, the archive, and the source.
+sqlite3 -readonly '/data/memory/engine-v3/engine-v3/<did>.sqlite' \
+  "VACUUM INTO '/data/replaced/<did>.pre-compaction-<date>.sqlite'"
+sha256sum '/data/replaced/<did>.pre-compaction-<date>.sqlite'
+
+# 4. Compact a COPY of the backup — the backup itself is never written to —
+#    and write the result beside it. The dry-run report printed first must
+#    agree with step 1's up to the commits accepted between the two snapshots.
+cp '/data/replaced/<did>.pre-compaction-<date>.sqlite' /data/replaced/<did>.work.sqlite
+cf space compact /data/replaced/<did>.work.sqlite --documents computed: \
+  --out '/data/replaced/<did>.compacted.sqlite'
+rm /data/replaced/<did>.work.sqlite
+
+# 5. Verify, on the host, against the post-stop backup.
+cf space compact '/data/replaced/<did>.compacted.sqlite' \
+  --verify --against '/data/replaced/<did>.pre-compaction-<date>.sqlite'
+
+# 6. Swap. Move the live file ASIDE with its companions, never delete; install
+#    the result owned by deploy. (sudo.)
+cd /data/memory/engine-v3/engine-v3/
+ls -la '<did>.sqlite'*
+sudo mv '<did>.sqlite'* /data/replaced/
+sudo install -o deploy -g deploy -m 644 '/data/replaced/<did>.compacted.sqlite' '<did>.sqlite'
+
+# 7. Start, confirm, read back. (sudo.)
+sudo systemctl start toolshed-binary@8020
+systemctl is-active toolshed-binary@8020
+```
+
+After the start, the two checks the staging copy document ends with: the space
+is listed, and a read through the API returns the content.
+
+## Rolling back
+
+The procedure never deletes the original: it is moved aside with its `-wal`
+and `-shm` companions, and the result is installed under its name. Rolling
+back is moving the result out and the original back, then starting the
+instance. Write the commands down before the instance is stopped. The backup
+is a second copy of the same pre-compaction state should the original be
+damaged in the move.
+
+## What the store shows afterward
+
+`cf inspect commits` names the compaction run's own commit and every payload
+it hollowed, in place of counting zero operations on them. The ACL document,
+where the space has one, carries a `compaction` member beside `value` with
+each run and the newest seq any removed row had; `cf inspect` labels the
+document with it. The Topics space has no ACL document, so there the
+compaction commit is the store's one record of the run, and the archive the
+operator took is where the history before it lives.

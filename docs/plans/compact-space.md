@@ -1,8 +1,9 @@
 # `compact-space` — shrinking one space's history after a write storm
 
 **Status:** stages 1–4 landed (the bounded base search, the basis guard,
-the dry run, the write path with its verification); stage 5, documentation,
-in review; stage 6, the rehearsal, under way; stages 7–8 open. Design
+the dry run, the write path with its verification); stage 6, the rehearsal,
+ran on 2026-10-12 and passed; stage 5, documentation, in review with its
+numbers; stages 7–8 open. Design
 written 2026-10-08 against
 the shared Topics space after
 [the October write storm](../history/development/performance/2026-10-07-topics-space-write-storm.md):
@@ -991,8 +992,8 @@ operator took.
 
 ## Stages
 
-Each stage is a pull request. Stages 1 through 4 have landed, stage 5 is in
-review, and stage 6 onward is open. Two engine changes came first, and both have landed: the
+Each stage is a pull request. Stages 1 through 4 have landed, stage 6 has
+run, stage 5 is in review, and stage 7 onward is open. Two engine changes came first, and both have landed: the
 base search, because it preserves history, helps the uncompacted store from
 the deploy that carries it, and is the measurement the compaction decision
 was made against; and the basis guard, because no store may be compacted
@@ -1051,8 +1052,15 @@ until the engine can tell compacted history from absence.
    classification carries it) and the compaction commit and the hollowed
    payloads (`cf inspect commits` names them), and a runbook document
    carrying the Estuary recipe of §4 as the rehearsal ran it.
-6. **Rehearsal on a clone of the current Topics file**, with the same
-   timings as stage 1 taken after compaction.
+6. **Rehearsal on a clone of the current Topics file** — done 2026-10-12,
+   on the clone of the 2026-10-09 snapshot, with the same timings as stage 1
+   taken after compaction; the numbers are in
+   [`space-compaction.md`](../development/space-compaction.md). Reset 35
+   min; dry run 56 s; compaction 298 s to an 8.45 GB result from 22.71 GB;
+   verification 50.5 min, 24 checks passed, every head identical; served,
+   the board's cold load 15.5 s against 20.2 s and the patch replays behind
+   it 14,273 against 44,928, with the traversal still the bound; writes 1–5
+   ms, as after stage 1.
 7. **The production run**, by the operator, from the rehearsed flag set, with
    the owner's agreement. Stage 1's measurement left disk as the reason:
    22.7 GB, of which 13.6 GB is commit payloads that I6 reaches outside the
