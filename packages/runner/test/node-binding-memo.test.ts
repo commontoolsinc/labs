@@ -121,7 +121,7 @@ describe("node-binding-memo", () => {
       }
     });
 
-    it("computes a path's binding apart from a document id spelled like it", () => {
+    it("computes a path's binding apart from that of a document id holding the path's characters", () => {
       // A key built by joining members with a separator would hold these two
       // under one entry.
 

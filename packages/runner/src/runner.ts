@@ -2641,7 +2641,8 @@ export class Runner {
    * syncer and deferred-start committer a test may supply, the setup,
    * storage-subscription, commit-gated run, ownership, key, sync, walk, and
    * retry steps, the implementation invoker, the node planner, which a
-   * test drives directly, the wave kick, and the pre-sync plan recorder and
+   * test drives directly, the wave kick, the step that drops the node
+   * bindings held, and the pre-sync plan recorder, node binding recorder and
    * resume yield a test installs.
    */
   get accessForTestingOnly(): {
@@ -2720,6 +2721,7 @@ export class Runner {
       | ((piece: string, node: Node, site: "node" | "owned") => void)
       | undefined;
     nodeBindingRecorder: ((piece: string, node: Node) => void) | undefined;
+    forgetNodeBindings(): void;
     displacedChildReadRecorder: ((child: string) => void) | undefined;
     resumeYield: CooperativeYield;
     kickResumeWave(
@@ -2841,6 +2843,10 @@ export class Runner {
       },
       set nodeBindingRecorder(value) {
         outerThis.#nodeBindingRecorder = value;
+      },
+      forgetNodeBindings: () => {
+        this.#nodeIOBindings.clear();
+        this.#patternNodeBindings.clear();
       },
       get displacedChildReadRecorder() {
         return outerThis.#displacedChildReadRecorder;
