@@ -3232,8 +3232,9 @@ export class StorageManager implements IStorageManager {
    * linked document onto `promises`, under the schema a read at the link's
    * place in `schema` would cross it with: the reader's sub-schema, which the
    * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
-   * through `#syncLinkTarget`, which crosses a link into a data-URI document
-   * locally rather than sending it. `seen` holds the ancestors of the current occurrence. A served per-instance run's
+   * through `#syncLinkTarget`, which crosses a link into an immutable document
+   * locally rather than sending it. `seen` holds the current ancestors; completed
+   * visits are memoized by value, base, schema, and principal context. A served run's
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
@@ -3245,6 +3246,7 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity?: ScopeKeyIdentity,
+    completed = new WeakMap<object, Set<string>>(),
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -3252,7 +3254,17 @@ export class StorageManager implements IStorageManager {
     if (typeof value !== "object") {
       return;
     }
+    const context = JSON.stringify([
+      base.id,
+      base.space,
+      base.scope,
+      base.path,
+      hashStringOf(schema),
+      identity,
+    ]);
+    if (completed.get(value)?.has(context)) return;
     seen.add(value);
+    let succeeded = true;
     // A shared frozen node can occur under different schemas and origins.
     // Guard ancestors, not all previously visited identities: each occurrence
     // must contribute the reads its own schema requests.
@@ -3270,6 +3282,7 @@ export class StorageManager implements IStorageManager {
           promises,
           seen,
           identity,
+          completed,
         );
         return;
       }
@@ -3287,6 +3300,7 @@ export class StorageManager implements IStorageManager {
             promises,
             seen,
             identity,
+            completed,
           );
         }
         return;
@@ -3313,17 +3327,26 @@ export class StorageManager implements IStorageManager {
             promises,
             seen,
             identity,
+            completed,
           );
         }
       }
+    } catch (error) {
+      succeeded = false;
+      throw error;
     } finally {
       seen.delete(value);
+      if (succeeded) {
+        let contexts = completed.get(value);
+        if (contexts === undefined) completed.set(value, contexts = new Set());
+        contexts.add(context);
+      }
     }
   }
 
   /**
    * Syncs the document `link` names under `schema`, the schema a read
-   * crosses the link with. A link into a data-URI document is walked
+   * crosses the link with. A link into an immutable document is walked
    * locally instead: the walk descends the link's path through the
    * document's value, and a link it meets on the way is followed with the
    * rest of the path appended, so a stand-in holding a caller's cell at
@@ -3339,6 +3362,7 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity: ScopeKeyIdentity | undefined,
+    completed: WeakMap<object, Set<string>>,
   ): void {
     const space = link.space ?? base.space!;
     // A handle with no declared value shape transfers only its
@@ -3376,6 +3400,7 @@ export class StorageManager implements IStorageManager {
             promises,
             seen,
             identity,
+            completed,
           );
           return;
         }
@@ -3392,6 +3417,7 @@ export class StorageManager implements IStorageManager {
         promises,
         seen,
         identity,
+        completed,
       );
       return;
     }

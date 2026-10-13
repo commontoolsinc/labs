@@ -5,9 +5,10 @@
 //
 // Cell is a type-only import. Native snapshots are made portable at this
 // string boundary because SQLite rows can outlive their creating runtime.
+// The caller supplies conversion, keeping runtime cell imports out of this codec.
 
 import type { Cell } from "../../cell.ts";
-import { portableSnapshotId } from "../../data-uri.ts";
+import type { URI } from "../../sigil-types.ts";
 import type { NormalizedFullLink } from "../../link-types.ts";
 import {
   type CellLink,
@@ -21,11 +22,14 @@ import {
  * (`includeSchema: false`), so the row resolves independent of any base
  * document and stores no schema flags.
  */
-export function encodeCellToSigilString(cell: Cell<unknown>): string {
+export function encodeCellToSigilString(
+  cell: Cell<unknown>,
+  portableId: (id: URI) => URI,
+): string {
   const link: NormalizedFullLink = cell.getAsNormalizedFullLink();
   const sigil = createSigilLinkFromParsedLink({
     ...link,
-    id: portableSnapshotId(link.id),
+    id: portableId(link.id),
   }, { includeSchema: false });
   return JSON.stringify(sigil);
 }

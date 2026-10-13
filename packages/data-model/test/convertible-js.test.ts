@@ -2152,6 +2152,29 @@ describe("convertible-js", () => {
         expect(Object.isFrozen(result[0])).toBe(true);
       });
 
+      it("checks frozen prefixes once per conversion and rechecks after input changes", () => {
+        for (const leaf of [{ n: 1 }, Object.freeze(new Date(0))]) {
+          let visits = 0;
+          let input: unknown = leaf;
+          const depth = 40;
+          for (let i = 0; i < depth; i++) {
+            input = new Proxy(Object.freeze({ child: input }), {
+              ownKeys(target) {
+                visits++;
+                return Reflect.ownKeys(target);
+              },
+            });
+          }
+          fabricFromConvertibleJsValue(input);
+          expect(visits).toBeLessThan(depth * 20);
+        }
+        const child = { n: 1 };
+        const input = Object.freeze({ child });
+        expect(fabricFromConvertibleJsValue(input)).not.toBe(input);
+        Object.freeze(child);
+        expect(fabricFromConvertibleJsValue(input)).toBe(input);
+      });
+
       it("shares frozen children beneath a mutable input without freezing the input", () => {
         const child = deepFreeze({ items: [1, 2, 3] });
         const input = { child, other: { n: 1 } };

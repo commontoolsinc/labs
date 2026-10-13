@@ -547,15 +547,12 @@ self-contained schema. Path narrowing, target queries, and derived Cell
 handles therefore do not require B to hold A's schema documents. A schema
 declared by a link inside B resolves in B when that next link is followed.
 
-A `data:` document is stored in no space: it is its own identifier, and
-nothing writes it. Nor does the identifier reach a space inside another
-value: a stored write and a stream send both dissolve a `data:` link into
-the value it carries, so no runtime receives one from another through
-storage (a link held in a `FabricInstance`'s state excepted, which neither
-walk reaches). A link inside one resolves its schema's `cid:` references in
-the space carried by the address that names the document, by the same rule
-and through the same gates as a link inside a stored document. Two kinds of
-`data:` document differ in what that space holds:
+An immutable document (`snapshot:` or portable `data:`) is stored in no
+space, and nothing writes it. A native snapshot retains its frozen value
+and relative-link origin; a portable identifier encodes its value. A link inside one resolves its schema's `cid:` references
+in the space carried by the address that names the document, by the same
+rule and through the same gates as a link inside a stored document. Two
+kinds of immutable document differ in what that space holds:
 
 - A snapshot of a value read out of a stored document — an array element
   read by value — is addressed in that document's space and keeps each
@@ -580,13 +577,13 @@ documents available alongside their declarations:
   decomposed closure is written into the space that will hold the
   reference, in the same transaction as the reference itself. A
   transaction stamps the reference itself on an inline link schema it
-  writes into an ordinary document — a value copied out of a `data:`
+  writes into an ordinary document — a value copied out of an immutable
   document minted from unstored data carries its link schemas inline, and
   would otherwise store and send every closure in full. Three kinds of
   inline schema stay as written:
   a trivial one, one that decomposition refuses, and one that takes no more
   wire bytes than the reference that would replace it, a bare handle stamp
-  such as `{ asCell: ["stream"] }` among them; a `data:` document is never
+  such as `{ asCell: ["stream"] }` among them; an immutable document is never
   written, and a `cid:` document is not link-scanned. A
   transaction commits against one space's session, so the closure reaches
   whichever server handles that space by construction. An event append is

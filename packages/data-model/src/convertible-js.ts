@@ -55,7 +55,7 @@ import {
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { cloneHelper } from "./value-clone.ts";
-import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
+import { isValidDeepFrozenFabricValueWithCaches } from "./deep-freeze.ts";
 
 /**
  * Helper for `shallowFabricFromConvertibleJsObjectElseUndefined()`, which
@@ -323,6 +323,8 @@ export function fabricFromConvertibleJsValue(
     value,
     new Map(),
     freeze,
+    new WeakSet(),
+    new WeakSet(),
   );
 }
 
@@ -334,10 +336,21 @@ function fabricFromConvertibleJsValueInternal(
   original: unknown,
   converted: Map<object, FabricValue>,
   freeze: boolean,
+  notDeepFrozen: WeakSet<object>,
+  invalidValues: WeakSet<object>,
 ): FabricValue {
   // Reuse validated frozen subtrees even when their parent needs conversion.
   // The shared validator rejects frozen objects that are not Fabric values.
-  if (freeze && isValidDeepFrozenFabricValue(original)) return original;
+  if (
+    freeze &&
+    isValidDeepFrozenFabricValueWithCaches(
+      original,
+      notDeepFrozen,
+      invalidValues,
+    )
+  ) {
+    return original;
+  }
 
   const isOriginalRecord = isObjectOrArray(original);
 
@@ -387,7 +400,13 @@ function fabricFromConvertibleJsValueInternal(
   // Rebuild via the deep recursion so the resulting `FabricError`'s slots
   // really are `FabricValue`.
   if (value instanceof FabricError) {
-    const result = rebuildFabricErrorDeep(value, converted, freeze);
+    const result = rebuildFabricErrorDeep(
+      value,
+      converted,
+      freeze,
+      notDeepFrozen,
+      invalidValues,
+    );
     if (freeze) Object.freeze(result);
     if (isOriginalRecord) {
       converted.set(original, result);
@@ -420,6 +439,8 @@ function fabricFromConvertibleJsValueInternal(
           value[i],
           converted,
           freeze,
+          notDeepFrozen,
+          invalidValues,
         );
       }
     }
@@ -435,6 +456,8 @@ function fabricFromConvertibleJsValueInternal(
         val,
         converted,
         freeze,
+        notDeepFrozen,
+        invalidValues,
       );
     }
     if (freeze) Object.freeze(obj);
@@ -461,10 +484,18 @@ function rebuildFabricErrorDeep(
   shallow: FabricError,
   converted: Map<object, FabricValue>,
   freeze: boolean,
+  notDeepFrozen: WeakSet<object>,
+  invalidValues: WeakSet<object>,
 ): FabricError {
   // Recursively convert `.cause` -- it could be a raw `Error`, `Map`, etc.
   const cause = shallow.cause !== undefined
-    ? fabricFromConvertibleJsValueInternal(shallow.cause, converted, freeze)
+    ? fabricFromConvertibleJsValueInternal(
+      shallow.cause,
+      converted,
+      freeze,
+      notDeepFrozen,
+      invalidValues,
+    )
     : undefined;
 
   // Recursively convert custom enumerable properties.
@@ -472,7 +503,13 @@ function rebuildFabricErrorDeep(
   for (const [key, value] of shallow.extraEntries()) {
     extras.push([
       key,
-      fabricFromConvertibleJsValueInternal(value, converted, freeze),
+      fabricFromConvertibleJsValueInternal(
+        value,
+        converted,
+        freeze,
+        notDeepFrozen,
+        invalidValues,
+      ),
     ]);
   }
 

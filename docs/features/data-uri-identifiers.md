@@ -36,8 +36,12 @@ parsing and value expansion resolve a URI without retaining its runtime. Stores
 retain their snapshots until runtime disposal or collection; entries are not
 evicted while their IDs may still be used. Equal snapshots held by multiple
 runtimes share their frozen value, and disposing one owner does not invalidate
-another owner's snapshot. After the last owner is disposed, the identifier no
-longer resolves. These IDs are not a persistence or cross-process format.
+another owner's snapshot. A store also acquires nested snapshots, including
+those in codec state, inline schema defaults, available external schema
+closures, and saved origins. An incomplete schema closure remains readable
+through the normal loader; registry registration notifies waiting stores to
+acquire newly visible dependencies. After the last owner is disposed, the
+identifier no longer resolves. These IDs are not a persistence or cross-process format.
 
 This lifetime trades encoded payload strings and decoded copies for retention of
 one native frozen snapshot per distinct value and origin. A long-lived runtime
@@ -77,9 +81,9 @@ space, whose schema documents arrived with the source. `getImmutableCell()`
 accepts unstored input, so `inlineExternalSchemaRefsInValue` puts those link
 schemas into inline form where the schema registry can resolve them.
 
-A stored write (`normalizeAndDiff`) or a stream send (`Cell.send`) expands
-immutable links through `findAndInlineDataUriLinks`. Both `snapshot:` and the
-Fabric `data:` media type expand to their contents; nested immutable links are
+A stored write (`normalizeAndDiff`) expands immutable links through
+`findAndInlineDataUriLinks`. Both `snapshot:` and the Fabric `data:` media type
+expand to their contents; nested immutable links are
 expanded in turn, including links held in schema defaults. Relative links are
 materialized against the saved origin at this boundary. An ordinary
 stored-document link stays a link. A path into an immutable value selects the
@@ -94,12 +98,23 @@ where a link is rewritten.
 A `FabricPrimitive` remains a leaf. At the inlining boundary, a `FabricInstance`
 supplied directly or as the entire immutable payload is refused. Below a
 payload's root, codec-mediated traversal expands links in instance state before
-a stored write. A stream send uses `refuseCarriedInstances` and refuses
-instances anywhere in the carried value.
+a stored write. A stream send refuses a directly supplied instance during
+cell-to-link conversion; an immutable link keeps its carried contents behind
+the link.
 
-Snapshot identifiers therefore do not travel through stored values or events.
-Offline traversal capture converts native IDs and embedded snapshot links to
-portable `data:` IDs before writing a fixture. Replay compares those portable
+Local stream delivery retains native immutable links so handlers can compare
+array-element identities. With server execution enabled, `Cell.send` converts
+those links to self-contained `data:` links before durable append, same-space
+serving dispatch, or the client echo. The append and echo carry the same event.
+`Writable.equals()` and link equality compare canonical portable content hashes
+when two immutable IDs differ, preserving equality across native and portable
+forms. Space, scope, and path must still agree. Relative links are resolved
+against each snapshot's origin before this comparison, so equal raw links from
+different origins need not compare equal.
+
+Snapshot identifiers do not travel through stored values or across runtime
+boundaries. Offline traversal capture converts native IDs and embedded snapshot
+links to portable `data:` IDs before writing a fixture. Replay compares those portable
 representations, so runtime lifetime does not affect the oracle. SQLite
 `_cf_link` columns also store a self-contained `data:` link when given an
 immutable cell: the column is a link string whose contents must survive runtime
@@ -138,7 +153,8 @@ use its bounded decode cache.
 Two runner predicates preserve distinct routing questions:
 
 - `hasInlineCellScheme` accepts `snapshot:` and every `data:` media type. It
-  answers whether there is a replica document to fetch, write, or validate.
+  answers whether an address is inline and must not be fetched, written, or
+  validated as a replica document.
 - `isInlineCellId` accepts `snapshot:` and only the Fabric `data:` media type.
   It answers whether the runtime can expand this identifier to a value.
 
@@ -153,7 +169,9 @@ Writes to either immutable scheme fail with `ReadOnlyAddressError`. Transaction
 reads and batched read tracking exclude them from commit preconditions;
 replication plans and server read sets exclude them as well. Sync walks their
 embedded links and loads the referenced ordinary documents, using the snapshot
-origin for relative links. There is no immutable document itself to sync.
+origin for relative links. Completed shared-subtree visits are memoized by
+value, addressing context, reader schema, and principal; only active ancestors
+are treated as cycles. There is no immutable document itself to sync.
 
 `toURI` accepts either scheme. `fromURI` hashes the entire identifier instead of
 stripping an entity scheme. `hasEntityUriScheme` returns false and

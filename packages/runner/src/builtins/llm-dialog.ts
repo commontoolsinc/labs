@@ -665,7 +665,7 @@ function serializeForLLMObservation(
     value = getCellOrThrow(value);
   }
 
-  // Turn cells into a link, unless they are data: URIs and traverse instead
+  // Traverse inline cell contents; render stored cells as links.
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
     if (hasInlineCellScheme(link.id)) {

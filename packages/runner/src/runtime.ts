@@ -975,6 +975,21 @@ export interface CfcRuntimeStats {
   /** Containers receiving child templates from flow persistence. */
   flowTemplateContainers: number;
 
+  /**
+   * Input-requirement verifications for which a boundary pass copied the
+   * transaction's reads. A written target takes one verification per schema
+   * that applies to it, so this counts verifications, not targets. It counts
+   * the copy of the reads alone: resolving the stored envelopes again after a
+   * write retires one is not counted.
+   */
+  inputReadViewsBuilt: number;
+
+  /**
+   * Input-requirement verifications that reused the copy of the reads a
+   * boundary pass already held.
+   */
+  inputReadViewsReused: number;
+
   cfcPreparedTx: number;
   cfcPrepareRejects: number;
   cfcDigestInvalidations: number;
@@ -1029,6 +1044,8 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
   stagedReferenceCacheHits: 0,
   flowTemplateEntriesMinted: 0,
   flowTemplateContainers: 0,
+  inputReadViewsBuilt: 0,
+  inputReadViewsReused: 0,
   cfcPreparedTx: 0,
   cfcPrepareRejects: 0,
   cfcDigestInvalidations: 0,
@@ -2488,6 +2505,10 @@ export class Runtime {
 
   async #disposeInner(closeStorage: boolean): Promise<void> {
     this.#viewReplication?.dispose();
+    // Before either drain below, each of which waits for the scheduler to go
+    // idle: a queued event waiting for its piece to become startable waits on
+    // another participant's commit, not on work of this runtime's own.
+    this.scheduler.endPieceStartWaits();
     try {
       // A kept store keeps RECORDING, so this path drains what could still write
       // into it. In-flight async builtin work is that shape: a fetch / llm call or

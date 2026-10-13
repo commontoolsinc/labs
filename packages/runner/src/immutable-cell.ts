@@ -8,6 +8,7 @@ import {
   assertAcyclicFabricValue,
   cloneIfNecessary,
   type FabricValue,
+  forEachFabricContainerValue,
   hashStringOf,
 } from "@commonfabric/data-model";
 import {
@@ -15,8 +16,16 @@ import {
   isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
+import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { collectExternalSchemaRefHashes } from "@commonfabric/data-model-schema/schema-refs";
+import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+
+import {
+  lookupSchemaDocument,
+  onSchemaDocumentRegistered,
+} from "./schema-registry.ts";
 import type { NormalizedLink } from "./link-types.ts";
-import type { URI } from "./sigil-types.ts";
+import type { CellLinkRefPayload, URI } from "./sigil-types.ts";
 
 /** The addressing context needed to interpret a relative primitive link. */
 type SnapshotOrigin = Pick<NormalizedLink, "id" | "space" | "scope">;
@@ -57,6 +66,11 @@ const finalizedStores = new FinalizationRegistry<Set<URI>>(releaseSnapshots);
 export class ImmutableCellStore {
   readonly #ids = new Set<URI>();
   readonly #snapshots = new Map<URI, ImmutableSnapshot>();
+  #dependencies = new WeakMap<object, readonly ImmutableSnapshot[]>();
+  readonly #settled = new Set<URI>();
+  readonly #pending = new Set<ImmutableSnapshot>();
+  readonly #retaining = new Set<URI>();
+  #unsubscribeSchemas: (() => void) | undefined;
   #origins = new Map<string, { value: SnapshotOrigin; hash: string }>();
   #disposed = false;
 
@@ -102,15 +116,11 @@ export class ImmutableCellStore {
     const id: URI = `snapshot:${key}`;
     let snapshot = this.#snapshots.get(id);
     if (snapshot === undefined) {
-      const shared = snapshots.get(id);
-      snapshot = shared?.value.deref() ??
-        Object.freeze({ id, value: frozen, origin });
-      snapshots.set(id, {
-        value: new WeakRef(snapshot),
-        owners: (shared?.owners ?? 0) + 1,
-      });
-      this.#snapshots.set(id, snapshot);
-      this.#ids.add(id);
+      snapshot = snapshots.get(id)?.value.deref();
+      if (snapshot === undefined) {
+        snapshot = Object.freeze({ id, value: frozen, origin });
+      }
+      this.#retain(snapshot);
     }
     return snapshot;
   }
@@ -126,9 +136,124 @@ export class ImmutableCellStore {
   dispose(): void {
     this.#disposed = true;
     this.#snapshots.clear();
+    this.#settled.clear();
+    this.#pending.clear();
+    this.#unsubscribeSchemas?.();
+    this.#unsubscribeSchemas = undefined;
+    this.#dependencies = new WeakMap();
     this.#origins.clear();
     releaseSnapshots(this.#ids);
     finalizedStores.unregister(this);
+  }
+
+  /** Finds dependencies in codec state, inline schemas, and available closures. */
+  #collectDependencies(value: FabricValue, deferExpired: boolean): {
+    dependencies: readonly ImmutableSnapshot[];
+    complete: boolean;
+  } {
+    const object = typeof value === "object" && value !== null
+      ? value
+      : undefined;
+    const cached = object === undefined
+      ? undefined
+      : this.#dependencies.get(object);
+    if (cached !== undefined) return { dependencies: cached, complete: true };
+    const nested = new Set<ImmutableSnapshot>();
+    let hasExpired = false;
+    const schemaRoots = new Set<string>();
+    const collect = (value: FabricValue, follow?: (hash: string) => void) => {
+      forEachFabricContainerValue(value, (container) => {
+        if (!isLinkRef(container)) return;
+        const payload = linkRefPayload(container) as CellLinkRefPayload;
+        if (payload.id !== undefined && isImmutableCellId(payload.id)) {
+          const target = snapshots.get(payload.id)?.value.deref();
+          if (target !== undefined) nested.add(target);
+          else if (deferExpired) hasExpired = true;
+          else immutableSnapshot(payload.id);
+        }
+        for (const hash of collectExternalSchemaRefHashes(payload.schema)) {
+          if (!schemaRoots.has(hash)) {
+            schemaRoots.add(hash);
+            follow?.(hash);
+          }
+        }
+      });
+    };
+    collect(value);
+    const closure = walkSchemaDocumentClosure({
+      roots: schemaRoots,
+      load: (hash) => {
+        const schema = lookupSchemaDocument(hash);
+        return schema === undefined ? undefined : { kind: "verified", schema };
+      },
+      onVerified: (_hash, schema, walk) => {
+        collect(schema, (hash) => walk.follow(hash));
+      },
+    });
+    const dependencies = Object.freeze([...nested]);
+    const complete = closure.missing.size === 0 && !hasExpired;
+    if (object !== undefined && complete) {
+      this.#dependencies.set(object, dependencies);
+    }
+    return { dependencies, complete };
+  }
+
+  /** Acquires dependencies, revisiting incomplete closures when documents arrive. */
+  #retain(snapshot: ImmutableSnapshot, deferExpired = false): void {
+    if (this.#settled.has(snapshot.id) || this.#retaining.has(snapshot.id)) {
+      return;
+    }
+    this.#retaining.add(snapshot.id);
+    try {
+      const { dependencies, complete } = this.#collectDependencies(
+        snapshot.value,
+        deferExpired,
+      );
+      for (const dependency of dependencies) {
+        this.#retain(dependency, deferExpired);
+      }
+      if (
+        snapshot.origin?.id !== undefined &&
+        isImmutableCellId(snapshot.origin.id)
+      ) {
+        this.#retain(immutableSnapshot(snapshot.origin.id));
+      }
+      if (!this.#snapshots.has(snapshot.id)) {
+        const shared = snapshots.get(snapshot.id);
+        snapshots.set(snapshot.id, {
+          value: new WeakRef(snapshot),
+          owners: (shared?.owners ?? 0) + 1,
+        });
+        this.#snapshots.set(snapshot.id, snapshot);
+        this.#ids.add(snapshot.id);
+      }
+      if (complete) {
+        this.#settled.add(snapshot.id);
+        this.#pending.delete(snapshot);
+      } else {
+        this.#pending.add(snapshot);
+        if (this.#unsubscribeSchemas === undefined) {
+          const owner = new WeakRef(this);
+          const unsubscribe = onSchemaDocumentRegistered(() => {
+            const store = owner.deref();
+            if (store === undefined) unsubscribe();
+            else store.#refreshPending();
+          });
+          this.#unsubscribeSchemas = unsubscribe;
+        }
+      }
+    } finally {
+      this.#retaining.delete(snapshot.id);
+    }
+  }
+
+  /** Acquires newly visible dependencies before schema registration returns. */
+  #refreshPending(): void {
+    for (const snapshot of this.#pending) this.#retain(snapshot, true);
+    if (this.#pending.size === 0) {
+      this.#unsubscribeSchemas?.();
+      this.#unsubscribeSchemas = undefined;
+    }
   }
 }
 

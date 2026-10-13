@@ -213,7 +213,8 @@ export class TraverseCaptureRecorder {
     tx: IExtendedStorageTransaction,
     address: IMemorySpaceAddress,
   ): void {
-    // data: URIs carry their value in the id; replay decodes them directly.
+    // Inline cells have no replica document. Capture makes native snapshots
+    // portable data URIs, which replay decodes directly.
     if (hasInlineCellScheme(address.id)) return;
     const key = fixtureDocKey(address);
     if (this.#docs.has(key)) return;

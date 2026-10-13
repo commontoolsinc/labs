@@ -1575,7 +1575,7 @@ export function normalizeAndDiff(
     ? parseLink(newValue, link)
     : undefined;
 
-  // Check for links that are data: URIs and inline them, by calling
+  // Expand native snapshot and portable Fabric data-URI links by calling
   // normalizeAndDiff on the contents of the link. This re-entry REPLACES the
   // value (the link's contents, not the link), so anchoring eligibility
   // deliberately does not carry over: inlined content in an array slot stores
@@ -1583,8 +1583,8 @@ export function normalizeAndDiff(
   // links) stored it.
   //
   // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
-  // check accepts exactly the media type that call inlines: this codec's
-  // own. A `data:` URI of any other media type stores as an ordinary link.
+  // check accepts native snapshots and the Fabric codec's data URIs. Other
+  // `data:` media types store as ordinary links.
   if (newValueLink !== undefined && isInlineCellId(newValueLink.id)) {
     return normalizeAndDiff(
       runtime,

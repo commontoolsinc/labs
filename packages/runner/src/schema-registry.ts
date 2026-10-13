@@ -47,6 +47,15 @@ const documentsByHash = new Map<string, JSONSchema>();
 // WRONG value — this is about not outliving the epoch's availability.
 const clearListeners = new Set<() => void>();
 
+/** Listeners waiting for an incomplete schema closure to gain a document. */
+const registrationListeners = new Set<() => void>();
+
+/** Subscribes to new verified documents; the returned function unsubscribes. */
+export function onSchemaDocumentRegistered(listener: () => void): () => void {
+  registrationListeners.add(listener);
+  return () => registrationListeners.delete(listener);
+}
+
 /** Registers a callback for the registry-clear transition. */
 export function onSchemaRegistryClear(listener: () => void): void {
   clearListeners.add(listener);
@@ -123,6 +132,7 @@ export function registerSchemaDocument(
   if (existing !== undefined) return existing;
   const interned = sah.schemaOrUndefined as JSONSchema;
   documentsByHash.set(taggedHash, interned);
+  for (const listener of registrationListeners) listener();
   return interned;
 }
 

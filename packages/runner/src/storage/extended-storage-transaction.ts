@@ -2755,7 +2755,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * (`docs/specs/content-addressed-schemas.md`): the closure each reference
    * names is staged with the write (`#stageSchemaDocsForValue`), so the
    * stored form travels with its documents and a same-transaction read
-   * through the link resolves. A `data:` document is never written, and a
+   * through the link resolves. Neither `snapshot:` nor `data:` names a written
+   * document, and a
    * `cid:` document's keywords may hold link-shaped data, so neither is
    * rewritten; with the flag off the value is stored as given.
    */

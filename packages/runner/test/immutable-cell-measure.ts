@@ -76,6 +76,7 @@ for (const schemaShape of ["inline", "reference"]) {
       if (snapshot.value !== shared) throw new Error("Frozen graph copied");
       const iterations = mode === "reused frozen" ? 10 : 1;
       const samples: { legacyMs: number; nativeMs: number }[] = [];
+      const measuredSharing = new Set<boolean>();
       for (let round = 0; round < 9; round++) {
         const inputs: FabricValue[] = Array.from(
           { length: 2 },
@@ -93,12 +94,16 @@ for (const schemaShape of ["inline", "reference"]) {
             : ["native", "legacy"]
         ) {
           const value = inputs[arm === "legacy" ? 0 : 1];
+          let measuredSnapshot;
           const start = performance.now();
           for (let i = 0; i < iterations; i++) {
             if (arm === "legacy") dataUriSnapshotWithResolvedLinks(value, base);
-            else store.create(value, base);
+            else measuredSnapshot = store.create(value, base);
           }
           const elapsed = (performance.now() - start) / iterations;
+          if (measuredSnapshot !== undefined) {
+            measuredSharing.add(measuredSnapshot.value === value);
+          }
           if (arm === "legacy") pair.legacyMs = elapsed;
           else pair.nativeMs = elapsed;
         }
@@ -112,7 +117,7 @@ for (const schemaShape of ["inline", "reference"]) {
         iterations,
         legacyIdChars: legacy.id.length,
         nativeIdChars: snapshot.id.length,
-        sharesFrozenGraph: snapshot.value === shared,
+        sharesMeasuredInput: [...measuredSharing],
         legacyMedianMs: median(samples.map((s) => s.legacyMs)),
         nativeMedianMs: median(samples.map((s) => s.nativeMs)),
         samples,

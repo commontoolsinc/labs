@@ -25,6 +25,7 @@ import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import {
   externalResolutionMissCount,
   lookupSchemaDocument,
+  noteExternalResolutionMiss,
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
@@ -34,6 +35,8 @@ import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 
+import { immutableContentId } from "./data-uri.ts";
+import { isInlineCellId } from "./immutable-cell.ts";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -222,7 +225,15 @@ export function areLinksSame(
   }
 
   // Compare normalized links
-  return areNormalizedLinksSame(link1, link2);
+  if (areNormalizedLinksSame(link1, link2)) return true;
+  if (
+    link1.id !== undefined && link2.id !== undefined &&
+    isInlineCellId(link1.id) && isInlineCellId(link2.id) &&
+    areNormalizedLinksSame({ ...link1, id: link2.id }, link2)
+  ) {
+    return immutableContentId(link1.id) === immutableContentId(link2.id);
+  }
+  return false;
 }
 
 export function areMaybeLinkAndNormalizedLinkSame(
@@ -359,6 +370,7 @@ export function inlineExternalSchemaRefsInValue<T extends FabricValue>(
       inlinedSchemaByRef.set(ref, recomposed);
       return recomposed;
     } catch {
+      noteExternalResolutionMiss();
       return schema;
     }
   }) as T;

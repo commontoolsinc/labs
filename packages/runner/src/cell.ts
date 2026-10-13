@@ -130,6 +130,8 @@ import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAndInlineDataUriLinks,
+  portableSnapshotId,
+  portableSnapshotLinks,
   resolveImmutableValueLinks,
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
@@ -1181,7 +1183,7 @@ export function encodeSqliteParams(
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
       }
-      return encodeCellToSigilString(cell);
+      return encodeCellToSigilString(cell, portableSnapshotId);
     }
     return encodeNested(value);
   };
@@ -2185,14 +2187,12 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      //
-      // Immutable links expand to contents before an event leaves the runtime.
-      // An event admits no FabricInstance, including one carried inside an
-      // immutable value whose state could itself contain a snapshot link.
-      const event = findAndInlineDataUriLinks(
-        convertCellsToLinks(newValue as CellLinkInput),
-        { refuseCarriedInstances: true },
-      ) as AnyCellWrapping<T>;
+      // Local delivery retains immutable cell identity. Server execution
+      // persists events, so its echo and durable delivery use portable links.
+      const convertedEvent = convertCellsToLinks(newValue as CellLinkInput);
+      const event = (this.#runtime.experimental.serverExecution === true
+        ? portableSnapshotLinks(convertedEvent)
+        : convertedEvent) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
       const mintedKeys = mintedRuntimeInjectedEventKeys(
@@ -2328,7 +2328,9 @@ export class CellImpl<T extends FabricValue>
                     ? doneStatusTxView(echoTx)
                     : echoTx,
                 );
-                if (callerOnCommit === undefined) return;
+                if (callerOnCommit === undefined) {
+                  return;
+                }
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
@@ -2595,7 +2597,9 @@ export class CellImpl<T extends FabricValue>
           this.#cleanup?.();
           const [cancel, addCancel] = useCancelGroup();
           this.#cleanup = cancel;
-          this.#listeners.forEach((callback) => addCancel(callback(event)));
+          this.#listeners.forEach((callback) =>
+            addCancel(callback(event))
+          );
           return this as unknown as Cell<T>;
         }
       }

@@ -1,7 +1,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import type { JSONValue } from "@commonfabric/api";
 import { deepFreeze, type FabricValue } from "@commonfabric/data-model";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
@@ -12,16 +14,222 @@ import {
   ImmutableCellStore,
   immutableSnapshot,
 } from "../src/immutable-cell.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
+import { load } from "../src/storage/transaction/attestation.ts";
 import { TraverseCaptureRecorder } from "../src/traverse-recorder.ts";
 import { replayFixture } from "./traverse-replay/replay.ts";
 import {
+  dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
+  immutableContentId,
   portableSnapshotId,
 } from "../src/data-uri.ts";
-import { createSigilLinkFromParsedLink, parseLink } from "../src/link-utils.ts";
+import {
+  areLinksSame,
+  createSigilLinkFromParsedLink,
+  parseLink,
+} from "../src/link-utils.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 describe("immutable-cell", () => {
+  for (const timing of ["before", "after"] as const) {
+    it(`retains schema-default snapshots when their closure arrives ${timing} adoption`, () => {
+      const release = acquireSchemaRegistryLease();
+      const source = new ImmutableCellStore();
+      const receiver = new ImmutableCellStore();
+      try {
+        const nested = source.create({ schemaDefault: timing });
+        const schema = decomposeSchema({
+          // Schema defaults carry links in either cell representation.
+          default: linkRefFrom({ id: nested.id }) as JSONValue,
+        });
+        const register = () => {
+          for (const [hash, document] of schema.documents) {
+            registerSchemaDocument(hash, document);
+          }
+        };
+        if (timing === "before") register();
+        const outer = receiver.create({
+          ref: linkRefFrom({
+            id: "of:target",
+            schema: { $ref: schema.rootRef },
+          }),
+        });
+        immutableContentId(outer.id);
+        if (timing === "after") register();
+        source.dispose();
+        expect(immutableSnapshot(nested.id).value).toEqual({
+          schemaDefault: timing,
+        });
+        expect(
+          areLinksSame(
+            linkRefFrom({ id: outer.id }),
+            linkRefFrom({ id: portableSnapshotId(outer.id) }),
+          ),
+        ).toBe(true);
+        receiver.dispose();
+        expect(() => immutableSnapshot(nested.id)).toThrow(/expired/);
+      } finally {
+        source.dispose();
+        receiver.dispose();
+        release();
+      }
+    });
+  }
+
+  it("keeps an expired hidden reference from interrupting other pending owners", () => {
+    const release = acquireSchemaRegistryLease();
+    const source = new ImmutableCellStore();
+    const expired = source.create({ expiredSchemaDefault: true });
+    source.dispose();
+    const liveSource = new ImmutableCellStore();
+    const badOwner = new ImmutableCellStore();
+    const goodOwner = new ImmutableCellStore();
+    try {
+      const live = liveSource.create({ liveSchemaDefault: true });
+      const schema = decomposeSchema({
+        default: {
+          bad: linkRefFrom({ id: expired.id }) as JSONValue,
+          good: linkRefFrom({ id: live.id }) as JSONValue,
+        },
+      });
+      const value = {
+        ref: linkRefFrom({ id: "of:target", schema: { $ref: schema.rootRef } }),
+      };
+      badOwner.create(value);
+      goodOwner.create(value);
+      for (const [hash, document] of schema.documents) {
+        registerSchemaDocument(hash, document);
+      }
+      liveSource.dispose();
+      expect(immutableSnapshot(live.id).value).toEqual({
+        liveSchemaDefault: true,
+      });
+    } finally {
+      liveSource.dispose();
+      badOwner.dispose();
+      goodOwner.dispose();
+      release();
+    }
+  });
+
+  it("does not freeze caller-owned codec state while rewriting links", () => {
+    const cause = {
+      kept: { mutable: true },
+      ref: linkRefFrom({ path: ["target"] }),
+    };
+    const failure = new FabricError({
+      type: "Error",
+      message: "boom",
+      stack: undefined,
+      cause,
+      extras: undefined,
+    });
+    dataUriFromValueWithResolvedLinks(failure, { id: "of:origin", path: [] });
+    expect(Object.isFrozen(cause.kept)).toBe(false);
+    cause.kept.mutable = false;
+    expect(cause.kept.mutable).toBe(false);
+  });
+
+  it("retains snapshots in codec state and schema defaults", () => {
+    const source = new ImmutableCellStore();
+    const receiver = new ImmutableCellStore();
+    const nested = source.create({ n: 9 });
+    const ref = linkRefFrom({ id: nested.id });
+    const outer = receiver.create({
+      carried: new UnknownValue("SnapshotFixture@1", deepFreeze({ ref })),
+      link: linkRefFrom({ id: "of:target", schema: { default: ref } }),
+    });
+    source.dispose();
+    try {
+      expect(valueFromDataUri(portableSnapshotId(outer.id))).toBeDefined();
+      expect(immutableSnapshot(nested.id).value).toEqual({ n: 9 });
+    } finally {
+      receiver.dispose();
+    }
+    expect(() => immutableSnapshot(nested.id)).toThrow(/expired/);
+  });
+
+  it("compares native and portable content transitively without losing relative origins", () => {
+    const store = new ImmutableCellStore();
+    try {
+      const baseA = {
+        id: "of:a" as const,
+        space: "did:key:test" as const,
+        path: [],
+      };
+      const baseB = { ...baseA, id: "of:b" as const };
+      const a = store.create({ n: 1 }, baseA);
+      const b = store.create({ n: 1 }, baseB);
+      const link = (id: typeof a.id) => linkRefFrom({ id });
+      const portable = link(portableSnapshotId(a.id));
+      expect(areLinksSame(link(a.id), portable)).toBe(true);
+      expect(areLinksSame(link(b.id), portable)).toBe(true);
+      expect(areLinksSame(link(a.id), link(b.id))).toBe(true);
+      const relative = linkRefFrom({ path: ["target"] });
+      const relativeA = store.create({ relative }, baseA);
+      const relativeB = store.create({ relative }, baseB);
+      expect(areLinksSame(link(relativeA.id), link(relativeB.id))).toBe(false);
+      expect(
+        areLinksSame(
+          link(relativeA.id),
+          link(portableSnapshotId(relativeA.id)),
+        ),
+      ).toBe(true);
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it("retains a native relative origin without an explicit snapshot link", () => {
+    const source = new ImmutableCellStore();
+    const receiver = new ImmutableCellStore();
+    const parent = source.create({ target: 8 });
+    const child = receiver.create({ ref: linkRefFrom({ path: ["target"] }) }, {
+      id: parent.id,
+      path: [],
+    });
+    source.dispose();
+    try {
+      expect(findAndInlineDataUriLinks(linkRefFrom({ id: child.id }))).toEqual({
+        ref: 8,
+      });
+    } finally {
+      receiver.dispose();
+    }
+  });
+
+  it("retains nested snapshots after their original store is disposed", () => {
+    const source = new ImmutableCellStore();
+    const receiver = new ImmutableCellStore();
+    const inner = source.create({ count: 7 });
+    const outer = receiver.create({ child: linkRefFrom({ id: inner.id }) });
+    source.dispose();
+    try {
+      expect(findAndInlineDataUriLinks(linkRefFrom({ id: outer.id })))
+        .toEqual({ child: { count: 7 } });
+      expect(valueFromDataUri(portableSnapshotId(outer.id))).toBeDefined();
+    } finally {
+      receiver.dispose();
+    }
+    expect(() => immutableSnapshot(inner.id)).toThrow(/expired/);
+  });
+
+  it("reports an expired snapshot as a transaction error", () => {
+    const store = new ImmutableCellStore();
+    const snapshot = store.create({ expired: true });
+    store.dispose();
+    const result = load({
+      id: snapshot.id,
+      type: "application/json",
+    });
+    expect(result.error).toBeDefined();
+  });
+
   it("rejects frozen cycles before registering a snapshot", () => {
     const store = new ImmutableCellStore();
     const value: Record<string, FabricValue> = {};

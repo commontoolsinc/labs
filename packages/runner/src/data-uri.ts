@@ -9,10 +9,12 @@
  */
 
 import {
+  cloneIfNecessary,
   deepFreeze,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
+  hashStringOf,
   refuseFabricInstance,
 } from "@commonfabric/data-model";
 import {
@@ -20,7 +22,10 @@ import {
   NULL_LIVE_ENVIRONMENT,
 } from "@commonfabric/data-model/codec-common";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
+import {
+  dataUriFromValue,
+  valueFromDataUri,
+} from "@commonfabric/data-model/codec-data-uri";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";
@@ -37,6 +42,10 @@ import {
   KeepAsCell,
   parseLink,
 } from "./link-utils.ts";
+import {
+  externalResolutionMissCount,
+  onSchemaRegistryClear,
+} from "./schema-registry.ts";
 import type { URI } from "./sigil-types.ts";
 import {
   immutableSnapshot,
@@ -185,7 +194,7 @@ function mapLinks(
         ) as typeof payload.schema;
         return rewrite(
           schema === payload.schema
-            ? value
+            ? link
             : linkRefFrom({ ...payload, schema }),
         );
       }
@@ -246,7 +255,7 @@ function mapInstanceState(
   const mapped = map(state);
   return mapped === state ? value : deepFreeze(codec.decode(
     codec.tagForValue(value),
-    deepFreeze(mapped),
+    cloneIfNecessary(mapped),
     NULL_LIVE_ENVIRONMENT,
   ));
 }
@@ -270,7 +279,7 @@ export function resolveImmutableValueLinks(
 }
 
 /**
- * Encodes an ephemeral identifier for an offline diagnostic or replay fixture.
+ * Encodes an ephemeral identifier for a durable link, event, or replay fixture.
  * This boundary pays the encoding cost only when a snapshot must outlive its
  * runtime; ordinary reads and writes keep native values.
  */
@@ -280,7 +289,30 @@ export function portableSnapshotId(id: URI): URI {
   return dataUriFromValue(portableSnapshotLinks(value));
 }
 
-/** Replaces ephemeral link IDs with self-contained IDs for offline capture. */
+/** Cached content identities for comparisons with portable immutable links. */
+let immutableContentIds = new WeakMap<object, string>();
+onSchemaRegistryClear(() => {
+  immutableContentIds = new WeakMap();
+});
+
+/** Returns the canonical portable content hash of either immutable format. */
+export function immutableContentId(id: URI): string {
+  if (!isImmutableCellId(id)) return hashStringOf(valueFromDataUri(id));
+  const snapshot = immutableSnapshot(id);
+  let hash = immutableContentIds.get(snapshot);
+  if (hash === undefined) {
+    const misses = externalResolutionMissCount();
+    hash = hashStringOf(
+      portableSnapshotLinks(resolveImmutableValueLinks(snapshot.value, id)),
+    );
+    if (externalResolutionMissCount() === misses) {
+      immutableContentIds.set(snapshot, hash);
+    }
+  }
+  return hash;
+}
+
+/** Replaces native link IDs with self-contained IDs at a portable boundary. */
 export function portableSnapshotLinks(value: FabricValue): FabricValue {
   return mapLinks(
     value,
