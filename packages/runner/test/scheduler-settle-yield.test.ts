@@ -83,11 +83,52 @@ describe("scheduler", () => {
       ran += 1;
     });
     await runtime.idle();
+    // `idle()` spans the yields: it resolves once the whole pass has run,
+    // not at the first turn the pass hands back.
+    const ranAtIdle = ran;
     await timer.promise;
-    expect(ran).toBe(3);
+    expect(ranAtIdle).toBe(3);
     expect(yielder.yieldCount).toBeGreaterThan(0);
     expect(ranWhenTimerFired).toBeGreaterThan(0);
     expect(ranWhenTimerFired).toBeLessThan(3);
+  });
+
+  it("reruns an action whose input a yield let change before `idle()` resolves", async () => {
+    const yielder = new CooperativeYield(0);
+    runtime.scheduler.accessForTestingOnly.cooperativeYield = yielder;
+    const input = runtime.getCell<number>(
+      space,
+      "settle yield changed input",
+      undefined,
+      tx,
+    );
+    input.set(1);
+    const seen: number[] = [];
+    const reader: Action = (tx) => {
+      seen.push(input.withTx(tx).get());
+    };
+    runtime.scheduler.subscribe(reader, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    // The reader runs first. A timer the next action arms fires in the turn
+    // the settle yields before the action after it, and commits a write to
+    // the reader's input while the pass is still under way.
+    const written = Promise.withResolvers<void>();
+    subscribeEffects(3, (index) => {
+      if (index !== 0) return;
+      setTimeout(() => {
+        const write = runtime.edit();
+        input.withTx(write).set(2);
+        write.commit();
+        written.resolve();
+      }, 0);
+    });
+    await runtime.idle();
+    const seenAtIdle = [...seen];
+    await written.promise;
+    expect(seenAtIdle).toEqual([1, 2]);
   });
 
   it("runs a settle whose slice is never spent without yielding", async () => {
