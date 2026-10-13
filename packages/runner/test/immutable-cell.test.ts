@@ -117,6 +117,42 @@ describe("immutable-cell", () => {
     }
   });
 
+  it("refreshes portable identity when the schema registry is cleared", () => {
+    const store = new ImmutableCellStore();
+    let release = acquireSchemaRegistryLease();
+    const schema = decomposeSchema({ type: "string", default: "epoch test" });
+    const register = () => {
+      for (const [hash, document] of schema.documents) {
+        registerSchemaDocument(hash, document);
+      }
+    };
+    try {
+      register();
+      const snapshot = store.create({
+        ref: linkRefFrom({
+          id: "of:target",
+          schema: { $ref: schema.rootRef },
+        }),
+      });
+      const native = linkRefFrom({ id: snapshot.id });
+      const beforeClear = portableSnapshotId(snapshot.id);
+      expect(areLinksSame(native, linkRefFrom({ id: beforeClear }))).toBe(true);
+      release();
+      release = acquireSchemaRegistryLease();
+      const whileMissing = portableSnapshotId(snapshot.id);
+      expect(whileMissing).not.toBe(beforeClear);
+      expect(areLinksSame(native, linkRefFrom({ id: whileMissing }))).toBe(
+        true,
+      );
+      register();
+      expect(portableSnapshotId(snapshot.id)).toBe(beforeClear);
+      expect(areLinksSame(native, linkRefFrom({ id: beforeClear }))).toBe(true);
+    } finally {
+      store.dispose();
+      release();
+    }
+  });
+
   it("does not freeze caller-owned codec state while rewriting links", () => {
     const cause = {
       kept: { mutable: true },
