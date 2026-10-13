@@ -244,6 +244,29 @@ where the pre-sync was no longer the whole cost.
       the document they read, so a writer's ordering edges cost the readers
       of what it writes rather than the whole set
       (`packages/runner/src/scheduler/topology.ts`).
+- [x] The sort's cycle break chooses from a heap it keeps current under the
+      break's preference, in place of a filter and a sort of every unvisited
+      action at every break. A load of the thirty-row room sorts a work set
+      of 3,900 actions with 1,991 breaks in one settle, and that pass had
+      cost 4 to 5 s, nearly all of it the comparator
+      (`packages/runner/src/scheduler/topology.ts`).
+- [ ] The room's one cycle is a component of 180 computations: each message
+      row's `placement`, `inOpenThread` and `cannotWrite` passes the
+      captured `messages` cell to a helper, so the transformer marks each a
+      writer of the list (`materializerWriteInputPaths: [["messages"]]`),
+      and each reads it. The sixty row instances' computations then all
+      order against one another, 32,220 edges per `messages` document.
+      Passing the helpers a read-only view of the list, or an analysis that
+      follows the helper, would remove the component.
+- [ ] The cycle break prefers the lowest remaining in-degree, which picks an
+      action downstream of the cycle before the cycle's own members: a
+      render effect with one unmet input against a computation with 179.
+      1,812 of the room's 1,991 breaks were such picks, each running an
+      effect before the computation it reads, which then runs again.
+      The specification names the parent preference and registration order
+      (`../specs/scheduler-v2/README.md` §7.4); the in-degree preference is
+      the implementation's, and limiting the break's choice to the actions
+      that are on a cycle is a change to the run order.
 - [x] CFC commit preparation indexes a transaction's write-policy inputs by
       the document they name, once per transaction, so the two checks a
       written path makes read the inputs about its document
