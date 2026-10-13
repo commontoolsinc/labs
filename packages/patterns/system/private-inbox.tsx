@@ -15,6 +15,7 @@
  */
 
 import {
+  type AnyCell,
   type Cell,
   computed,
   type Confidential,
@@ -28,6 +29,7 @@ import {
   isWellFormedDID,
   NAME,
   pattern,
+  spaceOf,
   type Stream,
   type TrustedActionWrite,
   UI,
@@ -722,9 +724,10 @@ export type PrivateInboxReceipt = Cell<PrivateInboxAnswer>;
 
 /**
  * Every answer Home gives a request for its inbox, which a request's receipt
- * links to one of: one per profile in Home's list, in list order, and one
- * each for a request naming no profile in the list and for one naming a
- * profile without `setInbox`.
+ * links to one of: one for each profile a request has named, keyed by the
+ * profile's document as {@link profileKeyOf} keys it, and one each for a
+ * request naming no profile in the list and for one naming a profile without
+ * `setInbox`.
  */
 export type PrivateInboxAnswers = {
   /**
@@ -754,13 +757,21 @@ export type AnswerTarget = {
 };
 
 /**
- * The key Home files its answer for `profile` under: the entity of the
- * profile's own result document, which no change to Home's list moves to
- * another profile. `undefined` for a value that names no entity.
+ * The key Home files its answer for `profile` under: the space of the
+ * profile's own document and the entity that document is, which together name
+ * one document wherever the profile sits in Home's list. `profile` is a
+ * profile as a handler or a computation reads it, a cell or the value a cell
+ * reads as. `undefined` for a profile that names no entity. Call it in a
+ * handler or a reactive computation, where `spaceOf()` can be called.
  */
 export function profileKeyOf(profile: unknown): string | undefined {
   const ref = getEntityId(profile);
-  return ref === undefined ? undefined : entityRefToString(ref);
+  // `spaceOf()` takes a cell or the value a cell reads as, as its own
+  // documentation says, though its declared type names only the cell.
+  const space = spaceOf(profile as AnyCell<unknown> | undefined);
+  return ref === undefined || space === undefined
+    ? undefined
+    : `${space}/${entityRefToString(ref)}`;
 }
 
 /**

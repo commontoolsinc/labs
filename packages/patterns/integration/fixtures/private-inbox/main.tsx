@@ -303,7 +303,6 @@ const recordRefusalOf = handler<
   });
 });
 
-/** Empties `profiles`. */
 /**
  * Takes the first profile out of `profiles`, by removing its link, which
  * leaves every other entry as it is stored.
@@ -315,6 +314,7 @@ const dropFirstProfile = handler<
   profiles.removeByValue(profiles.key(0).resolveAsCell());
 });
 
+/** Empties `profiles`. */
 const dropProfiles = handler<
   void,
   { profiles: Writable<ProfileHomeOutput[]> }

@@ -304,11 +304,11 @@ adopting it" says. It adopts nothing: adopting an inbox a profile advertises
 waits on the host's vetting, at the next ensure the host sends.
 
 The handler's result, which is its handling's receipt, is a link into Home's
-answers. The handler records the profile the request names, by the entity of
-the profile's own document, in Home's `privateInboxRequests`, and
+answers. The handler records the profile the request names, by the space and
+the entity of the profile's own document, in Home's `privateInboxRequests`, and
 `PrivateInboxAnswering` computes, once for all of them, with
 `privateInboxAnswersOf()`, an answer for each profile so recorded, filed under
-that entity, and one each for a request naming no listed profile and for one
+that key, and one each for a request naming no listed profile and for one
 naming a profile without `setInbox`. So a request leaves nothing running,
 however many are sent, and the receipt reads whatever the answer it links to
 reads now. A receipt answers for the profile it was sent for whatever else
@@ -328,7 +328,14 @@ and then the profile's own `setInbox`, so `ensured` comes only once the
 profile's pointer names Home's inbox, and every way that pointer can come to
 name something else is a final status rather than a `pending` that never ends.
 The handler reads whether the profile has `setInbox` from Home's list, bound
-as a value, so it decides only once the profile has loaded. The answer holds
+as a value, so it decides only once the profile has loaded.
+
+One way the pointer can fail to come is not a final status: the profile's
+`setInbox` run refused, as by Contextual Flow Control or a write policy. A
+refused run records nothing, and the pointing step's send gives Home no word
+of how the profile handled it, so Home cannot tell a refused pointing from one
+still on its way, and the answer stays `pending`. A client's own abort is the
+only way out of that wait. The answer holds
 no link to the inbox: a link to an inbox carries the label its
 owner gives its offers, which would then reach every run reading Home's
 answers. Once a request is `ensured`, the client reads the inbox from the
