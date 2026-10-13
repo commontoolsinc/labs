@@ -86,6 +86,17 @@ describe("pattern-swap-setup-verdict", () => {
   });
 
   /**
+   * Waits until the piece's instantiation and the writes before it have
+   * settled, so that a pointer move that follows cannot race them.
+   */
+  const settled = async () => {
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    await runtime.storageManager.synced();
+    await runtime.idle();
+  };
+
+  /**
    * Refuse, at the commit boundary, the setup the pattern watcher stages for
    * `pieceId`, and record each refusal's verdict in the returned list. The
    * watcher's setup is the only commit that writes the piece's setup marker
@@ -157,7 +168,7 @@ describe("pattern-swap-setup-verdict", () => {
     expect((await seed.commit().settled).error).toBeUndefined();
     expect(await runtime.start(piece)).toBe(true);
     const cancel = piece.sink(() => {});
-    await runtime.idle();
+    await settled();
     expect(piece.get()).toEqual({ slots: [2] });
 
     const refused = refuseWatcherSetup(piece.getAsNormalizedFullLink().id);
@@ -203,9 +214,9 @@ describe("pattern-swap-setup-verdict", () => {
     runtime.prepareTxForCommit(seed);
     expect((await seed.commit().settled).error).toBeUndefined();
     const cancel = piece.sink(() => {});
-    await runtime.idle();
+    await settled();
     piece.key("add").send({ add: "before" });
-    await runtime.idle();
+    await settled();
     expect(await piece.key("list").pull()).toEqual(["before"]);
     return {
       piece,
@@ -247,14 +258,17 @@ describe("pattern-swap-setup-verdict", () => {
     );
   }
 
-  it("delivers an event that dispatches before the incoming pattern's setup settles to that pattern's handler", async () => {
+  it("delivers events queued before the incoming pattern's setup settles to that pattern's handler", async () => {
     // The watcher's setup commit settles only once `settle` resolves. It
-    // resolves when the scheduler finds the event's piece mid-change, or, if
-    // nothing holds the event, when the running pattern's handler writes it to
-    // that pattern's list. The setup is applied locally before it settles, so
-    // the piece's `list` names the incoming pattern's cell by then, and the
-    // running pattern's list is watched where it lives.
+    // resolves when the scheduler finds the first event's piece mid-change,
+    // or, if nothing holds the event, when the running pattern's handler
+    // writes it to that pattern's list. The second event reaches the queue's
+    // head once the swap has finished, still holding the outgoing pattern's
+    // handler. The setup is applied locally before it settles, so the piece's
+    // `list` names the incoming pattern's cell by then, and the running
+    // pattern's list is watched where it lives.
     const { piece, v2Ref, cancel } = await runAppending();
+    const outgoingAdd = piece.key("add").resolveAsCell();
     const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
     const runner = runtime.runner;
     const consult = runner.pendingPatternChangeFor.bind(runner);
@@ -275,7 +289,8 @@ describe("pattern-swap-setup-verdict", () => {
         rawMetaWriteAuthorization,
       );
       expect((await move.commit().settled).error).toBeUndefined();
-      piece.key("add").send({ add: "after" });
+      outgoingAdd.send({ add: "after" });
+      outgoingAdd.send({ add: "later" });
       await settle.promise;
       await runtime.idle();
     } finally {
@@ -284,20 +299,23 @@ describe("pattern-swap-setup-verdict", () => {
       watch();
     }
 
-    expect(await piece.key("list").pull()).toEqual(["after"]);
+    expect(await piece.key("list").pull()).toEqual(["after", "later"]);
     cancel();
   });
 
   it("drops events the incoming pattern registers no handler for", async () => {
-    // Both events are queued while the swap's setup is held, so both hold the
-    // outgoing pattern's handler, which nothing replaces. The first reaches
-    // the queue's head while the swap is in flight and waits for it, which
-    // releases the setup; the second reaches it once the swap has finished.
-    // If nothing holds the first, the outgoing handler's write releases it.
+    // Both events are sent to the outgoing pattern's stream while the swap's
+    // setup is held, so both hold its handler, which nothing replaces. The
+    // first reaches the queue's head while the swap is in flight and waits for
+    // it, which releases the setup; the second reaches it once the swap has
+    // finished. If nothing holds the first, the outgoing handler's write
+    // releases it. The setup applies locally before it settles, and the
+    // incoming result has no `add`, so the stream is resolved beforehand.
     const { piece, v2Ref, cancel } = await runAppending(
       appending("labels", false),
     );
     const outgoingList = piece.key("list").resolveAsCell();
+    const outgoingAdd = piece.key("add").resolveAsCell();
     const settle = holdWatcherSetup(piece.getAsNormalizedFullLink().id);
     const runner = runtime.runner;
     const consult = runner.pendingPatternChangeFor.bind(runner);
@@ -317,8 +335,8 @@ describe("pattern-swap-setup-verdict", () => {
         rawMetaWriteAuthorization,
       );
       expect((await move.commit().settled).error).toBeUndefined();
-      piece.key("add").send({ add: "during" });
-      piece.key("add").send({ add: "after" });
+      outgoingAdd.send({ add: "during" });
+      outgoingAdd.send({ add: "after" });
       await settle.promise;
       await runtime.idle();
     } finally {
