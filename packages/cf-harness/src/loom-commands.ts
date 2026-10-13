@@ -180,11 +180,12 @@ export const readLoomCommandsConfig = async (
  * Whether a manifest row's own declarations say an agent may not run it. A
  * broker-stamped run reaches the command layer as an `agent:` actor with
  * origin `session`, so a row is left out when it is a pattern's verb (an
- * agent calls a piece's verbs through the piece it holds), a developer
- * command, one whose actors are all people, one that refuses or does not
- * require the `session` origin, or one that runs only over a person's
- * consent grant. The broker's grant decides what may run; this decides only
- * what is shown, and a row the host declares nothing about is shown.
+ * agent calls a piece's verbs through `call_verb` on the piece it holds), a
+ * developer command, one whose actors are all people, one that refuses or
+ * does not require the `session` origin, or one that runs only over a
+ * person's consent grant. The broker's grant decides what may run; this
+ * decides only what is shown, and a row the host declares nothing about is
+ * shown.
  */
 export const isHiddenFromAgents = (row: Record<string, unknown>): boolean => {
   const strings = (key: string): string[] =>

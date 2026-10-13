@@ -12,9 +12,9 @@
 /**
  * The root of a payload, as a refusal names it. Positions below it are spelled
  * the way the read boundary spells its own (`normalizeProjectionSchema`,
- * cell-selection.ts): a property is `.name`, an array element is `[index]`. A
- * caller meets both refusals through the same command, so they name a position
- * the same way.
+ * `packages/cli/lib/cell-selection.ts`): a property is `.name`, an array
+ * element is `[index]`. A caller meets both refusals through the same command,
+ * so they name a position the same way.
  *
  * Every flag-door refusal names THIS position and never one below it, because
  * a flag can only name a root field. A payload can nest, and reports the path
