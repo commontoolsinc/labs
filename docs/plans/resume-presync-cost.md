@@ -297,6 +297,18 @@ where the pre-sync was no longer the whole cost.
       stream under its event schema, one root carrying that schema per
       stream, for an absence record. A reload of the thirty-row room sends
       6.1 MB of watch frames instead of 10 MB.
+- [x] A fourth path had survived those three: setup writes each derived
+      internal cell's `result` pointer, and that meta write starts a load of
+      the cell's document under the cell's link schema, which for a
+      handler's stream is its event schema. One root carrying that schema
+      per stream, 4.5 KB each, about 25 per message row and 848 per load of
+      the thirty-row room, at the resume wave and again after the settle,
+      each answered with an absence record. The storage manager now loads
+      every cell declared a stream as the whole document
+      (`StorageManager.syncCell`), the rule the owned-cells wave had
+      applied for itself; the roots stay, at 26 bytes each. On a
+      three-row room the watch frames of a reload went from 1.5 MB to
+      1.1 MB, and the stream-event selector is gone from the frame log.
 - [x] A link schema written into an ordinary document is stored as a
       reference when the reference is the shorter wire form; a trivial
       schema, one decomposition refuses, and a bare handle stamp stay
