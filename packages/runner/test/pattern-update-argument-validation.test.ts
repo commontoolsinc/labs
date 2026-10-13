@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -17,6 +18,12 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
+import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
+import {
+  SEED_ENVELOPE_SCHEMA_HASH,
+  seedStoredEnvelope,
+  writeSeedEnvelopeDoc,
+} from "./cfc-seed-envelope.ts";
 
 // A pattern update must not leave durable state the new version's argument
 // schema cannot read. `packages/piece/src/schema-compatibility.ts` waives one
@@ -53,6 +60,12 @@ import { resultSchemaMetaSpelling } from "../src/result-schema-meta.ts";
 
 const signer = await Identity.fromPassphrase("pattern-update-argument-check");
 const space = signer.did();
+
+/** The confidentiality atom naming `owner`'s personal space. */
+const personalSpaceOf = (owner: string) => ({
+  type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+  owner,
+});
 
 const programOf = (contents: string): RuntimeProgram => ({
   main: "/main.tsx",
@@ -101,6 +114,21 @@ const typedRow = (marker: string): RuntimeProgram =>
     // stored docs of another vintage routinely do.
     "interface Row { name: string; other?: string; [key: string]: any }",
     "interface Args { row?: Row; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
+/**
+ * A candidate that types `tally` as a cell handle onto a counter, the way a
+ * pattern takes a document it shares with another as a `Writable`.
+ */
+const tallyHandle = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern, Writable } from 'commonfabric';",
+    "interface Counter { count?: number }",
+    "interface Args { tally?: Writable<Counter>; [key: string]: any }",
     "export default pattern<Args, { marker: string }>(() => {",
     `  return { marker: ${JSON.stringify(marker)} };`,
     "});",
@@ -175,6 +203,15 @@ describe("pattern update validates the stored argument", () => {
       cell,
       identity: rt.patternManager.getArtifactEntryRef(pattern)!.identity,
     };
+  };
+
+  /** The confidentiality atoms the label map stored for `id` carries. */
+  const confidentialityOf = async (id: URI): Promise<unknown[]> => {
+    const tx = rt.edit();
+    const entries = readStoredCfcMetadata(tx, { space, id })?.labelMap
+      .entries ?? [];
+    await tx.commit().settled;
+    return entries.flatMap((entry) => entry.label.confidentiality ?? []);
   };
 
   /** Stamp `ref` and materialize `candidate`, the production repair shape. */
@@ -1310,6 +1347,111 @@ describe("pattern update validates the stored argument", () => {
     ).toContain("updated arguments do not match the candidate schema");
     expect(error).toContain("name: value does not match type string");
     expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+  });
+
+  describe("a stored link in a slot the candidate types as a cell", () => {
+    // A slot typed `Writable` holds a handle, and a stored link is a valid
+    // handle whatever it reaches. What it reaches is another document's
+    // content, read and checked by the reactive reads that follow the handle,
+    // so the update neither judges it nor reads it. Not reading it is what
+    // keeps that document's labels out of the update's transaction, which
+    // writes the piece's own stores. The counterweight is the plain-typed
+    // slot above, whose linked content IS the argument and is still judged.
+
+    it("leaves the linked document's confidentiality off what the update writes", async () => {
+      const counter = rt.getCell<Record<string, unknown>>(
+        space,
+        "cell-slot-labeled-counter",
+      );
+      const counterId = counter.getAsNormalizedFullLink().id;
+      const seed = rt.edit();
+      writeSeedEnvelopeDoc(seed, space);
+      seedStoredEnvelope(seed, {
+        space,
+        scope: "space",
+        id: counterId,
+        path: [],
+      }, {
+        value: { count: 3 },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["count"],
+              label: { confidentiality: [personalSpaceOf(space)] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: counter },
+        "cell-slot-labeled-link",
+      );
+
+      const { error } = await rollForward(cell, tallyHandle("v2"));
+
+      expect(error).toBeUndefined();
+      // The stored value pins the root as the document the update wrote, and
+      // the counter carries the atom the root must not.
+      await cell.pull();
+      expect(cell.getRaw()).toEqual({ marker: "v2" });
+      expect(
+        await confidentialityOf(cell.getAsNormalizedFullLink().id),
+        "the update read the linked counter through the handle slot, and " +
+          "its transaction carried the counter's label onto the piece's root",
+      ).not.toContainEqual(personalSpaceOf(space));
+      expect(await confidentialityOf(counterId)).toContainEqual(
+        personalSpaceOf(space),
+      );
+    });
+
+    it("rolls forward when the link reaches a value the handle's schema refuses", async () => {
+      const counter = rt.getCell<Record<string, unknown>>(
+        space,
+        "cell-slot-wrong-type-counter",
+      );
+      const { error: writeError } = await rt.editWithRetry((tx) => {
+        counter.withTx(tx).set({ count: "seven" });
+      });
+      expect(writeError?.message).toBeUndefined();
+      await rt.idle();
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: counter },
+        "cell-slot-wrong-type-link",
+      );
+
+      const { error } = await rollForward(cell, tallyHandle("v2"));
+
+      expect(
+        error,
+        "a link in a handle slot was judged by the value it reaches",
+      ).toBeUndefined();
+      await cell.pull();
+      expect((cell.getAsQueryResult() as { marker: string }).marker).toBe(
+        "v2",
+      );
+    });
+
+    it("still refuses the same value stored in the slot itself", async () => {
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: { count: "seven" } },
+        "cell-slot-wrong-type-inline",
+      );
+
+      const { error, thrown } = await rollForward(cell, tallyHandle("v2"));
+
+      expect(error).toContain(
+        "updated arguments do not match the candidate schema",
+      );
+      expect(error).toContain("count: value does not match type number");
+      expect(isStoredArgumentSchemaRefusal(thrown)).toBe(true);
+    });
   });
 
   it("leaves a same-version setup alone over an argument its OWN schema rejects", async () => {

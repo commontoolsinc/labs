@@ -794,8 +794,9 @@ historical origin retains that origin.
 Preflight and setup share stored-argument validation. Optional fields holding
 `undefined` count as absent. An argument document or linked value unreadable in
 the validating transaction defers to reactive reads; a readable wrong-typed
-value is refused. Preflight does not establish that every linked value is
-available.
+value is refused. A link stored at a position the schema types as a cell
+handle validates as that handle, without reading what it reaches. Preflight
+does not establish that every linked value is available.
 
 When validation needs to distinguish unreadable links from literal absence, its
 fallback builds a view whose fields follow stored links as validation reads
