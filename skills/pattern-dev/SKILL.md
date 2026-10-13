@@ -167,9 +167,9 @@ with the square of the list, and a change to one element re-runs the scan in
 every row. Derive what is true of the list as a whole once, in the pattern that
 maps it, as a record keyed by element, and give each child that record as a
 cell: `ReadonlyCell<Record<string, T>>`, read as `facts.key(ownKey).get()`. A
-cell keyed that way reads one entry and re-runs when that entry changes; the
-same record taken as a plain value reads every entry in every child.
-`packages/patterns/fabrichat/room.tsx` derives `places` this way and
+computation that keys the cell that way reads one entry and re-runs when that
+entry changes; the same record taken as a plain value is read whole by every
+child. `packages/patterns/fabrichat/room.tsx` derives `places` this way and
 `packages/patterns/fabrichat/message-row.tsx` reads its own.
 
 How much of a value a `computed()` reads depends on what the value passes
