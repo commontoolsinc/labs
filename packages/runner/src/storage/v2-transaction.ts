@@ -1736,13 +1736,12 @@ export class V2StorageTransaction implements IStorageTransaction {
         journalIndex: this.#activityClock++,
       };
       this.#recordReadActivity(readActivity);
-      // The log lists a read the scheduler ignores only as an attempted
-      // write, so any other such read leaves the log it was built from
-      // standing (`#buildReactivityLog`).
-      if (
-        !isReadIgnoredForScheduling(readActivity.meta) ||
-        isReadMarkedAsAttemptedWrite(readActivity.meta)
-      ) {
+      // A record carrying the sealed verifier metadata is frozen with it
+      // (`#recordReadActivity`), and that metadata has the scheduler ignore
+      // the read and marks no attempted write, so the log never lists it and
+      // stands across it. Any other read's metadata can still change what
+      // the log says of it, so it retires the log.
+      if (readActivity.meta !== stableInternalVerifierRead) {
         this.#invalidateReactivityLog();
       }
     }

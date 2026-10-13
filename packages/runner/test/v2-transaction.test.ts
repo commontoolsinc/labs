@@ -15,6 +15,7 @@ import type {
   URI,
 } from "../src/storage/interface.ts";
 import {
+  ignoreReadForScheduling,
   internalVerifierRead,
   isInternalVerifierRead,
   stableInternalVerifierRead,
@@ -1053,7 +1054,7 @@ describe("v2-transaction", () => {
       return { storage, address, tx: storage.edit() };
     };
 
-    it("keeps the log across a read the scheduler ignores", async () => {
+    it("keeps the log across a read under the sealed verifier metadata", async () => {
       const { storage, address, tx } = await writerOverCommittedDocument(
         "of:v2-transaction-log-ignored-read",
       );
@@ -1072,6 +1073,30 @@ describe("v2-transaction", () => {
         const after = tx.getReactivityLog!();
         expect(after).not.toBe(built);
         expect(after.reads.map(({ path }) => path)).toEqual([["value", "a"]]);
+      } finally {
+        tx.abort();
+        await storage.close();
+      }
+    });
+
+    it("lists a read whose unsealed metadata stops ignoring it after the read", async () => {
+      // Only the sealed verifier metadata is ignored for good. A read under
+      // any other metadata can come to count, so the log does not stand
+      // across it.
+
+      const { storage, address, tx } = await writerOverCommittedDocument(
+        "of:v2-transaction-log-unsealed-read",
+      );
+      try {
+        expect(tx.write({ ...address, path: ["value", "b"] }, 2).ok)
+          .toBeTruthy();
+        expect(tx.getReactivityLog!().reads).toEqual([]);
+        const meta = { ...ignoreReadForScheduling };
+        expect(tx.read({ ...address, path: ["value", "a"] }, { meta }).ok)
+          .toBeTruthy();
+        for (const key of Reflect.ownKeys(meta)) delete meta[key];
+        expect(tx.getReactivityLog!().reads.map(({ path }) => path))
+          .toEqual([["value", "a"]]);
       } finally {
         tx.abort();
         await storage.close();
