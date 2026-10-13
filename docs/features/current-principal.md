@@ -107,8 +107,10 @@ They part in two places.
   initializes on nobody's behalf mints no claim, binds no owner, and is
   admitted, except under a literal owner DID, which every write must come
   from. A run of the serving loop's own that it attaches a principal's
-  snapshot to, as the space-root ensure attaches the owner it resolves, takes
-  its trust from that principal, and so does a piece start it defers.
+  snapshot to, as the space-root ensure attaches the owner it resolves, acts
+  for that principal, and so does a piece start it defers that initializes on
+  its behalf. A demanded derivation with no actor carries its demander's
+  snapshot for its reads but acts for no one, and is refused the same writes.
 - A host embedding the runtime can supply its own trust snapshot naming a
   different acting principal. The placeholder then resolves to that principal,
   and `currentPrincipal()` still returns the identity the runtime authenticates
@@ -190,7 +192,8 @@ write to a field with no owner yet and to one a user owns, refused an
 initialization attributed to it, and admitted, binding no one, an
 initialization on nobody's behalf. Its serving-loop cases cover a run of the
 loop's own under a principal's snapshot, which labels what it initializes for
-that principal and binds them as owner.
+that principal and binds them as owner, and a demanded derivation with no
+actor under its demander's snapshot, which is refused both.
 `packages/runner/test/executor-space-root-ensure.test.ts` covers the root's
 deferred start taking the owner's snapshot from the ensure, and
 `packages/runner/test/executor-effect-channel.test.ts` a served handler's

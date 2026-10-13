@@ -501,6 +501,46 @@ describe("authored-by-writer", () => {
     });
   });
 
+  describe("a demanded derivation with no actor, under its demander's trust snapshot", () => {
+    // The serving loop attaches the demander's snapshot to a derivation it
+    // runs for a demanded instance, before the seal settles whether the run
+    // acts for anyone; the snapshot alone does not make it act for them.
+
+    /** Stamps `tx` as such a derivation, demanded by `alice`. */
+    const demandedDerivation = (tx: IExtendedStorageTransaction) => {
+      stampWaveRunContext(tx, {
+        actionId: "derivation/authored-by-writer",
+        kind: "derivation",
+        attributionFromScope: true,
+      });
+      setCfcTrustSnapshot(tx, serving.trustSnapshotForPrincipal(alice.did()));
+    };
+
+    it("refuses the declared writer's write", async () => {
+      const { error, cell } = await write(
+        serving,
+        "derivation-note",
+        noteSchema(),
+        { setup: demandedDerivation },
+      );
+      expect(error).toContain(
+        "current-principal integrity requires the run's actor",
+      );
+      expect(authoredBy(serving, cell)).toEqual([]);
+    });
+
+    it("refuses the declared writer's write to a field with no owner", async () => {
+      const { error, cell } = await write(
+        serving,
+        "derivation-owned-field",
+        ownedSchema(),
+        { setup: demandedDerivation },
+      );
+      expect(error).toContain("ownerPrincipal requires the run's actor");
+      expect(representedBy(serving, cell)).toEqual([]);
+    });
+  });
+
   describe("a claim naming someone other than the acting principal", () => {
     // `bob`'s client runtime makes every write here; none may produce a claim
     // naming `alice`.

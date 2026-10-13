@@ -61,7 +61,7 @@ import {
   type ForeignPositions,
 } from "./claim-preservation.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { waveRunActorOf } from "../executor/wave.ts";
+import { waveRunActorOf, waveRunContextOf } from "../executor/wave.ts";
 import {
   decomposeSchema,
   recomposeSchema,
@@ -5610,23 +5610,30 @@ const storedRepresentedPrincipalsAt = (
 };
 
 /**
- * Whether `trustSnapshot`, the one `tx` takes its trust from, is the serving
- * runtime's own: it names the runtime's identity, and no run on `tx` is
- * stamped as acting for that identity. A serving runtime gives a run with no
- * actor this ambient snapshot, and a claim or an owner resolved under it would
- * name the service. A run it attaches a principal's snapshot to — a handler's
- * actor, or the owner the space-root ensure resolves — takes its trust from
- * that principal instead. Off the serving posture no snapshot is the serving
- * runtime's.
+ * Whether the run on `tx` acts for no one on a serving runtime, so that a
+ * claim or an owner binding resolved for it would name a principal it does not
+ * act for. A run acts for the actor its serving loop stamps on it. A run of
+ * the loop's own (`bookkeeping`) acts for the principal whose trust snapshot
+ * the loop attached to it, such as the owner the space-root ensure resolves or
+ * the parent of a start it defers, and for no one under the serving runtime's
+ * ambient snapshot, which names the runtime itself. Any other run with no
+ * stamped actor acts for no one whatever snapshot it carries: a demanded
+ * derivation carries its demander's for its reads, before the seal settles
+ * whether it acts for anyone. A transaction no serving loop stamped acts for
+ * no one under the ambient snapshot. Off the serving posture every run acts
+ * for the runtime's own user.
  */
-const trustIsServingRuntimeOwn = (
+const servedRunActsForNoOne = (
   tx: IExtendedStorageTransaction,
   trustSnapshot: TrustSnapshot,
 ): boolean => {
   const servingIdentity = tx.getCfcState().servingIdentity;
-  return servingIdentity !== undefined &&
-    trustSnapshot.actingPrincipal === servingIdentity &&
-    waveRunActorOf(tx) !== servingIdentity;
+  if (servingIdentity === undefined || waveRunActorOf(tx) !== undefined) {
+    return false;
+  }
+  const kind = waveRunContextOf(tx)?.kind;
+  if (kind !== undefined && kind !== "bookkeeping") return true;
+  return trustSnapshot.actingPrincipal === servingIdentity;
 };
 
 const currentPrincipalIntegrityReason = (
@@ -5691,13 +5698,13 @@ const currentPrincipalIntegrityReason = (
         path.join("/")
       }`;
     }
-    // Under the serving runtime's own trust snapshot, an owner the write
-    // matched or bound would be the service. Only an initialization on
-    // nobody's behalf at a placeholder owner checks no owner and binds no
-    // one, so only that is left to admit.
+    // A run that acts for no one would match or bind an owner it does not
+    // act for, the service under the serving runtime's own snapshot. Only an
+    // initialization on nobody's behalf at a placeholder owner checks no
+    // owner and binds no one, so only that is left to admit.
     // SPEC-PENDING https://github.com/commonfabric/specs/pull/64
     if (
-      trustIsServingRuntimeOwn(tx, trustSnapshot) &&
+      servedRunActsForNoOne(tx, trustSnapshot) &&
       (!isCurrentPrincipalPlaceholder(ownerPrincipalSpec) ||
         !pathHoldsUnattributedInitialization(tx, target, path))
     ) {
@@ -5766,10 +5773,10 @@ const currentPrincipalIntegrityReason = (
       path.join("/")
     }`;
   }
-  // Under the serving runtime's own trust snapshot, a claim the write minted
-  // would name the service.
+  // A run that acts for no one would mint a claim naming a principal it does
+  // not act for, the service under the serving runtime's own snapshot.
   if (
-    trustIsServingRuntimeOwn(tx, trustSnapshot) &&
+    servedRunActsForNoOne(tx, trustSnapshot) &&
     claimsCurrentPrincipalAt(tx, target, path)
   ) {
     return `current-principal integrity requires the run's actor at /${

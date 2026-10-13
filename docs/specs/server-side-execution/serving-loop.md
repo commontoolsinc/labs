@@ -1034,7 +1034,9 @@ action's public write. Therefore, normatively:
   snapshot and cannot mint USER-NAMED current-principal claims. A
   transaction under the service snapshot is refused a write that would
   resolve a current-principal placeholder or an owner binding to the
-  SERVICE, initialization included (`currentPrincipalIntegrityReason`).
+  SERVICE, initialization included (`currentPrincipalIntegrityReason`),
+  and so is a demanded derivation with no actor under its demander's
+  snapshot, which is attached for its reads and names no actor.
   A bookkeeping run the loop attaches a principal's snapshot to — the
   space-root ensure's resolved owner — hands that snapshot to the piece
   starts it defers, so their initializations resolve to the owner.
