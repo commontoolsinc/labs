@@ -1237,12 +1237,16 @@ is the batch lane's,
 
 A piece that is already running when it is opened keeps its reactive nodes
 through step 7. The runner's pattern watcher re-instantiates it on the accepted
-pattern, and the open resolves once the watcher has finished, so the caller is
-handed a piece running the pattern its `patternIdentity` names whether or not
-the piece was running. A re-instantiation that fails leaves the piece on the
-pattern it was running. [In-place
-apply](pattern-imports/pattern-updates.md#in-place-apply) states which pointer
-moves that wait covers and what it does not.
+pattern, and the open waits for the watcher to finish. Where the
+re-instantiation succeeds, the caller is handed a piece running the pattern its
+`patternIdentity` names, as it is for a piece that was not running.
+
+Two cases leave the caller with the outgoing pattern's nodes still running. A
+re-instantiation that fails is logged, and the piece stays on the pattern it
+was running. On a runtime that seals its writes into a serving wave, the
+re-instantiation follows the wave's settlement, and the open does not wait for
+it. [In-place apply](pattern-imports/pattern-updates.md#in-place-apply) states
+which pointer moves the wait covers.
 
 If reconciliation fails and the current source remains loadable, the runtime
 starts that source. A piece in that state is not following its origin any

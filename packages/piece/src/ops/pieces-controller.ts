@@ -1844,7 +1844,9 @@ export class PiecesController<T = unknown> {
    * moved to. This resolves once the watcher has, for the move this open's
    * own reconcile made and for any earlier move the watcher has observed. A
    * re-instantiation that fails is logged by the runner and leaves the piece
-   * on the pattern it was running.
+   * on the pattern it was running. On a runtime that seals its writes into a
+   * serving wave, the re-instantiation follows the wave's settlement, and
+   * this resolves with the outgoing pattern's graph still running.
    */
   async openPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
     const piece = typeof pieceOrId === "string"
