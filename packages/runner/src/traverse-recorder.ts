@@ -1,9 +1,21 @@
-import type { SchemaPathSelector } from "@commonfabric/api";
+import type { JSONSchema, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   type FabricValue,
   hashStringOf,
+  isFabricPlainObject,
 } from "@commonfabric/data-model";
+
+import { internSchema } from "@commonfabric/data-model-schema";
+import {
+  isSubschema,
+  mapSubschemas,
+} from "@commonfabric/data-model-schema/schema-walk";
+import {
+  formatExternalSchemaRef,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 
 import { getLogger } from "../../utils/src/logger.ts";
 import type { NormalizedFullLink } from "./link-utils.ts";
@@ -101,6 +113,7 @@ const DEFAULT_MAX_INVOCATIONS = 20_000;
 /** @internal Exported for focused capture tests. */
 export class TraverseCaptureRecorder {
   #docs = new Map<string, FabricValue>();
+  #verifiedSchemaDocs = new Set<string>();
 
   #invocations: TraverseFixtureInvocation[] = [];
 
@@ -229,6 +242,17 @@ export class TraverseCaptureRecorder {
       { meta: ignoreReadForScheduling },
     );
     if (ok !== undefined && ok.value !== undefined) {
+      if (
+        address.id.startsWith("cid:") && isFabricPlainObject(ok.value) &&
+        isSubschema(ok.value.value) &&
+        `cid:${
+            internSchema(cloneIfNecessary(ok.value.value), true)
+              .taggedHashString
+          }` ===
+          address.id
+      ) {
+        this.#verifiedSchemaDocs.add(key);
+      }
       this.#docs.set(
         key,
         cloneIfNecessary(portableSnapshotLinks(ok.value)),
@@ -279,6 +303,141 @@ export class TraverseCaptureRecorder {
   }
 
   toFixture(name: string, source: string): TraverseFixture {
+    // Portable IDs change schema content. Readdress verified schema documents
+    // dependency-first, and rewrite schema positions against the same corpus.
+    // Missing or invalid documents stay missing or invalid in the replay.
+    const docs = new Map<string, FabricValue>();
+    const ids = new Map<string, string>();
+    const active = new Set<string>();
+    type Context = { space: string; scope?: string; type?: string };
+    const rewriteRef = (ref: string, context: Context): string => {
+      const parsed = parseExternalSchemaRef(ref);
+      if (parsed === undefined) return ref;
+      const id = rewriteDoc(`cid:${parsed.taggedHash}`, {
+        ...context,
+        scope: "space",
+        type: "application/json",
+      });
+      return formatExternalSchemaRef(id.slice(4), parsed.defName);
+    };
+    const rewriteSchema = (
+      schema: JSONSchema,
+      context: Context,
+    ): JSONSchema => {
+      if (typeof schema === "boolean") return schema;
+      const children = mapSubschemas(
+        schema,
+        (child) => rewriteSchema(child, context),
+        { includeDefs: true, includeUnused: true },
+      );
+      const ref = typeof children.$ref === "string"
+        ? rewriteRef(children.$ref, context)
+        : children.$ref;
+      const result = ref === children.$ref
+        ? children
+        : { ...children, $ref: ref };
+      // Defaults may themselves contain links with reader schemas.
+      return mapLinkSchemas(
+        result,
+        (nested) =>
+          isSubschema(nested) ? rewriteSchema(nested, context) : nested,
+      ) as JSONSchema;
+    };
+    const rewriteValue = (value: FabricValue, context: Context): FabricValue =>
+      mapLinkSchemas(
+        value,
+        (schema) =>
+          isSubschema(schema) ? rewriteSchema(schema, context) : schema,
+      );
+    const rewriteDoc = (id: string, context: Context): string => {
+      const key = fixtureDocKey({ ...context, id });
+      const cached = ids.get(key);
+      if (cached !== undefined) return cached;
+      const fact = this.#docs.get(key);
+      if (fact === undefined) return id;
+      // External schema groups are acyclic; recursive members use local $defs.
+      if (active.has(key)) {
+        throw new Error("Circular captured schema documents");
+      }
+      active.add(key);
+      let result = rewriteValue(fact, context);
+      let nextId = id;
+      if (isFabricPlainObject(result)) {
+        if (this.#verifiedSchemaDocs.has(key) && isSubschema(result.value)) {
+          const schema = internSchema(
+            rewriteSchema(result.value, context),
+            true,
+          );
+          nextId = `cid:${schema.taggedHashString}`;
+          result = { ...result, value: schema.schemaOrUndefined };
+        }
+        if (isSubschema(result.schema)) {
+          result = { ...result, schema: rewriteSchema(result.schema, context) };
+        }
+      }
+      ids.set(key, nextId);
+      docs.set(
+        fixtureDocKey({ ...context, id: nextId }),
+        cloneIfNecessary(result),
+      );
+      active.delete(key);
+      return nextId;
+    };
+    for (const key of this.#docs.keys()) {
+      const [space, scope, id, type] = key.split("|");
+      rewriteDoc(id, { space, scope, type });
+    }
+    const selectors: SchemaPathSelector[] = [];
+    const links: NormalizedFullLink[] = [];
+    const selectorIndices = new Map<string, number>();
+    const linkIndices = new Map<string, number>();
+    const intern = <T extends FabricValue>(
+      value: T,
+      table: T[],
+      index: Map<string, number>,
+    ): number => {
+      const hash = hashStringOf(value);
+      const previous = index.get(hash);
+      if (previous !== undefined) return previous;
+      const position = table.length;
+      table.push(value);
+      index.set(hash, position);
+      return position;
+    };
+    const invocations = this.#invocations.map((invocation) => {
+      const context = invocation.address;
+      const selector = this.#selectors[invocation.selector];
+      const selectorIndex = intern(
+        {
+          ...selector,
+          schema: selector.schema === undefined
+            ? undefined
+            : rewriteSchema(selector.schema, context),
+        },
+        selectors,
+        selectorIndices,
+      );
+      const link = invocation.link === undefined
+        ? undefined
+        : this.#links[invocation.link];
+      const linkIndex = link === undefined ? undefined : intern(
+        {
+          ...link,
+          id: rewriteDoc(link.id, link) as NormalizedFullLink["id"],
+          schema: link.schema === undefined
+            ? undefined
+            : rewriteSchema(link.schema, link),
+        },
+        links,
+        linkIndices,
+      );
+      return {
+        ...invocation,
+        address: { ...context, id: rewriteDoc(context.id, context) },
+        selector: selectorIndex,
+        ...(link !== undefined && { link: linkIndex }),
+      };
+    });
     return {
       version: 2,
       meta: {
@@ -286,12 +445,12 @@ export class TraverseCaptureRecorder {
         source,
         capturedAt: new Date().toISOString(),
       },
-      selectors: this.#selectors,
-      links: this.#links,
+      selectors,
+      links,
       docs: Object.fromEntries(
-        [...this.#docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
+        [...docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
       ),
-      invocations: this.#invocations,
+      invocations,
     };
   }
 

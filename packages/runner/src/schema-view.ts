@@ -49,6 +49,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
 import { readStatsActive, recordProxyAccess } from "./read-stats.ts";
 import { toCell } from "./back-to-cell.ts";
 import { type Cell, createCell } from "./cell.ts";
@@ -76,7 +77,6 @@ import {
   opaqueLeafMissesRequired,
   schemaAcceptsType,
 } from "./traverse.ts";
-import { immutableCellsFor } from "./immutable-cell.ts";
 
 const logger = getLogger("schema-view", { enabled: false, level: "warn" });
 
@@ -317,6 +317,7 @@ export function materializeSchemaView(
   synced: boolean,
   isRoot: boolean,
 ): unknown {
+  pinImmutableCell(link, link.id);
   const mismatch = (reason: string): undefined => {
     // Register the read that failed before doing anything else. A refusal has
     // to leave behind the dependency that re-triggers the reader when the data
@@ -794,7 +795,7 @@ function createArrayView(
         tx,
         {
           ...slotLink,
-          id: immutableCellsFor(runtime).create(item, slotLink).id,
+          id: immutableCellsFor(runtime).createElement(item, slotLink).id,
           path: [],
         },
         [key],

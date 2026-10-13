@@ -24,6 +24,7 @@ import type {
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
+import { ownImmutableCells } from "./immutable-cell.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import {
   type BaseMemoryAddress,
@@ -298,6 +299,8 @@ export class GraphQueryWalk {
 
     const tx = new ExtendedStorageTransaction(
       new ManagedStorageTransaction(this.#manager),
+      {},
+      ownImmutableCells(this.#memo),
     );
     if (!covered) {
       const value = (document.value as { value: FabricValue }).value;

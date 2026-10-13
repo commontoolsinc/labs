@@ -20,6 +20,7 @@ import {
   isNontrivialSchema,
   schemaWithProperties,
 } from "@commonfabric/data-model-schema";
+import { hasInlineCellScheme, pinImmutableCell } from "./immutable-cell.ts";
 import { readStatsActive, recordLinkResolution } from "./read-stats.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
@@ -104,7 +105,6 @@ import {
   schemaAcceptsType,
   SchemaObjectTraverser,
 } from "./traverse.ts";
-import { hasInlineCellScheme } from "./immutable-cell.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -955,6 +955,7 @@ export function annotateWithBackToCellSymbols(
   synced = false,
   cfcLabelView?: CfcLabelView,
 ) {
+  pinImmutableCell(link, link.id);
   if (
     !isObjectOrArray(value) || isCell(value) ||
     value instanceof FabricPrimitive

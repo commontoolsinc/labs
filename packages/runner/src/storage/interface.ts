@@ -3759,7 +3759,7 @@ export interface IStorageTransactionWriteIsolationError extends IStorageError {
 }
 
 /**
- * Error returned when attempting to write to a read-only address (data: URI).
+ * Error returned when attempting to write to a read-only address (`snapshot:` or `data:` URI).
  */
 export interface IReadOnlyAddressError extends IStorageError {
   readonly name: "ReadOnlyAddressError";

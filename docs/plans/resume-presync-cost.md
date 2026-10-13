@@ -38,7 +38,7 @@ few recurring across the rows that received them.
 **A plan's inputs cell recomposes every schema.** `#bindNodeIO` hands the
 bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
-the `data:` id. The rewrite stays: a traversal accepts a reference-form
+the `snapshot:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
 and no write has stored the links a plan binds, so a link inside the inputs
 cell carries its schema inline (`packages/runner/src/link-utils.ts`). What

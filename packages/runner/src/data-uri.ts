@@ -4,8 +4,12 @@
  * expand immutable references to their contents. Portable data URIs use the
  * canonical data-model codec and remain available for offline capture.
  *
- * Both formats carry a cell value. Storage supplies the separate document
+ * Both formats address a cell value. Storage supplies the separate document
  * wrapper, keeping payload properties distinct from document facets.
+ *
+ * The link-utility dependency is one-way: this module imports `link-utils.ts`,
+ * which imports no encoding operations back. `link-equality.ts` composes link
+ * normalization and content comparison above both modules.
  */
 
 import {
@@ -31,6 +35,13 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import {
+  type ImmutableSnapshot,
+  immutableSnapshot,
+  inlineCellValue,
+  isImmutableCellId,
+  isInlineCellId,
+} from "./immutable-cell.ts";
+import {
   isPrimitiveCellLink,
   type NormalizedLink,
   type PrimitiveCellLink,
@@ -47,12 +58,6 @@ import {
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
 import type { URI } from "./sigil-types.ts";
-import {
-  immutableSnapshot,
-  inlineCellValue,
-  isImmutableCellId,
-  isInlineCellId,
-} from "./immutable-cell.ts";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
@@ -174,7 +179,7 @@ function mapLinks(
   value: FabricValue,
   rewrite: (link: PrimitiveCellLink) => FabricValue,
   seen: Set<object> = new Set(),
-  includeSchemas = false,
+  includeSchemas: false | "changed" | "all" = false,
 ): FabricValue {
   if (!isObjectOrArray(value)) return value;
   if (seen.has(value)) {
@@ -190,11 +195,11 @@ function mapLinks(
           payload.schema,
           rewrite,
           seen,
-          true,
+          includeSchemas,
         ) as typeof payload.schema;
         return rewrite(
           schema === payload.schema
-            ? link
+            ? includeSchemas === "all" ? link : value
             : linkRefFrom({ ...payload, schema }),
         );
       }
@@ -266,16 +271,29 @@ export function resolveImmutableValueLinks(
   id: URI,
 ): FabricValue {
   if (!isImmutableCellId(id)) return value;
-  const { origin } = immutableSnapshot(id);
-  if (origin === undefined) return value;
-  return mapLinks(
+  const snapshot = immutableSnapshot(id);
+  const { origin } = snapshot;
+  if (origin === undefined || !isObjectOrArray(value)) return value;
+  const cached = resolvedSnapshotValues.get(snapshot)?.get(value);
+  if (cached !== undefined) return cached;
+  const misses = externalResolutionMissCount();
+  const resolved = cloneIfNecessary(mapLinks(
     value,
     (link) =>
       createSigilLinkFromParsedLink(parseLink(link, { ...origin, path: [] }), {
         includeSchema: true,
         keepAsCell: KeepAsCell.All,
       }),
-  );
+  ));
+  if (externalResolutionMissCount() === misses) {
+    let values = resolvedSnapshotValues.get(snapshot);
+    if (values === undefined) {
+      values = new WeakMap();
+      resolvedSnapshotValues.set(snapshot, values);
+    }
+    values.set(value, resolved);
+  }
+  return resolved;
 }
 
 /**
@@ -285,25 +303,42 @@ export function resolveImmutableValueLinks(
  */
 export function portableSnapshotId(id: URI): URI {
   if (!isImmutableCellId(id)) return id;
-  const value = resolveImmutableValueLinks(inlineCellValue(id), id);
-  return dataUriFromValue(portableSnapshotLinks(value));
+  const snapshot = immutableSnapshot(id);
+  const cached = portableSnapshotIds.get(snapshot);
+  if (cached !== undefined) return cached;
+  const misses = externalResolutionMissCount();
+  const value = resolveImmutableValueLinks(snapshot.value, id);
+  const portable = dataUriFromValue(portableSnapshotLinks(value, true));
+  if (externalResolutionMissCount() === misses) {
+    portableSnapshotIds.set(snapshot, portable);
+  }
+  return portable;
 }
 
 /** Cached content identities for comparisons with portable immutable links. */
 let immutableContentIds = new WeakMap<object, string>();
+let portableSnapshotIds = new WeakMap<ImmutableSnapshot, URI>();
+let resolvedSnapshotValues = new WeakMap<
+  ImmutableSnapshot,
+  WeakMap<object, FabricValue>
+>();
 onSchemaRegistryClear(() => {
   immutableContentIds = new WeakMap();
+  portableSnapshotIds = new WeakMap();
+  resolvedSnapshotValues = new WeakMap();
 });
 
 /** Returns the canonical portable content hash of either immutable format. */
 export function immutableContentId(id: URI): string {
-  if (!isImmutableCellId(id)) return hashStringOf(valueFromDataUri(id));
+  if (!isImmutableCellId(id)) {
+    return hashStringOf(canonicalImmutableContent(valueFromDataUri(id)));
+  }
   const snapshot = immutableSnapshot(id);
   let hash = immutableContentIds.get(snapshot);
   if (hash === undefined) {
     const misses = externalResolutionMissCount();
     hash = hashStringOf(
-      portableSnapshotLinks(resolveImmutableValueLinks(snapshot.value, id)),
+      canonicalImmutableContent(resolveImmutableValueLinks(snapshot.value, id)),
     );
     if (externalResolutionMissCount() === misses) {
       immutableContentIds.set(snapshot, hash);
@@ -312,8 +347,38 @@ export function immutableContentId(id: URI): string {
   return hash;
 }
 
-/** Replaces native link IDs with self-contained IDs at a portable boundary. */
-export function portableSnapshotLinks(value: FabricValue): FabricValue {
+/** Normalizes both generations of link spelling before comparing contents. */
+function canonicalImmutableContent(value: FabricValue): FabricValue {
+  return mapLinks(
+    value,
+    (link) => {
+      const parsed = parseLink(link);
+      if (parsed.id !== undefined && isInlineCellId(parsed.id)) {
+        parsed.id = dataUriFromValue(canonicalImmutableContent(
+          resolveImmutableValueLinks(inlineCellValue(parsed.id), parsed.id),
+        ));
+      }
+      return inlineExternalSchemaRefsInValue(
+        createSigilLinkFromParsedLink(parsed, {
+          includeSchema: true,
+          keepAsCell: KeepAsCell.All,
+        }),
+      );
+    },
+    new Set(),
+    "all",
+  );
+}
+
+/**
+ * Replaces native link IDs with self-contained IDs at a portable boundary.
+ * Unchanged schema references remain available for the durable schema writer;
+ * `inlineSchemas` closes every available schema for standalone snapshot export.
+ */
+export function portableSnapshotLinks(
+  value: FabricValue,
+  inlineSchemas = false,
+): FabricValue {
   return mapLinks(
     value,
     (link) => {
@@ -324,7 +389,7 @@ export function portableSnapshotLinks(value: FabricValue): FabricValue {
       return linkRefFrom({ ...payload, id: portableSnapshotId(payload.id) });
     },
     new Set(),
-    true,
+    inlineSchemas ? "all" : "changed",
   );
 }
 

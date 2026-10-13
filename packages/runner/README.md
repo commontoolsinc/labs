@@ -396,8 +396,8 @@ inference.
 > patterns, declared defaults (`Default<>`) become schema defaults and the
 > initial state is written to storage when the piece is instantiated. Without
 > that instantiation write, a schema `default` stays **virtual** — readable, but
-> backed by a read-only `data:` document — so writing through a nested cell it
-> materialized throws `ReadOnlyAddressError`, links resolve against stored
+> backed by a read-only `snapshot:` document — so writing through a nested cell
+> it materialized throws `ReadOnlyAddressError`, links resolve against stored
 > values only, and nested-path subscriptions see `undefined`. The examples below
 > therefore seed initial state with an explicit `runtime.edit()` transaction
 > before mutating through nested cells or resolving links.

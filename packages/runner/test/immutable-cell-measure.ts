@@ -64,7 +64,7 @@ for (const schemaShape of ["inline", "reference"]) {
       const store = new ImmutableCellStore();
       const shared = deepFreeze(makeValue());
       const legacy = dataUriSnapshotWithResolvedLinks(shared, base);
-      const snapshot = store.create(shared, base);
+      const snapshot = store.createElement(shared, base);
       if (
         !valueEqual(
           valueFromDataUri(legacy.id),
@@ -98,7 +98,7 @@ for (const schemaShape of ["inline", "reference"]) {
           const start = performance.now();
           for (let i = 0; i < iterations; i++) {
             if (arm === "legacy") dataUriSnapshotWithResolvedLinks(value, base);
-            else measuredSnapshot = store.create(value, base);
+            else measuredSnapshot = store.createElement(value, base);
           }
           const elapsed = (performance.now() - start) / iterations;
           if (measuredSnapshot !== undefined) {

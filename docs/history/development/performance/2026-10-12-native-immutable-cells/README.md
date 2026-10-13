@@ -2,7 +2,8 @@
 status: historical
 created: 2026-10-12
 archived: 2026-10-12
-reason: "Implementation and measurement record for native immutable cells."
+reason: "Initial measurement record; sharesFrozenGraph did not describe measured inputs. Use the 2026-10-13 feedback report for corrected sharing evidence. Runtime-lifetime element retention is superseded by weak source-and-handle ownership."
+superseded-by: "../2026-10-13-immutable-cell-feedback/README.md"
 ---
 
 # Native immutable cells: implementation and measurements
@@ -12,7 +13,7 @@ This change replaces newly minted immutable-cell payload URIs with compact
 mutable input uses the canonical clone-and-freeze machinery, and array snapshots
 save their relative-link origin. Export expands snapshots to values; legacy
 Fabric data URIs remain readable. The live contract is
-[Immutable cell identifiers](../../../../features/data-uri-identifiers.md).
+[Immutable cell identifiers](../../../../features/immutable-cell-identifiers.md).
 
 The checkout started at `13845915081539396bbede3a57ec6d4877bee35c`. These are
 local measurements of the implementation, not a production rollout or an
@@ -64,7 +65,7 @@ final harnesses are:
   two warm-up pairs, alternating arm order. Each fresh arm receives an equal,
   independently created graph. Construction/freezing of fixtures and semantic
   checks are outside timing. Reused cases run ten operations per sample.
-- `packages/runner/test/immutable-cell.bench.ts`: Deno benchmarks for fresh
+- `packages/runner/test/immutable-cell-codec.bench.ts`: Deno benchmarks for fresh
   creation plus reading, repeated creation, and repeated reading at 1, 100, and
   1,000 rows. Raw codec encode/decode is compared with native create/get.
 - `packages/runner/test/immutable-cell-retention.ts`: post-GC heap for changing

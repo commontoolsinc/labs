@@ -1568,6 +1568,18 @@ export function normalizeAndDiff(
     }
   }
 
+  // Ordinary document links can carry immutable values in schema defaults.
+  // Expand those before the writer decomposes their schemas into durable docs.
+  if (
+    isPrimitiveCellLink(newValue) &&
+    !isInlineCellId(parseLink(newValue, link).id)
+  ) {
+    newValue = attachCfcLabelViewToSigilLink(
+      findAndInlineDataUriLinks(newValue),
+      cfcLabelViewForPrimitiveLink(newValue),
+    );
+  }
+
   // The incoming value's link, parsed once for every check below that asks
   // whether the value is a link or where it points, and `undefined` where it
   // is not a sigil link.

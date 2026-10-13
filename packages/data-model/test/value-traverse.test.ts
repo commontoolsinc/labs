@@ -23,6 +23,18 @@ describe("forEachFabricContainerValue", () => {
     expect(Object.isFrozen(root)).toBe(false);
   });
 
+  it("visits each identity once when cycles are allowed", () => {
+    const child: Record<string, FabricValue> = {};
+    const value = { child, again: child };
+    child.parent = value;
+    const visited: FabricContainerValue[] = [];
+    forEachFabricContainerValue(value, (node) => visited.push(node), {
+      allowCycles: true,
+    });
+    expect(visited).toEqual([value, child]);
+    expect(Object.isFrozen(value)).toBe(false);
+  });
+
   it("rejects cycles without mutating the graph", () => {
     const value: Record<string, FabricValue> = {};
     value.self = value;

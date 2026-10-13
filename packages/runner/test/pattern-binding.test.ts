@@ -24,7 +24,6 @@ import {
 } from "../src/cfc/link-label-view.ts";
 import { createCell, isCell } from "../src/cell.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
@@ -33,6 +32,7 @@ import {
   parseLink,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   causalFormOfBinding,

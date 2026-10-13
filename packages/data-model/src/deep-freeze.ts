@@ -118,6 +118,7 @@ function isDeepFrozenWithCache(
   // build the recursion callback ONCE here, reusing the same closure at every
   // layer rather than allocating an equivalent `(v) => …` per descent.
   const inProgress = new Set<object>();
+  const confirmed = new Set<object>();
   const check = (value: unknown): boolean => {
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return true;
@@ -131,7 +132,7 @@ function isDeepFrozenWithCache(
     // If we're already checking `obj` higher in the recursion, treat it as
     // frozen for the rest of this check: it only ends up marked actually
     // deep-frozen if the outer check confirms.
-    if (inProgress.has(obj)) return true;
+    if (inProgress.has(obj) || confirmed.has(obj)) return true;
     inProgress.add(obj);
 
     let result = true;
@@ -169,14 +170,20 @@ function isDeepFrozenWithCache(
 
     inProgress.delete(obj);
     if (result) {
-      addToDeepFrozenCache(obj);
+      confirmed.add(obj);
     } else {
       notDeepFrozen?.add(obj);
     }
     return result;
   };
 
-  return check(value);
+  const result = check(value);
+  // A cycle member depends on its ancestors' proofs. Publish those proofs
+  // together only after the entire reachable graph succeeds.
+  if (result) {
+    for (const object of confirmed) addToDeepFrozenCache(object);
+  }
+  return result;
 }
 
 /**

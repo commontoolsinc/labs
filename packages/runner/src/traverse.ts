@@ -77,6 +77,7 @@ import {
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -125,7 +126,6 @@ import {
   recordTraverseInvocation,
   wrapTxForTraverseCapture,
 } from "./traverse-recorder.ts";
-import { immutableCellsFor } from "./immutable-cell.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
@@ -246,9 +246,9 @@ const _memoIdDigests = new LRUCache<string, string>({
 });
 
 /**
- * Fixed-size stand-in for a document id that carries its own content.
+ * Fixed-size traversal key for a document identifier.
  *
- * A data URI names the value it holds, so an inline document's id is as long
+ * A legacy data URI names the value it holds, so its id is as long
  * as the document — tens of thousands of characters for a component that
  * holds a list. A key built from that id costs a copy and a hash of every one
  * of those characters, and the traversal builds one key per node it visits
@@ -2099,13 +2099,13 @@ function getNormalizedLink(
     throw new Error("Unable to create link to non-value address");
   }
   const { space, id, path } = address;
-  return {
+  return pinImmutableCell({
     space,
     id,
     scope: address.scope ?? "space",
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
-  };
+  }, id);
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -5435,7 +5435,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell.set(array);
       // ```
       // work as expected. Handle boolean items values for element schema
-      // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isSigilLink(item)) {
         const elementLink = parseLink(item, curDoc.address);
@@ -5578,7 +5577,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // The snapshot shares the frozen element and saves its relative-link
         // origin, so traversal needs no link-rewriting walk here.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-        const snapshot = immutableCellsFor(this.tx).create(
+        const snapshot = immutableCellsFor(this.tx).createElement(
           curDoc.value,
           elementLink,
         );

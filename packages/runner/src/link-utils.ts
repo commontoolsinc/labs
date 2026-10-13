@@ -35,8 +35,6 @@ import { getContentAddressedSchemasConfig } from "./schema-doc-config.ts";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
 
-import { immutableContentId } from "./data-uri.ts";
-import { isInlineCellId } from "./immutable-cell.ts";
 import {
   type AnyCell,
   type DerivedInternalCellDescriptor,
@@ -58,11 +56,10 @@ import {
 } from "./cfc.ts";
 import { resolveExternalCfcSchemaRefAsDocument } from "./cfc/schema-refs.ts";
 import { createRef } from "./create-ref.ts";
-import { resolveLink } from "./link-resolution.ts";
+import { pinImmutableCell } from "./immutable-cell.ts";
 import { ensureExternalSchemaClosure } from "./schema-ifc.ts";
 import {
   areNormalizedLinksSame,
-  isNormalizedFullLink,
   isNormalizedLink,
   isPrimitiveCellLink,
   NormalizedFullLink,
@@ -75,7 +72,6 @@ import {
   getCellOrThrow,
   isCellResultForDereferencing,
 } from "./query-result-proxy.ts";
-import type { Runtime } from "./runtime.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { type CellLinkRefPayload, type SigilLink } from "./sigil-types.ts";
 import {
@@ -148,7 +144,9 @@ export function parseLink(
     // it names somebody else's doc, so a later read that dead-ends at
     // that doc missing is an unresolved input, not a known absence.
     const markDerived = <L extends NormalizedLink | undefined>(link: L): L =>
-      link === undefined ? link : { ...link, viaLinkHop: true as const };
+      link === undefined
+        ? link
+        : pinImmutableCell({ ...link, viaLinkHop: true as const }, link.id);
     if (!base) {
       return markDerived(parseLinkPrimitive(value));
     } else if (isAnyCell(base)) {
@@ -177,63 +175,6 @@ export function parseLinkOrThrow(
     );
   }
   return result;
-}
-
-/**
- * Compare two link values for equality, supporting all link formats
- */
-export function areLinksSame(
-  value1: any,
-  value2: any,
-  base?: Cell | NormalizedLink,
-  resolveBeforeComparing?: boolean,
-  txForResolving?: IExtendedStorageTransaction,
-  runtime?: Runtime,
-  markIfcCrossings?: boolean,
-): boolean {
-  if (value1 === undefined && value2 === undefined) return false;
-
-  // If both are the same object, they're equal
-  if (value1 === value2) return true;
-
-  // If either is null/undefined, they're only equal if both are
-  if (!value1 || !value2) return value1 === value2;
-
-  // Try parsing both as links
-  let link1 = parseLink(value1, base);
-  let link2 = parseLink(value2, base);
-
-  // If one parses and the other doesn't, they're not equal
-  if (!link1 || !link2) return false;
-
-  if (resolveBeforeComparing) {
-    const tx = txForResolving;
-    if (!tx) throw new Error("Provide tx to resolve before comparing");
-    if (!runtime) {
-      throw new Error("Provide runtime to resolve before comparing");
-    }
-    // Content-reading callers (a candidate comparison reads through the
-    // links it resolves) opt into the ifc crossing seam; identity-only
-    // callers leave it off.
-    const options = markIfcCrossings ? { markIfcCrossings: true } : {};
-    link1 = isNormalizedFullLink(link1)
-      ? resolveLink(runtime, tx, link1, "value", options)
-      : link1;
-    link2 = isNormalizedFullLink(link2)
-      ? resolveLink(runtime, tx, link2, "value", options)
-      : link2;
-  }
-
-  // Compare normalized links
-  if (areNormalizedLinksSame(link1, link2)) return true;
-  if (
-    link1.id !== undefined && link2.id !== undefined &&
-    isInlineCellId(link1.id) && isInlineCellId(link2.id) &&
-    areNormalizedLinksSame({ ...link1, id: link2.id }, link2)
-  ) {
-    return immutableContentId(link1.id) === immutableContentId(link2.id);
-  }
-  return false;
 }
 
 export function areMaybeLinkAndNormalizedLinkSame(
@@ -295,7 +236,7 @@ export function externalizeSchema(schema: JSONSchemaObj): JSONSchema {
 /**
  * The self-contained schema a link carries across a space boundary. Its
  * external documents are loaded from the space holding the declaration;
- * the target space need not hold them. A declaration inside a `data:`
+ * the target space need not hold them. A declaration inside an immutable
  * document, which no space stores, is held by the space in the address
  * naming that document. An incomplete declaration selects nothing until its
  * missing documents arrive. A declaration rejected by the decomposer logs a
@@ -342,7 +283,7 @@ onSchemaRegistryClear(() => {
 /**
  * Rewrites reference-form link schemas inside `value` back to their inline
  * (recomposed) form, for a value no space has stored that is about to
- * become a `data:` document. A link inside a `data:` document resolves its
+ * become an immutable document. A link inside an immutable document resolves its
  * schema's references in the space of the address naming the document
  * (`schemaForSpaceCrossing`), and the traversal admits a reference there
  * only where that space persists its closure. No write has put the closure
@@ -394,7 +335,7 @@ function wireByteLength(value: unknown): number | undefined {
  * Rewrites inline link schemas inside `value` to their reference form, the
  * form a link created by `createSigilLinkFromParsedLink()` carries with the
  * flag on, registering each closure in the realm registry as that does. A
- * value copied out of a `data:` document minted from unstored data carries
+ * value copied out of an immutable document minted from unstored data carries
  * its link schemas inline (`inlineExternalSchemaRefsInValue`), and written
  * as it stands into an ordinary document it would store, and send, every
  * closure in full for every link: a nested instance's argument document
@@ -502,7 +443,10 @@ export function createSigilLinkFromParsedLink(
     reference.overwrite = "redirect";
   }
 
-  return linkRefFrom<CellLinkRefPayload>(reference);
+  return pinImmutableCell(
+    linkRefFrom<CellLinkRefPayload>(reference),
+    reference.id,
+  );
 }
 
 /**

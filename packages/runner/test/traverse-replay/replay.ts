@@ -20,7 +20,7 @@ import {
   hashStringOf,
 } from "@commonfabric/data-model";
 import {
-  portableSnapshotId,
+  dataUriFromValueWithResolvedLinks,
   portableSnapshotLinks,
 } from "../../src/data-uri.ts";
 
@@ -49,7 +49,11 @@ import {
   type TraversalContext,
 } from "../../src/traverse.ts";
 import { readMaybeGzippedText } from "./gzip.ts";
-import { hasInlineCellScheme } from "../../src/immutable-cell.ts";
+import {
+  hasInlineCellScheme,
+  immutableSnapshot,
+  isImmutableCellId,
+} from "../../src/immutable-cell.ts";
 
 export type ReplayInvocationOracle = {
   ok: boolean;
@@ -207,6 +211,22 @@ function wrapTxWithReadLog(
   tx: IExtendedStorageTransaction,
   log: Set<string>,
 ): IExtendedStorageTransaction {
+  const comparisonIds = new Map<string, string>();
+  const comparisonId = (id: IMemorySpaceAddress["id"]): string => {
+    if (!isImmutableCellId(id)) return id;
+    let portable = comparisonIds.get(id);
+    if (portable === undefined) {
+      const { value, origin } = immutableSnapshot(id);
+      // Read-set identity follows the fixture's minting policy. Portable
+      // export additionally closes schemas and would change existing oracles.
+      portable = dataUriFromValueWithResolvedLinks(
+        value,
+        origin === undefined ? undefined : { ...origin, path: [] },
+      );
+      comparisonIds.set(id, portable);
+    }
+    return portable;
+  };
   const recordRead = (
     address: IMemorySpaceAddress,
     options: IReadOptions | undefined,
@@ -217,7 +237,7 @@ function wrapTxWithReadLog(
     }${options?.meta !== undefined ? "m" : ""}`;
     log.add(
       `${address.space}|${address.scope ?? "space"}|${
-        compactId(portableSnapshotId(address.id))
+        compactId(comparisonId(address.id))
       }|${JSON.stringify(address.path)}|${flags}`,
     );
   };

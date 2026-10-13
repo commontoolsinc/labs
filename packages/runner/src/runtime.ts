@@ -105,6 +105,7 @@ import {
   runtimeWritePolicyAuthorization,
   runtimeWritePolicyAuthorized,
 } from "./cfc/types.ts";
+import { isRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { collectConsumedLabel, deriveFlowJoin } from "./cfc/prepare.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import { memoryHostForForeignOrigin } from "./deployment-meta.ts";
@@ -116,6 +117,7 @@ import {
 import type { ConsoleMethod } from "./harness/console.ts";
 import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
+import { immutableCellsFor, ownImmutableCells } from "./immutable-cell.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { addressKey } from "./link-types.ts";
 import {
@@ -218,8 +220,6 @@ import {
 } from "./unsafe-host-trust.ts";
 import { toURI } from "./uri-utils.ts";
 import { ViewReplicationClient } from "./view-replication-client.ts";
-import { bindImmutableCells, immutableCellsFor } from "./immutable-cell.ts";
-import { isRendererTrustedEvent } from "./cfc/ui-contract.ts";
 const isFullNormalizedLinkShape = (
   value: unknown,
 ): value is NormalizedLink & {
@@ -355,7 +355,7 @@ export interface ExperimentalOptions {
    * reader that touches data the schema no longer describes refuses, and the
    * run is disposed of as an argument that did not resolve. On by default; pass
    * `false` as a temporary rollback override. See
-   * `docs/plans/lazy-cell-materialization.md`.
+   * `docs/history/plans/lazy-cell-materialization.md`.
    */
   lazyMaterialization?: boolean | undefined;
 
@@ -1862,6 +1862,7 @@ export class Runtime {
   }
 
   constructor(options: RuntimeOptions) {
+    ownImmutableCells(this);
     brandRuntime(this);
 
     // Validate-then-apply: option combinations are refused BEFORE any
@@ -2685,9 +2686,8 @@ export class Runtime {
     const wrapped = new ExtendedStorageTransaction(
       tx,
       this.#cfcInstrumentation,
+      immutableCellsFor(this),
     );
-    bindImmutableCells(wrapped, immutableCellsFor(this));
-    bindImmutableCells(tx, immutableCellsFor(this));
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
@@ -4287,7 +4287,10 @@ export class Runtime {
     // Fabric input remains shared; unstored links need inline schema closures.
     // Renderer trust is identity-based authority, so a marked event is copied
     // before it becomes ordinary immutable data.
-    const snapshot = immutableCellsFor(this).create(
+    const store = immutableCellsFor(this);
+    const readerSchema = internCellLinkSchema(schema);
+    store.retainSchema(readerSchema);
+    const snapshot = store.create(
       inlineExternalSchemaRefsInValue(
         fabricFromConvertibleJsValue(
           flattenBuilderArtifacts(data, {
@@ -4313,7 +4316,7 @@ export class Runtime {
         space,
         path: [],
         id: snapshot.id,
-        schema: internCellLinkSchema(schema),
+        schema: readerSchema,
       },
       tx,
       false,

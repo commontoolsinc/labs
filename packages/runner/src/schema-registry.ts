@@ -26,6 +26,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
+import { getLogger } from "@commonfabric/utils/logger";
 
 /** Thrown when a document's content does not hash to its claimed id. */
 export class SchemaDocumentHashMismatchError extends Error {
@@ -132,7 +133,16 @@ export function registerSchemaDocument(
   if (existing !== undefined) return existing;
   const interned = sah.schemaOrUndefined as JSONSchema;
   documentsByHash.set(taggedHash, interned);
-  for (const listener of registrationListeners) listener();
+  for (const listener of registrationListeners) {
+    try {
+      listener();
+    } catch (error) {
+      getLogger("schema-registry").error("registration-listener", () => [
+        "Schema registration listener failed",
+        error,
+      ]);
+    }
+  }
   return interned;
 }
 

@@ -10,41 +10,38 @@ import {
   visitValue,
 } from "./value-visit/index.ts";
 
-/** Successfully checked frozen graphs need no subsequent walk. */
+/**
+ * Successfully checked frozen graphs need no subsequent walk. This relies on
+ * FabricInstance's deep-frozen honesty mandate: frozen state cannot later grow
+ * a reference cycle through a private slot.
+ */
 const acyclic = new WeakSet<object>();
 
-/** The class is initialized after codec and visitor modules finish loading. */
-let visitorClass: (new () => DefaultValueVisitor) | undefined;
+class AcyclicVisitor extends DefaultValueVisitor {
+  readonly #seen = new WeakSet<object>();
 
-/** Uses the shared visitor's container and codec-state cycle detection. */
-function makeAcyclicVisitor(): DefaultValueVisitor {
-  visitorClass ??= class AcyclicVisitor extends DefaultValueVisitor {
-    readonly #seen = new WeakSet<object>();
-
-    override visitFabricContainerValue(
-      value: FabricContainerValue,
-    ): VisitResult<never, FabricValue> {
-      if (acyclic.has(value) || this.#seen.has(value)) {
-        return { type: "mapTo", value };
-      }
-      this.#seen.add(value);
-      return DO_RECURSE_VALUES;
+  override visitFabricContainerValue(
+    value: FabricContainerValue,
+  ): VisitResult<never, FabricValue> {
+    if (acyclic.has(value) || this.#seen.has(value)) {
+      return { type: "mapTo", value };
     }
+    this.#seen.add(value);
+    return DO_RECURSE_VALUES;
+  }
 
-    override visitPrimitiveValue(): undefined {
-      return undefined;
-    }
+  override visitPrimitiveValue(): undefined {
+    return undefined;
+  }
 
-    override visitCycle(): never {
-      throw new Error("Cannot encode a cyclic Fabric value");
-    }
+  override visitCycle(): never {
+    throw new Error("Cannot encode a cyclic Fabric value");
+  }
 
-    static {
-      Object.freeze(this);
-      Object.freeze(this.prototype);
-    }
-  };
-  return new visitorClass();
+  static {
+    Object.freeze(this);
+    Object.freeze(this.prototype);
+  }
 }
 
 /**
@@ -54,7 +51,7 @@ function makeAcyclicVisitor(): DefaultValueVisitor {
  */
 export function assertAcyclicFabricValue(value: FabricValue): void {
   if (!isFabricContainerValue(value) || acyclic.has(value)) return;
-  const visitor = makeAcyclicVisitor();
+  const visitor = new AcyclicVisitor();
   visitValue(value, visitor);
   if (isValidDeepFrozenFabricValue(value)) acyclic.add(value);
 }

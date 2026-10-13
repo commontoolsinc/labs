@@ -1,8 +1,6 @@
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { cloneIfNecessary } from "@/value-clone.ts";
-import { assertAcyclicFabricValue } from "@/value-acyclic.ts";
 import {
   BaseFabricInstance,
   DEEP_CLONE_CORE,
@@ -147,11 +145,13 @@ export class ProblematicValue extends BaseFabricInstance {
   }
 
   /** @inheritDoc */
-  protected [DEEP_CLONE_CORE](frozen: boolean): ProblematicValue {
-    assertAcyclicFabricValue(this.state);
+  [DEEP_CLONE_CORE](
+    _frozen: boolean,
+    subClone: (value: FabricValue) => FabricValue,
+  ): ProblematicValue {
     return new ProblematicValue(
       this.wireTypeTag,
-      cloneIfNecessary(this.state, { frozen }),
+      subClone(this.state),
       this.error,
     );
   }

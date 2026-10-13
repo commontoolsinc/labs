@@ -193,7 +193,6 @@ export {
   resolveLinkTracingDereferences,
 } from "./link-resolution.ts";
 export {
-  areLinksSame,
   getDerivedInternalCellLink,
   getMetaLink,
   isCellLink as isLink,
@@ -205,6 +204,7 @@ export {
   parseLLMFriendlyLink,
   sanitizeSchemaForLinks,
 } from "./link-utils.ts";
+export { areLinksSame } from "./link-equality.ts";
 export * from "./pattern-manager.ts";
 export {
   createSpaceRootIfAbsent,

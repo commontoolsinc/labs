@@ -17,6 +17,7 @@ import {
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 
+import { immutableSnapshot, isImmutableCellId } from "../../immutable-cell.ts";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -33,7 +34,6 @@ import type {
 } from "../interface.ts";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import { immutableSnapshot, isImmutableCellId } from "../../immutable-cell.ts";
 
 const logger = getLogger("attestation", {
   enabled: false,

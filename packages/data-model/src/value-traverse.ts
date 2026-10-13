@@ -8,52 +8,59 @@ import {
   visitValue,
 } from "./value-visit/index.ts";
 
-/** Defers initialization until codec and visitor modules finish loading. */
-let visitorClass:
-  | (new (
-    callback: (value: FabricContainerValue) => void,
-  ) => DefaultValueVisitor)
-  | undefined;
-
 /**
  * Calls `callback` once per container identity in a Fabric graph, including
  * containers in instance codec state. Input must remain unchanged during the
- * walk. Shared subtrees are visited once; reference cycles are rejected.
+ * walk. Shared subtrees are visited once; reference cycles are rejected unless
+ * `allowCycles` is set, in which case each identity is still visited only once.
  */
 export function forEachFabricContainerValue(
   value: FabricValue,
   callback: (value: FabricContainerValue) => void,
+  options: { allowCycles?: boolean } = {},
 ): void {
-  visitorClass ??= class ContainerVisitor extends DefaultValueVisitor {
-    readonly #seen = new WeakSet<object>();
-    readonly #callback: (value: FabricContainerValue) => void;
+  visitValue(
+    value,
+    new ContainerVisitor(callback, options.allowCycles === true),
+  );
+}
 
-    constructor(callback: (value: FabricContainerValue) => void) {
-      super();
-      this.#callback = callback;
-    }
+class ContainerVisitor extends DefaultValueVisitor {
+  readonly #seen = new WeakSet<object>();
+  readonly #callback: (value: FabricContainerValue) => void;
+  readonly #allowCycles: boolean;
 
-    override visitFabricContainerValue(
-      value: FabricContainerValue,
-    ): VisitResult<never, FabricValue> {
-      if (this.#seen.has(value)) return { type: "mapTo", value };
-      this.#seen.add(value);
-      this.#callback(value);
-      return DO_RECURSE_VALUES;
-    }
+  constructor(
+    callback: (value: FabricContainerValue) => void,
+    allowCycles: boolean,
+  ) {
+    super();
+    this.#callback = callback;
+    this.#allowCycles = allowCycles;
+  }
 
-    override visitPrimitiveValue(): undefined {
-      return undefined;
-    }
+  override visitFabricContainerValue(
+    value: FabricContainerValue,
+  ): VisitResult<never, FabricValue> {
+    if (this.#seen.has(value)) return { type: "mapTo", value };
+    this.#seen.add(value);
+    this.#callback(value);
+    return DO_RECURSE_VALUES;
+  }
 
-    override visitCycle(): never {
-      throw new Error("Cannot traverse a cyclic Fabric value");
-    }
+  override visitPrimitiveValue(): undefined {
+    return undefined;
+  }
 
-    static {
-      Object.freeze(this);
-      Object.freeze(this.prototype);
-    }
-  };
-  visitValue(value, new visitorClass(callback));
+  override visitCycle(
+    value: FabricContainerValue,
+  ): VisitResult<never, FabricValue> {
+    if (this.#allowCycles) return { type: "mapTo", value };
+    throw new Error("Cannot traverse a cyclic Fabric value");
+  }
+
+  static {
+    Object.freeze(this);
+    Object.freeze(this.prototype);
+  }
 }

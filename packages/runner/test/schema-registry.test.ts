@@ -14,6 +14,7 @@ import {
   acquireSchemaRegistryLease,
   isSchemaDocumentClosureComplete,
   lookupSchemaDocument,
+  onSchemaDocumentRegistered,
   registerSchemaDocument,
   SchemaDocumentHashMismatchError,
 } from "../src/schema-registry.ts";
@@ -35,6 +36,27 @@ const registerAll = (decomposed: DecomposedSchema): void => {
 
 describe("schema-registry", () => {
   describe("registerSchemaDocument()", () => {
+    it("notifies remaining listeners when one listener throws", () => {
+      const release = acquireSchemaRegistryLease();
+      let notified = 0;
+      const stopBad = onSchemaDocumentRegistered(() => {
+        throw new Error("listener failure");
+      });
+      const stopGood = onSchemaDocumentRegistered(() => {
+        notified++;
+      });
+      try {
+        const schema = { title: "listener isolation", type: "number" } as const;
+        const hash = internSchemaAsTaggedHashString(schema);
+        expect(registerSchemaDocument(hash, schema)).toEqual(schema);
+        expect(notified).toBe(1);
+      } finally {
+        stopBad();
+        stopGood();
+        release();
+      }
+    });
+
     it("returns the interned schema and makes it retrievable by hash", () => {
       const schema: JSONSchema = {
         type: "object",

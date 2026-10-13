@@ -220,7 +220,7 @@ wrong. These rules hold that agreement:
   element, including a nested array, must not name the array's index; written
   elsewhere that link would follow whatever lands at the index next. Eager
   traversal rebases it onto a
-  [`data:` identifier](data-uri-identifiers.md), and the view does the same. The
+  [`snapshot:` identifier](immutable-cell-identifiers.md), and the view does the same. The
   read stays on the slot, and recursively: the identity is derived from the
   whole
   element value.
@@ -424,7 +424,7 @@ is the unmarked ones that stand.
 
 ## Related documents
 
-- [`data-uri-identifiers.md`](data-uri-identifiers.md) — the identifiers an
+- [`immutable-cell-identifiers.md`](immutable-cell-identifiers.md) — the identifiers an
   inline array element is rebased onto.
 - [`../specs/space-model/7-schemas.md`](../specs/space-model/7-schemas.md) —
   what a schema means on a read.

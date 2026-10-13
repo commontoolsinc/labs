@@ -4,6 +4,7 @@
  * until an outbound write expands the snapshot; no payload lives in the URI.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
 import {
   assertAcyclicFabricValue,
   cloneIfNecessary,
@@ -16,7 +17,11 @@ import {
   isFabricDataUri,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import { isLinkRef, linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import {
+  isLinkRef,
+  linkRefFrom,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { collectExternalSchemaRefHashes } from "@commonfabric/data-model-schema/schema-refs";
 import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
 
@@ -43,6 +48,17 @@ const snapshots = new Map<
   { value: WeakRef<ImmutableSnapshot>; owners: number }
 >();
 
+/** Ephemeron edges: live values and handles retain their element owners. */
+const elementSnapshotOwners = new WeakMap<
+  ImmutableSnapshot,
+  WeakMap<ImmutableCellStore, ImmutableCellStore>
+>();
+const handleSnapshots = new WeakMap<object, ImmutableSnapshot>();
+const finalizedElementStores = new FinalizationRegistry<{
+  owners: Set<WeakRef<ImmutableCellStore>>;
+  ref: WeakRef<ImmutableCellStore>;
+}>(({ owners, ref }) => owners.delete(ref));
+
 /** Owners and their transactions share one store without extending its life. */
 const owners = new WeakMap<object, ImmutableCellStore>();
 
@@ -59,16 +75,20 @@ function releaseSnapshots(ids: Set<URI>): void {
 const finalizedStores = new FinalizationRegistry<Set<URI>>(releaseSnapshots);
 
 /**
- * Holds snapshots for one runtime. Entries are not evicted: a live URI must
- * continue to resolve even after its source document changes. Disposal releases
- * all snapshots, including those owned by a runtime that keeps its storage open.
+ * Holds explicitly created snapshots for one runtime. Traversal snapshots are
+ * owned by their frozen source values and live cell/link handles, so discarded
+ * document versions release their snapshots. Disposal releases both kinds.
  */
 export class ImmutableCellStore {
+  #elementStores = new WeakMap<object, ImmutableCellStore>();
+  readonly #elementOwners = new Set<WeakRef<ImmutableCellStore>>();
   readonly #ids = new Set<URI>();
   readonly #snapshots = new Map<URI, ImmutableSnapshot>();
   #dependencies = new WeakMap<object, readonly ImmutableSnapshot[]>();
+  #readerSchemas = new WeakMap<object, FabricValue>();
   readonly #settled = new Set<URI>();
   readonly #pending = new Set<ImmutableSnapshot>();
+  readonly #pendingValues = new Set<FabricValue>();
   readonly #retaining = new Set<URI>();
   #unsubscribeSchemas: (() => void) | undefined;
   #origins = new Map<string, { value: SnapshotOrigin; hash: string }>();
@@ -87,7 +107,86 @@ export class ImmutableCellStore {
   create(value: FabricValue, base?: NormalizedLink): ImmutableSnapshot {
     if (this.#disposed) throw new Error("Immutable cell store is disposed");
     assertAcyclicFabricValue(value);
+    const snapshot = this.#findSnapshot(cloneIfNecessary(value), base);
+    this.#retain(snapshot);
+    return snapshot;
+  }
+
+  /**
+   * Creates an element snapshot owned by its frozen value and escaped handles.
+   * A bare URI string does not retain an element; portable export is required
+   * when the reference must outlive those owners.
+   */
+  createElement(value: FabricValue, base: NormalizedLink): ImmutableSnapshot {
+    if (this.#disposed) throw new Error("Immutable cell store is disposed");
     const frozen = cloneIfNecessary(value);
+    if (typeof frozen !== "object" || frozen === null) {
+      throw new TypeError("Element snapshots require a container");
+    }
+    assertAcyclicFabricValue(frozen);
+    const snapshot = this.#findSnapshot(frozen, base);
+    // Equal content shares one weak owner even across distinct source objects.
+    let snapshotOwners = elementSnapshotOwners.get(snapshot);
+    if (snapshotOwners === undefined) {
+      snapshotOwners = new WeakMap();
+      elementSnapshotOwners.set(snapshot, snapshotOwners);
+    }
+    let store = snapshotOwners.get(this) ?? this.#elementStores.get(frozen);
+    if (store === undefined) {
+      store = new ImmutableCellStore();
+      const ref = new WeakRef(store);
+      this.#elementOwners.add(ref);
+      finalizedElementStores.register(store, {
+        owners: this.#elementOwners,
+        ref,
+      });
+    }
+    this.#elementStores.set(frozen, store);
+    store.#retain(snapshot);
+    snapshotOwners.set(this, store);
+    return snapshot;
+  }
+
+  /** Retains snapshots referenced by a reader schema without minting a value ID. */
+  retainSchema(schema: JSONSchema | undefined): void {
+    if (this.#disposed) throw new Error("Immutable cell store is disposed");
+    if (schema === undefined || typeof schema === "boolean") return;
+    const frozen = cloneIfNecessary(schema);
+    let value = this.#readerSchemas.get(frozen);
+    if (value === undefined) {
+      value = linkRefFrom({ schema: frozen });
+      this.#readerSchemas.set(frozen, value);
+    }
+    this.#retainValue(value);
+  }
+
+  /** Returns a live snapshot, or throws for an absent or expired identifier. */
+  get(id: URI): ImmutableSnapshot {
+    const snapshot = this.#snapshots.get(id);
+    if (snapshot === undefined) throw new Error("Unknown immutable cell");
+    return snapshot;
+  }
+
+  /** Releases this runtime's snapshots and invalidates their identifiers. */
+  dispose(): void {
+    this.#disposed = true;
+    for (const owner of this.#elementOwners) owner.deref()?.dispose();
+    this.#elementOwners.clear();
+    this.#elementStores = new WeakMap();
+    this.#snapshots.clear();
+    this.#settled.clear();
+    this.#pending.clear();
+    this.#pendingValues.clear();
+    this.#unsubscribeSchemas?.();
+    this.#unsubscribeSchemas = undefined;
+    this.#dependencies = new WeakMap();
+    this.#readerSchemas = new WeakMap();
+    this.#origins.clear();
+    releaseSnapshots(this.#ids);
+    finalizedStores.unregister(this);
+  }
+
+  #findSnapshot(frozen: FabricValue, base?: NormalizedLink): ImmutableSnapshot {
     const resolved = base === undefined ? undefined : immutableOrigin(base);
     // This key contains only address strings, never cell data or a schema.
     const originKey = resolved === undefined ? undefined : JSON.stringify([
@@ -120,30 +219,23 @@ export class ImmutableCellStore {
       if (snapshot === undefined) {
         snapshot = Object.freeze({ id, value: frozen, origin });
       }
-      this.#retain(snapshot);
     }
     return snapshot;
   }
 
-  /** Returns a live snapshot, or throws for an absent or expired identifier. */
-  get(id: URI): ImmutableSnapshot {
-    const snapshot = this.#snapshots.get(id);
-    if (snapshot === undefined) throw new Error("Unknown immutable cell");
-    return snapshot;
-  }
-
-  /** Releases this runtime's snapshots and invalidates their identifiers. */
-  dispose(): void {
-    this.#disposed = true;
-    this.#snapshots.clear();
-    this.#settled.clear();
-    this.#pending.clear();
-    this.#unsubscribeSchemas?.();
-    this.#unsubscribeSchemas = undefined;
-    this.#dependencies = new WeakMap();
-    this.#origins.clear();
-    releaseSnapshots(this.#ids);
-    finalizedStores.unregister(this);
+  #retainValue(value: FabricValue, deferExpired = false): void {
+    const { dependencies, complete } = this.#collectDependencies(
+      value,
+      deferExpired,
+    );
+    for (const dependency of dependencies) {
+      this.#retain(dependency, deferExpired);
+    }
+    if (complete) this.#pendingValues.delete(value);
+    else {
+      this.#pendingValues.add(value);
+      this.#watchSchemas();
+    }
   }
 
   /** Finds dependencies in codec state, inline schemas, and available closures. */
@@ -177,7 +269,7 @@ export class ImmutableCellStore {
             follow?.(hash);
           }
         }
-      });
+      }, { allowCycles: true });
     };
     collect(value);
     const closure = walkSchemaDocumentClosure({
@@ -205,18 +297,22 @@ export class ImmutableCellStore {
     }
     this.#retaining.add(snapshot.id);
     try {
-      const { dependencies, complete } = this.#collectDependencies(
+      const collected = this.#collectDependencies(
         snapshot.value,
         deferExpired,
       );
-      for (const dependency of dependencies) {
+      let complete = collected.complete;
+      for (const dependency of collected.dependencies) {
         this.#retain(dependency, deferExpired);
       }
       if (
         snapshot.origin?.id !== undefined &&
         isImmutableCellId(snapshot.origin.id)
       ) {
-        this.#retain(immutableSnapshot(snapshot.origin.id));
+        const origin = snapshots.get(snapshot.origin.id)?.value.deref();
+        if (origin !== undefined) this.#retain(origin, deferExpired);
+        else if (deferExpired) complete = false;
+        else immutableSnapshot(snapshot.origin.id);
       }
       if (!this.#snapshots.has(snapshot.id)) {
         const shared = snapshots.get(snapshot.id);
@@ -232,39 +328,71 @@ export class ImmutableCellStore {
         this.#pending.delete(snapshot);
       } else {
         this.#pending.add(snapshot);
-        if (this.#unsubscribeSchemas === undefined) {
-          const owner = new WeakRef(this);
-          const unsubscribe = onSchemaDocumentRegistered(() => {
-            const store = owner.deref();
-            if (store === undefined) unsubscribe();
-            else store.#refreshPending();
-          });
-          this.#unsubscribeSchemas = unsubscribe;
-        }
+        this.#watchSchemas();
       }
     } finally {
       this.#retaining.delete(snapshot.id);
     }
   }
 
+  #watchSchemas(): void {
+    if (this.#unsubscribeSchemas !== undefined) return;
+    const owner = new WeakRef(this);
+    const unsubscribe = onSchemaDocumentRegistered(() => {
+      const store = owner.deref();
+      if (store === undefined) unsubscribe();
+      else store.#refreshPending();
+    });
+    this.#unsubscribeSchemas = unsubscribe;
+  }
+
   /** Acquires newly visible dependencies before schema registration returns. */
   #refreshPending(): void {
     for (const snapshot of this.#pending) this.#retain(snapshot, true);
-    if (this.#pending.size === 0) {
+    for (const value of this.#pendingValues) this.#retainValue(value, true);
+    if (this.#pending.size === 0 && this.#pendingValues.size === 0) {
       this.#unsubscribeSchemas?.();
       this.#unsubscribeSchemas = undefined;
     }
   }
 }
 
-/** Returns the store owned by a runtime or bound to one of its transactions. */
-export function immutableCellsFor(owner: object): ImmutableCellStore {
+/** Creates or returns the store for an explicitly declared lifetime owner. */
+export function ownImmutableCells(owner: object): ImmutableCellStore {
   let store = owners.get(owner);
   if (store === undefined) {
     store = new ImmutableCellStore();
     owners.set(owner, store);
   }
   return store;
+}
+
+/** Returns a bound owner's store, following transparent transaction wrappers. */
+export function immutableCellsFor(owner: object): ImmutableCellStore {
+  const visited = new Set<object>();
+  let current: object | undefined = owner;
+  while (current !== undefined && !visited.has(current)) {
+    visited.add(current);
+    const store = owners.get(current);
+    if (store !== undefined) return store;
+    const wrapped: unknown = Reflect.get(current, "wrappedTransaction") ??
+      Reflect.get(current, "tx");
+    current = typeof wrapped === "object" && wrapped !== null
+      ? wrapped
+      : undefined;
+  }
+  throw new Error("Immutable cells require an explicitly bound owner");
+}
+
+/** Keeps an element snapshot alive for as long as its cell or link object. */
+export function pinImmutableCell<T extends object>(
+  handle: T,
+  id: URI | undefined,
+): T {
+  if (id !== undefined && isImmutableCellId(id)) {
+    handleSnapshots.set(handle, immutableSnapshot(id));
+  }
+  return handle;
 }
 
 /** Binds a transaction to the immutable documents of its owning runtime. */

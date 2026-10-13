@@ -88,6 +88,11 @@ import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
 import {
+  hasInlineCellScheme,
+  inlineCellValue,
+  isImmutableCellId,
+} from "../immutable-cell.ts";
+import {
   diagnosticPrefix,
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
@@ -206,11 +211,6 @@ import {
   normalizeSyncSelector,
   watchIdForEntry,
 } from "./v2-watch.ts";
-import {
-  hasInlineCellScheme,
-  inlineCellValue,
-  isImmutableCellId,
-} from "../immutable-cell.ts";
 
 /**
  * Syncs the CFC schema document a document's `cfc.schemaHash` names and the
@@ -370,7 +370,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 }
 
 /**
- * Identity of one data-URI pull: the URI, the schema it was read against, the
+ * Identity of one immutable-document pull: the URI, the schema it was read against, the
  * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
@@ -1426,7 +1426,7 @@ export class StorageManager implements IStorageManager {
   #docPullKicks = new Set<string>();
 
   /**
-   * Data URIs whose linked targets this manager has already pulled, keyed by a
+   * Immutable documents whose linked targets this manager has already pulled, keyed by a
    * hash of the URI, schema, path, space, and scope. Per manager rather than
    * per process: a hit skips the pull, and a manager that inherited another
    * manager's hit would leave its own replica without those documents.
@@ -1436,13 +1436,13 @@ export class StorageManager implements IStorageManager {
   );
 
   /**
-   * What a data URI is worth knowing per sync, by the URI: the hash of the id
-   * and the value it decodes to. A plan's inputs document is synced under
+   * What a legacy data URI is worth knowing per sync, by the URI: the hash of the id
+   * and the value it decodes to. An immutable document can be synced under
    * each schema its node reads through and again on every pre-sync wave, and
    * hashing and decoding tens of kilobytes of URI on each would cost more than
    * the sync. An entry weighs its URI, which it keeps alive as its key, and
    * the value decoded from it, taken as the payload's bytes several times
-   * over; a URI too large for a share of the budget is not kept at all.
+   * over. Native snapshots bypass this decoded-value cache; a URI too large for a share of the budget is not kept at all.
    */
   #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
     capacity: DATA_URI_SYNC_CACHE_MAX,
@@ -2858,7 +2858,7 @@ export class StorageManager implements IStorageManager {
     }
 
     if (hasInlineCellScheme(id)) {
-      return this.#syncDataURICell(
+      return this.#syncImmutableCell(
         cell,
         space,
         id,
@@ -3140,7 +3140,7 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.#resolveCrossSpace(resolve));
   }
 
-  async #syncDataURICell<T>(
+  async #syncImmutableCell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3148,7 +3148,7 @@ export class StorageManager implements IStorageManager {
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
-    const memo = this.#dataUri(id);
+    const memo = this.#immutableValue(id);
     const cacheKey = dataURISyncKey({
       id,
       idHash: memo.idHash,
@@ -3160,7 +3160,7 @@ export class StorageManager implements IStorageManager {
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(
+      work = this.#syncImmutableLinkTargets(
         cell,
         space,
         id,
@@ -3175,8 +3175,8 @@ export class StorageManager implements IStorageManager {
     return cell;
   }
 
-  /** The memo entry for the data URI `id`, decoded and hashed on first use. */
-  #dataUri(id: string): { idHash: string; value: unknown } {
+  /** Returns the native snapshot or a legacy value decoded and hashed on first use. */
+  #immutableValue(id: string): { idHash: string; value: unknown } {
     if (isImmutableCellId(id)) {
       return { idHash: id, value: inlineCellValue(id) };
     }
@@ -3190,7 +3190,7 @@ export class StorageManager implements IStorageManager {
     return entry;
   }
 
-  async #syncDataURILinkTargets<T>(
+  async #syncImmutableLinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3380,7 +3380,7 @@ export class StorageManager implements IStorageManager {
     if (hasInlineCellScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
-      let target: unknown = this.#dataUri(link.id).value;
+      let target: unknown = this.#immutableValue(link.id).value;
       for (let i = 0; i < segments.length; i++) {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);

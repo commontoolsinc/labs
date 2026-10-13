@@ -135,10 +135,11 @@ import {
   resolveImmutableValueLinks,
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
+import { areLinksSame } from "./link-equality.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
-import { areNormalizedLinksSame } from "./link-types.ts";
+import { areNormalizedLinksSame, isPrimitiveCellLink } from "./link-types.ts";
 import {
-  areLinksSame,
   createSigilLinkFromParsedLink,
   declareStreamSchema,
   isCellLink,
@@ -204,7 +205,6 @@ import {
 } from "./storage/reactivity-log.ts";
 import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
-import { immutableCellsFor } from "./immutable-cell.ts";
 
 ensureNotRenderThread();
 
@@ -3776,7 +3776,7 @@ export class CellImpl<T extends FabricValue>
         );
       }
     }
-    link = maybeConvertArrayPathToDataURILink(readTx, link);
+    link = maybeConvertArrayPathToImmutableLink(readTx, link);
     return createCell(
       this.#runtime,
       link,
@@ -3809,7 +3809,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
-    return this.#link;
+    return pinImmutableCell(this.#link, this.#link.id);
   }
 
   /**
@@ -4719,10 +4719,13 @@ function cellImplOf(value: unknown): CellImpl<FabricValue> | undefined {
  * it.
  */
 function frozenLink(link: NormalizedLink): NormalizedLink {
-  return Object.freeze(
-    Object.isFrozen(link.path)
-      ? link
-      : { ...link, path: Object.freeze([...link.path]) },
+  return pinImmutableCell(
+    Object.freeze(
+      Object.isFrozen(link.path)
+        ? link
+        : { ...link, path: Object.freeze([...link.path]) },
+    ),
+    link.id,
   );
 }
 
@@ -5078,7 +5081,7 @@ export function deepTraverse(
   }
 }
 
-function maybeConvertArrayPathToDataURILink(
+function maybeConvertArrayPathToImmutableLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): NormalizedFullLink {
@@ -5148,7 +5151,7 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: immutableCellsFor(tx).create(candidate.value, baseLink).id,
+    id: immutableCellsFor(tx).createElement(candidate.value, baseLink).id,
     path: candidate.remainingPath,
   };
 }
@@ -5681,7 +5684,7 @@ function convertOneToLinks(
     // filled by assignment costs about half again as much to structured-clone
     // as the same object built from entries, and every consumer of a converted
     // value pays that, the crossing to the client included.
-    return Object.freeze(Object.fromEntries(
+    const converted = Object.freeze(Object.fromEntries(
       Object.entries(container).map(([key, member]) => {
         stack.push(key);
 
@@ -5697,6 +5700,9 @@ function convertOneToLinks(
         return [key, converted];
       }),
     ));
+    return isPrimitiveCellLink(converted)
+      ? pinImmutableCell(converted, parseLink(converted).id)
+      : converted;
   } finally {
     // `popExpect()` instead of just `pop()`, as defense-in-depth against bugs
     // elsewhere in the code.

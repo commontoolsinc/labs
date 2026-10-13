@@ -221,6 +221,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 - [topics-board-migration-2026-08-28.md](topics-board-migration-2026-08-28.md) — the Stage B migration of the Estuary Topics board and its 125 topics: why the board moved FIRST and the children-first rule inverts when the parent's demand is what changed, that reversal through the source log is refused in both directions so recovery means restoring content, and the failures only the live run produced — every laptop run dying 4-6 minutes in on a different entity, per-row cost rising and never recovering after each transport error, and a partial apply reporting success.
 - [topics-number-rollout-2026-10-06.md](topics-number-rollout-2026-10-06.md) — the source push that made the Estuary Topics board's 883 topics publish the numbers they store: a staged live rollout in place of a clone rehearsal, with restore and plan rollback proven on a throwaway topic and on one real topic of each live generation first, then ten batches cut from one plan, topics before the board because the board's demand did not move, about seventy minutes of laptop apply time with no transport error in the topic batches, a title-change stop caused by someone else's rename, 218 stale comment counts refreshed and none lowered, and what it leaves unverified — no comparison of every topic's computed results, and #7806 held for its hoist renumbering.
 
+- [Lazy cell materialization](plans/lazy-cell-materialization.md) — Completed schema-observing lazy view and transaction-mode implementation; current semantics are maintained in the feature contract.
 - [Lazy materialization fast-follow](plans/lazy-materialization-fast-follow.md) — Completed default-on measurement and guidance plan, retaining the explicit handler deferral and independent rollout-switch decision.
 
 ## Shipped or superseded designs and decision records
@@ -459,3 +460,4 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 ## The retired tutorial site
 
 - [tutorials/](tutorials/) — the complete MyST source of the retired docs.commontools.dev site: nine chapters, example code and images, and the build scaffolding, entered at [index.md](tutorials/index.md). Its state chapters and LLM tour teach the retired `cell()` API.
+- [Immutable-cell review fixes](development/performance/2026-10-13-immutable-cell-review-fixes/README.md) — Weak element ownership retained-heap measurements, paired creation timings under shared-host load, and focused served-pattern evidence for PR 8814.

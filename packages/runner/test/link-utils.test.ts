@@ -8,7 +8,6 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   areNormalizedLinksSameIgnoringScope,
   createLLMFriendlyLink,
@@ -30,6 +29,7 @@ import {
   sanitizeSchemaForLinks,
   schemaForSpaceCrossing,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";

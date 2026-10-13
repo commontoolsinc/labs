@@ -100,6 +100,11 @@ import {
 } from "../cfc/types.ts";
 import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
+  bindImmutableCells,
+  hasInlineCellScheme,
+  ImmutableCellStore,
+} from "../immutable-cell.ts";
+import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-types.ts";
@@ -194,7 +199,6 @@ import {
   getTransactionWriteDetails,
   getTransactionWrittenSpaces,
 } from "./transaction-inspection.ts";
-import { hasInlineCellScheme } from "../immutable-cell.ts";
 
 /**
  * The epoch position of a snapshot memo key for the current instant, which no
@@ -800,7 +804,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     cfcInstrumentation: CfcInstrumentationHooks = {},
+    immutableCells: ImmutableCellStore = new ImmutableCellStore(),
   ) {
+    bindImmutableCells(this, immutableCells);
+    bindImmutableCells(tx, immutableCells);
     this.#cfcInstrumentation = cfcInstrumentation;
   }
 

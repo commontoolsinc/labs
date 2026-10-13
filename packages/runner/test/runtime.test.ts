@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { JSONValue } from "@commonfabric/api";
 import { isExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 import { deepFreeze } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
@@ -21,6 +22,7 @@ import {
 } from "../src/schema-doc-config.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { resolvedSchema } from "./schema-ref-helpers.ts";
+import { portableSnapshotLinks } from "../src/data-uri.ts";
 import { immutableSnapshot } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -222,6 +224,30 @@ describe("runtime", () => {
       expect(cell.getRaw()).toEqual({ disposalFixture: true });
       await owner.dispose({ closeStorage: false });
       expect(() => immutableSnapshot(id)).toThrow("expired");
+    });
+
+    it("retains immutable defaults in its reader schema after the source runtime closes", async () => {
+      const owner = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        const inner = owner.getImmutableCell(space, { readerDefault: 42 });
+        const outer = runtime.getImmutableCell(space, {}, {
+          type: "object",
+          properties: { missing: { default: inner.getAsLink() as JSONValue } },
+        });
+        const exported = portableSnapshotLinks(
+          outer.getAsLink({ includeSchema: true }),
+        );
+        await owner.dispose({ closeStorage: false });
+        expect(portableSnapshotLinks(outer.getAsLink({ includeSchema: true })))
+          .toEqual(exported);
+        expect(immutableSnapshot(inner.getAsNormalizedFullLink().id).value)
+          .toEqual({ readerDefault: 42 });
+      } finally {
+        await owner.dispose({ closeStorage: false });
+      }
     });
 
     it("does not carry renderer authority with a frozen event snapshot", () => {

@@ -3,13 +3,14 @@ status: historical
 created: 2026-10-13
 archived: 2026-10-13
 reason: "PR feedback corrections and measurements after integrating main."
+validation: "https://github.com/commonfabric/labs/pull/8814"
 ---
 
 # Immutable cell feedback: ownership, events, and measurement correction
 
 This record covers the feedback changes to PR #8814, integrating main at
 `676e4cae1b` with the native snapshot implementation at `1e2f2e317f`.
-The live contract is [Immutable cell identifiers](../../../../features/data-uri-identifiers.md).
+The live contract is [Immutable cell identifiers](../../../../features/immutable-cell-identifiers.md).
 
 ## Corrections
 

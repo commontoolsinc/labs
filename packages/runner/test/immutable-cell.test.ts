@@ -1,18 +1,25 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { JSONValue } from "@commonfabric/api";
-import { deepFreeze, type FabricValue } from "@commonfabric/data-model";
+import type { JSONSchema, JSONValue } from "@commonfabric/api";
+import {
+  deepFreeze,
+  type FabricValue,
+  hashStringOf,
+} from "@commonfabric/data-model";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
+
+import { internSchema } from "@commonfabric/data-model-schema";
 
 import {
   bindImmutableCells,
   immutableCellsFor,
   ImmutableCellStore,
   immutableSnapshot,
+  ownImmutableCells,
 } from "../src/immutable-cell.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import {
@@ -20,6 +27,13 @@ import {
   registerSchemaDocument,
 } from "../src/schema-registry.ts";
 import { load } from "../src/storage/transaction/attestation.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  createDefaultTraversalContext,
+  ManagedStorageTransaction,
+  SchemaObjectTraverser,
+} from "../src/traverse.ts";
 import { TraverseCaptureRecorder } from "../src/traverse-recorder.ts";
 import { replayFixture } from "./traverse-replay/replay.ts";
 import {
@@ -27,15 +41,82 @@ import {
   findAndInlineDataUriLinks,
   immutableContentId,
   portableSnapshotId,
+  portableSnapshotLinks,
+  resolveImmutableValueLinks,
 } from "../src/data-uri.ts";
-import {
-  areLinksSame,
-  createSigilLinkFromParsedLink,
-  parseLink,
-} from "../src/link-utils.ts";
+import { createSigilLinkFromParsedLink, parseLink } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 describe("immutable-cell", () => {
+  it("requires ownership and follows transaction wrappers", () => {
+    expect(() => immutableCellsFor({})).toThrow("explicitly bound");
+    const owner = {};
+    const store = ownImmutableCells(owner);
+    try {
+      expect(immutableCellsFor({ wrappedTransaction: owner })).toBe(store);
+      expect(immutableCellsFor({ tx: owner })).toBe(store);
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it("compares legacy schema references with native and portable snapshots", () => {
+    const release = acquireSchemaRegistryLease();
+    const store = new ImmutableCellStore();
+    try {
+      const schema = decomposeSchema({
+        type: "string",
+        default: "legacy identity",
+      });
+      for (const [hash, document] of schema.documents) {
+        registerSchemaDocument(hash, document);
+      }
+      const value = deepFreeze({
+        ref: linkRefFrom({
+          id: "of:legacy-target",
+          schema: { $ref: schema.rootRef },
+        }),
+      });
+      const legacy = linkRefFrom({
+        id: dataUriFromValueWithResolvedLinks(value),
+      });
+      const native = store.create(value);
+      const portable = linkRefFrom({ id: portableSnapshotId(native.id) });
+      expect(areLinksSame(legacy, linkRefFrom({ id: native.id }))).toBe(true);
+      expect(areLinksSame(legacy, portable)).toBe(true);
+    } finally {
+      store.dispose();
+      release();
+    }
+  });
+
+  it("reuses resolved raw values and portable exports within a registry epoch", () => {
+    let visits = 0;
+    const value = deepFreeze(
+      new Proxy({ ref: linkRefFrom({ path: ["target"] }) }, {
+        ownKeys(target) {
+          visits++;
+          return Reflect.ownKeys(target);
+        },
+      }),
+    );
+    const store = new ImmutableCellStore();
+    try {
+      const snapshot = store.create(value, { id: "of:origin", path: [] });
+      const first = resolveImmutableValueLinks(value, snapshot.id);
+      expect(first).not.toBe(value);
+      expect(resolveImmutableValueLinks(value, snapshot.id)).toBe(first);
+      const portable = portableSnapshotId(snapshot.id);
+      visits = 0;
+      expect(portableSnapshotId(snapshot.id)).toBe(portable);
+      expect(resolveImmutableValueLinks(value, snapshot.id)).toBe(first);
+      expect(visits).toBe(0);
+    } finally {
+      store.dispose();
+    }
+  });
+
   for (const timing of ["before", "after"] as const) {
     it(`retains schema-default snapshots when their closure arrives ${timing} adoption`, () => {
       const release = acquireSchemaRegistryLease();
@@ -80,6 +161,55 @@ describe("immutable-cell", () => {
       }
     });
   }
+
+  it("acquires reader-schema dependencies when their closure arrives after adoption", () => {
+    const release = acquireSchemaRegistryLease();
+    const source = new ImmutableCellStore();
+    const receiver = new ImmutableCellStore();
+    try {
+      const inner = source.create({ lateReaderDefault: 42 });
+      const schema = decomposeSchema({
+        default: linkRefFrom({ id: inner.id }) as JSONValue,
+      });
+      receiver.retainSchema({ $ref: schema.rootRef });
+      for (const [hash, document] of schema.documents) {
+        registerSchemaDocument(hash, document);
+      }
+      source.dispose();
+      expect(immutableSnapshot(inner.id).value).toEqual({
+        lateReaderDefault: 42,
+      });
+      receiver.dispose();
+      expect(() => immutableSnapshot(inner.id)).toThrow("expired");
+    } finally {
+      source.dispose();
+      receiver.dispose();
+      release();
+    }
+  });
+
+  it("retains defaults in cyclic reader schemas while rejecting cyclic snapshot data", () => {
+    const source = new ImmutableCellStore();
+    const receiver = new ImmutableCellStore();
+    try {
+      const inner = source.create({ cyclicReaderDefault: 42 });
+      const schema: JSONSchema & { properties: Record<string, JSONSchema> } = {
+        type: "object",
+        properties: {},
+        default: linkRefFrom({ id: inner.id }) as JSONValue,
+      };
+      schema.properties.next = schema;
+      receiver.retainSchema(internSchema(schema));
+      expect(() => receiver.create(schema)).toThrow(/cyclic/);
+      source.dispose();
+      expect(immutableSnapshot(inner.id).value).toEqual({
+        cyclicReaderDefault: 42,
+      });
+    } finally {
+      source.dispose();
+      receiver.dispose();
+    }
+  });
 
   it("keeps an expired hidden reference from interrupting other pending owners", () => {
     const release = acquireSchemaRegistryLease();
@@ -182,7 +312,16 @@ describe("immutable-cell", () => {
     });
     source.dispose();
     try {
-      expect(valueFromDataUri(portableSnapshotId(outer.id))).toBeDefined();
+      const portable = valueFromDataUri(portableSnapshotId(outer.id)) as {
+        carried: UnknownValue;
+        link: ReturnType<typeof linkRefFrom>;
+      };
+      expect(findAndInlineDataUriLinks(portable.carried.state)).toEqual({
+        ref: { n: 9 },
+      });
+      expect(parseLink(portable.link)?.schema).toEqual({
+        default: linkRefFrom({ id: portableSnapshotId(nested.id) }),
+      });
       expect(immutableSnapshot(nested.id).value).toEqual({ n: 9 });
     } finally {
       receiver.dispose();
@@ -248,7 +387,12 @@ describe("immutable-cell", () => {
     try {
       expect(findAndInlineDataUriLinks(linkRefFrom({ id: outer.id })))
         .toEqual({ child: { count: 7 } });
-      expect(valueFromDataUri(portableSnapshotId(outer.id))).toBeDefined();
+      expect(
+        findAndInlineDataUriLinks(
+          valueFromDataUri(portableSnapshotId(outer.id)),
+        ),
+      )
+        .toEqual({ child: { count: 7 } });
     } finally {
       receiver.dispose();
     }
@@ -411,6 +555,85 @@ describe("immutable-cell", () => {
     const replay = replayFixture(fixture, { collectOracle: true });
     expect(replay.oracle!.invocations[0]).toMatchObject({ ok: true });
   });
+
+  for (const scope of ["space", "user"] as const) {
+    it(`readdresses captured schema documents for a ${scope}-scoped invocation`, () => {
+      const snapshots = new ImmutableCellStore();
+      try {
+        const inner = snapshots.create({ answer: 42 });
+        const decomposition = decomposeSchema({
+          type: "object",
+          properties: {
+            foo: {
+              default: linkRefFrom({ id: inner.id }) as JSONValue,
+              asCell: ["cell"],
+            },
+          },
+        });
+        const store = new Map();
+        const put = (id: string, value: FabricValue) =>
+          store.set(`${id}/application/json`, {
+            the: "application/json",
+            of: id,
+            is: { value },
+            since: 1,
+          });
+        put("of:root", {});
+        for (const [hash, document] of decomposition.documents) {
+          put(`cid:${hash}`, document);
+        }
+        const raw = new ExtendedStorageTransaction(
+          new ManagedStorageTransaction(new StoreObjectManager(store)),
+        );
+        const recorder = new TraverseCaptureRecorder();
+        const tx = recorder.wrapTx(raw);
+        const address = {
+          space: "did:key:capture" as const,
+          scope,
+          id: "of:root" as const,
+          type: "application/json" as const,
+          path: ["value"] as const,
+        };
+        const value = tx.readOrThrow(address);
+        const context = createDefaultTraversalContext({
+          principal: "did:key:capture",
+          sessionId: "session:capture",
+        });
+        const selector = {
+          path: ["value"],
+          schema: { $ref: decomposition.rootRef },
+        };
+        recorder.recordInvocation(
+          { address },
+          selector,
+          undefined,
+          context,
+          undefined,
+        );
+        const live = new SchemaObjectTraverser(tx, selector, context).traverse({
+          address,
+          value,
+        });
+        expect(live.ok).toBeDefined();
+        const expectedHash = hashStringOf(portableSnapshotLinks(live.ok)).slice(
+          0,
+          16,
+        );
+        const fixture = recorder.toFixture("native-schema", "unit test");
+        expect(JSON.stringify(fixture)).not.toContain("snapshot:");
+        expect(fixture.selectors[0].schema).not.toEqual(selector.schema);
+        snapshots.dispose();
+        const replay = replayFixture(fixture, { collectOracle: true });
+        expect(replay.oracle!.invocations).toHaveLength(1);
+        expect(replay.oracle!.invocations[0]).toEqual({
+          ok: true,
+          hash: expectedHash,
+        });
+      } finally {
+        snapshots.dispose();
+      }
+    });
+  }
 
   it("expands and captures snapshot links held in link schema defaults", () => {
     const store = new ImmutableCellStore();

@@ -21,13 +21,13 @@ import {
   writeAuthorizationCoversPath,
 } from "../src/data-updating.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isPrimitiveCellLink,
   isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { Runtime } from "../src/runtime.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";

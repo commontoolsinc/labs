@@ -38,7 +38,7 @@ await heap();
 
 const results = [];
 for (const retainIds of [false, true]) {
-  for (const mode of ["legacy", "native"]) {
+  for (const mode of ["legacy", "explicit", "element"]) {
     const store = new ImmutableCellStore();
     const ids: string[] = [];
     const before = await heap();
@@ -52,6 +52,8 @@ for (const retainIds of [false, true]) {
       });
       const id = mode === "legacy"
         ? dataUriFromValue(value)
+        : mode === "element"
+        ? store.createElement(value, { id: "of:retention", path: [] }).id
         : store.create(value).id;
       if (retainIds) ids.push(id);
     }

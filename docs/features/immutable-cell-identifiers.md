@@ -31,21 +31,27 @@ This matters because a cell's identifier can participate in derived identity.
 Object key insertion order does not affect identity. Origins do: identical raw
 relative links in different documents can denote different values.
 
-Each runtime and its transactions share a store. A weak realm lookup lets link
-parsing and value expansion resolve a URI without retaining its runtime. Stores
-retain their snapshots until runtime disposal or collection; entries are not
-evicted while their IDs may still be used. Equal snapshots held by multiple
-runtimes share their frozen value, and disposing one owner does not invalidate
-another owner's snapshot. A store also acquires nested snapshots, including
-those in codec state, inline schema defaults, available external schema
-closures, and saved origins. An incomplete schema closure remains readable
-through the normal loader; registry registration notifies waiting stores to
-acquire newly visible dependencies. After the last owner is disposed, the
-identifier no longer resolves. These IDs are not a persistence or cross-process format.
+Each runtime and its transactions share an explicitly bound store. Graph query
+transactions share the lifetime of their schema memo. An unbound transaction
+cannot mint snapshots; transparent transaction wrappers inherit their owner's
+store.
 
-This lifetime trades encoded payload strings and decoded copies for retention of
-one native frozen snapshot per distinct value and origin. A long-lived runtime
-that creates many distinct snapshots retains those values until disposal.
+Explicit `getImmutableCell()` values remain owned until runtime disposal.
+Array-element snapshots have a shorter ownership policy: their frozen source
+value, live cells, annotated views, and exported link objects keep them alive.
+Discarding a document version and its handles allows those snapshots to be
+collected, even in a long-lived server runtime. Equal content and origin share a
+snapshot. A bare URI string does not retain an element snapshot; use
+`portableSnapshotId()` when the reference must outlive its source and handles.
+
+A weak realm lookup lets link parsing and expansion resolve a URI without
+retaining its runtime. Disposing one runtime does not invalidate another
+runtime's adopted snapshot. Stores acquire dependencies in codec state, inline
+schema defaults, available external schema closures, reader schemas passed to
+`getImmutableCell()`, and saved origins. Registry registration notifies waiting
+stores to acquire newly visible dependencies. The last owner's disposal or
+collection invalidates the native identifier. Native IDs are not a persistence
+or cross-process format.
 
 ## Relative-link origins
 
@@ -82,7 +88,8 @@ accepts unstored input, so `inlineExternalSchemaRefsInValue` puts those link
 schemas into inline form where the schema registry can resolve them.
 
 A stored write (`normalizeAndDiff`) expands immutable links through
-`findAndInlineDataUriLinks`. Both `snapshot:` and the Fabric `data:` media type
+`findAndInlineDataUriLinks`, including immutable defaults inside an ordinary
+document link's schema. Both `snapshot:` and the Fabric `data:` media type
 expand to their contents; nested immutable links are
 expanded in turn, including links held in schema defaults. Relative links are
 materialized against the saved origin at this boundary. An ordinary
@@ -106,7 +113,8 @@ Local stream delivery retains native immutable links so handlers can compare
 array-element identities. With server execution enabled, `Cell.send` converts
 those links to self-contained `data:` links before durable append, same-space
 serving dispatch, or the client echo. The append and echo carry the same event.
-`Writable.equals()` and link equality compare canonical portable content hashes
+`Cell.equals()` and link equality compare canonical content hashes after normalizing links and schema closures in both
+native and legacy values
 when two immutable IDs differ, preserving equality across native and portable
 forms. Space, scope, and path must still agree. Relative links are resolved
 against each snapshot's origin before this comparison, so equal raw links from
@@ -114,8 +122,10 @@ different origins need not compare equal.
 
 Snapshot identifiers do not travel through stored values or across runtime
 boundaries. Offline traversal capture converts native IDs and embedded snapshot
-links to portable `data:` IDs before writing a fixture. Replay compares those portable
-representations, so runtime lifetime does not affect the oracle. SQLite
+links to portable `data:` IDs before writing a fixture. A captured schema document
+whose contents change receives a new content address, and the fixture's schema
+references follow that address. Replay normalizes read IDs using the fixture
+minting policy, so runtime lifetime does not affect the oracle. SQLite
 `_cf_link` columns also store a self-contained `data:` link when given an
 immutable cell: the column is a link string whose contents must survive runtime
 disposal. These explicit string boundaries pay the encoding cost.

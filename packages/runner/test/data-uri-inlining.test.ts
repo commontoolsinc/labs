@@ -6,7 +6,10 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/data-model";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
 import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -56,6 +59,25 @@ describe("data URI inlining", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  for (const method of ["set", "setRaw"] as const) {
+    it(`expands immutable defaults before ${method} stores an ordinary link schema`, async () => {
+      const snapshot = runtime.getImmutableCell(space, { answer: 42 });
+      const holder = runtime.getCell(space, `schema-default-${method}`);
+      holder.withTx(tx)[method]({
+        ref: linkRefFrom({
+          id: "of:target",
+          space,
+          schema: { default: snapshot.getAsLink() },
+        }),
+      });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      const stored = holder.getRaw() as { ref: ReturnType<typeof linkRefFrom> };
+      const schema = parseLink(stored.ref)!.schema!;
+      expect(resolvedSchema(schema)).toEqual({ default: { answer: 42 } });
+      tx = runtime.edit();
+    });
+  }
 
   describe("findAndInlineDataUriLinks", () => {
     it("returns a link-free array holding NaN by reference", () => {
