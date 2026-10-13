@@ -27,6 +27,9 @@ function reconnectableTransport(
     holdFirstTransact?: boolean;
     loseFirstTransact?: boolean;
     refuseWritesOf?: { localSeq: number; cause: unknown };
+    /** Resolve a send once the frame is handed over, as a socket does,
+     * rather than once the server has handled it. */
+    sendResolvesOnWrite?: boolean;
   } = {},
 ) {
   let connection: ReturnType<Server["connect"]> | undefined;
@@ -39,7 +42,9 @@ function reconnectableTransport(
   let heldOnce = false;
   let holding = false;
   let lostOnce = false;
+  let loseOpenResponse = false;
   let refusedWrites = 0;
+  const inFlight = new Set<Promise<unknown>>();
   const reset = () => {
     connection?.close();
     connection = undefined;
@@ -95,6 +100,16 @@ function reconnectableTransport(
         closeReceiver(new Error("test connection dropped"));
         throw connectionError("Memory websocket changed before send");
       }
+      if (loseOpenResponse && message.type === "session.open") {
+        // The server handles this open, and the connection drops before its
+        // response reaches the client.
+        loseOpenResponse = false;
+        holding = true;
+        await connection.receive(payload);
+        reset();
+        closeReceiver(new Error("test connection dropped"));
+        return;
+      }
       const held = options.holdFirstTransact && !heldOnce &&
         message.type === "transact";
       if (held) {
@@ -102,7 +117,10 @@ function reconnectableTransport(
         holding = true;
       }
       const received = connection.receive(payload);
+      inFlight.add(received);
+      void received.finally(() => inFlight.delete(received)).catch(() => {});
       if (held) transactSent.resolve();
+      if (options.sendResolvesOnWrite) return;
       await received;
     },
     reset() {
@@ -134,6 +152,21 @@ function reconnectableTransport(
     drop() {
       reset();
       closeReceiver(new Error("test connection dropped"));
+    },
+    /** Loses the response to the next `session.open` the client sends. */
+    loseNextOpenResponse() {
+      loseOpenResponse = true;
+    },
+    /** Gives up on the connection the way a client does on a socket that
+     * stopped answering: the server is not told, and holds it open. */
+    abandon() {
+      connection = undefined;
+      holding = false;
+      closeReceiver(new Error("test connection abandoned"));
+    },
+    /** Resolves once the server has handled every frame sent so far. */
+    async settled() {
+      await Promise.allSettled([...inFlight]);
     },
   };
 }
@@ -410,6 +443,104 @@ describe("v2-client-reconnect-recovery", () => {
       await server.close();
     }
   });
+
+  it("resumes a session, and lands a commit issued while disconnected, when the response to its reopen is lost", async () => {
+    // The server rotates the resume token as it handles the reopen, so the
+    // client, which never saw the response, resumes with the token before.
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://lost-reopen-response"),
+    });
+    const lossy = reconnectableTransport(server);
+    const client = await connect({ transport: lossy.transport });
+    try {
+      const session = await client.mount(
+        "did:key:z6Mk-lost-reopen-response",
+        {},
+        testSessionOpenAuthFactory,
+      );
+      await session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:x", value: { value: "A" } }],
+      });
+
+      lossy.loseNextOpenResponse();
+      lossy.drop();
+      const pending = session.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:x", value: { value: "B" } }],
+      });
+      pending.catch(() => {});
+
+      await expect(pending).resolves.toMatchObject({ seq: 2 });
+      expect(session.closeError).toBeUndefined();
+      expect(lossy.connections).toBe(3);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  for (const given of ["closed", "abandoned"] as const) {
+    it(`keeps a restored session when a resume the client ${given} reaches the server after it`, async () => {
+      // Found in review: the superseded resume carries the session's key
+      // and the token the restoring one presented, so only its attempt
+      // number tells it apart. "abandoned" is the case where the server
+      // still holds the superseded connection open.
+      let gate: PromiseWithResolvers<void> | undefined;
+      const reached = Promise.withResolvers<void>();
+      const server = new Server({
+        ...testSessionOpenServerOptions,
+        store: new URL(`memory://superseded-resume-${given}`),
+        async authorizeSessionOpen(message) {
+          const paused = gate;
+          if (paused !== undefined && message.session.sessionToken) {
+            gate = undefined;
+            reached.resolve();
+            await paused.promise;
+          }
+          return testSessionOpenServerOptions.authorizeSessionOpen();
+        },
+      });
+      const lossy = reconnectableTransport(server, {
+        sendResolvesOnWrite: true,
+      });
+      const client = await connect({ transport: lossy.transport });
+      try {
+        const session = await client.mount(
+          "did:key:z6Mk-superseded-resume",
+          {},
+          testSessionOpenAuthFactory,
+        );
+        const write = (localSeq: number, value: string) =>
+          session.transact({
+            localSeq,
+            reads: { confirmed: [], pending: [] },
+            operations: [{ op: "set", id: "of:x", value: { value } }],
+          });
+        await write(1, "A");
+
+        const release = Promise.withResolvers<void>();
+        gate = release;
+        lossy.drop();
+        await reached.promise;
+        if (given === "closed") lossy.drop();
+        else lossy.abandon();
+        await client.restoreConnection();
+        expect(session.closeError).toBeUndefined();
+
+        release.resolve();
+        await lossy.settled();
+        expect(session.closeError).toBeUndefined();
+        await expect(write(2, "B")).resolves.toMatchObject({ seq: 2 });
+      } finally {
+        await client.close();
+        await server.close();
+      }
+    });
+  }
 
   it("retains a commit whose send rejects with a `ConnectionError` as its connection drops", async () => {
     const server = new Server({

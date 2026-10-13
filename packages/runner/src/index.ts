@@ -133,6 +133,8 @@ export {
   cellTx,
   convertCellsToLinks,
   encodeSqliteParams,
+  EventDeliveryError,
+  type EventDeliveryFailure,
   exportCell,
   hostValueOf,
   isCell,
@@ -437,6 +439,7 @@ export {
 export { schemaPathSelection } from "./schema-path.ts";
 export {
   acceptsOpaqueCellOrUnresolvedLink,
+  materializeStoredValueForValidation,
   overlayUnreadableLinkPlaceholders,
   storedArgumentValidationIssue,
 } from "./stored-argument-validation.ts";
