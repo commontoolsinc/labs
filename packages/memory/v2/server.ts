@@ -1268,6 +1268,11 @@ class Connection {
     this.#server.forgetAdmissionWaits(this.id, principal);
   }
 
+  /** Whether this connection has closed. */
+  get closed(): boolean {
+    return this.#closed;
+  }
+
   /** Whether this connection is bound to a verified Mode A context. */
   get routed(): boolean {
     return this.#routedOwns !== undefined;
@@ -5015,6 +5020,15 @@ export class Server {
             "ProtocolError",
             "The requested space kind differs from the space's immutable genesis",
           ),
+        );
+      }
+      // Admission awaited, and the connection may have closed meanwhile: its
+      // sessions were detached at the close, so one opened now would be held
+      // by a connection that is gone, and never expire.
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during admission"),
         );
       }
       const priorOwner = message.session.sessionId === undefined
@@ -10039,6 +10053,12 @@ export const parseClientMessage = (
         sessionToken: typeof parsed.session.sessionToken === "string"
           ? parsed.session.sessionToken
           : undefined,
+        ...(typeof parsed.session.resumeKey === "string"
+          ? { resumeKey: parsed.session.resumeKey }
+          : {}),
+        ...(Number.isSafeInteger(parsed.session.resumeAttempt)
+          ? { resumeAttempt: parsed.session.resumeAttempt as number }
+          : {}),
         // The delegated READ binding (OW31): parsed as the LITERAL
         // marker only — any other string reaches openSession's
         // unknown-value refusal rather than being silently dropped.
