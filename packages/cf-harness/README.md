@@ -167,8 +167,8 @@ What works today:
     host-owned result file)
   - `describe_handle` (shape and labels of a handle's referent, and the tables
     of one that is a database together with how full each of them is, never its
-    data; a piece's handle also lists the piece's verbs, each with the event
-    schema it takes and the result schema it returns; see
+    data; a piece's handle also lists the piece's verbs, each with its author's
+    description, the event schema it takes and the result schema it returns; see
     [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `resolve_piece` (parent-only exact slug resolution in the session's space;
     returns a handle for child source reads and revisions, without source or
@@ -178,10 +178,13 @@ What works today:
   - `call_verb` (present only when the run configures a fabric session; sends an
     event to a verb of a piece in the session's own space, behind a handle the
     run holds. The verb is found and the event judged by the listing and gate
-    `cf piece call` uses, so an undeclared field, a missing required field, or a
-    name that is not a verb is refused before anything is sent. The result
-    returns the way a `run_pattern` value does: numbers, booleans and nulls as
-    themselves, every other position as a handle into the handling's receipt)
+    `cf piece call` uses, so an undeclared field, a missing required field, a
+    copy where a reference is declared, or a name that is not a verb is refused
+    before anything is sent; a handle at a reference position reaches the verb
+    as the address it stands for. The result returns the way a `run_pattern`
+    value does: numbers, booleans and nulls as themselves, a piece the verb
+    returns as that piece's handle, every other position as a handle into the
+    handling's receipt; a handler that throws returns its message)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import

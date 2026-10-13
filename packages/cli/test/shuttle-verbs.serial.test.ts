@@ -30,6 +30,7 @@ import { describe, it } from "@std/testing/bdd";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { SlugResolutionError } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
+import { LINK_MARKER_KEY } from "@commonfabric/piece/verb-input";
 import type { PieceCallableListing } from "@commonfabric/piece/verb-listing";
 
 import { UI } from "@commonfabric/runner";
@@ -42,7 +43,6 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import { pieceDataCommand } from "../commands/piece.ts";
 import {
   type CellSelection,
-  LINK_MARKER_KEY,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import { LinkValidationError } from "../lib/piece.ts";

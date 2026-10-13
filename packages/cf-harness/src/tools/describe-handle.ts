@@ -85,11 +85,11 @@ export interface DescribeHandleToolOutput {
   path?: string[];
 
   /**
-   * The verbs of a referent that is a piece: each one's name, the event it
-   * takes and the result it returns, which is what `call_verb` sends to.
-   * Reduced to structure like {@link schema}, so the pattern's doc comments do
-   * not ride out on them. Absent for anything but a piece itself, and for a
-   * piece whose pattern could not be read.
+   * The verbs of a referent that is a piece: each one's name, what it is for,
+   * the event it takes and the result it returns, which is what `call_verb`
+   * sends to. Unlike {@link schema} these are not reduced to structure: they
+   * carry the pattern author's descriptions. Absent for anything but a piece
+   * itself, and for a piece whose pattern could not be read.
    */
   verbs?: HarnessCallableDescriptor[];
 
@@ -335,8 +335,8 @@ export type DescribeHandleLabel = DisclosedCfcLabel;
  * A referent that is a piece also reports its verbs, read from the compiled
  * pattern the piece is pinned to by the listing `cf piece verbs` reads — what
  * `call_verb` can send to, each with the event it takes and the result it
- * returns. Those schemas are declarations of the same kind and go through the
- * same reduction, so a verb's doc comments do not cross with it either.
+ * returns. Those cross with their author's descriptions rather than reduced
+ * to structure, the one disclosure here that does; `pieceVerbsOf` says why.
  *
  * A run with no fabric session still answers from its own table, so shape
  * stays inspectable in every run that has handles at all.
@@ -356,7 +356,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data — a research handle, whose content is the run's own findings, is the one referent whose content it returns. A held non-cell referent returns its kind and provenance under `referent`, with `hasSchema: false`. A handle to a piece also lists the piece's verbs under `verbs`: each one's name, the event schema it takes and the result schema it returns, which is what call_verb sends to. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the distinct labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. A table reporting `rowLabelReads` carries a per-row label rule over those columns, and a query over it must select every one of them by its own name — an alias does not stand in for the column — or the read is refused and the refusal arrives on the result's `error` rather than as rows; `rowLabelReadsIncomplete` means the named columns are not the whole of what the rule needs — it reads a column this reply does not name, or it is declared in a shape that cannot be read — so such a query is refused whatever it selects. Read such a referent with `db.query` over the handle rather than as a value. A research handle — the cfh:v: token a research call returned — returns what that research found under `research`: its kit, the patterns it confirmed, and the handles it described, each marked `unavailable` when this run does not hold its token; read it before researching the same question again. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data — a research handle, whose content is the run's own findings, is the one referent whose content it returns. A held non-cell referent returns its kind and provenance under `referent`, with `hasSchema: false`. A handle to a piece also lists the piece's verbs under `verbs`: each one's name, its author's description, the event schema it takes and the result schema it returns, which is what call_verb sends to. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, the distinct labels those columns carry, and under `fill` how many rows each table holds and how many of them are non-NULL in each column. Read `fill` before writing a query: a column whose count is 0 is NULL on every row of this database, so filtering on it returns nothing, and a table reporting `unread` was not counted rather than empty. A table reporting `rowLabelReads` carries a per-row label rule over those columns, and a query over it must select every one of them by its own name — an alias does not stand in for the column — or the read is refused and the refusal arrives on the result's `error` rather than as rows; `rowLabelReadsIncomplete` means the named columns are not the whole of what the rule needs — it reads a column this reply does not name, or it is declared in a shape that cannot be read — so such a query is refused whatever it selects. Read such a referent with `db.query` over the handle rather than as a value. A research handle — the cfh:v: token a research call returned — returns what that research found under `research`: its kit, the patterns it confirmed, and the handles it described, each marked `unavailable` when this run does not hold its token; read it before researching the same question again. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -385,6 +385,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
           type: "object",
           properties: {
             name: { type: "string" },
+            description: { type: "string" },
             inputSchema: {},
             outputSchema: {},
           },
@@ -788,10 +789,19 @@ interface DescribedReferent {
 }
 
 /**
- * The verbs of the piece whose result document is `root`, each reduced to
- * structure, or nothing when `root` is not a piece or its pattern cannot be
- * read. A failure costs the reply its verbs and nothing else, the way a
+ * The verbs of the piece whose result document is `root`, as the pattern
+ * declares them, or nothing when `root` is not a piece or its pattern cannot
+ * be read. A failure costs the reply its verbs and nothing else, the way a
  * schema the session cannot state is reported as absent.
+ *
+ * SHORTCUT (2026-10-12): each verb's schemas and doc comment cross as the
+ * pattern's author wrote them — descriptions, defaults and enumerations
+ * included — where every other schema this tool discloses is reduced to
+ * structure. A model cannot call a verb well without the author's account of
+ * it, and that account is author text in model context: a prompt-injection
+ * surface the reduction otherwise closes, and one no bound on property names
+ * limits here. To harden, route the verbs through the CFC release check with
+ * the pattern's own label, and disclose what that admits.
  */
 const pieceVerbsOf = async (
   session: HarnessFabricSession,
@@ -801,16 +811,16 @@ const pieceVerbsOf = async (
   try {
     return (await heldPieceVerbs(session.pieces, root)).map((verb) => ({
       name: verb.name,
-      inputSchema: verb.inputSchema === true
-        ? true
-        : schemaShapeOnly(verb.inputSchema) as HarnessCallableDescriptor[
-          "inputSchema"
-        ],
+      ...(verb.description !== undefined
+        ? { description: verb.description }
+        : {}),
+      inputSchema: verb.inputSchema as HarnessCallableDescriptor[
+        "inputSchema"
+      ],
       ...(verb.outputSchema !== undefined
         ? {
-          outputSchema: schemaShapeOnly(
-            verb.outputSchema,
-          ) as HarnessCallableDescriptor["outputSchema"],
+          outputSchema: verb
+            .outputSchema as HarnessCallableDescriptor["outputSchema"],
         }
         : {}),
     }));

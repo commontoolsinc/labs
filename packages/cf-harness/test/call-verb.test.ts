@@ -67,6 +67,7 @@ const TIMER_PATTERN_SOURCE = [
   "}",
   "export default pattern<Input, Output>(({ minutes, label, status }) => {",
   "  const start = action<StartEvent, StartResult>((event) => {",
+  "    if (!(event.minutes > 0)) throw new Error('start: minutes must be positive');",
   "    minutes.set(event.minutes);",
   "    label.set(event.label ?? '');",
   "    status.set('running');",
@@ -170,7 +171,7 @@ describe("call-verb", () => {
         "stop",
       ]);
       const start = output.verbs!.find((verb) => verb.name === "start")!;
-      expect(start.inputSchema).toEqual({
+      expect(start.inputSchema).toMatchObject({
         type: "object",
         properties: {
           minutes: { type: "number" },
@@ -178,7 +179,7 @@ describe("call-verb", () => {
         },
         required: ["minutes"],
       });
-      expect(start.outputSchema).toEqual({
+      expect(start.outputSchema).toMatchObject({
         type: "object",
         properties: {
           endsAt: { type: "number" },
@@ -188,9 +189,10 @@ describe("call-verb", () => {
       });
     });
 
-    it("reports no prose from the pattern's doc comments on a verb", async () => {
-      // A verb's signature is reduced to structure like every other schema
-      // this tool discloses, so the author's words do not ride out on it.
+    it("reports each verb's doc comment and its event fields' descriptions", async () => {
+      // A model cannot call a verb well without its author's account of it,
+      // so a verb's signature crosses with its prose where every other schema
+      // this tool discloses is reduced to structure.
       const ref = await createTimer();
       const minted = await mintAddressHandle(
         createHarnessHandleTable("run-call-verb"),
@@ -202,9 +204,11 @@ describe("call-verb", () => {
         { token: minted.token },
       );
 
-      const text = JSON.stringify(output.verbs);
-      expect(text).not.toContain("whole minutes");
-      expect(text).not.toContain("Start the timer");
+      const start = output.verbs!.find((verb) => verb.name === "start")!;
+      expect(start.description).toBe("Start the timer.");
+      expect(JSON.stringify(start.inputSchema)).toContain(
+        "How long the timer runs, in whole minutes.",
+      );
     });
 
     it("lists no verbs for a field within a piece", async () => {
@@ -258,6 +262,22 @@ describe("call-verb", () => {
       expect(JSON.stringify(output)).not.toContain("deep work");
       const result = (output as { result: { label: unknown } }).result;
       expect(result.label).toEqual({ "@link": expect.any(String) });
+    });
+
+    it("returns the message a failing handler threw", async () => {
+      const ref = await createTimer();
+
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: ref,
+        verb: "start",
+        event: { minutes: 0 },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "start: minutes must be positive",
+      );
+      expect(await readField(ref, "status")).toBe("idle");
     });
 
     it("runs a verb that takes no event", async () => {
@@ -343,38 +363,134 @@ describe("call-verb", () => {
     });
   });
 
+  describe("with a reference argument", () => {
+    /** The tracker the CLI's verb session drives, whose `blockOn` takes an
+     * item by reference. */
+    const trackerSource = () =>
+      Deno.readTextFile(
+        new URL(
+          "../../cli/integration/pattern/tracker.tsx",
+          import.meta.url,
+        ),
+      );
+
+    /** Files a root item on `board` and returns the address `addItem` handed
+     * back for it, which is where a run gets an item's handle from. */
+    const fileItem = async (board: string, title: string): Promise<string> => {
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: board,
+        verb: "addItem",
+        event: { title },
+      });
+      expect(output.status).toBe("ok");
+      const item = (output as { result: { item: { "@link": string } } })
+        .result.item;
+      expect(item).toEqual({ "@link": expect.any(String) });
+      return item["@link"];
+    };
+
+    /** The ids the stored `blockedOn` list of the item at `ref` links to. */
+    const blockedOnIds = async (ref: string): Promise<unknown[]> => {
+      const cell = runtime.getCellFromLink(
+        parseLLMFriendlyLink(ref, session.pieces.getSpace()),
+      ) as Cell<Record<string, unknown>>;
+      await cell.key("blockedOn").pull();
+      const raw = cell.key("blockedOn").resolveAsCell().getRaw() as
+        | unknown[]
+        | undefined;
+      return (raw ?? []).map((entry) =>
+        (entry as { "/": { "link@1": { id: string } } })["/"]["link@1"].id
+      );
+    };
+
+    let board: string;
+
+    beforeEach(async () => {
+      const output = await runPatternTool.invoke(
+        contextWith(session),
+        { sourceText: await trackerSource() },
+      ) as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      board = output.resultRef;
+    });
+
+    it("refuses an inline copy at a reference position, before the event is sent", async () => {
+      // A copy of the target's fields matches its shape, so only the declared
+      // contract can tell it from a reference: stored, it would be a detached
+      // document rather than an edge.
+      const item = await fileItem(board, "Ship");
+
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: item,
+        verb: "blockOn",
+        event: { on: { title: "Review" } },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "inline copy",
+      );
+      expect(await blockedOnIds(item)).toEqual([]);
+    });
+
+    it("refuses a string that is not an address at a reference position", async () => {
+      const item = await fileItem(board, "Ship");
+
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: item,
+        verb: "blockOn",
+        event: { on: "Review" },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "is not an address",
+      );
+      expect(await blockedOnIds(item)).toEqual([]);
+    });
+
+    it("refuses a handle token the run does not hold", async () => {
+      // A token the table holds reaches the tool as its address; one it does
+      // not hold arrives as written.
+      const item = await fileItem(board, "Ship");
+
+      const output = await callVerbTool.invoke(contextWith(session), {
+        token: item,
+        verb: "blockOn",
+        event: { on: "cfh:a:zzzzz" },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        "cfh:a:zzzzz is not a handle this run holds",
+      );
+      expect(await blockedOnIds(item)).toEqual([]);
+    });
+  });
+
   describe("at the prompt-loop model boundary", () => {
-    it("lets a model holding a piece's handle read its verbs and call one", async () => {
-      // The model never sees an address: it holds the token run_pattern
-      // handed back, describes it to learn the verbs, and calls one by the
-      // same token.
+    /**
+     * Runs a scripted model through the ordinary tool dispatcher. Each step
+     * receives the previous tool's parsed output and returns the next call;
+     * the run ends after the last one.
+     */
+    const runScripted = async (
+      steps: readonly ((
+        previous: Record<string, unknown>,
+      ) =>
+        | { name: string; input: unknown }
+        | Promise<{ name: string; input: unknown }>)[],
+    ) => {
       const artifactRoot = await Deno.makeTempDir();
-      const fabricSession: HarnessFabricSessionConfig = {
-        apiUrl: "http://toolshed.test",
-        identityKeyPath: "/unused/fixture.key",
-        space: session.pieces.getSpace(),
-      };
-      const requests: HarnessModelTurnRequest[] = [];
-      const lastToolOutput = (request: HarnessModelTurnRequest) =>
+      const outputs: Record<string, unknown>[] = [];
+      const toolOutput = (request: HarnessModelTurnRequest) =>
         JSON.parse(
           (request.transcript.findLast((message) => message.role === "tool") as
             | HarnessToolTranscriptMessage
-            | undefined)!.content,
+            | undefined)?.content ?? "{}",
         );
-      const toolCall = (
-        name: string,
-        input: unknown,
-      ): HarnessAssistantTranscriptMessage => ({
-        role: "assistant",
-        content: "",
-        toolCalls: [{
-          id: `call-${name}`,
-          type: "function",
-          function: { name, arguments: JSON.stringify(input) },
-        }],
-      });
-      let token = "";
       try {
+        let turn = 0;
         const loop = new CfHarnessPromptLoop({
           sandboxRuntime: {
             describe: () => ({
@@ -393,66 +509,153 @@ describe("call-verb", () => {
           artifactRoot,
           runId: "run-call-verb-loop",
           model: "test-model",
-          fabricSession,
+          fabricSession: {
+            apiUrl: "http://toolshed.test",
+            identityKeyPath: "/unused/fixture.key",
+            space: session.pieces.getSpace(),
+          } satisfies HarnessFabricSessionConfig,
           fabricSessionFactory: () => Promise.resolve(session),
           allowedToolIds: ["run_pattern", "describe_handle", "call_verb"],
           modelClient: {
             providerId: "test-provider",
-            complete: (request) => {
-              requests.push({
-                ...request,
-                transcript: [...request.transcript],
-              });
-              switch (requests.length) {
-                case 1:
-                  return Promise.resolve({
-                    assistant: toolCall("run_pattern", {
-                      sourceText: TIMER_PATTERN_SOURCE,
-                    }),
-                  });
-                case 2:
-                  token = lastToolOutput(request).resultRef;
-                  return Promise.resolve({
-                    assistant: toolCall("describe_handle", { token }),
-                  });
-                case 3:
-                  return Promise.resolve({
-                    assistant: toolCall("call_verb", {
-                      token,
-                      verb: "start",
-                      event: { minutes: 10 },
-                    }),
-                  });
-                default:
-                  return Promise.resolve({
-                    assistant: { role: "assistant", content: "Started." },
-                  });
+            complete: async (request) => {
+              const previous = toolOutput(request);
+              if (turn > 0) outputs.push(previous);
+              const step = steps[turn];
+              turn += 1;
+              if (step === undefined) {
+                return { assistant: { role: "assistant", content: "Done." } };
               }
+              const { name, input } = await step(previous);
+              const assistant: HarnessAssistantTranscriptMessage = {
+                role: "assistant",
+                content: "",
+                toolCalls: [{
+                  id: `call-${turn}`,
+                  type: "function",
+                  function: { name, arguments: JSON.stringify(input) },
+                }],
+              };
+              return { assistant };
             },
           },
         });
-
         const result = await loop.runPrompt({
-          prompt: "start a ten minute timer",
-          maxModelTurns: 4,
+          prompt: "drive the piece",
+          maxModelTurns: steps.length + 1,
           promptSlotBinding: directPromptSlotBindingFor("call-verb"),
         });
-
-        expect(token).toMatch(/^cfh:a:/);
-        const described = lastToolOutput(requests[2]);
-        expect(described.verbs.map((verb: { name: string }) => verb.name))
-          .toEqual(["start", "stop"]);
-        const called = lastToolOutput(requests[3]);
-        expect(called).toMatchObject({
-          status: "ok",
-          verb: "start",
-          result: { endsAt: 600000 },
-        });
-        const entry = resolveHandleToken(result.runState.handleTable!, token);
-        expect(await readField(entry!.ref, "status")).toBe("running");
+        return { outputs, result };
       } finally {
         await Deno.remove(artifactRoot, { recursive: true });
       }
+    };
+
+    it("lets a model holding a piece's handle read its verbs and call one", async () => {
+      // The model never sees an address: it holds the token run_pattern
+      // handed back, describes it to learn the verbs, and calls one by the
+      // same token.
+      let token = "";
+      const { outputs, result } = await runScripted([
+        () => ({
+          name: "run_pattern",
+          input: { sourceText: TIMER_PATTERN_SOURCE },
+        }),
+        (ran) => {
+          token = ran.resultRef as string;
+          return { name: "describe_handle", input: { token } };
+        },
+        () => ({
+          name: "call_verb",
+          input: { token, verb: "start", event: { minutes: 10 } },
+        }),
+      ]);
+
+      expect(token).toMatch(/^cfh:a:/);
+      expect(
+        (outputs[1].verbs as { name: string }[]).map((verb) => verb.name),
+      ).toEqual(["start", "stop"]);
+      expect(outputs[2]).toMatchObject({
+        status: "ok",
+        verb: "start",
+        result: { endsAt: 600000 },
+      });
+      const entry = resolveHandleToken(result.runState.handleTable!, token);
+      expect(await readField(entry!.ref, "status")).toBe("running");
+    });
+
+    it("passes an item's handle to a verb that takes the item by reference", async () => {
+      // addItem hands each item back as a handle, and blockOn takes one: the
+      // token reaches the verb as the item's address and is stored as a link
+      // to it, never as a copy of it.
+      const tokens: string[] = [];
+      const itemToken = (output: Record<string, unknown>) =>
+        (output.result as { item: string }).item;
+      const { outputs, result } = await runScripted([
+        async () => ({
+          name: "run_pattern",
+          input: {
+            sourceText: await Deno.readTextFile(
+              new URL(
+                "../../cli/integration/pattern/tracker.tsx",
+                import.meta.url,
+              ),
+            ),
+          },
+        }),
+        (ran) => {
+          tokens.push(ran.resultRef as string);
+          return {
+            name: "call_verb",
+            input: {
+              token: tokens[0],
+              verb: "addItem",
+              event: { title: "Ship" },
+            },
+          };
+        },
+        (filed) => {
+          tokens.push(itemToken(filed));
+          return {
+            name: "call_verb",
+            input: {
+              token: tokens[0],
+              verb: "addItem",
+              event: { title: "Review" },
+            },
+          };
+        },
+        (filed) => {
+          tokens.push(itemToken(filed));
+          return {
+            name: "call_verb",
+            input: {
+              token: tokens[1],
+              verb: "blockOn",
+              event: { on: tokens[2] },
+            },
+          };
+        },
+      ]);
+
+      expect(tokens.slice(1)).toEqual([
+        expect.stringMatching(/^cfh:a:/),
+        expect.stringMatching(/^cfh:a:/),
+      ]);
+      expect(outputs.at(-1)).toMatchObject({ status: "ok", verb: "blockOn" });
+      const table = result.runState.handleTable!;
+      const ship = resolveHandleToken(table, tokens[1])!.ref;
+      const review = resolveHandleToken(table, tokens[2])!.ref;
+      const cell = runtime.getCellFromLink(
+        parseLLMFriendlyLink(ship, session.pieces.getSpace()),
+      ) as Cell<Record<string, unknown>>;
+      await cell.key("blockedOn").pull();
+      const stored = cell.key("blockedOn").resolveAsCell().getRaw() as {
+        "/": { "link@1": { id: string } };
+      }[];
+      expect(stored.map((entry) => entry["/"]["link@1"].id)).toEqual([
+        parseLLMFriendlyLink(review, session.pieces.getSpace()).id,
+      ]);
     });
   });
 });

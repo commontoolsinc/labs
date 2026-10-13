@@ -9,6 +9,7 @@
  */
 
 import type { JSONSchema } from "@commonfabric/api";
+import { isDID } from "@commonfabric/identity/did";
 import { isLink } from "@commonfabric/runner";
 import { cfcSchemaResolvedRoot } from "@commonfabric/runner/cfc/schema-refs";
 import {
@@ -16,6 +17,12 @@ import {
   relaxDefaultedRequired,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc/schema-sanitization";
+import {
+  isPieceHandle,
+  linkPathSegmentToCellPathSegment,
+  parseCellReference,
+} from "@commonfabric/runner/shared";
+import { isSlugAddress } from "@commonfabric/runner/slugs";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   declaredFieldNames,
@@ -92,7 +99,7 @@ interface UndeclaredEventField {
  * a live `Cell`, a primitive link — is already a value rather than a caller's
  * JSON, and has no payload to malform.
  */
-export function isOpaqueReference(value: unknown): boolean {
+function isOpaqueReference(value: unknown): boolean {
   if (!isLink(value)) return false;
   const payload = (value as Record<string, Record<string, unknown>> | null)
     ?.["/"]?.["link@1"];
@@ -106,7 +113,7 @@ export function isOpaqueReference(value: unknown): boolean {
 
 /** Whether a schema node marks its position as a cell or a stream, which is
  * where a caller may write a link in place of a value. */
-export function carriesCellMarker(node: Record<string, unknown>): boolean {
+function carriesCellMarker(node: Record<string, unknown>): boolean {
   return node.asCell !== undefined || node.asStream !== undefined;
 }
 
@@ -336,4 +343,309 @@ export function verbInputSchemaError(
   return validateSchemaValue(relaxed, input, relaxed, {
     acceptOpaqueValue: (value) => isOpaqueReference(value),
   });
+}
+
+/** The key a caller writes beside `properties` to ask for an address. */
+export const LINK_MARKER_KEY = "$link";
+
+/**
+ * The link an address written at a reference position names, or `undefined`
+ * when the string is not one: the canonical reference form, naming its piece
+ * by handle and any space by DID, and selecting no member.
+ *
+ * A slug and a space name are refused as firmly as a non-address is. The
+ * link this becomes is stored, holding the id and the space verbatim with no
+ * session behind it to resolve a name with — so the wider vocabulary `cf`'s
+ * own intake takes would land a durable edge pointing at nothing.
+ */
+function addressedLink(text: string): Record<string, unknown> | undefined {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("/")) return undefined;
+  let parsed;
+  try {
+    parsed = parseCellReference(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (
+    parsed.member === "argument" || isSlugAddress(parsed.id) ||
+    !isPieceHandle(parsed.id) ||
+    (parsed.space !== undefined && !isDID(parsed.space))
+  ) {
+    return undefined;
+  }
+  const path = parsed.path.map(linkPathSegmentToCellPathSegment);
+  return {
+    id: parsed.id,
+    ...(parsed.space !== undefined && { space: parsed.space }),
+    ...(parsed.scope !== undefined && { scope: parsed.scope }),
+    ...(path.length > 0 && { path }),
+  };
+}
+
+/**
+ * The address inside the `{"$link": "/of:…"}` object a marked read renders
+ * (`composeLinkAddresses`, `packages/cli/lib/cell-selection.ts`), whether the
+ * address stands alone there or the contents the same read projected sit
+ * beside it. `undefined` for every other value, a `$link` holding no string
+ * included: `{"$link": true}` is the projection-schema marker, not an
+ * address.
+ */
+function printedAddressOf(value: unknown): string | undefined {
+  if (!isObjectNotArray(value)) return undefined;
+  const address = (value as Record<string, unknown>)[LINK_MARKER_KEY];
+  return typeof address === "string" ? address : undefined;
+}
+
+/**
+ * The round-trip spelling, resolved where the contract declares a reference:
+ * at a position whose schema carries a cell marker — which the DECLARED
+ * event schema keeps and a link-derived dispatch schema does not, see
+ * `CallableResolution.declaredEvent` in `packages/cli/lib/callable.ts` — a
+ * string holding the address a read emits (`/of:…`, the canonical fabric
+ * reference) converts to the link envelope dispatch already accepts. So does
+ * the `{"$link": "/of:…"}` object a marked read renders that address in, alone
+ * or joined by the contents the same read projected: the address inside is
+ * what the position takes, and the contents beside it are the target's own
+ * fields, which a reference never stores.
+ * An address printed by one command is now a verb argument in the next,
+ * which is the property the CLI surface states for commands, one level in.
+ *
+ * The same positions refuse the two payloads that could only ever be
+ * mistakes there. A string that is NOT an address is refused naming what
+ * the position takes — silence would leave it to schema validation, whose
+ * "does not match type object" says nothing about references. And a plain
+ * object is refused outright: a shape-matching copy at a reference position
+ * stores a DETACHED DOCUMENT inside the caller's own piece and reports
+ * success (#5560), which no caller has ever meant. Both refusals spend
+ * nothing; the corruption they prevent is durable.
+ *
+ * The walk descends the payload beside the schema exactly as the
+ * undeclared-field gate does — objects by `properties`, arrays by `items`
+ * and `prefixItems`, conjunctions member-wise, local `$ref`s through
+ * `localRefTarget` against the document root threaded beside — and passes
+ * over disjunction interiors, where choosing a branch is the caller's.
+ * Everything it does not recognize flows through untouched.
+ */
+export function resolveEmittedAddressArguments(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  scopeRoot?: JSONSchema,
+  path = "<event>",
+  atRoot = true,
+): { value: unknown; refusal?: string } {
+  if (!isSchemaObject(schema)) return { value };
+  const root = scopeRoot ?? schema;
+  const node = localRefTarget(schema, root);
+  if (!isSchemaObject(node)) return { value };
+  const nodeRoot = node !== schema ? cfcSchemaResolvedRoot(node, root) : root;
+
+  // The marker rides the `$ref` SITE (`{$ref: …, asCell: […]}`), where the
+  // authored cell wrapper was declared, so the pre-resolution node is
+  // checked as well as the target.
+  if (!atRoot && (carriesCellMarker(schema) || carriesCellMarker(node))) {
+    const spelled = printedAddressOf(value) ?? value;
+    if (typeof spelled === "string") {
+      const link = addressedLink(spelled);
+      if (link === undefined) {
+        return {
+          value,
+          refusal:
+            `${JSON.stringify(spelled)} at ${path} is not an address — ` +
+            `the position declares a reference, and takes the /of:… form ` +
+            `a read prints`,
+        };
+      }
+      return { value: { "/": { "link@1": link } } };
+    }
+    if (isObjectNotArray(value) && !isOpaqueReference(value)) {
+      return {
+        value,
+        refusal: `${path} declares a reference, and an inline copy would ` +
+          `store a detached document rather than an edge — send the ` +
+          `address a read printed`,
+      };
+    }
+    return { value };
+  }
+
+  if (node.anyOf !== undefined || node.oneOf !== undefined) return { value };
+
+  if (Array.isArray(node.allOf)) {
+    let current = value;
+    for (const member of node.allOf) {
+      const resolved = resolveEmittedAddressArguments(
+        current,
+        member as JSONSchema,
+        nodeRoot,
+        path,
+        atRoot,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      current = resolved.value;
+    }
+    return { value: current };
+  }
+
+  if (isObjectNotArray(value)) {
+    const properties = isObjectNotArray(node.properties)
+      ? node.properties as Record<string, JSONSchema>
+      : undefined;
+    // A record schema declares its values on `additionalProperties` and names
+    // no key at all, so a key absent from `properties` falls back to it — the
+    // same fallback the undeclared-field walk makes. Without it a map of
+    // references (`{additionalProperties: {asCell: […]}}`) converts nothing.
+    const additional = isObjectNotArray(node.additionalProperties)
+      ? node.additionalProperties as JSONSchema
+      : undefined;
+    if (!properties && !additional) return { value };
+    let changed = false;
+    const next: Record<string, unknown> = { ...value };
+    for (const [key, child] of Object.entries(value)) {
+      const childSchema = properties?.[key] ?? additional;
+      if (childSchema === undefined) continue;
+      const resolved = resolveEmittedAddressArguments(
+        child,
+        childSchema,
+        nodeRoot,
+        `${path}.${key}`,
+        false,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      if (resolved.value !== child) {
+        next[key] = resolved.value;
+        changed = true;
+      }
+    }
+    return { value: changed ? next : value };
+  }
+
+  if (Array.isArray(value)) {
+    const prefix = Array.isArray(node.prefixItems)
+      ? node.prefixItems as JSONSchema[]
+      : undefined;
+    const items = isSchemaObject(node.items as JSONSchema | undefined)
+      ? node.items as JSONSchema
+      : undefined;
+    let changed = false;
+    const next: unknown[] = [];
+    for (let index = 0; index < value.length; index++) {
+      const element = value[index];
+      const childSchema = prefix?.[index] ?? items;
+      if (childSchema === undefined) {
+        next.push(element);
+        continue;
+      }
+      const resolved = resolveEmittedAddressArguments(
+        element,
+        childSchema,
+        nodeRoot,
+        `${path}[${index}]`,
+        false,
+      );
+      if (resolved.refusal !== undefined) return resolved;
+      if (resolved.value !== element) changed = true;
+      next.push(resolved.value);
+    }
+    return { value: changed ? next : value };
+  }
+
+  return { value };
+}
+
+/**
+ * The shared pre-dispatch gate. Returns the event to dispatch — the caller's
+ * own payload, or `{}` when an absent payload was normalized against an
+ * object schema, or a payload whose emitted addresses were converted to link
+ * envelopes — or the refusal saying why that event cannot satisfy the schema.
+ * The absent-payload refusal says so explicitly: "send a payload" has to read
+ * differently from "fix your payload".
+ *
+ * `schema` is the event schema the payload is judged against, and
+ * `declaredEvent` the verb's declared event contract, consulted only where it
+ * can change the answer — see below.
+ */
+export async function verbEventForDispatch(
+  input: unknown,
+  schema: JSONSchema | undefined,
+  declaredEvent?: () => Promise<JSONSchema | undefined>,
+): Promise<{ value: unknown } | { refusal: string }> {
+  const normalized = normalizeAbsentVerbPayload(input, schema);
+  const shapeError = verbInputSchemaError(normalized, schema);
+
+  // The published schema cannot state the one thing that decides a reference
+  // position: link sanitization keeps only stream markers, so `asCell` on a
+  // declared reference never reaches the dispatch cell. Only the compiled
+  // pattern still carries it (`declaredEvent`), and reaching it costs a
+  // pattern load — so the question is when a load can change the answer.
+  //
+  // Sanitization strips the MARKER and keeps the SHAPE. A declared reference
+  // is a `$ref` to the target's object schema, so it stays an object-shaped
+  // position, and a string there is refused by the published schema before
+  // this gate ever asks the contract. Two payloads therefore need the
+  // contract and no others: one the published shape REFUSED (a string where
+  // an object is declared — the emitted address, the case conversion exists
+  // for), and one it ACCEPTED that carries an inline object below its root
+  // (a shape-valid copy — the #5560 corruption, which validates precisely
+  // because it matches the target's shape). Everything else — a flat payload
+  // of scalars, an envelope the walk passes through — has no position whose
+  // reading a contract could change, so it dispatches without a load.
+  //
+  // The residue this leaves is a reference whose target itself admits a
+  // string, where the published schema accepts a bare string and no consult
+  // happens. Converting there would be a guess about whether the caller
+  // meant an address or a value, and declining is the safe half of it.
+  if (shapeError === undefined && !carriesInlineObject(normalized)) {
+    return { value: normalized };
+  }
+
+  // Against the contract, an emitted address string at a reference position
+  // converts to the link envelope dispatch already accepts, and the two
+  // payloads that could only ever be mistakes there are refused naming the
+  // position: a string that is no address, and an inline copy that would
+  // store a detached document rather than an edge (#5560).
+  const contract = isObjectOrArray(normalized)
+    ? await declaredEvent?.()
+    : undefined;
+  const addressed = resolveEmittedAddressArguments(normalized, contract);
+  if (addressed.refusal !== undefined) {
+    return { refusal: addressed.refusal };
+  }
+  // A conversion is re-judged by the published shape, so what goes out is
+  // still what the gate accepted.
+  let detail = shapeError;
+  if (addressed.value !== normalized) {
+    const converted = verbInputSchemaError(addressed.value, schema);
+    if (converted === undefined) return { value: addressed.value };
+    detail = converted;
+  }
+  if (detail === undefined) return { value: normalized };
+  return {
+    refusal: input === undefined
+      ? `no payload was supplied, and this verb cannot run without one ` +
+        `(${detail}) — send a payload`
+      : detail,
+  };
+}
+
+/**
+ * Whether `value` carries a plain object BELOW its root — the payload shape
+ * that can still hold a detached copy at a declared reference position after
+ * the published schema has accepted it.
+ *
+ * A link envelope is a reference already, not a copy, so it stops the descent
+ * rather than triggering a contract consult on every well-formed reference
+ * argument. The root itself is excluded because the event object always is
+ * one; what matters is what sits inside it, at any depth, through arrays.
+ */
+function carriesInlineObject(value: unknown, atRoot = true): boolean {
+  if (Array.isArray(value)) {
+    return value.some((element) => carriesInlineObject(element, false));
+  }
+  if (!isObjectNotArray(value)) return false;
+  if (isOpaqueReference(value)) return false;
+  if (!atRoot) return true;
+  return Object.values(value).some((child) =>
+    carriesInlineObject(child, false)
+  );
 }

@@ -20,13 +20,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { resolveEmittedAddressArguments } from "@commonfabric/piece/verb-input";
 import { handlerVerbEvents } from "@commonfabric/piece/verb-listing";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import {
-  resolveEmittedAddressArguments,
-  VerbInputValidationError,
-} from "../lib/callable.ts";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import { executePieceCallable } from "../lib/piece.ts";
 
 /** A real-shaped piece id, so the address parser judges the spelling and not

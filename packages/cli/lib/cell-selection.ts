@@ -16,6 +16,7 @@ import {
   schemaIsObjectShaped,
 } from "@commonfabric/piece/declared-fields";
 import { nearestName } from "@commonfabric/piece/refusal";
+import { LINK_MARKER_KEY } from "@commonfabric/piece/verb-input";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import {
   ContextualFlowControl,
@@ -83,9 +84,6 @@ export interface ParsedSelectionFilter {
   predicate: SelectionPredicate;
   paths: Array<Array<string | number>>;
 }
-
-/** The key a caller writes beside `properties` to ask for an address. */
-export const LINK_MARKER_KEY = "$link";
 
 /**
  * The character a concise field path ends a segment with to ask for the

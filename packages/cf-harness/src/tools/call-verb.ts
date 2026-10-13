@@ -17,13 +17,11 @@
  * into the handling's receipt.
  */
 
-import type { JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, Pattern } from "@commonfabric/api";
 import { nearestName } from "@commonfabric/piece/refusal";
+import { verbEventForDispatch } from "@commonfabric/piece/verb-input";
 import {
-  normalizeAbsentVerbPayload,
-  verbInputSchemaError,
-} from "@commonfabric/piece/verb-input";
-import {
+  handlerVerbEvents,
   type PieceCallableListing,
   verbsFromCompiledPattern,
 } from "@commonfabric/piece/verb-listing";
@@ -34,12 +32,19 @@ import {
 import {
   type Cell,
   type IExtendedStorageTransaction,
+  isLink,
   isStream,
   sendEvent,
+  transactionFailureMessage,
 } from "@commonfabric/runner";
 import { describeSinkReleaseRefusal } from "@commonfabric/runner/cfc";
+import { localRefTarget } from "@commonfabric/runner/cfc/schema-sanitization";
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
+import {
+  HANDLE_TOKEN_PATTERN,
+  REFERENT_TOKEN_PATTERN,
+} from "../contracts/handle-table.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { errorMessage } from "../error-message.ts";
 import { scrubBareFabricIdentifiers } from "../fabric-identifier-scrub.ts";
@@ -104,7 +109,7 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   toolId: "call_verb",
   title: "Call Verb",
   description:
-    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. An event the verb does not declare, a missing required field, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing. Returns the verb's result: numbers, booleans and nulls as themselves, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece must be in this run's own space.",
+    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece must be in this run's own space.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -153,11 +158,135 @@ export const heldPieceVerbs = async (
   pieces: PiecesController,
   piece: Cell<unknown>,
 ): Promise<PieceCallableListing[]> =>
-  verbsFromCompiledPattern(
-    await new PieceController(pieces, piece).getPattern({
-      projectResult: false,
-    }),
-  ).filter((verb) => verb.kind === "handler" && verb.on === "result");
+  resultVerbs(await heldPiecePattern(pieces, piece));
+
+/** The compiled pattern `piece` is pinned to, its result left unprojected. */
+const heldPiecePattern = (
+  pieces: PiecesController,
+  piece: Cell<unknown>,
+): Promise<Pattern> =>
+  new PieceController(pieces, piece).getPattern({ projectResult: false });
+
+/** The rows of `pattern`'s listing an event can be sent to here. */
+const resultVerbs = (pattern: Pattern): PieceCallableListing[] =>
+  verbsFromCompiledPattern(pattern).filter((verb) =>
+    verb.kind === "handler" && verb.on === "result"
+  );
+
+/** The first string in `event` that is a whole handle token, at any depth. */
+const firstTokenIn = (event: unknown): string | undefined => {
+  if (typeof event === "string") {
+    const whole = (pattern: RegExp) =>
+      new RegExp(`^${pattern.source}$`).test(event);
+    return whole(HANDLE_TOKEN_PATTERN) || whole(REFERENT_TOKEN_PATTERN)
+      ? event
+      : undefined;
+  }
+  if (Array.isArray(event)) {
+    for (const element of event) {
+      const found = firstTokenIn(element);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (isObjectNotArray(event)) return firstTokenIn(Object.values(event));
+  return undefined;
+};
+
+/** The schema the result sanitizer keeps a `{"@link": …}` object under. */
+const OPAQUE_LINK_SCHEMA = {
+  type: "object",
+  properties: { "@link": { type: "string" } },
+  required: ["@link"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
+/**
+ * Every path within a receipt's stored value at which it holds a link rather
+ * than a value: the positions where the verb returned a reference to another
+ * cell, a piece it created or was handed among them.
+ */
+const storedLinkPaths = (
+  raw: unknown,
+  path: readonly (string | number)[] = [],
+): (string | number)[][] => {
+  if (isLink(raw)) return [[...path]];
+  if (Array.isArray(raw)) {
+    return raw.flatMap((element, index) =>
+      storedLinkPaths(element, [...path, index])
+    );
+  }
+  if (isObjectNotArray(raw)) {
+    return Object.entries(raw).flatMap(([key, child]) =>
+      storedLinkPaths(child, [...path, key])
+    );
+  }
+  return [];
+};
+
+/** `value` with `replacement` at `path`, or `value` itself where the path
+ * does not reach. Copies only the containers along the path. */
+const replacedAt = (
+  value: unknown,
+  path: readonly (string | number)[],
+  replacement: unknown,
+): unknown => {
+  if (path.length === 0) return replacement;
+  const [head, ...rest] = path;
+  if (Array.isArray(value) && typeof head === "number" && head < value.length) {
+    const copy = [...value];
+    copy[head] = replacedAt(value[head], rest, replacement);
+    return copy;
+  }
+  if (isObjectNotArray(value) && Object.hasOwn(value, String(head))) {
+    return {
+      ...value,
+      [head]: replacedAt(value[String(head)], rest, replacement),
+    };
+  }
+  return value;
+};
+
+/**
+ * `schema` declaring an opaque link at `path`, so the result sanitizer keeps
+ * the `{"@link": …}` object a reference is handed back as instead of judging
+ * it against the shape of what it points at. An array's elements share one
+ * schema, so an element position admits the link beside what it already
+ * admitted. `root` is the document local references resolve against.
+ */
+const withOpaqueLinkAt = (
+  schema: JSONSchema,
+  root: JSONSchema,
+  path: readonly (string | number)[],
+): JSONSchema => {
+  if (path.length === 0) return OPAQUE_LINK_SCHEMA;
+  const node = localRefTarget(schema, root);
+  if (!isObjectNotArray(node)) return schema;
+  const [head, ...rest] = path;
+  if (typeof head === "number") {
+    const items = node.items as JSONSchema | undefined;
+    if (items === undefined) return schema;
+    const element = withOpaqueLinkAt(items, root, rest);
+    return {
+      ...node,
+      items: rest.length === 0 ? { anyOf: [items, element] } : element,
+    } as JSONSchema;
+  }
+  const properties = isObjectNotArray(node.properties)
+    ? node.properties as Record<string, JSONSchema>
+    : {};
+  const child = properties[head] ??
+    (isObjectNotArray(node.additionalProperties)
+      ? node.additionalProperties as JSONSchema
+      : {});
+  return {
+    ...node,
+    properties: {
+      ...properties,
+      [head]: withOpaqueLinkAt(child, root, rest),
+    },
+  } as JSONSchema;
+};
 
 /** The refusal for a name `verbs` does not hold, naming the ones it does. */
 const notAVerbMessage = (
@@ -209,28 +338,44 @@ export const callVerbTool: HarnessToolDefinition<
     const piece = await resolvePiece("call_verb", pieces, ref);
     if (!piece.ok) return fail(piece.message);
 
-    let verbs: PieceCallableListing[];
+    let pattern: Pattern;
     try {
-      verbs = await heldPieceVerbs(pieces, piece.cell);
+      pattern = await heldPiecePattern(pieces, piece.cell);
     } catch (error) {
       return fail(
         `call_verb could not read the piece's pattern: ${errorMessage(error)}`,
       );
     }
+    const verbs = resultVerbs(pattern);
     const verb = verbs.find((candidate) => candidate.name === name);
     if (verb === undefined) return fail(notAVerbMessage(name, verbs));
 
-    // Judged against the verb's declared event, which is the schema
-    // describe_handle lists for it, so what a model was told it may send and
-    // what is accepted here are one schema.
-    const schema = verb.inputSchema === true ? undefined : verb.inputSchema;
-    const event = normalizeAbsentVerbPayload(input.event, schema);
-    const refusal = verbInputSchemaError(event, schema);
-    if (refusal !== undefined) {
+    // A token the run holds reached this tool as the address it stands for,
+    // so one still written as a token is one the run does not hold.
+    const unheld = firstTokenIn(input.event);
+    if (unheld !== undefined) {
       return fail(
-        `call_verb refused the event for "${name}" without sending it: ${refusal}`,
+        `call_verb refused the event for "${name}" without sending it: ${unheld} is not a handle this run holds`,
       );
     }
+
+    // Judged against the verb's declared event, which is the schema
+    // describe_handle lists for it, so what a model was told it may send and
+    // what is accepted here are one schema. The handler module's own event
+    // contract decides which positions take a reference, where an address
+    // converts to the link the verb stores.
+    const schema = verb.inputSchema === true ? undefined : verb.inputSchema;
+    const judged = await verbEventForDispatch(
+      input.event,
+      schema,
+      () => Promise.resolve(handlerVerbEvents(pattern).get(name)),
+    );
+    if ("refusal" in judged) {
+      return fail(
+        `call_verb refused the event for "${name}" without sending it: ${judged.refusal}`,
+      );
+    }
+    const event = judged.value;
 
     const { runtime } = pieces;
     await pieces.startPiece(piece.cell);
@@ -255,11 +400,18 @@ export const callVerbTool: HarnessToolDefinition<
     if (await raceWithAbort(handling, context.signal) === "aborted") {
       return fail("call_verb was cancelled before the verb's handling settled");
     }
-    if (tx.status().status === "error") {
-      // The handler's thrown text stays out of the reply: a handler over data
-      // the model cannot read may carry that data in what it throws.
+    const status = tx.status();
+    if (status.status === "error") {
+      // SHORTCUT (2026-10-12): the handler's failure, its thrown text
+      // included, reaches the model as written. A handler over data the model
+      // cannot read may carry that data in what it throws, and a pattern's
+      // author can write instructions there. To harden, measure the failure
+      // against the release ceiling as the result below is, and withhold it
+      // where the ceiling refuses it.
       return fail(
-        `the handler for "${name}" failed, and nothing it wrote was kept`,
+        `the handler for "${name}" failed, and nothing it wrote was kept: ${
+          transactionFailureMessage(status.error)
+        }`,
       );
     }
 
@@ -308,9 +460,27 @@ export const callVerbTool: HarnessToolDefinition<
     try {
       // The declared result reduced to structure decides what releases as
       // itself, so a string comes back as a reference however the author
-      // constrained it.
+      // constrained it. A position the receipt stores as a link is a
+      // reference the verb returned, and goes back as the address of what it
+      // points at — the piece a verb created comes back as that piece's
+      // handle, not as a copy of its fields.
+      const declared = schemaShapeOnly(verb.outputSchema ?? {});
+      let shaped = declared;
+      for (const path of storedLinkPaths(raw)) {
+        const target = runtime.getCellFromLink({
+          ...receipt,
+          path: [...receipt.path, ...path.map(String)],
+        }).resolveAsCell().getAsNormalizedFullLink();
+        value = replacedAt(value, path, {
+          "@link": createLLMFriendlyLink(target, space),
+        });
+        shaped = withOpaqueLinkAt(shaped, declared, path);
+      }
+      if (isObjectNotArray(declared) && declared.$defs !== undefined) {
+        shaped = { ...(shaped as object), $defs: declared.$defs } as JSONSchema;
+      }
       const sanitized = validateAndSanitizeStructuredResult({
-        schema: schemaShapeOnly(verb.outputSchema ?? {}),
+        schema: shaped,
         value,
         opaqueHandleId: outputId,
       });
