@@ -139,9 +139,9 @@ That places an obligation on whoever mints one from a value holding links:
 
 - The snapshot mints above — `resolveAsCell()`, a traversal that snapshots an
   inline array element, the lazy schema view — take the value out of a stored
-  document and address the result in that document's space. The space already holds every schema
-  document those links reference, because the write that stored a link
-  stored its schema documents with it.
+  document and address the result in that document's space. The space already
+  holds every schema document those links reference, because the write that
+  stored a link stored its schema documents with it.
 - `Runtime.getImmutableCell()` takes a caller's value, whose links no write
   has stored, and a space the caller chooses. It has no space to point a
   reference at, so it rewrites each link's schema to the inline form before
