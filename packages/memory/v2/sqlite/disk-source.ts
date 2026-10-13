@@ -9,9 +9,9 @@
 // When the server reads a database for a handle id (`Server.sqliteQuery`), it
 // consults this registry first: a registered id is read from the descriptor's
 // path, read-only and on a read worker, instead of the cell-derived
-// per-(space,id) file. Writes to a
-// registered (injected) source are rejected — on-disk write/atomicity is gated
-// on Q13/Q14 and reactivity on Q12 (see plans/on-disk-source.md).
+// per-(space,id) file. Writes to a registered (injected) source are rejected —
+// on-disk write/atomicity is gated on Q13/Q14 and reactivity on Q12 (see
+// plans/on-disk-source.md).
 //
 // v1 scope: in-memory map on the Server instance. Persisting the registration
 // across restarts (and the operator/service-space ownership of the handle cell)

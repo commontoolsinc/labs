@@ -6,8 +6,8 @@
  * Each connection is opened exactly as the server's own `ReadConnectionPool`
  * opens one, because it is one. The process holds a single libsqlite3 image,
  * built threadsafe, which `@db/sqlite` and the column-origin binding in this
- * worker load from the same file the main thread loaded. `read-worker-protocol.ts`
- * holds the exchange with the pool.
+ * worker load from the same file the main thread loaded.
+ * `read-worker-protocol.ts` holds the exchange with the pool.
  */
 
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
@@ -22,7 +22,10 @@ import {
 
 const connections = new ReadConnectionPool(CONNECTIONS_PER_WORKER);
 
-/** Posts `reply` to the pool, moving the buffers in `transfer` rather than copying them. */
+/**
+ * Posts `message` to the pool, moving the buffers in `transfer` rather than
+ * copying them.
+ */
 function reply(message: ReadWorkerReply, transfer: ArrayBuffer[] = []): void {
   self.postMessage(message, { transfer });
 }

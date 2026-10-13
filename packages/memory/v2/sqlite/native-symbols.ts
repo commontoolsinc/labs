@@ -80,10 +80,10 @@ export type LibrarySource =
 
 /**
  * `@db/sqlite` reads these vars behind a try/catch so a denied `--allow-env`
- * falls through to its default rather than throwing; this does the same. Only a
- * denied read is swallowed — `NotCapable` on current Deno, `PermissionDenied` on
- * older ones — and reported as the var being unset; any other failure is
- * unexpected and propagates.
+ * falls through to its default rather than throwing; this does the same. Only
+ * a denied read is swallowed — `NotCapable` on current Deno,
+ * `PermissionDenied` on older ones — and reported as the var being unset; any
+ * other failure is unexpected and propagates.
  */
 function readEnv(key: string): string | undefined {
   try {
@@ -100,9 +100,9 @@ function readEnv(key: string): string | undefined {
 }
 
 /**
- * Which libsqlite3 `@db/sqlite` will load, in the branch order its own `ffi.ts`
- * uses: `DENO_SQLITE_LOCAL` outranks `DENO_SQLITE_PATH`, and with neither set it
- * takes the release its package version names.
+ * Which libsqlite3 `@db/sqlite` will load, in the branch order its own
+ * `ffi.ts` uses: `DENO_SQLITE_LOCAL` outranks `DENO_SQLITE_PATH`, and with
+ * neither set it takes the release its package version names.
  */
 export function librarySource(
   getEnv: (key: string) => string | undefined = readEnv,

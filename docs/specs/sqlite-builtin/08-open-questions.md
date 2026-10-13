@@ -83,6 +83,10 @@ during design are marked **[resolved]** with the decision.
    needs cell-db files in WAL mode, so that a worker's read does not hold a
    lock a main-thread commit to the same file would wait on (Section
    [04](./04-server-execution-and-transactions.md#which-thread-runs-a-read)).
+   Also open: what bounds a worker read that never finishes on a connection
+   that stays open, how reads competing for the four workers are shared among
+   spaces or connections, and the main-thread cost of converting a very large
+   result.
 8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
    - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
      `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10).

@@ -22,6 +22,12 @@ import { ReadWorkerPool } from "../v2/sqlite/read-worker-pool.ts";
 // The comparison pool reads column origins on this thread.
 await ensureColumnOriginAvailable();
 
+/**
+ * The read `support/read-worker-crash.ts` dies on. That module is a worker's
+ * entry point, so importing it here would run it on this thread.
+ */
+const CRASHING_READ = "SELECT 'crash'";
+
 const LONG_READ =
   "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c " +
   "LIMIT 50000000) SELECT count(*) AS n FROM c";
@@ -133,7 +139,7 @@ describe("ReadWorkerPool", () => {
         const missing = `${path}.absent`;
         await expect(
           pool.query(missing, "SELECT 1", undefined, { labeled: false }),
-        ).rejects.toThrow();
+        ).rejects.toThrow("unable to open database file");
       });
 
       it("throws a `GuardError` for a statement that is not a read", async () => {
@@ -237,17 +243,48 @@ describe("ReadWorkerPool", () => {
         expect(error.message).toContain("a read worker failed");
       });
 
-      it("rejects a read whose worker dies running it", async () => {
+      it("rejects a read whose worker dies running it, and returns the next read", async () => {
         pool = new ReadWorkerPool({
+          maxWorkers: 1,
           workerModule: new URL(
             "./support/read-worker-crash.ts",
             import.meta.url,
           ),
         });
         const error = await rejectionOf(
-          pool.query(path, "SELECT 1", undefined, { labeled: false }),
+          pool.query(path, CRASHING_READ, undefined, { labeled: false }),
         );
-        expect(error.message).toContain("the read worker crashed");
+        expect(error.message).toBe("sqlite: a read worker failed");
+        const { rows } = await pool.query(
+          path,
+          "SELECT count(*) AS c FROM t",
+          undefined,
+          { labeled: false },
+        );
+        expect(rows).toEqual([{ c: 2 }]);
+      });
+
+      it("throws a `DataCloneError` for a parameter a worker cannot be sent, and returns the next read", async () => {
+        // The first read goes out from the handler that sees the worker
+        // announce itself, the second from the one calling `query()` on an
+        // idle worker: neither may throw past them or leave the worker busy.
+
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
+        for (const attempt of ["cold", "idle"]) {
+          const error = await rejectionOf(
+            pool.query(path, "SELECT ? AS v", [Symbol.for(attempt)], {
+              labeled: false,
+            }),
+          );
+          expect(error.name).toBe("DataCloneError");
+          const { rows } = await pool.query(
+            path,
+            "SELECT k FROM t WHERE k = ?",
+            ["a"],
+            { labeled: false },
+          );
+          expect(rows).toEqual([{ k: "a" }]);
+        }
       });
 
       it("returns the next read on a worker whose read was interrupted", async () => {
@@ -281,8 +318,27 @@ describe("ReadWorkerPool", () => {
         await pool.close();
         expect(longSettled()).toBe(true);
         const error = await rejectionOf(long);
+        expect(error.name).toBe("AbortError");
         expect(error.message).toContain("the read pool closed");
         expect(causeMessage(error)).toMatch(/interrupted$/);
+      });
+
+      it("rejects a queued read with an `AbortError`", async () => {
+        pool = new ReadWorkerPool({ maxWorkers: 1 });
+        const long = pool.query(path, LONG_READ, undefined, {
+          labeled: false,
+        });
+        const waiting = pool.query(path, "SELECT 1", undefined, {
+          labeled: false,
+        });
+        const longError = rejectionOf(long);
+        const waitingError = rejectionOf(waiting);
+        await pool.close();
+        const error = await waitingError;
+        expect(error.name).toBe("AbortError");
+        expect(error.message).toContain("the read pool closed");
+        expect(causeMessage(error)).toBeUndefined();
+        await longError;
       });
 
       it("rejects a read asked for after it", async () => {

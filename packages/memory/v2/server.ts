@@ -2472,8 +2472,8 @@ export class Server {
   /**
    * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
    * is read from its descriptor path, read-only and on a read worker, instead
-   * of the cell-derived per-(space, id) file. In-memory only: a registration does not survive a
-   * restart.
+   * of the cell-derived per-(space, id) file. In-memory only: a registration
+   * does not survive a restart.
    */
   #diskSources = new DiskSourceRegistry();
 
@@ -2487,9 +2487,11 @@ export class Server {
   #readPool = new ReadConnectionPool();
 
   /**
-   * Workers that read injected on-disk sources, which the engine never writes,
-   * off this thread: a read of a multi-gigabyte file, or one waiting on another
-   * process's write lock, holds a worker rather than every connection.
+   * Workers that read injected on-disk sources off this thread: a read of a
+   * multi-gigabyte file, or one waiting on another process's write lock, holds
+   * a worker rather than every connection. `registerDiskSource` refuses the
+   * engine's own files, so none of these is a file this thread writes. Once a
+   * worker has started it keeps the process alive until `close()`.
    */
   #readWorkers = new ReadWorkerPool();
 
@@ -4755,7 +4757,8 @@ export class Server {
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
    * link <piece> <field> sqlite:<absPath>` issues this so subsequent reads for the
    * handle id resolve against the on-disk file (read-only, on a read worker)
-   * instead of the cell-derived db. The descriptor is server-side state — never the cell value.
+   * instead of the cell-derived db. The descriptor is server-side state —
+   * never the cell value.
    */
   async sqliteRegisterDiskSource(
     message: SqliteRegisterDiskSourceRequest,

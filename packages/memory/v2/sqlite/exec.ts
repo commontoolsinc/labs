@@ -181,7 +181,9 @@ export function runInterruptibly<T>(
   }
 }
 
-/** Converts a {@link NativeQueryResult}'s values to rows keyed by output name. */
+/**
+ * Converts a {@link NativeQueryResult}'s values to rows keyed by output name.
+ */
 export function rowsFromNative<Row extends SqliteNativeRow = SqliteNativeRow>(
   result: NativeQueryResult,
 ): Row[] {

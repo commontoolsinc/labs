@@ -11,12 +11,17 @@
  * commit that writes the same file from the main thread would then wait for it
  * in SQLite's busy handler, on the main thread.
  *
- * A read is cancelled through its `AbortSignal`: still queued, it is dropped;
+ * * A read is cancelled through its `AbortSignal`: still queued, it is dropped;
  * running, the pool calls `sqlite3_interrupt` on the worker's connection, the
  * one SQLite call documented as safe on a connection another thread is using.
  * Terminating a worker would not stop it, since a thread inside the SQLite
- * library runs on to the statement's end. The workers exchange
- * `read-worker-protocol.ts`'s messages.
+ * library runs on to the statement's end. SQLite does not consult an
+ * interrupt while it waits for another connection's lock, so a read waiting
+ * on one ends when the wait does, after at most its `busy_timeout`. A read
+ * that finishes before the interrupt reaches it returns its rows.
+ *
+ * A pool that has started a worker keeps the process alive until it is
+ * closed. The workers exchange `read-worker-protocol.ts`'s messages.
  */
 
 import { terminateWorker } from "@commonfabric/utils/worker-lifetime";
@@ -104,7 +109,7 @@ export class ReadWorkerPool {
   #workers = new Set<ReadWorker>();
   #queue: ReadJob[] = [];
   #nextId = 1;
-  #terminations: Promise<void>[] = [];
+  #terminations = new Set<Promise<void>>();
   #closing: Promise<void> | undefined;
   #symbols: Promise<void> | undefined;
 
@@ -129,8 +134,10 @@ export class ReadWorkerPool {
    * well as in the worker, so a refused statement throws before it is queued.
    *
    * Throws what the read threw, with that error's `name` and `message`; an
-   * `AbortError` when `options.signal` cancelled it; and an error once the
-   * pool is closing, or when the worker running it failed.
+   * `AbortError` when `options.signal` or `close()` cancelled it; a
+   * `DataCloneError` for a parameter a worker cannot be sent, such as a
+   * symbol; and an error when the pool was already closed, or the worker
+   * running the read failed.
    */
   async query<Row extends SqliteNativeRow = SqliteNativeRow>(
     path: string,
@@ -215,7 +222,17 @@ export class ReadWorkerPool {
           this.#workers.size < this.#maxWorkers &&
           starting < this.#queue.length
         ) {
-          this.#workers.add(this.#start());
+          try {
+            this.#workers.add(this.#start());
+          } catch (error) {
+            // Dispatch runs in worker event handlers, so a worker that cannot
+            // even be constructed fails the reads waiting for one instead of
+            // escaping into them.
+            const failure = error instanceof Error
+              ? error
+              : new Error(String(error));
+            for (const job of this.#queue.splice(0)) job.reject(failure);
+          }
         }
         return;
       }
@@ -224,6 +241,8 @@ export class ReadWorkerPool {
       const path = job.request.path;
       const worker = idle.find((candidate) => candidate.hasRead(path)) ??
         idle[0];
+      // A request the worker could not take was rejected, and the worker is
+      // still idle for the next one.
       worker.run(job);
     }
   }
@@ -232,15 +251,12 @@ export class ReadWorkerPool {
   #start(): ReadWorker {
     // A worker takes no read before the interrupt symbol is bound, so that a
     // read can always be interrupted once it is running.
-    this.#symbols ??= ensureNativeSymbols().then((bound) => {
-      if (!bound) {
-        console.warn(
-          "[memory-sqlite] SQLite reads cannot be interrupted, so a " +
-            "cancelled or closing read runs to its end: " +
-            `${nativeSymbolsUnavailableReason()}`,
-        );
-      }
-    });
+    this.#symbols ??= ensureNativeSymbols().then(
+      (bound) => {
+        if (!bound) warnUninterruptible(nativeSymbolsUnavailableReason());
+      },
+      (error: unknown) => warnUninterruptible(error),
+    );
     const worker = new ReadWorker(this.#workerModule, this.#symbols, {
       onReady: () => this.#dispatch(),
       onSettled: () => this.#dispatch(),
@@ -249,7 +265,9 @@ export class ReadWorkerPool {
       },
       onFailed: (failed, error, started) => {
         this.#workers.delete(failed);
-        this.#terminations.push(failed.terminate());
+        const termination = failed.terminate();
+        this.#terminations.add(termination);
+        void termination.then(() => this.#terminations.delete(termination));
         if (!started) {
           // A worker that fails before it can receive anything (its module
           // missing from a compiled binary, a permission it lacks) is how the
@@ -282,6 +300,7 @@ export class ReadWorkerPool {
   /** Helper for `close()`, which does the closing once. */
   async #shutDown(): Promise<void> {
     const closed = new Error("sqlite: the read pool closed");
+    closed.name = "AbortError";
     for (const job of [...this.#queue]) this.#cancel(job, closed);
     for (const worker of this.#workers) {
       if (worker.job !== undefined) this.#cancel(worker.job, closed);
@@ -289,6 +308,7 @@ export class ReadWorkerPool {
     await Promise.all([...this.#workers].map((worker) => worker.shutDown()));
     this.#workers.clear();
     await Promise.all(this.#terminations);
+    this.#terminations.clear();
   }
 }
 
@@ -348,7 +368,11 @@ class ReadWorker {
       this.#receive(event.data);
     this.#worker.onerror = (event) => {
       event.preventDefault();
-      this.#fail(`sqlite: a read worker failed: ${event.message}`);
+      // The worker's own message can name files on the server (a module it
+      // could not load, say), so it goes to the log and the read gets the
+      // bare fact.
+      console.error(`[memory-sqlite] a read worker failed: ${event.message}`);
+      this.#fail("sqlite: a read worker failed");
     };
     this.#worker.onmessageerror = () => {
       this.#fail("sqlite: a read worker's reply could not be received");
@@ -365,8 +389,18 @@ class ReadWorker {
     return this.#recentPaths.includes(path);
   }
 
-  /** Hands the idle worker `job`. */
-  run(job: ReadJob): void {
+  /**
+   * Hands the idle worker `job`, and returns whether it took it. A request
+   * that cannot be posted — a parameter structured cloning refuses, such as a
+   * symbol — rejects `job` and leaves the worker idle.
+   */
+  run(job: ReadJob): boolean {
+    try {
+      this.#post(job.request);
+    } catch (error) {
+      job.reject(error instanceof Error ? error : new Error(String(error)));
+      return false;
+    }
     this.job = job;
     this.#settled = Promise.withResolvers<void>();
     const path = job.request.path;
@@ -374,7 +408,7 @@ class ReadWorker {
       path,
       ...this.#recentPaths.filter((recent) => recent !== path),
     ].slice(0, CONNECTIONS_PER_WORKER);
-    this.#post(job.request);
+    return true;
   }
 
   /**
@@ -481,6 +515,16 @@ class ReadWorker {
 function interrupt(job: ReadJob): void {
   if (job.connection === undefined) return;
   nativeSymbols()?.sqlite3_interrupt(Deno.UnsafePointer.create(job.connection));
+}
+
+/** Logs that a cancelled or closing read cannot be stopped, and why. */
+function warnUninterruptible(reason: unknown): void {
+  console.warn(
+    "[memory-sqlite] SQLite reads cannot be interrupted, so a cancelled or " +
+      `closing read runs to its end: ${
+        reason instanceof Error ? reason.message : String(reason)
+      }`,
+  );
 }
 
 /** The error a read cancelled through `signal` rejects with. */

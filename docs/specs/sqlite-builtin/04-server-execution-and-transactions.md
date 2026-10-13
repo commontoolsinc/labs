@@ -149,7 +149,17 @@ A read waiting for a worker is dropped when its connection closes, and a
 running one is stopped with `sqlite3_interrupt`, the one SQLite call documented
 as safe on a connection another thread is using; terminating the worker would
 not stop a thread inside SQLite. Closing the server stops every read and tears
-the workers down. A stopped read fails with an `AbortError` and returns no rows.
+the workers down. A stopped read fails with an `AbortError` and returns no rows;
+one that finishes before the interrupt reaches it returns its rows. SQLite does
+not consult an interrupt while a read waits for another connection's lock, so
+such a read stops when the wait ends, after at most its `busy_timeout` of five
+seconds.
+
+Nothing else bounds a read on a worker: one that never finishes on a connection
+that stays open holds its worker until that connection closes, and four such
+reads leave every other injected read waiting. Its rows are still converted on
+the main thread, so a very large result costs the main thread in proportion to
+its size ([08-open-questions.md](./08-open-questions.md) Q8).
 
 A read still holds its connection's turn for its space (the ordered frame queue
 of [memory-v2 §4](../memory-v2/04-protocol.md)), so that connection's later

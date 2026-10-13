@@ -1,9 +1,10 @@
 // A small LRU pool of read-only SQLite connections keyed by canonical file path
 // and by integer mode.
 //
-// Reads (injected on-disk sources, and — once routed — cell-derived dbs) run
-// here: each connection is opened `readonly` directly on the db file and is
-// NEVER attached to the per-space engine connection. This gives three things the
+// Every SQLite read runs on one of these: the server's own, for cell-derived
+// dbs, and each read worker's (`read-worker.ts`), for injected on-disk sources.
+// Each connection is opened `readonly` directly on the db file and is NEVER
+// attached to the per-space engine connection. This gives three things the
 // attach-per-op read path could not:
 //   - no ATTACH/DETACH churn on the shared single-threaded engine connection;
 //   - real per-connection read-only (SQLITE_OPEN_READONLY), not a connection-
@@ -20,8 +21,9 @@
 // `@db/sqlite` reads an INTEGER column through the 32-bit
 // `sqlite3_column_int` unless `int64` is set, so a stored 4294967303 arrives
 // as 7 — and a per-row label derived from that gates the row as mailbox 7.
-// The labeled reads (`queryWithOrigins`, issued only for a db that declares
-// `ifc` or a row rule) therefore run on an `int64` connection, where a value
+// The labeled reads (`queryWithOrigins`, or a worker's `connection(path,
+// true)`, issued only for a db that declares `ifc` or a row rule) therefore
+// run on an `int64` connection, where a value
 // past 2^53 arrives as a `bigint` rather than a rounded number. Ordinary
 // reads keep the connection and the values they have always had: widening
 // them is a change to every consumer's data, which belongs to its own

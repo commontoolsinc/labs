@@ -96,7 +96,13 @@ describe("engine-side exec", () => {
     // taken its first step, is the moment SQLite would otherwise clear it.
 
     const COUNT = "SELECT count(*) AS n FROM messages";
-    const interrupt = () => nativeSymbols()?.sqlite3_interrupt(db.unsafeHandle);
+    const interrupt = () => {
+      const symbols = nativeSymbols();
+      if (symbols === undefined) {
+        throw new Error("`sqlite3_interrupt` is not bound");
+      }
+      symbols.sqlite3_interrupt(db.unsafeHandle);
+    };
 
     it("throws `interrupted` from a read interrupted once `started` is called", () => {
       expect(() => runInterruptibly(db, interrupt, () => runQuery(db, COUNT)))
