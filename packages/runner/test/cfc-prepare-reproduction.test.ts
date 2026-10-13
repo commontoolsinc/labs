@@ -128,15 +128,21 @@ describe("CFC prepare reproduction", () => {
       const edit = runtime.edit.bind(runtime);
       runtime.edit = (...args: Parameters<Runtime["edit"]>) => {
         const tx = edit(...args);
-        const prepare = tx.prepareCfc.bind(tx);
-        tx.prepareCfc = () => {
+        // The scheduler and `commit()` prepare through `prepareForCommit()`,
+        // which prepares only a relevant transaction not yet prepared.
+        const prepare = tx.prepareForCommit.bind(tx);
+        tx.prepareForCommit = () => {
+          const unprepared = tx.getCfcState().prepare.status === "unprepared";
           const before = runtime.getCfcStats();
           const reads = [...(tx.getReadActivities?.() ?? [])].length;
           const writes = tx.getCfcState().writePolicyInputs.length;
           const started = performance.now();
-          const digest = prepare();
+          prepare();
           const elapsedMs = performance.now() - started;
           const after = runtime.getCfcStats();
+          if (!unprepared || tx.getCfcState().prepare.status === "unprepared") {
+            return;
+          }
           preparations.push({
             reads,
             writes,
@@ -147,7 +153,6 @@ describe("CFC prepare reproduction", () => {
               ) => [key, value - before[key as keyof typeof before]]),
             ),
           });
-          return digest;
         };
         return tx;
       };

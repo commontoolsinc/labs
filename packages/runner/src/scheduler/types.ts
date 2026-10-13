@@ -337,6 +337,19 @@ export type ServedEventDispatch = {
   onFailure?: (outcome: ServedEventFailureOutcome) => void;
 };
 
+/**
+ * What ends the wait of a client event whose piece could not be started yet
+ * (`queueSchedulerEvent()`): a commit touching a document the start read, a
+ * handler registering for the event's stream, the event settling by some other
+ * path, the end of the retry window, or the scheduler being disposed.
+ */
+export type PieceStartWake =
+  | "documents-changed"
+  | "handler-registered"
+  | "settled"
+  | "window-spent"
+  | "disposed";
+
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
@@ -412,6 +425,13 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+
+  /**
+   * Ends the wait of a loading head whose piece could not be started yet.
+   * Present only while that wait is in progress, and called with what ended
+   * it, one of the causes {@link PieceStartWake} lists.
+   */
+  endPieceStartWait?: (cause: PieceStartWake) => void;
 
   /**
    * The FIFO slot is held while the stale-basis retry that requeued this

@@ -182,7 +182,10 @@ present; no stage handles a missing one.
      data it returns under a writer policy is data its result document holds:
      a literal, an object or array literal (spreads and computed keys
      included, a member its type does not name read against the type's index
-     signature), a constant, a plain call's result, at any depth. That result
+     signature), a constant, a plain call's result, at any depth. A cell or a
+     stream such data holds is a link: a writer policy inside the type it
+     links to is that document's, so it does not make the data the result
+     document's own. That result
      is rebuilt from the returned object, and each such member's type node
      carries the `definesDocument` schema hint, which the generator reads the
      same way for that member alone. A returned value the rebuild cannot read
@@ -470,8 +473,41 @@ past the cut to hold one, and the expansion stops there unless a use the body
 makes reaches below. The remainder is printed from its instantiation and marked
 `SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
 cell no use reaches earns; a finite chain deeper than the cut reads the same as
-reading it to its end would. Observed
+reading it to its end would. A cell the body uses in a way its summary does not
+record one path at a time keeps the capability written for it, past such a cut
+too, since no narrower one can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among them,
+and one strictly below a wildcard's prefix (`wildcardPaths`), as a destructuring
+of an array, an object's rest element, or a key that can name any element
+reaches. The prefix's own cell keeps the capability its recorded use earns: a
+`.get()` before `JSON.stringify()` reads it, and a write through such a key
+writes it. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
+
+A reference the alias reading above does not see through — to an interface, or
+to a type alias that takes type parameters — expands as the type it denotes,
+which for a generic declaration is the declaration instantiated with the
+reference's arguments, built one level deep (`unfoldReferencedType()`). An
+object is built from its properties, with their optionality and the type's
+index signatures as the instantiation has them. Each property is written as its
+declaration's annotation where that still denotes the property's type, and is
+printed from its type where an argument replaced what the annotation names, so
+`v: T` in `Box<T>` reads as `string` in `Box<string>`. A union, an array, or a
+cell is built from its parts, each printed from its own type. A tuple is kept
+as written, as a tuple written out is, and so is a type that carries a scope,
+since only a scope wrapper names its scope: a scoped cell keeps the capability
+written for it. An optional member's node is read at the member's type without
+the `undefined` its `?` adds (`memberValueType()`, which leaves a type that also
+holds `null` whole), so `replyTo?: Reply` reads as `Reply` and not as a union
+with `undefined`. A printed node is overlaid on its
+unfolding (`unfoldPrint()`) and never taken apart, since schema generation
+reads a print by the type it was printed from; it goes through the same
+expansion a reference does, after the identity-only comparison that wraps a
+plain position `comparable`, so a recursion through prints is cut where one
+through references is, and a print compared only by identity keeps its
+`comparable` marker. The tests under
+`overlayContractCapabilities()` in `test/type-shrinking.test.ts` hold each
+generic shape to the schema of the same type written out.
 
 A SYNTHETIC event node — JSX handler events among them — has no authored
 structure to serve and keeps the `full` usage shrink, as does a handler with
@@ -2524,7 +2560,8 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   type (`unfoldPrint` in `transformers/type-shrinking.ts`). Node-driven
   shrinking and the application of identity-only paths unfold a literal, a union
   (into one print for each of its members), an array (`T[]` or `readonly T[]`,
-  as the printer writes one), and a cell reference. The narrowing of cells to
+  as the printer writes one), and a cell reference, and so does the contract
+  overlay of an event (§6.3a). The narrowing of cells to
   their observed capability unfolds a literal, and reads the value of a printed
   cell, or of each cell in a printed nullable union, printed from the type
   arguments its wrapper was given. A union carrying a `Default` brand, and an
@@ -2595,7 +2632,10 @@ computation's input schema:
   opaque access at or below that path. Comparable and cell-like subsets are
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
-  overlap it in either direction; disjoint paths survive. A root wildcard still
+  overlap it in either direction; disjoint paths survive. The summary carries
+  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a),
+  and a caller takes on a helper's at the path it handed the helper, as it
+  does the helper's reads, writes, and escapes. A root wildcard still
   suppresses `identityOnly`. This matters because closure captures share one
   synthetic root: blanket erasure degraded disjoint `equals()`-only captures
   into unsatisfiable full-value self-demands
@@ -2642,7 +2682,11 @@ Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
 in another file, the callee's declared Common Fabric wrapper parameter type
 (`Writable<T>` → read+write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` →
-write, etc.) is what capability analysis charges to that argument. Spread
+write, etc.) is what capability analysis charges to that argument. A
+parameter spelled bare `Cell<T>` declares no capability, write intent being
+spelled `Writable<T>`: its argument is charged the whole read of a value that
+leaves the analysis, and no write (`getExplicitCellKindFromTypeNode`;
+`test/policy/capability-analysis.test.ts`). Spread
 arguments of fixed-length tuple type expand positionally against the callee's
 parameter list before matching (#4578). Two write-tracking hardenings
 (#4554): `send` is a WRITER_METHOD (`Stream.send()` delegates to `set()` at

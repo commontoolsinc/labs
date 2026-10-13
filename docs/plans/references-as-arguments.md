@@ -183,7 +183,7 @@ link *values*. That is a considered position on exactly this question, taken in
 the layer most careful about what a caller may submit.
 
 **The CLI gate is the same validator, aligned since #5880.**
-`verbInputSchemaError` (`packages/cli/lib/callable.ts`) calls the identical
+`verbInputSchemaError` (`packages/piece/src/verb-input.ts`) calls the identical
 `validateSchemaValue` and now passes `acceptOpaqueValue`, so a link envelope
 passes it opaquely — and one gate earlier, the emitted address is converted
 into that envelope against the declared contract. Its purpose is unchanged:
