@@ -173,7 +173,7 @@ every child. The key exists only at run time, so the transformer cannot declare
 which entry that is: `--show-transformed` shows the record's whole schema on
 that `lift`, as a cell, and no `completeSchedulerScopeSummary`. What narrows is
 the read the run makes, and the read-cost report of
-`cf test --verbose --stats-threshold 0` counts it per step.
+`cf test <file> --verbose --stats-threshold 0` counts it per step.
 `packages/patterns/fabrichat/room.tsx` derives `places` this way and
 `packages/patterns/fabrichat/message-row.tsx` reads its own.
 
