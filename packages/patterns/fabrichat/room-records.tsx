@@ -240,6 +240,20 @@ export type MessagesValue = SentMessage[] | Default<[]>;
 /** The cell holding the room's messages. */
 export type MessagesCell = Writable<MessagesValue>;
 
+/**
+ * The room's messages as a helper that only reads them takes them. A
+ * parameter spelled `Cell` declares no write, where one spelled `Writable`,
+ * as `MessagesCell` is, declares one: a computation passing the list to a
+ * helper that takes it as `MessagesCell` is registered as a writer of the
+ * list it reads, and the scheduler then orders every such computation against
+ * every other
+ * (`docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
+ * §10.7.2). The two are one type, so a `MessagesCell` is passed as it is,
+ * and nothing but the spelling keeps a helper from writing: a helper that
+ * writes the list takes `MessagesCell`.
+ */
+export type MessagesReadCell = Cell<MessagesValue>;
+
 /** A link to one stored message. */
 export type MessageCell = Cell<MessageRecord>;
 
@@ -548,13 +562,13 @@ export interface MessageEntry extends ViewItem {
 const timeKeyOf = (time: FabricEpochNsec): string => String(nsecOf(time));
 
 /** A link to the stored message at `index` of `messages`. */
-const cellAt = (messages: MessagesCell, index: number): MessageCell => {
+const cellAt = (messages: MessagesReadCell, index: number): MessageCell => {
   const cell: MessageCell = messages.key(index);
   return cell;
 };
 
 /** Every stored message of `messages`, as a view item. */
-export const messageEntries = (messages: MessagesCell): MessageEntry[] =>
+export const messageEntries = (messages: MessagesReadCell): MessageEntry[] =>
   ((messages.get() ?? []) as MessageRecord[]).flatMap((record, index) => {
     if (record?.sentAt === undefined) return [];
     const target = record.replyTo?.message?.get();
@@ -614,7 +628,7 @@ export const isOwnerOf = (cell: Cell<unknown>): boolean =>
  * them WRITE or OWNER. A level not known yet (`undefined`) is not a grant.
  */
 export const canActIn = (
-  messages: MessagesCell,
+  messages: MessagesReadCell,
   myProfile: ProfileCell | undefined,
 ): boolean => {
   const level = spaceAccess(messages);
