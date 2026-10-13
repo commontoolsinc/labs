@@ -142,7 +142,7 @@ import {
   type ScopeKey,
   type ScopeKeyIdentity,
 } from "@commonfabric/memory/v2";
-import { internSchema } from "@commonfabric/data-model-schema";
+import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import { forEachSubschema } from "@commonfabric/data-model-schema/schema-walk";
 import { speculationRunContextOf } from "./speculation/overlay-destination.ts";
 import {
@@ -2188,23 +2188,28 @@ type PieceVariantRegistration = {
 };
 
 /**
- * A pattern's authored argument schema, interned once per pattern. The
- * binding walk narrows this schema at every slot it binds, and a narrowing
- * is kept only for a deep-frozen schema; a loaded pattern's is the parsed
- * object as it came off the wire, so every narrowing walked its definitions
- * again. The interned schema is equal in content and stands in wherever
- * the walk reads the authored declarations.
+ * A pattern's authored argument schema as a deep-frozen, interned schema of
+ * the same content. The binding walk narrows this schema at every slot it
+ * binds, and a narrowing is kept only for a deep-frozen schema; a loaded
+ * pattern's is the parsed object as it came off the wire, so every narrowing
+ * walked its definitions again. The copy is made once per schema object and
+ * stands in wherever the walk reads the authored declarations. It is a
+ * clone, not the pattern's own object frozen in place: the pattern holds
+ * that object, and freezing it would change what its other holders may do
+ * with it.
  */
 const internedArgumentSchemaOf = (pattern: Pattern): JSONSchema => {
-  let interned = internedArgumentSchemas.get(pattern);
+  const authored = pattern.argumentSchema;
+  if (!isObjectOrArray(authored) || isDeepFrozen(authored)) return authored;
+  let interned = internedArgumentSchemas.get(authored);
   if (interned === undefined) {
-    interned = internSchema(pattern.argumentSchema);
-    internedArgumentSchemas.set(pattern, interned);
+    interned = deepFrozenCloneAndInternSchema(authored);
+    internedArgumentSchemas.set(authored, interned);
   }
   return interned;
 };
 
-const internedArgumentSchemas = new WeakMap<Pattern, JSONSchema>();
+const internedArgumentSchemas = new WeakMap<object, JSONSchema>();
 
 export class Runner {
   /** Scoped defaults in a caller-owned setup share its commit or abort. */
