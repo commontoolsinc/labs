@@ -576,6 +576,20 @@ export function transformLiftAppliedCall(
         );
       if (spelledBy && namesOnlyPolicyBindings(spelledBy, checker)) {
         state.recordSchemaHint(resultTypeNode, { spelledBy });
+      } else if (returned && ts.isArrayLiteralExpression(returned)) {
+        // A callback returning an array literal of one binding's value is
+        // read at that binding's annotation in the print's element, by the
+        // same rule.
+        const elementNode = printedArrayElementNode(resultTypeNode);
+        const elementType = checker.getIndexTypeOfType(
+          resultType,
+          ts.IndexKind.Number,
+        );
+        const annotation = elementNode && elementType &&
+          returnedElementAnnotation(returned, elementType, checker);
+        if (annotation && namesOnlyPolicyBindings(annotation, checker)) {
+          state.recordSchemaHint(elementNode, { spelledBy: annotation });
+        }
       }
     }
   }
@@ -696,4 +710,49 @@ function returnedValue(
   return only && rest.length === 0 && ts.isReturnStatement(only)
     ? only.expression
     : undefined;
+}
+
+/**
+ * The node a print of an array type spells its element with: the element of
+ * `T[]`, or the type argument of `Array<T>` and `ReadonlyArray<T>`.
+ */
+export function printedArrayElementNode(
+  printed: ts.TypeNode,
+): ts.TypeNode | undefined {
+  if (ts.isArrayTypeNode(printed)) return printed.elementType;
+  if (
+    ts.isTypeReferenceNode(printed) && ts.isIdentifier(printed.typeName) &&
+    (printed.typeName.text === "Array" ||
+      printed.typeName.text === "ReadonlyArray")
+  ) {
+    return printed.typeArguments?.[0];
+  }
+  return undefined;
+}
+
+/**
+ * The annotation every element of `literal` is read at, where each element
+ * reads a binding declared with the same annotation and that annotation
+ * denotes `elementType`; `undefined` for a spread, a hole, an element that
+ * reads no binding, or elements declared apart.
+ */
+function returnedElementAnnotation(
+  literal: ts.ArrayLiteralExpression,
+  elementType: ts.Type,
+  checker: ts.TypeChecker,
+): ts.TypeNode | undefined {
+  let annotation: ts.TypeNode | undefined;
+  for (const element of literal.elements) {
+    if (ts.isSpreadElement(element) || ts.isOmittedExpression(element)) {
+      return undefined;
+    }
+    const read = readBindingAnnotation(
+      readDeclaringSymbol(element, checker),
+      elementType,
+      checker,
+    );
+    if (!read || (annotation && read !== annotation)) return undefined;
+    annotation = read;
+  }
+  return annotation;
 }

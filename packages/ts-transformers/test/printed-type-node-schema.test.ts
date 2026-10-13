@@ -3196,32 +3196,66 @@ export default pattern<{ ${input} }>(({ a, b }) => (${result}));`,
       expect(pattern().out).toMatchObject({ ifc: policy("readers") });
     });
 
-    it("leaves the policy out of a lift's result element written from a binding in an array literal", async () => {
-      // The element's type spells the policy as its brand, and the literal
-      // names no binding to read it at, so the declared list carries no atom
-      // for it rather than one nothing can match. The value keeps the
-      // argument's label through the lift's join at runtime.
+    it("reads the policy of a lift's result element written from a binding in an array literal", async () => {
+      // The element's type spells the policy as its brand; the literal's one
+      // element reads the binding, so the element is read at its annotation,
+      // in the lift's result and in the pattern's member holding it.
       const { lift, pattern } = await inferred(
         "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
         "{ out: computed(() => [a]) }",
       );
 
-      expect((lift!.items as Schema).ifc).toEqual({ confidentiality: [] });
-      expect(((pattern().out as Schema).items as Schema).ifc).toEqual({
-        confidentiality: [],
+      expect(lift!.items).toMatchObject({ ifc: policy("readers") });
+      expect((pattern().out as Schema).items).toMatchObject({
+        ifc: policy("readers"),
       });
     });
 
-    it("leaves the policy out of a pattern's result member holding a lift that returns a binding", async () => {
-      // The lift's own result is read at the binding's annotation; the
-      // pattern's member, printed from the lift's type, is not.
+    it("reads the policy of a pattern's result member holding a lift that returns a binding", async () => {
       const { lift, pattern } = await inferred(
         "a: Confidential<string[], [PolicyOf<typeof readers>]>; b: string",
         "{ out: computed(() => a) }",
       );
 
       expect(lift).toMatchObject({ ifc: policy("readers") });
-      expect((pattern().out as Schema).ifc).toEqual({ confidentiality: [] });
+      expect(pattern().out).toMatchObject({ ifc: policy("readers") });
+    });
+
+    it("leaves a lift's result element unread where the literal's elements read bindings declared apart", async () => {
+      // The elements' annotations differ, and no one annotation denotes the
+      // element type, so the print stays as the type spells it: the policy's
+      // brand with no binding, which the schema carries as it read it.
+      const output = await transformFiles({
+        "/rules.ts": RULES,
+        "/main.tsx":
+          `import { computed, pattern, type Confidential } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { readers, writers } from "./rules.ts";
+export default pattern<{ a: Confidential<string[], [PolicyOf<typeof readers>]>; b: Confidential<string[], [PolicyOf<typeof writers>]> }>(({ a, b }) => ({ out: computed(() => [a, b]) }));`,
+      }, { types: COMMONFABRIC_TYPES, typeCheck: true });
+
+      expect(output["/main.tsx"]).toContain("__ct_cfc_policy_of__: undefined");
+    });
+
+    it("reads the policy of a pattern's result element declared by a local annotation over an unlabelled input", async () => {
+      // The annotation introduces the label, so nothing else carries it; the
+      // member reads the element at that annotation.
+      const output = await transformFiles({
+        "/rules.ts": RULES,
+        "/main.tsx": `import { pattern, type Confidential } from "commonfabric";
+import { type PolicyOf } from "commonfabric/cfc";
+import { readers } from "./rules.ts";
+export default pattern<{ a: string }>(({ a }) => {
+  const secret: Confidential<string, [PolicyOf<typeof readers>]> = a;
+  return { out: [secret] };
+});`,
+      }, { types: COMMONFABRIC_TYPES, typeCheck: true });
+      const out = patternSchemas(parseModule(output["/main.tsx"]!)).output
+        .properties as Schema;
+
+      expect((out.out as Schema).items).toMatchObject({
+        ifc: policy("readers"),
+      });
     });
 
     it("reads each member at its own binding's policy where the two policies' rules share a type", async () => {

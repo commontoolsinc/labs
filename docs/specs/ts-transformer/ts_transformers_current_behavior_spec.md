@@ -2542,9 +2542,16 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   result read from its type, as the result views the document that stores the
   writer's policy, and reads that policy in part. A callback with several
   returns may return the values of several bindings whose types are one type,
-  so it records none. A result written as an object literal is read member by
-  member at the annotations of the bindings its members read (the
-  schema-generator mapping spec's §13; the runner's
+  so it records none. One that returns an array literal whose every element
+  reads a binding declared with one annotation denoting the element type
+  records that annotation as the hint of the print's element, by the same rule
+  (`returnedElementAnnotation` there). A result written as an object literal
+  is read member by member at the authored type each member's value has: a
+  constructed cell's, a binding's declaration's, an array literal's as the
+  array of its elements' where every element has the same one, or, for a lift
+  applied as the member, the value its callback returns, where that names only
+  policies (`getExplicitValueTypeNode` in `transformers/schema-injection.ts`;
+  the schema-generator mapping spec's §13; the runner's
   `test/cfc-result-policy-binding.test.ts`)
 - a pass that reads the structure of a node printed from a type reads the
   print's unfolding in its place: a node of the print's own kind built from the

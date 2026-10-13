@@ -92,7 +92,6 @@ import {
 import {
   holdsUnreadLabel,
   holdsUnreadMetadataLabel,
-  isUnboundPolicyOf,
   reportUnreadLabel,
 } from "../unread-label-diagnostics.ts";
 import { reportUnreadWriterBinding } from "../writer-binding-diagnostics.ts";
@@ -3683,34 +3682,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       if (holdsUnreadLabel(labels)) reportUnread(index);
       return labels;
     };
-    // A confidentiality list leaves out a `PolicyOf` read with no binding,
-    // as an atom of its own or as an alternative of an `AnyOf` clause, and
-    // the clause with it when no alternative remains. Carried, it would be a
-    // clause no exchange rule can match, holding the value closed to every
-    // reader, the ones its policy releases to included. Left out, the value
-    // keeps the labels the runtime derives for it: the argument labels a
-    // lift joins into its result, and the label a link carries from its
-    // target. A declared confidentiality list is never a value's only label,
-    // so leaving the atom out releases nothing on its own. Every other label
-    // list carries the atom as read, since fewer required or ceiling atoms
-    // would admit more; the warning names it either way.
-    const withoutUnboundPolicies = (labels: unknown): unknown =>
-      Array.isArray(labels)
-        ? labels.flatMap((clause) => {
-          if (isUnboundPolicyOf(clause)) return [];
-          if (!isObjectNotArray(clause) || !Array.isArray(clause.anyOf)) {
-            return [clause];
-          }
-          const alternatives = clause.anyOf.filter(
-            (alternative) => !isUnboundPolicyOf(alternative),
-          );
-          return alternatives.length === 0
-            ? []
-            : [{ ...clause, anyOf: alternatives }];
-        })
-        : labels;
-    const readConfidentiality = (index: number): unknown =>
-      withoutUnboundPolicies(readLabels(index));
     // The list a trusted pattern's name stands for when the policy writes no
     // `requiredEventIntegrity` of its own, checked as a written one is.
     const patternLabels = (pattern: unknown, index: number): unknown[] => {
@@ -3726,15 +3697,10 @@ export class CommonFabricFormatter implements TypeFormatter {
           return undefined;
         }
         if (holdsUnreadMetadataLabel(payload)) reportUnread(1);
-        return {
-          ...payload,
-          ...("confidentiality" in payload && {
-            confidentiality: withoutUnboundPolicies(payload.confidentiality),
-          }),
-        };
+        return { ...payload };
       }
       case "Confidential":
-        return { confidentiality: readConfidentiality(1) };
+        return { confidentiality: readLabels(1) };
       case "Integrity":
         return { integrity: readLabels(1) };
       case "AddIntegrity":

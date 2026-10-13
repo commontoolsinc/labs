@@ -55,6 +55,7 @@ import {
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
+import { printedArrayElementNode } from "../closures/strategies/lift-applied-strategy.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
@@ -712,6 +713,7 @@ function collectFunctionSchemaTypeNodes(
     objectLiteralHasPreservedValueTypeNodes(
       unwrappedReturnExpr,
       checker,
+      sourceFile,
       context.state,
     )
   ) {
@@ -2668,6 +2670,7 @@ function buildObjectLiteralReturnTypeNode(
     const explicit = getExplicitValueTypeNode(
       valueExpr,
       checker,
+      sourceFile,
       typeRegistry,
       context?.state,
     );
@@ -2878,19 +2881,41 @@ function freshResultTypeNode(
   ) ?? "whole";
 }
 
-/** The authored type of a returned cell expression or identifier declaration. */
+/**
+ * The authored type of a value a callback returns as a member, inside any
+ * parentheses: a constructed cell's, an identifier's declaration's, an array
+ * literal's as the array of its elements' where every element has the same
+ * one, or the binding a lift applied there returns, at that binding's
+ * annotation. A node printed from the value's type spells a `typeof` binding
+ * as the structural type of the value it names, which no reader can tell the
+ * binding from; the authored node keeps it.
+ */
 function getExplicitValueTypeNode(
   valueExpr: ts.Expression,
   checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
   state?: CrossStageState,
 ): PreservedBindingType | undefined {
   const cellType = getConstructedCellTypeNode(valueExpr, checker, typeRegistry);
   if (cellType) return { typeNode: cellType };
-  if (!ts.isIdentifier(valueExpr)) {
+  const value = unwrapExpression(valueExpr);
+  if (ts.isArrayLiteralExpression(value)) {
+    return explicitArrayLiteralTypeNode(
+      value,
+      checker,
+      sourceFile,
+      typeRegistry,
+      state,
+    );
+  }
+  if (ts.isCallExpression(value)) {
+    return explicitLiftResultTypeNode(value, state);
+  }
+  if (!ts.isIdentifier(value)) {
     return undefined;
   }
-  const symbol = checker.getSymbolAtLocation(valueExpr);
+  const symbol = checker.getSymbolAtLocation(value);
   let declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
   if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
     const shorthandValueSymbol = checker.getShorthandAssignmentValueSymbol(
@@ -2913,9 +2938,68 @@ function getExplicitValueTypeNode(
   return undefined;
 }
 
+/**
+ * The array of its elements' authored type, for an array literal whose every
+ * element has the same one and that spreads nothing. The array's own type is
+ * registered by the caller, so the node reads the array at its type and each
+ * element at the annotation its binding was declared with.
+ */
+function explicitArrayLiteralTypeNode(
+  literal: ts.ArrayLiteralExpression,
+  checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  state?: CrossStageState,
+): PreservedBindingType | undefined {
+  let element: ts.TypeNode | undefined;
+  for (const written of literal.elements) {
+    if (ts.isSpreadElement(written) || ts.isOmittedExpression(written)) {
+      return undefined;
+    }
+    const explicit = getExplicitValueTypeNode(
+      written,
+      checker,
+      sourceFile,
+      typeRegistry,
+      state,
+    );
+    if (!explicit || (element && explicit.typeNode !== element)) {
+      return undefined;
+    }
+    element = explicit.typeNode;
+  }
+  return element && { typeNode: ts.factory.createArrayTypeNode(element) };
+}
+
+/**
+ * The authored type of what a lift applied as a member computes: the
+ * annotation its result print is read at (`SchemaHint.spelledBy`, recorded
+ * when the lift was lowered from the binding its callback returns), or the
+ * array of the annotation its print's element is read at. The lift's own
+ * result schema reads the print at that annotation; the member, printed afresh
+ * from the lift's type, would not, and the print spells the binding as the
+ * structural type of the value it names.
+ */
+function explicitLiftResultTypeNode(
+  call: ts.CallExpression,
+  state: CrossStageState | undefined,
+): PreservedBindingType | undefined {
+  const inner = getLiftAppliedInnerCall(call);
+  const printed = inner?.typeArguments?.[1];
+  if (!printed || !state) return undefined;
+  const whole = state.lookupSchemaHint(printed)?.spelledBy;
+  if (whole) return { typeNode: whole };
+  const element = printedArrayElementNode(printed);
+  const spelledBy = element && state.lookupSchemaHint(element)?.spelledBy;
+  return spelledBy
+    ? { typeNode: ts.factory.createArrayTypeNode(spelledBy) }
+    : undefined;
+}
+
 function objectLiteralHasPreservedValueTypeNodes(
   expr: ts.ObjectLiteralExpression,
   checker: ts.TypeChecker,
+  sourceFile: ts.SourceFile,
   state: CrossStageState,
 ): boolean {
   for (const property of expr.properties) {
@@ -2932,6 +3016,7 @@ function objectLiteralHasPreservedValueTypeNodes(
     const explicit = getExplicitValueTypeNode(
       valueExpr,
       checker,
+      sourceFile,
       undefined,
       state,
     );

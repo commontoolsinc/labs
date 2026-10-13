@@ -1631,17 +1631,7 @@ Mechanics:
   never by an alias name, so an authored type named `AnyOf` is read as
   itself. A `PolicyOf` reached from a type alone, with no annotation that
   denotes it, has no binding to read: its brand is read as an ordinary object,
-  `{ __ct_cfc_policy_of__: undefined }`, not as a policy atom
-  (`isUnboundPolicyOf`, `unread-label-diagnostics.ts`). A confidentiality
-  list leaves such an atom out, as an atom of its own or as an alternative of
-  an `AnyOf` clause, and the clause with it when no alternative remains: no
-  exchange rule could match it, so carried
-  it would hold the value closed to every reader, the ones its policy
-  releases to included, while left out the value keeps the labels the
-  runtime derives for it, the argument labels a lift joins into its result
-  and the label a link carries from its target. Every other label list
-  carries the atom as read, since fewer required or ceiling atoms would admit
-  more. A label list the
+  `{ __ct_cfc_policy_of__: undefined }`, not as a policy atom. A label list the
   extraction cannot read in full is reported as the `cfc-label:unread` warning
   (`unread-label-diagnostics.ts`), naming the label: an argument that is not a
   tuple, or an atom with anything unread in it, whether the atom itself, a
@@ -1650,8 +1640,8 @@ Mechanics:
   contract that writes no `requiredEventIntegrity` requires its trusted
   pattern, and that list is checked too. The schema carries what it could not
   read as no label, as an atom that serializes as `null` (an unread value, not
-  an authored `null`, which is a literal read like any other), as a field
-  left out, or, for a `PolicyOf` in a confidentiality list, as no atom.
+  an authored `null`, which is a literal read like any other), or as a field
+  left out.
   Projection paths encode as JSON Pointers with `~0`/`~1` escaping
   (`encodeJsonPointerPath`).
 - `ifc` combines with the base schema's existing `ifc` one key at a time
@@ -1877,7 +1867,10 @@ or a printed generation root is formatted (`formatChildType` and
   `PolicyOf<typeof rules>` does. A print spells the binding as the structural
   type of the value it names, from which no reader can tell the binding, so
   the node is read as the annotation spells the type at hand (`#spelling` in
-  `schema-generator.ts`):
+  `schema-generator.ts`). A print of an array is read by its type, and its
+  element at the annotation the hint on the print's element node spells,
+  where the lowering recorded one there (`ArrayFormatter`); that hint is
+  recorded only where the annotation denotes the element type:
   - Where the annotation denotes that type, the node is read as the
     annotation. An annotation denotes a type that is its own, or a union of
     the same members, since a union written through an alias is a type apart

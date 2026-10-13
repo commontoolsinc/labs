@@ -1889,9 +1889,6 @@ describe("Schema: CFC authoring aliases", () => {
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: { readonly meta?: Meta; readonly of?: T } };
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type AnyOf<X extends readonly unknown[]> = { readonly __ct_cfc_any_of__?: X };
-      type Integrity<T, X extends readonly unknown[]> = Cfc<T, { integrity: X }>;
-      type PolicyOf<Rules> = { readonly __ct_cfc_policy_of__?: Rules };
-      declare const rules: { readonly rule: string };
     `;
 
     const unreadLabels = async (code: string) => {
@@ -1985,113 +1982,6 @@ describe("Schema: CFC authoring aliases", () => {
         diagnostics.map((diagnostic) => [diagnostic.severity, diagnostic.type]),
       ).toEqual([["warning", "cfc-label:unread"]]);
       expect(diagnostics[0]!.message).toContain('"a" | "b"');
-    });
-
-    /**
-     * The schema of `Holder.value`, read from its type alone, and the unread
-     * labels reported while reading it.
-     */
-    const readFromType = async (code: string) => {
-      const { checker, sourceFile } = await createTestProgram(ALIASES + code);
-      const holder = checker.getSymbolsInScope(
-        sourceFile,
-        ts.SymbolFlags.Interface,
-      ).find((candidate) => candidate.name === "Holder")!;
-      const value = checker.getDeclaredTypeOfSymbol(holder).getProperty(
-        "value",
-      )!;
-      const diagnostics: SchemaGenerationDiagnostic[] = [];
-      const schema = asObjectSchema(
-        new SchemaGenerator().generateSchema(
-          checker.getTypeOfSymbolAtLocation(value, sourceFile),
-          checker,
-          undefined,
-          { onDiagnostic: (diagnostic) => diagnostics.push(diagnostic) },
-        ),
-      );
-      return {
-        ifc: schema.ifc as Record<string, unknown> | undefined,
-        unread: diagnostics.filter((diagnostic) =>
-          diagnostic.type === "cfc-label:unread"
-        ),
-      };
-    };
-
-    it("leaves a `PolicyOf` read from a type alone out of a confidentiality list, and reports it", async () => {
-      // The instantiation holds the policy's brand and no `typeof` to read a
-      // binding from, so no policy atom can be made of it; an atom nothing
-      // can match would hold the value closed to the readers the policy
-      // releases to.
-      const { ifc, unread } = await readFromType(`
-        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
-        interface Holder { value: Labeled<readonly [PolicyOf<typeof rules>]> }
-      `);
-
-      expect(ifc).toEqual({ confidentiality: [] });
-      expect(unread).toHaveLength(1);
-    });
-
-    it("keeps the atoms beside a `PolicyOf` it leaves out of a confidentiality list", async () => {
-      const { ifc, unread } = await readFromType(`
-        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
-        interface Holder {
-          value: Labeled<readonly ["a", PolicyOf<typeof rules>, "b"]>;
-        }
-      `);
-
-      expect(ifc).toEqual({ confidentiality: ["a", "b"] });
-      expect(unread).toHaveLength(1);
-    });
-
-    it("leaves an `AnyOf` clause whose every alternative is a `PolicyOf` read from a type alone out of a confidentiality list", async () => {
-      // A clause with no alternative left would be as unmatchable as the
-      // atom alone.
-      const { ifc, unread } = await readFromType(`
-        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
-        interface Holder {
-          value: Labeled<readonly [AnyOf<readonly [PolicyOf<typeof rules>]>]>;
-        }
-      `);
-
-      expect(ifc).toEqual({ confidentiality: [] });
-      expect(unread).toHaveLength(1);
-    });
-
-    it("keeps the alternatives beside a `PolicyOf` it leaves out of an `AnyOf` clause", async () => {
-      const { ifc, unread } = await readFromType(`
-        type Labeled<L extends readonly unknown[]> = Confidential<string, L>;
-        interface Holder {
-          value: Labeled<readonly [AnyOf<readonly ["a", PolicyOf<typeof rules>]>, "b"]>;
-        }
-      `);
-
-      expect(ifc).toEqual({ confidentiality: [{ anyOf: ["a"] }, "b"] });
-      expect(unread).toHaveLength(1);
-    });
-
-    it("leaves a `PolicyOf` read from a type alone out of a `Cfc` payload's confidentiality list", async () => {
-      const { ifc, unread } = await readFromType(`
-        type Labeled<L extends readonly unknown[]> = Cfc<string, { confidentiality: L }>;
-        interface Holder { value: Labeled<readonly [PolicyOf<typeof rules>]> }
-      `);
-
-      expect(ifc).toEqual({ confidentiality: [] });
-      expect(unread).toHaveLength(1);
-    });
-
-    it("carries a `PolicyOf` read from a type alone in an integrity list as it read it", async () => {
-      // A label list other than confidentiality keeps every atom it read:
-      // fewer atoms there would claim or require less.
-      const { ifc, unread } = await readFromType(`
-        type Trusted<L extends readonly unknown[]> = Integrity<string, L>;
-        interface Holder { value: Trusted<readonly [PolicyOf<typeof rules>]> }
-      `);
-
-      expect(ifc?.integrity).toHaveLength(1);
-      expect(Object.keys((ifc?.integrity as object[])[0]!)).toEqual([
-        "__ct_cfc_policy_of__",
-      ]);
-      expect(unread).toHaveLength(1);
     });
 
     it("reports an object atom holding a field it cannot read", async () => {
