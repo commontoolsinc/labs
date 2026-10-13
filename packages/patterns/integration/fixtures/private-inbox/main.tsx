@@ -12,7 +12,9 @@
  * whose space stops letting the owner read it, which its owner replaces.
  * `olderHome` stands in for a Home of the vintage whose ensure takes no
  * refusal, and `unreadableHome` for one whose profile keeps its pointer per
- * user. Fixture for `private-inbox-multi-runtime.test.ts`.
+ * user. `requestingHome` and `profilelessHome` are Homes whose inboxes a
+ * client requests, as a loom daemon does, the second with no profiles. Fixture
+ * for `private-inbox-multi-runtime.test.ts`.
  */
 
 import {
@@ -42,13 +44,16 @@ import PrivateInbox, {
   type OfferEvent,
   pointProfilesAtPrivateInbox,
   type PointTarget,
+  type PrivateInboxAnswer,
   type PrivateInboxHolder,
   type PrivateInboxOutput,
   type PrivateInboxPiece,
   type PrivateInboxRefusalHolder,
   type PrivateInboxReplacementHolder,
+  type PrivateInboxRequest,
   replaceRefusedPrivateInbox,
   repointProfilesFromReplacedInbox,
+  requestPrivateInbox,
   type RetainedPrivateInboxes,
 } from "../../../system/private-inbox.tsx";
 
@@ -297,6 +302,12 @@ export interface HomeStandInOutput {
   /** Gives the Home a private inbox, as Home's own stream does. */
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
 
+  /**
+   * Has the Home ensure its inbox and answers with it, as Home's own stream
+   * does.
+   */
+  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxAnswer>;
+
   /** Replaces the inbox the Home was refused, as Home's own stream does. */
   replaceRefusedPrivateInbox: Stream<void>;
 
@@ -327,6 +338,18 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
     const defaultProfile = new Writable<DefaultProfileSlot>({}).for(
       "defaultProfileSlot",
     );
+    const ensure = ensurePrivateInbox({
+      privateInbox,
+      retainedPrivateInboxes,
+      privateInboxRefusal,
+      // deno-lint-ignore no-explicit-any
+      profiles: profiles as any,
+      pointProfiles: pointProfilesAtPrivateInbox({
+        privateInbox,
+        // deno-lint-ignore no-explicit-any
+        profiles: profiles as any,
+      }),
+    });
     return {
       [NAME]: label,
       privateInbox,
@@ -336,17 +359,12 @@ const HomeStandIn = pattern<{ label: string }, HomeStandInOutput>(
       profiles,
       defaultProfile,
       setDefaultProfile: setDefaultProfile({ profiles, defaultProfile }),
-      ensurePrivateInbox: ensurePrivateInbox({
+      ensurePrivateInbox: ensure,
+      requestPrivateInbox: requestPrivateInbox({
         privateInbox,
-        retainedPrivateInboxes,
-        privateInboxRefusal,
         // deno-lint-ignore no-explicit-any
         profiles: profiles as any,
-        pointProfiles: pointProfilesAtPrivateInbox({
-          privateInbox,
-          // deno-lint-ignore no-explicit-any
-          profiles: profiles as any,
-        }),
+        ensure,
       }),
       replaceRefusedPrivateInbox: replaceRefusedPrivateInbox({
         privateInbox,
@@ -684,6 +702,15 @@ export interface MainOutput {
 
   /** Ensures `unreadableHome`'s inbox, with the event the host sends. */
   ensureUnreadable: Stream<EnsurePrivateInboxEvent>;
+
+  /** A Home whose inbox a client requests, as a loom daemon does. */
+  requestingHome: HomeStandInOutput;
+
+  /** Creates one of `requestingHome`'s profiles. */
+  createRequestingProfile: Stream<void>;
+
+  /** A Home with no profiles, whose inbox a client requests. */
+  profilelessHome: HomeStandInOutput;
 }
 
 export default pattern<MainInput, MainOutput>((
@@ -720,6 +747,8 @@ export default pattern<MainInput, MainOutput>((
   const unreadableHome = HomeStandIn({
     label: "Home of an unreadable profile",
   });
+  const requestingHome = HomeStandIn({ label: "Requested Home" });
+  const profilelessHome = HomeStandIn({ label: "Home with no profiles" });
   return {
     [NAME]: "Private inbox fixture",
     [UI]: <div>private inbox fixture</div>,
@@ -740,6 +769,8 @@ export default pattern<MainInput, MainOutput>((
     ownSpaceHome,
     unreadableRefusedHome,
     olderHome,
+    requestingHome,
+    profilelessHome,
     copiedOffers,
     retainedPrivateInboxes,
     privateInboxRefusal,
@@ -842,6 +873,7 @@ export default pattern<MainInput, MainOutput>((
       inbox: loomInbox,
     }),
     ensureUnreadable: unreadableHome.ensurePrivateInbox,
+    createRequestingProfile: requestingHome.createProfile,
     createProfileThroughSurface: ProfileCreate({
       // deno-lint-ignore no-explicit-any
       profiles: profiles as any,

@@ -8,7 +8,8 @@
  * the inbox a profile advertises, Home's ensure step, the profiles' pointers,
  * the inbox the host names for it to adopt, the inbox Home holds, the ones it
  * retains, the one its refusal record names and the one its replacement
- * record names, Home's pointing and re-pointing steps, the seed step that
+ * record names, the one it answers a request for its inbox with, Home's
+ * pointing and re-pointing steps, the seed step that
  * points a profile once it is created, and a sender reading through
  * `profile-home.tsx`'s own types, as FabriChat's manager does offering a room,
  * therefore reads it as a typed link.
@@ -38,6 +39,7 @@ import type {
   advertisedInbox,
   EnsurePrivateInboxEvent,
   PointTarget,
+  PrivateInboxAnswer,
   PrivateInboxHolder,
   PrivateInboxOutput,
   PrivateInboxRefusalHolder,
@@ -105,6 +107,10 @@ const replacedInboxReachesOnlyTheName: ReachesOnlyTheName<
   >
 > = true;
 
+const answeredInboxReachesOnlyTheName: ReachesOnlyTheName<
+  PointeeOf<{ piece?: PrivateInboxAnswer["inbox"] }>
+> = true;
+
 /** The pointee the host reads an advertised inbox's link as. */
 type HostPointee = Schema<typeof inboxPieceLinkSchema> extends Cell<infer T> ? T
   : Schema<typeof inboxPieceLinkSchema>;
@@ -158,6 +164,10 @@ describe("private-inbox pointer type", () => {
 
   it("types each inbox Home retains as a link naming only the inbox's name", () => {
     expect(retainedInboxReachesOnlyTheName).toBe(true);
+  });
+
+  it("types the inbox Home answers a request with as a link naming only the inbox's name", () => {
+    expect(answeredInboxReachesOnlyTheName).toBe(true);
   });
 
   it("types the pointing step's pointer as a link naming only the inbox's name", () => {

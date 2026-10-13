@@ -56,6 +56,8 @@ import {
 import { Identity } from "@commonfabric/identity";
 import {
   ensurePrivateInboxOf,
+  inboxPieceLinkSchema,
+  requestPrivateInboxOf,
   type ShareIntake,
   startShareIntakeOf,
 } from "@commonfabric/piece/ops";
@@ -1104,6 +1106,46 @@ const handlers: Record<
       ...(profile === undefined
         ? {}
         : { profile: { id: profile.id, space: profile.space } }),
+    };
+  },
+
+  /**
+   * Requests, as a loom daemon does, the private inbox of the Home stand-in
+   * reached from the piece result by `path`, naming its profile reached from
+   * that result by `profile`, and answers with Home's answer, naming the inbox
+   * by its link, and the link that profile's pointer holds once Home has
+   * answered, read after a sync.
+   */
+  async requestPrivateInbox({ path, profile, piece }) {
+    const target = await resultAt(piece);
+    await target.pull();
+    const cellAt = async (segments: unknown) => {
+      let cell = target;
+      for (const segment of (segments ?? []) as (string | number)[]) {
+        cell = cell.key(segment as never);
+      }
+      await cell.sync();
+      return cell.resolveAsCell();
+    };
+    const home = await cellAt(path);
+    const named = await cellAt(profile);
+    const answer = await requestPrivateInboxOf(
+      controller().runtime,
+      home,
+      named,
+    );
+    const pointer = await named.key("inbox").asSchema({
+      type: "object",
+      properties: { piece: inboxPieceLinkSchema },
+    }).pull();
+    const addressOf = (cell: Cell<unknown>) => {
+      const { id, space } = cell.getAsNormalizedFullLink();
+      return { id, space };
+    };
+    return {
+      status: answer.status,
+      ...("inbox" in answer ? { inbox: addressOf(answer.inbox) } : {}),
+      ...(isCell(pointer?.piece) ? { pointer: addressOf(pointer.piece) } : {}),
     };
   },
 

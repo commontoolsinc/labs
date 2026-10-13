@@ -16,6 +16,7 @@
 
 import {
   type Cell,
+  computed,
   type Confidential,
   type CurrentPrincipal,
   currentPrincipal,
@@ -666,6 +667,143 @@ export const pointProfilesAtPrivateInbox = handler<
   for (const profile of profiles ?? []) {
     pointAtInboxIfUnset(profile, privateInbox);
   }
+});
+
+/** What a client sends Home's `requestPrivateInbox`. */
+export type PrivateInboxRequest = {
+  /**
+   * The profile the client finds the owner by, which is to advertise Home's
+   * inbox: the one `#profile` answers with.
+   */
+  from?: Cell<PointTarget>;
+};
+
+/**
+ * Where a request for Home's private inbox stands, for the profile it names:
+ *
+ * - `pending` while Home is giving the profile its inbox: Home holds an inbox
+ *   the profile does not point at yet, or holds none and is creating one.
+ * - `ensured` once the profile points at the inbox Home holds.
+ * - `unlisted` when the request names no profile in Home's list, which Home
+ *   never points.
+ * - `not-held` when the profile points at an inbox Home does not hold, or
+ *   points at none while Home holds none and creates none, because another
+ *   profile advertises an inbox that awaits the host's vetting.
+ */
+export type PrivateInboxAnswerStatus =
+  | "pending"
+  | "ensured"
+  | "unlisted"
+  | "not-held";
+
+/** How Home answers a request for its private inbox. */
+export type PrivateInboxAnswer = {
+  /** Where the request stands. */
+  status: PrivateInboxAnswerStatus;
+
+  /**
+   * The inbox Home holds, as the pointer of the profile the request names
+   * links it: the inbox's own result document. Present only when `status` is
+   * `ensured`.
+   */
+  inbox?: Cell<PrivateInboxPiece>;
+};
+
+/**
+ * Returns where a request for Home's inbox stands, as
+ * {@link PrivateInboxAnswerStatus} says, given the inbox Home holds, Home's
+ * profiles read as values, and the profile the request names.
+ */
+export function privateInboxAnswerOf(
+  held: Cell<PrivateInboxPiece> | undefined,
+  profiles: readonly (PointTarget | undefined)[] | undefined,
+  profile: Cell<PointTarget> | undefined,
+): PrivateInboxAnswer {
+  const listed = profile === undefined ? undefined : (profiles ?? []).find(
+    (each) => each !== undefined && equals(each, profile),
+  );
+  if (listed === undefined) return { status: "unlisted" };
+  const pointer = listed.inbox?.piece;
+  if (pointer !== undefined) {
+    return held !== undefined && equals(pointer, held)
+      ? { status: "ensured", inbox: pointer }
+      : { status: "not-held" };
+  }
+  return held === undefined && advertisedInbox(profiles) !== undefined
+    ? { status: "not-held" }
+    : { status: "pending" };
+}
+
+/** Arguments for {@link PrivateInboxAnswerer}. */
+export type PrivateInboxAnswererInput = {
+  /** Home's holder of its inbox. */
+  privateInbox: PrivateInboxHolder;
+
+  /** The profile the request names, which is in Home's list. */
+  profile: PointTarget;
+};
+
+/**
+ * Answers a pending request for Home's inbox: `pending` until the profile it
+ * names points at the inbox Home holds, and then `ensured`, naming that inbox
+ * as the profile's pointer links it. It never answers anything else, so a
+ * reader whose view of Home's holder and of the profile's pointer lags one
+ * behind the other reads `pending` rather than a status the request does not
+ * have.
+ */
+export const PrivateInboxAnswerer = pattern<
+  PrivateInboxAnswererInput,
+  PrivateInboxAnswer
+>(({ privateInbox, profile }) => {
+  const answer = computed((): PrivateInboxAnswer => {
+    const held = privateInbox?.piece;
+    const pointer = profile?.inbox?.piece;
+    return held !== undefined && pointer !== undefined && equals(pointer, held)
+      ? { status: "ensured", inbox: pointer }
+      : { status: "pending" };
+  });
+  return { status: answer.status, inbox: answer.inbox };
+});
+
+/**
+ * Has Home ensure its private inbox, as an event naming nothing has
+ * {@link ensurePrivateInbox} do, and answers, for the profile the request
+ * names, with the inbox Home holds once that profile points at it. Home keeps
+ * the inbox it holds, creates one when it holds none and no profile advertises
+ * one, and points each profile in its list that points at no inbox at its
+ * own; it adopts nothing, since adopting an inbox a profile advertises waits on
+ * the host's vetting.
+ *
+ * The answer is this handling's result, and so its receipt, which a client
+ * reads from the receipt link its send's completion carries. It is decided
+ * here, from Home's holder and its profiles as this run reads them, as
+ * {@link privateInboxAnswerOf} decides it. An answer that is not `pending`
+ * stands as it is. A `pending` one is a {@link PrivateInboxAnswerer}, since the
+ * profile is pointed in events of their own, in Home's space and then in the
+ * profile's, after this run: the receipt reads `pending` until the profile
+ * points at the inbox Home holds, and then `ensured`, naming that inbox.
+ *
+ * The list is bound as a value, for the reason it is in
+ * {@link ensurePrivateInbox}.
+ */
+export const requestPrivateInbox = handler<
+  PrivateInboxRequest,
+  {
+    privateInbox: Writable<PrivateInboxHolder>;
+    profiles: PointTarget[];
+    ensure: Stream<EnsurePrivateInboxEvent>;
+  },
+  PrivateInboxAnswer
+>((event, { privateInbox, profiles, ensure }) => {
+  ensure.send({});
+  const profile = event?.from;
+  const answer = privateInboxAnswerOf(
+    privateInbox.get()?.piece,
+    profiles,
+    profile,
+  );
+  if (answer.status !== "pending" || profile === undefined) return answer;
+  return PrivateInboxAnswerer({ privateInbox, profile });
 });
 
 /**

@@ -5,10 +5,10 @@ other principals deliver offers to the identity, such as a chat room to join.
 Its offers are labeled readable by the owner alone. Anyone can append to it,
 through its `receive` stream, which keeps an offer only when the offer names the
 principal sending it as its sender. This document says where the inbox lives,
-how Home comes to hold it, what Home records when the host refuses one, how the
-owner replaces a refused one, what access its space grants, what `receive`
-accepts, how the host admits what it receives, and the limits on what it keeps
-private.
+how Home comes to hold it, how a client such as a loom daemon asks Home for it,
+what Home records when the host refuses one, how the owner replaces a refused
+one, what access its space grants, what `receive` accepts, how the host admits
+what it receives, and the limits on what it keeps private.
 
 The pattern is `packages/patterns/system/private-inbox.tsx`.
 
@@ -36,17 +36,23 @@ pointer is left as it is.
 
 ## Creating or adopting it
 
-An identity has one inbox, whichever side creates it: Home, or a loom daemon,
-which creates a share inbox of its own and points a profile at it. Whichever
-side arrives second adopts the inbox the first one advertises, if the inbox is
-usable, and never replaces a pointer that names a different inbox. When both
-arrive together, as when a new person's Home and daemon first come up, each can
-read the pointer before the other sets it, and the one that sets it last decides
-what it names. Each side then adopts again, deciding by the same profile, the
-one `#profile` answers with: Home adopts the inbox that profile advertises in
-place of another, and a loom daemon adopts a pointer that moved; each keeps
-reading the inbox it held. A loom daemon does its half as loom #7300 describes;
-the loom release that carries it is what the two halves wait on.
+An identity has one inbox, and Home is what creates it. A client that would
+otherwise create an inbox of its own, as a loom daemon does, asks Home for it
+through Home's `requestPrivateInbox` stream when Home has that stream, and
+adopts the inbox Home answers with, as "Requesting it" says. Home adopts an
+inbox a profile already advertises, such as one a loom daemon created, if the
+inbox is usable, and nothing replaces a pointer that names a different inbox.
+
+A loom daemon that creates a share inbox of its own and points a profile at it,
+because Home has no such stream or because the daemon does not ask, races Home
+for the pointer. When both arrive together, as when a new person's Home and
+daemon first come up, each can read the pointer before the other sets it, and
+the one that sets it last decides what it names. Each side then adopts again,
+deciding by the same profile, the one `#profile` answers with: Home adopts the
+inbox that profile advertises in place of another, and a loom daemon adopts a
+pointer that moved; each keeps reading the inbox it held. A loom daemon does its
+half as loom #7300 describes; the loom release that carries it is what the two
+halves wait on.
 
 The host gives Home its inbox, normally once per runtime worker, when it first
 brings up the user's Home pattern: `PiecesController.ensurePrivateInbox()` in
@@ -165,12 +171,10 @@ failed. So when a pointer moves away from the inbox Home holds, as when a daemon
 writes the pointer last or the owner points a profile elsewhere, Home goes on
 holding the earlier inbox while senders deliver to the new one, until the next
 runtime worker to start brings Home up. Nothing watches the pointers in between.
-A loom daemon instead reads its profile's pointer again at intervals. Two
-further changes could close that window: a `setInbox` that sets the pointer only
-while it is unset, which needs older profile vintages detected and still leaves
-the side that loses to adopt the winner; or a single minter, where a loom daemon
-asks Home to ensure its inbox when Home has the stream and adopts the result.
-Either would need the loom side to agree.
+A loom daemon instead reads its profile's pointer again at intervals. A daemon
+that asks Home for the inbox, as "Requesting it" says, writes no pointer of its
+own, so the pointer moves this way only for a daemon that creates its own inbox,
+or when the owner points a profile elsewhere.
 
 Home opens without waiting for the ensure, which reads every profile's pointer
 and loads inbox documents in other spaces. The ensure itself waits for Home's
@@ -216,10 +220,11 @@ the list as a value too, for the same reason. A profile of any vintage with a
 `setInbox` is pointed this way; one predating `setInbox` drops the event, and
 the runtime logs a warning that no handler took it.
 
-The host, the handler, the pointing and re-pointing steps and the seed step read
-each profile's pointer, and the handlers read the inbox the event names to
-adopt, the inbox Home holds, the ones it retains, the one its refusal record
-names and the one its replacement record names, as a typed link,
+The host, the handler, the pointing and re-pointing steps, the seed step and
+the answer to a request for the inbox read each profile's pointer, and the
+handlers read the inbox the event names to adopt, the inbox Home holds, the ones
+it retains, the one its refusal record names, the one its replacement record
+names and the one it answers a request with, as a typed link,
 `Cell<ShareInboxPiece>`; the host reads it through `inboxPieceLinkSchema` in
 `packages/piece/src/ops/private-inbox.ts`, the same type as a schema. A link
 that names the inbox's own result document, as `setInbox` and an adoption write
@@ -248,7 +253,8 @@ says, reads the record's `reason` and `refusedAt` and never its `inbox`.
 `private-inbox.pointer-type.test.ts` fails to compile if any reader's pointer
 type, the host's, the ensure's and the pointing step's, the seed step's, the
 profile's own, the event's refused inbox or Home's holder, retained list,
-refusal record and replacement record, becomes unconstrained, or names a member
+refusal record, replacement record and answer to a request, becomes
+unconstrained, or names a member
 of the inbox's result other than its name. For the event's refused inbox, the
 second of those is the one the measurement above bears out.
 
@@ -279,6 +285,90 @@ profile list the new root holds. Nothing replaces an identity Home's root:
 `PiecesController.recreateDefaultPattern()` in `packages/piece` refuses one,
 absent or present, and a Home's source is changed in place, which keeps both
 (`docs/common/conventions/HOME_SPACE.md`, "Custom Home Pattern").
+
+## Requesting it
+
+A client that reads the owner's offers, such as a loom daemon, gets the inbox
+from Home rather than creating one, so that the inbox senders find through a
+profile is the one Home and the client both read. It sends Home's
+`requestPrivateInbox` stream an event naming the profile it finds the owner
+by, the one `#profile` answers with, under `from`: `{ from: <profile> }`, where
+the profile is a link to it. Event schemas are open, so a field the event
+carries beyond that is dropped.
+
+Home's handler, `requestPrivateInbox` in `private-inbox.tsx`, sends Home's
+`ensurePrivateInbox` an event naming nothing. So Home keeps the inbox it holds,
+creates one when it holds none and no profile advertises one, and points every
+profile in its list that points at no inbox at its own, as "Creating or
+adopting it" says. It adopts nothing: adopting an inbox a profile advertises
+waits on the host's vetting, at the next ensure the host sends. The handler
+then answers, and its answer is the result of its handling of the event, which
+is that handling's receipt. The answer holds `status`, and with `ensured`, an
+`inbox`:
+
+| `status` | The profile `from` names | Final |
+| --- | --- | --- |
+| `pending` | is in Home's list and points at no inbox, and Home is pointing it at the inbox it holds or creates | no |
+| `ensured` | points at the inbox Home holds, which `inbox` links as the profile's pointer does, to the inbox's own result document | yes |
+| `unlisted` | is not in Home's list, or the event names none, so Home points it at nothing | yes |
+| `not-held` | points at an inbox Home does not hold, or points at none while Home holds none and creates none, because another profile advertises an inbox that awaits the host's vetting | yes |
+
+The handler decides the answer from Home's holder and its profiles as its run
+reads them, the list as a value, as `privateInboxAnswerOf()` decides it. A
+final answer is written as it is. The profile is pointed in events after the
+handler's run, Home's pointing step and then the profile's own `setInbox`, so a
+`pending` answer is a pattern instead, `PrivateInboxAnswerer`, which goes on
+writing the receipt: it reads `pending` until the profile points at the inbox
+Home holds, and then `ensured`, and never anything else. So an `ensured` answer
+arrives only once the profile's pointer is set, and a read of the pointer that
+syncs sees it. A profile of a vintage without `setInbox` is never pointed, and
+its answer stays `pending`.
+
+A client reads the answer without polling. It sends the event through
+`sendEvent()` with a completion callback, reads `handlingReceiptLink` from the
+transaction the callback receives, and subscribes to the cell at that address
+until the answer is not `pending`, as the share intake reads the result of
+Home's `registerSharedSpace`. The callback's transaction reports a failure of
+the send or of Home's handling as an error status, and carries no receipt
+address unless the runtime writes receipts, which it does with commit
+preconditions or server execution on. The answer's `inbox` is read through the
+typed link `inboxPieceLinkSchema` in `packages/piece/src/ops/private-inbox.ts`,
+for the reason the pointer is, as "Creating or adopting it" says. Under server
+execution a client runs its own copy of Home's handling, and of the pattern a
+`pending` answer launches, so it reads the answer its own replica computes,
+which can stay `pending` for longer than the serving runtime's does.
+
+`requestPrivateInboxOf()` in `packages/piece/src/ops/private-inbox.ts` is the
+host's implementation of that client. It returns `ensured` with the inbox,
+`unlisted` or `not-held`; `unavailable`, sending nothing, for a Home without
+the stream; and `abandoned` once the caller's signal aborts while it waits. It
+rejects when the send or Home's handling fails, when the handling writes no
+receipt, or when Home answers with a status the host does not know.
+
+A client tells the cases apart by what Home has and what it answers:
+
+- **No Home, or a Home without the stream**, as one whose source predates it:
+  the identity's Home space has no root, or `requestPrivateInbox` at Home's
+  root holds nothing. The client sends nothing, and goes on as it would
+  without a Home: a loom daemon creates its own inbox, and the race in
+  "Creating or adopting it" applies to it.
+- **`ensured`**: the client reads the inbox the answer links, which the
+  profile advertises and Home holds.
+- **`unlisted` or `not-held`**: Home will not have that profile advertise its
+  inbox. The client goes on as it would without a Home, a loom daemon adopting
+  the inbox the profile advertises, if it is usable, and creating its own when
+  the profile advertises none.
+- **A failure** of the send or of Home's handling: nothing about the inbox is
+  decided. Sending the request again is safe, since the ensure it sends creates
+  and re-points nothing more once it has run.
+
+`packages/patterns/system/private-inbox-request.test.tsx` tests the answers,
+`packages/piece/test/ops/requestPrivateInboxOf.test.ts` the host's client, and
+`packages/patterns/integration/private-inbox-multi-runtime.test.ts`, with
+server execution on and off, a request through the receipt: answered with the
+inbox the profile points at, two at once answered with one inbox, one to a Home
+with no profiles answered `unlisted` while the Home creates its inbox, and one
+to a Home without the stream sending nothing.
 
 ## When the host refuses an inbox
 

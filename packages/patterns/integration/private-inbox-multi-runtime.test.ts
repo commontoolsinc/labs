@@ -20,7 +20,11 @@
  * replacement that no click on the refusal notice's button marks is refused,
  * and a marked one creates the Home's own inbox and points the refused
  * profile at it, including when the refused inbox's space has stopped letting
- * the owner read it.
+ * the owner read it. A client requests a Home's inbox, as a loom daemon does,
+ * for two of its profiles at once, and reads, from each handling's receipt,
+ * the one inbox Home creates and both profiles point at; a request to a Home
+ * with no profiles reads `unlisted`, and one to a Home without the stream sends
+ * nothing.
  *
  * The inbox's space grants every principal `WRITE` in both server-execution
  * postures: the serving loop makes a sender's write where server execution is
@@ -81,6 +85,17 @@ type HostEnsure = {
   profile?: { id: string; space: string };
 };
 
+/**
+ * What a client learned when it requested a Home's inbox: Home's answer, the
+ * inbox it names, and the inbox the profile it named points at once Home had
+ * answered.
+ */
+type RequestAnswer = {
+  status: string;
+  inbox?: { id: string; space: string };
+  pointer?: { id: string; space: string };
+};
+
 /** An offer as the owner reads it. */
 type ReadOffer = {
   kind: string;
@@ -123,6 +138,10 @@ describe("private inbox across runtimes", () => {
     replacement: unknown;
   };
   let markedReplacementRefusals: number;
+  let requested: RequestAnswer[];
+  let profilelessRequest: RequestAnswer;
+  let olderRequest: RequestAnswer;
+  let olderHandledBefore: unknown;
 
   /** The link a profile of the owner's holds to its inbox, if any. */
   const profileInbox = async (index: number) =>
@@ -138,6 +157,19 @@ describe("private inbox across runtimes", () => {
    */
   const ensureThroughHost = async (path: string[]): Promise<HostEnsure> =>
     await owner.client().call("ensurePrivateInbox", { path }) as HostEnsure;
+
+  /**
+   * Has the owner's runtime request the inbox of the Home stand-in at `path`,
+   * as a loom daemon does, naming its profile at `profile`.
+   */
+  const requestInbox = async (
+    path: string[],
+    profile: (string | number)[],
+  ): Promise<RequestAnswer> =>
+    await owner.client().call("requestPrivateInbox", {
+      path,
+      profile,
+    }) as RequestAnswer;
 
   /** How many adoption refusals the owner's host has logged. */
   const adoptionRefusals = async (): Promise<number> => {
@@ -444,6 +476,31 @@ describe("private inbox across runtimes", () => {
             .id === (await owner.link(replacingHeld)).id)
     );
     markedReplacementRefusals = await refusals(owner) - markedBefore;
+
+    // `requestingHome`: two profiles pointing at no inbox, whose inbox a
+    // client requests for both at once. `profilelessHome` has no profiles,
+    // and `olderHome` no stream to request through.
+    await owner.send("createRequestingProfile");
+    await owner.send("createRequestingProfile");
+    await harness.settle();
+    requested = await Promise.all([
+      requestInbox(["requestingHome"], ["requestingHome", "profiles", 0]),
+      requestInbox(["requestingHome"], ["requestingHome", "profiles", 1]),
+    ]);
+    profilelessRequest = await requestInbox(
+      ["profilelessHome"],
+      ["requestingHome", "profiles", 0],
+    );
+    await harness.settleUntil(async () =>
+      (await owner.read(["profilelessHome", "privateInbox", "piece"])) !==
+        undefined
+    );
+    olderHandledBefore = await owner.read(["olderHome", "handled"]);
+    olderRequest = await requestInbox(
+      ["olderHome"],
+      ["olderHome", "profiles", 0],
+    );
+    await harness.settle();
   });
 
   afterAll(async () => {
@@ -749,6 +806,37 @@ describe("private inbox across runtimes", () => {
 
     expect(await owner.read(["unreadableHome", "privateInbox", "piece"]))
       .toBeUndefined();
+  });
+
+  it("answers a request with the inbox Home holds, once the profile it names points at it", async () => {
+    const held = await owner.link(["requestingHome", "privateInbox", "piece"]);
+    expect(requested[0]).toEqual({
+      status: "ensured",
+      inbox: { id: held.id, space: held.space },
+      pointer: { id: held.id, space: held.space },
+    });
+  });
+
+  it("answers two requests made at once with the one inbox", () => {
+    expect(requested[1].status).toBe("ensured");
+    expect(requested[1].inbox).toEqual(requested[0].inbox);
+    expect(requested[1].pointer).toEqual(requested[0].inbox);
+  });
+
+  it("answers a request to a Home with no profiles as unlisted, and creates the Home's inbox", async () => {
+    expect(profilelessRequest.status).toBe("unlisted");
+    expect(profilelessRequest.inbox).toBeUndefined();
+    expect(await owner.read(["profilelessHome", "profiles"])).toEqual([]);
+    expect(
+      (await owner.link(["profilelessHome", "privateInbox", "piece"])).id,
+    ).not.toBe(requested[0].inbox?.id);
+  });
+
+  it("sends nothing to a Home without the stream, and reports it unavailable", async () => {
+    expect(olderRequest.status).toBe("unavailable");
+    expect(await owner.read(["olderHome", "handled"])).toBe(
+      olderHandledBefore,
+    );
   });
 
   it("delivers each offer a sender's own handler sends, from the sender", async () => {

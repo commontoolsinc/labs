@@ -51,11 +51,14 @@ import {
   ensurePrivateInbox,
   type EnsurePrivateInboxEvent,
   pointProfilesAtPrivateInbox,
+  type PrivateInboxAnswer,
   type PrivateInboxHolder,
   type PrivateInboxRefusalHolder,
   type PrivateInboxReplacementHolder,
+  type PrivateInboxRequest,
   replaceRefusedPrivateInbox,
   repointProfilesFromReplacedInbox,
+  requestPrivateInbox,
   type RetainedPrivateInboxes,
   TRUSTED_PRIVATE_INBOX_REFUSAL_SURFACE,
   TRUSTED_REPLACE_REFUSED_INBOX_ACTION,
@@ -181,8 +184,14 @@ export type HomeOutput = {
   // profile's inbox in `privateInboxRefusal`.
   // The host sends it the first time a runtime worker brings up Home, and
   // again at that worker's next bring-up if the ensure failed, so Home adopts
-  // again only then.
+  // again only then. `requestPrivateInbox` sends it an event naming nothing,
+  // which adopts nothing.
   ensurePrivateInbox: Stream<EnsurePrivateInboxEvent>;
+  // For a client, such as a loom daemon, that would otherwise create an inbox
+  // of its own: has Home ensure its inbox, as `ensurePrivateInbox` does for an
+  // event naming nothing, and answers, in the handling's receipt, with the
+  // inbox Home holds once the profile the request names points at it.
+  requestPrivateInbox: Stream<PrivateInboxRequest, PrivateInboxAnswer>;
   // For the owner, from the button on Home's refusal notice: replaces the
   // refused inbox with the one Home holds, or with one it creates when it holds
   // none, and points the profiles that point at the refused inbox at Home's.
@@ -670,6 +679,11 @@ const Home = pattern(
       renameSpace: renameSpaceHandler({ spaces }),
       createProfile: createProfileStream,
       ensurePrivateInbox: ensurePrivateInboxStream,
+      requestPrivateInbox: requestPrivateInbox({
+        privateInbox,
+        profiles: profiles as any,
+        ensure: ensurePrivateInboxStream,
+      }),
       replaceRefusedPrivateInbox: replaceRefusedInboxStream,
     };
   },
