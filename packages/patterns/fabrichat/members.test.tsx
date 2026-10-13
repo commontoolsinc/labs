@@ -100,6 +100,12 @@ const reactingDisabled = (room: unknown): unknown =>
 const composerDisabled = (room: unknown): unknown =>
   propValue(findNodeByProp(room, "inputId", "fabrichat-message"), "disabled");
 
+/** A message of the shared records, as an event names it. */
+function messageOf(cell: unknown): Writable<MessageRecord>;
+function messageOf(cell: unknown): unknown {
+  return cell;
+}
+
 /** What makes the shared room a group room of its own. */
 const groupRoom = {
   about: { kind: "group" as const, title: "Team" },
@@ -246,10 +252,26 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         trustedUi: obliterateGesture,
       },
       {
+        action: room.deleteMessage,
+        event: {
+          requestId: "d-alices",
+          message: messageOf(setup.records.messages.key(0)),
+        },
+        trustedUi: deleteGesture,
+      },
+      {
         assertion: assert(() =>
           bodies(setup.records.messages) ===
             "From Alice | From Bob | Bob again"
         ),
+      },
+      // The room records his refused deletion as one he isn't allowed.
+      {
+        assertion: assert(() => {
+          const outcome = room.messageRequests["d-alices"];
+          return outcome?.status === "refused" &&
+            outcome.code === "not-allowed";
+        }),
       },
       { label: "bob-tried" },
       { await: "alice-done" },

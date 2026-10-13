@@ -160,9 +160,10 @@ times](#unique-times)). Clients MUST NOT make up ids from content or position.
 ## Deleted messages
 
 A deleted message, whether deleted by its sender or obliterated, accepts nothing
-further except obliteration. The room refuses, silently, an `editMessage`, a
+further except obliteration. The room refuses an `editMessage`, a
 `deleteMessage`, a `sendReaction`, or a `deleteReaction` on it, and a
-`sendMessage` that replies to it. Replies it already had, and a thread rooted at
+`sendMessage` that replies to it, recording `deleted-target` in the sender's
+`messageRequests`. Replies it already had, and a thread rooted at
 it, keep their links.
 
 There is no undeletion, and no redacting a single earlier version. Obliteration

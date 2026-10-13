@@ -20,6 +20,7 @@ import type { ViewPlace } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
+  type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -32,6 +33,7 @@ import {
   type JoinRoomRequest,
   type MessageCell,
   type MessageRecord,
+  type MessageRequestsCell,
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
@@ -158,6 +160,15 @@ export interface FabriChatMessageRowInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
   /** Whether the viewer's manager can take the viewer into the room. */
   canJoin?: boolean;
 
@@ -224,6 +235,8 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
     joinRoom,
     self,
@@ -237,6 +250,8 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
     joinRoom,
     self,
@@ -477,6 +492,8 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        outcomes,
+                        refusal,
                         canJoin,
                         joinRoom,
                         self,
@@ -508,6 +525,8 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
+                        outcomes,
+                        refusal,
                         canJoin,
                         joinRoom,
                         self,
@@ -567,6 +586,8 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
+                    outcomes,
+                    refusal,
                     canJoin,
                     joinRoom,
                     self,
