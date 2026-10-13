@@ -12,6 +12,7 @@
     "./property-name": "./src/typescript/property-name.ts",
     "./scope-brand": "./src/typescript/scope-brand.ts",
     "./cfc-carrier": "./src/typescript/cfc-carrier.ts",
+    "./expanding-recursion": "./src/typescript/expanding-recursion.ts",
     "./numeric-expression": "./src/typescript/numeric-expression.ts",
     "./type-node": "./src/typescript/type-node.ts",
     "./value-annotation": "./src/typescript/value-annotation.ts",

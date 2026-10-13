@@ -130,6 +130,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
     "a secret input path or stdin marker, supplied explicitly",
   ],
   // Numbers, durations and bounds. Nothing enumerates a count.
+  ["space compact:verify-sample", "an every-nth stride over the documents"],
   ["limit", "a row count"],
   ["depth", "a graph depth"],
   ["seq", "a revision sequence number"],

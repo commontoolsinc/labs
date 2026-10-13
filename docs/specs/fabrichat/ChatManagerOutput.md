@@ -282,8 +282,8 @@ conversation from splitting.
 - `joinableByLink?: boolean` — Whether the room admits anyone who has its
   link. When true, the room's space grants every principal WRITE (the `"*"`
   wildcard) besides its members, so the room's address is all that keeps it
-  private: whoever holds it can read and write the room, and add it to their
-  chats from the room itself. Absent or false, the room admits its members
+  private: whoever holds it can read and write the room, and joins it, as one
+  of their chats, by writing in it. Absent or false, the room admits its members
   alone.
 
 Creates a group room. This is an outward act: it grants other people access.
