@@ -5,7 +5,8 @@ import {
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { isDeepFrozen } from "@commonfabric/data-model";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
+import { getContainersHashedForTestingOnly } from "@commonfabric/data-model/for-testing-only";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
@@ -669,6 +670,65 @@ describe("pattern-binding", () => {
         type: "string",
         scope: "user",
       });
+    });
+
+    it("hashes nothing to fold a declared scope into an argument binding again", () => {
+      // The fold builds the binding's schema with the slot's declared scope
+      // on it, and a schema built per binding is hashed whole per binding.
+      const authored = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            profile: {
+              type: "object",
+              properties: { name: { type: "string" } },
+              asCell: [{ kind: "cell", scope: "user" }],
+            },
+          },
+        } as const satisfies JSONSchema,
+      );
+      const binding = {
+        profile: { $alias: { cell: "argument", path: ["profile"] } },
+      };
+      const resultCell = runtime.getCell(
+        space,
+        "folded scope hashed once result cell",
+        undefined,
+        tx,
+      );
+      const argumentLink = runtime.getCell(
+        space,
+        "folded scope hashed once argument cell",
+        {
+          type: "object",
+          properties: {
+            profile: {
+              type: "object",
+              properties: { name: { type: "string" } },
+            },
+          },
+        },
+        tx,
+      ).getAsNormalizedFullLink();
+      const bind = () =>
+        unwrapOneLevelAndBindToDoc(binding, argumentLink, resultCell, {
+          sourceSchemas: { argument: authored },
+        }) as { profile: unknown };
+
+      const first = parseLink(bind().profile, resultCell)!;
+      expect(first.scope).toBe("space");
+      expect(resolvedSchema(first.schema)).toEqual({
+        type: "object",
+        properties: { name: { type: "string" } },
+        scope: "user",
+      });
+      const hashedBefore = getContainersHashedForTestingOnly();
+      for (let node = 0; node < 10; node++) {
+        expect(parseLink(bind().profile, resultCell)!.schema).toBe(
+          first.schema,
+        );
+      }
+      expect(getContainersHashedForTestingOnly()).toBe(hashedBefore);
     });
 
     it("binds aliases from a caller-owned circular schema", () => {

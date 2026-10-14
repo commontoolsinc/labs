@@ -272,12 +272,47 @@ where the pre-sync was no longer the whole cost.
       `null`, so two positions of a graph sharing one schema object derive
       other ids than two positions holding equal ones. The thirty-row
       room's counts and profile shares are in
-      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md).
-- [ ] Interning a schema is 8 to 10% of the same reload's profile samples
-      (the record above has the split). About three tenths of it is the
-      selectors a sync interns, and a sixth to a fifth each `asSchema`
-      under `#cellsNodePlanReads` and the schema pairs
-      `combineSchemaForLink` and `mergeSchemaFlags` key their memos by.
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md),
+      and the shares once the pre-sync held a node's bindings, when the
+      binding walk fell from 2.1–3.6% of the samples to 0.9–1.2%, are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md).
+- [x] A schema derived for a sync or a binding is derived once per schema
+      it is derived from, and interned, so `internSchema()` is given an
+      object it has seen: it hashes the whole of any other, whether or not
+      the content is already interned. The read schema a handler plan's
+      inputs are synced under is kept per handler schema, which is frozen in
+      place when first read (`schemaWithEventSlotAsStream`,
+      `packages/runner/src/runner.ts`); the selector schema a link's target
+      is asked for, per deep-frozen reader schema (`selectorSchemaForLink`,
+      `packages/runner/src/storage/v2.ts`); the reference and the inline
+      form a selector goes to the wire in, per decomposition
+      (`externalizeSyncSelector`, `packages/runner/src/storage/v2-watch.ts`);
+      and a binding's schema with its slot's declared scope folded in, per
+      emitted schema (`packages/runner/src/pattern-binding.ts`). Two results
+      are keyed by content, because each document holding a link carries
+      the link's schema as an object of its own: a shaped reader crossing a
+      link that declares a default keys the schema it continues with by its
+      own schema and that default (`combineSchemaForLink`,
+      `packages/runner/src/traverse.ts`), and `schemaHasIfc` judges a
+      deep-frozen schema as the interned instance of its content
+      (`packages/runner/src/schema-ifc.ts`). No two positions of a pattern
+      graph share a schema object for it. On the thirty-row room's reload,
+      86,407 of 1.25 million `internSchema()` calls had missed the identity
+      cache and hashed 150 million characters of schema JSON; 35,101 miss
+      and hash 45 million, and interning is 2.8 to 4.8% of the profile's
+      samples where it was 5.7 to 9.1% in the render paired with each. The
+      counts per caller are in
+      [`../history/development/performance/2026-10-13-schema-interning-on-reload.md`](../history/development/performance/2026-10-13-schema-interning-on-reload.md).
+- [ ] Of the 35,101 schemas a reload still interns as new objects, 13,749
+      arrive deep-frozen, most of them a link schema read out of a document:
+      a true reader's crossing (`mergeSchemaFlags`), the link-target
+      selector and the crossing's `schemaHasIfc` each intern such a schema
+      once per object. A plan's inputs document is decoded apart from the
+      value it was minted from, once for its sync and again for its reads,
+      so each decoding holds new objects; the last item of this stage is
+      where that ends. Link serialization interns the stripped schema it
+      builds and a reference it builds per call, 5,839 times a reload
+      (`externalizeLinkSchema`, `packages/runner/src/link-utils.ts`).
 - [x] A preparation seals a frozen snapshot of the transaction's activity
       and computes its digest only when something reads it. A commit whose
       activity epoch stands where the preparation left it accepts the
@@ -403,6 +438,14 @@ where the pre-sync was no longer the whole cost.
       of inputs documents and the thirty-row room holds 69 MB, so a room of
       about a hundred rows is at it: an inputs document carries the schema
       of every link it holds inline, and averages 22 KB on that room.
+- [ ] A plan's inputs document is decoded apart from the value it was
+      minted from: once for its sync (`valueFromDataUri` under
+      `#syncDataURICell`, `packages/runner/src/storage/v2.ts`) and again for
+      its reads. The sync's decode was 4.1 to 7.5% of the profile's samples
+      on the thirty-row room's reload, measured before the pre-sync held a
+      node's bindings. A document decoded there is one this process minted,
+      so keeping the minted value by its URI would spare the decode, and
+      with it the link schemas a decode makes new objects of.
 
 Exit: a room of a hundred rows opens in the browser.
 
