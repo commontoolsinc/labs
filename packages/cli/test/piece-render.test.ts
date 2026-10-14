@@ -117,6 +117,60 @@ describe("piece-render", () => {
         }
       });
 
+      it("returns the same HTML from the runtime that wrote a tree and from one that loaded it", async () => {
+        // The writer holds the `style` object's keys in the order its write
+        // listed them, and the reader holds them in the order the store's
+        // encoding leaves them in.
+
+        const server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+        const writerStorage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const readerStorage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const writer = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: writerStorage,
+        });
+        const reader = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: readerStorage,
+        });
+        try {
+          const written = await cellHolding(
+            writer,
+            "style-order",
+            vnode("div", {
+              style: { display: "none", gap: "0.25rem", alignItems: "center" },
+            }, ["picker"]),
+          );
+          const fromWriter = await renderVDomToHtml(
+            written,
+            () => writer.idle(),
+          );
+
+          const loaded = reader.getCell<unknown>(space, "style-order");
+          await loaded.sync();
+          const fromReader = await renderVDomToHtml(
+            loaded,
+            () => reader.idle(),
+          );
+
+          const html =
+            '<div style="align-items: center; display: none; gap: 0.25rem">' +
+            "picker</div>";
+          expect(fromWriter).toBe(html);
+          expect(fromReader).toBe(html);
+        } finally {
+          await writer.dispose();
+          await reader.dispose();
+          await writerStorage.close();
+          await readerStorage.close();
+          await server.close();
+        }
+      });
+
       it("follows a cell in child position", async () => {
         const runtime = makeRuntime();
         try {

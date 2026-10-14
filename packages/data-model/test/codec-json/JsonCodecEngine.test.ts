@@ -98,7 +98,7 @@ class UnregisteredInstance extends BaseFabricInstance {
     throw new Error("not implemented");
   }
 
-  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+  [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
     throw new Error("not implemented");
   }
 
@@ -523,7 +523,7 @@ describe("JsonCodecEngine", () => {
         return new ProbeInstance();
       }
 
-      protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+      [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
         return new ProbeInstance();
       }
     }

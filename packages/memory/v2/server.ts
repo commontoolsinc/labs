@@ -395,9 +395,10 @@ export type SlowQuery = {
   /** transact only: the commit's pending read count. */
   readsPending?: number;
 
-  /** transact only: "ok", the response error's name (a rejected commit
-   * that took this long is at least as interesting as an applied one), or
-   * "threw" when evaluation raised instead of responding. */
+  /** transact and sqlite.query: "ok", or the error's name (a rejected
+   * commit or a failed read that took this long is at least as interesting
+   * as one that succeeded). A transact reports "threw" when evaluation raised
+   * instead of responding. */
   outcome?: string;
 
   /** Query and watch operations: how many roots the request's evaluations
@@ -444,6 +445,12 @@ export type SlowQuery = {
    * {@link SlowestQueryRoot} for why overlapping closures charge whichever
    * root ran first, and what to check before calling one the cause. */
   slowestRoot?: SlowestQueryRoot;
+
+  /** sqlite.query only: the id of the database handle the read named. */
+  db?: string;
+
+  /** sqlite.query only: the rows a read that succeeded returned. */
+  rows?: number;
 };
 
 /** The root attribution accumulated across one request's branch groups. */
@@ -519,8 +526,8 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query, watch, and commit operations — those over
- * `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
+/** Returns the last N slow query, watch, commit, and SQLite read operations —
+ * those over `CF_SLOW_QUERY_THRESHOLD_MS`, 100 ms unless set. */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -1412,12 +1419,15 @@ class Connection {
     this.#challenges.get(challenge.value)?.acceptedFor.add(issuer);
     this.#principals.set(principal, { leaseEnd });
     // The sessions opened as the principal take the renewed lease, and one
-    // whose lease had run out is evaluated again for whatever it missed.
+    // whose lease had run out is evaluated again for whatever it missed. An
+    // empty dirty batch schedules that pass: the lapsed session runs the
+    // full evaluation it is marked for, and every other session of the
+    // space evaluates as untouched.
     for (const handle of this.#sessions.values()) {
       if (handle.principal !== principal) continue;
       if (this.#leaseExpired(handle)) {
         this.#server.markSessionForFullResync(handle.space, handle.sessionId);
-        this.#server.markSpaceDirty(handle.space);
+        this.#server.markSpaceDirty(handle.space, []);
       }
       handle.leaseEnd = leaseEnd;
     }
@@ -4652,30 +4662,46 @@ export class Server {
         );
       }
       const disk = this.#diskSources.get(message.space, message.db.id);
-      const result = disk
-        ? (wantColumns
-          ? this.#readPool.queryWithOrigins(
-            disk.path,
+      // A read past the slow-operation threshold is recorded with what its
+      // caller is told: its rows, the error it failed with, or the refusal of
+      // the access check that follows it.
+      const readStartedAt = performance.now();
+      const recordRead = (outcome: string, rows?: number) =>
+        recordSlowQueryDuration("sqlite.query", message.space, readStartedAt, {
+          db: message.db.id,
+          outcome,
+          ...(rows === undefined ? {} : { rows }),
+        });
+      let result: { rows: SqliteNativeRow[]; columns?: SqliteResultColumn[] };
+      try {
+        result = disk
+          ? (wantColumns
+            ? this.#readPool.queryWithOrigins(
+              disk.path,
+              message.sql,
+              queryParams,
+            )
+            : {
+              rows: this.#readPool.query(disk.path, message.sql, queryParams),
+            })
+          : await this.#readCellDb(
+            message.space,
+            message.db,
             message.sql,
             queryParams,
-          )
-          : {
-            rows: this.#readPool.query(disk.path, message.sql, queryParams),
-          })
-        : await this.#readCellDb(
-          message.space,
-          message.db,
-          message.sql,
-          queryParams,
-          Engine.resolveScopeKey(
-            message.db.scope,
-            message.reader ?? {
-              principal: session.principal,
-              sessionId: message.sessionId,
-            },
-          ),
-          wantColumns,
-        );
+            Engine.resolveScopeKey(
+              message.db.scope,
+              message.reader ?? {
+                principal: session.principal,
+                sessionId: message.sessionId,
+              },
+            ),
+            wantColumns,
+          );
+      } catch (error) {
+        recordRead(error instanceof Error ? error.name : "SqliteError");
+        throw error;
+      }
       // SQLite reads necessarily await filesystem work. Re-check both the
       // session identity and its current ACL immediately before exposing the
       // rows, so a revoke during that I/O cannot leak a late result.
@@ -4695,9 +4721,11 @@ export class Server {
             "READ",
           ));
         if (deny) {
+          recordRead(deny.name);
           return respondTypedError<never>(message.requestId, deny);
         }
       }
+      recordRead("ok", result.rows.length);
       return {
         type: "response",
         requestId: message.requestId,
@@ -5866,9 +5894,11 @@ export class Server {
           } else {
             // Every operation elided: nothing was written, so no document
             // turns dirty — but the accept still owes this session its
-            // catch-up marker, and the marker rides the batched flush.
-            // Schedule the pass without dirtying anything.
-            this.markSpaceDirty(message.space);
+            // catch-up marker, and the marker rides the batched flush. An
+            // empty dirty batch schedules that pass: every session of the
+            // space evaluates as untouched, and the writer's otherwise-empty
+            // frame carries the marker.
+            this.markSpaceDirty(message.space, []);
           }
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded. An
@@ -8552,6 +8582,16 @@ export class Server {
     });
   }
 
+  /**
+   * Marks `space` for the next batched flush. `dirtyIds` names the dirty keys
+   * whose watchers that flush re-evaluates incrementally. An empty iterable
+   * schedules the pass with every session of the space evaluating as
+   * untouched, and a session then sends a frame only for what it is otherwise
+   * owed, such as a catch-up marker or a forced full resync. Leaving
+   * `dirtyIds` out has the flush evaluate every session of the space in full
+   * from its watch roots, which replaces each session's tracked graphs and is
+   * the costly path.
+   */
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,

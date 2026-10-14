@@ -2575,10 +2575,30 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   result read from its type, as the result views the document that stores the
   writer's policy, and reads that policy in part. A callback with several
   returns may return the values of several bindings whose types are one type,
-  so it records none. A result written as an object literal is read member by
-  member at the annotations of the bindings its members read (the
-  schema-generator mapping spec's §13; the runner's
-  `test/cfc-result-policy-binding.test.ts`)
+  so it records none. One that returns an array literal, inside any
+  parentheses, whose every element reads a binding declared with an
+  annotation spelling one value and denoting the element type, records that
+  annotation as the hint of the print's element, by the same rule
+  (`returnedElementAnnotation` there; `spellSameValue` in the schema
+  generator's `src/typescript/value-annotation.ts`, which holds two
+  annotations to one type and the same value bindings, since two policies'
+  rules may share a type). A result written as an object literal
+  is read member by member at the authored type each member's value has: a
+  constructed cell's, a binding's declaration's, an array literal's as the
+  array of its elements' where every element's spells one value, or, for a lift
+  applied as the member, the value its callback returns, where that names only
+  policies (`getExplicitValueTypeNode` in `transformers/schema-injection.ts`;
+  the schema-generator mapping spec's §13; the runner's
+  `test/cfc-result-policy-binding.test.ts`). What these rules do not reach
+  keeps the print as the type spells it, with the policy's brand as an atom no
+  exchange rule matches, `{}`, and the `cfc-label:unread` warning, so the
+  position stays closed to every reader: an array literal whose elements read
+  bindings declared apart, one labelled by `readers` beside one by `writers`;
+  an alias beside the same type written out, which denote a type apart; a
+  spread, a hole, or an element that reads no binding, such as a member
+  access; a tuple print, as `as const` gives one; and an `AnyOf` whose only
+  alternative is such a `PolicyOf`. Each is a shape to recover should a
+  pattern write it
 - a pass that reads the structure of a node printed from a type reads the
   print's unfolding in its place: a node of the print's own kind built from the
   type it was printed from, each type node below it printed afresh from its own

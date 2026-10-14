@@ -8,6 +8,14 @@ import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 
 import { preparedDigestFor } from "../../src/cfc/canonical.ts";
+import {
+  addCfcDenialListener,
+  type CfcDenialCode,
+} from "../../src/cfc/denial-report.ts";
+import {
+  isVerdictReason,
+  verdictReason,
+} from "../../src/cfc/verdict-reason.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { SEED_ENVELOPE_SCHEMA_HASH } from "../cfc-seed-envelope.ts";
 import {
@@ -41,6 +49,42 @@ describe("prepared digest transaction binding", () => {
   afterEach(async () => {
     await runtime.dispose();
   });
+
+  /** A relevant transaction that wrote `value` and prepared successfully. */
+  const prepared = (value: number) => {
+    const tx = runtime.edit() as ExtendedStorageTransaction;
+    tx.writeValueOrThrow(address("output"), value);
+    tx.markCfcRelevant("test");
+    expect(tx.prepareCfc()).not.toBe("");
+    return tx;
+  };
+
+  /** Runs `run`, and returns the code of each CFC denial reported meanwhile. */
+  const denialsDuring = async (
+    run: () => unknown,
+  ): Promise<CfcDenialCode[]> => {
+    const codes: CfcDenialCode[] = [];
+    const stop = addCfcDenialListener((denial) => codes.push(denial.code));
+    try {
+      await run();
+    } finally {
+      stop();
+    }
+    return codes;
+  };
+
+  /** Writes a label map to `of:output` from outside the runtime's own code. */
+  const writeLabelMapUnprivileged = (tx: ExtendedStorageTransaction) =>
+    tx.writeOrThrow({
+      space: signer.did(),
+      id: "of:output",
+      type: "application/json",
+      path: ["cfc"],
+    }, {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: { version: 1, entries: [] },
+    });
 
   it("does not report a write when the storage operation rejects it", () => {
     const operations = [
@@ -286,16 +330,7 @@ describe("prepared digest transaction binding", () => {
         // A write to a document's label map from outside the runtime's own
         // persistence invalidates the preparation, and the gate refuses it
         // once enforcement is on.
-        tx.writeOrThrow({
-          space: signer.did(),
-          id: "of:output",
-          type: "application/json",
-          path: ["cfc"],
-        }, {
-          version: 1,
-          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-          labelMap: { version: 1, entries: [] },
-        });
+        writeLabelMapUnprivileged(tx);
         const invalidated = tx.getCfcState().prepare;
         expect(invalidated.status).toBe("invalidated");
         expect((invalidated as { digest?: string }).digest).toBeDefined();
@@ -554,14 +589,6 @@ describe("prepared digest transaction binding", () => {
     // the journal. Comparing digests at commit cannot refuse any of them, so
     // each has to invalidate the preparation where it happens.
 
-    const prepared = (value: number) => {
-      const tx = runtime.edit() as ExtendedStorageTransaction;
-      tx.writeValueOrThrow(address("output"), value);
-      tx.markCfcRelevant("test");
-      expect(tx.prepareCfc()).not.toBe("");
-      return tx;
-    };
-
     const expectInvalidated = async (
       tx: ExtendedStorageTransaction,
       reason: string,
@@ -569,13 +596,19 @@ describe("prepared digest transaction binding", () => {
       const state = tx.getCfcState().prepare;
       expect(state.status).toBe("invalidated");
       expect(state.status === "invalidated" && state.reasons).toEqual([reason]);
-      const { error } = await tx.commit().settled;
+      let error: Error | undefined;
+      const denials = await denialsDuring(async () => {
+        ({ error } = await tx.commit().settled);
+      });
       expect(error?.name).toBe("StorageTransactionAborted");
       // The reason the invalidation refuses under, where a commit refused by
       // the digest recheck carries `cfc-prepared-digest-mismatch`.
       expect((error as { reason?: Error }).reason?.message).toBe(
         "cfc-refusal-not-a-verdict",
       );
+      // No policy check refused the commit; the preparation was sound when
+      // it was made.
+      expect(denials).toEqual(["write-prepare-invalidated"]);
     };
 
     it("leaves the transaction prepared, and commits it, after an empty batch", async () => {
@@ -634,6 +667,161 @@ describe("prepared digest transaction binding", () => {
         expect(after.readValueOrThrow(address("output"))).toBeUndefined();
       } finally {
         after.abort();
+      }
+    });
+  });
+
+  describe("the denial a refused commit reports", () => {
+    it("reports `write-prepare-invalidated` for a read after a successful preparation", async () => {
+      const tx = prepared(1);
+      tx.readValueOrThrow(address("input"));
+      const denials = await denialsDuring(() => tx.commit().settled);
+      expect(denials).toEqual(["write-prepare-invalidated"]);
+    });
+
+    it("reports `write-policy-gate` once, from the preparation, for a verdict the preparation records", async () => {
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      tx.writeValueOrThrow(address("output"), "one");
+      writeLabelMapUnprivileged(tx);
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const atPreparation = await denialsDuring(() => {
+        expect(tx.prepareCfc()).toBe("");
+      });
+      expect(atPreparation).toEqual(["write-policy-gate"]);
+      let error: Error | undefined;
+      const atCommit = await denialsDuring(async () => {
+        ({ error } = await tx.commit().settled);
+      });
+      expect(error?.name).toBe("CfcCommitRefusalError");
+      expect(atCommit).toEqual([]);
+    });
+
+    it("reports `write-policy-gate` at commit for a refused preparation that a later invalidation adds a reason to", async () => {
+      // Under `observe` the refused preparation reports nothing, so the
+      // commit, once enforcement is raised, is the first to report it, with
+      // the preparation's verdict and the invalidation's reason both on it.
+
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      tx.writeValueOrThrow(address("output"), "one");
+      writeLabelMapUnprivileged(tx);
+      tx.setCfcEnforcementMode("observe");
+      const atPreparation = await denialsDuring(() => {
+        expect(tx.prepareCfc()).toBe("");
+      });
+      expect(atPreparation).toEqual([]);
+      tx.setCfcEnforcementMode("enforce-explicit");
+      tx.invalidateCfc("after the refusal");
+      const state = tx.getCfcState().prepare;
+      expect(state.status === "invalidated" && state.reasons.length).toBe(2);
+      let error: Error | undefined;
+      const atCommit = await denialsDuring(async () => {
+        ({ error } = await tx.commit().settled);
+      });
+      expect(error?.name).toBe("StorageTransactionAborted");
+      expect(atCommit).toEqual(["write-policy-gate"]);
+    });
+
+    it("reports `write-policy-gate` at commit for a refused preparation none of whose reasons is a verdict", async () => {
+      // The seeded document carries a stored label, so a write to it with no
+      // schema leaves the preparation without the write-policy input it
+      // needs, which it records untagged.
+
+      const schema = {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+        },
+      } as const satisfies JSONSchema;
+      const seed = runtime.edit();
+      const cell = runtime.getCell(signer.did(), "labeled", schema, seed);
+      cell.set({ secret: "s" });
+      runtime.prepareTxForCommit(seed);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      tx.writeValueOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: cell.getAsNormalizedFullLink().id,
+        path: ["secret"],
+      }, "t");
+      tx.setCfcEnforcementMode("observe");
+      expect(tx.prepareCfc()).toBe("");
+      const state = tx.getCfcState().prepare;
+      expect(state.status === "invalidated" && state.reasons).toEqual([
+        expect.stringContaining("missing schema write-policy input"),
+      ]);
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const denials = await denialsDuring(() => tx.commit().settled);
+      expect(denials).toEqual(["write-policy-gate"]);
+    });
+
+    it("reports `write-prepare-invalidated` for an invalidation reason tagged as a verdict after a successful preparation", async () => {
+      // `invalidateCfc()` removes a caller's tag where it records the reason,
+      // so the tag cannot make the denial a policy refusal.
+
+      const tx = prepared(1);
+      tx.invalidateCfc(verdictReason("a verdict recorded after preparing"));
+      const denials = await denialsDuring(() => tx.commit().settled);
+      expect(denials).toEqual(["write-prepare-invalidated"]);
+    });
+
+    it("reports `write-unprepared` for a commit whose only reasons a caller recorded before any preparation", async () => {
+      const tx = runtime.edit() as ExtendedStorageTransaction;
+      tx.writeValueOrThrow(address("output"), 1);
+      tx.markCfcRelevant("test");
+      tx.invalidateCfc("never prepared");
+      let error: Error | undefined;
+      const denials = await denialsDuring(async () => {
+        ({ error } = await tx.commit().settled);
+      });
+      expect(error?.message).toContain("never prepared");
+      expect(denials).toEqual(["write-unprepared"]);
+    });
+  });
+
+  describe("invalidateCfc()", () => {
+    it("records a caller's reason without its verdict tags", () => {
+      const tx = prepared(1);
+      try {
+        tx.invalidateCfc(verdictReason(verdictReason("forged")));
+        const state = tx.getCfcState().prepare;
+        expect(state.status === "invalidated" && state.reasons).toEqual([
+          "forged",
+        ]);
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("leaves the refused commit of a passed preparation retryable for a reason tagged as a verdict", async () => {
+      const tx = prepared(1);
+      tx.invalidateCfc(verdictReason("forged"));
+      const { error } = await tx.commit().settled;
+      expect(error?.name).toBe("StorageTransactionAborted");
+      expect((error as { reason?: Error }).reason?.message).toBe(
+        "cfc-refusal-not-a-verdict",
+      );
+    });
+
+    it("keeps the verdict tags of the reasons a refused preparation recorded", () => {
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      try {
+        tx.writeValueOrThrow(address("output"), "one");
+        writeLabelMapUnprivileged(tx);
+        tx.setCfcEnforcementMode("enforce-explicit");
+        expect(tx.prepareCfc()).toBe("");
+        tx.invalidateCfc(verdictReason("after the refusal"));
+        const state = tx.getCfcState().prepare;
+        expect(state.status === "invalidated" && state.reasons.length).toBe(2);
+        expect(
+          state.status === "invalidated" && state.reasons.map(isVerdictReason),
+        ).toEqual([true, false]);
+      } finally {
+        tx.abort();
       }
     });
   });

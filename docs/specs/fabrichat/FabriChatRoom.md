@@ -35,7 +35,9 @@ manager creates, is its space's root, and reads only its own roster: its
 `#default` is itself. `roster` is computed from those who joined alone.
 `messages` (its `count`, `oldestAt`, `newestAt`, `latest`, and `threads`) is
 computed from the messages, and `canSend` from the reader's access and profile,
-when they're read. Neither is stored.
+when they're read. Neither is stored. `viewer` and `messageRights` are computed
+for each reader too, `viewer` from their profile and access, and
+`messageRights` from those and the messages, for every message at once.
 
 `participantEntries` is computed from `participants`, reading the
 `represents-principal` label on each profile with `principalOf()`, and
@@ -112,12 +114,19 @@ when the room's `deletionIsObliteration` setting is on, does exactly what
 `commitObliterate` does. They have the same kind of write policy as
 `commitSend`.
 
-`commitObliterate` is admitted for an OWNER in a group room or a space's own
-chat, when the room's `ownersMayObliterate` setting is on, and for a message's
-own sender in a direct room. It rewrites the message to its tombstone and clears
-its reactions. So the message's write policy admits it alongside `commitSend`,
-`commitEdit`, and `commitDelete`, and the reactions' write policy admits both it
-and `commitDelete` alongside the reaction handlers.
+`commitObliterate` is admitted for an OWNER of the room's space, in a direct
+room as in a group room or a space's own chat, when the room's policy states
+`ownersMayObliterate`, and for a message's own sender in a direct room. The
+handlers read that from the policy document `about.policy` links, so a room
+enforces what it states, and a policy that doesn't read lets no OWNER
+obliterate. One function, `messageRightsOf()`, states who may edit, delete,
+and obliterate a message: the three handlers admit an act by it, and
+`messageRights` and the rendering's controls offer one by it, so what a reader
+is offered is what the room takes. `commitObliterate` rewrites the message to
+its tombstone and clears its reactions. So the message's write policy admits
+it alongside `commitSend`, `commitEdit`, and `commitDelete`, and the
+reactions' write policy admits both it and `commitDelete` alongside the
+reaction handlers.
 
 `commitSend`, `commitEdit`, `commitDelete`, and `commitSendReaction` choose a
 recorded time in the same transaction that records it: the chosen time, or the
@@ -175,7 +184,7 @@ built at first. The first build fixes each setting at an initial value:
 
 | Setting | `ChatRoomPolicy` key | Initial value |
 | --- | --- | --- |
-| OWNERs may obliterate messages | `ownersMayObliterate` | yes |
+| OWNERs may obliterate messages, anyone's | `ownersMayObliterate` | yes in a group room or a space's own chat, no in a direct room |
 | An edit or a plain deletion keeps the version it replaces | `keepsHistory` | yes, every version |
 | A sender's deletion obliterates their message | `deletionIsObliteration` | no |
 | How far before the clock a proposed time is accepted | `proposedTimeMaxAgeNsec` | 10 minutes |
@@ -185,9 +194,16 @@ built at first. The first build fixes each setting at an initial value:
 | The most windows a session can have open | `maxOpenWindows` | 50 |
 
 These are the first build's values. Once the configuration exists, rooms can
-differ from them. A room states its settings in `about.policy`
-([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present, written when
-the room is created from the same settings the handlers read.
+differ from them. `ownersMayObliterate` is there for a group room with many
+OWNERs; a direct room is set up without it, and its two people each obliterate
+only their own messages. The room's kind picks which policy document
+`about.policy` links, one stating `ownersMayObliterate` and one not, unless
+`FabriChatRoomCore` is given the setting as an input, which the room's own
+pattern leaves unset. Nothing in the room's rendering shows or changes it. A
+room states its settings in `about.policy`
+([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present, and its
+handlers read `ownersMayObliterate` from that document itself, so it is the
+source of truth for what the room allows.
 
 ## Prerequisites
 
