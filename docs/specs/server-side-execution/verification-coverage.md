@@ -3930,9 +3930,12 @@ Delta 2026-10-13 — an echo sealed into a space other than its intent's:
   An entry is filed under the space its run wrote and the mark arrives
   in the space the intent was fired in, so the two differ whenever a
   handler sends to a stream in another space, as a sender's offer to a
-  private inbox does. The retirement walks every space's entries. The
-  flicker count reads only a descendant in the mark's own space, since
-  it compares seqs and a seq orders commits within one space.
+  private inbox does. The retirement walks every space's entries, an
+  intent's own echo in another space included, which can therefore go
+  before the served write to that space lands: the descendant's
+  one-wave flicker. The flicker count reads only an echo in the mark's
+  own space, since it compares seqs and a seq orders commits within one
+  space.
 - Instrument: `packages/runner/test/speculation-intent-listener.test.ts`
   — the cases under "an echo sealed into a space other than its
   intent's": a cascade child and a grandchild behind a write-less child

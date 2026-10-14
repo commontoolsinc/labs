@@ -1634,7 +1634,11 @@ export class SpeculationOverlayDestination
    * `space` is the space the intent was fired in, where its mark
    * arrives. Entries are retired in every space: an entry is filed
    * under the space its run wrote, which for a handler that sends to a
-   * stream in another space is not `space`.
+   * stream in another space, or writes into one, is not `space`. The
+   * served write to another space commits apart from the mark, so an
+   * echo there, the intent's own or a descendant's, can go before that
+   * write lands: the one-wave flicker described below, which the
+   * unarrived witness does not count outside `space`.
    *
    * The known cost (W2.1, flagged — the reason the owner-level
    * alternative exists): when the server's LT1 child was PURGED at the

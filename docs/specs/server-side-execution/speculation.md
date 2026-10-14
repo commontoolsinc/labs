@@ -316,6 +316,11 @@ On each pushed `derived` commit with `derivedThrough = W` and
    own echo and its descendants in every space. A handler that sends to
    a stream in another space leaves its cascade child's echo in that
    space, where no mark, watermark or arrival would otherwise name it.
+   A handler that writes into another space itself leaves its own echo
+   there. The served handler's write to that space commits apart from
+   the mark, so that echo can go before the write lands, the same
+   one-wave flicker a descendant costs below, and uncounted, as a
+   descendant in another space is.
    Cost, stated: when the server's LT1 child
    of `e` did not complete in `e`'s appending wave (events.md §4's
    purge; the drain delivers it a wave later), the descendant echo goes
