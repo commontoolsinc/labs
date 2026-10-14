@@ -668,6 +668,46 @@ describe("plan", () => {
       ).toBe(3);
     });
 
+    it("moves a leaf up as its lane's share of the suite grows, by what the `describe` around it adds", () => {
+      // The pattern unit suite runs its tests side by side, and its lane is
+      // charged the 100 seconds its longest unit takes. The leaf takes one
+      // second of its own and 45 with the hooks of the `describe` around
+      // it, and costs the lane 16; the stranger takes 50 and costs 20. The
+      // test growing the longest unit to 150 is the densest there is, and
+      // once it is in, the leaf costs 6 and the stranger 10. There is room
+      // left for one of the two, and the leaf is now the denser.
+      const pattern = (
+        name: string,
+        unit: string,
+        fields: Partial<ManifestEntry>,
+      ) => test(name, `${unit}.test.tsx`, { suite: "pattern-unit", ...fields });
+      const longest = pattern("longest", "longest", { cost: 100 });
+      const chosen = reasons(run(
+        sampleManifest({
+          entries: [
+            longest,
+            test("proven", "proven.test.ts", { cost: 135.4, score: 0.9 }),
+            pattern("grows", "longest", { cost: 50, score: 0.5 }),
+            pattern("hooks", "hooks", { cost: 44, flakeRate: 0.5 }),
+            pattern("hooks > runs a leaf", "hooks", { score: 0.06 }),
+            pattern("stranger", "stranger", { cost: 50, score: 0.06 }),
+          ],
+          calibration: perFile,
+        }),
+        {
+          lanes: 1,
+          budgetSeconds: 344,
+          mandatory: new Map([[
+            testIdentityKey(longest.test),
+            "changed" as const,
+          ]]),
+        },
+      ));
+      expect(chosen.get("grows")).toBe("density");
+      expect(chosen.get("hooks > runs a leaf")).toBe("density");
+      expect(chosen.get("stranger")).not.toBe("density");
+    });
+
     it("moves a suite's shorter tests up once its lane holds a longer one", () => {
       // The pattern unit suite runs its tests side by side. A mandatory
       // test puts it in the lane, so taking the long test opens nothing
