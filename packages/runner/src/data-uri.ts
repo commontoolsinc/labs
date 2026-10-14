@@ -408,36 +408,24 @@ export function portableSnapshotLinks(
  * inline. A `FabricInstance` is refused, since passing one through would leave
  * a link inside it un-inlined. The refusal covers `value` and the root of the
  * value an immutable link carries. Below that root, instance state is mapped
- * through its codec to expand embedded immutable links, unless
- * `options.refuseCarriedInstances` asks for refusal there as well.
+ * through its codec to expand embedded immutable links.
  *
  * @param value - The value to find and inline data: URI links in.
- * @param options.refuseCarriedInstances - Refuses a `FabricInstance` anywhere
- *   in the value a `data:` link carries. For a caller whose destination admits
- *   no instance, where returning one whole would put it there.
  * @returns The value with any data: URI links inlined.
  * @throws If it reaches a `FabricInstance` it refuses.
  */
-export function findAndInlineDataUriLinks(
-  value: any,
-  options: { refuseCarriedInstances?: boolean } = {},
-): any {
-  return inlineDataUriLinks(
-    value,
-    false,
-    options.refuseCarriedInstances === true,
-  );
+export function findAndInlineDataUriLinks(value: any): any {
+  return inlineDataUriLinks(value, false);
 }
 
 /**
  * Recursive worker for {@link findAndInlineDataUriLinks}. `decoded` says
  * `value` lies inside the value a `data:` link carried, where a
- * `FabricInstance` is returned whole unless `refuseCarried` is set.
+ * `FabricInstance` is walked through its codec state rather than refused.
  */
 function inlineDataUriLinks(
   value: any,
   decoded: boolean,
-  refuseCarried: boolean,
 ): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
@@ -477,7 +465,7 @@ function inlineDataUriLinks(
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return inlineDataUriLinks(newSigilLink, decoded, refuseCarried);
+          return inlineDataUriLinks(newSigilLink, decoded);
         }
         if (path.length > 0) {
           // TODO(danfuzz): a path segment naming something inside a
@@ -505,14 +493,14 @@ function inlineDataUriLinks(
 
       // Immutable values may contain links to earlier immutable values.
       // Expand them before this value crosses the runtime boundary.
-      return inlineDataUriLinks(dataValue, true, refuseCarried);
+      return inlineDataUriLinks(dataValue, true);
     } else {
       // Schema defaults can carry immutable links too. Keep the document link
       // while expanding those values before its schema crosses a boundary.
       const payload = isPrimitiveCellLink(value)
         ? linkRefPayload(inlineExternalSchemaRefsInValue(value))
         : dataLink;
-      const schema = inlineDataUriLinks(payload.schema, decoded, refuseCarried);
+      const schema = inlineDataUriLinks(payload.schema, decoded);
       if (schema !== payload.schema) {
         if (isPrimitiveCellLink(value)) {
           return linkRefFrom({ ...payload, schema });
@@ -529,7 +517,7 @@ function inlineDataUriLinks(
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = inlineDataUriLinks(current, decoded, refuseCarried);
+      const inlined = inlineDataUriLinks(current, decoded);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -548,17 +536,17 @@ function inlineDataUriLinks(
   } else if (value instanceof FabricInstance) {
     // A stored value may carry an instance below the payload root. Traverse
     // its canonical codec state so native snapshot IDs cannot escape in it.
-    if (decoded && !refuseCarried) {
+    if (decoded) {
       return mapInstanceState(
         value,
-        (state) => inlineDataUriLinks(state, decoded, refuseCarried),
+        (state) => inlineDataUriLinks(state, decoded),
       );
     }
     refuseFabricInstance(value, "when inlining `data:` URI links");
   } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = inlineDataUriLinks(entry, decoded, refuseCarried);
+      const inlined = inlineDataUriLinks(entry, decoded);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {
