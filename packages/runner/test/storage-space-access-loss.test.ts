@@ -70,7 +70,13 @@ describe("storage space access loss", () => {
       expect(observed).toEqual([{ target: space, error: session.closeError }]);
       expect(manager.spaceAccessError(space)).toBe(session.closeError);
       expect(changed).toEqual([space]);
-      expect(reported.calls.map((call) => call.args)).toEqual([
+      // The memory client also logs the session's end through
+      // `console.error` (labs#8824).
+      expect(
+        reported.calls.map((call) => call.args).filter((args) =>
+          typeof args[0] === "string" && args[0].endsWith("subscriber threw:")
+        ),
+      ).toEqual([
         ["space-access-loss subscriber threw:", failure],
         ["space-access-change subscriber threw:", failure],
       ]);

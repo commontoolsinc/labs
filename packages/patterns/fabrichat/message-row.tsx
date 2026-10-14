@@ -20,6 +20,7 @@ import type { ViewPlace } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
+  type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -33,10 +34,12 @@ import {
   type JoinRoomRequest,
   type MessageCell,
   type MessageRecord,
+  type MessageRequestsCell,
   type MessagesCell,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
+  tellManagerJoined,
   type UsedTimesCell,
   viewKeyOf,
 } from "./room-records.tsx";
@@ -157,6 +160,15 @@ export interface FabriChatMessageRowInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
   /** Whether the viewer's manager can take the viewer into the room. */
   canJoin?: boolean;
 
@@ -223,10 +235,13 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
     joinRoom,
     self,
   } = input;
+  const joined = tellManagerJoined({ canJoin, joinRoom, self });
   const records = {
     kind,
     composer,
@@ -236,9 +251,9 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom,
-    self,
+    outcomes,
+    refusal,
+    joined,
   };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
@@ -476,9 +491,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -507,9 +522,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -566,9 +581,9 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
-                    canJoin,
-                    joinRoom,
-                    self,
+                    outcomes,
+                    refusal,
+                    joined,
                     message,
                     emoji,
                     pickerOpen,

@@ -44,6 +44,12 @@ no more than those three values, whatever the data behind it turned out to be.
 Widening what crosses means widening a schema on purpose, in the open, rather
 than a value slipping through because nobody said it should not.
 
+`read_value` is the one deliberate exception: it returns the value behind a
+handle the run holds and has described, whatever its shape, measured against the
+run's release and read ceilings rather than a schema. Its label joins the run's
+model context, so a run that reads pays for it in what it may release
+afterwards.
+
 **Work happens by running patterns over those handles.** When an agent needs
 something computed, it does not fetch the data and compute in its own context;
 it writes a pattern, runs it in the space against references it holds, and
@@ -177,8 +183,8 @@ What works today:
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `call_verb` (present only when the run configures a fabric session; sends an
     event to a handler verb on the result of a piece in the session's own space,
-    or of a piece the run was handed as an input in an admitted foreign space; a
-    piece merely discovered in a foreign space stays read-only. The piece, and
+    or of a piece in a foreign space admitted to the session: anything the run
+    reaches through the pieces it was given is in its scope. The piece, and
     every piece the event names, must be behind a handle the run holds; an
     address written out in full is refused unless the run holds it. The verb is
     found among the result-side handlers `cf piece verbs` lists, and the event
@@ -190,6 +196,19 @@ What works today:
     booleans and nulls as themselves, a piece the verb returns as that piece's
     handle, every other position as a handle into the handling's receipt; a
     handler that throws returns its message)
+  - `read_value` (present only when the run configures a fabric session; returns
+    the value behind a handle the run holds, optionally narrowed by a
+    `/`-separated `select` path, in the session's space or an admitted foreign
+    space. A handle `describe_handle` has not answered for in this run is
+    refused, so a value is read after its shape was looked at; the handle table
+    records the answer on the entry. A link at the read position is followed; a
+    link inside the value returns as the linked document's handle. What it reads
+    is measured through its own transaction against the release ceiling with the
+    model as the sink, the measurement `call_verb` and `run_pattern` apply to
+    their results; a refused read names the offending atoms and that
+    `delegate_task` can hand the handle to a subagent; a value above the
+    session's read ceiling, which subagents inherit, is refused naming that
+    ceiling. A released read's label joins the run's model context)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
@@ -1268,10 +1287,17 @@ otherwise, with the status and selected headers.
 
 A final assistant reply must contain non-whitespace text. A reply with no text
 and no function tool calls fails the run with `provider-unavailable`, including
-when the provider returned HTTP 200. Tool-only replies continue through normal
-tool dispatch. The normalized assistant message stays in the transcript, and the
-run report retains the model attempts and token usage. This failure does not
-trigger a retry.
+when the provider returned HTTP 200. The one exception is a run that has
+`submit_result`: when a turn that still offers tools follows, its first such
+reply is answered with a host notice asking it to submit the answer, or why it
+cannot be given, and only a second fails it. Tool-only replies continue through
+normal tool dispatch. The normalized assistant message stays in the transcript,
+and the run report retains the model attempts and token usage. This failure does
+not trigger a retry. A Codex attempt that reached its terminal response records
+that response's `status` as `terminalStatus` and the type of each of its output
+items as `outputItemTypes`, which together say whether a blank reply was a
+`completed` response with an empty message, a reasoning item alone, or no item
+at all.
 
 A failed attempt carries the provider's own reason wherever the provider stated
 one. `providerError` holds the provider's `type`, `code`, and `message` as the
@@ -1391,15 +1417,16 @@ granted token, not a tool of its own, and `describe_handle` answers the
 registry's shape like any other reference.
 
 What the model receives is a token and fixed prose, never data. Reading anything
-behind the token means running a pattern over it, where the CFC boundary rules
-as it does for every other flow — in particular, a piece's `$NAME` is a value,
-and a name computed from labeled data taints a name-listing pattern's result,
-which strict enforcement refuses whole. A refused name read leaves the name
-unknown. For an explicit reference-listing task, a pattern can return entry
-references without reading values, with addresses returned as tokens through the
-ordinary outbound swap. This does not authorize crawling references to identify
-an unspecified edit target; the shared target-selection guidance applies to the
-registry announcement too.
+behind the token means running a pattern over it, or `read_value` once
+`describe_handle` has answered for it, where the CFC boundary rules as it does
+for every other flow — in particular, a piece's `$NAME` is a value, and a name
+computed from labeled data taints a name-listing pattern's result, which strict
+enforcement refuses whole. A refused name read leaves the name unknown. For an
+explicit reference-listing task, a pattern can return entry references without
+reading values, with addresses returned as tokens through the ordinary outbound
+swap. This does not authorize crawling references to identify an unspecified
+edit target; the shared target-selection guidance applies to the registry
+announcement too.
 
 The grants are recorded in run state (`wellKnownGrants`), replayed rather than
 re-minted on resume, and reported in the operator summary as `fabricGrants:`. A
@@ -1424,7 +1451,10 @@ pass on by accident. No shape is stated on the flag, by rule: an input cell
 carries its own declared schema in the fabric — the same place its CFC labels
 live — and `describe_handle` answers from that declaration, so there is one
 source of truth and nothing an operator-written view could drift from or quietly
-claim.
+claim. A run granted `read_value` can read an input's value once
+`describe_handle` has answered for it; that value arrives as a tool result,
+measured against the release ceiling like any other, and its label joins the
+run's model context.
 
 A `<link>` may also be a piece's NAME: `pattern:<space>/<slug>`, or the bare
 `<slug>` meaning a piece in the session's own space. That is what a surface
@@ -2856,14 +2886,17 @@ reason, and the model corrects it and submits again. An accepted value is the
 run's return: the run completes after the turn that submitted it, without asking
 the model for another, and the words the model wrote beside the call, if any,
 are its final answer. A later valid submission in that same turn replaces an
-earlier one. This is the way that works under every enforcement mode and
-prompt-slot role — under `enforce-strict`, a run whose prompt is bound as
-`context` or `quote` is refused `bash`, `edit_file`, and `write_file`, and so
-cannot write the file itself. A run that does hold such a tool may still write
-the file directly; both ways end at the same path. With `--allow-tool`, name
-`submit_result` alongside the run's other tools. The schema and host path are
-retained in run state, so a resumed root run keeps the same result contract
-without repeating the command-line flags; a conflicting restatement is refused.
+earlier one. A turn with neither words nor a tool call gets one host notice
+asking for the submission when a turn that still offers tools follows it; a
+second such turn, or one with no such turn after it, fails the run. This is the
+way that works under every enforcement mode and prompt-slot role — under
+`enforce-strict`, a run whose prompt is bound as `context` or `quote` is refused
+`bash`, `edit_file`, and `write_file`, and so cannot write the file itself. A
+run that does hold such a tool may still write the file directly; both ways end
+at the same path. With `--allow-tool`, name `submit_result` alongside the run's
+other tools. The schema and host path are retained in run state, so a resumed
+root run keeps the same result contract without repeating the command-line
+flags; a conflicting restatement is refused.
 
 The system prompt includes the complete result schema for both batch and
 operator runs, whether the result is submitted through the tool or written to

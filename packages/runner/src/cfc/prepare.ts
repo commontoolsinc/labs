@@ -7669,6 +7669,9 @@ const verifyTrustedEventRequirements = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
   schema: JSONSchema,
+  // A UI contract names who may write its path, as `writeAuthorizedBy`
+  // does, so its refusal is deferred on the same terms as a writer's.
+  deferWriterRefusal?: (reason: string, path: readonly string[]) => boolean,
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
@@ -7697,9 +7700,11 @@ const verifyTrustedEventRequirements = (
       continue;
     }
     if (!trustedEventMatchesContract(tx, target, entry.path, entry.contract)) {
-      return `missing trusted-event policy input for ${target.id} at /${
+      const reason = `missing trusted-event policy input for ${target.id} at /${
         entry.path.join("/")
       }`;
+      if (deferWriterRefusal?.(reason, entry.path) === true) continue;
+      return reason;
     }
   }
   return undefined;
@@ -11537,6 +11542,32 @@ export function* prepareBoundaryCommitSteps(
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/67
+    // TODO(danfuzz): Restating a replayed argument slot admits more than
+    // §8.15.4 permits, and runs by default rather than behind the dial
+    // `cfc-spec-correspondence.md` step 4 asks for, by Dan's decision. Drop
+    // this, or put it behind a dial, when the specs ruling lands.
+    //
+    // A refusal of the writer a path names, by `writeAuthorizedBy` or by a UI
+    // contract, is deferred where the write changes nothing there.
+    const deferWriterRefusal = stored.status === "loaded"
+      ? (reason: string, path: readonly string[]): boolean => {
+        if (
+          writeReplaysArgumentSlot(tx, target, path) &&
+          writeLeavesPathUnchanged(tx, target, path)
+        ) {
+          deferredWriterPaths.push(path);
+        } else if (
+          path.length === 0 && writePreservesRuntimeOutput(tx, target)
+        ) {
+          deferredPreservedOutput = true;
+        } else {
+          return false;
+        }
+        deferredWriterRefusal ??= reason;
+        return true;
+      }
+      : undefined;
     const requirementFailure = firstFailure((schema, index) =>
       verifyInputRequirements(
         tx,
@@ -11553,24 +11584,7 @@ export function* prepareBoundaryCommitSteps(
         inputReads,
         // The precision counters measure each protected write once.
         index === 0 ? prefixProvenance : undefined,
-        stored.status === "loaded"
-          ? (reason, path) => {
-            if (
-              writeReplaysArgumentSlot(tx, target, path) &&
-              writeLeavesPathUnchanged(tx, target, path)
-            ) {
-              deferredWriterPaths.push(path);
-            } else if (
-              path.length === 0 && writePreservesRuntimeOutput(tx, target)
-            ) {
-              deferredPreservedOutput = true;
-            } else {
-              return false;
-            }
-            deferredWriterRefusal ??= reason;
-            return true;
-          }
-          : undefined,
+        deferWriterRefusal,
         policyApplication,
       )
     );
@@ -11598,7 +11612,7 @@ export function* prepareBoundaryCommitSteps(
     const trustedEventFailure = policyApplication
       ? undefined
       : firstFailure((schema) =>
-        verifyTrustedEventRequirements(tx, target, schema)
+        verifyTrustedEventRequirements(tx, target, schema, deferWriterRefusal)
       );
     if (trustedEventFailure) {
       reasons.push(verdictReason(trustedEventFailure));
@@ -13185,11 +13199,25 @@ export function* prepareBoundaryCommitSteps(
     // runtime spelled inline. The stored schema is kept: writing another
     // spelling of it is the writer's to do. Labels elsewhere in the document
     // are not the writer policy's to guard, and persist as for any write.
+    // In a release, the claims beneath a position holding links describe
+    // the documents linked there, which the release may re-describe; they
+    // govern nothing in this document, so they are not compared.
     let keepsStoredSchema = false;
+    // TODO(danfuzz): Like the restatement deferral this waiver discharges,
+    // leaving these positions out admits more than §8.15.4 permits, and runs
+    // by default by Dan's decision; the marker at that deferral names the
+    // specs ruling both wait on.
+    const governsNothingHere = foreignPositions === undefined
+      ? () => false
+      : beneathForeignPosition(foreignPositions);
     if (
       deferredWriterRefusal !== undefined && !deferredPreservedOutput &&
       existing !== undefined && storedSchema !== undefined &&
-      cfcSchemaPoliciesEqual(storedSchema, schemaAndHash.schema)
+      cfcSchemaPoliciesEqual(
+        storedSchema,
+        schemaAndHash.schema,
+        governsNothingHere,
+      )
     ) {
       const storedEntries = canonicalizeCfcMetadata(existing).labelMap.entries;
       const derivedEntries = canonicalizeCfcMetadata(metadata).labelMap.entries;
@@ -13203,7 +13231,9 @@ export function* prepareBoundaryCommitSteps(
       // the positions both schemas declare are compared whole, not at the
       // deferred paths alone.
       const declaredPositions = (schema: JSONSchema) =>
-        cfcSchemaEntries(schema).map((entry) => ({
+        cfcSchemaEntries(schema).filter((entry) =>
+          !governsNothingHere(entry.path)
+        ).map((entry) => ({
           path: encodePointer(entry.path),
           ifc: withoutUndefinedMembers(
             isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
