@@ -200,8 +200,9 @@ What works today:
     is measured through its own transaction against the release ceiling with the
     model as the sink, the measurement `call_verb` and `run_pattern` apply to
     their results; a refused read names the offending atoms and that
-    `delegate_task` can hand the handle to a subagent. A released read's label
-    joins the run's model context)
+    `delegate_task` can hand the handle to a subagent; a value above the
+    session's read ceiling, which subagents inherit, is refused naming that
+    ceiling. A released read's label joins the run's model context)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import

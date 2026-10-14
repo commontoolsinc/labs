@@ -18,6 +18,7 @@
 
 import type { JSONSchema } from "@commonfabric/api";
 import {
+  CfcReadCeilingError,
   collectConsumedLabel,
   describeSinkReleaseRefusal,
   type IFCLabel,
@@ -174,12 +175,17 @@ export const readValueTool: HarnessToolDefinition<
     let observedLabel: IFCLabel | undefined;
     try {
       // A link at the position itself is followed, so a piece's field reads
-      // as the value it aliases. Links within that value stay links.
-      const read = runtime.getCellFromLink({
+      // as the value it aliases. Links within that value stay links. The
+      // position is pulled before it is resolved: a resolution stops at a
+      // document this replica has not loaded yet, which every link the
+      // selected path crosses can be.
+      const selected = runtime.getCellFromLink({
         ...link,
         path: [...link.path, ...select],
         schema: undefined,
-      }).withTx(releaseTx).resolveAsCell();
+      }).withTx(releaseTx);
+      await selected.pull();
+      const read = selected.resolveAsCell();
       await read.pull();
       const denied = runtime.storageManager.authorizationError?.(link.space);
       if (denied !== undefined) return fail(denied.message);
@@ -209,6 +215,14 @@ export const readValueTool: HarnessToolDefinition<
         ? { confidentiality: [...confidentiality] }
         : undefined;
     } catch (error) {
+      // The session's read ceiling withholds a value before any release is
+      // measured, and binds every reader the session runs, so the refusal
+      // says which limit held rather than offering a route around it.
+      if (error instanceof CfcReadCeilingError) {
+        return fail(
+          `the value was withheld: its label is above this session's read ceiling; describe_handle lists the labels ${entry.token} carries`,
+        );
+      }
       return fail(
         `read_value could not read ${entry.token}: ${errorMessage(error)}`,
       );

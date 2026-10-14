@@ -40,6 +40,7 @@ const SECRET_ATOM = "read-value-test-secret";
 /** A fabric under `mode`, with persisted flow labels. */
 const createFabric = async (
   mode: "observe" | "enforce-strict",
+  readCeiling?: readonly string[],
 ): Promise<{
   runtime: Runtime;
   storage: ReturnType<typeof StorageManager.emulate>;
@@ -51,6 +52,9 @@ const createFabric = async (
     storageManager: storage,
     cfcEnforcementMode: mode,
     cfcFlowLabels: "persist",
+    ...(readCeiling !== undefined
+      ? { cfcReadMaxConfidentiality: readCeiling }
+      : {}),
   });
   const pieces = new PiecesController(
     createSession({
@@ -245,6 +249,25 @@ describe("read-value", () => {
       const message = (output as { message: string }).message;
       expect(message).toContain(SECRET_ATOM);
       expect(message).toContain("delegate_task");
+      expect(JSON.stringify(output)).not.toContain("4417");
+    });
+
+    it("refuses a value above the session's read ceiling, naming the ceiling", async () => {
+      // The read ceiling binds every reader the session runs, subagents
+      // included, so this refusal offers no route around it.
+      fabric = await createFabric("observe", ["read-value-test-other"]);
+      const { ref } = await seedDocument(fabric.runtime, fabric.session);
+      const { table } = await held(ref);
+
+      const output = await readValueTool.invoke(
+        contextWith(fabric.session, table),
+        { token: ref, select: "secret" },
+      );
+
+      expect(output.status).toBe("error");
+      const message = (output as { message: string }).message;
+      expect(message).toContain("above this session's read ceiling");
+      expect(message).not.toContain("delegate_task");
       expect(JSON.stringify(output)).not.toContain("4417");
     });
 
