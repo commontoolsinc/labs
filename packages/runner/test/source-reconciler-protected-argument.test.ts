@@ -644,4 +644,71 @@ describe("source-reconciler-protected-argument", () => {
       );
     });
   });
+
+  describe("a slot the release adds", () => {
+    // The stored document holds nothing at the slot, so the setup fills it
+    // with the release's default: an initialization, not a write by any
+    // writer.
+
+    const prime = async (runtime: Runtime, room: Cell<Room>) => {
+      await send(
+        runtime,
+        room,
+        "describeRoom",
+        trustedEvent("Describe", { title: "lunch" }),
+      );
+      await send(runtime, room, "join", { name: "ada" });
+      expect(room.get().about).toEqual({ title: "lunch" });
+      expect(room.get().roster).toEqual({ items: ["ada"] });
+    };
+
+    // A list whose entries only `rename` may write, defaulting to empty, as a
+    // FabriChat room's `titles` is.
+    const withList = NAMED_SOURCE
+      .replace(
+        "interface Input {",
+        `const rename = handler<{ title: string }, { titles: TitlesCell }>(
+  ({ title }, { titles }) => {
+    const record = titles.elementById("title");
+    record.set({ title });
+    titles.addUnique(record);
+  },
+);
+
+type TitlesCell = Writable<
+  WriteAuthorizedBy<About, typeof rename>[] | Default<[]>
+>;
+
+interface Input {
+  titles?: TitlesCell;`,
+      )
+      .replace("  roster: Roster;\n", "  roster: Roster;\n  titles: About[];\n")
+      .replace(
+        "({ about, roster }) => ({",
+        "({ about, roster, titles }) => ({\n  titles,\n  rename: rename({ titles }),",
+      )
+      .replace(
+        "  join: Stream<{ name: string }>;\n",
+        "  join: Stream<{ name: string }>;\n  rename: Stream<{ title: string }>;\n",
+      );
+
+    it("adopts a release that adds a protected list defaulting to empty, and keeps what the other fields hold", async () => {
+      expect(withList).toContain("titles: TitlesCell");
+      expect(withList).toContain("rename: rename({ titles })");
+      await reconcileRelease(
+        "added-list-release",
+        NAMED_SOURCE,
+        withList,
+        prime,
+        ({ outcome, room, recorded, currentIdentity }) => {
+          expect(recorded?.detail).toBeUndefined();
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().roster).toEqual({ items: ["ada"] });
+          expect(room.get().titles).toEqual([]);
+        },
+      );
+    });
+  });
 });
