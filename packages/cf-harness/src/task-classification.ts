@@ -140,12 +140,23 @@ const modelPrompt = (task: string, context: TaskClassificationContext) => {
   ].join("\n");
 };
 
-const modelTags = (answer: string): Set<HarnessTaskTag> =>
-  new Set(
+/**
+ * Tags a task by one call to a cheap model, or answers `undefined` when the
+ * answer names no tag. A failed call rejects.
+ */
+export const classifyTaskByModel = async (
+  task: string,
+  context: TaskClassificationContext,
+  askModel: (prompt: string) => Promise<string>,
+): Promise<Set<HarnessTaskTag> | undefined> => {
+  const answer = await askModel(modelPrompt(task, context));
+  const tags = new Set(
     HARNESS_TASK_TAGS.filter((tag) =>
       new RegExp(`\\b${tag}\\b`, "i").test(answer)
     ),
   );
+  return tags.size === 0 ? undefined : tags;
+};
 
 /**
  * Tags a root task: by rule when one applies, otherwise by one cheap model
@@ -173,10 +184,12 @@ export const classifyTask = async (
   if (byRule !== undefined) return classified(byRule, "rule");
   if (options.askModel !== undefined) {
     try {
-      const byModel = modelTags(
-        await options.askModel(modelPrompt(task, context)),
+      const byModel = await classifyTaskByModel(
+        task,
+        context,
+        options.askModel,
       );
-      if (byModel.size > 0) return classified(byModel, "model");
+      if (byModel !== undefined) return classified(byModel, "model");
     } catch {
       // A failed model call leaves the run with full orientation.
     }
