@@ -6102,6 +6102,23 @@ const distinctAddresses = (
 };
 
 /**
+ * The evidence of several contributions as one, or `undefined` where one of
+ * them has none.
+ */
+const joinFloorEvidence = (
+  parts: readonly (FloorEvidence | undefined)[],
+): FloorEvidence | undefined => {
+  const walks: CfcAddress[] = [];
+  const labeled: StoredCfcTarget[] = [];
+  for (const part of parts) {
+    if (part === undefined) return undefined;
+    for (const walk of part.walks) walks.push(walk);
+    for (const document of part.labeled) labeled.push(document);
+  }
+  return { walks: distinctAddresses(walks), labeled };
+};
+
+/**
  * Whether every document behind `evidence` is one this transaction holds, so
  * that an immediate re-run weighs the same evidence; where it is, makes the
  * run depend on that evidence.
@@ -8801,7 +8818,12 @@ const linkedSourceEvidence = (
   linkWrites: ReadonlyMap<string, readonly LinkWritePolicyInput[]>,
   bindCreator: CreatorBinding,
   pendingSourceView?: CfcLabelView,
-): { label?: IFCLabel; reason?: string; sourceView?: CfcLabelView } => {
+): {
+  label?: IFCLabel;
+  reason?: string;
+  sourceView?: CfcLabelView;
+  unavailable?: true;
+} => {
   metadataResolver.refresh();
   // Where the source reaches its value through a link stored before this
   // transaction, the evidence is the label of the document holding the
@@ -8838,9 +8860,24 @@ const linkedSourceEvidence = (
     "application/json",
   );
   if (sourceMetadata !== undefined) {
+    let envelopeSchema: JSONSchema;
+    try {
+      envelopeSchema = loadEnvelopeSchema(
+        tx,
+        input.source.space,
+        sourceMetadata,
+      );
+    } catch (error) {
+      // The schema the stored envelope names could not be read in this
+      // transaction, so the evidence is undecided rather than short.
+      return {
+        reason: error instanceof Error ? error.message : String(error),
+        unavailable: true,
+      };
+    }
     try {
       assertStoredPrincipalConfidentialityBound(
-        loadEnvelopeSchema(tx, input.source.space, sourceMetadata),
+        envelopeSchema,
         sourceMetadata.labelMap.entries.map((entry) => entry.label),
       );
     } catch (error) {
@@ -9194,6 +9231,9 @@ type DerivedLink = {
    * each as the address its walk starts from (`holdFloorEvidence`).
    */
   sources: readonly CfcAddress[];
+
+  /** Set where a hop could not read what its evidence rests on. */
+  unavailable?: true;
 };
 
 /** Resolves recorded links through the references staged into their sources. */
@@ -9219,7 +9259,7 @@ type LinkLabelDeriver = {
     relativePath: readonly string[],
   ) => Generator<
     void,
-    { label?: IFCLabel; sources: readonly CfcAddress[] }
+    { label?: IFCLabel; sources: readonly CfcAddress[]; unavailable?: true }
   >;
 };
 
@@ -9338,7 +9378,12 @@ const createLinkLabelDeriver = (
     walk: Walk,
   ): Generator<
     void,
-    { view?: CfcLabelView; reasons: string[]; sources: CfcAddress[] }
+    {
+      view?: CfcLabelView;
+      reasons: string[];
+      sources: CfcAddress[];
+      unavailable?: true;
+    }
   > {
     const views: (CfcLabelView | undefined)[] = [];
     const sources: CfcAddress[] = [];
@@ -9381,6 +9426,7 @@ const createLinkLabelDeriver = (
         return {
           reasons: resolved.reasons,
           sources: distinctAddresses(sources),
+          unavailable: resolved.unavailable,
         };
       }
       yield;
@@ -9483,6 +9529,7 @@ const createLinkLabelDeriver = (
         entries: [],
         reasons: pending.reasons,
         sources: pending.sources,
+        unavailable: pending.unavailable,
       };
     }
     yield;
@@ -9500,7 +9547,12 @@ const createLinkLabelDeriver = (
     );
     const sources = distinctAddresses([...pending.sources, input.source]);
     if (result.reason !== undefined) {
-      return { entries: [], reasons: [result.reason], sources };
+      return {
+        entries: [],
+        reasons: [result.reason],
+        sources,
+        unavailable: result.unavailable,
+      };
     }
     yield;
     // What a downstream hop sees of this one: the label at the linked path
@@ -9576,13 +9628,15 @@ const createLinkLabelDeriver = (
     relativePath: readonly string[],
   ): Generator<
     void,
-    { label?: IFCLabel; sources: readonly CfcAddress[] }
+    { label?: IFCLabel; sources: readonly CfcAddress[]; unavailable?: true }
   > {
     const derived = yield* derive(input, {
       ...emptyWalk(),
       requested: [requestPath(relativePath)],
     });
-    if (derived.reasons.length > 0) return { sources: derived.sources };
+    if (derived.reasons.length > 0) {
+      return { sources: derived.sources, unavailable: derived.unavailable };
+    }
     const nested: LinkWritePolicyInput = {
       ...input,
       source: {
@@ -9599,20 +9653,24 @@ const createLinkLabelDeriver = (
       ...derived.sources,
       ...pending.sources,
     ]);
-    if (pending.reasons.length > 0) return { sources };
+    if (pending.reasons.length > 0) {
+      return { sources, unavailable: pending.unavailable };
+    }
+    const evidence = linkedSourceEvidence(
+      tx,
+      nested,
+      candidates,
+      identityForInput(input),
+      metadataResolver,
+      valueTargets,
+      linkWrites,
+      bindCreator,
+      pending.view,
+    );
     return {
-      label: linkedSourceEvidence(
-        tx,
-        nested,
-        candidates,
-        identityForInput(input),
-        metadataResolver,
-        valueTargets,
-        linkWrites,
-        bindCreator,
-        pending.view,
-      ).label,
+      label: evidence.label,
       sources: distinctAddresses([...sources, nested.source]),
+      unavailable: evidence.unavailable,
     };
   };
 
@@ -11080,11 +11138,12 @@ type WriteFloorFailure = {
   reason: string;
 
   /**
-   * The evidence of each contribution that missed the floor, empty where the
-   * transaction's own data alone decided it. A contribution resting on a
-   * label no document holds has none.
+   * The stored state that decided the failure, joined over every contribution
+   * that missed the floor, and empty where the transaction's own data alone
+   * decided it. `undefined` where one of them rests on something this
+   * transaction could not read, or on a label no document holds.
    */
-  verdictEvidence: readonly FloorEvidence[];
+  evidence: FloorEvidence | undefined;
 };
 
 /**
@@ -11192,13 +11251,15 @@ const verifyWriteFloor = function* (
           // evidence decided the miss. A source that lacks the atom and one
           // this transaction does not hold both reach the floor as a label
           // short of it, so the refusal is a verdict only where every source
-          // the evidence weighed is held, and the commit boundary decides
-          // that (cfc/verdict-reason.ts).
+          // the evidence weighed is held and read, and the commit boundary
+          // decides that (cfc/verdict-reason.ts).
           failures.push({
             reason: `write floor failed at /${
               linkPath.join("/")
             } (requiredIntegrity, §8.12.4.1)`,
-            verdictEvidence: [{ walks: derived.sources, labeled: [] }],
+            evidence: derived.unavailable
+              ? undefined
+              : { walks: derived.sources, labeled: [] },
           });
         }
       }
@@ -11280,8 +11341,9 @@ const verifyWriteFloor = function* (
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    // Each carries the evidence that decided it, or none where the flow join
-    // weighed a label no document holds (`WriteFloorFailure`).
+    // Each carries the evidence that decided it, or none where that rests on
+    // something this transaction could not read, or on a label no document
+    // holds (`WriteFloorFailure`).
     const contributions: {
       integrity: readonly CfcAtom[];
       evidence: FloorEvidence | undefined;
@@ -11295,7 +11357,9 @@ const verifyWriteFloor = function* (
       // integrity — it fails the floor, fail-closed.
       contributions.push({
         integrity: derived.label?.integrity ?? [],
-        evidence: { walks: derived.sources, labeled: [] },
+        evidence: derived.unavailable
+          ? undefined
+          : { walks: derived.sources, labeled: [] },
       });
     }
     for (const input of ancestorLinks) {
@@ -11327,7 +11391,7 @@ const verifyWriteFloor = function* (
         : ctx.linkLabels.labelAt(input, relative));
       contributions.push({
         integrity: at.label?.integrity ?? [],
-        evidence: {
+        evidence: at.unavailable ? undefined : {
           walks: distinctAddresses([walked, ...at.sources]),
           labeled: [],
         },
@@ -11385,9 +11449,7 @@ const verifyWriteFloor = function* (
         reason: `write floor failed at /${
           entry.path.join("/")
         } (requiredIntegrity, §8.12.4.1)`,
-        verdictEvidence: misses.flatMap(({ evidence }) =>
-          evidence === undefined ? [] : [evidence]
-        ),
+        evidence: joinFloorEvidence(misses.map(({ evidence }) => evidence)),
       });
     }
   }
@@ -12068,15 +12130,14 @@ export function* prepareBoundaryCommitSteps(
       }
       if (floorFailures.length > 0) {
         if (state.writeFloorMode === "enforce") {
-          // A failure is a verdict where a contribution that missed the floor
-          // was decided by the transaction's own data and by stored state in
-          // documents it holds, which `holdFloorEvidence` makes the run
-          // depend on.
+          // A failure is a verdict where every contribution that missed the
+          // floor was decided by the transaction's own data and by stored
+          // state in documents it holds, which `holdFloorEvidence` makes the
+          // run depend on.
           for (const failure of floorFailures) {
             reasons.push(
-              failure.verdictEvidence.some((evidence) =>
-                  holdFloorEvidence(tx, evidence)
-                )
+              failure.evidence !== undefined &&
+                holdFloorEvidence(tx, failure.evidence)
                 ? verdictReason(failure.reason)
                 : failure.reason,
             );

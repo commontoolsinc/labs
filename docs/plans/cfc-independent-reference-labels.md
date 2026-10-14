@@ -458,7 +458,10 @@ specification does not require.
   floor's failure over a plain value is a verdict on the same terms, the
   documents being those whose stored labels the flow join read; it is not one
   where the flow join also weighed the flow of external content, which no
-  document holds.
+  document holds. Where several contributions miss one floor, the refusal is a
+  verdict only when every one of them is decided that way, and a source whose
+  stored labels name a schema document the transaction could not read decides
+  nothing.
 - Under flow labels `persist`, a reference written by an attempt that read
   labeled data carries that join at its slot even when the reference has no
   declared or carried restriction, unless the container it sits in is
