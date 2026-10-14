@@ -76,8 +76,8 @@ import {
 } from "./cfc.ts";
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
-import { dataUriSnapshotWithResolvedLinks } from "./data-uri.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -246,9 +246,9 @@ const _memoIdDigests = new LRUCache<string, string>({
 });
 
 /**
- * Fixed-size stand-in for a document id that carries its own content.
+ * Fixed-size traversal key for a document identifier.
  *
- * A data URI names the value it holds, so an inline document's id is as long
+ * A legacy data URI names the value it holds, so its id is as long
  * as the document — tens of thousands of characters for a component that
  * holds a list. A key built from that id costs a copy and a hash of every one
  * of those characters, and the traversal builds one key per node it visits
@@ -1581,7 +1581,7 @@ export type PointerCycleTracker = CompoundCycleTracker<
  * than in the one a position is in.
  *
  * A traversal that moves a value to another address without following a
- * link, as an inline array item moves to a `data:` document of its own,
+ * link, as an inline array item moves to an immutable document of its own,
  * records that as a copy.
  */
 export interface LinkCrossingRoute {
@@ -1641,11 +1641,11 @@ export type TraversalContext = {
   /**
    * Whether an inline object or array held in an array is traversed at its
    * address in the document that stores it. Otherwise the traversal gives
-   * such an element a `data:` address carrying a snapshot of its value, which
+   * such an element a `snapshot:` address naming its frozen value, which
    * is what gives the object a read returns its value identity. A walk that
    * selects documents for a storage engine sets this: it returns no object,
    * so the snapshot buys it nothing, and its storage holds no document at a
-   * `data:` address, so each read under one is a lookup that finds nothing.
+   * snapshot address, so those reads cannot select stored documents.
    */
   inlineArrayItemsInPlace: boolean;
 
@@ -2111,13 +2111,13 @@ function getNormalizedLink(
     throw new Error("Unable to create link to non-value address");
   }
   const { space, id, path } = address;
-  return {
+  return pinImmutableCell({
     space,
     id,
     scope: address.scope ?? "space",
     path: path.slice(1),
     ...(schema !== undefined && { schema }),
-  };
+  }, id);
 }
 
 // Value traversed must be a DAG, though it may have aliases or cell links
@@ -5456,7 +5456,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // cell.set(array);
       // ```
       // work as expected. Handle boolean items values for element schema
-      // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isSigilLink(item)) {
         const elementLink = parseLink(item, curDoc.address);
@@ -5590,15 +5589,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
         !this.context.inlineArrayItemsInPlace &&
         arrayItemUsesValueIdentity(item, curSelector.schema)
       ) {
-        // An inline object or array gets a `data:` address carrying a
-        // snapshot of its value, so that the object a read returns copies
+        // An inline object or array gets a `snapshot:` address naming its
+        // frozen value, so that the object a read returns copies
         // the data when written elsewhere; a link to this slot would name
         // whatever the slot holds next.
         //
         // A context that sets `inlineArrayItemsInPlace` does not take this
         // branch. Its traversal goes through the element at its address in
         // the document that stores it, like any other nested value, so it
-        // mints no id and issues no read at a `data:` address.
+        // mints no id and issues no read at a snapshot address.
         //
         // The element link exists to give the snapshot an id for the links
         // inside the element that name no document.
@@ -5606,15 +5605,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           curDoc.address,
           curSelector.schema,
         );
-        // The snapshot's address keeps this document's space, which is where
-        // a link inside the element resolves the references in its schema.
-        // The snapshot is of the whole element, so the read is recursive.
+        // Keep the source dependency and the space that owns schema refs.
+        // The whole element is read recursively, then shared by the snapshot
+        // with its relative-link origin, without a link-rewriting walk.
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-        // A link inside the element that names no document takes its id from
-        // the address it is read under, which under the `data:` address is
-        // the snapshot. The walk continues over the element with each such
-        // link given the id of the document storing the element.
-        const snapshot = dataUriSnapshotWithResolvedLinks(
+        const snapshot = immutableCellsFor(this.tx).createElement(
           curDoc.value,
           elementLink,
         );

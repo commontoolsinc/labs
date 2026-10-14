@@ -106,6 +106,13 @@ import {
   untaggedReason,
 } from "../cfc/verdict-reason.ts";
 import {
+  bindImmutableCells,
+  findImmutableCells,
+  hasInlineCellScheme,
+  type ImmutableCellStore,
+  ownImmutableCells,
+} from "../immutable-cell.ts";
+import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-types.ts";
@@ -131,7 +138,7 @@ import {
 } from "../runtime-secret.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { CooperativeYield } from "../scheduler/cooperative-yield.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
 import { externalizeLinkSchemasInValue } from "../link-utils.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
@@ -858,7 +865,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     cfcInstrumentation: CfcInstrumentationHooks = {},
+    immutableCells: ImmutableCellStore = findImmutableCells(tx) ??
+      ownImmutableCells(tx),
   ) {
+    bindImmutableCells(this, immutableCells);
+    bindImmutableCells(tx, immutableCells);
     this.#cfcInstrumentation = cfcInstrumentation;
   }
 
@@ -2904,7 +2915,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * (`docs/specs/content-addressed-schemas.md`): the closure each reference
    * names is staged with the write (`#stageSchemaDocsForValue`), so the
    * stored form travels with its documents and a same-transaction read
-   * through the link resolves. A `data:` document is never written, and a
+   * through the link resolves. Neither `snapshot:` nor `data:` names a written
+   * document, and a
    * `cid:` document's keywords may hold link-shaped data, so neither is
    * rewritten; with the flag off the value is stored as given.
    */
@@ -2913,7 +2925,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): FabricValue {
     if (!getContentAddressedSchemasConfig()) return value;
-    if (address.id.startsWith("cid:") || hasDataUriScheme(address.id)) {
+    if (address.id.startsWith("cid:") || hasInlineCellScheme(address.id)) {
       return value;
     }
     return externalizeLinkSchemasInValue(value);

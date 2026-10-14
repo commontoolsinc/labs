@@ -616,7 +616,7 @@ flags it adopts from the deployment it runs against.
   — what a view checks, where it diverges from an eager read, and where a
   schema-less read takes over.
 - **Design, measurements and staging.**
-  [`../plans/lazy-cell-materialization.md`](../plans/lazy-cell-materialization.md).
+  [`../history/plans/lazy-cell-materialization.md`](../history/plans/lazy-cell-materialization.md).
 
 **Validation and rollback limits.** Off is not qualified as an equivalent
 rollback. Eager reads can hand `undefined` to a body whose schema promises a
