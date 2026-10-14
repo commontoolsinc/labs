@@ -603,9 +603,11 @@ loop's duty).
   failure carries §2's arrival-order barrier as the other deferral arms
   do: every later same-space arrival already queued behind the failed
   head defers with it. A head retried after such a failure is the last
-  entry its drain pass queues, so the events behind it wait in the
-  drain for the pass its outcome arms rather than for the backstop
-  rescan a swept event waits for.
+  entry its drain pass queues, and a pass that finds that retry still
+  in flight queues nothing behind it, so the events behind it wait in
+  the drain for the pass its outcome arms rather than for the backstop
+  rescan a swept event waits for. An input wake such a pass takes is
+  kept for the attempt after the one in flight.
 - The failed-state budget is 60 seconds. This terminal-disposition
   budget is an explicit exception to the repository's no-timeout rule:
   it starts only after an observed failure, never cancels an in-flight

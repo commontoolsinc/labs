@@ -2397,6 +2397,8 @@ describe("Phase 3 events-down (serving side)", () => {
   const standUpUntaggedRefusalProbe = async (
     names: { arg: string; result: string; source: string },
     clock: { now: number },
+    /** Holds the `run`th run for `refused` open until `until` settles. */
+    hold?: { run: number; started: () => void; until: Promise<void> },
   ) => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
@@ -2457,10 +2459,14 @@ describe("Phase 3 events-down (serving side)", () => {
     >();
     const runtime = servingRuntime!;
     const cancelProbe = runtime.scheduler.addEventHandler(
-      (tx, event) => {
+      async (tx, event) => {
         const kind = (event as { kind?: string }).kind ?? "unknown";
         probeRuns.record(kind);
         if (kind !== "refused") return;
+        if (probeRuns.count((run) => run === "refused") === hold?.run) {
+          hold.started();
+          await hold.until;
+        }
         tx.addCommitCallback((_tx, outcome) =>
           refusedOutcomes.record(
             outcome.error as { name?: string; message?: string } | undefined,
@@ -2632,6 +2638,72 @@ describe("Phase 3 events-down (serving side)", () => {
       order.lastIndexOf("refused"),
     );
     expect(order.indexOf("wake")).toBeGreaterThan(order.indexOf("follower"));
+  });
+
+  it("holds the events behind a served event while its retry after a CFC refusal that is not a verdict is in flight, and retries it again for the input that arrived meanwhile", async () => {
+    // The probe holds its third run for `refused`, a retry an input woke,
+    // open, so a later append reaches the head while that retry is in flight.
+
+    const clock = { now: 10_000 };
+    const started = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    using probe = await standUpUntaggedRefusalProbe(
+      {
+        arg: "untagged-flight-arg",
+        result: "untagged-flight-result",
+        source: "untagged-flight-source",
+      },
+      clock,
+      { run: 3, started: started.resolve, until: release.promise },
+    );
+    try {
+      await probe.send("refused");
+      await probe.awaitFailures(2);
+      await probe.send("wake-1");
+      await started.promise;
+
+      const passesBefore = drainPasses.entries.length;
+      const skipsBefore = host!.stats().events.drainInFlightSkips;
+      await probe.send("follower");
+      await awaitEach(
+        drainSkips,
+        () => host!.stats().events.drainInFlightSkips > skipsBefore,
+      );
+      await drainPasses.reached(passesBefore + 1);
+      // The pass that found the retry in flight queued nothing behind it.
+      expect(drainPasses.entries.slice(passesBefore)).toEqual(
+        drainPasses.entries.slice(passesBefore).map(() => 0),
+      );
+
+      // The held retry fails again, and the follower's append, which arrived
+      // while it ran, wakes one more.
+      release.resolve();
+      await probe.awaitFailures(4);
+    } finally {
+      release.resolve();
+    }
+
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.getCell(space, "untagged-flight-source", {
+        type: "string",
+        ifc: { addIntegrity: ["admin-approved"] },
+      }, tx).set("endorsed");
+      expect((await tx.commit().settled).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    await servingRuntime!.getCell(space, "untagged-flight-source").sync();
+    await probe.send("wake-2");
+    await awaitAdmitted(
+      server,
+      () => probe.entryByKind("wake-2")?.consequenced === true,
+    );
+    expect(probe.entryByKind("refused")?.error).toBeUndefined();
+    const order = probe.probeRuns.entries;
+    expect(order.indexOf("wake-1")).toBeGreaterThan(
+      order.lastIndexOf("refused"),
+    );
+    expect(order.indexOf("follower")).toBeGreaterThan(order.indexOf("wake-1"));
   });
 
   it("covers a served event that a CFC refusal that is not a verdict keeps turning away with one needs-attention notice once its failed-state budget is spent, and delivers the events behind it", async () => {
