@@ -139,8 +139,9 @@ export default pattern<{ ledger: SqliteDb; month?: string | Default<""> }>(
 The month is matched as a range over `date` — on or after its first day and
 before the next month's — rather than as `substr(date, 1, 7) = ?`. A range over
 a column is something an index on that column serves, so the database reads
-only the month's rows; a function of the column has to be evaluated on every
-row, so it reads the whole table whatever indexes it has.
+only the month's rows. An index on the column does not serve a function of it,
+which is evaluated on every row; only an index on that same expression would,
+and a store written outside the runtime rarely has one.
 
 ## One statement, one database
 
@@ -246,7 +247,8 @@ shows; where the question is a smaller one, ask the smaller question:
   oldest — and not the table's, so a column empty in the sample may still be
   filled further on. For a column of long text or blobs, select
   `nullif(typeof(c), 'null')` in the inner query in place of `c`, which SQLite
-  answers from the row header without loading the value:
+  answers for an ordinary table from the row header without loading the value
+  (a virtual table, such as a full-text index, still loads it):
 
   ```sql
   SELECT count(*) AS sampled, count(f) AS filled

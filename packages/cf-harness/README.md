@@ -1564,14 +1564,16 @@ of whole columns across them, or not at all.
 The figures are a sample's and never a total. The databases this answers for are
 often connector stores another process writes, gigabytes of them, and counting a
 table walks the whole of it unless an index serves the count; the sample reads
-at most `sampleLimit` rows whatever the table holds, and reads each column's
-NULL-ness from the row header without loading the value. What that costs is
-coverage: the first rows a table yields are usually its oldest, so a column with
-no value among them may still hold values further on. A table that could not be
-read reports `unread` with what refused it, never `0`, since zero rows and
-unknown rows are the two readings the sample exists to separate. `fill` is
-absent entirely where the run's storage provider offers no query, which claims
-nothing about any table rather than reporting them all as empty.
+at most `sampleLimit` rows whatever the table holds, and on an ordinary table
+reads each column's NULL-ness from the row header without loading the value (a
+virtual table, such as a full-text index, loads the values of the rows it
+samples). What that costs is coverage: the first rows a table yields are usually
+its oldest, so a column with no value among them may still hold values further
+on. A table that could not be read reports `unread` with what refused it, never
+`0`, since zero rows and unknown rows are the two readings the sample exists to
+separate. `fill` is absent entirely where the run's storage provider offers no
+query, which claims nothing about any table rather than reporting them all as
+empty.
 
 Without it a database reads as an opaque value, and the code an agent writes
 over an opaque value is code that treats it as one — stringifying a handle and
