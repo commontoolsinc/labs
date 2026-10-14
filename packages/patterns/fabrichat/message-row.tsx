@@ -50,6 +50,7 @@ import {
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDisplay,
   type ChatReaction,
   type ChatReactionTally,
@@ -160,6 +161,9 @@ export interface FabriChatMessageRowInput {
   /** Whether the viewer's manager can take the viewer into the room. */
   canJoin?: boolean;
 
+  /** The container's declaration for a room held inside another space. */
+  container?: Cell<ChatContainer>;
+
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
 
@@ -224,6 +228,7 @@ export const FabriChatMessageRow = pattern<
     activity,
     counters,
     canJoin,
+    container,
     joinRoom,
     self,
   } = input;
@@ -237,6 +242,7 @@ export const FabriChatMessageRow = pattern<
     activity,
     counters,
     canJoin,
+    container,
     joinRoom,
     self,
   };
@@ -477,6 +483,7 @@ export const FabriChatMessageRow = pattern<
                         activity,
                         counters,
                         canJoin,
+                        container,
                         joinRoom,
                         self,
                         message,
@@ -508,6 +515,7 @@ export const FabriChatMessageRow = pattern<
                         activity,
                         counters,
                         canJoin,
+                        container,
                         joinRoom,
                         self,
                         message,
@@ -567,6 +575,7 @@ export const FabriChatMessageRow = pattern<
                     activity,
                     counters,
                     canJoin,
+                    container,
                     joinRoom,
                     self,
                     message,

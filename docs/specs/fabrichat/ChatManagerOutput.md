@@ -19,6 +19,12 @@ interface ChatManagerOutput {
   /** The user's shared-space catalog, as stored. */
   sharedSpaceCatalog: object;
 
+  /** Explicit choices about individual conversations. */
+  roomMembership: (ChatIndexEntry & {
+    state: "saved" | "archived";
+    revision: string;
+  })[];
+
   /** The outcome of each request, by the `requestId` its caller chose. */
   requests: Record<
     string,
@@ -63,8 +69,13 @@ interface ChatManagerOutput {
     requestId: string;
     room: Cell<ChatRoomOutput>;
     counterpart?: string;
+    container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>;
   }>;
-  joinRoom: Stream<{ requestId?: string; room: Cell<ChatRoomOutput> }>;
+  joinRoom: Stream<{
+    requestId?: string;
+    room: Cell<ChatRoomOutput>;
+    container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>;
+  }>;
   forget: Stream<{
     requestId: string;
     room: Cell<ChatRoomOutput>;
@@ -150,8 +161,13 @@ room's members by principal or by profile itself.
   room's `about`, and where its conversation stands, `messages.count` and
   `messages.newestAt`; [`ChatIndexEntry`](ChatIndexEntry.md) says why the link
   declares those and no more. `rooms` is drawn from the user's shared-space
-  catalog, Home's: each entry the catalog keeps as a saved `fabrichat-room`,
-  whose space's root is a room.
+  catalog, Home's: standalone `fabrichat-room` roots and explicit `chatRoom`
+  declarations on other saved spaces' roots, combined with the manager's
+  individual `roomMembership` choices. Resolved room identity deduplicates
+  discovery paths; an archived individual entry suppresses every path.
+- **`roomMembership`** keeps explicit choices about individual conversations:
+  room links, `saved` or `archived` state, `since`, and opaque `revision`.
+  These choices are independent of the catalog's container membership.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
   stored. Membership checks belong to the manager's Home-space handling. A
@@ -380,16 +396,16 @@ Records a room this user has been admitted to.
   an acceptance this user's host makes on their behalf can come before their
   profile resolves, and the room's sender has already joined them to it.
 - **Outcome:** `done` with the entry, or `refused` if the request names no
-  room, or this user can't read the room, or the room is a social space's own
-  chat, or if the room is direct and its label names no creator, names this
+  room, or this user can't read the room, or a container's chat is named
+  without its matching declaration, or if the room is direct and its label names no creator, names this
   user, or names someone other than a `counterpart` sent, or, once there are
   member sets, the counterpart isn't a member.
 
-A social space's own chat is created with its space and not by a manager, so
-it has no `about.record`, and the catalog lists rooms by their own spaces, so
-`accept` refuses one, with the code `space-own-chat`: its space is the social
-space it belongs to. Listing a space's own chat among a user's chats is a
-possible later direction, which this contract doesn't promise.
+A container's conversation is accepted with `container`, a link to the root
+whose `chatRoom` declares the requested room. The manager compares resolved
+room identities and records individual membership, leaving the container's
+catalog entry alone. A room lacking both a standalone creator record and a
+matching declaration is refused with `space-own-chat`.
 
 ### `joinRoom(requestId?: string, room: Cell<ChatRoomOutput>)`
 
@@ -399,6 +415,8 @@ possible later direction, which this contract doesn't promise.
   and the manager records the outcome under an id of its own, or, for a room
   this user's chats list already, records nothing.
 - `room: Cell<ChatRoomOutput>` — A link to the room this user has joined.
+- `container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>` — The root declaring
+  a container conversation. Its `chatRoom` must resolve to `room`.
 
 Makes a room this user has joined one of their chats. The caller says what
 happened, that the user entered the room, and the manager decides what that
@@ -434,8 +452,10 @@ opening the room's page.
 Removes a room from this user's list.
 
 - **Admitted:** without a reviewed gesture.
-- **Effect:** archives the room's catalog entry, which removes it from `rooms`.
-  A direct room's entry stays in `direct`, so a later `openDirect` with the same
+- **Effect:** archives the room's individual membership, or its standalone
+  catalog entry, which removes it from `rooms`. A container's catalog entry is
+  untouched. The opaque revision may name either form of membership; clients
+  pass it unchanged. A direct room's entry stays in `direct`, so a later `openDirect` with the same
   person returns the same room. The room, and this user's access to it, are
   untouched.
 - **Outcome:** `done`, with no entry, or `refused` if the request names no room

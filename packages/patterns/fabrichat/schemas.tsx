@@ -437,6 +437,12 @@ export interface ChatRoomLink {
   roster?: ManagerProfileCell[];
 }
 
+/** A container's explicit declaration of the conversation it holds. */
+export interface ChatContainer {
+  /** The declared conversation, wherever its room lives. */
+  chatRoom?: Cell<ChatRoomLink>;
+}
+
 /** One room in a user's chat manager. */
 export interface ChatIndexEntry {
   /** The room. */

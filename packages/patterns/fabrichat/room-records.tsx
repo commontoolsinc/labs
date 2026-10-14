@@ -62,6 +62,7 @@ import {
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDeletedBody,
   type ChatMessageVersion,
   type ChatReaction,
@@ -711,6 +712,9 @@ type MessageAct = "send" | "edit" | "delete" | "obliterate";
 
 /** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
 export interface JoinRoomRequest {
+  /** The root explicitly declaring a room held inside a container. */
+  container?: Cell<ChatContainer>;
+
   /** The room the viewer has joined. */
   room: Cell<ChatRoomLink>;
 }
@@ -786,10 +790,13 @@ export interface RoomActState {
 
   /**
    * Whether the viewer's manager can take the viewer into the room: the
-   * viewer has a manager, and the room is its space's own, which it can name
-   * itself to the manager by. Absent, it can't.
+   * viewer has a manager and the room is standalone or its container's
+   * declared conversation. Absent, it can't.
    */
   canJoin?: boolean;
+
+  /** The container's declaration, for a room held inside another space. */
+  container?: Cell<ChatContainer>;
 
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
@@ -806,7 +813,7 @@ export interface RoomActState {
 const joinForViewer = (state: RoomActState): void => {
   const { canJoin, joinRoom, self } = state;
   if (canJoin !== true || joinRoom === undefined || self === undefined) return;
-  joinRoom.send({ room: self });
+  joinRoom.send({ room: self, container: state.container });
 };
 
 /**
