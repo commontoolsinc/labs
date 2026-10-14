@@ -9745,6 +9745,33 @@ const beneathForeignPosition =
   };
 
 /**
+ * Whether a logical path lies at or beneath a new field: a concrete property
+ * the document held nothing at before the transaction, which `storedSchema`
+ * declares no policy at or beneath and which overlaps none of
+ * `restatedPaths`. A path whose stored value can't be told, or which reaches
+ * a `*` before such a property, lies beneath none.
+ */
+const atOrBeneathNewField = (
+  valuesAt: (path: readonly string[]) => readonly FabricValue[] | undefined,
+  storedSchema: JSONSchema,
+  restatedPaths: readonly (readonly string[])[],
+) => {
+  const declared = cfcSchemaEntries(storedSchema).map((entry) => entry.path);
+  return (path: readonly string[]): boolean => {
+    for (let depth = 1; depth <= path.length; depth++) {
+      const field = path.slice(0, depth);
+      const values = field[depth - 1] === "*" ? undefined : valuesAt(field);
+      if (values === undefined) return false;
+      if (values.length === 0) {
+        return !declared.some((entry) => pathPatternsOverlap(field, entry)) &&
+          !restatedPaths.some((restated) => pathsOverlap(restated, field));
+      }
+    }
+    return false;
+  };
+};
+
+/**
  * The envelope a document stores after a write under `candidate`: the stored
  * envelope where the write leaves it unchanged, and the two merged otherwise.
  * Throws what {@link mergeCfcSchemaEnvelopes} throws.
@@ -13202,6 +13229,10 @@ export function* prepareBoundaryCommitSteps(
     // In a release, the claims beneath a position holding links describe
     // the documents linked there, which the release may re-describe; they
     // govern nothing in this document, so they are not compared.
+    // Nor are the claims at a field the write adds beside those paths, which
+    // the document held nothing at and the stored envelope declares nothing
+    // at or beneath: they govern a value the setup initializes, and the
+    // envelope that declares them is stored in place of the stored one.
     let keepsStoredSchema = false;
     // TODO(danfuzz): Like the restatement deferral this waiver discharges,
     // leaving these positions out admits more than §8.15.4 permits, and runs
@@ -13212,13 +13243,15 @@ export function* prepareBoundaryCommitSteps(
       : beneathForeignPosition(foreignPositions);
     if (
       deferredWriterRefusal !== undefined && !deferredPreservedOutput &&
-      existing !== undefined && storedSchema !== undefined &&
-      cfcSchemaPoliciesEqual(
-        storedSchema,
-        schemaAndHash.schema,
-        governsNothingHere,
-      )
+      existing !== undefined && storedSchema !== undefined
     ) {
+      const newField = atOrBeneathNewField(
+        storedValuesAt(tx, { space, id, scope }),
+        storedSchema,
+        deferredWriterPaths,
+      );
+      const omitted = (path: readonly string[]) =>
+        governsNothingHere(path) || newField(path);
       const storedEntries = canonicalizeCfcMetadata(existing).labelMap.entries;
       const derivedEntries = canonicalizeCfcMetadata(metadata).labelMap.entries;
       const entriesAt = (
@@ -13231,15 +13264,16 @@ export function* prepareBoundaryCommitSteps(
       // the positions both schemas declare are compared whole, not at the
       // deferred paths alone.
       const declaredPositions = (schema: JSONSchema) =>
-        cfcSchemaEntries(schema).filter((entry) =>
-          !governsNothingHere(entry.path)
-        ).map((entry) => ({
+        cfcSchemaEntries(schema).filter((entry) => !omitted(entry.path)).map((
+          entry,
+        ) => ({
           path: encodePointer(entry.path),
           ifc: withoutUndefinedMembers(
             isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
           ),
         })).sort((left, right) => utf8Compare(left.path, right.path));
       if (
+        cfcSchemaPoliciesEqual(storedSchema, schemaAndHash.schema, omitted) &&
         deepEqual(
           declaredPositions(storedSchema),
           declaredPositions(schemaAndHash.schema),
@@ -13252,7 +13286,13 @@ export function* prepareBoundaryCommitSteps(
         )
       ) {
         deferredWriterRefusal = undefined;
-        keepsStoredSchema = true;
+        keepsStoredSchema = cfcSchemaPoliciesEqual(
+          storedSchema,
+          schemaAndHash.schema,
+          governsNothingHere,
+        );
+      }
+      if (keepsStoredSchema) {
         // The stored spelling is kept whole, its envelope version included;
         // a version-1 store migrates on its next authorized write.
         metadata = {
