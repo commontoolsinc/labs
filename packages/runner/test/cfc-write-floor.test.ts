@@ -1427,6 +1427,25 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         seedLabeledDoc(runtime, id, "unendorsed", {}),
     };
 
+    // Replaces the labels `id` stores, and nothing else of it.
+    const relabel = async (runtime: Runtime, id: string, label: IFCLabel) => {
+      const tx = runtime.edit();
+      const docId = runtime.getCell(signer.did(), id, undefined, tx)
+        .getAsNormalizedFullLink().id as URI;
+      writeSeedEnvelopeDoc(tx, signer.did());
+      seedStoredEnvelope(tx, {
+        space: signer.did(),
+        id: docId,
+        type: "application/json",
+        path: ["cfc"],
+      }, {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: { version: 1, entries: [{ path: [], label }] },
+      });
+      expect((await tx.commit().settled).error).toBeUndefined();
+    };
+
     // Links `sourceId` into the floored list and commits.
     const linkIntoList = async (
       runtime: Runtime,
@@ -1651,9 +1670,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
           "CfcCommitRefusalError",
         ]);
 
-        await seedLabeledDoc(runtime, "wf-rerun-src", "pending", {
-          integrity: [ADMIN_ATOM],
-        });
+        await relabel(runtime, "wf-rerun-src", { integrity: [ADMIN_ATOM] });
         await runtime.scheduler.idleWithPendingCommits();
         expect(runs).toBe(2);
         expect(errors).toHaveLength(1);
@@ -1663,6 +1680,134 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         } finally {
           read.abort();
         }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    for (const flow of ["off", "persist"] as const) {
+      it(`rejects a plain value at a floored field as \`CfcCommitRefusalError\` with flow labels \`${flow}\``, async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = makeRuntime({
+          storageManager,
+          cfcWriteFloor: "enforce",
+          cfcFlowLabels: flow,
+        });
+        try {
+          await seedLabeledDoc(runtime, "wf-plain-input", "unendorsed", {});
+          const tx = runtime.edit();
+          const input = runtime.getCell<string>(
+            signer.did(),
+            "wf-plain-input",
+            undefined,
+            tx,
+          );
+          const sink = runtime.getCell(
+            signer.did(),
+            "wf-plain-sink",
+            FLOOR_SCHEMA,
+            tx,
+          );
+          sink.set({ out: input.get() });
+          tx.prepareCfc();
+          const error = (await tx.commit().settled).error;
+          expect(error?.name).toBe("CfcCommitRefusalError");
+          expect(error?.message).toContain("write floor failed at /out");
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
+
+    it("rejects a plain value at a floored field as a retryable `StorageTransactionAborted` when the transaction read a document it does not hold", async () => {
+      // Under flow labels `persist` the flow join credits the value from the
+      // labels of everything the transaction read, and a document it does not
+      // hold may yet store some.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcWriteFloor: "enforce",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        const tx = runtime.edit();
+        const input = runtime.getCell<string>(
+          signer.did(),
+          "wf-plain-unheld-input",
+          undefined,
+          tx,
+        );
+        const sink = runtime.getCell(
+          signer.did(),
+          "wf-plain-unheld-sink",
+          FLOOR_SCHEMA,
+          tx,
+        );
+        sink.set({ out: input.get() ?? "unendorsed" });
+        tx.prepareCfc();
+        const error = (await tx.commit().settled).error;
+        expect(error?.name).toBe("StorageTransactionAborted");
+        expect(error?.message).toContain("write floor failed at /out");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("runs a reactive writer the floor refused over a plain value again once a document it read stores other labels", async () => {
+      // Under flow labels `persist` the value's credit is the flow join over
+      // what the writer read, so a change to those labels can run it again,
+      // and here refuses it again. The writer reads the input raw, which
+      // reads none of the input's labels itself.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcWriteFloor: "enforce",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedLabeledDoc(runtime, "wf-plain-rerun-input", "plain", {});
+        const errors: Error[] = [];
+        runtime.scheduler.onError((error) => errors.push(error));
+        const input = runtime.getCell<string>(
+          signer.did(),
+          "wf-plain-rerun-input",
+        );
+        const sink = runtime.getCell(
+          signer.did(),
+          "wf-plain-rerun-sink",
+          FLOOR_SCHEMA,
+        );
+        let runs = 0;
+        runtime.scheduler.subscribe(
+          (actionTx: IExtendedStorageTransaction) => {
+            runs++;
+            sink.withTx(actionTx).set({
+              out: input.withTx(actionTx).getRaw() as string,
+            });
+          },
+          { reads: [], shallowReads: [], writes: [] },
+          { isEffect: true },
+        );
+        await runtime.scheduler.idleWithPendingCommits();
+        expect(runs).toBe(1);
+        expect(errors.map((error) => error.name)).toEqual([
+          "CfcCommitRefusalError",
+        ]);
+
+        await relabel(runtime, "wf-plain-rerun-input", {
+          integrity: ["other-endorsement"],
+        });
+        await runtime.scheduler.idleWithPendingCommits();
+        expect(runs).toBe(2);
+        expect(errors.map((error) => error.name)).toEqual([
+          "CfcCommitRefusalError",
+          "CfcCommitRefusalError",
+        ]);
       } finally {
         await runtime.dispose();
         await storageManager.close();
