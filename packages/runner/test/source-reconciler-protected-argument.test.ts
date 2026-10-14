@@ -12,6 +12,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 
+import { loadStoredCfcEnvelope } from "../src/cfc/prepare.ts";
 import { markRendererTrustedEvent } from "../src/cfc/ui-contract.ts";
 import {
   type Cell,
@@ -411,6 +412,21 @@ async function reconcileRelease(
 const releaseBehind = (source: string): string =>
   `${source}\n// a release behind\n`;
 
+/** The schema hash of the envelope the room's argument stores. */
+function storedSchemaHash(runtime: Runtime, room: Cell<Room>): string {
+  const tx = runtime.edit();
+  try {
+    const stored = loadStoredCfcEnvelope(
+      tx,
+      room.getArgumentCell<Room>()!.getAsNormalizedFullLink(),
+    );
+    expect(stored.status).toBe("loaded");
+    return stored.status === "loaded" ? String(stored.metadata.schemaHash) : "";
+  } finally {
+    tx.abort();
+  }
+}
+
 describe("source-reconciler-protected-argument", () => {
   describe("a field only its handler may write", () => {
     const prime = async (runtime: Runtime, room: Cell<Room>) => {
@@ -600,6 +616,32 @@ describe("source-reconciler-protected-argument", () => {
           expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
           expect(room.get().about).toEqual({ title: "lunch" });
           expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+      );
+    });
+
+    it("keeps the stored envelope whole through a release that changes only the claims beneath the links", async () => {
+      // The release names no writer for each `Note`'s `tags`, so its
+      // envelope differs from the stored one beneath the links alone.
+      const current = LINKED_SOURCE.replace(
+        /tags\?: WritePolicyAnyOf<[^;]*;/,
+        "tags?: AuthoredByCurrentUser<string[]>;",
+      );
+      expect(current).toContain("tags?: AuthoredByCurrentUser<string[]>;");
+      let before = "";
+      await reconcileRelease(
+        "linked-claims-release",
+        LINKED_SOURCE,
+        current,
+        async (runtime, room) => {
+          await prime(runtime, room);
+          before = storedSchemaHash(runtime, room);
+        },
+        ({ outcome, room, runtime, currentIdentity }) => {
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(before).not.toBe("");
+          expect(storedSchemaHash(runtime, room)).toBe(before);
         },
       );
     });
