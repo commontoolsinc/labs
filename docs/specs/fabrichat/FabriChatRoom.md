@@ -84,9 +84,11 @@ explicitly declares it through `chatRoom`. A declared container room includes
 that root as `container`; a standalone room needs no container, including when
 another space declares it. The manager's separate event checks private Home
 membership and lists or restores the conversation. Joining an already listed
-room without a `requestId` changes nothing. Room write handlers hold the
-manager's stream but read no catalog, so the catalog's confidentiality stays
-out of the transaction that stores shared messages and reactions.
+room without a `requestId` changes nothing. Room write handlers send their
+local `joined` stream after recording the write. Its `tellManagerJoined`
+handler reads the manager binding and sends `joinRoom` in a separate event,
+so the transaction that stores shared messages and reactions reads neither
+the manager nor its private catalog.
 
 Every handler in the table first checks its event's sender and `requestId`
 against a keyed collection of the requests the room has acted on, and does
