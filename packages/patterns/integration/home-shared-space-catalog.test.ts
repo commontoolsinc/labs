@@ -591,8 +591,22 @@ describe("Home shared-space catalog", () => {
         expect(await client.key("messages").pull()).toEqual([
           "A public social-space write",
         ]);
-        const view = await home.key("sharedSpaces").key("view")
-          .asSchema(sharedSpaceCollectionViewSchema).pull();
+        // Under server execution the registration is a cascade the serving
+        // loop runs into Home's space after the send's own consequence, which
+        // `idle()` does not wait for, and this runtime's preview of it is
+        // withdrawn once that consequence arrives. The view is read once the
+        // served write has reached it.
+        const viewCell = home.key("sharedSpaces").key("view")
+          .asSchema(sharedSpaceCollectionViewSchema);
+        await awaitEdges(
+          [(wake) => viewCell.sink(wake)],
+          () => {
+            const current = viewCell.get();
+            return current !== undefined && "saved" in current &&
+              current.saved.length > 0;
+          },
+        );
+        const view = await viewCell.pull();
         expect(view).toMatchObject({
           status: "ready",
           saved: [{ space: social }],
