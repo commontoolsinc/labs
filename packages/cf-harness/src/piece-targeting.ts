@@ -13,6 +13,17 @@ export const PIECE_TARGETING_GUIDANCE = [
   "This bound applies to selecting a missing target, not to an explicit request to list or analyze the space. Research and authoring children return an unresolved target to the parent rather than planning a registry crawl, and the parent asks the user.",
 ].join("\n");
 
+/**
+ * What a task about the pieces it holds is told about them, in place of the
+ * piece-targeting rules a pattern-authoring task needs.
+ */
+export const HELD_PIECES_GUIDANCE =
+  "The input cells are the pieces on the person's screen, named by where they are: focused_piece, on_screen_…, in_loom_…. Use describe_handle for a piece's shape and verbs, read_value for its data, and call_verb to act on it. Never search for or make a pattern that is already in hand.";
+
+/** What a task not tagged as about its pieces is told about them. */
+export const MAY_HOLD_PIECES_GUIDANCE =
+  "Handles may be held; if the request turns out to be about one, describe it with describe_handle.";
+
 /** Target selection context for both configured sessions and unattached turns. */
 export const pieceTargetingContextMessages = (
   inputCells: readonly HarnessInputCell[],

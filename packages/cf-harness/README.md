@@ -2041,8 +2041,11 @@ the classification's wall time are recorded as `taskClassification` in
 in the run report and the run's total usage like research's. Only an `author`
 task gets the opening research pass. The parent's orientation follows the tags:
 `pieces` and `author` add the code-authoring framing (reading docs and skills,
-repairing code, acquiring a skill by its id) and the piece-targeting guidance,
-`author` alone the instruction to verify an effect and the revision-verification
+repairing code, acquiring a skill by its id), `pieces` a short held-pieces block
+(the input cells are the pieces on the person's screen; `describe_handle`,
+`read_value`, and `call_verb` read and act on them) where any other task gets
+one sentence saying handles may be held, `author` alone the piece-targeting
+guidance, the instruction to verify an effect, and the revision-verification
 guidance, `pieces` and `find` the held-handle and grant guidance, `find` and
 `author` the findable and pattern-index guidance, `author` what research is (a
 private pass that reports what to run and cannot execute) and the

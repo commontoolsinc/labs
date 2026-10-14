@@ -5,7 +5,11 @@ import {
   buildCfHarnessBaseSystemPrompt,
   buildCfHarnessOperatorSystemPrompt,
 } from "../src/cli.ts";
-import { PIECE_TARGETING_GUIDANCE } from "../src/piece-targeting.ts";
+import {
+  HELD_PIECES_GUIDANCE,
+  MAY_HOLD_PIECES_GUIDANCE,
+  PIECE_TARGETING_GUIDANCE,
+} from "../src/piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import { orientContextMessages } from "../src/session-assembly.ts";
 import { WEAVER_COMMAND_GUIDANCE } from "../src/tools/weaver-action.ts";
@@ -259,26 +263,52 @@ describe("orientation", () => {
         .toEqual(["input cells"]);
     });
 
-    it("withholds piece targeting and revision verification from a respond task's context", () => {
+    describe("held pieces", () => {
       const messages = [
         "input cells",
         PIECE_TARGETING_GUIDANCE,
         REVISION_VERIFICATION_GUIDANCE,
       ];
 
-      expect(orientContextMessages(messages, new Set(["respond"])))
-        .toEqual(["input cells"]);
-      expect(orientContextMessages(messages, new Set(["author"])))
-        .toEqual(messages);
-    });
+      it("gives a pieces task the held-pieces block in place of piece targeting and revision verification", () => {
+        expect(orientContextMessages(messages, new Set(["pieces"])))
+          .toEqual(["input cells", HELD_PIECES_GUIDANCE]);
+      });
 
-    it("keeps revision verification for an author task and withholds it from a pieces task", () => {
-      const messages = ["input cells", REVISION_VERIFICATION_GUIDANCE];
+      it("gives a respond, find, or act task one sentence about held handles", () => {
+        for (const tag of ["respond", "find", "act"] as const) {
+          expect(orientContextMessages(messages, new Set([tag])))
+            .toEqual(["input cells", MAY_HOLD_PIECES_GUIDANCE]);
+        }
+      });
 
-      expect(orientContextMessages(messages, new Set(["pieces"])))
-        .toEqual(["input cells"]);
-      expect(orientContextMessages(messages, new Set(["author"])))
-        .toEqual(messages);
+      it("keeps piece targeting and revision verification for an author task", () => {
+        expect(orientContextMessages(messages, new Set(["author"])))
+          .toEqual([
+            "input cells",
+            MAY_HOLD_PIECES_GUIDANCE,
+            PIECE_TARGETING_GUIDANCE,
+            REVISION_VERIFICATION_GUIDANCE,
+          ]);
+        expect(
+          orientContextMessages(messages, new Set(["pieces", "author"])),
+        ).toEqual([
+          "input cells",
+          HELD_PIECES_GUIDANCE,
+          PIECE_TARGETING_GUIDANCE,
+          REVISION_VERIFICATION_GUIDANCE,
+        ]);
+      });
+
+      it("names the input cells by where the pieces are and the tools that read and act on them", () => {
+        expect(HELD_PIECES_GUIDANCE).toContain("focused_piece");
+        expect(HELD_PIECES_GUIDANCE).toContain("on_screen_");
+        expect(HELD_PIECES_GUIDANCE).toContain("in_loom_");
+        expect(HELD_PIECES_GUIDANCE).toContain("describe_handle");
+        expect(HELD_PIECES_GUIDANCE).toContain("read_value");
+        expect(HELD_PIECES_GUIDANCE).toContain("call_verb");
+        expect(HELD_PIECES_GUIDANCE.length).toBeLessThan(600);
+      });
     });
 
     it("tells only an author task to verify what it did", () => {
