@@ -66,7 +66,7 @@ describe("in-process-attributes", () => {
     }
   });
 
-  it("renders one `style` attribute for two orders of the same style object's keys", async () => {
+  it("renders the same `style` attribute whichever order a style object lists its keys in", async () => {
     // The reconciler turns a style object into the attribute's text. A
     // runtime holds the object's keys in the order its writer listed them,
     // and holds the same object loaded from the store in UTF-8 order.
