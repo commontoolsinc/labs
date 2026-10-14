@@ -780,6 +780,17 @@ Implemented behavior:
   their handler's piece must load asynchronously. The event and any
   handler-result pieces are recorded under the sending transaction's
   speculation lineage.
+- A queued event runs the handler registered for its stream when it
+  dispatches, which is not the one it was queued with once its piece has
+  replaced its graph. Off a serving runtime, while the piece, or a piece that
+  instantiated it, is changing pattern, from its watcher seeing the pointer
+  move until the piece runs the incoming pattern or keeps the one it ran, the
+  head event for it waits in its position (`Runner.pendingPatternChangeFor`),
+  and then runs the handler of the pattern the piece settled on, or is dropped
+  when that pattern registered none for the stream. An event that reaches the
+  head after its piece replaced its graph, holding a handler of the replaced
+  graph that nothing re-registered, is dropped the same way; a stopped piece's
+  handler still runs.
 - The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
   collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
   last-wins into the last pending same-origin entry, so a same-origin flood

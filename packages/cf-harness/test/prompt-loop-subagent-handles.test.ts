@@ -31,6 +31,7 @@ import {
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
   createHarnessHandleTable,
+  markHandleDescribed,
   mintAddressHandle,
   mintReferentHandle,
   resolveReferentToken,
@@ -506,6 +507,25 @@ describe("prompt-loop cross-agent address handles", () => {
     expect(child?.referents?.map((entry) => entry.token)).toEqual([
       first.token,
     ]);
+  });
+
+  it("hands a child a delegated handle undescribed, whatever the parent described", async () => {
+    // read_value admits a handle once the run reading it has looked at its
+    // shape, so a child looks for itself before it reads.
+    const runId = "run-subagent-described-handles";
+    const minted = await mintAddressHandle(
+      createHarnessHandleTable(runId),
+      "of:fid1:described-handle-test",
+    );
+    const parent = markHandleDescribed(minted.table, minted.token);
+
+    const child = seedSubagentHandleTable(parent, `${runId}.subagent.1`, {
+      goal: `Read ${minted.token}.`,
+      profile: "pattern-author",
+    });
+
+    expect(child?.entries.map((entry) => entry.token)).toEqual([minted.token]);
+    expect(child?.entries[0].described).toBeUndefined();
   });
 
   it("adopts referents discovered by a child and preserves seeded identities", async () => {
