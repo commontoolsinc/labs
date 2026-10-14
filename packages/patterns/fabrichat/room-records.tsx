@@ -6,7 +6,8 @@
  *
  * Every stream that changes the room's record has a handler of its own, as
  * `FabriChatRoom.md` names them. `commitWindow` writes the sending session's
- * windows.
+ * windows, and `commitSetTitle` the title a member last set, a record of its
+ * own beside the one the room's creator wrote.
  *
  * A message is a record of its own in the room's messages, labeled
  * `authored-by` whoever last wrote it, and admitted only from the reviewed
@@ -56,6 +57,8 @@ import {
   CHAT_OBLITERATE_SURFACE,
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
@@ -77,6 +80,9 @@ import {
   type MessageActRefusalCode,
   nsecOf,
   type ProfileCell,
+  type SetTitleOutcome,
+  type SetTitleRefusalCode,
+  type TitleRecord,
   type WindowEvent,
 } from "./schemas.tsx";
 
@@ -389,6 +395,39 @@ export type StoredAbout = AuthoredByCurrentUser<
     typeof CHAT_START_ACTION,
     typeof CHAT_START_SURFACE
   >
+>;
+
+/**
+ * A room's title as a member last set it: written only by `commitSetTitle`,
+ * from a reviewed `ChatRetitle` on `ChatRetitleSurface`, and labeled
+ * `authored-by` that member. The creator's `about` record keeps the title the
+ * room was created with, and its own label.
+ */
+export type StoredTitle = AuthoredByCurrentUser<
+  TrustedActionWrite<
+    TitleRecord,
+    typeof commitSetTitle,
+    typeof CHAT_RETITLE_ACTION,
+    typeof CHAT_RETITLE_SURFACE
+  >
+>;
+
+/**
+ * The room's title as a member last set it, kept as one keyed record,
+ * `TITLE_KEY`, absent until a member sets one. The list around it defaults to
+ * empty, so nothing but `commitSetTitle` ever writes the record.
+ */
+export type TitlesCell = Writable<StoredTitle[] | Default<[]>>;
+
+/** The key of the one record of the title a member set. */
+export const TITLE_KEY = "title";
+
+/**
+ * The outcome of each of a sender's retitles, by its `requestId`: one
+ * instance per user, which no one else reads.
+ */
+export type TitleRequestsCell = Writable<
+  Record<string, SetTitleOutcome> | Default<Record<PropertyKey, never>>
 >;
 
 //
@@ -1376,5 +1415,93 @@ export const commitWindow = handler<RoomWindowEvent, WindowActState>(
       hasOlder: slice.hasOlder,
       hasNewer: slice.hasNewer,
     });
+  },
+);
+
+/**
+ * An event on the room's `setTitle`. A rendered control sends the text it
+ * holds as `target.value`, and no request id, which the room then mints.
+ */
+export interface SetTitleEvent {
+  /**
+   * Chosen by the sender, and unique among its retitles. The outcome is
+   * recorded under it, and sending the same event again with it changes
+   * nothing.
+   */
+  requestId?: string;
+
+  /** The new title. */
+  title?: string;
+
+  /** A rendered control's text. */
+  readonly target?: { readonly value?: string };
+}
+
+/** What `commitSetTitle` is bound to. */
+export interface SetTitleState {
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
+
+  /**
+   * Whether the room is one a manager created in a space of its own. A
+   * space's own chat is shown by its space's name.
+   */
+  ownSpace: boolean;
+
+  /** The room's messages, which name the room's space. */
+  messages: MessagesCell;
+
+  /** The sender's retitles' outcomes. */
+  outcomes: TitleRequestsCell;
+
+  /**
+   * Why the session's latest retitle was refused, which the rendered control
+   * shows; empty once one takes effect.
+   */
+  refusal: Writable<string>;
+}
+
+/**
+ * Sets the room's title, which every member shares, from a trusted gesture on
+ * `ChatRetitleSurface`. Any member who can write in the room may, in a group
+ * room or a direct one. The outcome is recorded under the event's
+ * `requestId` in the sender's own outcomes, and a refusal leaves the title as
+ * it is.
+ */
+export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
+  (event, { titles, ownSpace, messages, outcomes, refusal }) => {
+    const requestId = event?.requestId ?? eventKey();
+    if (outcomes.key(requestId).get() !== undefined) return;
+    const refuse = (code: SetTitleRefusalCode, reason: string): void => {
+      outcomes.key(requestId).set({ status: "refused", reason, code });
+      refusal.set(reason);
+    };
+    if (!ownSpace || titles === undefined) {
+      refuse("fixed-title", "This chat is named by its space.");
+      return;
+    }
+    // A level not known yet is left to the space's own access list, which
+    // refuses the write where it doesn't admit it.
+    const level = spaceAccess(messages);
+    if (
+      currentPrincipal() === undefined || level === "none" || level === "READ"
+    ) {
+      refuse("not-member", "You can't write in this chat.");
+      return;
+    }
+    const proposed = event?.title ?? event?.target?.value;
+    const title = typeof proposed === "string" ? proposed.trim() : "";
+    if (title === "") {
+      refuse("invalid-title", "A chat's title needs some text.");
+      return;
+    }
+    const record = titles.elementById(TITLE_KEY);
+    record.set({ title } as StoredTitle);
+    titles.addUnique(record);
+    outcomes.key(requestId).set({ status: "done" });
+    refusal.set("");
   },
 );

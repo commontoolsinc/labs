@@ -33,17 +33,23 @@ and its `since` and `revision` are its entry's. A direct room's `counterpart` is
 the one `direct` holds the room under, for a room `direct` holds, or else the
 room's creator, as its `about.record` is labeled; a room whose label can't be
 read is listed with no counterpart. A room appears in `rooms` once its root
-resolves and its `about` reads. `people` is drawn from `rooms` in the same
-session: each listed room's `roster`, read through the room's link, with each
-profile keyed by the principal its own `represents-principal` label attests
-(`principalOf()`). `offerRoom` reads it, to offer a room to a member named by
-principal alone. `direct` holds one entry per counterpart, including forgotten
-rooms, for the direct rooms this manager created or accepted, and `openDirect` finds a direct room there and nowhere
-else. A room another manager created and offered the user is there too, once the
-user's host has registered the offer, since the host's share intake then has the
-manager accept it on the user's behalf (see [first contact](#first-contact)).
-`rooms` can also hold a second direct room with the same counterpart, after
-crossing creations.
+resolves and its `about` reads. The manager's rendering labels each listed room
+with its `about.title`, read through the room's link, so a retitle shows there
+once the room records it, and labels a direct room with no title by its
+counterpart. The title registered with a room's catalog entry is the room's
+title when it was registered, a display hint the catalog doesn't refresh
+([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), so
+neither the rendering nor `rooms` reads it. `people` is drawn from `rooms` in
+the same session: each listed room's `roster`, read through the room's link,
+with each profile keyed by the principal its own `represents-principal` label
+attests (`principalOf()`). `offerRoom` reads it, to offer a room to a member
+named by principal alone. `direct` holds one entry per counterpart, including
+forgotten rooms, for the direct rooms this manager created or accepted, and
+`openDirect` finds a direct room there and nowhere else. A room another manager
+created and offered the user is there too, once the user's host has registered
+the offer, since the host's share intake then has the manager accept it on the
+user's behalf (see [first contact](#first-contact)). `rooms` can also hold a
+second direct room with the same counterpart, after crossing creations.
 
 `direct`'s entries, and the entry a `done` outcome in `requests` carries, hold a
 room as `FabriChatRoom.inSpace(…)` returned it at creation, or as `accept` was
