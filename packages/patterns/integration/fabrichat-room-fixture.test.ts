@@ -93,5 +93,13 @@ describe("fabrichat-room-fixture", () => {
     it("returns no more roots than there are messages", () => {
       expect(threadRoots(1, 3)).toEqual([0]);
     });
+
+    it("returns only roots among the room's latest hundred messages", () => {
+      // The seed addresses a thread's root through the room's `latest`, which
+      // holds the last hundred of its main conversation.
+      const roots = threadRoots(300, 150);
+      expect(roots).toHaveLength(100);
+      expect(Math.min(...roots)).toBe(200);
+    });
   });
 });

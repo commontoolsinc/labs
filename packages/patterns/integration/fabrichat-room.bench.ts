@@ -29,14 +29,15 @@
  * with the timer stopped. Each iteration therefore measures exactly one
  * segment of a fresh visit.
  *
- * `send` and `react` write to the room, so they run against a second room of
- * the same shape. Each `send` adds one message and each `react` one reaction
- * to a message that had none of the viewer's, so the room either measures
- * grows by a message per `send` iteration and by nothing else; which of the
- * two runs first is `deno bench`'s order, which is stable.
+ * `send` and `react` write to the room, so each runs against a room of its own
+ * of the same shape, and neither changes what the other or the reading
+ * segments measure. Each `send` adds one message to its room, so its room holds
+ * between thirty and thirty-six messages as the run goes on; each `react` adds
+ * one reaction to a message that had none of the viewer's, which leaves the
+ * room's messages as they were.
  *
- * Both rooms are seeded on first use, each by members whose identities are new
- * to this run, so the starter's Home lists that one room. Each is then loaded
+ * The three rooms are seeded together on first use, each by members whose
+ * identities are new to this run, so each starter's Home lists that one room. Each is then loaded
  * once, untimed, through the same steps a segment takes: a seeded room's first
  * load builds and commits the derived state of every row, which no later load
  * repeats, and that load is not what any segment measures.
@@ -92,9 +93,10 @@ const WARMUP = 1;
 /**
  * How many times `Deno.bench` invokes a case's body, and how many of those it
  * discards: `n + 2` invocations, of which only the first is dropped, whatever
- * `warmup` is set to (measured on Deno 2.9.4).
+ * `warmup` is set to (measured on Deno 2.9.4). So `n` is one less than the
+ * iterations a run measures.
  */
-const BENCH_INVOCATIONS = ITERATIONS + 2;
+const BENCH_INVOCATIONS = ITERATIONS + 1;
 const DISCARDED_INVOCATIONS = 1;
 
 /** The thread the `thread` segment opens. */
@@ -126,40 +128,35 @@ report(
     `segment after ${WARMUP} warm-up, at ${env.API_URL}`,
 );
 
-let seeding:
-  | {
-    read: Promise<FabrichatRoomFixture>;
-    write: Promise<FabrichatRoomFixture>;
-  }
-  | undefined;
+/** The rooms the segments visit, by what they do there. */
+interface Rooms {
+  /** The room every segment but `send` and `react` visits. */
+  read: Promise<FabrichatRoomFixture>;
 
-/**
- * Seeds both rooms together on first use, each in a child of its own, so a
- * run pays for the slower of the two seeds rather than for both in turn.
- */
-function rooms() {
-  seeding ??= {
-    read: seedLoadedRoom({
-      passphrase: `${PASSPHRASE} read`,
-      memberCount: MEMBERS,
-      messageCount: MESSAGES,
-      report,
-    }),
-    write: seedLoadedRoom({
-      passphrase: `${PASSPHRASE} write`,
-      memberCount: MEMBERS,
-      messageCount: MESSAGES,
-      report,
-    }),
-  };
-  return seeding;
+  /** The room `send` writes to. */
+  send: Promise<FabrichatRoomFixture>;
+
+  /** The room `react` writes to. */
+  react: Promise<FabrichatRoomFixture>;
 }
 
-/** The room every segment but `send` and `react` visits. */
-const readRoom = (): Promise<FabrichatRoomFixture> => rooms().read;
+let seeding: Rooms | undefined;
 
-/** The room `send` and `react` write to. */
-const writeRoom = (): Promise<FabrichatRoomFixture> => rooms().write;
+/**
+ * Seeds every room together on first use, each in a child of its own, so a run
+ * pays for the slowest of the seeds rather than for all of them in turn.
+ */
+function rooms(): Rooms {
+  const seed = (label: string) =>
+    seedLoadedRoom({
+      passphrase: `${PASSPHRASE} ${label}`,
+      memberCount: MEMBERS,
+      messageCount: MESSAGES,
+      report,
+    });
+  seeding ??= { read: seed("read"), send: seed("send"), react: seed("react") };
+  return seeding;
+}
 
 /** Invocations of each case so far, by name. */
 const invocations = new Map<string, number>();
@@ -195,7 +192,7 @@ function segment<Reached>(
   Deno.bench({
     name,
     group: GROUP,
-    n: ITERATIONS,
+    n: ITERATIONS - DISCARDED_INVOCATIONS,
     warmup: WARMUP,
   }, async (b) => {
     await benchPosture(report);
@@ -280,21 +277,21 @@ async function draftNext(session: RoomSession): Promise<() => Promise<void>> {
 
 segment(
   "load",
-  readRoom,
+  () => rooms().read,
   () => Promise.resolve(),
   (session) => session.load(),
 );
 
 segment(
   "sign in",
-  readRoom,
+  () => rooms().read,
   (session) => session.load(),
   (session) => session.signIn(),
 );
 
 segment(
   "messages",
-  readRoom,
+  () => rooms().read,
   signedIn,
   (session) => session.showMessages(),
   async (session) => {
@@ -305,7 +302,7 @@ segment(
 
 segment(
   "send",
-  writeRoom,
+  () => rooms().send,
   draftNext,
   (_session, send) => send(),
   draftNext,
@@ -313,7 +310,7 @@ segment(
 
 segment(
   "react",
-  writeRoom,
+  () => rooms().react,
   async (session) => {
     await inRoom(session);
     const index = REACTABLE[reacted++];
@@ -327,14 +324,14 @@ segment(
 
 segment(
   "thread",
-  readRoom,
+  () => rooms().read,
   inRoom,
   (session) => session.openThread(THREAD),
 );
 
 segment(
   "journey",
-  readRoom,
+  () => rooms().read,
   () => Promise.resolve(),
   inRoom,
 );

@@ -12,9 +12,10 @@
  * spaces besides its own.
  *
  * Writing joins a member to the room: the room tells the writer's manager,
- * which lists the room and puts the member on its roster. So every member who
- * has written once is on the roster, with no step of their own beyond the
- * message.
+ * which lists the room and puts the member on its roster. A member left with
+ * nothing to write, in a room of fewer messages than members, joins the way a
+ * visit to the room joins them in the shell, through their manager's
+ * `joinRoom`. So every member is on the roster whatever the room's size.
  *
  * The members write in turn, each a block of consecutive messages, and a
  * member's runtime runs only while they write their block. Every runtime that
@@ -35,6 +36,7 @@
 
 import type { DID } from "@commonfabric/identity";
 import { Identity } from "@commonfabric/identity";
+import { joinVisitedRoomOf } from "@commonfabric/piece/ops";
 import type { Cell } from "@commonfabric/runner";
 import {
   markRendererTrustedEvent,
@@ -83,10 +85,7 @@ export interface FabrichatRoomFixture {
   /** The room's title. */
   title: string;
 
-  /**
-   * The members who wrote in the room, and so are on its roster, the starter
-   * first. A room of fewer messages than members leaves the rest out.
-   */
+  /** The members, all on the room's roster, the starter first. */
   members: SeededMember[];
 
   /** How many messages the room's main conversation holds. */
@@ -245,14 +244,16 @@ export function replyBody(thread: number, reply: number): string {
 
 /**
  * The message each thread is under: the latest messages, one per thread
- * counting back from the last, so that each is in the window a room shows.
+ * counting back from the last, so that each is in the window of the latest
+ * messages the room addresses its messages by. A room has no more threads than
+ * that window holds messages.
  */
 export function threadRoots(
   messageCount: number,
   threadCount: number,
 ): number[] {
   return Array.from(
-    { length: Math.min(threadCount, messageCount) },
+    { length: Math.min(threadCount, messageCount, LATEST_WINDOW) },
     (_, thread) => messageCount - 1 - thread,
   );
 }
@@ -341,17 +342,27 @@ async function openMember(
     apiUrl,
     identity,
   });
-  const home = (await controller.ensureDefaultPattern()).getCell();
-  await controller.runtime.idle();
-  const profiles = home.key("profiles") as Cell<unknown[] | undefined>;
-  await profiles.pull();
-  if ((profiles.get() ?? []).length === 0) {
-    await sendTrusted(controller, home.key("createProfile"), {
-      target: { value: memberName(index) },
-    }, PROFILE_CREATE);
-    await until(profiles, (list) => (list ?? []).length > 0);
+  try {
+    const home = (await controller.ensureDefaultPattern()).getCell();
+    await controller.runtime.idle();
+    // The list holds links to profiles in spaces of their own, which its
+    // length needs none of.
+    const profiles = home.key("profiles").asSchema<Cell<unknown>[]>({
+      type: "array",
+      items: { asCell: ["cell"] },
+    });
+    await profiles.pull();
+    if ((profiles.get() ?? []).length === 0) {
+      await sendTrusted(controller, home.key("createProfile"), {
+        target: { value: memberName(index) },
+      }, PROFILE_CREATE);
+      await until(profiles, (list) => (list ?? []).length > 0);
+    }
+    return { index, identity, controller, home, sent: 0 };
+  } catch (error) {
+    await controller.dispose();
+    throw error;
   }
-  return { index, identity, controller, home, sent: 0 };
 }
 
 /**
@@ -359,9 +370,12 @@ async function openMember(
  * runtime.
  */
 async function closeMember(member: MemberSession): Promise<void> {
-  await member.controller.runtime.idle();
-  await member.controller.synced();
-  await member.controller.dispose();
+  try {
+    await member.controller.runtime.idle();
+    await member.controller.synced();
+  } finally {
+    await member.controller.dispose();
+  }
 }
 
 /** The space the member's first profile is the root of. */
@@ -555,6 +569,8 @@ export async function seedFabrichatRoom(
     return member;
   };
   const release = async (member: MemberSession): Promise<void> => {
+    // Out of the set before closing, which disposes the runtime whether or not
+    // its writes reach the server, so a failure here is not disposed twice.
     open.delete(member);
     await closeMember(member);
   };
@@ -620,9 +636,33 @@ export async function seedFabrichatRoom(
       }
     }
 
-    // Writing or reacting joined each member who did either, and no one else.
+    // A member with nothing to write joins as a visit joins them.
+    for (let index = 0; index < memberCount; index++) {
+      if (acted.has(index)) continue;
+      const visitor = await openRoomMember(index);
+      await enterRoom(visitor, room);
+      const decision = await joinVisitedRoomOf(
+        visitor.controller.runtime,
+        visitor.home,
+        visitor.identity.did(),
+        room.space as DID,
+      );
+      if (decision !== "sent") {
+        throw new Error(
+          `${memberName(index)}'s visit did not join the room: ${decision}`,
+        );
+      }
+      const joined = acted.size + 1;
+      await until(
+        visitor.room!.key("roster") as Cell<unknown[] | undefined>,
+        (list) => (list ?? []).length >= joined,
+      );
+      await record(visitor);
+      await release(visitor);
+    }
+
     const roster = helper.room!.key("roster") as Cell<unknown[] | undefined>;
-    await until(roster, (list) => (list ?? []).length >= acted.size);
+    await until(roster, (list) => (list ?? []).length >= memberCount);
 
     for (const member of [...open]) await release(member);
     return {

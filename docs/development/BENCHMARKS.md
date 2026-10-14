@@ -796,8 +796,8 @@ Four things follow from that shape:
   the board benchmark's size does. CI leaves both unset, and the size in force
   is written to stderr.
 
-Ten runtimes is the largest footprint of any benchmark in the job, and the cost
-is worth knowing before adding a voter to it. **Measured on a default hosted
+Ten runtimes is a large footprint, and the cost is worth knowing before adding
+a voter to it. **Measured on a default hosted
 runner — four cores, 15.6GB — the file takes 89 seconds and peaks at 4.76GB
 resident**, under a third of that host with around 9GB still free. The runner
 group this workflow uses is a larger machine than that one, so the share it
@@ -944,7 +944,11 @@ brought up by `ensureDefaultPattern()` and a profile created through Home's
 of its own and carries the `represents-principal` label, as one created in the
 browser does. The starter creates the room from their manager's `createGroup`,
 naming every other member by address, and the members write in it with trusted
-`ChatSend` events. Writing is what joins a member to the room's roster.
+`ChatSend` events. Writing is what joins a member to the room's roster. In a
+room of fewer messages than members, a member left with nothing to write joins
+the way a visit joins them in the shell, through `joinVisitedRoomOf()` and their
+manager's `joinRoom`, so every room has all of its members on the roster
+whatever its size.
 
 The profiles are the reason the fixture goes through Home rather than a
 stand-in. Every participant chip and every author badge reads a profile in
@@ -984,9 +988,11 @@ pane), and `journey` (`load`, `sign in` and `messages` together). Each segment
 reaches its starting point untimed in a browser of its own, as the navigation
 benchmark's do.
 
-`send` and `react` write, so they visit a second room of the same shape. Each
-`send` iteration adds one message to it and each `react` iteration adds one
-reaction, to a different message each time. One read-accounted sample each of
+`send` and `react` write, so each visits a room of its own of the same shape,
+and neither changes what another segment measures. Each `send` adds one message
+to its room, so the room holds thirty messages before the first send and
+thirty-six before the last; each `react` adds one reaction, to a different
+message each time, and leaves the messages as they were. One read-accounted sample each of
 `messages` and `send`, taken in a browser of its own, goes to stderr with the
 same counters the rendered lunch-poll benchmark records.
 
@@ -1010,6 +1016,11 @@ hides those outside the main conversation's view rather than leaving them out,
 so a room of three hundred messages builds three hundred rows although its
 `latest` holds a hundred; these curves say what that costs. Each size seeds two
 rooms, one for each series, so that sends do not grow the room `<size>` loads.
+The `send <size>` room does grow, by one message per send: it holds `<size>`
+messages before the first of its five sends and four more before the last. A
+fresh room per send would multiply each size's seeding by five, and against
+sizes a factor of three or more apart that growth stays well inside one step of
+the curve.
 Sizes above 100 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
 the limit.
 
@@ -1031,6 +1042,12 @@ from different members therefore collide, which a lunch-poll vote does not. A
 contention accounting of rejected commits and rolled-back writes over one
 untimed burst goes to stderr; on three members sending two messages each it
 counted 15 and 37.
+
+Twelve runtimes is the largest footprint of any benchmark in the job. The file
+releases them after the last of the `n + 2` invocations `Deno.bench` makes of
+its body, so they are not a floor under the benchmarks measured after it; the
+file throws if it is invoked once more than that, rather than run on released
+workers. A run stopped early releases them at process exit instead.
 
 A burst adds sixty messages, so each iteration sends into a room of its own,
 created outside the measurement by the first member, into which each member has

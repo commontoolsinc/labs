@@ -230,9 +230,18 @@ async function reverts() {
   );
 }
 
-// `Deno.bench` has no hook for "the file's benchmarks are done", so the
-// workers are released at process exit instead, where the listener runs
-// synchronously and `terminate()` is the form that fits.
+/**
+ * How many times `Deno.bench` invokes the body: `n + 2`, of which only the
+ * first is discarded, whatever `warmup` is set to (measured on Deno 2.9.4).
+ * So `n` is one less than the bursts a run measures.
+ */
+const INVOCATIONS = ITERATIONS + 1;
+
+// `Deno.bench` has no hook for "the file's benchmarks are done". The workers
+// are released after the last invocation, so that twelve runtimes are not a
+// floor under every benchmark measured after this file, and at process exit
+// as well, where the listener runs synchronously and `terminate()` is the form
+// that fits, for a run that stopped before its last invocation.
 globalThis.addEventListener("unload", () => harness.terminate());
 
 let round = 1;
@@ -240,14 +249,21 @@ let round = 1;
 Deno.bench({
   name: `send burst ${MEMBERS}x${MESSAGES}`,
   group: GROUP,
-  n: ITERATIONS,
+  n: ITERATIONS - 1,
   warmup: WARMUP,
   async fn(b) {
+    if (round > INVOCATIONS) {
+      throw new Error(
+        `The send burst released its workers after ${INVOCATIONS} ` +
+          `invocations, and \`Deno.bench\` invoked it again`,
+      );
+    }
     const current = round++;
     const room = await openRoom(current);
     b.start();
     await burst(room, current);
     b.end();
     await verify(room, current, MESSAGES);
+    if (current === INVOCATIONS) await harness.dispose();
   },
 });

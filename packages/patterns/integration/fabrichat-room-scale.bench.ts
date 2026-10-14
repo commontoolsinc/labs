@@ -24,7 +24,11 @@
  * size and the curve is the messages'. Each size seeds two rooms, one each
  * series, because a `send` adds a message to the room it measures, and a
  * hundred-message room's `<size>` would otherwise measure a room some sends
- * larger than its name.
+ * larger than its name. The `send <size>` room itself grows by one message per
+ * send, from `<size>` before the first of its five sends to four more before
+ * the last; a fresh room per send would multiply each size's seeding by five,
+ * and that growth stays well inside one step of a curve whose sizes are a
+ * factor of three or more apart.
  *
  * Requirements and stdout discipline are the same as the fixed-size benchmark.
  */
@@ -78,7 +82,8 @@ const WARMUP = 1;
 
 /**
  * Invocations `Deno.bench` makes but does not measure: of `n + 2`, only the
- * first, whatever `warmup` is set to (measured on Deno 2.9.4).
+ * first, whatever `warmup` is set to (measured on Deno 2.9.4). So `n` is one
+ * less than the iterations a run measures.
  */
 const DISCARDED_INVOCATIONS = 1;
 
@@ -177,7 +182,7 @@ function sizeBench(
   Deno.bench({
     name,
     group: GROUP,
-    n: ITERATIONS,
+    n: ITERATIONS - DISCARDED_INVOCATIONS,
     warmup: WARMUP,
     ignore: size > SCALE_LIMIT,
   }, async (b) => {
