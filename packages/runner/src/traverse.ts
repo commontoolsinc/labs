@@ -3565,7 +3565,14 @@ export function combineSchemaForLink(
   if (linkDefault === undefined) {
     return parentSchema;
   }
-  const key = internSchemaPairAsKey(parentSchema, linkSchema);
+  // The result holds nothing of the link schema but its default, so the key
+  // is the reader's schema and that default. Each document a link is read
+  // out of holds the link's schema as an object of its own, and a key over
+  // the whole link schema would hash one whole schema per document. The
+  // second delimiter keeps this key apart from the pair key above.
+  const key = `${internSchemaAsTaggedHashString(parentSchema)}|default|${
+    hashStringOf(linkDefault)
+  }`;
   const cached = _combineLinkSchemaCache.get(key);
   if (cached !== undefined) return cached;
   return internSet(

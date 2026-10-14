@@ -332,6 +332,11 @@ deno check packages/patterns/phaser-shared-targets/guest.ts
 deno task cf check packages/patterns/phaser-shared-targets/main.tsx --no-run
 ```
 
+Launch the pattern with the steps under
+[Verify](./iframe-pattern-guide.md#verify) in the plain DOM guide, substituting
+this pattern's path, a space label, and a slug. Those steps start local
+servers, create the space, and sign the browser in as its owner.
+
 Verify in a real browser that the canvas renders, pointer and keyboard controls
 work, shared changes reconcile without recreating the game, concurrent spawns
 compose, stable entities survive reordering, declared user/session scopes stay

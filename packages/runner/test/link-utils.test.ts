@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { deepFreeze } from "@commonfabric/data-model";
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -25,6 +25,7 @@ import {
   parseLinkOrThrow,
   parseLLMFriendlyLink,
   parseReferenceParts,
+  sanitizeAndFreezeSchemaForLinks,
   sanitizeAndInternSchemaForLinks,
   sanitizeSchemaForLinks,
   schemaForSpaceCrossing,
@@ -1074,6 +1075,89 @@ describe("link-utils", () => {
       for (const primitive of [undefined, true, false]) {
         expect(sanitizeAndInternSchemaForLinks(primitive)).toBe(primitive);
       }
+    });
+
+    describe("sanitizeAndFreezeSchemaForLinks()", () => {
+      it("returns a deep-frozen strip of a mutable schema, leaving the schema unfrozen", () => {
+        const schema = {
+          type: "object",
+          properties: { name: { type: "string", asCell: ["cell"] } },
+          required: ["name"],
+        } satisfies JSONSchema;
+        const frozen = sanitizeAndFreezeSchemaForLinks(schema);
+        expect(frozen).toEqual({
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        });
+        expect(isDeepFrozen(frozen)).toBe(true);
+        expect(Object.isFrozen(schema)).toBe(false);
+        expect(Object.isFrozen(schema.properties)).toBe(false);
+        expect(Object.isFrozen(schema.properties.name)).toBe(false);
+        expect(Object.isFrozen(schema.required)).toBe(false);
+      });
+
+      it("returns the strip `sanitizeSchemaForLinks()` returns, in every mode", () => {
+        const schema = () =>
+          ({
+            type: "object",
+            properties: {
+              name: { type: "string", asCell: ["cell"] },
+              events: { type: "number", asCell: ["stream"] },
+            },
+          }) as JSONSchema;
+        for (const mode of Object.values(KeepAsCell)) {
+          for (const input of [schema(), deepFreeze(schema())]) {
+            const frozen = sanitizeAndFreezeSchemaForLinks(input, mode);
+            expect(frozen).toEqual(sanitizeSchemaForLinks(input, mode));
+            expect(isDeepFrozen(frozen)).toBe(true);
+          }
+        }
+      });
+
+      it("returns a schema with a root of its own on each call", () => {
+        // Each caller holds an object of its own, as with the mutable form: a
+        // graph holding two of these must not hold one object twice.
+        const mutable = { type: "object", properties: { name: {} } };
+        expect(sanitizeAndFreezeSchemaForLinks(mutable as JSONSchema)).not
+          .toBe(sanitizeAndFreezeSchemaForLinks(mutable as JSONSchema));
+
+        const deepFrozen = deepFreeze({
+          type: "object",
+          properties: { name: {} },
+        }) as JSONSchema;
+        const first = sanitizeAndFreezeSchemaForLinks(deepFrozen);
+        const second = sanitizeAndFreezeSchemaForLinks(deepFrozen);
+        expect(second).not.toBe(first);
+        expect(second).not.toBe(deepFrozen);
+        expect(isDeepFrozen(first)).toBe(true);
+        expect(isDeepFrozen(second)).toBe(true);
+      });
+
+      it("returns a boolean schema and `undefined` as they are", () => {
+        for (const primitive of [undefined, true, false]) {
+          expect(sanitizeAndFreezeSchemaForLinks(primitive)).toBe(primitive);
+        }
+      });
+
+      it("leaves unfrozen a part of a mutable schema nested past the depth the strip rebuilds", () => {
+        // The strip carries what lies below a fixed depth by reference, so
+        // that part of a result is otherwise still the caller's object.
+        const innermost: Record<string, unknown> = { type: "string" };
+        let nested = innermost;
+        for (let level = 0; level < 60; level++) {
+          nested = { type: "object", properties: { next: nested } };
+        }
+        const schema = {
+          type: "object",
+          properties: { deep: nested },
+        } as JSONSchema;
+        const frozen = sanitizeAndFreezeSchemaForLinks(schema, KeepAsCell.All);
+        expect(isDeepFrozen(frozen)).toBe(true);
+        expect(frozen).toEqual(schema);
+        expect(Object.isFrozen(nested)).toBe(false);
+        expect(Object.isFrozen(innermost)).toBe(false);
+      });
     });
 
     it("memoizes a frozen input per keepAsCell mode, handing out a fresh top that shares the cached sub-tree", () => {
