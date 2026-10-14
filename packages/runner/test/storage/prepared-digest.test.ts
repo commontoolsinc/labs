@@ -12,7 +12,10 @@ import {
   addCfcDenialListener,
   type CfcDenialCode,
 } from "../../src/cfc/denial-report.ts";
-import { verdictReason } from "../../src/cfc/verdict-reason.ts";
+import {
+  isVerdictReason,
+  verdictReason,
+} from "../../src/cfc/verdict-reason.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";
 import { SEED_ENVELOPE_SCHEMA_HASH } from "../cfc-seed-envelope.ts";
 import {
@@ -756,8 +759,8 @@ describe("prepared digest transaction binding", () => {
     });
 
     it("reports `write-prepare-invalidated` for an invalidation reason tagged as a verdict after a successful preparation", async () => {
-      // `invalidateCfc()` takes any string, so the tag says nothing about
-      // which pass recorded the reason.
+      // `invalidateCfc()` removes a caller's tag where it records the reason,
+      // so the tag cannot make the denial a policy refusal.
 
       const tx = prepared(1);
       tx.invalidateCfc(verdictReason("a verdict recorded after preparing"));
@@ -776,6 +779,50 @@ describe("prepared digest transaction binding", () => {
       });
       expect(error?.message).toContain("never prepared");
       expect(denials).toEqual(["write-unprepared"]);
+    });
+  });
+
+  describe("invalidateCfc()", () => {
+    it("records a caller's reason without its verdict tags", () => {
+      const tx = prepared(1);
+      try {
+        tx.invalidateCfc(verdictReason(verdictReason("forged")));
+        const state = tx.getCfcState().prepare;
+        expect(state.status === "invalidated" && state.reasons).toEqual([
+          "forged",
+        ]);
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("leaves the refused commit of a passed preparation retryable for a reason tagged as a verdict", async () => {
+      const tx = prepared(1);
+      tx.invalidateCfc(verdictReason("forged"));
+      const { error } = await tx.commit().settled;
+      expect(error?.name).toBe("StorageTransactionAborted");
+      expect((error as { reason?: Error }).reason?.message).toBe(
+        "cfc-refusal-not-a-verdict",
+      );
+    });
+
+    it("keeps the verdict tags of the reasons a refused preparation recorded", () => {
+      const underlying = runtime.edit() as ExtendedStorageTransaction;
+      const tx = new ExtendedStorageTransaction(underlying.tx);
+      try {
+        tx.writeValueOrThrow(address("output"), "one");
+        writeLabelMapUnprivileged(tx);
+        tx.setCfcEnforcementMode("enforce-explicit");
+        expect(tx.prepareCfc()).toBe("");
+        tx.invalidateCfc(verdictReason("after the refusal"));
+        const state = tx.getCfcState().prepare;
+        expect(state.status === "invalidated" && state.reasons.length).toBe(2);
+        expect(
+          state.status === "invalidated" && state.reasons.map(isVerdictReason),
+        ).toEqual([true, false]);
+      } finally {
+        tx.abort();
+      }
     });
   });
 

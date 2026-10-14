@@ -100,7 +100,11 @@ import {
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
-import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
+import {
+  isTerminalRefusal,
+  plainReason,
+  untaggedReason,
+} from "../cfc/verdict-reason.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -1748,12 +1752,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** @inheritDoc */
   invalidateCfc(reason: string): void {
     this.#activitySnapshotMemo = undefined;
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
+    const recorded = untaggedReason(reason);
     const reasons = this.#cfcState.prepare.status === "invalidated"
-      ? [...this.#cfcState.prepare.reasons, reason]
-      : [reason];
+      ? [...this.#cfcState.prepare.reasons, recorded]
+      : [recorded];
     // The digest the preparation had stays readable, and reading it is what
     // hashes it: an invalidation asks for no digest.
     const prepared = this.#preparedSnapshot;
@@ -1768,7 +1774,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         reasons,
       };
     if (wasPrepared) {
-      this.#cfcInstrumentation.onDigestInvalidation?.(reason);
+      this.#cfcInstrumentation.onDigestInvalidation?.(recorded);
     }
   }
 

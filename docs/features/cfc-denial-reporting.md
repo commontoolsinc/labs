@@ -58,8 +58,8 @@ which pass recorded the reasons rather than from their text, since
 - `write-prepare-invalidated`: prepare passed the transaction, and a change to
   it afterwards — a read, a write, a decision input recorded, a dial set —
   invalidated the preparation where the change was made. No policy check
-  refused the commit. The runtime records no invalidation as a verdict, so the
-  rejection is retryable.
+  refused the commit, and the rejection is retryable: `invalidateCfc()`
+  records its reason without a verdict tag, so no invalidation is a verdict.
 - `write-prepared-digest-mismatch`: prepare passed the transaction, and the
   recheck at commit found that its activity changed with nothing having
   invalidated the preparation.
