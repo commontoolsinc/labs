@@ -55,10 +55,13 @@ describe("test-cfc-posture", () => {
         expect(report).toContain(span);
       }
       if (flags === "--cfc-shell-posture") {
+        expect(report).toMatch(/prepareCfc\s+Δn=\s*[1-9]/);
         expect(report).toMatch(/cfc\/deriveFlowJoin\s+Δn=\s*[1-9]/);
-        expect(report).toMatch(/cfc\/preparedDigestFor\s+Δn=\s*[1-9]/);
-        // Successful writes skip refusal-source collection, but its zero count
-        // must remain visible beside the active preparation spans.
+        // A commit whose activity stands since its preparation hashes no
+        // digest, and a successful write skips refusal-source collection.
+        // Each zero count must remain visible beside the active preparation
+        // spans.
+        expect(report).toMatch(/cfc\/preparedDigestFor\s+Δn=\s*0/);
         expect(report).toMatch(/cfc\/collectConsumedLabel\s+Δn=\s*0/);
       } else {
         expect(report).not.toMatch(/cfc\/deriveFlowJoin\s+Δn=\s*[1-9]/);
