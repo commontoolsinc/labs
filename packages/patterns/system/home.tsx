@@ -7,6 +7,7 @@ import {
   NAME,
   pattern,
   type PatternFactory,
+  SELF,
   Stream,
   toSchema,
   UI,
@@ -22,6 +23,14 @@ import FabriChatManager, {
 } from "../fabrichat/manager.tsx";
 import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
+import SharedSpaceCollection, {
+  type SharedSpaceCollectionOutput,
+} from "./shared-space-collection.tsx";
+import {
+  sharedSpaceCollectionViewOf,
+  type SharedSpaceInterface,
+  sharedSpaceReceiptViewOf,
+} from "./shared-space-interface.ts";
 import {
   changeSharedSpaceMembership,
   readSharedSpaceCatalog,
@@ -98,6 +107,8 @@ type SpaceEntry = {
 };
 
 export type HomeOutput = {
+  /** The collection browser's named instance and session-local controls. */
+  socialSpaceCollection: SharedSpaceCollectionOutput;
   [NAME]: string;
   [UI]: VNode;
   // These defaults are part of Home's published result contract. Pattern setup
@@ -161,6 +172,10 @@ export type HomeOutput = {
   // `replaceRefusedPrivateInbox` writes it, from the button on Home's refusal
   // notice. No `replacement` before the first.
   privateInboxReplacement: Writable<PrivateInboxReplacementHolder>;
+  // Independent roles for product consumers. Select `commands` for writes,
+  // `view` for collection lists, and `receipts` for offer admission evidence.
+  sharedSpaces: SharedSpaceInterface;
+  // Flat aliases address the same catalog and command streams.
   sharedSpaceCatalog: SharedSpaceCatalog;
   registerSharedSpace: Stream<
     SharedSpaceRegistration,
@@ -348,7 +363,8 @@ const homeResultSchema = __cf_data(
 );
 
 const Home = pattern(
-  (_: Record<string, never>): HomeOutput => {
+  (input: Record<string, never> & { [SELF]: HomeOutput }): HomeOutput => {
+    const home = input[SELF];
     // OWN the data cells (.for for id stability)
     const favorites = new Writable<Favorite[]>([]).for("favorites");
     const journal = new Writable<JournalEntry[]>([]).for("journal");
@@ -455,11 +471,6 @@ const Home = pattern(
     // Child components
     const favoritesComponent = FavoritesManager({});
     const agentQueue = AgentQueue({});
-    // Its panel renders after every other panel. A panel inserted ahead of an
-    // existing one shifts the positions of a deployed Home's existing
-    // children, so each child's update runs on the stored state of the child
-    // that held its position before, and a stored slot the child's argument
-    // schema refuses is dropped with a `setup-stored-slot-dropped` warning.
     const chatManager = FabriChatManager({ sharedSpaceCatalog: catalog });
     const ensurePrivateInboxStream = ensurePrivateInbox({
       privateInbox,
@@ -487,13 +498,26 @@ const Home = pattern(
     const selfComponent = Self({});
     const activeTab = new Writable("spaces").for("activeTab");
     // Home's answers to requests for its inbox, which `requestPrivateInbox`
-    // links a request's receipt to. It is Home's last child: a child inserted
-    // ahead of an existing one shifts the positions of a deployed Home's
-    // existing children, as the chat manager's note says.
+    // links a request's receipt to.
     const privateInboxAnswering = PrivateInboxAnswering({
       privateInbox,
       profiles: profiles as any,
       requested: privateInboxRequests,
+    });
+    const sharedSpaces = {
+      view: computed(() => sharedSpaceCollectionViewOf(catalog.get())),
+      receipts: computed(() => sharedSpaceReceiptViewOf(catalog.get())),
+      commands: {
+        register: home.registerSharedSpace,
+        changeMembership: home.changeSharedSpaceMembership,
+      },
+      imports: { remove: home.removeSharedSpace },
+    };
+    // The builder numbers unnamed roots in input/result walk order, including
+    // the UI. Naming this spot preserves every existing positional cause.
+    const socialSpaceCollection = SharedSpaceCollection({
+      catalog,
+      view: sharedSpaces.view,
     });
 
     return {
@@ -512,6 +536,7 @@ const Home = pattern(
               <cf-tab value="self">Self</cf-tab>
               <cf-tab value="agent-runs">Agent runs</cf-tab>
               <cf-tab value="chats">Chats</cf-tab>
+              <cf-tab value="social-spaces">Social spaces</cf-tab>
             </cf-tab-list>
             <cf-tab-panel value="agent-runs" id="home-agent-runs">
               {agentQueue}
@@ -614,6 +639,9 @@ const Home = pattern(
             <cf-tab-panel value="chats" id="home-chats">
               {chatManager}
             </cf-tab-panel>
+            <cf-tab-panel value="social-spaces" id="home-social-spaces">
+              {socialSpaceCollection}
+            </cf-tab-panel>
           </cf-tabs>
 
           <div slot="header">
@@ -665,6 +693,7 @@ const Home = pattern(
       ) as VNode,
 
       // Exported data
+      socialSpaceCollection,
       favorites,
       journal,
       spaces,
@@ -680,6 +709,7 @@ const Home = pattern(
       privateInboxRefusal,
       privateInboxReplacement,
 
+      sharedSpaces,
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
 
       // Exported handlers
