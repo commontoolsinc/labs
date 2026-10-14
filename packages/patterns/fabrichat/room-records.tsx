@@ -888,6 +888,12 @@ export interface RoomActState {
   closesPicker?: boolean;
 
   /**
+   * Whether an OWNER of the room's space may obliterate its messages, as the
+   * room's policy says; absent, `ownersMayObliterateIn()` decides by `kind`.
+   */
+  ownersMayObliterate?: boolean;
+
+  /**
    * Tells the viewer's manager the viewer has joined the room, as
    * `tellManagerJoined` does, in an event of its own; absent where nothing is
    * told. The act's own transaction reads nothing of the manager, which can
