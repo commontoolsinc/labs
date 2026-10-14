@@ -184,6 +184,13 @@ const storedSlots = async (
   }));
 };
 
+/** The slots of `after` that `before` holds too, in `after`'s order. */
+const kept = (
+  after: readonly StoredSlot[],
+  before: readonly StoredSlot[],
+): StoredSlot[] =>
+  after.filter((slot) => before.some(({ name }) => name === slot.name));
+
 describe("FabriChat update rehearsal", () => {
   // Set up once, in `beforeAll()`: the deployed release, seeded and then
   // updated to this tree's source. Each test reads what that left, so each
@@ -521,13 +528,17 @@ describe("FabriChat update rehearsal", () => {
   });
 
   it("reads back every stored slot and per-user outcome the deployed release wrote", () => {
-    expect(after.manager, "The manager's stored slots changed").toEqual(
-      before.manager,
-    );
+    // The update may add slots, each with its default; every slot the
+    // deployed release stored has to read back as it was.
+    expect(
+      kept(after.manager, before.manager),
+      "The manager's stored slots changed",
+    ).toEqual(before.manager);
     after.rooms.forEach((slots, index) =>
-      expect(slots, `Room ${index}'s stored slots changed`).toEqual(
-        before.rooms[index],
-      )
+      expect(
+        kept(slots, before.rooms[index]),
+        `Room ${index}'s stored slots changed`,
+      ).toEqual(before.rooms[index])
     );
     expect(after.messageRequests).toEqual(before.messageRequests);
     expect(after.addRequests).toEqual(before.addRequests);
