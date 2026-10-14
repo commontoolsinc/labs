@@ -185,6 +185,45 @@ describe("read-value", () => {
       );
     });
 
+    it("refuses an empty token, one the run does not hold, and a path holding nothing", async () => {
+      // Each refusal names what was wrong with the reference, never a value.
+      fabric = await createFabric("observe");
+      const { ref } = await seedDocument(fabric.runtime, fabric.session);
+      const { table } = await held(ref);
+      const read = (input: { token: string; select?: string }) =>
+        readValueTool.invoke(contextWith(fabric!.session, table), input);
+
+      expect(await read({ token: " " })).toMatchObject({
+        status: "error",
+        message: "read_value requires a handle token",
+      });
+      expect(await read({ token: "cfh:a:zzzzz" })).toMatchObject({
+        status: "error",
+        message: "read_value can only read a handle this run holds",
+      });
+      expect(await read({ token: ref, select: "missing" })).toMatchObject({
+        status: "error",
+        message: expect.stringContaining("holds nothing at that path"),
+      });
+    });
+
+    it("refuses a handle whose own space the session was not admitted to", async () => {
+      fabric = await createFabric("observe");
+      const elsewhere = (await Identity.generate()).did();
+      const ref = `//${elsewhere}/of:fid1:read-value-elsewhere`;
+      const { table } = await held(ref);
+
+      const output = await readValueTool.invoke(
+        contextWith(fabric.session, table),
+        { token: ref },
+      );
+
+      expect(output).toMatchObject({
+        status: "error",
+        message: expect.stringContaining("admitted to"),
+      });
+    });
+
     it("narrows what it reads to the selected path", async () => {
       fabric = await createFabric("observe");
       const { ref } = await seedDocument(fabric.runtime, fabric.session);
