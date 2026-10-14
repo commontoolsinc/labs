@@ -5886,6 +5886,38 @@ describe("piece schema compatibility", () => {
       ).not.toThrow();
     });
 
+    it("accepts a candidate result whose optional cell property no longer admits `undefined` beside the cell", () => {
+      const cell: JSONSchema = {
+        anyOf: [{ type: "undefined" }, { type: "string" }],
+        asCell: ["cell"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            { type: "object" },
+            objectWith({ anyOf: [{ type: "undefined" }, cell] }),
+          ),
+          pattern({ type: "object" }, objectWith(cell)),
+        )
+      ).not.toThrow();
+    });
+
+    it("accepts a candidate argument whose optional cell property comes to admit `undefined` beside the cell", () => {
+      const cell: JSONSchema = {
+        anyOf: [{ type: "undefined" }, { type: "string" }],
+        asCell: ["cell"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(objectWith(cell), { type: "object" }),
+          pattern(
+            objectWith({ anyOf: [cell, { type: "undefined" }] }),
+            { type: "object" },
+          ),
+        )
+      ).not.toThrow();
+    });
+
     it("still refuses a candidate argument whose cell no longer admits an `undefined` value", () => {
       expect(() =>
         assertPatternSchemasBackwardCompatible(

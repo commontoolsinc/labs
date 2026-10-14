@@ -1135,12 +1135,12 @@ function additionalPropertiesOf(schema: SchemaObject): JSONSchema {
 }
 
 /**
- * `schema`, the schema of a property of a source object, without the
- * `undefined` alternative it may hold. An object stores no property whose
- * value is `undefined` (`docs/specs/json_schema.md`), so that alternative
- * describes no value the source holds, and the target need not accept it: a
- * schema generator that leaves out the `undefined` an optional property's `?`
- * adds narrows nothing a piece stores. A property whose only alternative is
+ * `schema`, the schema of an object's property, without the `undefined`
+ * alternative it may hold. An object stores no property whose value is
+ * `undefined` (`docs/specs/json_schema.md`), so that alternative describes no
+ * value either side holds, and both are compared without it: a schema
+ * generator that leaves out the `undefined` an optional property's `?` adds
+ * narrows nothing a piece stores. A property whose only alternative is
  * `undefined` holds no value at all, and reads as `false`; one with a single
  * other alternative reads as that alternative.
  */
@@ -1383,7 +1383,7 @@ function objectSubsetIssue(
     if (Object.hasOwn(targetProperties, property)) {
       const directIssue = schemaSubsetIssue(
         sourceDirect,
-        targetProperties[property],
+        withoutUndefinedAlternative(targetProperties[property]),
         propertyPath,
         context,
       );
