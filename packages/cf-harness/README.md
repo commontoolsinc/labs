@@ -172,9 +172,10 @@ What works today:
     result; validates the submitted value against that schema and writes the
     host-owned result file)
   - `describe_handle` (shape and labels of a handle's referent, and the tables
-    of one that is a database together with how full each of them is, never its
-    data; a piece's handle also lists the piece's verbs, each with its author's
-    description, the event schema it takes and the result schema it returns; see
+    of one that is a database together with how full a sample of each one's
+    first rows is, never its data; a piece's handle also lists the piece's
+    verbs, each with its author's description, the event schema it takes and the
+    result schema it returns; see
     [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `resolve_piece` (parent-only exact slug resolution in the session's space;
     returns a handle for child source reads and revisions, without source or
@@ -1545,21 +1546,32 @@ prose and defaults do not ride out on the schema; only columns that reduction
 kept contribute a label. The read is conditional on nothing being declared, so a
 referent that states its own shape is never opened.
 
-**How full each of those tables is answers beside the contract, under `fill`.**
-One entry per disclosed table: `rows`, every row the table holds, and `nonNull`,
-one count per disclosed column saying how many of those rows carry a value there
-rather than NULL. A column reading `0` beside a non-zero `rows` is filled on no
-row at all, so a query filtering on it matches nothing — and an empty result
-from such a query is indistinguishable, from inside the pattern, from a source
-that is genuinely empty. That is the difference these counts buy, and it is the
-reason they are worth the one quantity this tool reports: no row, no cell value
-and no column's contents cross with a count, and no predicate a caller chose is
-ever counted — a count is taken of a whole table and of whole columns, or not at
-all. A table that could not be counted reports `unread` with what refused it,
-never `0`, since zero rows and unknown rows are the two readings the counts
-exist to separate. `fill` is absent entirely where the run's storage provider
-offers no query, which claims nothing about any table rather than reporting them
-all as empty.
+**How full those tables are answers beside the contract, under `fill`, judged
+from a sample of each table's first rows.** `fill.sampleLimit` is the most rows
+the sample reads of any one table, and `fill.tables` holds one entry per
+disclosed table: `sampled`, how many rows the sample read — every row the table
+holds, up to the limit, so `0` is an empty table — and `nonNull`, one figure per
+disclosed column saying how many of those rows carry a value there rather than
+NULL. A column reading `0` beside a non-zero `sampled` has no value in any row
+the sample read, so a query filtering on it is likely to match nothing — and an
+empty result from such a query is indistinguishable, from inside the pattern,
+from a source that is genuinely empty. That is the difference the sample buys,
+and it is the reason its figures are worth the one quantity this tool reports:
+no row, no cell value and no column's contents cross with them, and no predicate
+a caller chose is ever applied — a figure is taken of a table's first rows and
+of whole columns across them, or not at all.
+
+The figures are a sample's and never a total. The databases this answers for are
+often connector stores another process writes, gigabytes of them, and counting a
+table walks the whole of it unless an index serves the count; the sample reads
+at most `sampleLimit` rows whatever the table holds, and reads each column's
+NULL-ness from the row header without loading the value. What that costs is
+coverage: the first rows a table yields are usually its oldest, so a column with
+no value among them may still hold values further on. A table that could not be
+read reports `unread` with what refused it, never `0`, since zero rows and
+unknown rows are the two readings the sample exists to separate. `fill` is
+absent entirely where the run's storage provider offers no query, which claims
+nothing about any table rather than reporting them all as empty.
 
 Without it a database reads as an opaque value, and the code an agent writes
 over an opaque value is code that treats it as one — stringifying a handle and
@@ -1642,9 +1654,10 @@ failed call.
 
 `describe_handle` is declared `effectClass: "read"`. It reads no value except a
 database handle's own table declaration, and — where that handle names a
-database it can query — the count of its rows and of the non-NULL values in each
-disclosed column. It reports no datum from any of them: a count is derived from
-every row and identifies none, it is taken of a whole table and of whole columns
+database it can query — how many of the first rows of each table it sampled and
+how many of those hold a value in each disclosed column. It reports no datum
+from any of them: a figure is derived from every sampled row and identifies
+none, it is taken of a table's first rows and of whole columns across them
 rather than under a predicate a caller chose, and no cell value crosses with it.
 Answering from the fabric establishes the run's fabric session — loading the
 identity key and opening a remote connection — so the first call in a run
