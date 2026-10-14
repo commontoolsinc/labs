@@ -2947,6 +2947,11 @@ deno task run -- \
   --prompt "Delegate a focused inspection and summarize the result."
 ```
 
+The `delegate_task` descriptor a run offers lists only the profiles the run
+allows. A delegation to another profile is refused, and recorded among the run's
+failures as `subagent_profile_not_allowed`; the model reads the refusal and the
+run goes on, so that kind is never the run's `primaryFailure`.
+
 The browser profile is the only path to the `browser` tool. The tool drives the
 host `agent-browser` CLI one structured action per call, while the parent still
 receives only the normal sanitized subagent result. Together with the profile's

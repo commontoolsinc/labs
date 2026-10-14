@@ -663,3 +663,23 @@ Deno.test("selectPrimaryHarnessFailure prefers the highest-signal failure kind",
 
   assertEquals(primary?.kind, "tool_not_allowed");
 });
+
+Deno.test("selectPrimaryHarnessFailure never selects a refused subagent profile", () => {
+  const refusal = createHarnessFailureRecord({
+    kind: "subagent_profile_not_allowed",
+    source: "policy_event",
+    detail: 'delegate_task profile "web_search" is not allowed in this run',
+    at: "2026-10-14T21:00:00.000Z",
+    toolId: "delegate_task",
+  });
+  const invalid = createHarnessFailureRecord({
+    kind: "invalid_tool_call",
+    source: "tool_call",
+    detail: "goal must be a string",
+    at: "2026-10-14T21:00:01.000Z",
+    toolId: "delegate_task",
+  });
+
+  assertEquals(selectPrimaryHarnessFailure([refusal]), undefined);
+  assertEquals(selectPrimaryHarnessFailure([refusal, invalid]), invalid);
+});

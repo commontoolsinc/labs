@@ -4116,6 +4116,7 @@ export class CfHarnessPromptLoop {
         const toolRun = {
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           browserHost: this.engine.browserHost !== undefined,
+          subagentProfiles: [...this.#allowedSubagentProfiles],
         };
         try {
           response = await this.modelClient.complete({
@@ -4853,10 +4854,10 @@ export class CfHarnessPromptLoop {
         : {}),
     });
     const recordPolicyEvent = async (
-      event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
+      ...args: Parameters<CfHarnessEngine["recordPolicyEvent"]>
     ): Promise<void> => {
       const index = this.engine.getRunState().policyEvents.length;
-      await this.engine.recordPolicyEvent(event);
+      await this.engine.recordPolicyEvent(...args);
       policyEventIndexes.push(index);
     };
     if (!this.#allowedToolIds.has(toolId)) {
@@ -5093,7 +5094,7 @@ export class CfHarnessPromptLoop {
           toolInputSummary,
           detail,
           observationDenied: denial,
-        });
+        }, { failureKind: "subagent_profile_not_allowed" });
         recordActivity({
           type: "cf-harness.tool-activity",
           ...baseActivity("denied", "not-run"),
