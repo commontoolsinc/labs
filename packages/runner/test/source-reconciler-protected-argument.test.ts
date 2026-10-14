@@ -938,6 +938,35 @@ interface Input {
       );
     });
 
+    it("refuses a release that adds a guarded list where the document holds `undefined`, and keeps the slot as it was", async () => {
+      // A slot holding `undefined` holds a value, which no initialization
+      // replaces and no new policy may adopt.
+      await reconcileRelease(
+        "undefined-slot-release",
+        NAMED_SOURCE,
+        withList(),
+        async (runtime, room) => {
+          await prime(runtime, room);
+          const argument = room.getArgumentCell<Room>()!;
+          const tx = runtime.edit();
+          argument.withTx(tx).key("titles").setRaw(undefined);
+          expect((await tx.commit().settled).error).toBeUndefined();
+          await argument.pull();
+          const stored = argument.getRaw() as Room;
+          expect(Object.hasOwn(stored, "titles")).toBe(true);
+          expect(stored.titles).toBeUndefined();
+        },
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          const stored = room.getArgumentCell<Room>()!.getRaw() as Room;
+          expect(Object.hasOwn(stored, "titles")).toBe(true);
+          expect(stored.titles).toBeUndefined();
+        },
+      );
+    });
+
     it("refuses a release that guards a slot the document already holds, and keeps the slot as it was", async () => {
       // Before the release, `titles` is a list anyone may write, and holds an
       // entry; guarding it would adopt what it holds.

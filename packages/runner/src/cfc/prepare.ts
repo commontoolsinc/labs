@@ -98,6 +98,7 @@ import type {
   IMemorySpaceAddress,
   IReadActivity,
   MediaType,
+  TransactionWriteDetail,
 } from "../storage/interface.ts";
 import {
   internalVerifierRead,
@@ -1787,6 +1788,53 @@ const slotHoldsInitialization = (
 };
 
 /**
+ * The write details of `tx` covering the logical `path` of `target`'s
+ * document, in the order their paths were first written.
+ */
+const writeDetailsCovering = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): TransactionWriteDetail[] => {
+  const addressPath = ["value", ...path];
+  const details = tx.getWriteDetailsForTarget?.(target) ??
+    tx.getWriteDetails?.(target.space) ?? [];
+  return [...details].filter((detail) =>
+    detail.address.id === target.id &&
+    normalizeCellScope(detail.address.scope) === target.scope &&
+    concretePathHasPrefix(addressPath, detail.address.path.map(String))
+  );
+};
+
+/**
+ * What the snapshot of `detail`, a write detail covering the logical `path`,
+ * held at that path, or `undefined` where it can't tell: where the detail
+ * records no presence, or the way down passes through a value that is not an
+ * object or array, or one `opaque` names.
+ */
+const previousAtPath = (
+  detail: TransactionWriteDetail,
+  path: readonly string[],
+  opaque: (value: unknown) => boolean,
+): { present: false } | { present: true; value: FabricValue } | undefined => {
+  if (detail.previousPresent === undefined) return undefined;
+  if (!detail.previousPresent) return { present: false };
+  let previous = detail.previousValue;
+  for (const segment of ["value", ...path].slice(detail.address.path.length)) {
+    if (!isWalkableObjectOrArray(previous) || opaque(previous)) {
+      return undefined;
+    }
+    if (!Object.hasOwn(previous, segment)) return { present: false };
+    previous = (previous as Record<string, FabricValue>)[segment];
+  }
+  return { present: true, value: previous };
+};
+
+/**
  * A runtime initialization covers one absent slot and its exact final value.
  * A capture covers a slot that was absent or held a link to the same cell,
  * and ends holding a link to it, whatever schema each link carries. A binding
@@ -1834,33 +1882,10 @@ const writeIsRuntimeInitialization = (
   // setup staged is all a binding asks; a write in the transaction that
   // re-points the slot elsewhere leaves it holding another cell.
   if (input.mode === "binding") return true;
-  const addressPath = ["value", ...input.target.path];
-  const details = tx.getWriteDetailsForTarget?.(target) ??
-    tx.getWriteDetails?.(target.space) ?? [];
-  const covering = [...details].filter((detail) =>
-    detail.address.id === target.id &&
-    normalizeCellScope(detail.address.scope) === target.scope &&
-    concretePathHasPrefix(addressPath, detail.address.path.map(String))
-  );
+  const covering = writeDetailsCovering(tx, target, input.target.path);
   // A link staged over the link the slot holds already lands no write there:
   // the slot keeps its link, so nothing is repointed.
   if (staged && covering.length === 0) return true;
-  // What one covering write's snapshot held at the slot, if it can tell.
-  const previousAtSlot = (
-    detail: (typeof covering)[number],
-  ): { present: false } | { present: true; value: FabricValue } | undefined => {
-    if (detail.previousPresent === undefined) return undefined;
-    if (!detail.previousPresent) return { present: false };
-    let previous = detail.previousValue;
-    for (const segment of addressPath.slice(detail.address.path.length)) {
-      if (!isWalkableObjectOrArray(previous) || isWriteRedirectLink(previous)) {
-        return undefined;
-      }
-      if (!Object.hasOwn(previous, segment)) return { present: false };
-      previous = (previous as Record<string, FabricValue>)[segment];
-    }
-    return { present: true, value: previous };
-  };
   // The slot as it stood before the transaction. A write detail keeps its
   // path's state from before the path was first written, and details come in
   // the order their paths were first written, so the first covering detail
@@ -1870,7 +1895,9 @@ const writeIsRuntimeInitialization = (
   // about what the slot held before. Overlapping write paths capture
   // different intermediate states, so the deepest detail is no substitute.
   const first = covering[0];
-  const before = first === undefined ? undefined : previousAtSlot(first);
+  const before = first === undefined
+    ? undefined
+    : previousAtPath(first, input.target.path, isWriteRedirectLink);
   if (before === undefined) return false;
   // A capture staged again, under whatever schema its link now carries, over
   // a slot that held a link to the same cell repoints nothing, even when the
@@ -9745,24 +9772,50 @@ const beneathForeignPosition =
   };
 
 /**
- * Whether a logical path lies at or beneath a new field: a concrete property
- * the document held nothing at before the transaction, which `storedSchema`
- * declares no policy at or beneath and which overlaps none of
- * `restatedPaths`. A path whose stored value can't be told, or which reaches
- * a `*` before such a property, lies beneath none.
+ * Whether a logical path of `target`'s document lies at or beneath a new
+ * field: a concrete property the object holding it lacked before the
+ * transaction, so that one holding `undefined` is not new, which
+ * `storedSchema` declares no policy at or beneath and which overlaps none of
+ * `restatedPaths`. A path whose prior state can't be told, which passes
+ * through a link, or which reaches a `*` before such a property, lies beneath
+ * none.
  */
 const atOrBeneathNewField = (
-  valuesAt: (path: readonly string[]) => readonly FabricValue[] | undefined,
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
   storedSchema: JSONSchema,
   restatedPaths: readonly (readonly string[])[],
 ) => {
   const declared = cfcSchemaEntries(storedSchema).map((entry) => entry.path);
+  // Whether the document held `field` before the transaction. Where nothing
+  // the transaction wrote covers it, the object holding it holds it, or not,
+  // as it did before.
+  const heldBefore = (field: readonly string[]): boolean | undefined => {
+    const first = writeDetailsCovering(tx, target, field)[0];
+    if (first !== undefined) {
+      return previousAtPath(first, field, isPrimitiveCellLink)?.present;
+    }
+    const holder = tx.readValueOrThrow(
+      { ...target, path: field.slice(0, -1) },
+      {
+        meta: INTERNAL_VERIFIER_META,
+      },
+    );
+    return isWalkableObjectOrArray(holder) && !isPrimitiveCellLink(holder)
+      ? Object.hasOwn(holder, field[field.length - 1])
+      : undefined;
+  };
   return (path: readonly string[]): boolean => {
     for (let depth = 1; depth <= path.length; depth++) {
+      if (path[depth - 1] === "*") return false;
       const field = path.slice(0, depth);
-      const values = field[depth - 1] === "*" ? undefined : valuesAt(field);
-      if (values === undefined) return false;
-      if (values.length === 0) {
+      const held = heldBefore(field);
+      if (held === undefined) return false;
+      if (!held) {
         return !declared.some((entry) => pathPatternsOverlap(field, entry)) &&
           !restatedPaths.some((restated) => pathsOverlap(restated, field));
       }
@@ -13291,7 +13344,8 @@ export function* prepareBoundaryCommitSteps(
         keepsStoredSchema = true;
       } else {
         const newField = atOrBeneathNewField(
-          storedValuesAt(tx, { space, id, scope }),
+          tx,
+          { space, id, scope },
           storedSchema,
           deferredWriterPaths,
         );
