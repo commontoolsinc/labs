@@ -27,7 +27,12 @@ import {
 export { BRIDGE_READ_REFUSED };
 
 /** Behavior advertised for one named bridge resource. */
-export type BridgeResourceKind = "cell" | "stream" | "sqlite" | "service";
+export type BridgeResourceKind =
+  | "cell"
+  | "stream"
+  | "sqlite"
+  | "service"
+  | "presence";
 
 /** Cancels a live bridge subscription. */
 export type BridgeCancel = () => void;
@@ -89,13 +94,23 @@ type BridgeResourceMetadata = {
   description?: string;
 };
 
+/** Delivers the values and the failures of a resource that is not a cell. */
+export type BridgeResourceSink = (
+  listener: (value: FabricValue | undefined) => void,
+  failed: BridgeSinkFailure,
+) => BridgeCancel;
+
 /** Host implementation and discoverable metadata for one capability. */
 export type BridgeResource = BridgeResourceMetadata & {
   kind: BridgeResourceKind;
   cell?: BridgeCell;
-  sink?: (
-    listener: (value: FabricValue | undefined) => void,
-  ) => BridgeCancel;
+
+  /**
+   * Delivers each of the resource's values to `listener`, and each failure
+   * to `failed`, which the guest hears as an error of its subscription.
+   */
+  sink?: BridgeResourceSink;
+
   methods?: Record<string, BridgeMethod>;
 };
 
@@ -130,7 +145,8 @@ function resourceKind(
   if (
     !kind || !("value" in kind) ||
     kind.value !== "cell" && kind.value !== "stream" &&
-      kind.value !== "sqlite" && kind.value !== "service"
+      kind.value !== "sqlite" && kind.value !== "service" &&
+      kind.value !== "presence"
   ) {
     throw new TypeError(
       `Bridge resource \`${name}\` must declare its own valid kind.`,
@@ -239,14 +255,10 @@ function cellOperationNames(cell: BridgeCell): BridgeCellOperation[] {
 
 function resourceSink(
   resource: BridgeResource,
-):
-  | ((listener: (value: FabricValue | undefined) => void) => BridgeCancel)
-  | undefined {
+): BridgeResourceSink | undefined {
   const property = Object.getOwnPropertyDescriptor(resource, "sink");
   return property && "value" in property && typeof property.value === "function"
-    ? property.value as (
-      listener: (value: FabricValue | undefined) => void,
-    ) => BridgeCancel
+    ? property.value as BridgeResourceSink
     : undefined;
 }
 
@@ -483,6 +495,10 @@ export class FabricBridgeHost {
       this.disconnect();
       return;
     }
+    if (this.#namesPresence(decoded)) {
+      void this.#handle(decoded);
+      return;
+    }
     const handling = this.#operationTail
       ? this.#operationTail.then(() => {
         if (!this.#connected) return undefined;
@@ -495,6 +511,28 @@ export class FabricBridgeHost {
       if (this.#operationTail === tail) this.#operationTail = undefined;
     });
   };
+
+  /**
+   * Whether `request` names a `presence` resource. Such a request is handled
+   * as it arrives, outside the order the session's other operations wait in:
+   * a room's operations take effect at once and touch no cell, so a
+   * participant's status neither waits on a write's commit nor delays one.
+   * Requests of one room are still handled in the order they arrive.
+   */
+  #namesPresence(request: BridgeRequest): boolean {
+    if (request.resource === undefined) return false;
+    try {
+      const resource = discoverResource(
+        this.#bridge.resources,
+        request.resource,
+      );
+      return resource !== undefined &&
+        resourceKind(request.resource, resource) === "presence";
+    } catch {
+      // A malformed resource is reported to the guest by the ordered path.
+      return false;
+    }
+  }
 
   async #handle(request: BridgeRequest): Promise<void> {
     try {
@@ -707,7 +745,8 @@ export class FabricBridgeHost {
           path = target.path;
         } else {
           const sink = resource && resourceSink(resource);
-          sinkResource = sink && ((listener) => sink.call(resource, listener));
+          sinkResource = sink &&
+            ((listener, failed) => sink.call(resource, listener, failed));
           receiver = resource ?? {};
         }
         if (!sinkResource) {

@@ -56,8 +56,8 @@ any length reaches it intact. `initialize(defaultValue)` atomically stores the
 default only while the cell has no backing value and returns the value that won.
 A readable schema fallback does not count as stored, so calling `initialize()`
 after `pull()` safely materializes it before a child write. The resource kinds
-are `cell`, `stream`, `sqlite`, and `service`. Named methods let an application
-expose a narrow service without expanding the cell protocol.
+are `cell`, `stream`, `sqlite`, `service`, and `presence`. Named methods let an
+application expose a narrow service without expanding the cell protocol.
 
 The higher-level `cf-iframe` component accepts the same `bridge` property. Its
 `context` convenience property turns top-level Fabric cells into cell resources,
@@ -74,10 +74,12 @@ intentionally opaque at the renderer boundary:
 />;
 ```
 
-`resourceKinds` is a narrow manifest of `cell`, `readonly`, `stream`, or
-`sqlite` kinds. It does not grant access to another cell: each name must still
-be present in the bound context, and the bridge resolves that cell's concrete
-scope before the guest loads.
+`resourceKinds` is a narrow manifest of `cell`, `readonly`, `stream`, `sqlite`,
+or `presence` kinds. It does not grant access to another cell: each name must
+still be present in the bound context, and the bridge resolves that cell's
+concrete scope before the guest loads. A name marked `presence` grants the
+presence room of that cell's field and none of the cell's data; see
+[Presence](#presence).
 
 ## Guest API
 
@@ -253,6 +255,102 @@ The same `cf-iframe-bridge-multi-user.test.ts` multiplayer browser integration
 runs without a skip in both the default and server-execution ON pattern suites.
 It exercises `PerSpace`, `PerUser`, and `PerSession` cells and SQLite databases
 across two sessions for one identity, a second identity, and a guest reload.
+
+## Presence
+
+A presence room carries what its members are doing right now: a pointer, a
+selection, a drag in flight, a player's position. Nothing in it is stored. Each
+member holds one record, a display name and up to eight named facets, and the
+record is gone the moment the member leaves. The memory server relays the
+records and never reads a facet
+([`collaborative-fields.md`](../../docs/features/collaborative-fields.md),
+"Ephemeral co-presence").
+
+A host grants a room as a `presence` resource. `presenceResource()` builds one
+from a function that joins the room and a function that says what a guest is
+told when the room fails:
+
+```ts
+import {
+  createFabricBridge,
+  presenceResource,
+} from "@commonfabric/iframe-sandbox";
+
+const bridge = createFabricBridge({
+  cursors: presenceResource({
+    join: () => runtime.joinPresenceRoom(canvasCell),
+    failure: () => ({
+      code: "presence-disconnected",
+      message: "Lost the room.",
+    }),
+  }),
+});
+```
+
+`cf-iframe` does this for a context name whose `resourceKinds` entry is
+`presence`: the room is the one the runtime derives from that cell's resolved
+field, so every guest bound to the same field shares it, and a guest bound to a
+user- or session-scoped field shares it only within that user or session.
+
+The guest joins by listening, and publishes its own record:
+
+```ts
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+
+const fabric = connectFabric();
+const cursors = fabric.presence("cursors");
+
+const leave = cursors.join((event) => {
+  switch (event.kind) {
+    case "snapshot": // The room as it stands; `event.participantId` is ours.
+    case "upsert": // `event.participant` published its first or next record.
+    case "remove": // `event.participantId` left.
+      render(cursors.participants);
+      break;
+    case "failure": // The room ended; `event.error.code` says why.
+      render([]);
+  }
+});
+
+await cursors.setName("Ada");
+canvas.addEventListener("pointermove", (event) => {
+  void cursors.setFacet("pointer", { x: event.offsetX, y: event.offsetY });
+});
+canvas.addEventListener("pointerleave", () => {
+  void cursors.clearFacet("pointer");
+});
+```
+
+`.participants` is every other member's latest record, as
+`{ participantId, name, facets }`, and `.participantId` is the guest's own
+membership. A `participantId` names a membership rather than a person: it
+changes when a member reconnects, and two tabs of one user are two participants.
+A record does not carry the DID of the member that published it.
+
+A room is latest-state, not a message stream. A publish replaces the member's
+record, and the host sends at most one publication per animation frame, so a
+peer hears the latest value of a facet and not every value. State that must be
+agreed on, or that must survive, belongs in a cell.
+
+A facet's contents are whatever a peer's guest wrote. Check their shape before
+using them, as for any value a stranger supplied.
+
+The relay bounds a record: a name of at most 80 code points, eight facets, a
+facet name of lowercase letters, digits, and hyphens starting with a letter and
+at most 32 characters long, and 8 KiB for the record as encoded. A room holds
+128 members. A publication past a bound, or a join of a full room, ends the room
+with a `failure` whose code is `presence-refused` and whose message is the
+relay's. The other codes are `presence-unsupported`, for a host with no relay,
+and `presence-disconnected`, for a room the host lost. Nothing follows a
+`failure`; a guest that still wants the room calls `join()` again.
+
+The publishing methods reject while the guest has not joined, and the room
+publishes nothing for a member with no name.
+
+The host handles a request of a `presence` resource as it arrives, outside the
+order the session's other operations wait in. A status update therefore does not
+wait for an earlier write's commit to be confirmed, and does not hold up a later
+one.
 
 ## Protocol
 
