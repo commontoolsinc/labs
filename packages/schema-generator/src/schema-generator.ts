@@ -1358,6 +1358,11 @@ export class SchemaGenerator {
       ...(options?.rootWriterSupplied && typeNode &&
         { rootWriterSuppliedAt: typeNode }),
       ...(schemaHints && { schemaHints }),
+      // A root whose cells no use reaches reads them opaque, as a member does
+      // (`formatChildType()`); a print read in place carries its hints on the
+      // print.
+      ...(schemaHints?.get((hintsNode ?? typeNode)!)?.cellsOpaque &&
+        { cellsOpaque: true }),
     };
     context = this.#withGenericBindings(type, context);
     // A print read as the annotation that spells it keeps the print's own
@@ -3420,13 +3425,20 @@ export class SchemaGenerator {
     // (tuple-emission.test.ts pins that choice). A rest element contributes
     // its array's items; an optional one admits `undefined` as well, so a
     // tuple of `unknown` — reference-only slots — reads as that and not as a
-    // request for everything.
-    if (ts.isTupleTypeNode(typeNode)) {
+    // request for everything. A reference to a non-generic alias whose tuple
+    // names a writer reads as the tuple it declares (`#tupleBehind()`), as
+    // `#readsBySyntax()` sends it here to be.
+    const behind = this.#tupleBehind(typeNode, context);
+    const tuple = ts.isTupleTypeNode(typeNode) ||
+        (behind && this.#holdsWriterQuery(behind, context))
+      ? behind
+      : undefined;
+    if (tuple) {
       return {
         type: "array",
         items: tupleItems(
           this.#slotsOfTupleNode(
-            typeNode,
+            tuple,
             checker,
             context,
             new Set(),
@@ -4101,7 +4113,11 @@ export class SchemaGenerator {
    * the whole, so read by type, a CFC alias over a union as a member would lose
    * its boundary and its labels; its written reference keeps both. Any other
    * node is read by its type, a bound parameter in it read as its argument
-   * wherever the walk reaches it.
+   * wherever the walk reaches it. A tuple whose syntax writes a policy's
+   * writer as a `typeof` query is read by its syntax under no bindings too,
+   * written out or declared by a non-generic alias a reference names
+   * (`#tupleBehind()`): the checker's element types hold no declaration to
+   * name that writer by.
    */
   #readsBySyntax(
     typeNode: ts.TypeNode | undefined,
@@ -4110,9 +4126,8 @@ export class SchemaGenerator {
     const bound = context.boundTypeParameters;
     if (!typeNode) return false;
     const written = unwrapTypeParentheses(typeNode);
-    if (
-      ts.isTupleTypeNode(written) && this.#holdsWriterQuery(written, context)
-    ) return true;
+    const tuple = this.#tupleBehind(written, context);
+    if (tuple && this.#holdsWriterQuery(tuple, context)) return true;
     if (!bound) return false;
     const structural = ts.isUnionTypeNode(written) ||
       ts.isIntersectionTypeNode(written) || ts.isTypeLiteralNode(written) ||
@@ -4144,6 +4159,22 @@ export class SchemaGenerator {
         context.typeChecker,
         context,
       );
+  }
+
+  /**
+   * The tuple `typeNode` is, written out or declared by a non-generic alias a
+   * reference names, followed as `#openTypeNode()` follows one; `undefined`
+   * where it is no tuple.
+   */
+  #tupleBehind(
+    typeNode: ts.TypeNode,
+    context: GenerationContext,
+  ): ts.TupleTypeNode | undefined {
+    const behind = ts.isTypeReferenceNode(typeNode)
+      ? this.#openTypeNode(typeNode, context.typeChecker, context, new Set())
+        .node
+      : typeNode;
+    return ts.isTupleTypeNode(behind) ? behind : undefined;
   }
 
   /**

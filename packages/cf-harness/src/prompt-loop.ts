@@ -216,7 +216,11 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
-import { createResearchRunner } from "./research/runner.ts";
+import {
+  classifyTask,
+  type HarnessTaskClassification,
+} from "./task-classification.ts";
+import { createResearchRunner, researchModel } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import {
@@ -3099,6 +3103,15 @@ export class CfHarnessPromptLoop {
   #lastReservedSubagentSequence = 0;
 
   /**
+   * What the task-classification model call cost, held from `classifyTask`
+   * until the run's records exist, which the next transcript run opens and
+   * this then lands in: its attempts in the run report, its tokens in the
+   * total.
+   */
+  #classificationAttempts: HarnessModelAttemptDiagnostic[] = [];
+  #classificationUsage: HarnessModelUsage | undefined;
+
+  /**
    * The parent's subagent runs as they stood when the current turn's tool
    * calls were dispatched, and `undefined` outside a turn. Skill custody is
    * judged against this rather than the live state, so a delegation is not
@@ -3585,6 +3598,7 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
+      runState.taskClassification?.tags.includes("author") === false ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3707,6 +3721,48 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
+  /**
+   * Tags a fresh root task with the kinds of work it calls for and records
+   * them on the run, before the host assembles the prompt the tags shape.
+   * When the keyword rule has no answer, one call to the cheap research model
+   * decides; when that fails too, the task gets every tag. The tags gate the
+   * opening research pass and the parent's browser guidance here.
+   */
+  async classifyTask(
+    task: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<HarnessTaskClassification> {
+    const runState = this.engine.getRunState();
+    const classification = await classifyTask(task, {
+      patternRefs: runState.patternRefs,
+      skillRegistry: runState.skillRegistry,
+      inputCells: runState.inputCells,
+      browserHost: this.engine.browserHost !== undefined &&
+        this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
+    }, {
+      askModel: async (prompt) => {
+        const result = await this.modelClient.complete({
+          model: researchModel(this.modelClient.providerId),
+          transcript: [{ role: "user", content: prompt }],
+          tools: [],
+          nativeModelToolIds: [],
+          runId: `${runState.runId}:task-classification`,
+          ...(this.#researchReasoningEffort !== undefined
+            ? { reasoningEffort: this.#researchReasoningEffort }
+            : {}),
+          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          onAttempt: (attempt) => {
+            this.#classificationAttempts.push(attempt);
+          },
+        });
+        this.#classificationUsage = result.usage;
+        return result.assistant.content;
+      },
+    });
+    await this.engine.recordTaskClassification(classification);
+    return classification;
+  }
+
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
@@ -3794,7 +3850,8 @@ export class CfHarnessPromptLoop {
     // A host the run cannot delegate to has nothing to brief the parent on.
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
-      )
+      ) &&
+        initialRunState.taskClassification?.tags.includes("act") !== false
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {
@@ -3921,6 +3978,13 @@ export class CfHarnessPromptLoop {
       onUsage: recordModelUsage,
     });
     this.engine.setResearchRunner(runResearch);
+    for (const attempt of this.#classificationAttempts.splice(0)) {
+      recordModelAttempt(attempt);
+    }
+    if (this.#classificationUsage !== undefined) {
+      await recordModelUsage(this.#classificationUsage);
+      this.#classificationUsage = undefined;
+    }
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {

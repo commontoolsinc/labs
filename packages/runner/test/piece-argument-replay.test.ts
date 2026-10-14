@@ -14,7 +14,8 @@
  * well, the restage in `Runner.#applySetupState`, which a nested piece reaches
  * when its code changed: the stored slots survive it, and a slot holding
  * nothing takes its default, as does a stored slot the new code's input type
- * refuses, with a warning.
+ * refuses, with a warning, once the value it held is copied into the piece's
+ * refused-slot store.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -22,6 +23,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { getLogger } from "@commonfabric/utils/logger";
 
+import {
+  type PieceAddress,
+  type RefusedArgumentSlots,
+  refusedArgumentSlotsCell,
+} from "../src/refused-argument-slots.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -191,6 +197,24 @@ const runChanged = async (
   await running.pull();
   await runtime.idle();
   await cell.pull();
+};
+
+/** The piece a `setup-stored-slot-dropped` warning names, in `space`. */
+const pieceNamedIn = (warning: string): PieceAddress => {
+  const id = /on piece `([^`]+)`/.exec(warning)?.[1];
+  expect(id).toBeDefined();
+  // The pieces these tests set up live at space scope.
+  return { space, id: id as PieceAddress["id"], scope: "space" };
+};
+
+/** The refused-slot store of `piece`, as stored. */
+const refusedSlotsOf = async (
+  runtime: Runtime,
+  piece: PieceAddress,
+): Promise<RefusedArgumentSlots> => {
+  const record = refusedArgumentSlotsCell(runtime, piece);
+  await record.sync();
+  return record.getRaw() as RefusedArgumentSlots;
 };
 
 /**
@@ -381,6 +405,147 @@ describe("piece argument replay", () => {
           expect(warnings[0]).toContain("does not match type number");
         });
       });
+
+      it("keeps the value the refused slot held in the piece's refused-slot store", async () => {
+        await withRuntime(async (runtime) => {
+          const { cell } = await startedPiece(
+            runtime,
+            parentProgram,
+            "child-input-narrowed-kept",
+          );
+
+          const warnings = await warningsDuring(
+            "setup-stored-slot-dropped",
+            () =>
+              runChanged(
+                runtime,
+                cell,
+                changedFiles(narrowedChild, narrowedParent),
+              ),
+          );
+
+          const record = await refusedSlotsOf(
+            runtime,
+            pieceNamedIn(warnings[0]),
+          );
+          expect(Object.keys(record)).toEqual(["kept"]);
+          const entries = Object.values(record.kept).flat();
+          expect(entries.length).toBe(1);
+          expect(entries[0].value).toEqual(["one", "two"]);
+          expect(entries[0].reason).toContain("does not match type number");
+          expect(cell.key("kept").get()).toBe(0);
+        });
+      });
+
+      it("names the refused-slot store in its warning", async () => {
+        await withRuntime(async (runtime) => {
+          const { cell } = await startedPiece(
+            runtime,
+            parentProgram,
+            "child-input-narrowed-record-warning",
+          );
+
+          const warnings = await warningsDuring(
+            "setup-stored-slot-dropped",
+            () =>
+              runChanged(
+                runtime,
+                cell,
+                changedFiles(narrowedChild, narrowedParent),
+              ),
+          );
+
+          const id = refusedArgumentSlotsCell(
+            runtime,
+            pieceNamedIn(warnings[0]),
+          ).getAsNormalizedFullLink().id;
+          expect(warnings.length).toBe(1);
+          expect(warnings[0]).toContain(
+            `the value it held is kept in \`${id}\``,
+          );
+        });
+      });
+
+      it("keeps a labeled refused value under that label, and still sets the piece up, under strict enforcement", async () => {
+        // The nested piece's argument document is declared personal to the
+        // signer at its root, as a manager's is once Home has stamped it. The
+        // setup reads that value to copy it, so a record declaring nothing
+        // would be a misfit the strict rung refuses, and the whole setup with
+        // it.
+
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          cfcEnforcementMode: "enforce-strict",
+          cfcFlowLabels: "persist",
+        });
+        const personal = {
+          type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+          owner: signer.did(),
+        };
+        const storedLabels = (id: string) =>
+          (storageManager.open(space).replica as unknown as {
+            getDocument(id: string): {
+              cfc?: {
+                labelMap?: {
+                  entries: { label: { confidentiality?: unknown[] } }[];
+                };
+              };
+            } | undefined;
+          }).getDocument(id)?.cfc?.labelMap?.entries ?? [];
+        try {
+          const { cell } = await startedPiece(
+            runtime,
+            parentProgram,
+            "child-input-narrowed-labeled",
+          );
+          const argument = {
+            ...cell.key("kept").resolveAsCell().getAsNormalizedFullLink(),
+            path: [],
+          };
+          const tx = runtime.edit();
+          runtime.getCellFromLink(
+            argument,
+            { type: "object", ifc: { confidentiality: [personal] } },
+            tx,
+          ).set(runtime.getCellFromLink(argument).getRaw() as never);
+          expect((await tx.commit().settled).error).toBeUndefined();
+          await runtime.idle();
+          expect(
+            storedLabels(argument.id).flatMap(({ label }) =>
+              label.confidentiality ?? []
+            ),
+          ).toContainEqual(personal);
+
+          const warnings = await warningsDuring(
+            "setup-stored-slot-dropped",
+            () =>
+              runChanged(
+                runtime,
+                cell,
+                changedFiles(narrowedChild, narrowedParent),
+              ),
+          );
+
+          expect(cell.key("kept").get()).toBe(0);
+          expect(cell.key("label").get()).toBe("mine");
+          const piece = pieceNamedIn(warnings[0]);
+          const record = await refusedSlotsOf(runtime, piece);
+          expect(Object.values(record.kept).flat().map(({ value }) => value))
+            .toEqual([["one", "two"]]);
+          const recordId = refusedArgumentSlotsCell(runtime, piece)
+            .getAsNormalizedFullLink().id;
+          expect(
+            storedLabels(recordId).flatMap(({ label }) =>
+              label.confidentiality ?? []
+            ),
+          ).toContainEqual(personal);
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
     });
 
     it("sets every stored slot to its default when the argument as a whole refuses them, and warns of each", async () => {
@@ -456,6 +621,11 @@ describe("piece argument replay", () => {
         expect(warnings.length).toBe(1);
         expect(warnings[0]).toContain("its stored `kept`");
         expect(warnings[0]).toContain("the argument as a whole refuses it");
+        const record = await refusedSlotsOf(runtime, pieceNamedIn(warnings[0]));
+        expect(Object.values(record.kept).flat().map(({ value }) => value))
+          .toEqual([
+            ["one"],
+          ]);
       });
     });
   });
