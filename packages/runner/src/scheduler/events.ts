@@ -21,6 +21,7 @@ import {
   waveSettlementOf,
 } from "../executor/wave.ts";
 import {
+  addressKey,
   areNormalizedLinksSame,
   type NormalizedFullLink,
 } from "../link-utils.ts";
@@ -103,6 +104,68 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
+/**
+ * The handlers registered for event streams, at most one per stream, each
+ * held under its stream's address (`addressKey()`): the members of a link
+ * `areNormalizedLinksSame()` compares. Registering, removing and finding a
+ * handler therefore cost the same however many streams are registered.
+ * Iteration yields the registrations in the order they were made, a handler
+ * that replaces another taking a new place at the end.
+ */
+export class EventHandlerRegistry {
+  #byStream = new Map<string, readonly [NormalizedFullLink, EventHandler]>();
+
+  /** Constructs an instance holding `registrations`, registered in order. */
+  constructor(
+    registrations: Iterable<readonly [NormalizedFullLink, EventHandler]> = [],
+  ) {
+    for (const [link, handler] of registrations) this.set(link, handler);
+  }
+
+  /** Number of streams with a handler registered. */
+  get size(): number {
+    return this.#byStream.size;
+  }
+
+  /** Returns the handler registered for the stream `link` names, if any. */
+  get(link: NormalizedFullLink): EventHandler | undefined {
+    return this.#byStream.get(addressKey(link))?.[1];
+  }
+
+  /**
+   * Returns the registration for the stream `link` names, if any: the link
+   * it was made under, and its handler.
+   */
+  registration(
+    link: NormalizedFullLink,
+  ): readonly [NormalizedFullLink, EventHandler] | undefined {
+    return this.#byStream.get(addressKey(link));
+  }
+
+  /**
+   * Registers `handler` for the stream `link` names, in place of any
+   * handler registered for it.
+   */
+  set(link: NormalizedFullLink, handler: EventHandler): void {
+    const key = addressKey(link);
+    // Removed first, so that a replacement is the newest registration.
+    this.#byStream.delete(key);
+    this.#byStream.set(key, [link, handler]);
+  }
+
+  /** Removes the registration for the stream `link` names, if any. */
+  delete(link: NormalizedFullLink): void {
+    this.#byStream.delete(addressKey(link));
+  }
+
+  /** Iterates the registrations, oldest first. */
+  [Symbol.iterator](): IterableIterator<
+    readonly [NormalizedFullLink, EventHandler]
+  > {
+    return this.#byStream.values();
+  }
+}
+
 const guardedImplementations = Symbol("guarded event implementations");
 
 type GuardedDispatcher = EventHandler & {
@@ -157,7 +220,7 @@ export function selectEventImplementation(
 /** Stable queued callback whose selection follows the live stream registry. */
 function createGuardedDispatcher(
   ref: NormalizedFullLink,
-  eventHandlers: readonly [NormalizedFullLink, EventHandler][],
+  eventHandlers: EventHandlerRegistry,
 ): GuardedDispatcher {
   const dispatcher: GuardedDispatcher = Object.assign(
     (tx: IExtendedStorageTransaction, event: unknown) => {
@@ -173,7 +236,7 @@ function createGuardedDispatcher(
     {
       [guardedImplementations]: {
         implementations: new Map<string, { handler: EventHandler }>(),
-        current: () => findEventHandler(eventHandlers, ref),
+        current: () => eventHandlers.get(ref),
       },
     },
   );
@@ -335,6 +398,7 @@ export function isHeadEventParked(
 ): boolean {
   const headEvent = state.eventQueue[0];
   return headEvent?.handlerLoadPending === true ||
+    headEvent?.patternChangePending === true ||
     headEvent?.retryReadinessPending === true ||
     (headEvent?.notBefore !== undefined && headEvent.notBefore > now);
 }
@@ -356,7 +420,7 @@ export interface EventDependencyPreflightResult {
 
 export interface SchedulerEventQueueState {
   readonly runtime: Runtime;
-  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistry;
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
   readonly loadPieceForEvent?: (
@@ -471,6 +535,7 @@ export function dropQueuedEvent(
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
   event.endPieceStartWait?.("settled");
+  event.endPatternChangeWait?.();
   if (event.originTx !== undefined) {
     state.releaseLineageEvent?.(event.originTx, event);
   }
@@ -726,14 +791,6 @@ export function deferLaterSameSpaceServedEvents(
   }
 }
 
-function findEventHandler(
-  handlers: readonly [NormalizedFullLink, EventHandler][],
-  eventLink: NormalizedFullLink,
-): EventHandler | undefined {
-  return handlers.find(([link]) => areNormalizedLinksSame(link, eventLink))
-    ?.[1];
-}
-
 // Source of QueuedEvent.enqueueSeq stamps. Process-global monotonicity is a
 // superset of the per-queue monotonicity the ordered requeue insert needs.
 let nextEnqueueSeq = 1;
@@ -849,7 +906,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   // ingress caller's opaque idempotency key is bound to its stream earlier,
   // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
-  const handler = findEventHandler(state.eventHandlers, args.eventLink);
+  const handler = state.eventHandlers.get(args.eventLink);
 
   if (handler) {
     // W4: bound the per-(stream, handler) in-queue backlog. Below the cap,
@@ -1026,10 +1083,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             return;
           }
 
-          const loadedHandler = findEventHandler(
-            state.eventHandlers,
-            args.eventLink,
-          );
+          const loadedHandler = state.eventHandlers.get(args.eventLink);
           if (loadedHandler) {
             wait?.end("settled");
             queuedEvent.handler = loadedHandler;
@@ -1196,8 +1250,15 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   }
 }
 
+/**
+ * Registers `args.handler` for the stream `args.ref` names and returns the
+ * cancel that removes it. A handler carrying an implementation selection
+ * joins the stream's guarded dispatcher, which chooses among the
+ * implementations registered under it at dispatch. Any other handler takes
+ * the stream over, in place of whatever was registered for it.
+ */
 export function addSchedulerEventHandler(state: {
-  readonly eventHandlers: [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistry;
 }, args: {
   readonly handler: EventHandler;
   readonly ref: NormalizedFullLink;
@@ -1209,18 +1270,12 @@ export function addSchedulerEventHandler(state: {
   if (args.populateDependencies) {
     args.handler.populateDependencies = args.populateDependencies;
   }
-  const existingIndex = state.eventHandlers.findIndex(([existing]) =>
-    areNormalizedLinksSame(existing, args.ref)
-  );
-  const existing = state.eventHandlers[existingIndex]?.[1];
+  const existing = state.eventHandlers.get(args.ref);
   if (args.handler.implementationSelection !== undefined) {
     const dispatcher = existing && isGuardedDispatcher(existing)
       ? existing
       : createGuardedDispatcher(args.ref, state.eventHandlers);
-    if (dispatcher !== existing) {
-      if (existingIndex !== -1) state.eventHandlers.splice(existingIndex, 1);
-      state.eventHandlers.push([args.ref, dispatcher]);
-    }
+    if (dispatcher !== existing) state.eventHandlers.set(args.ref, dispatcher);
     const key = args.handler.implementationSelection.key;
     const registration = { handler: args.handler };
     dispatcher[guardedImplementations].implementations.set(key, registration);
@@ -1228,36 +1283,47 @@ export function addSchedulerEventHandler(state: {
       const { implementations } = dispatcher[guardedImplementations];
       if (implementations.get(key) !== registration) return;
       implementations.delete(key);
-      if (implementations.size === 0) {
-        const index = state.eventHandlers.findIndex(([, h]) =>
-          h === dispatcher
-        );
-        if (index !== -1) state.eventHandlers.splice(index, 1);
+      if (
+        implementations.size === 0 &&
+        state.eventHandlers.get(args.ref) === dispatcher
+      ) {
+        state.eventHandlers.delete(args.ref);
       }
     };
   }
-  if (existingIndex !== -1) {
-    if (existing && isGuardedDispatcher(existing)) {
+  if (existing !== undefined) {
+    if (isGuardedDispatcher(existing)) {
       existing[guardedImplementations].implementations.clear();
     }
-    state.eventHandlers.splice(existingIndex, 1);
     logger.warn("event-handler-replaced", () => [
       "Replacing existing event handler for link",
       { linkId: args.ref.id },
     ]);
   }
-  state.eventHandlers.push([args.ref, args.handler]);
+  state.eventHandlers.set(args.ref, args.handler);
   return () => {
-    const index = state.eventHandlers.findIndex(([r, h]) =>
-      r === args.ref && h === args.handler
-    );
-    if (index !== -1) state.eventHandlers.splice(index, 1);
+    // Only the registration this call made: one a later call made for the
+    // same stream stays, whichever handler it carries.
+    const registered = state.eventHandlers.registration(args.ref);
+    if (registered?.[0] === args.ref && registered[1] === args.handler) {
+      state.eventHandlers.delete(args.ref);
+    }
   };
 }
 
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
+  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
   readonly eventQueue: QueuedEvent[];
+
+  /** Holds `idle()` open until `work` settles (`Scheduler.trackBackgroundTask`). */
+  readonly trackBackgroundTask: (work: Promise<unknown>) => void;
+
+  /** The heads held for a pattern change, while each waits. */
+  readonly patternChangeWaits: Set<QueuedEvent>;
+
+  /** Whether `endPatternChangeWaits()` has run; no hold begins after it. */
+  readonly patternChangeWaitsEnded: () => boolean;
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -1653,6 +1719,135 @@ export function preflightQueuedEventDependencies(state: {
   }
 }
 
+/**
+ * The pattern change that `handler`'s piece, or a piece that instantiated
+ * it, is making (`Runner.pendingPatternChangeFor`), or `undefined` when none
+ * is. Until that change settles, the handler may be about to be replaced by
+ * the incoming pattern's, or kept because its setup did not land.
+ */
+function patternChangeHolding(
+  runtime: Runtime,
+  handler: EventHandler,
+): Promise<void> | undefined {
+  const pieces = piecesOf(handler);
+  if (pieces.length === 0) return undefined;
+  return runtime.runner.pendingPatternChangeFor(pieces);
+}
+
+/** The result cells of the pieces whose graphs registered `handler`. */
+function piecesOf(handler: EventHandler): NormalizedFullLink[] {
+  return eventHandlerImplementations(handler).flatMap((implementation) => {
+    const piece = (implementation as Partial<TelemetryAnnotations>).viewPiece;
+    return piece === undefined ? [] : [piece];
+  });
+}
+
+/**
+ * Whether `handler` belongs to a graph its piece has replaced: it is no longer
+ * registered, and the piece it came from runs with a graph installed. A
+ * running piece's current graph has its handlers registered, so the one that
+ * registered `handler` is gone. A stopped piece's handler is not judged.
+ */
+function isReplacedGraphHandler(
+  state: Pick<SchedulerEventExecutionState, "runtime" | "eventHandlers">,
+  handler: EventHandler,
+): boolean {
+  if (state.eventHandlers.some(([, registered]) => registered === handler)) {
+    return false;
+  }
+  return piecesOf(handler).some((piece) =>
+    state.runtime.runner.pieceGraphIsInstalled(
+      state.runtime.getCellFromLink(piece),
+    )
+  );
+}
+
+/**
+ * Points `queuedEvent` at the handler registered for its stream now, and
+ * reports whether there is one. An event takes its stream's handler when it is
+ * queued, and a piece that changes pattern or re-instantiates its graph
+ * before the event dispatches replaces that handler with its new graph's: the
+ * one the event holds then belongs to a graph that no longer runs, and writes
+ * through bindings nothing reads.
+ */
+function followRegisteredHandler(
+  state: Pick<SchedulerEventExecutionState, "eventHandlers">,
+  queuedEvent: QueuedEvent,
+): boolean {
+  const current = findEventHandler(state.eventHandlers, queuedEvent.eventLink);
+  if (current === undefined) return false;
+  if (current !== queuedEvent.handler) {
+    queuedEvent.handler = current;
+    queuedEvent.action = (tx) => current(tx, queuedEvent.event);
+    delete queuedEvent.preflightImplementation;
+  }
+  return true;
+}
+
+/**
+ * Parks the head `queuedEvent` until `change` settles, then hands it to the
+ * handler registered for its stream by then: the incoming pattern's once the
+ * piece swapped, the running one's when the swap's setup did not land. An
+ * event sent once a pointer move commits is the incoming pattern's to handle,
+ * and running it on the outgoing graph would write through bindings the
+ * incoming one no longer reads. The head holds the queue's FIFO slot, as a
+ * head whose handler's piece is loading does, so a later event cannot
+ * overtake it; and the wait holds `idle()` open, since the queue is quiet
+ * because it is waiting.
+ */
+function holdHeadEventForPatternChange(
+  state: SchedulerEventExecutionState,
+  queuedEvent: QueuedEvent,
+  change: Promise<void>,
+): void {
+  queuedEvent.patternChangePending = true;
+  logger.debug("scheduler", () => [
+    `event ${queuedEvent.id} waits for its piece's pattern change`,
+  ]);
+  const { promise: ended, resolve: end } = Promise.withResolvers<void>();
+  queuedEvent.endPatternChangeWait = end;
+  state.patternChangeWaits.add(queuedEvent);
+  const task = Promise.race([change, ended]).then(() => {
+    state.patternChangeWaits.delete(queuedEvent);
+    delete queuedEvent.endPatternChangeWait;
+    if (
+      queuedEvent.finalOutcomeNotified ||
+      !state.eventQueue.includes(queuedEvent)
+    ) return;
+    // The wait also ends when the piece stops, or when the scheduler is
+    // disposed, and then the event keeps the handler it was queued with, as
+    // a stopped piece's event does on the ordinary path.
+    if (
+      !followRegisteredHandler(state, queuedEvent) &&
+      isReplacedGraphHandler(state, queuedEvent.handler)
+    ) {
+      // The pattern the piece settled on registered nothing for this
+      // stream: events.md §5's drop predicate ("no runnable handler").
+      state.dropEvent(
+        queuedEvent,
+        `Event dropped: no handler registered for ${queuedEvent.eventLink.id} after its piece changed pattern`,
+      );
+      return;
+    }
+    delete queuedEvent.patternChangePending;
+  }).finally(() => state.queueExecution());
+  state.trackBackgroundTask(task);
+}
+
+/**
+ * Ends every pattern-change wait, for a scheduler being disposed: such a wait
+ * can be held by a pattern load that only the watcher's cancellation, later
+ * in the disposal, would release. The caller also makes
+ * `patternChangeWaitsEnded()` report `true`, so that no head is held again.
+ */
+export function endPatternChangeWaits(
+  state: Pick<SchedulerEventExecutionState, "patternChangeWaits">,
+): void {
+  for (const event of [...state.patternChangeWaits]) {
+    event.endPatternChangeWait?.();
+  }
+}
+
 export async function processPullQueuedEventDuringExecute(
   state: SchedulerEventExecutionState,
   eventBlockingDeps: Set<Action>,
@@ -1686,6 +1881,10 @@ export async function processPullQueuedEventDuringExecute(
   // completion hydrates the same object and queues a fresh execution tick.
   if (queuedEvent.handlerLoadPending) return;
 
+  // The head waits for its piece's pattern change; the change's settlement
+  // hands it its handler and queues a fresh tick.
+  if (queuedEvent.patternChangePending) return;
+
   // The head is a stale-basis retry holding its slot while the state it
   // re-runs against arrives; the readiness continuation queues a fresh tick.
   if (queuedEvent.retryReadinessPending) return;
@@ -1705,6 +1904,26 @@ export async function processPullQueuedEventDuringExecute(
   }
 
   delete queuedEvent.notBefore;
+
+  const change = state.patternChangeWaitsEnded()
+    ? undefined
+    : patternChangeHolding(state.runtime, queuedEvent.handler);
+  if (change !== undefined) {
+    holdHeadEventForPatternChange(state, queuedEvent, change);
+    return;
+  }
+  if (
+    !followRegisteredHandler(state, queuedEvent) &&
+    isReplacedGraphHandler(state, queuedEvent.handler)
+  ) {
+    // The graph the piece replaced its handler's with registered nothing for
+    // this stream: events.md §5's drop predicate ("no runnable handler").
+    state.dropEvent(
+      queuedEvent,
+      `Event dropped: no handler registered for ${queuedEvent.eventLink.id} after its piece replaced its graph`,
+    );
+    return;
+  }
 
   const { handler } = queuedEvent;
 

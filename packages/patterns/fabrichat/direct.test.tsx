@@ -11,6 +11,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   equals,
   multiUserTest,
   pattern,
@@ -89,7 +90,7 @@ export const setup = pattern(() => ({
 
 // Each message's body, or how it was taken away, in the order they were
 // recorded.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string"
       ? message.body
@@ -100,7 +101,7 @@ const bodies = (messages: Writable<MessagesValue>): string =>
 
 // The stored message at `index` of `messages`.
 const messageAt = (
-  messages: Writable<MessagesValue>,
+  messages: Cell<MessagesValue>,
   index: number,
 ): MessageRecord | undefined =>
   ((messages.get() ?? []) as MessageRecord[])[index];

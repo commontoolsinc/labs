@@ -11,6 +11,7 @@
 import {
   action,
   assert,
+  type Cell,
   currentPrincipal,
   equals,
   getEntityId,
@@ -125,13 +126,13 @@ const sameEntity = (a: unknown, b: unknown): boolean => {
 
 // The stored message at `index` of `messages`.
 const messageAt = (
-  messages: Writable<MessagesValue>,
+  messages: Cell<MessagesValue>,
   index: number,
 ): MessageRecord | undefined =>
   ((messages.get() ?? []) as MessageRecord[])[index];
 
 // The key the view's rights for the message at `index` are under.
-const keyAt = (messages: Writable<MessagesValue>, index: number): string =>
+const keyAt = (messages: Cell<MessagesValue>, index: number): string =>
   viewKeyOf(messages.key(index)) ?? "";
 
 // The OWNER, who sends first.
