@@ -29,11 +29,11 @@ space three principals read, `fabrichat-spaces`, creates it per user.
 Against each baseline recorded since the fields declared their scope, the
 pattern-update proof reports `scope changed`:
 
-- `fabrichat/manager.tsx`, at `result.$VIEWS.chats.people`, against three
+- `fabrichat/manager.tsx`, at `result.$VIEWS.chats.people`, against six
   baselines;
 - `system/home.tsx`, whose result types its `chatManager` as
   `FabriChatManagerOutput`, at `result.chatManager.$VIEWS.chats.people`, against
-  five baselines.
+  eleven baselines.
 
 The proof reports at most one issue per role, so `rooms`, which changed the
 same way, is reported behind `people`. The new entries name both.

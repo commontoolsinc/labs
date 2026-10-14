@@ -1204,6 +1204,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     baselines: [
       "20261011T221322Z-ESDR30hfSt52JJjG",
       "20261012T173536Z-6WvdcsJ1uCY7_PMp",
+      "20261013T211911Z-_KGvbNdJDAorzeH2",
+      "20261014T030847Z--3DmbOSzIygprqSe",
+      "20261014T162031Z-5e6WmbJILlZPfDKs",
     ],
     paths: [
       "result.$VIEWS.chats.rooms",
@@ -1241,6 +1244,12 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261011T232406Z-H8GLTyEEvgcBxdB1",
       "20261012T052420Z-12t_tpKxi8VbviJa",
       "20261012T173537Z-qa-uVwDf1s3biqH0",
+      "20261013T181949Z-GBuQOV7gSSM47_32",
+      "20261014T011647Z-MFMywpgMEY_E99SW",
+      "20261014T030848Z-JisMyyIiJIrCf4Gb",
+      "20261014T040623Z-Dv8vGrR_RU4o_od4",
+      "20261014T114259Z-bqtp-2EzUZZiWqbT",
+      "20261014T162033Z-LIoQs5Jl8gnJGhKC",
     ],
     paths: [
       "result.chatManager.$VIEWS.chats.rooms",
