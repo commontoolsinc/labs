@@ -1379,7 +1379,8 @@ const performManagerAct = (
   // which `keepArchived` marks, is no such choice, and leaves an archived
   // entry as it is; a join is always the person's own.
   const restore = act === "joinRoom" || event?.keepArchived !== true;
-  const catalogManaged = container === undefined ||
+  const catalogManaged = record.key("kind").get() !== undefined ||
+    container === undefined ||
     catalogEntries[space]?.kind === CHAT_ROOM_OFFER_KIND ||
     membership?.catalogRevision !== undefined;
   if (catalogManaged) {
@@ -1502,8 +1503,8 @@ const pickMember = handler<PickMemberEvent, PickMemberState>(
 /** What a manager stores. Every field has a default. */
 export interface FabriChatManagerInput {
   /**
-   * The user's shared-space catalog, which lists the rooms they belong to: in
-   * a user's home space, Home's. A manager given none keeps one of its own.
+   * The user's catalog for standalone membership and container discovery:
+   * in a user's home space, Home's. A manager given none keeps one of its own.
    */
   sharedSpaceCatalog?: CatalogCell;
 

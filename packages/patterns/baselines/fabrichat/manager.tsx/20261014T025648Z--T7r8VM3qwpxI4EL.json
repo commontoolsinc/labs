@@ -370,7 +370,7 @@
           "entries": {},
           "offers": {}
         },
-        "description": "The user's shared-space catalog, which lists the rooms they belong to: in\na user's home space, Home's. A manager given none keeps one of its own."
+        "description": "The user's catalog for standalone membership and container discovery:\nin a user's home space, Home's. A manager given none keeps one of its own."
       }
     },
     "type": "object"

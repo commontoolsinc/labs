@@ -46,7 +46,8 @@ conversation stays forgotten even while a saved container still declares it.
 A saved explicit entry remains listed if the container changes its declaration.
 Forgetting a declared conversation never archives its container.
 
-A standalone room's catalog membership remains authoritative. Its current
+Joining a record-backed standalone room registers its own space even when a
+container declares it. A standalone room's catalog membership remains authoritative. Its current
 catalog state and revision govern listing and forgetting even when the room
 also has an explicit membership record or a container declares it. Catalog
 restoration supersedes an older room tombstone; catalog archive or removal

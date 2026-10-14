@@ -343,6 +343,25 @@ describe("fabrichat-container-index", () => {
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].room.equals(room)).toBe(true);
     const containerRevision = entries.get()[0].revision;
+    sendEvent(manager.key("joinRoom"), {
+      room,
+      container,
+      requestId: "container-first",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
+    expect(catalog.key("entries").key(standalone).key("kind").get()).toBe(
+      "fabrichat-room",
+    );
+    expect(catalog.key("entries").key(standalone).key("state").get()).toBe(
+      "saved",
+    );
+    expect(catalog.key("entries").key(social).get()).toEqual(
+      stored.entries[social],
+    );
+    expect(manager.key("roomMembership").key(0).key("catalogRevision").get())
+      .toBe(catalog.key("entries").key(standalone).key("revision").get());
     const saveStandaloneTx = runtime.edit();
     catalog.withTx(saveStandaloneTx).key("entries").key(standalone).set(
       stored.entries[standalone],
@@ -352,6 +371,22 @@ describe("fabrichat-container-index", () => {
     await manager.pull();
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].revision).toBe("1:initial");
+    const removeFirstJoinTx = runtime.edit();
+    catalog.withTx(removeFirstJoinTx).key("entries").set({
+      [social]: stored.entries[social],
+    });
+    expect((await removeFirstJoinTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toEqual([]);
+    const restoreFirstJoinTx = runtime.edit();
+    catalog.withTx(restoreFirstJoinTx).key("entries").key(standalone).set(
+      stored.entries[standalone],
+    );
+    expect((await restoreFirstJoinTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
     sendEvent(manager.key("forget"), {
       room,
       revision: containerRevision,
