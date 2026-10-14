@@ -185,9 +185,21 @@ describe("logic", () => {
         .toEqual([["c", 0], ["a", 3], ["b", 0], ["d", 0], ["e", 0]]);
     });
 
+    it("gives each thread's newest reply time, whatever the list's order", () => {
+      const places = viewPlaces(items);
+      expect(items.map((item) => [item.key, places[item.key].latestReplyAt]))
+        .toEqual([
+          ["c", undefined],
+          ["a", 50n],
+          ["b", undefined],
+          ["d", undefined],
+          ["e", undefined],
+        ]);
+    });
+
     it("places each message in the main conversation, in a thread, or both", () => {
       expect(viewPlaces(items)).toEqual({
-        a: { inMain: true, replies: 3 },
+        a: { inMain: true, replies: 3, latestReplyAt: 50n },
         b: { inMain: false, replies: 0, thread: "a" },
         c: { inMain: true, replies: 0, thread: "a" },
         d: { inMain: true, replies: 0 },
