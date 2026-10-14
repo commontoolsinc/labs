@@ -6,6 +6,7 @@ import {
   action,
   type AddIntegrity,
   assert,
+  type Cell,
   pattern,
   TESTS,
   UI,
@@ -44,7 +45,7 @@ const sendGesture = {
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 // Each stored message, as `body@shownIn`.
-const summary = (messages: Writable<MessagesValue>): string =>
+const summary = (messages: Cell<MessagesValue>): string =>
   (messages.get() as MessageRecord[]).map((message) =>
     `${message?.body}@${message?.replyTo?.shownIn ?? "-"}`
   ).join(" | ");

@@ -3785,6 +3785,39 @@ type CalculatorRequest = {
       expect(schema.required).toEqual(["0"]);
     });
 
+    it("preserves an empty-string property name", async () => {
+      const generator = new SchemaGenerator();
+      const { checker } = await getTypeFromCode(
+        "type Dummy = unknown;",
+        "Dummy",
+      );
+      const typeNode = ts.factory.createTypeLiteralNode([
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createStringLiteral(""),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.StringKeyword),
+        ),
+        ts.factory.createPropertySignature(
+          undefined,
+          ts.factory.createIdentifier("other"),
+          undefined,
+          ts.factory.createKeywordTypeNode(ts.SyntaxKind.NumberKeyword),
+        ),
+      ]);
+
+      const schema = generator.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+      );
+
+      expect(schema).toEqual({
+        type: "object",
+        properties: { "": { type: "string" }, other: { type: "number" } },
+        required: ["", "other"],
+      });
+    });
+
     it("preserves explicit double-underscore property names", async () => {
       const generator = new SchemaGenerator();
       const { checker } = await getTypeFromCode(

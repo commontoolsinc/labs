@@ -5,6 +5,7 @@ import { isInertArray } from "@commonfabric/utils/arrays";
 import { isInertPlainObject } from "@commonfabric/utils/objects";
 import {
   assertValidFabricValueLayer,
+  deepFreeze,
   FabricInstance,
   FabricPrimitive,
   refuseFabricInstance,
@@ -229,7 +230,7 @@ export function withAliasBindings(
         ? serializePatternGraph(value)
         : (value as Readonly<Record<string, unknown>>);
 
-    return recordWithAliasBindings(
+    const bound = recordWithAliasBindings(
       value,
       record,
       ancestorStack,
@@ -250,6 +251,16 @@ export function withAliasBindings(
             ancestorStack,
           ),
     );
+    // A graph holds its schemas deep-frozen: binding the graph's nodes
+    // narrows the argument schema at every slot, and `schemaAtPath()` keeps a
+    // narrowing only for a deep-frozen schema. The walk has just rebuilt
+    // both, record by record and array by array, so the graph has schema
+    // objects of its own to freeze.
+    if (isGraph) {
+      deepFreeze(bound.argumentSchema);
+      deepFreeze(bound.resultSchema);
+    }
+    return bound;
   }
 
   // What remains is a leaf that is not an object: a primitive or a function.
