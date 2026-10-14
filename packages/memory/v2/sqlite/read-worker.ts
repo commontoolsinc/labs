@@ -10,6 +10,7 @@
  * `read-worker-protocol.ts` holds the exchange with the pool.
  */
 
+import type { Database } from "@db/sqlite";
 import { holdWorkerLifetimeLock } from "@commonfabric/utils/worker-lifetime";
 import { ensureColumnOriginAvailable } from "./column-origin.ts";
 import { runInterruptibly, runNativeQuery } from "./exec.ts";
@@ -41,7 +42,7 @@ async function query(
   try {
     // A labeled read fails loudly in `columnOrigins()` when this returns false.
     if (request.labeled) await ensureColumnOriginAvailable();
-    const db = connections.connection(request.path, request.labeled);
+    const db = openConnection(request.path, request.labeled);
     const result = runInterruptibly(
       db,
       () =>
@@ -60,6 +61,25 @@ async function query(
       name: error instanceof Error ? error.name : "SqliteError",
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+/**
+ * Helper for `query()`, which returns this worker's connection to the file at
+ * `path`, and throws a `SqliteSourceUnavailable` error when the file cannot be
+ * opened: a source whose file is missing or unreadable is unavailable, not a
+ * failed query.
+ */
+function openConnection(path: string, labeled: boolean): Database {
+  try {
+    return connections.connection(path, labeled);
+  } catch (error) {
+    const unavailable = new Error(
+      "sqlite: the database source is unavailable: its file cannot be " +
+        `opened (${error instanceof Error ? error.message : String(error)})`,
+    );
+    unavailable.name = "SqliteSourceUnavailable";
+    throw unavailable;
   }
 }
 

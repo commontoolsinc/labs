@@ -297,6 +297,9 @@ during design are marked **[resolved]** with the decision.
     re-prepares against committed DDL). If a future case is found where it
     doesn't, add an explicit drop-and-reopen of the pooled connection on a known
     schema-version bump.
-29. **Disk-source path disappearing / becoming unreadable** between registration
-    and read — surface a clear error (today an open error from the pool) rather
-    than a generic failure.
+29. **[resolved — `SqliteSourceUnavailable`]** Disk-source path disappearing /
+    becoming unreadable between registration and read. A read of an injected
+    source whose registration is missing, or whose file cannot be opened, fails
+    with `SqliteSourceUnavailable`, never `[]`; registrations persist across a
+    restart in the store directory (Section
+    [03.3](./03-database-sources.md#033-on-disk-file-injected-via-cf-read-only-v1)).

@@ -108,6 +108,7 @@ describe("linkSqliteDiskSource handle seeding", () => {
       id: deriveDiskHandleId(signer.did(), DISK_PATH),
       tables: {},
       rev: 0,
+      external: true,
     });
     expect(registered).toEqual([[
       deriveDiskHandleId(signer.did(), DISK_PATH),
@@ -136,9 +137,11 @@ describe("linkSqliteDiskSource handle seeding", () => {
 
     await link();
 
+    // The handle is left as it stands but for the `external` mark, which the
+    // link adds to a handle committed without it.
     const handle = handleCell();
     await handle.pull();
-    expect(handle.get()).toEqual(declared);
+    expect(handle.get()).toEqual({ ...declared, external: true });
     expect(warnings).toEqual([
       "cf piece link: kept the existing contract, 1 table " +
       "(re-linking does not reset it)",
@@ -175,6 +178,7 @@ describe("linkSqliteDiskSource handle seeding", () => {
       id: deriveDiskHandleId(signer.did(), DISK_PATH),
       tables: declared,
       rev: 0,
+      external: true,
     });
     expect(warnings).toEqual([
       "cf piece link: repaired an unusable handle id, keeping the existing " +

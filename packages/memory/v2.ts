@@ -1849,6 +1849,14 @@ export type SqliteDbRef = {
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
+
+  /**
+   * Whether the handle names an injected source outside the store (§03.3):
+   * such a handle has no cell-derived database behind it, so a read of one the
+   * server has no registration for fails with `SqliteSourceUnavailable` and a
+   * write to it is refused. Names no file; the server's registration does.
+   */
+  external?: boolean;
 };
 
 /** Whether `value` is a SQLite db handle. The `id` is the whole of the test:

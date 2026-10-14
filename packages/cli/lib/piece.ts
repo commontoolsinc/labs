@@ -161,6 +161,7 @@ import {
   deriveDiskHandleId,
   diskHandleSeed,
   type DiskHandleValue,
+  needsExternalMark,
 } from "./sqlite-source.ts";
 import {
   cliPhaseTrace,
@@ -4279,6 +4280,7 @@ export async function linkSqliteDiskSource(
     const prior = target.get() as DiskHandleValue | undefined;
     const seed = diskHandleSeed(id, prior);
     if (seed !== undefined) target.set(seed);
+    else if (needsExternalMark(prior)) target.key("external").set(true);
     kept = seed === undefined ? prior : undefined;
     // A first link seeds an empty contract, so a written seed that carries
     // tables can only be a contract this repair brought across from a handle

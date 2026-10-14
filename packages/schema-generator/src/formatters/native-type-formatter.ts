@@ -63,8 +63,8 @@ const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
  * whose per-column `ifc` labels are what a pattern reads to write a query
  * against the database, so it passes through unfiltered. The handle also
  * carries fields outside the descriptor the runtime resolves for itself
- * (`scope`, `owner`); `additionalProperties: true` is what keeps a read
- * through this schema from dropping them.
+ * (`scope`, `owner`, `external`); `additionalProperties: true` is what keeps a
+ * read through this schema from dropping them.
  */
 const SQLITE_DATABASE_SCHEMA: MutableJSONSchema = {
   type: "object",

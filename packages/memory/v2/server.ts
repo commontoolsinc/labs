@@ -214,7 +214,10 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import { ReadWorkerPool } from "./sqlite/read-worker-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import {
+  resolveSpaceStoreDirUrl,
+  resolveSpaceStoreUrl,
+} from "./storage-path.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 import {
@@ -728,6 +731,27 @@ function hashToken(s: string): string {
     h = Math.imul(h, 0x01000193);
   }
   return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
+
+/**
+ * Returns the key the server's per-process bookkeeping uses for the injected
+ * source `id` in `space`.
+ */
+function diskSourceKey(space: string, id: string): string {
+  return `${space}\x00${id}`;
+}
+
+/**
+ * Returns the error a read of an injected source fails with when the source
+ * cannot be read, for the given `reason`. Its name, `SqliteSourceUnavailable`,
+ * is what tells a caller the source is missing rather than empty.
+ */
+function sqliteSourceUnavailable(reason: string): Error {
+  const error = new Error(
+    `sqlite: the database source is unavailable: ${reason}`,
+  );
+  error.name = "SqliteSourceUnavailable";
+  return error;
 }
 
 /** Extract the table name from a SQLite "no such table: <name>" error, or
@@ -2472,10 +2496,17 @@ export class Server {
   /**
    * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
    * is read from its descriptor path, read-only and on a read worker, instead
-   * of the cell-derived per-(space, id) file. In-memory only: a registration
-   * does not survive a restart.
+   * of the cell-derived per-(space, id) file. Kept in `disk-sources.json` in
+   * the store directory of a file store, so a registration survives a restart.
    */
-  #diskSources = new DiskSourceRegistry();
+  #diskSources: DiskSourceRegistry;
+
+  /**
+   * The `(space, id)` keys whose registered path this process has checked, as
+   * registration checks a path. A registration read back after a restart is
+   * checked again before it is read, since the file system may have moved on.
+   */
+  #checkedDiskSources = new Set<string>();
 
   /**
    * Pooled read-only connections (keyed by canonical file path) for reads of
@@ -2656,6 +2687,15 @@ export class Server {
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#diskSources = new DiskSourceRegistry(
+      undefined,
+      options.store?.protocol === "file:"
+        ? Path.join(
+          Path.fromFileUrl(resolveSpaceStoreDirUrl(options.store)),
+          "disk-sources.json",
+        )
+        : undefined,
+    );
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
     // Every document-cache bound is checked here, where it is configured,
@@ -3972,6 +4012,31 @@ export class Server {
     path: string,
     beforeRegister?: (engine: Engine.Engine) => void,
   ): Promise<void> {
+    const engine = await this.#openEngine(space);
+    const canonical = await this.#checkDiskSourcePath(engine, path);
+    // The RPC path uses this synchronous hook to re-authorize beside the
+    // registry mutation after the filesystem awaits above. Direct internal
+    // callers do not need to provide it.
+    beforeRegister?.(engine);
+    this.#diskSources.register(space, id, { path: canonical });
+    this.#checkedDiskSources.add(diskSourceKey(space, id));
+  }
+
+  /**
+   * Returns the canonical form of `path` if it may be registered as an
+   * injected source in `engine`'s space, and throws a `ProtocolError` saying
+   * why when it may not.
+   *
+   * The path arrives over the wire (untrusted): it must be absolute and must
+   * exist, and is `realpath`-canonicalized and then rejected if it resolves
+   * INSIDE the engine's store directory OR names an internal cell-db file —
+   * otherwise a caller could point a handle at another space's (or a
+   * cell-derived) `.sqlite` file and read it cross-tenant.
+   */
+  async #checkDiskSourcePath(
+    engine: Engine.Engine,
+    path: string,
+  ): Promise<string> {
     if (!Path.isAbsolute(path)) {
       throw new Engine.ProtocolError(
         `disk source path must be absolute: ${path}`,
@@ -3983,7 +4048,6 @@ export class Server {
     } catch {
       throw new Engine.ProtocolError(`disk source path not found: ${path}`);
     }
-    const engine = await this.#openEngine(space);
     if (engine.url.protocol === "file:") {
       // Canonicalize the store dir too (not just the source path): `canonical`
       // is realpath-resolved, so comparing it against a NON-canonical storeDir
@@ -4014,11 +4078,36 @@ export class Server {
         "disk source path may not be an internal cell-db file",
       );
     }
-    // The RPC path uses this synchronous hook to re-authorize beside the
-    // registry mutation after the filesystem awaits above. Direct internal
-    // callers do not need to provide it.
-    beforeRegister?.(engine);
+    return canonical;
+  }
+
+  /**
+   * Returns the path to read the injected source registered for `(space,
+   * id)`, checking a registration this process has not checked yet — one read
+   * back after a restart — as registration checks a path. Throws a
+   * `SqliteSourceUnavailable` error for a source that is not registered or no
+   * longer passes.
+   */
+  async #diskSourcePath(
+    engine: Engine.Engine,
+    space: string,
+    id: string,
+  ): Promise<string> {
+    const disk = this.#diskSources.get(space, id);
+    if (disk === undefined) {
+      throw sqliteSourceUnavailable("it is not registered on this server");
+    }
+    const key = diskSourceKey(space, id);
+    if (this.#checkedDiskSources.has(key)) return disk.path;
+    let canonical: string;
+    try {
+      canonical = await this.#checkDiskSourcePath(engine, disk.path);
+    } catch {
+      throw sqliteSourceUnavailable("its registered file cannot be read");
+    }
     this.#diskSources.register(space, id, { path: canonical });
+    this.#checkedDiskSources.add(key);
+    return canonical;
   }
 
   /**
@@ -4132,8 +4221,10 @@ export class Server {
         throw new Engine.ProtocolError("sqlite db declares too many tables");
       }
       // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
-      // one is rejected before it can join the commit (Q13/Q14).
-      if (this.#diskSources.has(space, id)) {
+      // one is rejected before it can join the commit (Q13/Q14). A handle marked
+      // external is refused whether or not it is registered, so the refusal
+      // rides on the handle rather than on what the server remembers.
+      if (op.db.external === true || this.#diskSources.has(space, id)) {
         throw new Engine.ProtocolError(
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
@@ -4684,13 +4775,22 @@ export class Server {
             "@db/sqlite's column-origin symbols could not be bound",
         );
       }
-      const disk = this.#diskSources.get(message.space, message.db.id);
-      const result = disk
-        ? await this.#readWorkers.query(disk.path, message.sql, queryParams, {
-          labeled: wantColumns,
-          signal,
-          requester,
-        })
+      // A handle marked external names a source outside the store: with no
+      // registration it fails as unavailable rather than falling back to a
+      // cell-derived database that would read as empty.
+      const injected = message.db.external === true ||
+        this.#diskSources.has(message.space, message.db.id);
+      const result = injected
+        ? await this.#readWorkers.query(
+          await this.#diskSourcePath(
+            await this.#openEngine(message.space),
+            message.space,
+            message.db.id,
+          ),
+          message.sql,
+          queryParams,
+          { labeled: wantColumns, signal, requester },
+        )
         : await this.#readCellDb(
           message.space,
           message.db,
@@ -10244,6 +10344,8 @@ export const parseClientMessage = (
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session") &&
+    (parsed.db.external === undefined ||
+      typeof parsed.db.external === "boolean") &&
     !(parsed.params !== undefined && parsed.namedParams !== undefined) &&
     (parsed.namedParams === undefined ||
       isSqliteNamedParamEntries(parsed.namedParams))
@@ -10254,6 +10356,7 @@ export const parseClientMessage = (
         ? parsed.db.tables
         : undefined,
       scope: parsed.db.scope as CellScope | undefined,
+      ...(parsed.db.external === true ? { external: true } : {}),
     };
     const params = isSqliteNamedParamEntries(parsed.namedParams)
       ? Object.fromEntries(parsed.namedParams)

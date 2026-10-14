@@ -54,6 +54,9 @@ empty object:
 - `rev` — a monotonic write counter bumped by `db.exec` (Section
   [05](./05-reactivity.md)). It exists so `reactOn: db` re-runs after a write and
   so concurrent writes serialize; patterns do not read it directly.
+- `external` — `true` on the handle of a source injected from outside the store
+  (Section [03.3](./03-database-sources.md)); absent otherwise. It names no file,
+  and patterns do not read it.
 
 That descriptor is what the compiler emits as the schema of a `SqliteDb`
 position (`NativeTypeFormatter`, `packages/schema-generator`), keyed on the

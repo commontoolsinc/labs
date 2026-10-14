@@ -104,6 +104,42 @@ describe("DiskSourceRegistry", () => {
       .toThrow();
     expect(reg.get(SPACE_A, "of:1")).toEqual({ path: "/a/1b.db" });
   });
+
+  describe("with a file", () => {
+    let dir: string;
+
+    beforeEach(() => {
+      dir = Deno.makeTempDirSync();
+    });
+
+    afterEach(() => {
+      Deno.removeSync(dir, { recursive: true });
+    });
+
+    it("returns a registration another registry made with the same file", () => {
+      const file = `${dir}/store/disk-sources.json`;
+      new DiskSourceRegistry(4096, file).register(SPACE_A, "of:x", {
+        path: "/abs/x.db",
+      });
+      const restarted = new DiskSourceRegistry(4096, file);
+      expect(restarted.get(SPACE_A, "of:x")).toEqual({ path: "/abs/x.db" });
+      expect(restarted.has(SPACE_B, "of:x")).toBe(false);
+    });
+
+    it("holds no registrations while the file does not exist", () => {
+      const reg = new DiskSourceRegistry(4096, `${dir}/disk-sources.json`);
+      expect(reg.has(SPACE_A, "of:x")).toBe(false);
+    });
+
+    it("throws when the file does not hold a list of registrations", () => {
+      const file = `${dir}/disk-sources.json`;
+      Deno.writeTextFileSync(file, JSON.stringify([{ space: SPACE_A }]));
+      const reg = new DiskSourceRegistry(4096, file);
+      expect(() => reg.has(SPACE_A, "of:x")).toThrow(
+        "does not hold a list of registrations",
+      );
+    });
+  });
 });
 
 const SPACE = "did:key:z6Mk-sqlite-disk-source-test";
@@ -307,3 +343,134 @@ describe("server reads an injected source off its event loop", () => {
     expect(await readEnded).toBe("threw");
   });
 });
+
+describe("server keeps an injected source's state across a restart", () => {
+  // A file store keeps its registrations in the store directory, so a second
+  // server over the same store reads them back. A handle marked `external`
+  // names an injected source: a read with no registration behind it fails as
+  // unavailable, and a write to it is refused, registered or not.
+
+  let storeDir: string;
+  let diskPath: string;
+  let handleId: string;
+  const servers: Server[] = [];
+  const clients: Awaited<ReturnType<typeof connect>>[] = [];
+
+  /** Starts a server over the shared file store and mounts `SPACE` on it. */
+  async function start(store = new URL(`file://${storeDir}/`)) {
+    const server = new Server({ ...testSessionOpenServerOptions, store });
+    servers.push(server);
+    const client = await connect({ transport: loopback(server) });
+    clients.push(client);
+    return {
+      server,
+      session: await client.mount(SPACE, {}, testSessionOpenAuthFactory),
+    };
+  }
+
+  /** Closes every client and server `start()` opened. */
+  async function stopAll() {
+    for (const client of clients.splice(0)) await client.close();
+    for (const server of servers.splice(0)) await server.close();
+  }
+
+  beforeEach(() => {
+    storeDir = Deno.makeTempDirSync();
+    diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+    seedDiskDb(diskPath);
+    handleId = `of:disk-${crypto.randomUUID()}`;
+  });
+
+  afterEach(async () => {
+    await stopAll();
+    Deno.removeSync(storeDir, { recursive: true });
+    try {
+      Deno.removeSync(diskPath);
+    } catch { /* a case removed it */ }
+  });
+
+  it("reads a registered source after a restart without registering it again", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+
+    const { session } = await start();
+    const { rows } = await session.sqliteQuery(
+      { id: handleId, external: true },
+      "SELECT v FROM lookup ORDER BY k",
+    );
+    expect(rows).toEqual([{ v: "1" }, { v: "2" }]);
+  });
+
+  it("fails a read of a handle marked external that has no registration", async () => {
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("returns no rows for an unmarked handle whose cell-derived database was never written", async () => {
+    const { session } = await start();
+    const { rows } = await session.sqliteQuery({ id: handleId }, "SELECT 1");
+    expect(rows).toEqual([]);
+  });
+
+  it("fails a read of a registered source whose file is gone after a restart", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+    Deno.removeSync(diskPath);
+
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("refuses a write to a handle marked external, registered or not", async () => {
+    const { session } = await start();
+    await expect(
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "sqlite",
+          db: { id: handleId, external: true },
+          sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+        }],
+      }),
+    ).rejects.toThrow("read-only");
+  });
+
+  it("refuses a write to a registered source after a restart", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+
+    const { session } = await start();
+    await expect(
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "sqlite",
+          db: { id: handleId },
+          sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+        }],
+      }),
+    ).rejects.toThrow("read-only");
+  });
+});
+
+/** The error `promise` rejects with; fails the case when it resolves. */
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw new Error(`rejected with a non-error: ${String(error)}`);
+  }
+  throw new Error("resolved, where a rejection was expected");
+}

@@ -17,7 +17,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 
 describe("injected on-disk source via the runner storage provider", () => {
@@ -69,5 +72,37 @@ describe("injected on-disk source via the runner storage provider", () => {
         Deno.removeSync(diskPath);
       } catch { /* ignore */ }
     }
+  });
+
+  it("reports a handle marked external with no registration as unavailable, not empty", async () => {
+    // The mark travels with the handle to the server, which fails the read
+    // rather than falling back to a cell-derived database that would answer
+    // with no rows.
+    const { commonfabric } = createBuilder();
+    const { pattern, sqliteQuery } = commonfabric;
+    const db: SqliteDbRef = {
+      id: `of:disk-${crypto.randomUUID()}`,
+      tables: {},
+      external: true,
+    };
+    const testPattern = pattern<Record<string, never>>(() =>
+      // deno-lint-ignore no-explicit-any
+      sqliteQuery({ db, sql: "SELECT 1 AS one" } as any)
+    );
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      space,
+      "sqlite-disk-source-unavailable",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    await tx.commit().settled;
+
+    const settled = await waitForCellValue<
+      { pending?: boolean; error?: string; result?: unknown }
+    >(runtime, result, (value) => value?.pending === false);
+    expect(settled.error).toContain("unavailable");
+    expect(settled.result).toBeUndefined();
   });
 });

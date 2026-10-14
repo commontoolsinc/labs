@@ -64,6 +64,22 @@ export interface DiskHandleValue {
   scope?: string;
   owner?: string;
   rev?: number;
+
+  /**
+   * Marks the handle as naming an injected source, so the server fails a read
+   * it has no registration for as unavailable and refuses a write to it.
+   */
+  external?: boolean;
+}
+
+/**
+ * Whether a committed handle still lacks the `external` mark every injected
+ * source's handle carries. A link adds the mark to such a handle as its one
+ * change to it: the mark lowers no label and moves no `owner`, `scope` or
+ * `rev`, which are what leaving a committed handle as it stands protects.
+ */
+export function needsExternalMark(prior: DiskHandleValue | undefined): boolean {
+  return prior !== undefined && prior.external !== true;
 }
 
 /**
@@ -153,6 +169,7 @@ export function diskHandleSeed(
     id,
     tables: inlineTables(id, prior?.tables),
     rev: 0,
+    external: true,
   };
   const foreign = typeof prior?.id === "string" && prior.id !== "";
   if (foreign) return seed;
