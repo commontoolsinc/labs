@@ -159,19 +159,33 @@ next describes.
 
 For an instance the resume pre-sync planned and named, the gate takes the
 record of a derived cell, a document whose id has the `computed:` scheme,
-for the cell (`Runner.#derivedCellRecordPresent`). A derived cell whose
-record has arrived is here; one this replica never loaded has no record and
-still holds the start. `packages/runner/test/resume-presync-plan-count.test.ts`
-resumes a tree whose rows each own a derived cell that yields `undefined`
-and expects one name-sync. Before the change it counted seven: the root's,
-and two for each of three rows.
+for the cell, unless the cell is owed a default at a scope narrower than
+its piece's result (`ownedCellRecordSuffices` in
+`packages/runner/src/runner.ts`). A derived cell whose record has arrived
+is here; one this replica never loaded has no record and still holds the
+start. `packages/runner/test/resume-presync-plan-count.test.ts` resumes a
+tree whose rows each own a derived cell that yields `undefined` and expects
+one name-sync. Before the change it counted seven: the root's, and two for
+each of three rows.
+
+A cell owed such a default keeps its hold because a start's preparation is
+what seeds the default when the cell holds no value. On a resume through
+`Runner.start()` the root's preparation already seeds it for every instance
+its pre-sync named, before any row reaches the gate, so a test of that
+path, also in the file above, passes with or without the exception. The
+pre-syncs that name instances and seed nothing are `runSynced()`'s and
+`syncStoredPieceCells()`'s, and the exception keeps a later start of such
+an instance seeding as it did.
 
 The counts in the table above were taken with a first form of the change,
-which took the record for every derived cell whether or not the pre-sync
-had named its owner. All 120 row holds were on named instances, and five
-more reloads of each room with the final form, at a load of 175 to 229,
-gave the same counts: 4 name-syncs and 295 spans for room A on each, 4 and
-299 for room B.
+which took the record for every derived cell, whether or not the pre-sync
+had named its owner and whether or not a default was owed to it. All 120
+row holds were on named instances, and five more reloads of each room
+limited to named instances, at a load of 175 to 229, gave the same counts:
+4 name-syncs and 295 spans for room A on each, 4 and 299 for room B. Five
+more with the form that landed, the exception for an owed default included,
+on main at `560bcd9f20` and at a load of 323 to 758, gave the same counts
+again.
 
 The first form failed one test of the runner's suite,
 `packages/runner/test/cfc-policy-manifest-shared-install.test.ts`, "starts

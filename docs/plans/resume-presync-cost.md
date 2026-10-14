@@ -158,9 +158,12 @@ Exit: a schema is recomposed once per reference per registry epoch.
       owning such a cell was held on every load for a name-sync with no
       value to deliver, and a list's rows were held twice each: the element
       piece, then the row it instantiates. `#familyAbsent` takes the record
-      for the cell (`#derivedCellRecordPresent`). A tree whose rows each
-      own a derived cell that yields `undefined` resumes with one name-sync
-      (`packages/runner/test/resume-presync-plan-count.test.ts`).
+      for the cell, unless the cell is owed a default at a scope narrower
+      than its piece's result, which a start's preparation seeds
+      (`ownedCellRecordSuffices`). A tree whose rows each own a derived
+      cell that yields `undefined` resumes with one name-sync, and a tree
+      whose rows each owe such a cell a per-user default has it seeded on
+      resume (`packages/runner/test/resume-presync-plan-count.test.ts`).
 - [x] The field check, on a thirty-message room of sixty row instances
       whose rows each own one derived cell nothing demands, five reloads
       each way from copies of one store: `start/syncCellsForRunningPattern`

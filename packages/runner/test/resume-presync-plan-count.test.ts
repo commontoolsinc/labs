@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import { Identity } from "@commonfabric/identity";
 
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -104,6 +105,36 @@ const VALUELESS_TREE_PROGRAM: RuntimeProgram = {
       "});",
       "export default pattern<{ items: Item[] }, {",
       "  rows: { value: number; note?: string; badge: { label: string } }[];",
+      "}>(({ items }) => ({",
+      "  rows: items.map((item) => row({ item })),",
+      "}));",
+    ].join("\n"),
+  }],
+};
+
+// The plain tree, each row owning a per-user derived value with a default
+// that its computation never produces: once the computation has run, the
+// viewer's instance of the cell holds the record setup wrote and no value,
+// and the next start owes that instance the default.
+const SEEDED_DEFAULT_TREE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern, type Default, type PerUser } from 'commonfabric';",
+      "type Item = { n: number };",
+      "export const row = pattern<{ item: Item }, {",
+      "  value: number;",
+      "  mark?: string;",
+      "}>(({ item }) => {",
+      "  const mark = computed(",
+      "    (): PerUser<Default<string, 'none'>> | undefined =>",
+      "      item.n > 100 ? 'large' : undefined,",
+      "  );",
+      "  return { value: computed(() => item.n * 2), mark };",
+      "});",
+      "export default pattern<{ items: Item[] }, {",
+      "  rows: { value: number; mark?: string }[];",
       "}>(({ items }) => ({",
       "  rows: items.map((item) => row({ item })),",
       "}));",
@@ -505,6 +536,103 @@ describe("resume-presync-plan-count", () => {
     // No name-sync could deliver a value the store does not hold, so no
     // row's start asks for one: the root's is the only name-sync.
     expect(nameSyncs).toBe(1);
+  });
+
+  it("seeds a nested instance's per-user default when the derived cell holding it has no value", async () => {
+    const cellId = "resume-presync-plan-count-seeded-default-root";
+
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(
+      SEEDED_DEFAULT_TREE_PROGRAM,
+      { space },
+    );
+    const tx = author.edit();
+    const authored = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, authored);
+    await tx.commit().settled;
+    await authored.pull();
+    await author.settled();
+    await author.patternManager.flushCompileCacheWrites();
+    await author.storageManager.synced();
+    await author.dispose({ closeStorage: false });
+    runtimes.splice(runtimes.indexOf(author), 1);
+
+    const wrapperPattern = compiled.nodes
+      .map((node) => (node.inputs as { op?: unknown }).op)
+      .find(isPattern)!;
+    const rowPattern = wrapperPattern.nodes
+      .map(childPatternOf)
+      .find((pattern) => pattern !== undefined)!;
+    const markDescriptor = rowPattern.derivedInternalCells!
+      .find((descriptor) => descriptor.partialCause === "mark")!;
+    expect(markDescriptor).toMatchObject({
+      kind: "computed",
+      scope: "user",
+      schema: { default: "none" },
+    });
+
+    // Resumes the tree in a runtime of its own, as the same user, with
+    // `intercept` installed for the resume, and returns the rows' cells
+    // holding the default, with what this replica holds for each.
+    const resume = async (intercept?: (runtime: Runtime) => Disposable) => {
+      const runtime = replica();
+      await runtime.patternManager.compilePattern(SEEDED_DEFAULT_TREE_PROGRAM, {
+        space,
+      });
+      const pieces = new Set<string>();
+      runtime.runner.accessForTestingOnly.presyncPlanRecorder = (piece) => {
+        pieces.add(piece);
+      };
+      using _intercepted = intercept?.(runtime);
+      const resumed = runtime.getCell<{ rows: { value: number }[] }>(
+        space,
+        cellId,
+        compiled.resultSchema,
+      );
+      expect(await runtime.runner.start(resumed)).toBe(true);
+      await resumed.pull();
+      await runtime.settled();
+      await runtime.storageManager.synced();
+      const documents = managers[managers.length - 1].open(space).replica;
+      const marks = new Map<string, { value?: unknown } | undefined>();
+      for (const piece of pieces) {
+        const id = getDerivedInternalCellLink(
+          runtime.getCellFromEntityId(space, piece),
+          markDescriptor,
+        ).id;
+        const document = documents.getDocument(id, "user");
+        if (document !== undefined) marks.set(id, document);
+      }
+      await runtime.dispose({ closeStorage: false });
+      runtimes.splice(runtimes.indexOf(runtime), 1);
+      return marks;
+    };
+
+    // The first resume leaves each row's cell with its record and no
+    // value: the computation ran, and produces nothing.
+    const left = await resume();
+    expect([...left.values()].map((document) => document?.value))
+      .toEqual([undefined, undefined, undefined]);
+
+    // The next resume owes each row's cell its default and seeds it before
+    // any row starts: the root's start prepares every instance its pre-sync
+    // named, so no row has to be held for the seed.
+    const seeded: string[] = [];
+    await resume((runtime) => {
+      const stamp = runtime.stampServerRun.bind(runtime);
+      return stub(runtime, "stampServerRun", (tx, info) => {
+        if (info.actionId.startsWith("scoped-default/")) {
+          seeded.push(info.actionId.slice("scoped-default/".length));
+        }
+        stamp(tx, info);
+      });
+    });
+    expect(seeded.toSorted()).toEqual([...left.keys()].toSorted());
   });
 
   it("yields to the event loop between the syncs of a resume wave", async () => {
