@@ -319,7 +319,9 @@ function cellResource(
     };
   }
 
-  if (kind === "presence") {
+  // A room is granted by the embedder's explicit kind alone: a schema that
+  // declared one would let whoever wrote the schema announce the user.
+  if (kindHint === "presence") {
     return presenceResource({
       join: () => cell.runtime().joinPresenceRoom(cell),
       failure: presenceBridgeFailure,

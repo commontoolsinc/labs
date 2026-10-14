@@ -740,6 +740,41 @@ describe("cf-iframe cell bridge", () => {
       cancel();
     });
 
+    it("grants a cell, not a room, for a schema that declares `presence` with no kind given", () => {
+      let joins = 0;
+      const runtime = runtimeStub({
+        joinPresenceRoom: () => {
+          joins++;
+          return Promise.reject(new Error("unreachable"));
+        },
+        [$conn]: () => ({
+          request: () => Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          peersOf: () => [],
+          signal: { aborted: false },
+        }),
+      });
+      // A stored schema is data, and nothing holds one to the cell kinds the
+      // builder's types allow.
+      const stored: unknown = {
+        type: "object",
+        properties: {
+          cursors: { type: "object", asCell: ["presence"] },
+        },
+      };
+      const context = new CellHandle<Record<string, unknown>>(runtime, {
+        ...ref,
+        schema: stored as CellRef["schema"],
+      }, { value: { cursors: {} } });
+
+      const cursors = createCellContextBridge(context).resources.cursors;
+
+      expect(cursors.kind).toBe("cell");
+      expect(cursors.sink).toBeUndefined();
+      expect(joins).toBe(0);
+    });
+
     it("tells a guest a relay's refusal in the relay's words, and any other failure by category alone", async () => {
       const failures = [
         [
