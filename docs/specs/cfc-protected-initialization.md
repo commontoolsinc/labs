@@ -265,7 +265,10 @@ them, is stored. Labels elsewhere in the document persist as for any write. An
 authoritative transaction, which commits each document whole, receives no
 deferral. Any other write attempt at a protected field — pattern code setting a
 whole document with the field's own bytes among them — requires the field's
-ordinary writer.
+ordinary writer. The same requirements are deferred at the root of a document
+holding a runtime output that a re-run initializer preserves, as "New cells"
+above describes, and are waived there only when the transaction leaves the
+complete stored envelope as it was.
 
 ## Attribution of an initialized value
 
