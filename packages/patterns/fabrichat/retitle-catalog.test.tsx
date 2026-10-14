@@ -6,7 +6,9 @@
  * retitle moves the entry's title and nothing else, so its revision and
  * membership stay as they were. A retitle is a write in the room, and writing
  * in a room is joining it, so a member who forgot the room and retitles it has
- * it back among their chats, as a message or a reaction would.
+ * it back among their chats, as a message or a reaction would. An entry that
+ * names the room's space as something other than a room, as a container's
+ * does, keeps its own title.
  */
 import {
   action,
@@ -123,6 +125,19 @@ const listRoom = handler<unknown, EntryState>((_event, { catalog, room }) => {
   });
 });
 
+/** Lists the room's space in the catalog as a container titled `Container`. */
+const listAsContainer = handler<unknown, EntryState>((
+  _event,
+  { catalog, room },
+) => {
+  registerSharedSpaceIn(catalog, {
+    space: spaceOf(room) ?? "",
+    host: "http://localhost:8000",
+    kind: "loom",
+    title: "Container",
+  });
+});
+
 /** Forgets the room, at the revision its catalog entry holds. */
 const forgetRoom = handler<unknown, EntryState>((
   _event,
@@ -168,6 +183,12 @@ interface ViewerOutput {
 
   /** Has the viewer's manager forget the room. */
   forget: Stream<unknown>;
+
+  /** Lists the room's space in the viewer's catalog as a container. */
+  listAsContainer: Stream<unknown>;
+
+  /** The kind of the room's space's entry in the viewer's catalog. */
+  entryKind?: string;
 
   /** The title the room's entry in the viewer's catalog holds. */
   entryTitle?: string;
@@ -227,9 +248,11 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     setTitle: room.setTitle,
     list: listRoom({ catalog, room: self }),
     forget: forgetRoom({ catalog, room: self, forget: manager.forget }),
+    listAsContainer: listAsContainer({ catalog, room: self }),
     entryTitle: computed(() => entry?.title),
     entryRevision: computed(() => entry?.revision),
     entryState: computed(() => entry?.state),
+    entryKind: computed(() => entry?.kind),
   };
 });
 
@@ -323,4 +346,35 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   };
 });
 
-export default multiUserTest({ setup, participants: { alice, bob } });
+// Her catalog lists the room's space as a container, whose entry keeps its
+// own title when she retitles the room.
+export const carol = pattern<{ setup: Setup }>(({ setup }) => {
+  const viewer = Viewer({
+    setup,
+    profile: Writable.of<TestProfile>({ name: "Carol" }),
+  });
+
+  return {
+    [TESTS]: [
+      { await: "bob-done" },
+      { action: viewer.listAsContainer, event: {} },
+      {
+        action: viewer.setTitle,
+        event: { requestId: "t-carol", title: "Carol's plans" },
+        trustedUi: retitleGesture,
+      },
+      {
+        assertion: assert(() =>
+          viewer.about.title === "Carol's plans" &&
+          viewer.entryKind === "loom" &&
+          viewer.entryTitle === "Container"
+        ),
+      },
+    ],
+  };
+});
+
+export default multiUserTest({
+  setup,
+  participants: { alice, bob, carol },
+});

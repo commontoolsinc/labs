@@ -414,7 +414,9 @@ const hostOrigin = (): string => new URL(getPatternEnvironment().apiUrl).origin;
  * Brings the title registered with the listed room in `space` up to `title`,
  * the room's own, cut to the length an offer's may run to. The catalog is
  * written only where the two differ, and the entry's membership and revision
- * stay as they are. A room with no title leaves the entry's as it is.
+ * stay as they are. A room with no title leaves the entry's as it is, and so
+ * does an entry of any kind but a room's: a container's entry names the
+ * container, whatever chat it declares.
  */
 const refreshListedTitle = (
   catalog: CatalogCell,
@@ -422,6 +424,8 @@ const refreshListedTitle = (
   title: string | undefined,
 ): void => {
   if (title === undefined) return;
+  const entry = readSharedSpaceCatalog(catalog).entries[space];
+  if (entry?.kind !== CHAT_ROOM_OFFER_KIND) return;
   retitleSharedSpaceIn(catalog, {
     space,
     title: title.slice(0, OFFER_TITLE_MAX_LENGTH),
