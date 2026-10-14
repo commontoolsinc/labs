@@ -815,6 +815,17 @@ export interface RoomActState {
   closesPicker?: boolean;
 
   /**
+   * Tells the viewer's manager the viewer has joined the room, as
+   * `tellManagerJoined` does, in an event of its own; absent where nothing is
+   * told. The act's own transaction reads nothing of the manager, which can
+   * carry a label the room's space doesn't admit.
+   */
+  joined?: Stream<void>;
+}
+
+/** What `tellManagerJoined` is bound to. */
+export interface ManagerJoinState {
+  /**
    * Whether the viewer's manager can take the viewer into the room: the
    * viewer has a manager and the room is standalone or its container's
    * declared conversation. Absent, it can't.
@@ -834,13 +845,17 @@ export interface RoomActState {
 /**
  * Tells the viewer's manager the viewer has joined the room. The manager's
  * own event checks its private catalog and leaves an already listed room
- * unchanged, so catalog reads stay in the manager's event.
+ * unchanged, so catalog reads stay in the manager's event. A room's acts send
+ * it an event once they have recorded what the viewer wrote.
  */
-const joinForViewer = (state: RoomActState): void => {
-  const { canJoin, joinRoom, self } = state;
-  if (canJoin !== true || joinRoom === undefined || self === undefined) return;
-  joinRoom.send({ room: self, container: state.container });
-};
+export const tellManagerJoined = handler<void, ManagerJoinState>(
+  (_event, { canJoin, container, joinRoom, self }) => {
+    if (canJoin !== true || joinRoom === undefined || self === undefined) {
+      return;
+    }
+    joinRoom.send({ room: self, container });
+  },
+);
 
 /**
  * Records that the act `requestId` took effect, and clears the session's
@@ -1040,7 +1055,7 @@ const performMessageAct = (
     if (state.replyFrom === "replyTo" && composing?.replyTo !== undefined) {
       composer.key("replyTo").set(undefined);
     }
-    joinForViewer(state);
+    state.joined?.send();
     return;
   }
 
@@ -1251,7 +1266,7 @@ const performReactionAct = (
     mine.set({ reactorProfile: profile, emoji, sentAt } as SentReaction);
     list.addUnique(mine);
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
-    joinForViewer(state);
+    state.joined?.send();
   }
   if (op === "remove" && present) {
     const loggedAt = claimTime(usedTimes, clock);

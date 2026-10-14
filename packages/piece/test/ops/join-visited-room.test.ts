@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
+
 import { createSession, Identity } from "@commonfabric/identity";
 import type { ACL } from "@commonfabric/memory/acl";
 import {
@@ -343,6 +345,72 @@ describe("join-visited-room", () => {
         "space-kind-undeclared",
         "chat-room-invalid",
       ]);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `recipient-access-refused` when the declared room cannot be read for want of access", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const foreign = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const room = await runtime.getSpaceCell(foreign).key("defaultPattern")
+        .pull();
+      await edit((tx) => root!.withTx(tx).key("chatRoom").set(room));
+      const failure = new Error("room access refused");
+      using _session = stub(
+        storage,
+        "spaceSessionError",
+        (each) => each === foreign ? failure : undefined,
+      );
+      using _refused = stub(
+        storage,
+        "spaceAccessError",
+        (each) => each === foreign ? failure : undefined,
+      );
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("recipient-access-refused");
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("throws the original failure when reading a declaration fails without an access refusal", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const foreign = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const room = await runtime.getSpaceCell(foreign).key("defaultPattern")
+        .pull();
+      await edit((tx) => root!.withTx(tx).key("chatRoom").set(room));
+      const failure = new Error("declaration transport failed");
+      using _session = stub(
+        storage,
+        "spaceSessionError",
+        (each) => each === foreign ? failure : undefined,
+      );
+
+      await expect(joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .rejects.toBe(failure);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `recipient-access-refused` when access is revoked after the kind lookup", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      let revoked = false;
+      const spaceKind = runtime.spaceKind.bind(runtime);
+      using _kind = stub(runtime, "spaceKind", async (each) => {
+        const kind = await spaceKind(each);
+        if (each === space) revoked = true;
+        return kind;
+      });
+      using _refused = stub(
+        storage,
+        "spaceAccessError",
+        (each) =>
+          revoked && each === space ? new Error("access revoked") : undefined,
+      );
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("recipient-access-refused");
       expect(await joinedNow()).toStrictEqual([]);
     });
 
