@@ -1225,6 +1225,16 @@ const performManagerAct = (
         });
         return;
       }
+      const kind = membership?.kind ??
+        aboutRecordOf(room).key("kind").get() ??
+        room.key("about").key("kind").get();
+      if (kind !== "direct" && kind !== "group") {
+        recordOutcome(state, requestId, {
+          status: "refused",
+          reason: "The request names no room.",
+        });
+        return;
+      }
       if (
         standalone?.kind === CHAT_ROOM_OFFER_KIND &&
         standalone.state === "saved"
@@ -1246,7 +1256,7 @@ const performManagerAct = (
       const entry: RoomMembership = {
         room,
         container: membership?.container ?? container,
-        kind: membership?.kind ?? "group",
+        kind,
         since: membership?.since ?? epochNsecFromMsec(source?.since ?? 0),
         state: "archived",
         revision: eventKey(),
@@ -1658,7 +1668,7 @@ const FoundRoom = pattern<FoundRoomInput, FoundRoomOutput>(
     const standalone = computed(() => kind === CHAT_ROOM_OFFER_KIND);
     return {
       room: computed(() =>
-        standalone ? root.result : root.result?.get()?.chatRoom
+        standalone ? root.result : root.result?.key("chatRoom").get()
       ),
     };
   },
@@ -1725,8 +1735,8 @@ export const FabriChatManagerCore = pattern<
     const roomMembership = new Writable<RoomMembership[]>([]);
     const draft = new Writable.perSession<GroupDraft>(EMPTY_DRAFT);
     const startRefusal = new Writable.perSession<string>("");
-    // The rooms the catalog keeps as saved; a catalog that doesn't read as one
-    // lists none.
+    // Saved catalog entries are discovery sources; standalone rooms come first.
+    // A catalog that doesn't read as one supplies no sources.
     const savedRooms = computed((): SharedSpaceEntry[] => {
       const catalog = sharedSpaceCatalog.get();
       return isSharedSpaceCatalog(catalog)

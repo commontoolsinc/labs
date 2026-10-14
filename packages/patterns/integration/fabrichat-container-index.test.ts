@@ -27,6 +27,9 @@ interface Entry {
   /** The resolved conversation. */
   room: Cell<unknown>;
 
+  /** The room's declared conversation kind. */
+  kind: string;
+
   /** The membership revision clients return when forgetting it. */
   revision: string;
 }
@@ -37,6 +40,7 @@ const entriesSchema = {
     type: "object",
     properties: {
       room: { type: "object", asCell: ["cell"] },
+      kind: { type: "string" },
       revision: { type: "string" },
     },
   },
@@ -265,6 +269,38 @@ describe("fabrichat-container-index", () => {
         since: 123,
       },
     });
+    const directTx = runtime.edit();
+    const directRoom = runtime.getCell(
+      social,
+      "direct conversation",
+      undefined,
+      directTx,
+    );
+    directRoom.set({ about: { kind: "direct" } });
+    container.withTx(directTx).key("chatRoom").set(directRoom);
+    expect((await directTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    const directEntry = entries.get().find((entry) =>
+      entry.room.equals(directRoom)
+    );
+    expect(directEntry?.kind).toBe("direct");
+    sendEvent(manager.key("forget"), {
+      room: directRoom,
+      revision: directEntry?.revision,
+      requestId: "forget-direct",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(manager.key("requests").key("forget-direct").key("status").get())
+      .toBe("done");
+    expect(entries.get().some((entry) => entry.room.equals(directRoom))).toBe(
+      false,
+    );
+    expect(
+      manager.key("roomMembership").asSchema<Entry[]>(entriesSchema).get()
+        .find((entry) => entry.room.equals(directRoom))?.kind,
+    ).toBe("direct");
   });
   it("lists a room once through standalone and container entries and keeps forgetting it independent of its container", async () => {
     const standalone = await runtime.createSpace({
