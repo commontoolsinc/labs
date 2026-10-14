@@ -138,6 +138,54 @@ describe("cell-handle", () => {
       expect(child.ref()).not.toHaveProperty("keyedFrom");
     });
 
+    it("computes an update from a read under its own schema, not from one another view of the cell queued ahead of it", async () => {
+      const narrow = {
+        type: "object",
+        properties: { state: { type: "object", properties: { a: {} } } },
+      } as const;
+      const wide = {
+        type: "object",
+        properties: {
+          state: { type: "object", properties: { a: {}, b: {} } },
+        },
+      } as const;
+      const written: unknown[] = [];
+      const viewed = (request: { type: RequestType; cell: CellRef }) =>
+        request.cell.keyedFrom?.schema === narrow
+          ? { value: { a: 1 } }
+          : { value: { a: 1, b: 2 } };
+      const viewRuntime = {
+        [$conn]: () => ({
+          request: (
+            request: { type: RequestType; cell: CellRef; value?: unknown },
+          ) => {
+            if (request.type === RequestType.CellSet) {
+              written.push(request.value);
+              return Promise.resolve({});
+            }
+            return Promise.resolve(viewed(request));
+          },
+          peersOf: () => [],
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      type State = { state: Record<string, unknown> };
+      const narrowState = new CellHandle<State>(viewRuntime, {
+        ...ref,
+        schema: narrow,
+      }).key("state");
+      const wideState = new CellHandle<State>(viewRuntime, {
+        ...ref,
+        schema: wide,
+      }).key("state");
+
+      const pulling = narrowState.pull();
+      const updating = wideState.update((state) => ({ ...state, c: 3 }));
+      await Promise.all([pulling, updating]);
+
+      expect(written).toEqual([{ a: 1, b: 2, c: 3 }]);
+    });
+
     it("keys subscriptions on the ancestor a child was keyed from", () => {
       const first = new CellHandle<{ state: unknown }>(runtime, ref).key(
         "state",

@@ -60,10 +60,19 @@ interface ReadAnswer<T> {
   authoritative: boolean;
 }
 
+/**
+ * The operations on one cell, in the order they reach the worker, and the
+ * value the latest of them left. Handles that read the cell under different
+ * schemas share one queue, so their writes stay in order, but not that value:
+ * it is a reading under the schema of `view`, and a handle reading under
+ * another takes it as no value.
+ */
 interface CellOperationQueue {
   tail: Promise<void> | undefined;
   hasValue: boolean;
   value: unknown;
+  // `viewKey()` of the handle whose operation left `value`.
+  view: string | undefined;
   // Changes when any equivalent handle receives an authoritative update.
   authoritativeGeneration: number;
 }
@@ -214,6 +223,8 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
+  // `#viewKey()`, memoized.
+  #view: string | undefined;
   #updateGeneration = 0;
 
   /**
@@ -252,7 +263,7 @@ export class CellHandle<T = unknown> {
    * globalThis.commonfabric.logger["cell-handle"].disabled = false
    */
   #requireSchema(method: string): void {
-    if (!this.#ref.schema && !this.#schemaWarned) {
+    if (!this.#ref.schema && !this.#ref.keyedFrom && !this.#schemaWarned) {
       this.#schemaWarned = true;
       // Use callback for lazy evaluation - stack trace only generated if logging is enabled
       logger.warn(`no-schema-${method}`, () => {
@@ -367,8 +378,7 @@ export class CellHandle<T = unknown> {
         updateGeneration === this.#updateGeneration &&
         authoritativeGeneration === queue.authoritativeGeneration
       ) {
-        queue.value = snapshot;
-        queue.hasValue = true;
+        this.#holdInQueue(queue, snapshot);
       }
     });
   }
@@ -460,8 +470,7 @@ export class CellHandle<T = unknown> {
         updateGeneration === this.#updateGeneration &&
         authoritativeGeneration === queue.authoritativeGeneration
       ) {
-        queue.value = snapshot;
-        queue.hasValue = true;
+        this.#holdInQueue(queue, snapshot);
       }
     });
   }
@@ -481,7 +490,8 @@ export class CellHandle<T = unknown> {
   ): { value: unknown } | undefined {
     const refused = this.#writeRefusal();
     if (refused !== undefined) throw refused;
-    if (queue.hasValue) return { value: queue.value };
+    const queued = this.#queuedValue(queue);
+    if (queued !== undefined) return queued;
     if (!this.#unread && writeGeneration === this.#writeGeneration) {
       return { value: this.#value };
     }
@@ -537,8 +547,7 @@ export class CellHandle<T = unknown> {
         updateGeneration === this.#updateGeneration &&
         authoritativeGeneration === queue.authoritativeGeneration
       ) {
-        queue.value = snapshot;
-        queue.hasValue = true;
+        this.#holdInQueue(queue, snapshot);
       }
     });
   }
@@ -628,6 +637,7 @@ export class CellHandle<T = unknown> {
         tail: undefined,
         hasValue: false,
         value: undefined,
+        view: undefined,
         authoritativeGeneration: 0,
       };
       queues.set(key, queue);
@@ -963,14 +973,14 @@ export class CellHandle<T = unknown> {
       const refusedSince = this.#writeRefusal();
       if (refusedSince !== undefined) return Promise.reject(refusedSince);
       const authoritativeGeneration = queue.authoritativeGeneration;
-      const current = (queue.hasValue ? queue.value : fallback) as unknown[];
+      const queued = this.#queuedValue(queue);
+      const current = (queued ? queued.value : fallback) as unknown[];
       if (!Array.isArray(current)) {
         throw new Error("push() can only be used on array cells");
       }
       const value = [...current, ...snapshots];
       const updateGeneration = this.#updateGeneration;
-      queue.value = value;
-      queue.hasValue = true;
+      this.#holdInQueue(queue, value);
       if (writeGeneration === this.#writeGeneration) {
         this.#publishWrite(value as unknown as T);
       }
@@ -982,8 +992,7 @@ export class CellHandle<T = unknown> {
           // Keep the restored base explicit in the shared queue. A later
           // append may have captured this append's optimistic publication as
           // its private fallback before the refusal arrived.
-          queue.hasValue = true;
-          queue.value = current;
+          this.#holdInQueue(queue, current);
           if (writeGeneration === this.#writeGeneration) {
             this.#publishWrite(current as unknown as T);
           }
@@ -1300,8 +1309,40 @@ export class CellHandle<T = unknown> {
    * or none for a refusal, which holds nothing of the cell.
    */
   #recordInQueue(queue: CellOperationQueue, read: CellAnswer<T>): void {
-    queue.value = "refused" in read ? undefined : read.value;
-    queue.hasValue = !("refused" in read);
+    if ("refused" in read) {
+      queue.value = undefined;
+      queue.hasValue = false;
+    } else {
+      this.#holdInQueue(queue, read.value);
+    }
+  }
+
+  /**
+   * Records `value` as what this handle's operation left in `queue`, as read
+   * under this handle's schema.
+   */
+  #holdInQueue(queue: CellOperationQueue, value: unknown): void {
+    queue.value = value;
+    queue.hasValue = true;
+    queue.view = this.#viewKey();
+  }
+
+  /**
+   * The value the operations before this one left in `queue`, where they
+   * left one read under this handle's schema; `undefined` otherwise.
+   */
+  #queuedValue(queue: CellOperationQueue): { value: unknown } | undefined {
+    return queue.hasValue && queue.view === this.#viewKey()
+      ? { value: queue.value }
+      : undefined;
+  }
+
+  /** What decides the shape a read through this handle returns. */
+  #viewKey(): string {
+    return this.#view ??= JSON.stringify({
+      schema: this.#ref.schema,
+      keyedFrom: this.#ref.keyedFrom,
+    });
   }
 
   /**
@@ -1530,8 +1571,7 @@ export class CellHandle<T = unknown> {
     );
     if (queue) {
       queue.authoritativeGeneration++;
-      queue.value = applied;
-      queue.hasValue = true;
+      this.#holdInQueue(queue, applied);
     }
     const valueChanged = !valuesOrCellsEqual(applied, this.#value);
     // A label-only change (value identical) still fires label-aware subscribers.
