@@ -475,7 +475,7 @@ export abstract class FabricNativeWrapper<T extends object>
   /**
    * @inheritDoc Not yet implemented, so the inherited `deepClone()` throws.
    */
-  protected [DEEP_CLONE_CORE](_frozen: boolean): FabricInstance {
+  [DEEP_CLONE_CORE](_frozen: boolean, _subClone: (value: FabricValue) => FabricValue): FabricInstance {
     throw new Error(
       `Cannot yet handle deep cloning of \`${this.constructor.name}\`.`,
     );
@@ -633,10 +633,10 @@ export class FabricError extends FabricNativeWrapper<Error> {
   // ([DEEP_FREEZE] / [IS_DEEP_FROZEN] freeze `this` and recurse into
   // `cause` + the extras-bag values; `[SHALLOW_UNFROZEN_CLONE]()` copies the
   // slots + bag; `wrappedValue` / `toNativeFrozen()` / `toNativeThawed()`
-  // build the JS `Error` projection on demand. `[DEEP_CLONE_CORE](frozen)`
-  // round-trips through the codec, decoding mutable unless `frozen`:
-  // `codec.decode(tag, codec.encode(this, env), env, !frozen)`; the
-  // `deepClone()` template owns the final deep freeze. Bodies omitted for
+  // build the JS `Error` projection on demand. `[DEEP_CLONE_CORE]` clones
+  // codec state through `subClone`, preserving ancestor tracking:
+  // `codec.decode(tag, subClone(codec.encode(this, env)), env, !frozen)`.
+  // The canonical cloner owns the final deep freeze. Bodies omitted for
   // brevity.)
 
   static #codec = Object.freeze(
@@ -2200,11 +2200,11 @@ export abstract class BaseFabricInstance extends FabricInstance {
   /**
    * Returns a new deep clone of this instance, cloning nested `FabricValue`s
    * to the requested frozenness (see `[DEEP_CLONE_CORE]`'s symbol doc). The
-   * returned instance itself is not yet frozen: the `deepClone()` template
-   * method owns the identity optimization and the final freeze. Called by
-   * `deepClone()` when a fresh instance is needed.
+   * returned instance itself is not yet frozen; the canonical cloner owns the
+   * identity optimization and final freeze. Nested values use `subClone`,
+   * preserving ancestor tracking across instance boundaries.
    */
-  protected abstract [DEEP_CLONE_CORE](frozen: boolean): FabricInstance;
+  abstract [DEEP_CLONE_CORE](frozen: boolean, subClone: (value: FabricValue) => FabricValue): FabricInstance;
 
   //
   // Instance members

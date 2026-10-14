@@ -66,8 +66,17 @@ session, keyed by the principal each profile attests.
 The manager's rendering labels each listed room with its `about.title`, read
 through the room's link, so a retitle shows there once the room records it. A
 direct room with no title is labeled by its counterpart. A standalone room's
-catalog title is its title when it was registered, a display hint the catalog
-doesn't refresh; neither the rendering nor `rooms` reads it.
+catalog entry holds its title too, as a display hint for readers of the
+catalog, which neither the rendering nor `rooms` reads. Registration takes the
+room's title, whatever its kind. Whenever the manager handles `accept` or
+`joinRoom` for a room its catalog lists, it reads the room's `about`, and
+retitles the entry (`retitleSharedSpaceIn()`) where the room's title differs
+from the entry's, moving neither its revision nor its membership. A join of an
+already-listed room arrives with every write in the room, so that is all it
+reads of the room, and it writes the catalog only on a mismatch. The member who
+retitles a room tells their manager at once; another member's entry follows on
+their manager's next event for that room: their next message, reaction, or
+retitle, an acceptance, or a client's `joinRoom` when they open it.
 
 `direct` holds one entry per counterpart, including forgotten rooms, for direct
 rooms this manager created or accepted. `openDirect` finds a direct room there

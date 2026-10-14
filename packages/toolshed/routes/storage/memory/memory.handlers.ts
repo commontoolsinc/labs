@@ -33,6 +33,25 @@ type NegotiationOptions = {
 
 const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
 
+/**
+ * Helper for `bufferTextMessagesUntilNegotiated()`, which builds the error to
+ * report for a socket `error` event. Deno states why a socket failed only on
+ * the event: an `ErrorEvent` whose message names the cause, such as
+ * `Unexpected EOF` for a peer that left without a close frame, and whose
+ * `.error` holds that failure as an `Error`. `summary` leads the message
+ * whatever the cause, so a search for it finds every such failure.
+ */
+const socketFailureError = (summary: string, event: Event): Error => {
+  if (!(event instanceof ErrorEvent)) {
+    return new Error(summary);
+  }
+  const message = event.message === ""
+    ? summary
+    : `${summary}: ${event.message}`;
+  const cause = event.error;
+  return new Error(message, cause === undefined ? undefined : { cause });
+};
+
 export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
   options: NegotiationOptions = {},
@@ -116,13 +135,20 @@ export const bufferTextMessagesUntilNegotiated = (
       handlers?.onClose?.();
     };
 
-    const onError = () => {
+    const onError = (event: Event) => {
       cleanup();
       if (!settled) {
-        reject(new Error("Memory websocket failed before negotiation"));
+        reject(
+          socketFailureError(
+            "Memory websocket failed before negotiation",
+            event,
+          ),
+        );
         return;
       }
-      handlers?.onError?.(new Error("Memory websocket receive failure"));
+      handlers?.onError?.(
+        socketFailureError("Memory websocket receive failure", event),
+      );
     };
 
     cleanup = () => {
