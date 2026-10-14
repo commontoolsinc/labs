@@ -496,6 +496,11 @@ describe("private inbox across runtimes", () => {
       await refusals(owner) > unmarkedBefore ||
       (await owner.read(replacingHeld)) !== undefined
     );
+    // Under server execution the handler is refused twice, by the owner's
+    // own run and by the served one, and the wait above returns on the
+    // first. The served refusal is the event's consequence, so once that is
+    // back, neither refusal can land in the marked replacement's count.
+    await owner.awaitEventConsequences();
     unmarkedReplacement = {
       refusals: await refusals(owner) - unmarkedBefore,
       held: await owner.read(replacingHeld),
