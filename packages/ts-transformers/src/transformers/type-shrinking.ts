@@ -113,7 +113,7 @@ function groupPathsByHead(
   for (const path of paths) {
     if (path.length === 0) continue;
     const [head, ...tail] = path;
-    if (!head) continue;
+    if (head === undefined) continue;
     const existing = grouped.get(head);
     if (existing) {
       existing.push(tail);
@@ -627,7 +627,7 @@ function getArrayItemPaths(
   for (const path of paths) {
     if (path.length === 0) continue;
     const [head, ...tail] = path;
-    if (!head) continue;
+    if (head === undefined) continue;
     if (isArrayRootOnlyPath(path)) {
       continue;
     }
@@ -2380,7 +2380,7 @@ function shrinkTypeLiteralMembers(
     }
 
     const propertyName = getRequestedPropertyNameText(member.name, checker);
-    if (!propertyName) continue;
+    if (propertyName === undefined) continue;
     const childPaths = grouped.get(propertyName);
     if (!childPaths) continue;
 
@@ -2722,7 +2722,7 @@ export function validateShrinkCoverage(
   const requestedHeads = new Set<string>();
   for (const p of paths) {
     const head = p[0];
-    if (!head) {
+    if (head === undefined) {
       continue;
     }
     if (
@@ -3789,7 +3789,7 @@ function groupCellCapabilityPathsByHead(
   for (const entry of entries) {
     if (entry.path.length === 0) continue;
     const [head, ...tail] = entry.path;
-    if (!head) continue;
+    if (head === undefined) continue;
     const existing = grouped.get(head);
     const childEntry = { path: tail, capability: entry.capability };
     if (existing) {
@@ -3867,7 +3867,7 @@ function applyCellCapabilityPathsToTypeNode(
       return member;
     }
     const propertyName = getRequestedPropertyNameText(member.name, checker);
-    if (!propertyName) {
+    if (propertyName === undefined) {
       return member;
     }
     const childPaths = grouped.get(propertyName);
@@ -4607,7 +4607,7 @@ function applyIdentityOnlyPathsToTypeNode(
         return member;
       }
       const propertyName = getRequestedPropertyNameText(member.name, checker);
-      if (!propertyName) {
+      if (propertyName === undefined) {
         return member;
       }
       const childPaths = grouped.get(propertyName);
