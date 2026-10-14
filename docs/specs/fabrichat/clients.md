@@ -63,7 +63,11 @@ room's newest messages from its `messages`
 through windows it opens there, and never asks for the whole conversation at
 once. Both are in `[VIEWS]` (see [views a host draws
 itself](../../common/components/COMPONENTS.md#views-a-host-draws-itself)). A
-client that renders VDOM shows the adapter's `[UI]`.
+thread is read the same way, through a window whose `root` is the thread's
+root. A client that sends only to a view's top-level streams sends to the
+room's own `openWindow` and `closeWindow`, which are the message list's (see
+[`ChatRoomOutput`](ChatRoomOutput.md#facts)). A client that renders VDOM shows
+the adapter's `[UI]`.
 
 A client that draws natively MUST:
 
@@ -105,7 +109,9 @@ A client that draws natively MUST:
   sender, its history, and its reactions.
 - **Show replies where they say they are shown**: the main conversation and each
   thread, derived from `replyTo` as [`ChatReply`](ChatReply.md#the-two-views)
-  states, with flat threads.
+  states, with flat threads. A thread's reply count and latest reply time are
+  the room's `messages.threads` (see
+  [`ChatThreadSummary`](ChatThreadSummary.md)).
 - **Show a room it can't read as unreadable**, and nothing more (see
   [`FabriChatPlacement.md`](FabriChatPlacement.md#viewers-who-arent-members)).
 
@@ -151,8 +157,9 @@ participant whose profile the reader can't read.
 A client sends to the room's own streams, never through a placement or an
 adapter.
 
-A room refuses a bad event silently, so a client MUST check each event against
-its stream's rules before sending it: a non-empty body, a reply whose target is
+A room records why it refused a message act in the sender's
+`messageRequests`, where a client shows it to the person, but a client still
+MUST check each event against its stream's rules before sending it: a non-empty body, a reply whose target is
 in the same room and allowed for its `shownIn`, a single emoji (see
 [`ChatRoomOutput`](ChatRoomOutput.md#streams)). A client uses the room's
 `canSend` to tell the person when they can't send at all. A client mints a fresh

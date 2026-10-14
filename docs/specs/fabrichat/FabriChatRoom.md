@@ -30,9 +30,9 @@ root lists when the room is not that root (`wish({ query: "#default" })`), and
 the messages' authors, keyed by profile cell. A room with `about`, which only a
 manager creates, is its space's root, and reads only its own roster: its
 `#default` is itself. `roster` is computed from those who joined alone.
-`messages` (its `count`, `oldestAt`, `newestAt`, and
-`latest`) is computed from the messages, and `canSend` from the reader's access
-and profile, when they're read. Neither is stored.
+`messages` (its `count`, `oldestAt`, `newestAt`, `latest`, and `threads`) is
+computed from the messages, and `canSend` from the reader's access and profile,
+when they're read. Neither is stored.
 
 `participantEntries` is computed from `participants`, reading the
 `represents-principal` label on each profile with `principalOf()`, and
@@ -146,7 +146,8 @@ messages. Entries older than the window are dropped as new ones are appended.
 message's earlier entries.
 
 The message list keeps `windows` as a `PerSession` keyed collection, and
-fulfills `openWindow` and `closeWindow` by setting and removing entries in it. A
+fulfills `openWindow` and `closeWindow` by setting and removing entries in it.
+The room offers those same two streams at its top level as well. A
 window is a computed selection over the record, so it stays live as the messages
 in it change.
 
