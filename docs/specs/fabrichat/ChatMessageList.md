@@ -153,8 +153,8 @@ A room states two limits in its policy (see
 - **`maxWindowCount`**: the most messages a window holds. A request for more
   gets this many.
 - **`maxOpenWindows`**: the most windows a session can have open. An
-  `openWindow` for a new window beyond that is refused, silently, like any
-  refusal, so a client closes the windows it no longer shows.
+  `openWindow` for a new window beyond that is refused, silently, as a window
+  request is, so a client closes the windows it no longer shows.
 
 An `openWindow` whose `root` isn't a thread's root in this room is refused, too,
 as is one whose `from` is `{ around: t }` for a `t` that isn't a message in the

@@ -232,12 +232,11 @@ With a member set:
 
 ## Known quirks, accepted for now
 
-- **Refusals are invisible.** A room refuses a bad event silently, so a sender
-  learns of a refusal only by the absence of its effect. Streams are one-way,
-  and a room's record is shared by every member, so outcomes kept there would
-  tell everyone about each member's refused requests. The manager can keep
-  outcomes because it's private to its user (see
-  [`ChatRoomOutput`](ChatRoomOutput.md#streams)).
+- **Window requests are refused silently.** A room records the outcome of
+  each message act and each add where only its sender reads it
+  (`messageRequests` and `addRequests`), but a refused `openWindow` or
+  `closeWindow` leaves no outcome: a session learns of it only by the window's
+  absence (see [`ChatRoomOutput`](ChatRoomOutput.md#streams)).
 - **Crossing creations.** Two managers each keep their own index. If two people
   each start a direct room with the other at the same moment, there are two
   rooms. Each manager records the one it saw first. A tie-break rule is future
