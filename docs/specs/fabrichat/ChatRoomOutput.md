@@ -222,10 +222,11 @@ space.
   access list. A client uses it to leave the people already in the room out of
   its own add control.
 - **`messages`** is a [`ChatMessageList`](ChatMessageList.md): how many messages
-  the room holds, the span of their times, and `latest`, the newest messages of
-  the main conversation, which every member can read, a READ member included. It
-  also holds the reading session's own windows onto the messages, and the
-  streams that open and close them.
+  the room holds, the span of their times, `latest`, the newest messages of
+  the main conversation, and `threads`, each thread's reply count and latest
+  reply time, which every member can read, a READ member included. It also
+  holds the reading session's own windows onto the messages, and the streams
+  that open and close them.
 - **`openWindow`** and **`closeWindow`** are `messages.openWindow` and
   `messages.closeWindow` themselves, the same streams offered again at the
   room's top level, for a client that sends only to a view's own streams. A

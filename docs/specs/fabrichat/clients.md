@@ -109,7 +109,9 @@ A client that draws natively MUST:
   sender, its history, and its reactions.
 - **Show replies where they say they are shown**: the main conversation and each
   thread, derived from `replyTo` as [`ChatReply`](ChatReply.md#the-two-views)
-  states, with flat threads.
+  states, with flat threads. A thread's reply count and latest reply time are
+  the room's `messages.threads` (see
+  [`ChatThreadSummary`](ChatThreadSummary.md)).
 - **Show a room it can't read as unreadable**, and nothing more (see
   [`FabriChatPlacement.md`](FabriChatPlacement.md#viewers-who-arent-members)).
 
