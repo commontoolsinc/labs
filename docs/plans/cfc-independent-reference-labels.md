@@ -505,7 +505,9 @@ specification does not require.
   transaction does not hold, which reads the same as one that lacks the atom,
   the refusal is not a verdict: a reactive writer takes its bounded retries, a
   client that delivers its own events reports the refused commit after one
-  attempt, and a served event gets no error consequence sealed for it. A
+  attempt, and a served event's entry is sealed no consequence, so it stays
+  pending and its handler runs again on every drain pass that follows a wave
+  that commits. A
   floor's failure over a plain value is a verdict on the same terms, the
   documents being those whose stored labels the flow join read; it is not one
   where the flow join also weighed the flow of external content, which no
