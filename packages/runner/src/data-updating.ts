@@ -17,7 +17,7 @@ import {
   shallowFabricFromConvertibleJsObjectElseUndefined,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
+
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
@@ -103,6 +103,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
+import { isInlineCellId } from "./immutable-cell.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -688,7 +689,7 @@ export function scopedArgumentInitializationTargets(
   });
   if (
     blocked || container.pendingHopDoc || container.scope !== "space" ||
-    isFabricDataUri(container.id)
+    isInlineCellId(container.id)
   ) return [];
   // Reads which slots exist; the writes it leads to land in those slots.
   const value = tx.readValueOrThrow(container, {
@@ -724,7 +725,7 @@ export function initializeScopedArgumentSlots(
   const container = resolveLink(runtime, tx, argumentLink, "value", {
     onScopeBlocked: () => blocked = true,
   });
-  if (blocked || container.pendingHopDoc || isFabricDataUri(container.id)) {
+  if (blocked || container.pendingHopDoc || isInlineCellId(container.id)) {
     return;
   }
   const options = {
@@ -1567,14 +1568,29 @@ export function normalizeAndDiff(
     }
   }
 
-  // The incoming value's link, parsed once for every check below that asks
-  // whether the value is a link or where it points, and `undefined` where it
-  // is not a sigil link.
-  const newValueLink = isPrimitiveCellLink(newValue)
+  // The incoming value's link, shared by every check below. Only a schema
+  // rewrite changes the value and requires a fresh parse.
+  let newValueLink = isPrimitiveCellLink(newValue)
     ? parseLink(newValue, link)
     : undefined;
 
-  // Check for links that are data: URIs and inline them, by calling
+  // Ordinary document links can carry immutable values in schema defaults.
+  // Expand those before the writer decomposes their schemas into durable docs.
+  if (
+    newValueLink?.schema !== undefined &&
+    !isInlineCellId(newValueLink.id)
+  ) {
+    const inlined = findAndInlineDataUriLinks(newValue);
+    if (inlined !== newValue) {
+      newValue = attachCfcLabelViewToSigilLink(
+        inlined,
+        cfcLabelViewForPrimitiveLink(newValue),
+      );
+      newValueLink = parseLink(newValue, link);
+    }
+  }
+
+  // Expand native snapshot and portable Fabric data-URI links by calling
   // normalizeAndDiff on the contents of the link. This re-entry REPLACES the
   // value (the link's contents, not the link), so anchoring eligibility
   // deliberately does not carry over: inlined content in an array slot stores
@@ -1582,9 +1598,9 @@ export function normalizeAndDiff(
   // links) stored it.
   //
   // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
-  // check accepts exactly the media type that call inlines: this codec's
-  // own. A `data:` URI of any other media type stores as an ordinary link.
-  if (newValueLink !== undefined && isFabricDataUri(newValueLink.id)) {
+  // check accepts native snapshots and the Fabric codec's data URIs. Other
+  // `data:` media types store as ordinary links.
+  if (newValueLink !== undefined && isInlineCellId(newValueLink.id)) {
     return normalizeAndDiff(
       runtime,
       tx,

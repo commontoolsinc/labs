@@ -6,7 +6,8 @@
  *
  * Every stream that changes the room's record has a handler of its own, as
  * `FabriChatRoom.md` names them. `commitWindow` writes the sending session's
- * windows.
+ * windows, and `commitSetTitle` the title a member last set, a record of its
+ * own beside the one the room's creator wrote.
  *
  * A message is a record of its own in the room's messages, labeled
  * `authored-by` whoever last wrote it, and admitted only from the reviewed
@@ -56,12 +57,15 @@ import {
   CHAT_OBLITERATE_SURFACE,
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDeletedBody,
   type ChatMessageVersion,
   type ChatReaction,
@@ -73,8 +77,13 @@ import {
   durationNsec,
   epochNsec,
   epochNsecFromMsec,
+  type MessageActOutcome,
+  type MessageActRefusalCode,
   nsecOf,
   type ProfileCell,
+  type SetTitleOutcome,
+  type SetTitleRefusalCode,
+  type TitleRecord,
   type WindowEvent,
 } from "./schemas.tsx";
 
@@ -86,8 +95,10 @@ import {
 const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
- * Every room's policy. Each setting is read by the handlers it governs, and
- * `about.policy` states it, so the two cannot disagree.
+ * The policy every room starts from, a group room's. Each setting is read by
+ * the handlers it governs, and `about.policy` states it, so the two cannot
+ * disagree. A room's `ownersMayObliterate` is `ownersMayObliterateIn()`'s,
+ * and the message acts read it from the room's stated policy.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -99,6 +110,18 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
   maxWindowCount: 100,
   maxOpenWindows: 50,
 };
+
+/**
+ * The `ownersMayObliterate` a room of `kind` states in its policy, which
+ * decides which policy document `about.policy` links: `given`, where the room
+ * is configured, and otherwise yes for a group room and no for a direct room.
+ * What the room enforces is what that document states
+ * (`ownersMayObliterateBy()`).
+ */
+export const ownersMayObliterateIn = (
+  kind: ChatRoomKind,
+  given?: boolean,
+): boolean => given ?? kind !== "direct";
 
 /**
  * How long the room remembers a request it acted on: the greater of the
@@ -389,6 +412,39 @@ export type StoredAbout = AuthoredByCurrentUser<
   >
 >;
 
+/**
+ * A room's title as a member last set it: written only by `commitSetTitle`,
+ * from a reviewed `ChatRetitle` on `ChatRetitleSurface`, and labeled
+ * `authored-by` that member. The creator's `about` record keeps the title the
+ * room was created with, and its own label.
+ */
+export type StoredTitle = AuthoredByCurrentUser<
+  TrustedActionWrite<
+    TitleRecord,
+    typeof commitSetTitle,
+    typeof CHAT_RETITLE_ACTION,
+    typeof CHAT_RETITLE_SURFACE
+  >
+>;
+
+/**
+ * The room's title as a member last set it, kept as one keyed record,
+ * `TITLE_KEY`, absent until a member sets one. The list around it defaults to
+ * empty, so nothing but `commitSetTitle` ever writes the record.
+ */
+export type TitlesCell = Writable<StoredTitle[] | Default<[]>>;
+
+/** The key of the one record of the title a member set. */
+export const TITLE_KEY = "title";
+
+/**
+ * The outcome of each of a sender's retitles, by its `requestId`: one
+ * instance per user, which no one else reads.
+ */
+export type TitleRequestsCell = Writable<
+  Record<string, SetTitleOutcome> | Default<Record<PropertyKey, never>>
+>;
+
 //
 // Helpers
 //
@@ -629,6 +685,80 @@ const SHOWN_IN: readonly ShownIn[] = ["main", "thread", "both"];
 export const isOwnerOf = (cell: Cell<unknown>): boolean =>
   spaceAccess(cell) === "OWNER";
 
+/** What one person may do to one message. */
+export interface MessageRights {
+  /** Whether they may record a new version of it. */
+  canEdit: boolean;
+
+  /** Whether they may delete it. */
+  canDelete: boolean;
+
+  /** Whether they may obliterate it. */
+  canObliterate: boolean;
+}
+
+/** The rights of someone who may do nothing to a message. */
+export const NO_MESSAGE_RIGHTS: MessageRights = {
+  canEdit: false,
+  canDelete: false,
+  canObliterate: false,
+};
+
+/**
+ * What the person acting under `profile` may do to the message `record` in a
+ * room of `kind`, given whether they hold OWNER in the room's space and
+ * whether the room lets its OWNERs obliterate. Only the message's author may
+ * edit or delete it, and in a direct room they may obliterate it too. An OWNER
+ * may obliterate any message while `ownersMayObliterate` holds, and otherwise
+ * gains nothing over anyone else: never an edit or a deletion of someone
+ * else's message. A deleted message takes nothing further but obliteration,
+ * and an obliterated one, which names no author, takes nothing. The room's
+ * handlers admit an act by this, and the room's view and rendering offer one
+ * by it.
+ */
+export const messageRightsOf = (
+  record: MessageRecord | undefined,
+  profile: ProfileCell | undefined,
+  kind: ChatRoomKind,
+  isOwner: boolean,
+  ownersMayObliterate: boolean,
+): MessageRights => {
+  const author = record?.authorProfile;
+  const isAuthor = author !== undefined && profile !== undefined &&
+    equals(author, profile);
+  const live = !isDeleted(record);
+  return {
+    canEdit: live && isAuthor,
+    canDelete: live && isAuthor,
+    canObliterate: author !== undefined &&
+      ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
+  };
+};
+
+/**
+ * Whether the room whose policy `policy` is lets its OWNERs obliterate, as
+ * the policy states it; a policy that is absent, or doesn't read yet, doesn't.
+ */
+export const ownersMayObliterateBy = (
+  policy: Cell<ChatRoomPolicy> | undefined,
+): boolean => policy?.get()?.ownersMayObliterate === true;
+
+/**
+ * Why an obliteration `messageRightsOf()` doesn't allow is refused, for a
+ * person to read.
+ */
+const obliterationRefusal = (
+  kind: ChatRoomKind,
+  ownersMayObliterate: boolean,
+): string =>
+  kind === "direct"
+    ? ownersMayObliterate
+      ? "Only an owner of this chat can remove someone else's message."
+      : "Only its author can remove a message in this chat."
+    : ownersMayObliterate
+    ? "Only an owner of this chat can remove a message."
+    : "Messages in this chat can't be removed.";
+
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose
  * messages are `messages`: their profile resolves, and the room's space grants
@@ -709,8 +839,26 @@ export type ComposerCell = Writable<
 /** The acts on a message, each performed by a handler of its own. */
 type MessageAct = "send" | "edit" | "delete" | "obliterate";
 
+/**
+ * The cell holding the outcome of each of the sender's message acts, by its
+ * `requestId`: one instance per user, which no one else reads.
+ */
+export type MessageRequestsCell = Writable<
+  | Record<string, MessageActOutcome>
+  | Default<Record<PropertyKey, never>>
+>;
+
+/**
+ * The cell holding why the session's latest message act was refused, which
+ * the room's composer shows; empty once an act takes effect.
+ */
+export type ActRefusalCell = Writable<string>;
+
 /** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
 export interface JoinRoomRequest {
+  /** The root explicitly declaring a room held inside a container. */
+  container?: Cell<ChatContainer>;
+
   /** The room the viewer has joined. */
   room: Cell<ChatRoomLink>;
 }
@@ -757,6 +905,15 @@ export interface RoomActState {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
   /** A rendered control's message: the one acted on, or replied to. */
   message?: MessageCell;
 
@@ -785,11 +942,31 @@ export interface RoomActState {
   closesPicker?: boolean;
 
   /**
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   */
+  policy?: Cell<ChatRoomPolicy>;
+
+  /**
+   * Tells the viewer's manager the viewer has joined the room, as
+   * `tellManagerJoined` does, in an event of its own; absent where nothing is
+   * told. The act's own transaction reads nothing of the manager, which can
+   * carry a label the room's space doesn't admit.
+   */
+  joined?: Stream<void>;
+}
+
+/** What `tellManagerJoined` is bound to. */
+export interface ManagerJoinState {
+  /**
    * Whether the viewer's manager can take the viewer into the room: the
-   * viewer has a manager, and the room is its space's own, which it can name
-   * itself to the manager by. Absent, it can't.
+   * viewer has a manager and the room is standalone or its container's
+   * declared conversation. Absent, it can't.
    */
   canJoin?: boolean;
+
+  /** The container's declaration, for a room held inside another space. */
+  container?: Cell<ChatContainer>;
 
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
@@ -801,19 +978,89 @@ export interface RoomActState {
 /**
  * Tells the viewer's manager the viewer has joined the room. The manager's
  * own event checks its private catalog and leaves an already listed room
- * unchanged, so catalog reads stay in the manager's event.
+ * unchanged, so catalog reads stay in the manager's event. A room's acts send
+ * it an event once they have recorded what the viewer wrote.
  */
-const joinForViewer = (state: RoomActState): void => {
-  const { canJoin, joinRoom, self } = state;
-  if (canJoin !== true || joinRoom === undefined || self === undefined) return;
-  joinRoom.send({ room: self });
+export const tellManagerJoined = handler<void, ManagerJoinState>(
+  (_event, { canJoin, container, joinRoom, self }) => {
+    if (canJoin !== true || joinRoom === undefined || self === undefined) {
+      return;
+    }
+    joinRoom.send({ room: self, container });
+  },
+);
+
+/**
+ * Records that the act `requestId` took effect, and clears the session's
+ * shown refusal.
+ */
+const actDone = (state: RoomActState, requestId: string): void => {
+  state.outcomes?.key(requestId).set({ status: "done" });
+  state.refusal?.set("");
 };
 
 /**
- * Performs one message act: send, edit, delete, or obliterate. Each act is
- * refused silently when the event breaks the rules `ChatRoomOutput` states for
- * its stream; otherwise it records the change, an activity entry, and the
- * request, all in one transaction.
+ * Records that the act `requestId` was refused, with `code` and `reason`, and
+ * shows the reason to the session. Nothing else is written: a refusal leaves
+ * the room's shared record as it is. A request already done keeps its
+ * outcome, and shows nothing: a replay of an act that took effect is not
+ * refused, whatever the state it arrives in.
+ */
+const refuseAct = (
+  state: RoomActState,
+  requestId: string,
+  code: MessageActRefusalCode,
+  reason: string,
+): void => {
+  const outcome = state.outcomes?.key(requestId);
+  if (outcome?.get()?.status === "done") return;
+  outcome?.set({ status: "refused", reason, code });
+  state.refusal?.set(reason);
+};
+
+/**
+ * Helper for the act handlers, which refuses an act whose sender can't act in
+ * the room: one whose profile hasn't resolved, who isn't signed in, or whose
+ * access to the room's space is known and doesn't let them write. Returns
+ * whether it refused.
+ */
+const refuseUnableSender = (
+  state: RoomActState,
+  requestId: string,
+  profileResolved: boolean,
+  sender: string | undefined,
+): boolean => {
+  if (!profileResolved) {
+    refuseAct(
+      state,
+      requestId,
+      "no-profile",
+      "Acting in a chat needs a profile, and yours hasn't resolved.",
+    );
+    return true;
+  }
+  const level = spaceAccess(state.messages);
+  if (sender === undefined || level === "none" || level === "READ") {
+    refuseAct(
+      state,
+      requestId,
+      "not-member",
+      "You can't write in this chat.",
+    );
+    return true;
+  }
+  return false;
+};
+
+/** The reason an act's time is refused for, as a person reads it. */
+const OUT_OF_WINDOW = "The time it was made at is outside this chat's window.";
+
+/**
+ * Performs one message act: send, edit, delete, or obliterate. An act that
+ * breaks the rules `ChatRoomOutput` states for its stream is refused, which
+ * records the refusal in the sender's outcomes and nothing else; otherwise it
+ * records the change, an activity entry, the request, and its outcome, all in
+ * one transaction.
  */
 const performMessageAct = (
   op: MessageAct,
@@ -831,11 +1078,22 @@ const performMessageAct = (
     counters,
     composer,
   } = state;
-  const profile = myProfile?.resolveAsCell();
-  if (profile?.get() === undefined) return;
-  const sender = currentPrincipal();
-  if (sender === undefined) return;
   const requestId = event?.requestId ?? eventKey();
+  const refuse = (code: MessageActRefusalCode, reason: string): void =>
+    refuseAct(state, requestId, code, reason);
+  const profile = myProfile?.resolveAsCell();
+  const sender = currentPrincipal();
+  if (
+    refuseUnableSender(
+      state,
+      requestId,
+      profile?.get() !== undefined,
+      sender,
+    ) ||
+    sender === undefined
+  ) {
+    return;
+  }
   const requestKey = requestKeyOf(sender, requestId);
   if (actedOn(requests, requestKey)) return;
   const clock = clockNsec();
@@ -847,11 +1105,15 @@ const performMessageAct = (
       : undefined);
 
   if (op === "send") {
-    if (version === undefined || !isValidBody(version.body)) return;
+    if (version === undefined || !isValidBody(version.body)) {
+      refuse("invalid-body", "A message needs some text.");
+      return;
+    }
     // A send arriving again after its memo has expired finds the message it
     // made, and changes nothing.
     if (messages.elementById(requestKey).get() !== undefined) {
       rememberRequest(requests, requestKey, clock);
+      actDone(state, requestId);
       return;
     }
     const composing = composer.get();
@@ -869,9 +1131,25 @@ const performMessageAct = (
       ? undefined
       : entryFor(entries, replyCell);
     if (replyCell !== undefined) {
-      if (target === undefined || isDeleted(target.record)) return;
-      if (!SHOWN_IN.includes(shownIn)) return;
-      if (shownIn === "main" && !isInMain(target)) return;
+      if (target === undefined) {
+        refuse("bad-reply", "The message replied to isn't in this chat.");
+        return;
+      }
+      if (isDeleted(target.record)) {
+        refuse("deleted-target", "The message replied to was deleted.");
+        return;
+      }
+      if (!SHOWN_IN.includes(shownIn)) {
+        refuse("bad-reply", "A reply is shown in the main chat or a thread.");
+        return;
+      }
+      if (shownIn === "main" && !isInMain(target)) {
+        refuse(
+          "bad-reply",
+          "A message shown only in a thread takes its replies there.",
+        );
+        return;
+      }
     }
     const sentAt = claimTime(
       usedTimes,
@@ -879,9 +1157,13 @@ const performMessageAct = (
       nsecOf(version.sentAt),
       target?.sentAt,
     );
-    if (sentAt === undefined) return;
-    const loggedAt = claimTime(usedTimes, clock);
-    if (loggedAt === undefined) return;
+    const loggedAt = sentAt === undefined
+      ? undefined
+      : claimTime(usedTimes, clock);
+    if (sentAt === undefined || loggedAt === undefined) {
+      refuse("out-of-window", OUT_OF_WINDOW);
+      return;
+    }
     // The message and its reactions are addressed by the request that sent
     // it, which names one message in every session.
     const record = messages.elementById(requestKey);
@@ -902,33 +1184,58 @@ const performMessageAct = (
     messages.addUnique(record);
     appendActivity(activity, counters, loggedAt, clock, requestId, record);
     rememberRequest(requests, requestKey, clock);
+    actDone(state, requestId);
     if (state.replyFrom === "replyTo" && composing?.replyTo !== undefined) {
       composer.key("replyTo").set(undefined);
     }
-    joinForViewer(state);
+    state.joined?.send();
     return;
   }
 
   const target = (event?.message ?? state.message)?.resolveAsCell();
   const entry = entryFor(entries, target);
-  if (target === undefined || entry === undefined) return;
+  if (target === undefined || entry === undefined) {
+    refuse("unknown-target", "That message isn't in this chat.");
+    return;
+  }
   const current = entry.record;
-  const isAuthor = current.authorProfile !== undefined &&
-    equals(current.authorProfile, profile);
+  const ownersMayObliterate = ownersMayObliterateBy(state.policy);
+  const rights = messageRightsOf(
+    current,
+    profile,
+    kind,
+    isOwnerOf(messages),
+    ownersMayObliterate,
+  );
   const deletionObliterates = op === "delete" &&
     FABRICHAT_POLICY.deletionIsObliteration;
 
   if (op === "obliterate" || deletionObliterates) {
-    if (current.authorProfile === undefined) return;
-    const allowed = op === "delete" || kind === "direct"
-      ? isAuthor
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwnerOf(messages);
-    if (!allowed) return;
-    if (op === "delete" && isDeleted(current)) return;
+    if (current.authorProfile === undefined) {
+      refuse("deleted-target", "That message was already removed.");
+      return;
+    }
+    if (op === "delete" && isDeleted(current)) {
+      refuse("deleted-target", "That message was already deleted.");
+      return;
+    }
+    if (!(op === "delete" ? rights.canDelete : rights.canObliterate)) {
+      refuse(
+        "not-allowed",
+        op === "delete"
+          ? "Only its author can delete a message."
+          : obliterationRefusal(kind, ownersMayObliterate),
+      );
+      return;
+    }
     const editedAt = claimTime(usedTimes, clock);
-    if (editedAt === undefined) return;
-    const loggedAt = claimTime(usedTimes, clock);
-    if (loggedAt === undefined) return;
+    const loggedAt = editedAt === undefined
+      ? undefined
+      : claimTime(usedTimes, clock);
+    if (editedAt === undefined || loggedAt === undefined) {
+      refuse("out-of-window", OUT_OF_WINDOW);
+      return;
+    }
     current.reactions?.set([]);
     target.set({
       body: { deleted: true },
@@ -947,10 +1254,23 @@ const performMessageAct = (
       target,
     );
     rememberRequest(requests, requestKey, clock);
+    actDone(state, requestId);
     return;
   }
 
-  if (!isAuthor || isDeleted(current)) return;
+  if (isDeleted(current)) {
+    refuse("deleted-target", "That message was deleted.");
+    return;
+  }
+  if (!(op === "delete" ? rights.canDelete : rights.canEdit)) {
+    refuse(
+      "not-allowed",
+      op === "delete"
+        ? "Only its author can delete a message."
+        : "Only its author can edit a message.",
+    );
+    return;
+  }
   const kept: ChatMessageVersion[] = FABRICHAT_POLICY.keepsHistory
     ? [...(current.earlierVersions ?? []), {
       body: current.body as string,
@@ -960,9 +1280,13 @@ const performMessageAct = (
 
   if (op === "delete") {
     const editedAt = claimTime(usedTimes, clock);
-    if (editedAt === undefined) return;
-    const loggedAt = claimTime(usedTimes, clock);
-    if (loggedAt === undefined) return;
+    const loggedAt = editedAt === undefined
+      ? undefined
+      : claimTime(usedTimes, clock);
+    if (editedAt === undefined || loggedAt === undefined) {
+      refuse("out-of-window", OUT_OF_WINDOW);
+      return;
+    }
     current.reactions?.set([]);
     target.set({
       authorProfile: current.authorProfile,
@@ -974,14 +1298,22 @@ const performMessageAct = (
     } as SentMessage);
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
     rememberRequest(requests, requestKey, clock);
+    actDone(state, requestId);
     return;
   }
 
-  if (version === undefined || !isValidBody(version.body)) return;
+  if (version === undefined || !isValidBody(version.body)) {
+    refuse("invalid-body", "A message needs some text.");
+    return;
+  }
   const editedAt = claimTime(usedTimes, clock, nsecOf(version.sentAt));
-  if (editedAt === undefined) return;
-  const loggedAt = claimTime(usedTimes, clock);
-  if (loggedAt === undefined) return;
+  const loggedAt = editedAt === undefined
+    ? undefined
+    : claimTime(usedTimes, clock);
+  if (editedAt === undefined || loggedAt === undefined) {
+    refuse("out-of-window", OUT_OF_WINDOW);
+    return;
+  }
   target.set({
     authorProfile: current.authorProfile,
     body: version.body,
@@ -995,6 +1327,7 @@ const performMessageAct = (
   } as SentMessage);
   appendActivity(activity, counters, loggedAt, clock, requestId, target);
   rememberRequest(requests, requestKey, clock);
+  actDone(state, requestId);
   const editing = composer.get()?.editing;
   if (editing !== undefined && equals(editing, target)) {
     composer.key("editing").set(undefined);
@@ -1003,9 +1336,11 @@ const performMessageAct = (
 
 /**
  * Adds or removes the sender's reaction to a message. Adding one already
- * there, or removing one that isn't, changes nothing. A reaction is kept at an
- * address within its message's list derived from its reactor and its emoji,
- * so one person's one reaction has a single address in every session.
+ * there, or removing one that isn't, changes nothing, and is done. A reaction
+ * is kept at an address within its message's list derived from its reactor
+ * and its emoji, so one person's one reaction has a single address in every
+ * session. A refused reaction records only the refusal in the sender's
+ * outcomes.
  */
 const performReactionAct = (
   op: "add" | "remove",
@@ -1014,25 +1349,42 @@ const performReactionAct = (
 ): void => {
   const { myProfile, messages, requests, usedTimes, activity, counters } =
     state;
+  const requestId = event?.requestId ?? eventKey();
+  const refuse = (code: MessageActRefusalCode, reason: string): void =>
+    refuseAct(state, requestId, code, reason);
   const profile = myProfile?.resolveAsCell();
-  if (profile?.get() === undefined) return;
   const sender = currentPrincipal();
-  if (sender === undefined) return;
   // A reaction's address derives from its reactor's profile.
-  const reactorKey = entityKeyOf(profile);
-  if (reactorKey === undefined) return;
+  const reactorKey = profile === undefined ? undefined : entityKeyOf(profile);
+  if (
+    refuseUnableSender(
+      state,
+      requestId,
+      profile?.get() !== undefined && reactorKey !== undefined,
+      sender,
+    ) || sender === undefined
+  ) {
+    return;
+  }
   const typed = event?.target?.value?.trim();
   const emoji = event?.emoji ?? state.emoji ?? typed;
-  if (!isSingleEmoji(emoji)) return;
-  const requestId = event?.requestId ?? eventKey();
+  if (!isSingleEmoji(emoji)) {
+    refuse("invalid-body", "A reaction is a single emoji.");
+    return;
+  }
   const requestKey = requestKeyOf(sender, requestId);
   if (actedOn(requests, requestKey)) return;
   const target = (event?.message ?? state.message)?.resolveAsCell();
   const entry = entryFor(messageEntries(messages), target);
-  if (target === undefined || entry === undefined) return;
-  if (isDeleted(entry.record)) return;
+  if (target === undefined || entry === undefined) {
+    refuse("unknown-target", "That message isn't in this chat.");
+    return;
+  }
   const list = entry.record.reactions;
-  if (list === undefined) return;
+  if (isDeleted(entry.record) || list === undefined) {
+    refuse("deleted-target", "That message was deleted.");
+    return;
+  }
   const clock = clockNsec();
   if (state.closesPicker === true) state.pickerOpen?.set(false);
   const reactionKey = JSON.stringify([reactorKey, emoji]);
@@ -1040,17 +1392,24 @@ const performReactionAct = (
   const present = mine.get() !== undefined;
   if (op === "add" && !present) {
     const sentAt = claimTime(usedTimes, clock);
-    if (sentAt === undefined) return;
-    const loggedAt = claimTime(usedTimes, clock);
-    if (loggedAt === undefined) return;
+    const loggedAt = sentAt === undefined
+      ? undefined
+      : claimTime(usedTimes, clock);
+    if (sentAt === undefined || loggedAt === undefined) {
+      refuse("out-of-window", OUT_OF_WINDOW);
+      return;
+    }
     mine.set({ reactorProfile: profile, emoji, sentAt } as SentReaction);
     list.addUnique(mine);
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
-    joinForViewer(state);
+    state.joined?.send();
   }
   if (op === "remove" && present) {
     const loggedAt = claimTime(usedTimes, clock);
-    if (loggedAt === undefined) return;
+    if (loggedAt === undefined) {
+      refuse("out-of-window", OUT_OF_WINDOW);
+      return;
+    }
     list.removeByValue(mine);
     // The record outlives its place in the list, and it is the record that
     // says whether the reaction is there, so removing it clears it too.
@@ -1061,6 +1420,7 @@ const performReactionAct = (
     appendActivity(activity, counters, loggedAt, clock, requestId, target);
   }
   rememberRequest(requests, requestKey, clock);
+  actDone(state, requestId);
 };
 
 /** Sends a message, from `ChatSendSurface`. */
@@ -1073,7 +1433,7 @@ export const commitEdit = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("edit", event, state),
 );
 
-/** Deletes the sender's message, from `ChatDeleteSurface`. */
+/** Deletes a message, from `ChatDeleteSurface`. */
 export const commitDelete = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("delete", event, state),
 );
@@ -1159,5 +1519,104 @@ export const commitWindow = handler<RoomWindowEvent, WindowActState>(
       hasOlder: slice.hasOlder,
       hasNewer: slice.hasNewer,
     });
+  },
+);
+
+/**
+ * An event on the room's `setTitle`. A rendered control sends the text it
+ * holds as `target.value`, and no request id, which the room then mints.
+ */
+export interface SetTitleEvent {
+  /**
+   * Chosen by the sender, and unique among its retitles. The outcome is
+   * recorded under it, and sending the same event again with it changes
+   * nothing.
+   */
+  requestId?: string;
+
+  /** The new title. */
+  title?: string;
+
+  /** A rendered control's text. */
+  readonly target?: { readonly value?: string };
+}
+
+/** What `commitSetTitle` is bound to. */
+export interface SetTitleState {
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
+
+  /**
+   * Whether the room is one a manager created in a space of its own. A
+   * space's own chat is shown by its space's name.
+   */
+  ownSpace: boolean;
+
+  /** The room's messages, which name the room's space. */
+  messages: MessagesCell;
+
+  /** The sender's retitles' outcomes. */
+  outcomes: TitleRequestsCell;
+
+  /**
+   * Why the session's latest retitle was refused, which the rendered control
+   * shows; empty once one takes effect.
+   */
+  refusal: Writable<string>;
+
+  /**
+   * Tells the viewer's manager the viewer has joined the room, as
+   * `tellManagerJoined` does, in an event of its own, which brings the title
+   * the manager's catalog lists the room under up to the new one; absent where
+   * nothing is told. The retitle's own transaction reads nothing of the
+   * manager.
+   */
+  joined?: Stream<void>;
+}
+
+/**
+ * Sets the room's title, which every member shares, from a trusted gesture on
+ * `ChatRetitleSurface`. Any member who can write in the room may, in a group
+ * room or a direct one. The outcome is recorded under the event's
+ * `requestId` in the sender's own outcomes, and a refusal leaves the title as
+ * it is. A retitle that takes effect then tells the sender's manager, as a
+ * write in the room does, so the catalog lists the room under the new title.
+ */
+export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
+  (event, { titles, ownSpace, messages, outcomes, refusal, joined }) => {
+    const requestId = event?.requestId ?? eventKey();
+    if (outcomes.key(requestId).get() !== undefined) return;
+    const refuse = (code: SetTitleRefusalCode, reason: string): void => {
+      outcomes.key(requestId).set({ status: "refused", reason, code });
+      refusal.set(reason);
+    };
+    if (!ownSpace || titles === undefined) {
+      refuse("fixed-title", "This chat is named by its space.");
+      return;
+    }
+    // A level not known yet is left to the space's own access list, which
+    // refuses the write where it doesn't admit it.
+    const level = spaceAccess(messages);
+    if (
+      currentPrincipal() === undefined || level === "none" || level === "READ"
+    ) {
+      refuse("not-member", "You can't write in this chat.");
+      return;
+    }
+    const proposed = event?.title ?? event?.target?.value;
+    const title = typeof proposed === "string" ? proposed.trim() : "";
+    if (title === "") {
+      refuse("invalid-title", "A chat's title needs some text.");
+      return;
+    }
+    const record = titles.elementById(TITLE_KEY);
+    record.set({ title } as StoredTitle);
+    titles.addUnique(record);
+    outcomes.key(requestId).set({ status: "done" });
+    refusal.set("");
+    joined?.send();
   },
 );

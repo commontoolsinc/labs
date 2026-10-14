@@ -166,6 +166,7 @@ import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
+  markHandleDescribed,
   mintAddressHandle,
   mintReferentHandle,
   referentDraft,
@@ -215,7 +216,11 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
-import { createResearchRunner } from "./research/runner.ts";
+import {
+  classifyTask,
+  type HarnessTaskClassification,
+} from "./task-classification.ts";
+import { createResearchRunner, researchModel } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import {
@@ -1230,7 +1235,11 @@ export const seedSubagentHandleTable = (
   }
   return {
     ...createHarnessHandleTable(childRunId),
-    entries: [...seeded.values()].map((entry) => ({ ...entry })),
+    // A child looks at a handle's shape itself before read_value admits it,
+    // so a parent's describe does not carry over.
+    entries: [...seeded.values()].map(({ described: _described, ...entry }) =>
+      entry
+    ),
     ...(seededReferents.size > 0
       ? {
         referents: [...seededReferents.values()].map((referent) => ({
@@ -3094,6 +3103,15 @@ export class CfHarnessPromptLoop {
   #lastReservedSubagentSequence = 0;
 
   /**
+   * What the task-classification model call cost, held from `classifyTask`
+   * until the run's records exist, which the next transcript run opens and
+   * this then lands in: its attempts in the run report, its tokens in the
+   * total.
+   */
+  #classificationAttempts: HarnessModelAttemptDiagnostic[] = [];
+  #classificationUsage: HarnessModelUsage | undefined;
+
+  /**
    * The parent's subagent runs as they stood when the current turn's tool
    * calls were dispatched, and `undefined` outside a turn. Skill custody is
    * judged against this rather than the live state, so a delegation is not
@@ -3580,6 +3598,7 @@ export class CfHarnessPromptLoop {
     if (
       options.task === undefined || this.engine.resumedRun ||
       runState.lineage !== undefined || !this.#allowedToolIds.has("research") ||
+      runState.taskClassification?.tags.includes("author") === false ||
       isClosedResearchTask(options.task, runState)
     ) {
       return undefined;
@@ -3702,6 +3721,48 @@ export class CfHarnessPromptLoop {
     return { index: taskIndex, inserted: true };
   }
 
+  /**
+   * Tags a fresh root task with the kinds of work it calls for and records
+   * them on the run, before the host assembles the prompt the tags shape.
+   * When the keyword rule has no answer, one call to the cheap research model
+   * decides; when that fails too, the task gets every tag. The tags gate the
+   * opening research pass and the parent's browser guidance here.
+   */
+  async classifyTask(
+    task: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<HarnessTaskClassification> {
+    const runState = this.engine.getRunState();
+    const classification = await classifyTask(task, {
+      patternRefs: runState.patternRefs,
+      skillRegistry: runState.skillRegistry,
+      inputCells: runState.inputCells,
+      browserHost: this.engine.browserHost !== undefined &&
+        this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
+    }, {
+      askModel: async (prompt) => {
+        const result = await this.modelClient.complete({
+          model: researchModel(this.modelClient.providerId),
+          transcript: [{ role: "user", content: prompt }],
+          tools: [],
+          nativeModelToolIds: [],
+          runId: `${runState.runId}:task-classification`,
+          ...(this.#researchReasoningEffort !== undefined
+            ? { reasoningEffort: this.#researchReasoningEffort }
+            : {}),
+          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          onAttempt: (attempt) => {
+            this.#classificationAttempts.push(attempt);
+          },
+        });
+        this.#classificationUsage = result.usage;
+        return result.assistant.content;
+      },
+    });
+    await this.engine.recordTaskClassification(classification);
+    return classification;
+  }
+
   async runPrompt(
     options: RunHarnessPromptOptions,
   ): Promise<HarnessPromptLoopResult> {
@@ -3789,7 +3850,8 @@ export class CfHarnessPromptLoop {
     // A host the run cannot delegate to has nothing to brief the parent on.
     const browserHost = this.#allowedSubagentProfiles.has(
         BROWSER_SUBAGENT_PROFILE,
-      )
+      ) &&
+        initialRunState.taskClassification?.tags.includes("act") !== false
       ? this.engine.browserHost
       : undefined;
     if (this.#requirePieceOutput || browserHost !== undefined) {
@@ -3916,6 +3978,13 @@ export class CfHarnessPromptLoop {
       onUsage: recordModelUsage,
     });
     this.engine.setResearchRunner(runResearch);
+    for (const attempt of this.#classificationAttempts.splice(0)) {
+      recordModelAttempt(attempt);
+    }
+    if (this.#classificationUsage !== undefined) {
+      await recordModelUsage(this.#classificationUsage);
+      this.#classificationUsage = undefined;
+    }
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -4425,6 +4494,28 @@ export class CfHarnessPromptLoop {
     if (minted.table !== table) {
       await this.engine.recordHandleTable(minted.table);
     }
+  }
+
+  /**
+   * Helper for `#invokeToolCall()`, which records on the handle that
+   * `describe_handle` answered for it, which is what admits a `read_value` of
+   * that handle. A token the table does not hold, or a refusal, marks nothing.
+   */
+  async #recordDescribedHandle(
+    toolId: BuiltinToolId,
+    output: unknown,
+  ): Promise<void> {
+    if (
+      toolId !== "describe_handle" || !isObjectNotArray(output) ||
+      output.known !== true || output.error !== undefined ||
+      typeof output.token !== "string"
+    ) {
+      return;
+    }
+    const table = this.engine.handleTable;
+    if (table === undefined) return;
+    const marked = markHandleDescribed(table, output.token);
+    if (marked !== table) await this.engine.recordHandleTable(marked);
   }
 
   /**
@@ -5261,6 +5352,7 @@ export class CfHarnessPromptLoop {
       result.output,
     );
     await this.#persistRunPatternSource(toolId, input, result.resultRef);
+    await this.#recordDescribedHandle(toolId, result.output);
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolId,
       result.output,
@@ -5650,6 +5742,33 @@ export class CfHarnessPromptLoop {
             "model-context-truncation",
             resultRef,
             output.truncated === true ? ["/entries"] : [],
+          ),
+        ),
+      };
+    }
+    if (toolId === "read_value" && isObjectNotArray(output)) {
+      // The value reaches the model; its label stays on the artifact as the
+      // observation the run's model context accumulates.
+      const { cfc, ...publicOutput } = output;
+      const label = isObjectNotArray(cfc) ? cfc.observedLabel : undefined;
+      return {
+        output: stripInternalToolFields(publicOutput),
+        ...(label !== undefined
+          ? {
+            cfcModelContextObservations: [{
+              toolCallId,
+              toolId,
+              outputId: resultRef.outputId,
+              channels: ["output" as const],
+              label: label as IFCLabel,
+            }],
+          }
+          : {}),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            presentFieldPointers(output, ["cfc"]),
           ),
         ),
       };

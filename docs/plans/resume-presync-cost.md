@@ -38,7 +38,7 @@ few recurring across the rows that received them.
 **A plan's inputs cell recomposes every schema.** `#bindNodeIO` hands the
 bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
-the `data:` id. The rewrite stays: a traversal accepts a reference-form
+the `snapshot:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
 and no write has stored the links a plan binds, so a link inside the inputs
 cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
@@ -256,18 +256,63 @@ where the pre-sync was no longer the whole cost.
       schema document a reference names. On the thirty-row room's reload,
       preparation fell from 15.5% of the load to 4.4%, and its mean from 52
       to 12 ms per commit, on a pair of runs at the same machine load.
-- [x] The binding walk narrows a deep-frozen stand-in for a pattern's
-      authored argument schema where the schema is a mutable root over
-      deep-frozen members, made again when the root's members change
-      (`packages/runner/src/pattern-binding.ts`). `schemaAtPath` keeps a
-      narrowing only for a deep-frozen schema, and 42,296 of a reload's
-      86,398 narrowings, over six schemas, are of an authored schema that
-      is not one: a cost of its own outside preparation, 6 to 8% of the
-      same load. The stand-in takes a quarter to a third off it.
-- [ ] The rest of that cost is the authored schemas the builder hands out
-      as fully mutable trees. It goes when `factoryFromPattern` produces a
-      deep-frozen argument schema, which changes every pattern and is a
-      change of its own.
+- [x] A pattern holds its argument and result schemas deep-frozen from the
+      time the builder makes it, and so does each copy of its graph that the
+      builder puts into a pattern nesting it. `schemaAtPath` keeps a
+      narrowing only for a deep-frozen schema, and binding a pattern's nodes
+      narrows the pattern's argument schema for every argument alias it
+      binds, so every such narrowing is one `schemaAtPath` keeps.
+      `factoryFromPattern` takes the two schemas deep-frozen from the
+      sanitizer (`sanitizeAndFreezeSchemaForLinks`,
+      `packages/runner/src/link-utils.ts`), and the builder's binding walk
+      freezes the schemas of each pattern graph it rebuilds
+      (`packages/runner/src/builder/to-encodable-form.ts`). Each schema
+      stays an object of its own and is not the interned instance:
+      `createRef()` hashes an object it reaches twice in one cause as
+      `null`, so two positions of a graph sharing one schema object derive
+      other ids than two positions holding equal ones. The thirty-row
+      room's counts and profile shares are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md),
+      and the shares once the pre-sync held a node's bindings, when the
+      binding walk fell from 2.1–3.6% of the samples to 0.9–1.2%, are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md).
+- [x] A schema derived for a sync or a binding is derived once per schema
+      it is derived from, and interned, so `internSchema()` is given an
+      object it has seen: it hashes the whole of any other, whether or not
+      the content is already interned. The read schema a handler plan's
+      inputs are synced under is kept per handler schema, which is frozen in
+      place when first read (`schemaWithEventSlotAsStream`,
+      `packages/runner/src/runner.ts`); the selector schema a link's target
+      is asked for, per deep-frozen reader schema (`selectorSchemaForLink`,
+      `packages/runner/src/storage/v2.ts`); the reference and the inline
+      form a selector goes to the wire in, per decomposition
+      (`externalizeSyncSelector`, `packages/runner/src/storage/v2-watch.ts`);
+      and a binding's schema with its slot's declared scope folded in, per
+      emitted schema (`packages/runner/src/pattern-binding.ts`). Two results
+      are keyed by content, because each document holding a link carries
+      the link's schema as an object of its own: a shaped reader crossing a
+      link that declares a default keys the schema it continues with by its
+      own schema and that default (`combineSchemaForLink`,
+      `packages/runner/src/traverse.ts`), and `schemaHasIfc` judges a
+      deep-frozen schema as the interned instance of its content
+      (`packages/runner/src/schema-ifc.ts`). No two positions of a pattern
+      graph share a schema object for it. On the thirty-row room's reload,
+      86,407 of 1.25 million `internSchema()` calls had missed the identity
+      cache and hashed 150 million characters of schema JSON; 35,101 miss
+      and hash 45 million, and interning is 2.8 to 4.8% of the profile's
+      samples where it was 5.7 to 9.1% in the render paired with each. The
+      counts per caller are in
+      [`../history/development/performance/2026-10-13-schema-interning-on-reload.md`](../history/development/performance/2026-10-13-schema-interning-on-reload.md).
+- [ ] Of the 35,101 schemas a reload still interns as new objects, 13,749
+      arrive deep-frozen, most of them a link schema read out of a document:
+      a true reader's crossing (`mergeSchemaFlags`), the link-target
+      selector and the crossing's `schemaHasIfc` each intern such a schema
+      once per object. A plan's inputs document is decoded apart from the
+      value it was minted from, once for its sync and again for its reads,
+      so each decoding holds new objects; the last item of this stage is
+      where that ends. Link serialization interns the stripped schema it
+      builds and a reference it builds per call, 5,839 times a reload
+      (`externalizeLinkSchema`, `packages/runner/src/link-utils.ts`).
 - [x] A preparation seals a frozen snapshot of the transaction's activity
       and computes its digest only when something reads it. A commit whose
       activity epoch stands where the preparation left it accepts the
@@ -393,6 +438,14 @@ where the pre-sync was no longer the whole cost.
       of inputs documents and the thirty-row room holds 69 MB, so a room of
       about a hundred rows is at it: an inputs document carries the schema
       of every link it holds inline, and averages 22 KB on that room.
+- [ ] A plan's inputs document is decoded apart from the value it was
+      minted from: once for its sync (`valueFromDataUri` under
+      `#syncDataURICell`, `packages/runner/src/storage/v2.ts`) and again for
+      its reads. The sync's decode was 4.1 to 7.5% of the profile's samples
+      on the thirty-row room's reload, measured before the pre-sync held a
+      node's bindings. A document decoded there is one this process minted,
+      so keeping the minted value by its URI would spare the decode, and
+      with it the link schemas a decode makes new objects of.
 
 Exit: a room of a hundred rows opens in the browser.
 

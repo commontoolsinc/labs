@@ -12,7 +12,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
 import {
   internSchema,
   isNontrivialSchema,
@@ -132,6 +132,7 @@ import {
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { ownedCell, recordRuntimeOwnedStore } from "./runtime-owned-store.ts";
 import { setCfcImplementationIdentity } from "../storage/extended-storage-transaction.ts";
+import { hasInlineCellScheme } from "../immutable-cell.ts";
 
 // Message schema that mints the `LlmDerived` provenance stamp (Epic D1).
 // Recorded as the schema write-policy input for each model-produced message's
@@ -664,10 +665,10 @@ function serializeForLLMObservation(
     value = getCellOrThrow(value);
   }
 
-  // Turn cells into a link, unless they are data: URIs and traverse instead
+  // Traverse inline cell contents; render stored cells as links.
   if (isCell(value)) {
     const link = value.resolveAsCell().getAsNormalizedFullLink();
-    if (hasDataUriScheme(link.id)) {
+    if (hasInlineCellScheme(link.id)) {
       return serializeForLLMObservation({
         value: value.get(),
         schema,
@@ -761,7 +762,7 @@ function serializeForLLMObservation(
       if (isObjectOrArray(child.value) && isCellResultForDereferencing(v)) {
         const link = getCellOrThrow(v).resolveAsCell()
           .getAsNormalizedFullLink();
-        if (!hasDataUriScheme(link.id)) {
+        if (!hasInlineCellScheme(link.id)) {
           child = {
             ...child,
             value: {

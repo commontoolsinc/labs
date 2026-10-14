@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 
 import { lift } from "../src/builder/module.ts";
@@ -16,6 +17,7 @@ import {
   type Module,
   type Pattern,
 } from "../src/builder/types.ts";
+import { ContextualFlowControl } from "../src/cfc.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -623,5 +625,122 @@ describe("pattern", () => {
       false,
     );
     expect(isPattern(neverPattern)).toBe(true);
+  });
+
+  describe("schemas", () => {
+    // `schemaAtPath()` keeps a narrowing only for a deep-frozen schema, and
+    // binding a pattern's nodes narrows its argument schema at every slot,
+    // so a pattern holds its schemas deep-frozen from the time it is built.
+
+    // A fresh mutable tree per call, as a compiled pattern's schema literal
+    // is. The reference into `$defs` makes a narrowing carry the definitions
+    // it reaches, so an uncached one builds a new object.
+    const itemsArgumentSchema = () =>
+      ({
+        type: "object",
+        properties: {
+          item: { $ref: "#/$defs/Item" },
+          count: { type: "number", asCell: ["cell"] },
+        },
+        required: ["item", "count"],
+        $defs: {
+          Item: { type: "object", properties: { title: { type: "string" } } },
+        },
+      }) as JSONSchema;
+
+    const countResultSchema = () =>
+      ({
+        type: "object",
+        properties: { doubled: { type: "number" } },
+      }) as JSONSchema;
+
+    const double = lift<number>((x) => x * 2);
+
+    const buildItemsPattern = (
+      argumentSchema: JSONSchema = itemsArgumentSchema(),
+      resultSchema: JSONSchema = countResultSchema(),
+    ) =>
+      pattern<{ count: number }, { doubled: number }>(
+        ({ count }) => ({ doubled: double(count) }),
+        argumentSchema,
+        resultSchema,
+      );
+
+    it("holds a deep-frozen argument schema and result schema", () => {
+      const built = buildItemsPattern();
+      expect(isDeepFrozen(built.argumentSchema)).toBe(true);
+      expect(isDeepFrozen(built.resultSchema)).toBe(true);
+      expect(built.argumentSchema).toEqual(itemsArgumentSchema());
+      expect(built.resultSchema).toEqual(countResultSchema());
+    });
+
+    it("holds deep-frozen schemas given deep-frozen ones", () => {
+      const built = buildItemsPattern(
+        deepFreeze(itemsArgumentSchema()),
+        deepFreeze(countResultSchema()),
+      );
+      expect(isDeepFrozen(built.argumentSchema)).toBe(true);
+      expect(isDeepFrozen(built.resultSchema)).toBe(true);
+      expect(built.argumentSchema).toEqual(itemsArgumentSchema());
+      expect(built.resultSchema).toEqual(countResultSchema());
+    });
+
+    it("holds schemas of its own, given the schemas another pattern was given", () => {
+      // `createRef()` hashes an object it reaches twice in one cause as
+      // `null`, so two patterns sharing a schema object would derive other
+      // ids from a graph holding both than two patterns holding equal ones.
+      const argumentSchema = deepFreeze(itemsArgumentSchema());
+      const resultSchema = deepFreeze(countResultSchema());
+      const first = buildItemsPattern(argumentSchema, resultSchema);
+      const second = buildItemsPattern(argumentSchema, resultSchema);
+      expect(second.argumentSchema).toEqual(first.argumentSchema);
+      expect(second.argumentSchema).not.toBe(first.argumentSchema);
+      expect(second.resultSchema).toEqual(first.resultSchema);
+      expect(second.resultSchema).not.toBe(first.resultSchema);
+    });
+
+    it("narrows its argument schema to the same object on every call", () => {
+      const built = buildItemsPattern();
+      const first = ContextualFlowControl.schemaAtPath(
+        built.argumentSchema,
+        ["item"],
+      );
+      expect(first).toEqual({
+        $ref: "#/$defs/Item",
+        $defs: {
+          Item: { type: "object", properties: { title: { type: "string" } } },
+        },
+      });
+      expect(
+        ContextualFlowControl.schemaAtPath(built.argumentSchema, ["item"]),
+      ).toBe(first);
+    });
+
+    it("holds deep-frozen copies of a nested pattern's schemas in the node that instantiates it", () => {
+      // Copies, for the reason a pattern's schemas are its own: the graph
+      // and the pattern nested in it must not share a schema object.
+      const inner = buildItemsPattern();
+      const outer = pattern<{ count: number }, { doubled: number }>(
+        ({ count }) => {
+          const nested = inner({ count });
+          return { doubled: nested.doubled };
+        },
+        itemsArgumentSchema(),
+        countResultSchema(),
+      );
+      const patternNodes = outer.nodes.filter((node) =>
+        isModule(node.module) && node.module.type === "pattern"
+      );
+      expect(patternNodes).toHaveLength(1);
+      const nested = (patternNodes[0].module as Module).implementation;
+      expect(isPattern(nested)).toBe(true);
+      const { argumentSchema, resultSchema } = nested as Pattern;
+      expect(argumentSchema).toEqual(inner.argumentSchema);
+      expect(argumentSchema).not.toBe(inner.argumentSchema);
+      expect(resultSchema).toEqual(inner.resultSchema);
+      expect(resultSchema).not.toBe(inner.resultSchema);
+      expect(isDeepFrozen(argumentSchema)).toBe(true);
+      expect(isDeepFrozen(resultSchema)).toBe(true);
+    });
   });
 });

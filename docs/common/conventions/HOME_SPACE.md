@@ -298,6 +298,27 @@ pattern is created and the handler runs again; a serving runtime creates none.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
 
+## Social-space collection
+
+Home's `sharedSpaces` interface separates collection observations and offer
+receipts from registration and membership commands. Patterns discover individual
+roles through `#default/sharedSpaces/<role>` with `scope: ["~"]`; host consumers
+use the narrow projections in `@commonfabric/home-schemas`. The backing catalog
+keeps its stable identity, and the flat catalog fields remain aliases.
+
+The **Social spaces** tab lists saved and archived looms, chats, and other kinds
+without fetching their roots. Search and filters belong to the current session.
+Archive puts a space away and restore saves it again; both compare the revision
+the rendered control showed and leave space access unchanged. Unfamiliar states
+remain visible in **Other states**. An unavailable collection has an explicit
+notice rather than an empty list. Ordinary space navigation opens a listed
+space using the runtime's configured routing.
+
+This collection is independent of the navigation list, routing hints, favorites,
+and browser recents. See [the catalog interface](../../features/shared-space-catalog.md)
+for its command payloads, observation states, privacy boundary, and completion
+rules.
+
 ## Chat Manager
 
 The home default pattern holds the user's FabriChat manager in

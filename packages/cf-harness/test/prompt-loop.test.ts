@@ -3081,6 +3081,155 @@ describe("CfHarnessPromptLoop opening research", () => {
     ).toBe(false);
   });
 
+  describe("after task classification", () => {
+    const researchKit = JSON.stringify({
+      status: "incomplete",
+      summary: "The task needs more exact evidence.",
+      inputs: [],
+      selectedPatternIds: [],
+      leads: [],
+      questions: [],
+      rules: [],
+      sourceIds: [],
+      missing: ["an exact implementation contract"],
+    });
+    const classifiedLoop = (
+      runId: string,
+      runIds: string[],
+      artifactRoot?: string,
+    ) =>
+      new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+          ...(artifactRoot !== undefined
+            ? {
+              artifactStore: createFileSystemHarnessArtifactStore({
+                artifactRoot,
+                runId,
+              }),
+            }
+            : {}),
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            runIds.push(request.runId);
+            return Promise.resolve({
+              assistant: {
+                role: "assistant",
+                content: request.runId.includes(":research:")
+                  ? researchKit
+                  : "Done.",
+              },
+            });
+          },
+        },
+        allowedToolIds: ["research"],
+      });
+
+    it("runs no opening research for a respond task", async () => {
+      const runIds: string[] = [];
+      const root = await Deno.makeTempDir({ prefix: "cf-harness-classified-" });
+      try {
+        const loop = classifiedLoop("run-classified-respond", runIds, root);
+
+        const classification = await loop.classifyTask("thanks!");
+        const result = await loop.runPrompt({
+          prompt: "thanks!",
+          openingResearchTask: "thanks!",
+          promptSlotBinding: directPromptSlotBinding,
+        });
+
+        expect(classification.tags).toEqual(["respond"]);
+        expect(runIds).toEqual(["run-classified-respond"]);
+        expect(result.runState.openingResearch).toBeUndefined();
+        expect(result.runState.taskClassification).toMatchObject({
+          tags: ["respond"],
+          path: "rule",
+        });
+        const report = JSON.parse(
+          await Deno.readTextFile(
+            join(root, "run-classified-respond", "run-report.json"),
+          ),
+        );
+        expect(report.taskClassification).toMatchObject({
+          tags: ["respond"],
+          path: "rule",
+        });
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
+    it("counts a model classification's tokens in the run's total usage", async () => {
+      const task = "the quarterly numbers for Q3 sales";
+      const classificationRequests: HarnessModelTurnRequest[] = [];
+      const loop = new CfHarnessPromptLoop({
+        researchReasoningEffort: "low",
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-classified-by-model",
+          model: "gpt-test",
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            if (request.runId.endsWith(":task-classification")) {
+              classificationRequests.push(request);
+            }
+            return Promise.resolve(
+              request.runId.endsWith(":task-classification")
+                ? {
+                  assistant: { role: "assistant", content: "find" },
+                  usage: { totalTokens: 5 },
+                }
+                : {
+                  assistant: { role: "assistant", content: "Done." },
+                  usage: { totalTokens: 7 },
+                },
+            );
+          },
+        },
+      });
+
+      const classification = await loop.classifyTask(task, {
+        signal: new AbortController().signal,
+      });
+      const result = await loop.runPrompt({
+        prompt: task,
+        openingResearchTask: task,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(classification).toMatchObject({ tags: ["find"], path: "model" });
+      expect(result.usage?.totalTokens).toBe(7);
+      expect(result.totalUsage?.totalTokens).toBe(12);
+      expect(classificationRequests).toHaveLength(1);
+      expect(classificationRequests[0].reasoningEffort).toBe("low");
+      expect(classificationRequests[0].signal).toBeDefined();
+    });
+
+    it("runs opening research for an author task", async () => {
+      const runIds: string[] = [];
+      const loop = classifiedLoop("run-classified-author", runIds);
+
+      await loop.classifyTask("make me a pomodoro timer");
+      const result = await loop.runPrompt({
+        prompt: "make me a pomodoro timer",
+        openingResearchTask: "make me a pomodoro timer",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(runIds).toEqual([
+        createToolOutputId("run-classified-author", "research", 1),
+        "run-classified-author",
+      ]);
+      expect(result.runState.openingResearch?.status).toBe("completed");
+    });
+  });
+
   it("does not start opening research for a child run", async () => {
     const runId = "root.subagent.1";
     const task = "Implement the delegated task.";
@@ -4521,6 +4670,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "resolve_piece",
       "describe_handle",
       "call_verb",
+      "read_value",
       "finish_task",
       "research",
     ],
@@ -4724,6 +4874,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "resolve_piece",
       "describe_handle",
       "call_verb",
+      "read_value",
       "finish_task",
       "search_patterns",
       "record_feedback",

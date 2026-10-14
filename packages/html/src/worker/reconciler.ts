@@ -71,6 +71,7 @@ import {
   isBindingProp,
   isEventHandler,
   isEventProp,
+  styleObjectToCssString,
 } from "../render-utils.ts";
 import { CONTAINER_NODE_ID, type VDomOp } from "../vdom-ops.ts";
 import {
@@ -4224,15 +4225,15 @@ export class WorkerReconciler {
   // deno-lint-ignore no-explicit-any
   #transformPropValue(key: string, value: unknown): any {
     // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a
-    // fabric-valued `style` prop is routed into the `Object.entries` walk of
-    // `styleObjectToCssString` — yielding an empty CSS string, silently —
+    // fabric-valued `style` prop is routed into the walk over own keys in
+    // `styleObjectToCssString()` — yielding an empty CSS string, silently —
     // before it can reach `convertCellsToLinks` below, the one conversion
     // here that knows the fabric types.
     if (
       key === "style" && value && typeof value === "object" &&
       !Array.isArray(value)
     ) {
-      return this.#styleObjectToCssString(value as Record<string, unknown>);
+      return styleObjectToCssString(value as Record<string, unknown>);
     }
     // Use convertCellsToLinks to handle Cells, circular refs, and non-JSON values.
     // Pass doNotConvertCellResults to prevent already-resolved values (from .sink())
@@ -4246,58 +4247,6 @@ export class WorkerReconciler {
       includeSchema: true,
       keepAsCell: KeepAsCell.OnlyStream,
     });
-  }
-
-  /**
-   * Convert a style object to a CSS string.
-   */
-  #styleObjectToCssString(styleObject: Record<string, unknown>): string {
-    const unitlessProperties = new Set([
-      "animation-iteration-count",
-      "column-count",
-      "fill-opacity",
-      "flex",
-      "flex-grow",
-      "flex-shrink",
-      "font-weight",
-      "line-height",
-      "opacity",
-      "order",
-      "orphans",
-      "stroke-opacity",
-      "widows",
-      "z-index",
-      "zoom",
-    ]);
-
-    return Object.entries(styleObject)
-      .map(([key, value]) => {
-        if (value == null) return "";
-
-        let cssKey = key;
-        if (!key.startsWith("--")) {
-          if (/^(webkit|moz|ms|o)[A-Z]/.test(key)) {
-            cssKey = "-" + key;
-          }
-          cssKey = cssKey.replace(/([A-Z])/g, "-$1").toLowerCase();
-        }
-
-        let cssValue = value;
-        if (
-          typeof value === "number" &&
-          !cssKey.startsWith("--") &&
-          !unitlessProperties.has(cssKey) &&
-          value !== 0
-        ) {
-          cssValue = `${value}px`;
-        } else {
-          cssValue = String(value);
-        }
-
-        return `${cssKey}: ${cssValue}`;
-      })
-      .filter((s) => s !== "")
-      .join("; ");
   }
 
   /**

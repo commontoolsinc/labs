@@ -497,6 +497,13 @@ Rules:
   the session. Only this fallback needs the key; the latest token resumes the
   session without one
 - an open whose connection closes while the server admits it opens nothing
+- a resume whose connection closes during catch-up fails; the connection
+  detaches its session as it closes, so the session's grace period runs while
+  catch-up is pending
+- an open that fails after registering session ownership releases its
+  connection's session handle and detaches the session; catch-up computed for
+  that open is rolled back for redelivery, unless a newer open has already
+  replaced it
 - at most one connection may own a given `(space, sessionId)` at a time
 - a successful resume transfers ownership to the new connection, invalidates the
   old owner for that session, and MAY emit `session/revoked` to the previous
@@ -505,8 +512,11 @@ Rules:
   signed-open clients; a connection-auth client does not replace its audience
   or held challenge from that response
 - any other stale `sessionToken` MUST fail with `SessionRevokedError`
-- when a resumed session already has watches installed, `sync` carries the
-  catch-up delta the client missed while offline
+- when a resumed session already has watches installed, a non-routed connection
+  may receive `session/effect` while catch-up is pending, before the
+  `session.open` response; the response's `sync` carries only the remaining
+  catch-up delta. Reconnecting clients route early frames to their existing
+  session and apply them as they arrive
 - a resuming client that advertises `sessionHoldings` (and whose server does)
   sends `holdings`: the documents its replica holds, each at the seq it holds
   it at. The server replaces its memory of what the session was delivered with
@@ -970,7 +980,7 @@ Path conventions on the wire:
 - `ClientCommit` reads and writes use full document paths.
 - `readValue` / `writeValue` style helpers are client-side conveniences that
   prepend `"value"` before constructing those commit paths.
-- Inline `data:` document reads are local-only. Clients may read them during
+- Immutable `snapshot:` and Fabric `data:` document reads are local-only. Clients may read them during
   traversal, but must not serialize them into `ClientCommit.reads` because they
   have no server sequence and do not participate in conflict validation.
 - query selectors remain value-relative and are re-rooted by the shared

@@ -12,7 +12,6 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -25,6 +24,7 @@ import {
   usesLocalReads,
   validateLocalReadBasis,
 } from "./storage/local-read-policy.ts";
+import { keepRefusedArgumentSlots } from "./refused-argument-slots.ts";
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
 import {
   storedArgumentSlotIssues,
@@ -78,6 +78,7 @@ import {
   cellRuntime,
   cellTx,
   createCell,
+  internCellLinkSchema,
   isCell,
   schemaCellScope,
   syncCellForIdentity,
@@ -135,7 +136,11 @@ import {
   type RawBuiltinReturnType,
   type RawNodeCause,
 } from "./module.ts";
-import { NodeBindingMemo } from "./node-binding-memo.ts";
+import {
+  nodeBindingInputsWeight,
+  NodeBindingMemo,
+} from "./node-binding-memo.ts";
+import { hasInlineCellScheme } from "./immutable-cell.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
@@ -475,27 +480,48 @@ type StartAttempt = {
 };
 
 /**
+ * What `schemaWithEventSlotAsStream()` returned for each deep-frozen handler
+ * argument schema, by that schema.
+ */
+const eventSlotAsStreamSchemas = new WeakMap<object, JSONSchema>();
+
+/**
  * `schema` with a handler's `$event` slot declared as a stream: what a
  * handler node's bound inputs are synced under at start, where the slot
  * holds the stream link rather than an event. Declared so, the slot's
  * document is not loaded under the event schema the link carries; the
  * stream is named whole beside the plan (`#cellsNodePlanReads`).
+ *
+ * The result is the interned schema, and one handler schema gets the same
+ * one on every call: each plan of a handler node attaches it to its inputs
+ * cell, which interns what it is given, and a schema built per plan would be
+ * hashed whole per plan. A schema declaring an `$event` slot is interned as a
+ * cell interns one (`internCellLinkSchema()`), which deep-freezes it in place
+ * unless it holds a value read out of a cell.
  */
-function schemaWithEventSlotAsStream(
+export function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
+  // A result is kept only for a deep-frozen schema, which cannot change
+  // under it.
+  internCellLinkSchema(schema);
+  const keep = isDeepFrozen(schema);
+  const remembered = keep ? eventSlotAsStreamSchemas.get(schema) : undefined;
+  if (remembered !== undefined) return remembered;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
-  return {
+  const declared = internCellLinkSchema({
     ...schema,
     properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
-  };
+  });
+  if (keep) eventSlotAsStreamSchemas.set(schema, declared);
+  return declared;
 }
 
 // The debug-name builders reuse the action's already-computed
@@ -563,8 +589,7 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
  * or a link, whose kind belongs to whatever it resolves to rather than to the
  * receipt.
  *
- * A `data:` link is the exception among links: it carries its value inside
- * its own identifier, and the write inlines it, so the receipt holds that
+ * An immutable `snapshot:` or Fabric `data:` link is expanded on write, so the receipt holds that
  * value rather than a link to it. The description comes from the same
  * inlining, so it describes what is stored.
  *
@@ -837,13 +862,13 @@ const recordRawBuiltinResultSchemaPolicyInput = (
 };
 
 /**
- * Whether `argumentLink` names a stand-in: the `data:` document a pre-sync
+ * Whether `argumentLink` names a stand-in: the immutable document a pre-sync
  * builds from the inputs of an instance that has no stored argument.
  */
 function isStandInArgument(
   argumentLink: NormalizedFullLink | undefined,
 ): boolean {
-  return argumentLink !== undefined && hasDataUriScheme(argumentLink.id);
+  return argumentLink !== undefined && hasInlineCellScheme(argumentLink.id);
 }
 
 /**
@@ -2415,6 +2440,13 @@ export class Runner {
   >();
 
   /**
+   * The patterns a handler's result is set up from. A child one of them
+   * instantiates was made by an event, not by its parent's program, so no
+   * release of the parent re-instantiates it, whichever space it is in.
+   */
+  #handlerResultPatterns = new WeakSet<Pattern>();
+
+  /**
    * Registrations a run installed in a transaction refused for a stale basis,
    * by result document. The run keeps such a registration, but its graph read
    * setup writes that never landed, and a winner's writes do not stand in for
@@ -2573,7 +2605,8 @@ export class Runner {
   readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
     capacity: NODE_BINDING_LIMIT,
     maxWeight: NODE_BINDING_WEIGHT_LIMIT,
-    weigh: (binding) => binding.inputsCell.getAsNormalizedFullLink().id.length,
+    weigh: (binding) =>
+      nodeBindingInputsWeight(binding.inputsCell.getAsNormalizedFullLink().id),
   });
 
   /**
@@ -3833,8 +3866,10 @@ export class Runner {
    * holds, and validates what it staged. A stored slot the new argument
    * schema refuses is left out, so that its default fills it where it has
    * one. Where what is staged still fails the schema as a whole, every stored
-   * slot the caller does not name is left out. Each slot left out is logged
-   * as a warning naming the pattern, the piece, the slot and the mismatch.
+   * slot the caller does not name is left out. The value each slot left out
+   * held is copied into the piece's refused-slot store, and each is logged as
+   * a warning naming the pattern, the piece, the slot, the mismatch and the
+   * store.
    * A slot named in `droppedArgumentFields` is left out from the start and
    * not logged: the caller leaves it out on purpose. Returns the argument
    * staged.
@@ -3931,6 +3966,23 @@ export class Runner {
     const identity = entryRef === undefined
       ? "keyless"
       : `${entryRef.identity}#${entryRef.symbol}`;
+    // The staged argument fills each dropped slot with its default, so the
+    // value the slot held is copied out first, in this same transaction: the
+    // copy commits exactly when the write over it does. The refused-slot
+    // store is minted from the piece's result cell and named as a store the
+    // runtime owns for it, so the fit check declares the confidentiality the
+    // copy carries rather than refusing a labeled value a fresh document does
+    // not declare.
+    const kept = keepRefusedArgumentSlots(
+      this.#runtime,
+      tx,
+      resultCell.getAsNormalizedFullLink(),
+      argumentLink,
+      stored,
+      dropped,
+      identity,
+    );
+    if (kept !== undefined) recordRuntimeOwnedStore(tx, resultCell, kept);
     if (issue !== undefined) {
       this.#validateArgument(
         tx,
@@ -3945,7 +3997,10 @@ export class Runner {
         `${backtickQuote(resultCell.getAsNormalizedFullLink().id)} ` +
         `dropped its stored ${backtickQuote(slot)}, which the pattern's ` +
         `argument schema refuses: ${reason}. The slot takes its default, if ` +
-        "it has one.",
+        "it has one" +
+        (kept === undefined
+          ? "."
+          : `, and the value it held is kept in ${backtickQuote(kept.id)}.`),
       ]);
     }
     return staged;
@@ -4117,6 +4172,16 @@ export class Runner {
               nextArgument,
             );
           }
+          // No caller names a slot, so every slot the document holds is
+          // staged again with the bytes it holds, as a setup replay stages
+          // the slots its caller leaves out. A default the merge adds where
+          // the document holds nothing is no replay, and gets no record.
+          recordReplayedArgumentSlots(
+            tx,
+            argumentLink,
+            undefined,
+            previousArgument,
+          );
 
           // Stage the exact Fabric-layer representation before validating
           // it. The untyped materialization inside resolves ordinary sigil
@@ -9219,7 +9284,7 @@ export class Runner {
 
     // The nodes bind against the piece's argument document once setup has
     // written it. Before that, on a fresh run, they bind against an
-    // immutable stand-in holding the caller's argument: a data-URI document,
+    // immutable stand-in holding the caller's argument: a native snapshot document,
     // local by construction, whose links are the caller's, so a plan bound
     // against it names the same stored documents the run will read through
     // them. Planning resolves each node's output redirect chain, which reads
@@ -9433,8 +9498,9 @@ export class Runner {
         "node",
       );
       // Each node's plan, synced under the schema its run reads through. The
-      // inputs document is a data URI, so syncing it under a schema hands the
-      // server one selector per binding link, and the server's query walk
+      // inputs document may be stored or an immutable stand-in. Syncing it
+      // under the schema hands the server one selector per binding link,
+      // and the server's query walk
       // follows links from there the way a read does: as deep as the
       // declaration goes, through `asCell` positions, stopping at an opaque
       // one. What arrives is what the node's first run reads.
@@ -10787,7 +10853,7 @@ export class Runner {
    * links. What a plan reads through its transaction, the redirect chains
    * its outputs write through, is resolved by each plan in its own.
    *
-   * A binding against a stand-in argument, a `data:` document a pre-sync
+   * A binding against a stand-in argument, an immutable document a pre-sync
    * builds for an instance with no stored argument, is never held: the
    * instance's instantiation binds against the argument document its setup
    * writes, so no later plan has that argument link.
@@ -11777,6 +11843,7 @@ export class Runner {
       undefined,
       resultSchema,
     );
+    this.#handlerResultPatterns.add(resultPattern);
     // navigateTo result patterns must start after the handler's transaction
     // commits so the navigation target is durable. Every other handler result
     // pattern runs into the canonical result/receipt cell in the handler's
@@ -14105,12 +14172,14 @@ export class Runner {
           rawMetaWriteAuthorization,
         );
       }
-      // Only a child in a space of its own claims one: an in-space nested
-      // node is part of its parent's graph and is re-instantiated from the
-      // parent's program on each release of the parent, so an origin of its
-      // own would be followed twice; a cross-space child outlives the
-      // program that made it and is what a release has to reach.
-      const sourceOrigin = crossSpace && !resumeExisting
+      // A nested node of the parent's own graph claims none: the parent's
+      // program re-instantiates it on each release of the parent, so an
+      // origin of its own would be followed twice. A child in a space of its
+      // own, or one a handler made, outlives the program that made it, and is
+      // what a release has to reach.
+      const outlivesParent = crossSpace ||
+        this.#handlerResultPatterns.has(pattern);
+      const sourceOrigin = outlivesParent && !resumeExisting
         ? this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl)
         : undefined;
       const options = {
