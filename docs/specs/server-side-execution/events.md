@@ -599,11 +599,13 @@ loop's duty).
   active interval without erasing the accumulated time. A served
   `RetryImmediately` used for in-space name resolution is settlement
   and never creates or ages this checkpoint. Only a committed handler
-  consequence or terminal notice clears it. A head retried after a
-  commit-preparation failure is the last entry its drain pass queues:
-  that failure is known only once the run ends, so a later arrival
-  queued behind it in the same pass would run ahead of a head that
-  fails again (§2's arrival order).
+  consequence or terminal notice clears it. A commit-preparation
+  failure carries §2's arrival-order barrier as the other deferral arms
+  do: every later same-space arrival already queued behind the failed
+  head defers with it. A head retried after such a failure is the last
+  entry its drain pass queues, so the events behind it wait in the
+  drain for the pass its outcome arms rather than for the backstop
+  rescan a swept event waits for.
 - The failed-state budget is 60 seconds. This terminal-disposition
   budget is an explicit exception to the repository's no-timeout rule:
   it starts only after an observed failure, never cancels an in-flight

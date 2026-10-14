@@ -2988,6 +2988,14 @@ export async function dispatchQueuedEvent(state: {
               permanentEvidence: false,
             },
           });
+          // The deferral carries the drain's arrival-order barrier
+          // (events.md §2): a later arrival the drain queued in the same pass
+          // sits behind this head and would dispatch and seal next.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose commit preparation failed",
+          );
           return true;
         };
         const routeProvenNoCommitFailure = (): void => {

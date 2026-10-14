@@ -4556,12 +4556,11 @@ export class SpaceServer implements TransactionSealDestination {
           );
           queued += 1;
           this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
-          // A commit-preparation failure is known only once the run has
-          // committed or failed, and no sweep withdraws an event queued
-          // behind the head before then, so a retried head runs alone in its
-          // pass. The pass its outcome arms queues the events behind it, or
-          // holds them behind a head that failed again (events.md §2's
-          // arrival order).
+          // A retried head runs alone in its pass. Queued beside it, a later
+          // arrival is swept behind a head that fails again
+          // (`deferLaterSameSpaceServedEvents`) and waits for the backstop
+          // rescan; left in the drain, it is queued by the pass the head's
+          // outcome arms (events.md §2's arrival order).
           if (retriedAfterCommitPreparation) break;
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the

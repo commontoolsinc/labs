@@ -2455,7 +2455,8 @@ describe("Phase 3 events-down (serving side)", () => {
     const refusedOutcomes = new ArrivalLog<
       { name?: string; message?: string } | undefined
     >();
-    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+    const runtime = servingRuntime!;
+    const cancelProbe = runtime.scheduler.addEventHandler(
       (tx, event) => {
         const kind = (event as { kind?: string }).kind ?? "unknown";
         probeRuns.record(kind);
@@ -2465,18 +2466,9 @@ describe("Phase 3 events-down (serving side)", () => {
             outcome.error as { name?: string; message?: string } | undefined,
           )
         );
-        const source = servingRuntime!.getCell(
-          space,
-          names.source,
-          undefined,
-          tx,
-        );
-        servingRuntime!.getCell(
-          space,
-          `${names.source}-list`,
-          floorSchema,
-          tx,
-        ).set({ items: [source as unknown as string] });
+        const source = runtime.getCell(space, names.source, undefined, tx);
+        runtime.getCell(space, `${names.source}-list`, floorSchema, tx)
+          .set({ items: [source as unknown as string] });
       },
       streamLink,
     );
@@ -2495,6 +2487,7 @@ describe("Phase 3 events-down (serving side)", () => {
             failures,
       );
     return {
+      sidecarId,
       sidecarValue,
       entryByKind,
       probeRuns,
@@ -2583,6 +2576,62 @@ describe("Phase 3 events-down (serving side)", () => {
     expect(probe.sidecarValue()?.eventWatermark).toBe(
       probe.entryByKind("follower-2")!.seq,
     );
+  });
+
+  it("holds an event queued in the same drain pass behind a served event whose first commit a CFC refusal that is not a verdict turns away, and delivers both in arrival order", async () => {
+    // A transient failure to sync the stream's sidecar holds the drain while
+    // both events are appended, so the pass after it queues them together,
+    // before the head's first failure is known.
+
+    const clock = { now: 10_000 };
+    using probe = await standUpUntaggedRefusalProbe({
+      arg: "untagged-pass-arg",
+      result: "untagged-pass-result",
+      source: "untagged-pass-source",
+    }, clock);
+
+    GatedStorageManager.syncThrowWhen = (id) => id === probe.sidecarId;
+    try {
+      await probe.send("refused");
+      await probe.send("follower");
+      await awaitAdmitted(
+        server,
+        () => probe.entryByKind("follower") !== undefined,
+      );
+      // One failing pass that began with both entries durable.
+      const failingPassesBefore = GatedStorageManager.syncThrows.entries.length;
+      await GatedStorageManager.syncThrows.reached(failingPassesBefore + 1);
+    } finally {
+      GatedStorageManager.syncThrowWhen = undefined;
+    }
+    await probe.awaitFailures(1);
+    expect(probe.entryByKind("follower")?.consequenced).not.toBe(true);
+
+    // The document arrives with the atom, and a later append wakes the head.
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.getCell(space, "untagged-pass-source", {
+        type: "string",
+        ifc: { addIntegrity: ["admin-approved"] },
+      }, tx).set("endorsed");
+      expect((await tx.commit().settled).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    await servingRuntime!.getCell(space, "untagged-pass-source").sync();
+    await probe.send("wake");
+    await awaitAdmitted(
+      server,
+      () => probe.entryByKind("wake")?.consequenced === true,
+    );
+    const delivered = probe.entryByKind("refused")!;
+    expect(delivered.consequenced).toBe(true);
+    expect(delivered.error).toBeUndefined();
+    expect(probe.entryByKind("follower")?.consequenced).toBe(true);
+    const order = probe.probeRuns.entries;
+    expect(order.indexOf("follower")).toBeGreaterThan(
+      order.lastIndexOf("refused"),
+    );
+    expect(order.indexOf("wake")).toBeGreaterThan(order.indexOf("follower"));
   });
 
   it("covers a served event that a CFC refusal that is not a verdict keeps turning away with one needs-attention notice once its failed-state budget is spent, and delivers the events behind it", async () => {
