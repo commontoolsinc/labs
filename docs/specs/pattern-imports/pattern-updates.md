@@ -362,6 +362,16 @@ slot the parent does not supply is dropped the same way. A stored slot that no
 longer fits therefore does not stop the parent from starting. A slot the parent
 supplied once and supplies no longer keeps the value it last held.
 
+Dropping a slot does not destroy what it held. In the same transaction as the
+write that fills it, setup copies the slot's stored bytes, links included, into
+the nested piece's refused-slot store: a document minted from the piece's result
+cell, which `refusedArgumentSlotsCell()` in `@commonfabric/runner` names from
+that cell alone. The store holds each dropped value by slot and then by the
+`identity#symbol` of the pattern whose setup dropped it, beside the mismatch, so
+setting the same pattern up again rewrites the same entry. The warning names the
+store. The runtime names the store as one it owns for the piece, so a value
+copied out of a labeled argument keeps its confidentiality there.
+
 A refusal is a repair failure, not a silent one. The pointer has already moved
 by the time setup runs, so re-running the same identity refuses identically;
 the boot repair therefore classifies this failure and escalates it to the

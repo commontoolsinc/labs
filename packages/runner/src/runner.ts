@@ -25,6 +25,7 @@ import {
   usesLocalReads,
   validateLocalReadBasis,
 } from "./storage/local-read-policy.ts";
+import { keepRefusedArgumentSlots } from "./refused-argument-slots.ts";
 import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
 import {
   storedArgumentSlotIssues,
@@ -3855,8 +3856,10 @@ export class Runner {
    * holds, and validates what it staged. A stored slot the new argument
    * schema refuses is left out, so that its default fills it where it has
    * one. Where what is staged still fails the schema as a whole, every stored
-   * slot the caller does not name is left out. Each slot left out is logged
-   * as a warning naming the pattern, the piece, the slot and the mismatch.
+   * slot the caller does not name is left out. The value each slot left out
+   * held is copied into the piece's refused-slot store, and each is logged as
+   * a warning naming the pattern, the piece, the slot, the mismatch and the
+   * store.
    * A slot named in `droppedArgumentFields` is left out from the start and
    * not logged: the caller leaves it out on purpose. Returns the argument
    * staged.
@@ -3953,6 +3956,22 @@ export class Runner {
     const identity = entryRef === undefined
       ? "keyless"
       : `${entryRef.identity}#${entryRef.symbol}`;
+    // The staged argument fills each dropped slot with its default, so the
+    // value the slot held is copied out first, in this same transaction: the
+    // copy commits exactly when the write over it does. The refused-slot
+    // store is minted from the piece's result cell and named as a store the
+    // runtime owns for it, so the fit check declares the confidentiality the
+    // copy carries rather than refusing a labeled value a fresh document does
+    // not declare.
+    const kept = keepRefusedArgumentSlots(
+      this.#runtime,
+      tx,
+      resultCell.getAsNormalizedFullLink(),
+      stored,
+      dropped,
+      identity,
+    );
+    if (kept !== undefined) recordRuntimeOwnedStore(tx, resultCell, kept);
     if (issue !== undefined) {
       this.#validateArgument(
         tx,
@@ -3967,7 +3986,10 @@ export class Runner {
         `${backtickQuote(resultCell.getAsNormalizedFullLink().id)} ` +
         `dropped its stored ${backtickQuote(slot)}, which the pattern's ` +
         `argument schema refuses: ${reason}. The slot takes its default, if ` +
-        "it has one.",
+        "it has one" +
+        (kept === undefined
+          ? "."
+          : `, and the value it held is kept in ${backtickQuote(kept.id)}.`),
       ]);
     }
     return staged;
