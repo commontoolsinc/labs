@@ -63,6 +63,12 @@ unchanged to `forget`; they need supply no container. A direct room's
 room's labeled creator. `people` is drawn from listed rooms' rosters per
 session, keyed by the principal each profile attests.
 
+The manager's rendering labels each listed room with its `about.title`, read
+through the room's link, so a retitle shows there once the room records it. A
+direct room with no title is labeled by its counterpart. A standalone room's
+catalog title is its title when it was registered, a display hint the catalog
+doesn't refresh; neither the rendering nor `rooms` reads it.
+
 `direct` holds one entry per counterpart, including forgotten rooms, for direct
 rooms this manager created or accepted. `openDirect` finds a direct room there
 and restores its membership. A room another manager created and offered the

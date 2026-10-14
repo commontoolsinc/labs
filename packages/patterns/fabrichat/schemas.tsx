@@ -73,6 +73,12 @@ export const CHAT_ADD_MEMBER_SURFACE = "ChatAddMemberSurface";
 /** The reviewed action adding a member is, on `CHAT_ADD_MEMBER_SURFACE`. */
 export const CHAT_ADD_MEMBER_ACTION = "ChatAddMember";
 
+/** The reviewed surface a room is retitled from. */
+export const CHAT_RETITLE_SURFACE = "ChatRetitleSurface";
+
+/** The reviewed action retitling a room is, on `CHAT_RETITLE_SURFACE`. */
+export const CHAT_RETITLE_ACTION = "ChatRetitle";
+
 //
 // Principals
 //
@@ -272,19 +278,32 @@ export interface AboutRecord {
   /** How the room was created. */
   kind: ChatRoomKind;
 
-  /** A group room's title. */
+  /** The title a group room was created with. */
   title?: string;
 
   /** When the room was created. */
   createdAt?: FabricEpochNsec;
 }
 
-/** What a room says about itself, set once when it is created. */
+/**
+ * A room's title as a member last set it, through `setTitle`. The room stores
+ * it labeled `authored-by` that member.
+ */
+export interface TitleRecord {
+  /** The title. */
+  title: string;
+}
+
+/** What a room says about itself. */
 export interface ChatRoomAbout {
   /** `"direct"` if created as a direct room; `"group"` otherwise. */
   kind: ChatRoomKind;
 
-  /** A group room's title. A direct room, and a space's own chat, have none. */
+  /**
+   * The room's title, which every member shares: the one a member last set,
+   * or else the one the room was created with. A direct room has none until a
+   * member sets one, and a space's own chat has none.
+   */
   title?: string;
 
   /** When the room was created; absent for a space's own chat. */
@@ -557,6 +576,35 @@ export type AddMemberOutcome =
  * its two members.
  */
 export type AddMemberRefusalCode = "direct-room";
+
+/** The outcome of a retitle of a room, by its `requestId`. */
+export type SetTitleOutcome =
+  | {
+    /** The request set the room's title. */
+    status: "done";
+  }
+  | {
+    /** The retitle was refused, and the title is as it was. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /** Which refusal it is, for a client to act on. */
+    code: SetTitleRefusalCode;
+  };
+
+/**
+ * Why a room refused a retitle, which stays the same whatever its `reason`
+ * says. `not-member`: the sender can't write in the room, or isn't signed in.
+ * `invalid-title`: the title is not a string with some text in it.
+ * `fixed-title`: the room's title is not one its members set, as for a
+ * space's own chat, which is shown by its space's name.
+ */
+export type SetTitleRefusalCode =
+  | "not-member"
+  | "invalid-title"
+  | "fixed-title";
 
 /**
  * Why a room refused one of a sender's message acts: a send, an edit, a

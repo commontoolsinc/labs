@@ -2,8 +2,8 @@
  * A FabriChat room whose viewer's manager carries a confidentiality label the
  * room's space doesn't admit: a manager in a person's Home can come to carry
  * their `PersonalSpace` label. Nothing the room records about itself reads
- * the manager, so a send and a reaction still land; only what the room derives
- * from the manager is refused. That an add lands too is something only a room
+ * the manager, so a send, a reaction, and a retitle still land; only what the
+ * room derives from the manager is refused. That an add lands too is something only a room
  * in a space other than the test's own shows, so
  * `../integration/fabrichat-labeled-manager-multi-runtime.test.ts` checks it.
  */
@@ -33,6 +33,8 @@ import { FabriChatRoomCore, type RoomManager } from "./room.tsx";
 import {
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatIndexEntry,
@@ -40,6 +42,7 @@ import {
   type ChatProfile,
   type ChatRequestOutcome,
   type ChatRoomLink,
+  type TitleRecord,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -64,6 +67,10 @@ type LabeledManager = Confidential<RoomManager, readonly [typeof HOME_LABEL]>;
 
 const sendGesture = { surface: CHAT_SEND_SURFACE, action: CHAT_SEND_ACTION };
 const reactGesture = { surface: CHAT_REACT_SURFACE, action: CHAT_REACT_ACTION };
+const retitleGesture = {
+  surface: CHAT_RETITLE_SURFACE,
+  action: CHAT_RETITLE_ACTION,
+};
 
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
@@ -89,6 +96,7 @@ export default pattern((input) => {
     usedTimes: Writable.of<UsedTime[]>([]),
     activity: Writable.of<SentActivity[]>([]),
     counters: Writable.of<ActivityCounters[]>([]),
+    titles: Writable.of<TitleRecord[]>([]),
   };
   const core = FabriChatManagerCore({
     myProfile: profile,
@@ -150,6 +158,17 @@ export default pattern((input) => {
       {
         assertion: assert(() =>
           (messages.key(0).get()?.reactions?.get() ?? []).length === 1
+        ),
+      },
+      {
+        action: room.setTitle,
+        event: { requestId: "t-1", title: "Plans" },
+        trustedUi: retitleGesture,
+      },
+      {
+        assertion: assert(() =>
+          room.about.title === "Plans" &&
+          room.titleRequests["t-1"]?.status === "done"
         ),
       },
     ],

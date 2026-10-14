@@ -1854,15 +1854,16 @@ export const FabriChatManagerCore = pattern<
       draft,
       startRefusal,
     };
-    // Per session, as `newestFirst` is: a group's label is the title its room
-    // holds.
+    // Per session, as `newestFirst` is: a room's label is the title its room
+    // holds, which a direct room has only once a member sets one.
     const shown = computed((): PerSession<ShownEntry[]> =>
       newestFirst.map((entry) => ({
         room: entry.room,
         ...(entry.revision === undefined ? {} : { revision: entry.revision }),
-        label: entry.kind === "direct"
-          ? `With ${entry.counterpart ?? "someone"}`
-          : entry.room.key("about").get()?.title ?? "Group chat",
+        label: entry.room.key("about").get()?.title ??
+          (entry.kind === "direct"
+            ? `With ${entry.counterpart ?? "someone"}`
+            : "Group chat"),
       }))
     );
     // A refusal differs by session, so it is always rendered and hidden by a
