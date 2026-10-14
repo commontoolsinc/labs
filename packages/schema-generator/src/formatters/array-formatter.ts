@@ -65,12 +65,24 @@ export class ArrayFormatter implements TypeFormatter {
       return { type: "array", items: false };
     }
 
+    // A print is read by its type, and the context holds the print as its
+    // hints node. Its element node is reached from there, and read at the
+    // annotation its hint spells (`SchemaHint.spelledBy`), as a print of a
+    // whole value is; the hint is recorded only where that annotation denotes
+    // the element type.
+    const printedElement = !context.typeNode && context.hintsNode
+      ? getArrayElementInfo(type, context.typeChecker, context.hintsNode)
+        ?.elementNode
+      : undefined;
+    const spelledBy = printedElement &&
+      context.schemaHints?.get(printedElement)?.spelledBy;
+
     // Use formatChildType - it will auto-detect whether to use type-based
     // or node-based analysis based on whether the type is reliable
     const items = this.#schemaGenerator.formatChildType(
       info.elementType,
       context,
-      info.elementNode,
+      spelledBy ?? info.elementNode,
       instantiatedElementType(context.instantiatedAs, context.typeChecker),
     );
 

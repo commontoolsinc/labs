@@ -67,6 +67,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { isDefaultLibrarySourceFile } from "../typescript/default-library.ts";
+import { CFC_POLICY_OF_BRAND } from "../typescript/value-annotation.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import {
   getScopeBrand,
@@ -111,8 +112,6 @@ const WRITER_POLICY_ALIAS_NAMES: ReadonlySet<string> = new Set([
 /** The property `AnyOf<X>` is as a type (`@commonfabric/api/cfc`). */
 const CFC_ANY_OF_BRAND = "__ct_cfc_any_of__";
 
-/** The property `PolicyOf<Rules>` is as a type (`@commonfabric/api/cfc`). */
-const CFC_POLICY_OF_BRAND = "__ct_cfc_policy_of__";
 /**
  * What the literal reader returns for syntax it does not evaluate, so that the
  * type paired with that syntax is read in its place. `undefined` is a value it

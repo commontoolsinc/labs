@@ -1871,7 +1871,10 @@ or a printed generation root is formatted (`formatChildType` and
   `PolicyOf<typeof rules>` does. A print spells the binding as the structural
   type of the value it names, from which no reader can tell the binding, so
   the node is read as the annotation spells the type at hand (`#spelling` in
-  `schema-generator.ts`):
+  `schema-generator.ts`). A print of an array is read by its type, and its
+  element at the annotation the hint on the print's element node spells,
+  where the lowering recorded one there (`ArrayFormatter`); that hint is
+  recorded only where the annotation denotes the element type:
   - Where the annotation denotes that type, the node is read as the
     annotation. An annotation denotes a type that is its own, or a union of
     the same members, since a union written through an alias is a type apart
