@@ -2112,4 +2112,106 @@ describe("cfcSchemaPoliciesEqual", () => {
     } as unknown as JSONSchemaObj;
     expect(cfcSchemaPoliciesEqual(inline, dropped)).toBe(false);
   });
+
+  describe("over definitions", () => {
+    // `inline` with `list` named by reference into the root's definition
+    // map, which also holds `extra`, a definition nothing references.
+    const referenced = (listClaim: unknown, extraClaim: unknown) =>
+      ({
+        type: "object",
+        properties: { list: { $ref: "#/$defs/List" } },
+        $defs: {
+          List: { ...inline.properties.list, ifc: listClaim },
+          Extra: { type: "string", ifc: extraClaim },
+        },
+      }) as unknown as JSONSchemaObj;
+
+    it("compares a claim reached through a reference equal to the same claim inline", () => {
+      expect(cfcSchemaPoliciesEqual(inline, referenced(CLAIM, CLAIM))).toBe(
+        true,
+      );
+    });
+
+    it("compares two documents equal where only a definition no reference reaches differs", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          referenced(CLAIM, CLAIM),
+          referenced(CLAIM, { writeAuthorizedBy: ["other"] }),
+        ),
+      ).toBe(true);
+    });
+
+    it("tells apart a changed claim in a definition a reference reaches", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          referenced(CLAIM, CLAIM),
+          referenced({ writeAuthorizedBy: ["other"] }, CLAIM),
+        ),
+      ).toBe(false);
+      expect(
+        cfcSchemaPoliciesEqual(inline, referenced(undefined, CLAIM)),
+      ).toBe(false);
+    });
+
+    it("tells apart a changed claim in a referenced body beside a claim at the reference", () => {
+      const sited = (bodyClaim: unknown) =>
+        ({
+          type: "object",
+          properties: { list: { $ref: "#/$defs/List", ifc: CLAIM } },
+          $defs: {
+            List: {
+              ...inline.properties.list,
+              ifc: { confidentiality: bodyClaim },
+            },
+          },
+        }) as unknown as JSONSchemaObj;
+      expect(cfcSchemaPoliciesEqual(sited(["one"]), sited(["one"]))).toBe(
+        true,
+      );
+      expect(cfcSchemaPoliciesEqual(sited(["one"]), sited(["two"]))).toBe(
+        false,
+      );
+    });
+  });
+
+  describe("with positions left out", () => {
+    // `inline` with a claim beneath each item of `list`, which differs
+    // between the two documents.
+    const beneath = (claim: unknown) =>
+      ({
+        type: "object",
+        properties: {
+          list: {
+            ...inline.properties.list,
+            items: {
+              type: "object",
+              properties: { n: { type: "number", ifc: claim } },
+            },
+          },
+        },
+      }) as unknown as JSONSchemaObj;
+    const left = beneath(CLAIM);
+    const right = beneath({ writeAuthorizedBy: ["other"] });
+
+    it("compares two documents equal where they differ only beneath a position left out", () => {
+      expect(cfcSchemaPoliciesEqual(left, right)).toBe(false);
+      expect(
+        cfcSchemaPoliciesEqual(
+          left,
+          right,
+          (path) => path.length > 2 && path[0] === "list" && path[1] === "*",
+        ),
+      ).toBe(true);
+    });
+
+    it("tells apart a changed claim at a position not left out", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          left,
+          right,
+          (path) => path.length > 0 && path[0] === "other",
+        ),
+      ).toBe(false);
+    });
+  });
 });

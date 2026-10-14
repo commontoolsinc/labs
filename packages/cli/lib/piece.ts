@@ -5474,12 +5474,12 @@ export interface CellSinkOptions {
  *
  * One logical change fires the underlying sink several times before the
  * reactive graph quiets, so what a caller would see without this is a value
- * part-way through a computation. The discipline is a reentrancy guard plus
- * `runtime.idle()`, which is `renderVDomToHtml`'s
- * (`lib/piece-render.ts`): a fire while a settle is outstanding is folded
- * into that settle, and the value is read after the runtime is quiet rather
- * than taken from the callback. Nothing here waits on a clock, so a runtime
- * that is slow is a runtime that is still computing.
+ * part-way through a computation. The discipline is `renderVDomToHtml`'s
+ * (`lib/piece-render.ts`), a reentrancy guard around a wait for the runtime,
+ * and the wait here is `runtime.idle()`: a fire while a settle is outstanding
+ * is folded into that settle, and the value is read after the runtime is quiet
+ * rather than taken from the callback. Nothing here waits on a clock, so a
+ * runtime that is slow is a runtime that is still computing.
  *
  * The bound on "once per quiet runtime" is what the guard can promise: two
  * changes that quiet separately are two calls, and two that arrive inside one
