@@ -7669,6 +7669,9 @@ const verifyTrustedEventRequirements = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
   schema: JSONSchema,
+  // A UI contract names who may write its path, as `writeAuthorizedBy`
+  // does, so its refusal is deferred on the same terms as a writer's.
+  deferWriterRefusal?: (reason: string, path: readonly string[]) => boolean,
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
@@ -7697,9 +7700,11 @@ const verifyTrustedEventRequirements = (
       continue;
     }
     if (!trustedEventMatchesContract(tx, target, entry.path, entry.contract)) {
-      return `missing trusted-event policy input for ${target.id} at /${
+      const reason = `missing trusted-event policy input for ${target.id} at /${
         entry.path.join("/")
       }`;
+      if (deferWriterRefusal?.(reason, entry.path) === true) continue;
+      return reason;
     }
   }
   return undefined;
@@ -11537,6 +11542,32 @@ export function* prepareBoundaryCommitSteps(
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/NN
+    // TODO(danfuzz): Restating a replayed argument slot admits more than
+    // §8.15.4 permits, and runs by default rather than behind the dial
+    // `cfc-spec-correspondence.md` step 4 asks for, by Dan's decision. Drop
+    // this, or put it behind a dial, when the specs ruling lands.
+    //
+    // A refusal of the writer a path names, by `writeAuthorizedBy` or by a UI
+    // contract, is deferred where the write changes nothing there.
+    const deferWriterRefusal = stored.status === "loaded"
+      ? (reason: string, path: readonly string[]): boolean => {
+        if (
+          writeReplaysArgumentSlot(tx, target, path) &&
+          writeLeavesPathUnchanged(tx, target, path)
+        ) {
+          deferredWriterPaths.push(path);
+        } else if (
+          path.length === 0 && writePreservesRuntimeOutput(tx, target)
+        ) {
+          deferredPreservedOutput = true;
+        } else {
+          return false;
+        }
+        deferredWriterRefusal ??= reason;
+        return true;
+      }
+      : undefined;
     const requirementFailure = firstFailure((schema, index) =>
       verifyInputRequirements(
         tx,
@@ -11553,30 +11584,7 @@ export function* prepareBoundaryCommitSteps(
         inputReads,
         // The precision counters measure each protected write once.
         index === 0 ? prefixProvenance : undefined,
-        stored.status === "loaded"
-          ? (reason, path) => {
-            // SPEC-PENDING https://github.com/commonfabric/specs/pull/NN
-            // TODO(danfuzz): Restating a replayed argument slot admits more
-            // than §8.15.4 permits, and runs by default rather than behind
-            // the dial `cfc-spec-correspondence.md` step 4 asks for, by
-            // Dan's decision. Drop this, or put it behind a dial, when the
-            // specs ruling lands.
-            if (
-              writeReplaysArgumentSlot(tx, target, path) &&
-              writeLeavesPathUnchanged(tx, target, path)
-            ) {
-              deferredWriterPaths.push(path);
-            } else if (
-              path.length === 0 && writePreservesRuntimeOutput(tx, target)
-            ) {
-              deferredPreservedOutput = true;
-            } else {
-              return false;
-            }
-            deferredWriterRefusal ??= reason;
-            return true;
-          }
-          : undefined,
+        deferWriterRefusal,
         policyApplication,
       )
     );
@@ -11604,7 +11612,7 @@ export function* prepareBoundaryCommitSteps(
     const trustedEventFailure = policyApplication
       ? undefined
       : firstFailure((schema) =>
-        verifyTrustedEventRequirements(tx, target, schema)
+        verifyTrustedEventRequirements(tx, target, schema, deferWriterRefusal)
       );
     if (trustedEventFailure) {
       reasons.push(verdictReason(trustedEventFailure));

@@ -12,6 +12,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 
+import { markRendererTrustedEvent } from "../src/cfc/ui-contract.ts";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -66,6 +67,64 @@ export default pattern<Input, Output>(({ title, note }) => ({
 }));
 `;
 
+// `about` is written by `describeRoom` alone, from its surface's trusted
+// event, and labeled with its author; `badge` is written from its surface's
+// trusted event by whatever handler receives one.
+const CONTRACT_SOURCE = `/// <cts-enable />
+import {
+  type AuthoredByCurrentUser,
+  Default,
+  handler,
+  pattern,
+  Stream,
+  type TrustedActionUiContract,
+  type TrustedActionWrite,
+  Writable,
+} from "commonfabric";
+
+const describeRoom = handler<
+  { title: string },
+  { about: Writable<{ title: string } | undefined> }
+>(({ title }, { about }) => {
+  about.set({ title });
+});
+
+const pin = handler<{ text: string }, { badge: Writable<{ text: string }> }>(
+  ({ text }, { badge }) => {
+    badge.set({ text });
+  },
+);
+
+interface Input {
+  about?: AuthoredByCurrentUser<
+    TrustedActionWrite<
+      { title: string },
+      typeof describeRoom,
+      "Describe",
+      "GuardedRoom"
+    >
+  >;
+  badge?: Default<
+    TrustedActionUiContract<{ text: string }, "Pin", "GuardedRoom">,
+    { text: "" }
+  >;
+}
+
+interface Output {
+  about?: { title: string };
+  badge: { text: string };
+  describeRoom: Stream<{ title: string }>;
+  pin: Stream<{ text: string }>;
+}
+
+export default pattern<Input, Output>(({ about, badge }) => ({
+  about,
+  badge,
+  describeRoom: describeRoom({ about }),
+  pin: pin({ badge }),
+}));
+`;
+
 /** What a test reads off a room. */
 type Room = Record<string, unknown>;
 
@@ -98,6 +157,28 @@ async function send(
   await runtime.idle();
   await room.pull();
   await runtime.idle();
+}
+
+/**
+ * `fields` as an event from the room's own surface for `action`, which a
+ * field that surface's UI contract guards needs: the renderer-trusted mark
+ * and the surface's provenance.
+ */
+function trustedEvent<T extends object>(action: string, fields: T): T {
+  const event = {
+    ...fields,
+    provenance: {
+      origin: "dom",
+      trusted: true,
+      ui: {
+        pattern: "GuardedRoom",
+        eventIntegrity: ["GuardedRoom"],
+        uiContractDataset: { uiAction: action },
+      },
+    },
+  };
+  markRendererTrustedEvent(event);
+  return event;
 }
 
 /**
@@ -222,6 +303,61 @@ describe("source-reconciler-protected-argument", () => {
           );
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().title).toEqual({ text: "lunch" });
+        },
+      );
+    });
+  });
+
+  describe("fields a UI contract guards", () => {
+    const prime = async (runtime: Runtime, room: Cell<Room>) => {
+      await send(
+        runtime,
+        room,
+        "describeRoom",
+        trustedEvent("Describe", { title: "lunch" }),
+      );
+      await send(runtime, room, "pin", trustedEvent("Pin", { text: "hi" }));
+      expect(room.get().about).toEqual({ title: "lunch" });
+      expect(room.get().badge).toEqual({ text: "hi" });
+    };
+
+    it("adopts a release that leaves the fields as they are, and keeps what they hold", async () => {
+      await reconcileRelease(
+        "contract-release",
+        releaseBehind(CONTRACT_SOURCE),
+        CONTRACT_SOURCE,
+        prime,
+        ({ outcome, room, currentIdentity }) => {
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().badge).toEqual({ text: "hi" });
+        },
+      );
+    });
+
+    it("refuses a release whose setup would change a field, records the missing trusted event, and keeps the field as it was", async () => {
+      // As for the writer's field above: the release fills a default into
+      // what `badge` holds, which only an event from its surface may write.
+      const current = CONTRACT_SOURCE.replace(
+        'TrustedActionUiContract<{ text: string }, "Pin", "GuardedRoom">',
+        'TrustedActionUiContract<{ text: string; color?: Default<string, "red"> }, "Pin", "GuardedRoom">',
+      );
+      expect(current).not.toBe(CONTRACT_SOURCE);
+      await reconcileRelease(
+        "contract-changing-release",
+        CONTRACT_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(recorded?.detail).toContain(
+            "missing trusted-event policy input for",
+          );
+          expect(recorded?.detail).toContain("at /badge");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().badge).toEqual({ text: "hi" });
         },
       );
     });

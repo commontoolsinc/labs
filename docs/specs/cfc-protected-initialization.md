@@ -238,10 +238,11 @@ as a replay, and a default the changed schema adds where the document holds
 nothing is not. A stored slot the changed schema refuses refuses the setup as
 a whole.
 
-Preparation defers a protected field's writer requirement when the field lies
-at or under a recorded replay slot and no write the transaction recorded
-changes a byte at the field, at an ancestor where the difference reaches the
-field, or below it. The deferred requirement is waived only when the envelope
+Preparation defers a protected field's writer requirements — its
+`writeAuthorizedBy`, and the trusted event its UI contract requires — when the
+field lies at or under a recorded replay slot and no write the transaction
+recorded changes a byte at the field, at an ancestor where the difference
+reaches the field, or below it. The deferred requirement is waived only when the envelope
 the transaction would store leaves the field as it was too: the policy claims
 and the label positions they declare are the same throughout the document,
 and every label entry at the field, above it or below it is the same. The
