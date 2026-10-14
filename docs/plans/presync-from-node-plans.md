@@ -54,9 +54,10 @@ calls it from `#instantiateNode`. The pre-sync calls it from
 from the plan. The list-children pass is the one caller that binds a node
 without it: `#syncListSlotResolutions` and `#syncResumeListChildren` derive a
 list coordinator's inputs through `#buildRawNodeInputs`, the binder a raw
-node's plan uses. The bindings a pre-sync's plan computes are held until the
-plan the node's instantiation makes takes them (`NodeBindingMemo`,
-`packages/runner/src/node-binding-memo.ts`); "One plan per node" below says
+node's plan uses. The bindings a pre-sync's plan computes against a stored
+argument are held until the plan the node's instantiation makes takes them
+(`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`); a binding
+against a stand-in is computed and not held. "One plan per node" below says
 which part of a plan that covers.
 
 The pre-sync (`#syncCellsForRunningPattern`) names the result document and
