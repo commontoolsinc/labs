@@ -964,7 +964,7 @@ export interface ChatRoomView {
   /** Records a new version of one of the sender's messages. */
   editMessage: Stream<RoomStreamEvent>;
 
-  /** Records a message as deleted: the sender's own, or any, from an OWNER. */
+  /** Records one of the sender's messages as deleted. */
   deleteMessage: Stream<RoomStreamEvent>;
 
   /** Reduces a message to a tombstone. */
