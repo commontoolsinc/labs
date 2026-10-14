@@ -124,10 +124,35 @@ export interface RoomMembership extends ChatIndexEntry {
 
   /** The event that last changed membership. */
   revision: string;
+
+  /** A standalone catalog revision, which keeps the catalog authoritative. */
+  catalogRevision?: string;
 }
 
 /** Explicit membership choices, compared by resolved room identity. */
 export type RoomMembershipCell = Writable<RoomMembership[] | Default<[]>>;
+
+/**
+ * Applies standalone catalog choices to room records, including a removed
+ * catalog entry. Container membership keeps its own state and revision.
+ */
+const effectiveMemberships = (
+  memberships: readonly RoomMembership[],
+  entries: Record<string, SharedSpaceEntry>,
+): RoomMembership[] =>
+  memberships.map((membership): RoomMembership => {
+    const entry = entries[spaceOf(membership.room) ?? ""];
+    const standalone = entry?.kind === CHAT_ROOM_OFFER_KIND;
+    if (
+      !standalone && membership.catalogRevision === undefined
+    ) return membership;
+    return {
+      ...membership,
+      state: standalone && entry.state === "saved" ? "saved" : "archived",
+      revision: standalone ? entry.revision : membership.revision,
+      catalogRevision: standalone ? entry.revision : membership.catalogRevision,
+    };
+  });
 
 /** Each request's outcome, by its `requestId`. */
 export type RequestsCell = Writable<
@@ -1015,7 +1040,7 @@ const performManagerAct = (
     return;
   }
 
-  const room = event?.room ?? state.room;
+  const room = (event?.room ?? state.room)?.resolveAsCell();
   if (room === undefined) {
     recordOutcome(state, requestId, {
       status: "refused",
@@ -1024,7 +1049,11 @@ const performManagerAct = (
     return;
   }
 
-  const memberships = state.roomMembership.get() ?? [];
+  const catalogEntries = readSharedSpaceCatalog(catalog).entries;
+  const memberships = effectiveMemberships(
+    state.roomMembership.get() ?? [],
+    catalogEntries,
+  );
   const membership = memberships.find((known) => equals(known.room, room));
   const candidateContainer = event?.container ?? state.container;
   const container = candidateContainer?.get() === undefined
@@ -1181,7 +1210,10 @@ const performManagerAct = (
         (container === undefined
           ? undefined
           : readSharedSpaceCatalog(catalog).entries[spaceOf(container) ?? ""]);
-      const currentRevision = membership?.state === "saved"
+      const standalone = catalogEntries[spaceOf(room) ?? ""];
+      const currentRevision = standalone?.kind === CHAT_ROOM_OFFER_KIND
+        ? standalone.state === "saved" ? standalone.revision : undefined
+        : membership?.state === "saved"
         ? membership.revision
         : membership === undefined && source?.state === "saved"
         ? chatRevision(source, room)
@@ -1193,19 +1225,22 @@ const performManagerAct = (
         });
         return;
       }
-      {
-        const standalone =
-          readSharedSpaceCatalog(catalog).entries[spaceOf(room) ?? ""];
-        if (
-          standalone?.kind === CHAT_ROOM_OFFER_KIND &&
-          standalone.state === "saved"
-        ) {
-          changeSharedSpaceMembershipIn(catalog, {
-            space: standalone.space,
-            id: eventKey(),
-            expectedRevision: standalone.revision,
-            state: "archived",
+      if (
+        standalone?.kind === CHAT_ROOM_OFFER_KIND &&
+        standalone.state === "saved"
+      ) {
+        const changed = changeSharedSpaceMembershipIn(catalog, {
+          space: standalone.space,
+          id: eventKey(),
+          expectedRevision: standalone.revision,
+          state: "archived",
+        });
+        if (changed.status === "conflict") {
+          recordOutcome(state, requestId, {
+            status: "refused",
+            reason: "The room's entry changed since it was listed.",
           });
+          return;
         }
       }
       const entry: RoomMembership = {
@@ -1215,6 +1250,9 @@ const performManagerAct = (
         since: membership?.since ?? epochNsecFromMsec(source?.since ?? 0),
         state: "archived",
         revision: eventKey(),
+        catalogRevision: standalone?.kind === CHAT_ROOM_OFFER_KIND
+          ? readSharedSpaceCatalog(catalog).entries[standalone.space]?.revision
+          : membership?.catalogRevision,
       };
       state.roomMembership.set([
         ...memberships.filter((known) => !equals(known.room, room)),
@@ -1265,6 +1303,8 @@ const performManagerAct = (
         since: epochNsecFromMsec(entry?.since ?? 0),
         state: "archived",
         revision: eventKey(),
+        catalogRevision: readSharedSpaceCatalog(catalog).entries[space ?? ""]
+          ?.revision,
       },
     ]);
     recordOutcome(state, requestId, { status: "done" });
@@ -1339,7 +1379,10 @@ const performManagerAct = (
   // which `keepArchived` marks, is no such choice, and leaves an archived
   // entry as it is; a join is always the person's own.
   const restore = act === "joinRoom" || event?.keepArchived !== true;
-  if (container === undefined) {
+  const catalogManaged = container === undefined ||
+    catalogEntries[space]?.kind === CHAT_ROOM_OFFER_KIND ||
+    membership?.catalogRevision !== undefined;
+  if (catalogManaged) {
     listRoom(catalog, space, {
       title: kind === "group" ? room.key("about").get()?.title : undefined,
       restore,
@@ -1355,7 +1398,10 @@ const performManagerAct = (
           ...entry,
           container: container ?? membership?.container,
           since: membership?.since ?? entry.since,
-          revision: container === undefined
+          catalogRevision: catalogManaged
+            ? readSharedSpaceCatalog(catalog).entries[space]?.revision
+            : undefined,
+          revision: catalogManaged
             ? readSharedSpaceCatalog(catalog).entries[space]?.revision ??
               eventKey()
             : eventKey(),
@@ -1486,9 +1532,9 @@ export interface FabriChatManagerOutput {
   rooms: PerSession<ChatIndexEntry[]>;
 
   /**
-   * The user's shared-space catalog, as stored, from which `rooms` is drawn. A
-   * reader in another piece finds a room's entry here by its space without
-   * this manager's view having been computed.
+   * The stored catalog used for standalone membership and container discovery.
+   * `rooms` combines those discoveries with individual `roomMembership` choices;
+   * a reader can inspect catalog membership here without computing the view.
    */
   sharedSpaceCatalog: SharedSpaceCatalogStorage;
 
@@ -1705,11 +1751,23 @@ export const FabriChatManagerCore = pattern<
     const newestFirst = computed((): PerSession<ChatIndexEntry[]> => {
       const self = principalOf(myProfile, "represents-principal");
       const stored = direct.get() ?? {};
-      const memberships = roomMembership.get() ?? [];
+      const catalogValue = sharedSpaceCatalog.get();
+      const catalogEntries = isSharedSpaceCatalog(catalogValue)
+        ? catalogValue.entries
+        : {};
+      const memberships = effectiveMemberships(
+        roomMembership.get() ?? [],
+        catalogEntries,
+      );
       const discovered = savedRooms.flatMap(
         (entry, index): ChatIndexEntry[] => {
           const room = found[index]?.room;
           if (room === undefined) return [];
+          const standalone = catalogEntries[spaceOf(room) ?? ""];
+          if (
+            standalone?.kind === CHAT_ROOM_OFFER_KIND &&
+            standalone.state !== "saved"
+          ) return [];
           const kind = aboutRecordOf(room).key("kind").get() ??
             room.key("about").key("kind").get();
           if (kind !== "direct" && kind !== "group") return [];

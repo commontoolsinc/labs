@@ -154,7 +154,7 @@ describe("fabrichat-container-index", () => {
     expect(manager.key("roomMembership").get()).toEqual([]);
     expect(entries.get()).toHaveLength(1);
     sendEvent(manager.key("forget"), {
-      room,
+      room: entries.get()[0].room,
       revision: discoveredRevision,
       requestId: "forget",
     });
@@ -165,6 +165,22 @@ describe("fabrichat-container-index", () => {
     );
     expect(entries.get()).toEqual([]);
     expect(catalog.key("entries").key(social).key("state").get()).toBe("saved");
+
+    // A membership choice names a conversation, even when the declaration
+    // reaches it through an alias whose target can change.
+    const retargetTx = runtime.edit();
+    roomAlias.withTx(retargetTx).set(other);
+    expect((await retargetTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
+    expect(entries.get()[0].room.equals(other)).toBe(true);
+    const restoreAliasTx = runtime.edit();
+    roomAlias.withTx(restoreAliasTx).set(room);
+    expect((await restoreAliasTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toEqual([]);
 
     const reopenedStorage = EmulatedStorageManager.connectTo(server, {
       as: signer,
@@ -197,7 +213,11 @@ describe("fabrichat-container-index", () => {
     await runtime.idle();
     await manager.pull();
     expect(entries.get()).toEqual([]);
-    sendEvent(manager.key("joinRoom"), { room, container, requestId: "join" });
+    sendEvent(manager.key("joinRoom"), {
+      room: roomAlias,
+      container,
+      requestId: "join",
+    });
     await runtime.idle();
     await manager.pull();
     expect(manager.key("requests").key("join").key("status").get()).toBe(
@@ -229,7 +249,7 @@ describe("fabrichat-container-index", () => {
     );
     expect(entries.get()).toHaveLength(1);
     const replaceTx = runtime.edit();
-    container.withTx(replaceTx).key("chatRoom").set(other);
+    roomAlias.withTx(replaceTx).set(other);
     expect((await replaceTx.commit().settled).error).toBeUndefined();
     await runtime.idle();
     await manager.pull();
@@ -295,7 +315,10 @@ describe("fabrichat-container-index", () => {
       },
       offers: {},
     };
-    catalog.set(stored);
+    catalog.set({
+      entries: { [social]: stored.entries[social] },
+      offers: {},
+    });
     const program = await resolveLocalProgram(
       (resolver) => runtime.harness.resolve(resolver),
       {
@@ -319,6 +342,27 @@ describe("fabrichat-container-index", () => {
     const entries = manager.key("rooms").asSchema<Entry[]>(entriesSchema);
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].room.equals(room)).toBe(true);
+    const containerRevision = entries.get()[0].revision;
+    const saveStandaloneTx = runtime.edit();
+    catalog.withTx(saveStandaloneTx).key("entries").key(standalone).set(
+      stored.entries[standalone],
+    );
+    expect((await saveStandaloneTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
+    expect(entries.get()[0].revision).toBe("1:initial");
+    sendEvent(manager.key("forget"), {
+      room,
+      revision: containerRevision,
+      requestId: "stale-container-source",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(
+      manager.key("requests").key("stale-container-source").key("status").get(),
+    ).toBe("refused");
+    expect(entries.get()).toHaveLength(1);
     sendEvent(manager.key("forget"), {
       room,
       revision: entries.get()[0].revision,
@@ -328,6 +372,25 @@ describe("fabrichat-container-index", () => {
     await manager.pull();
     expect(entries.get()).toEqual([]);
     expect(catalog.key("entries").key(social).key("state").get()).toBe("saved");
+    // A later Home catalog restore controls standalone room membership.
+    const catalogRestoreTx = runtime.edit();
+    catalog.withTx(catalogRestoreTx).key("entries").key(standalone).set({
+      ...stored.entries[standalone],
+      revision: "3:catalog-restore",
+    });
+    expect((await catalogRestoreTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
+    expect(entries.get()[0].revision).toBe("3:catalog-restore");
+    sendEvent(manager.key("forget"), {
+      room,
+      revision: entries.get()[0].revision,
+      requestId: "forget-restored-root",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toEqual([]);
     sendEvent(manager.key("joinRoom"), {
       room,
       container,
@@ -353,6 +416,47 @@ describe("fabrichat-container-index", () => {
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].room.equals(room)).toBe(true);
     expect(entries.get()[0].revision).not.toBe(revision);
+    const beforeCatalogChange = entries.get()[0].revision;
+    const archiveTx = runtime.edit();
+    catalog.withTx(archiveTx).key("entries").key(standalone).set({
+      ...stored.entries[standalone],
+      state: "archived",
+      revision: "7:catalog-archive",
+    });
+    expect((await archiveTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toEqual([]);
+    const restoreTx = runtime.edit();
+    catalog.withTx(restoreTx).key("entries").key(standalone).set({
+      ...stored.entries[standalone],
+      revision: "8:catalog-restore",
+    });
+    expect((await restoreTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toHaveLength(1);
+    expect(entries.get()[0].revision).toBe("8:catalog-restore");
+    sendEvent(manager.key("forget"), {
+      room,
+      revision: beforeCatalogChange,
+      requestId: "stale-before-catalog-change",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(
+      manager.key("requests").key("stale-before-catalog-change").key("status")
+        .get(),
+    ).toBe("refused");
+    expect(entries.get()).toHaveLength(1);
+    const removeTx = runtime.edit();
+    catalog.withTx(removeTx).key("entries").set({
+      [social]: stored.entries[social],
+    });
+    expect((await removeTx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    expect(entries.get()).toEqual([]);
   });
 
   it("joins an unsaved container's real room when its viewer sends a message", async () => {

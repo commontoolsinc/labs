@@ -804,8 +804,9 @@ Each time a runtime shows a piece of a space other than the last one it showed,
 the shell waits for Home's bring-up to answer and for the view to settle, and
 then asks the worker, through `RuntimeClient.joinVisitedRoom()`, to join the
 user to the room in that space. The worker does nothing for a user with no
-Home, and creates none. Otherwise it requires write access to the visited
-space, through the user's own entry or the grant to every principal, and uses
+Home, and creates none. If Home has no `chatManager.joinRoom` stream, it
+returns `no-chat-manager` without vetting. Otherwise it requires write access
+to the visited space, through the user's own entry or the grant to every principal, and uses
 the space's declared kind to select its locator:
 
 - A `fabrichat-room` uses the same strict vetting as a share offer

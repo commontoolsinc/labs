@@ -38,16 +38,25 @@ or change after a space is saved, and discovery follows it reactively.
 Each entry links the room itself, so opening it displays the full conversation.
 Resolved room identity, compared with `equals()`, deduplicates a conversation
 reached through several containers or both a container and its standalone
-entry. Distinct rooms in one space remain distinct entries. Explicit
+entry. Membership records keep the resolved room reference, so retargeting an
+alias cannot move a choice to a different conversation. Distinct rooms in one
+space remain distinct entries. For container rooms, explicit
 `roomMembership` choices take precedence over discovery: an archived
 conversation stays forgotten even while a saved container still declares it.
 A saved explicit entry remains listed if the container changes its declaration.
 Forgetting a declared conversation never archives its container.
 
+A standalone room's catalog membership remains authoritative. Its current
+catalog state and revision govern listing and forgetting even when the room
+also has an explicit membership record or a container declares it. Catalog
+restoration supersedes an older room tombstone; catalog archive or removal
+supersedes a saved room record. A record's optional `catalogRevision` remembers
+that authority across catalog removal.
+
 A room's `kind` comes from its `about`. Its `since` and opaque `revision` come
 from the explicit membership record, or from its discovery source until a
 choice is recorded. A discovered conversation's revision identifies its source
-catalog entry and that entry's revision. Clients pass the revision back
+catalog entry, that entry's revision, and the resolved room identity. Clients pass the revision back
 unchanged to `forget`; they need supply no container. A direct room's
 `counterpart` is the one `direct` holds the resolved room under, or else the
 room's labeled creator. `people` is drawn from listed rooms' rosters per

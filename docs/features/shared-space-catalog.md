@@ -77,13 +77,22 @@ revision and names that one gives the check up, which is right only where the
 person's request is the choice whatever the entry's state. A new revision names
 the calling handler's event, so only a handler can call it.
 
-FabriChat's manager calls both from its own handlers, and lists the rooms the
-catalog keeps as saved. Creating a room, or accepting one a manager created,
-registers the room's space. Forgetting a room archives its entry, naming the
-revision the person's list showed. Finding a direct room again, or accepting a
-room, restores its entry if it was archived. Asking to open or accept the room
-is the person's choice to have it listed, so that restore names the revision the
-handler reads.
+FabriChat's manager calls both from its own handlers. For standalone
+`fabrichat-room` spaces, the catalog's current state and revision govern the
+chat list, including when a saved container also declares that room. Creating a
+room, or accepting one a manager created, registers the room's space. Forgetting
+a standalone room archives its entry, naming the revision the person's list
+showed. Finding a direct room again, or accepting a room, restores its entry if
+it was archived. Asking to open or accept the room is the person's choice to
+have it listed, so that restore names the revision the handler reads. Catalog
+restoration supersedes a prior room tombstone; catalog archive or removal
+supersedes a saved room record.
+
+Other saved spaces expose conversations through their roots' explicit
+`chatRoom` declarations. FabriChat keeps choices about those individual rooms
+separately from the container's catalog entry. Forgetting such a conversation
+leaves its container saved and suppresses rediscovery through the declaration.
+See [FabriChatManager](../specs/fabrichat/FabriChatManager.md).
 
 New entries record `since`, the recipient's admission time in epoch
 milliseconds. Registration records it when admitting the entry; a migration may

@@ -23,6 +23,7 @@ interface ChatManagerOutput {
   roomMembership: (ChatIndexEntry & {
     state: "saved" | "archived";
     revision: string;
+    catalogRevision?: string;
   })[];
 
   /** The outcome of each request, by the `requestId` its caller chose. */
@@ -166,7 +167,9 @@ room's members by principal or by profile itself.
   individual `roomMembership` choices. Resolved room identity deduplicates
   discovery paths; an archived individual entry suppresses every path.
 - **`roomMembership`** keeps explicit choices about individual conversations:
-  room links, `saved` or `archived` state, `since`, and opaque `revision`.
+  resolved room links, `saved` or `archived` state, `since`, and opaque
+  `revision`. An optional `catalogRevision` records that standalone catalog
+  membership governs the room, including when its catalog entry is removed.
   These choices are independent of the catalog's container membership.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
