@@ -3081,6 +3081,81 @@ describe("CfHarnessPromptLoop opening research", () => {
     ).toBe(false);
   });
 
+  describe("after task classification", () => {
+    const researchKit = JSON.stringify({
+      status: "incomplete",
+      summary: "The task needs more exact evidence.",
+      inputs: [],
+      selectedPatternIds: [],
+      leads: [],
+      questions: [],
+      rules: [],
+      sourceIds: [],
+      missing: ["an exact implementation contract"],
+    });
+    const classifiedLoop = (runId: string, runIds: string[]) =>
+      new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId,
+          model: "gpt-test",
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) => {
+            runIds.push(request.runId);
+            return Promise.resolve({
+              assistant: {
+                role: "assistant",
+                content: request.runId.includes(":research:")
+                  ? researchKit
+                  : "Done.",
+              },
+            });
+          },
+        },
+        allowedToolIds: ["research"],
+      });
+
+    it("runs no opening research for a respond task", async () => {
+      const runIds: string[] = [];
+      const loop = classifiedLoop("run-classified-respond", runIds);
+
+      const classification = await loop.classifyTask("thanks!");
+      const result = await loop.runPrompt({
+        prompt: "thanks!",
+        openingResearchTask: "thanks!",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(classification.tags).toEqual(["respond"]);
+      expect(runIds).toEqual(["run-classified-respond"]);
+      expect(result.runState.openingResearch).toBeUndefined();
+      expect(result.runState.taskClassification).toMatchObject({
+        tags: ["respond"],
+        path: "rule",
+      });
+    });
+
+    it("runs opening research for an author task", async () => {
+      const runIds: string[] = [];
+      const loop = classifiedLoop("run-classified-author", runIds);
+
+      await loop.classifyTask("make me a pomodoro timer");
+      const result = await loop.runPrompt({
+        prompt: "make me a pomodoro timer",
+        openingResearchTask: "make me a pomodoro timer",
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(runIds).toEqual([
+        createToolOutputId("run-classified-author", "research", 1),
+        "run-classified-author",
+      ]);
+      expect(result.runState.openingResearch?.status).toBe("completed");
+    });
+  });
+
   it("does not start opening research for a child run", async () => {
     const runId = "root.subagent.1";
     const task = "Implement the delegated task.";

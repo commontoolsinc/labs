@@ -2029,6 +2029,22 @@ match the digest — a source that changed is reported stale, its old id refused
 and the fresh read left in the catalog under a new id. Attached pattern
 references are leads until inspected.
 
+A fresh CLI run tags its task before assembling the prompt
+(`src/task-classification.ts`) with every kind of work it calls for: `respond`,
+`find`, `act`, `pieces`, `author`. A keyword rule reads the task and what the
+run holds (input cells, attached patterns, a browser); when no rule applies, one
+call to the cheap research model tags it, and when that fails the task gets
+every tag. The tags, the path that chose them (`rule`, `model`, `fallback`), and
+the classification's wall time are recorded as `taskClassification` in
+`run-state.json`. Only an `author` task gets the opening research pass. The
+parent's orientation follows the tags: `pieces` adds the handle and
+piece-targeting guidance, `find` and `author` the findable and pattern-index
+guidance, `author` the opening-research rule, `act` and `author` delegation,
+`act` the Weaver command and browser guidance, and revision verification goes
+with `pieces` or `author`. The tool allow-list does not narrow, so a task given
+too few tags can still reach what it needs; a run with no classification carries
+all of the orientation.
+
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit
 was returned together with the sanitized handoff and tool-output identity. After

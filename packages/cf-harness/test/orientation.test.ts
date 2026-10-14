@@ -2,6 +2,9 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { buildCfHarnessBaseSystemPrompt } from "../src/cli.ts";
+import { PIECE_TARGETING_GUIDANCE } from "../src/piece-targeting.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
+import { orientContextMessages } from "../src/session-assembly.ts";
 import { finishTaskTool } from "../src/tools/finish-task.ts";
 
 describe("orientation", () => {
@@ -74,5 +77,59 @@ describe("orientation", () => {
     expect(finishTaskTool.descriptor.description).toContain(
       "Never ask for a nonexistent permission to release results",
     );
+  });
+
+  describe("with task tags", () => {
+    it("gives a respond task none of the handle, research, or delegation guidance", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["respond"]),
+      });
+
+      expect(prompt).not.toContain("describe_handle");
+      expect(prompt).not.toContain("opening research");
+      expect(prompt).not.toContain("Search the pattern index");
+      expect(prompt).not.toContain("When you delegate");
+      expect(prompt).toContain("Orient to the user's goal");
+      expect(prompt.length).toBeLessThan(
+        buildCfHarnessBaseSystemPrompt({ patternIndex: true }).length,
+      );
+    });
+
+    it("gives a pieces task the handle guidance and not the opening-research rule", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["pieces"]),
+      });
+
+      expect(prompt).toContain(
+        "inspect unresolved relevant handles with describe_handle",
+      );
+      expect(prompt).not.toContain("opening research");
+    });
+
+    it("gives an author task the opening-research rule, index search, and delegation", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["author"]),
+      });
+
+      expect(prompt).toContain("attached patternRefs or explicit");
+      expect(prompt).toContain("Search the pattern index");
+      expect(prompt).toContain("When you delegate");
+    });
+
+    it("withholds piece targeting and revision verification from a respond task's context", () => {
+      const messages = [
+        "input cells",
+        PIECE_TARGETING_GUIDANCE,
+        REVISION_VERIFICATION_GUIDANCE,
+      ];
+
+      expect(orientContextMessages(messages, new Set(["respond"])))
+        .toEqual(["input cells"]);
+      expect(orientContextMessages(messages, new Set(["pieces"])))
+        .toEqual(messages);
+    });
   });
 });
