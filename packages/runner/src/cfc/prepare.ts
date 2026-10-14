@@ -11542,7 +11542,7 @@ export function* prepareBoundaryCommitSteps(
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
-    // SPEC-PENDING https://github.com/commonfabric/specs/pull/NN
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/67
     // TODO(danfuzz): Restating a replayed argument slot admits more than
     // §8.15.4 permits, and runs by default rather than behind the dial
     // `cfc-spec-correspondence.md` step 4 asks for, by Dan's decision. Drop
