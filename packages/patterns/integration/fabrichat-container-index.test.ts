@@ -84,6 +84,13 @@ describe("fabrichat-container-index", () => {
       tx,
     );
     room.set({ about: { kind: "group", title: "Photos" } });
+    const roomAlias = runtime.getCell(
+      social,
+      "conversation alias",
+      undefined,
+      tx,
+    );
+    roomAlias.set(room);
     const other = runtime.getCell(social, "other conversation", undefined, tx);
     other.set({ about: { kind: "group", title: "Other" } });
     runtime.prepareTxForCommit(tx);
@@ -128,13 +135,24 @@ describe("fabrichat-container-index", () => {
     expect(entries.get()).toEqual([]);
 
     const declareTx = runtime.edit();
-    container.withTx(declareTx).key("chatRoom").set(room);
+    container.withTx(declareTx).key("chatRoom").set(roomAlias);
     expect((await declareTx.commit().settled).error).toBeUndefined();
     await runtime.idle();
     await manager.pull();
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].room.equals(room)).toBe(true);
     const discoveredRevision = entries.get()[0].revision;
+    sendEvent(manager.key("forget"), {
+      room: other,
+      revision: discoveredRevision,
+      requestId: "mismatched-room",
+    });
+    await runtime.idle();
+    await manager.pull();
+    expect(manager.key("requests").key("mismatched-room").key("status").get())
+      .toBe("refused");
+    expect(manager.key("roomMembership").get()).toEqual([]);
+    expect(entries.get()).toHaveLength(1);
     sendEvent(manager.key("forget"), {
       room,
       revision: discoveredRevision,

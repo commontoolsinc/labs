@@ -75,7 +75,7 @@ import {
   type SharedSpaceCatalogStorage,
   type SharedSpaceEntry,
 } from "../system/shared-space-catalog.ts";
-import { listsRoomIn } from "./room-records.tsx";
+import { entityKeyOf, listsRoomIn } from "./room-records.tsx";
 import FabriChatRoom from "./room.tsx";
 import {
   type AboutRecord,
@@ -1036,7 +1036,7 @@ const performManagerAct = (
   const discoveredSource = act === "forget"
     ? Object.values(readSharedSpaceCatalog(catalog).entries).find((entry) =>
       entry.kind !== CHAT_ROOM_OFFER_KIND &&
-      chatRevision(entry) === (event?.revision ?? state.revision)
+      chatRevision(entry, room) === (event?.revision ?? state.revision)
     )
     : undefined;
 
@@ -1184,7 +1184,7 @@ const performManagerAct = (
       const currentRevision = membership?.state === "saved"
         ? membership.revision
         : membership === undefined && source?.state === "saved"
-        ? chatRevision(source)
+        ? chatRevision(source, room)
         : undefined;
       if (currentRevision !== revision) {
         recordOutcome(state, requestId, {
@@ -1571,8 +1571,20 @@ interface ShownPerson {
 }
 
 /** The opaque revision of a conversation discovered through a catalog entry. */
-const chatRevision = (entry: SharedSpaceEntry): string =>
-  `chat:${JSON.stringify([entry.space, entry.revision])}`;
+const chatRevision = (
+  entry: SharedSpaceEntry,
+  room: Cell<ChatRoomLink>,
+): string => {
+  const resolved = room.resolveAsCell();
+  return `chat:${
+    JSON.stringify([
+      entry.space,
+      entry.revision,
+      spaceOf(resolved),
+      entityKeyOf(resolved),
+    ])
+  }`;
+};
 
 /** What finding a catalog entry's room needs. */
 interface FoundRoomInput {
@@ -1711,7 +1723,7 @@ export const FabriChatManagerCore = pattern<
             since: epochNsecFromMsec(entry.since ?? 0),
             revision: entry.kind === CHAT_ROOM_OFFER_KIND
               ? entry.revision
-              : chatRevision(entry),
+              : chatRevision(entry, room),
           }];
         },
       );
