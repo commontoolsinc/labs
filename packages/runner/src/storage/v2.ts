@@ -7776,7 +7776,7 @@ export class SpaceReplica
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
         const verdict = session.transact(
-          wireCommit,
+          coarsenCommitForWire(wireCommit),
           () => this.#markRouteWriteIssued(routeSources),
         );
         const outcome = await Promise.race([
