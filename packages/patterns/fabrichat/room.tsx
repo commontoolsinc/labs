@@ -32,6 +32,7 @@ import {
   principalOf,
   SELF,
   spaceAccess,
+  type SpaceAccessLevel,
   spaceOf,
   Stream,
   UI,
@@ -68,9 +69,14 @@ import {
   type MessageCell,
   messageEntries,
   type MessageEntry,
+  type MessageRights,
+  messageRightsOf,
   type MessagesCell,
   NO_ACTIVITY,
+  NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
+  ownersMayObliterateBy,
+  ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
@@ -861,6 +867,42 @@ export interface ChatMessageList {
   closeWindow: Stream<RoomWindowEvent>;
 }
 
+/** Who is reading a room. */
+export interface ChatRoomViewer {
+  /**
+   * The reader's profile, as a link to the profile itself, which is the form
+   * a message's `authorProfile` takes; absent until it resolves.
+   */
+  profile?: ProfileCell;
+
+  /**
+   * The principal the reader's profile's `represents-principal` label attests;
+   * absent when it attests none, or the label can't be read.
+   */
+  principal?: string;
+
+  /**
+   * The reader's access to the room's space, as its access list grants it;
+   * absent while that isn't known.
+   */
+  role?: SpaceAccessLevel;
+}
+
+/**
+ * The reader's profile, as a link to the profile itself, which `myProfile`
+ * may reach only through another link; `undefined` while it holds no value.
+ */
+const viewerProfileOf = (
+  myProfile: ProfileCell | undefined,
+): ProfileCell | undefined =>
+  myProfile?.get() === undefined ? undefined : myProfile.resolveAsCell();
+
+/** What a room's reader may do to one of its messages. */
+export interface ChatMessageRights extends MessageRights {
+  /** The message, as `messages.latest` links it. */
+  message: MessageCell;
+}
+
 /** A room's data face, for hosts that draw it natively. */
 export interface ChatRoomView {
   /** What the room says about itself. */
@@ -924,6 +966,15 @@ export interface ChatRoomView {
 
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
+
+  /** Who is reading the room: their profile, its principal, and their access. */
+  viewer: ChatRoomViewer;
+
+  /**
+   * What this reader may do to each of the room's messages, oldest first.
+   * Nothing at all while `canSend` doesn't hold.
+   */
+  messageRights: ChatMessageRights[];
 
   /** Sends a message. */
   sendMessage: Stream<RoomStreamEvent>;
@@ -1058,6 +1109,14 @@ export interface FabriChatRoomCoreInput {
    * while the viewer has none, or theirs hasn't resolved.
    */
   manager?: RoomManager;
+
+  /**
+   * Whether the room's policy lets an OWNER of its space obliterate its
+   * messages, which picks the policy `about.policy` links; absent, as for
+   * every room the room's own pattern runs, yes for a group room and no for a
+   * direct room.
+   */
+  ownersMayObliterate?: boolean;
 }
 
 /**
@@ -1098,12 +1157,29 @@ export const FabriChatRoomCore = pattern<
     startDirect,
     self,
     manager,
+    ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
   const ownSpace = computed(() => about?.get() !== undefined);
+  // The room's policy, a document of its own that `about` links, and which
+  // the message acts read: one for each answer to whether OWNERs may
+  // obliterate, since the rest of a room's policy is the same.
+  const policyWithOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: true,
+  });
+  const policyWithoutOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: false,
+  });
+  const policy = computed((): Cell<ChatRoomPolicy> =>
+    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
+      ? policyWithOwners
+      : policyWithoutOwners
+  );
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
   const canJoin = computed(() =>
@@ -1119,6 +1195,7 @@ export const FabriChatRoomCore = pattern<
   const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
+    policy,
     composer,
     outcomes: messageRequests,
     refusal,
@@ -1209,8 +1286,35 @@ export const FabriChatRoomCore = pattern<
   });
   const cannotSend = computed(() => !canSend);
   const isOwner = computed(() => isOwnerOf(messages));
-  // The policy is a document of its own, which `about` links.
-  const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
+  const viewer = computed((): ChatRoomViewer => {
+    const profile = viewerProfileOf(myProfile);
+    const principal = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    const role = spaceAccess(messages);
+    return {
+      ...(profile === undefined ? {} : { profile }),
+      ...(principal === undefined ? {} : { principal }),
+      ...(role === undefined ? {} : { role }),
+    };
+  });
+  // Every message's rights for the reader, by the rule the handlers admit an
+  // act by, derived once for the whole list as `places` is.
+  const messageRights = computed((): ChatMessageRights[] => {
+    const profile = viewerProfileOf(myProfile);
+    return sortedEntries.map((entry) => ({
+      message: entry.cell,
+      ...(canSend && profile !== undefined
+        ? messageRightsOf(
+          entry.record,
+          profile,
+          kind,
+          isOwner,
+          ownersMayObliterateBy(policy),
+        )
+        : NO_MESSAGE_RIGHTS),
+    }));
+  });
   // The title a member last set outranks the one the room was created with.
   const title = computed((): string | undefined =>
     titles?.elementById(TITLE_KEY).get()?.title ?? about?.get()?.title
@@ -1354,6 +1458,8 @@ export const FabriChatRoomCore = pattern<
     openWindow,
     closeWindow,
     canSend,
+    viewer,
+    messageRights,
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
@@ -1439,6 +1545,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1517,6 +1624,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1673,6 +1781,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       openWindow: room.openWindow,
       closeWindow: room.closeWindow,
       canSend: room.canSend,
+      viewer: room.viewer,
+      messageRights: room.messageRights,
       sendMessage: room.sendMessage,
       editMessage: room.editMessage,
       deleteMessage: room.deleteMessage,

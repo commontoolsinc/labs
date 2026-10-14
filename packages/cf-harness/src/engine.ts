@@ -219,7 +219,9 @@ import {
   setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
+  setHarnessTaskClassification,
 } from "./run-state.ts";
+import type { HarnessTaskClassification } from "./task-classification.ts";
 import {
   assertRunscCfcPolicyForMode,
   resolveRunscSandboxConfig,
@@ -1505,6 +1507,19 @@ export class CfHarnessEngine {
     this.#runState = setHarnessOpeningResearch(
       this.#runState,
       openingResearch,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /** Persists the kinds of work the root task was classified with. */
+  async recordTaskClassification(
+    taskClassification: HarnessTaskClassification,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessTaskClassification(
+      this.#runState,
+      taskClassification,
       this.#now(),
     );
     await this.persistRunState();
