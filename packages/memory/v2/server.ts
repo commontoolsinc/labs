@@ -4662,8 +4662,9 @@ export class Server {
         );
       }
       const disk = this.#diskSources.get(message.space, message.db.id);
-      // A read past the slow-operation threshold is recorded whether it
-      // returned rows or failed.
+      // A read past the slow-operation threshold is recorded with what its
+      // caller is told: its rows, the error it failed with, or the refusal of
+      // the access check that follows it.
       const readStartedAt = performance.now();
       const recordRead = (outcome: string, rows?: number) =>
         recordSlowQueryDuration("sqlite.query", message.space, readStartedAt, {
@@ -4701,7 +4702,6 @@ export class Server {
         recordRead(error instanceof Error ? error.name : "SqliteError");
         throw error;
       }
-      recordRead("ok", result.rows.length);
       // SQLite reads necessarily await filesystem work. Re-check both the
       // session identity and its current ACL immediately before exposing the
       // rows, so a revoke during that I/O cannot leak a late result.
@@ -4721,9 +4721,11 @@ export class Server {
             "READ",
           ));
         if (deny) {
+          recordRead(deny.name);
           return respondTypedError<never>(message.requestId, deny);
         }
       }
+      recordRead("ok", result.rows.length);
       return {
         type: "response",
         requestId: message.requestId,
