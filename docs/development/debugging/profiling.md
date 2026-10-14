@@ -241,12 +241,14 @@ paid, one per family named, which a cold resume of a nested tree pays once for
 the root and once more for each child start that found something absent.
 `scheduler/execute/yield` is one macrotask turn the settle loop handed back
 between two actions because its slice of continuous work was spent
-(`packages/runner/src/scheduler/cooperative-yield.ts`). Its count is the turns
-a pass took, and its time is what they cost the pass: each turn's own timer
-latency, and whatever else the event loop ran before returning, frames applied
-and timers fired among it. That time is inside `scheduler/execute/settle`, so
-a settle span compared across a change to the yield compares different things
-unless this row is taken out of it.
+(`packages/runner/src/scheduler/cooperative-yield.ts`). The row accumulates
+over every pass in the capture: its count is the turns all of them took, and
+its time is what those turns cost, each turn's own timer latency and whatever
+else the event loop ran before returning, frames applied and timers fired
+among it. For one pass, difference the row across that pass, as for any other
+row here. Each turn's time is inside the `scheduler/execute/settle` span of
+the pass that took it, so settle spans compared across a change to the yield
+compare different things unless this row is taken out of them.
 
 ## 4. Split until an explosion has an origin
 
