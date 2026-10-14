@@ -12,7 +12,12 @@ import {
   storedSchemaCoversCandidateEnvelope,
 } from "../src/cfc/prepare.ts";
 import { cfcSchemaEntries } from "../src/cfc/schema-label-view.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 
 describe("mergeCfcSchemaEnvelopes", () => {
   describe("observes through a merge", () => {
@@ -2171,6 +2176,92 @@ describe("cfcSchemaPoliciesEqual", () => {
       expect(cfcSchemaPoliciesEqual(sited(["one"]), sited(["two"]))).toBe(
         false,
       );
+    });
+  });
+
+  describe("over recursive definitions", () => {
+    // A tree whose node names itself for its children, with a claim on each
+    // node's label; and two definitions naming each other the same way.
+    const tree = (labelClaim: unknown) =>
+      ({
+        type: "object",
+        properties: { root: { $ref: "#/$defs/Node" } },
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              label: { type: "string", ifc: labelClaim },
+              children: { type: "array", items: { $ref: "#/$defs/Node" } },
+            },
+          },
+        },
+      }) as unknown as JSONSchemaObj;
+    const mutual = (bClaim: unknown) =>
+      ({
+        type: "object",
+        properties: { root: { $ref: "#/$defs/A" } },
+        $defs: {
+          A: {
+            type: "object",
+            ifc: CLAIM,
+            properties: { next: { $ref: "#/$defs/B" } },
+          },
+          B: {
+            type: "object",
+            ifc: bClaim,
+            properties: { next: { $ref: "#/$defs/A" } },
+          },
+        },
+      }) as unknown as JSONSchemaObj;
+
+    it("compares a self-referencing definition equal to itself, and tells apart a changed claim inside it", () => {
+      expect(cfcSchemaPoliciesEqual(tree(CLAIM), tree(CLAIM))).toBe(true);
+      expect(
+        cfcSchemaPoliciesEqual(
+          tree(CLAIM),
+          tree({ writeAuthorizedBy: ["other"] }),
+        ),
+      ).toBe(false);
+    });
+
+    it("compares two definitions naming each other equal to themselves, and tells apart a changed claim in either", () => {
+      expect(cfcSchemaPoliciesEqual(mutual(CLAIM), mutual(CLAIM))).toBe(true);
+      expect(
+        cfcSchemaPoliciesEqual(
+          mutual(CLAIM),
+          mutual({ writeAuthorizedBy: ["other"] }),
+        ),
+      ).toBe(false);
+    });
+
+    it("compares a self-referencing definition reached through a `cid:` document equal to the same definition spelled locally, and tells apart a changed claim", () => {
+      // A member of a registered schema document that names itself is read
+      // back with that reference spelled as a `cid:` reference into the same
+      // document, so the walk recurses across `cid:` references.
+      const release = acquireSchemaRegistryLease();
+      try {
+        const external = (labelClaim: unknown) => {
+          const { $defs } = tree(labelClaim);
+          const group = { $defs } as unknown as JSONSchemaObj;
+          const hash = internSchemaAsTaggedHashString(group);
+          registerSchemaDocument(hash, group);
+          return {
+            type: "object",
+            properties: { root: { $ref: `cid:${hash}#/$defs/Node` } },
+          } as unknown as JSONSchemaObj;
+        };
+        // Compared with the same tree spelled locally, so that the `cid:`
+        // reference counts only by what it names.
+        expect(cfcSchemaPoliciesEqual(external(CLAIM), tree(CLAIM))).toBe(true);
+        expect(
+          cfcSchemaPoliciesEqual(
+            external(CLAIM),
+            tree({ writeAuthorizedBy: ["other"] }),
+          ),
+        ).toBe(false);
+      } finally {
+        release();
+      }
     });
   });
 
