@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { editDistance, nearestName } from "../lib/refusal.ts";
+import { editDistance, nearestName } from "@commonfabric/piece/refusal";
 
 describe("refusal", () => {
   describe("editDistance", () => {

@@ -417,6 +417,30 @@ describe("runHarnessJob()", () => {
       ).toEqual(["book"]);
     });
 
+    it("admits the spec's foreign spaces to the fabric session", async () => {
+      // A piece handed in from another space is reached in that space.
+      const other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      const { seen } = await runScripted(
+        plainSpec({
+          fabric: {
+            host: "https://toolshed.example",
+            space: SPACE,
+            identityKeyPath: join(runRoot, "unused.key"),
+            maxConfidentiality: [
+              { type: "https://cfc.test/atom/user", subject: "me" },
+            ] as never,
+            inputs: {},
+            foreignSpaces: { [other]: "https://toolshed.example" },
+          },
+        }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.fabricSession?.foreignSpaces).toEqual({
+        [other]: "https://toolshed.example/",
+      });
+    });
+
     /** A fabric part with no input cells, as a local job's is. */
     const localFabric = () => ({
       host: "https://toolshed.example",

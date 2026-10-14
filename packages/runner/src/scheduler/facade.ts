@@ -9,7 +9,6 @@ import type { Cancel } from "../cancel.ts";
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
-  areNormalizedLinksSame,
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
@@ -101,13 +100,17 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  endPatternChangeWaits,
+  endPieceStartWaits,
   eventHandlerImplementations,
+  EventHandlerRegistry,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
   type SchedulerEventExecutionState,
   type SchedulerEventQueueState,
   selectEventImplementation,
+  wakePieceStartWaits,
 } from "./events.ts";
 import {
   buildPullInitialSeeds,
@@ -310,7 +313,7 @@ export {
 
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
-  #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  #eventHandlers = new EventHandlerRegistry();
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason, quiet) =>
       this.#dropEvent(event, reason, { quiet }),
@@ -501,6 +504,19 @@ export class Scheduler {
 
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
+
+  /** Loading event-queue heads waiting for a piece that could not be started
+   * yet (`queueSchedulerEvent()`). */
+  #pieceStartWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPieceStartWaits()` has run; no new wait begins after it. */
+  #pieceStartWaitsEnded = false;
+
+  /** The heads held for their piece's pattern change. */
+  readonly #patternChangeWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPatternChangeWaits()` has run; no head is held after it. */
+  #patternChangeWaitsEnded = false;
 
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
@@ -1763,16 +1779,13 @@ export class Scheduler {
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.#eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        return shaperInstanceGroupKey(
-          (handler as {
-            schedulerObservationIdentity?: SchedulerObservationIdentity;
-          }).schedulerObservationIdentity,
-        );
-      }
-    }
-    return undefined;
+    const handler = this.#eventHandlers.get(eventLink);
+    if (handler === undefined) return undefined;
+    return shaperInstanceGroupKey(
+      (handler as {
+        schedulerObservationIdentity?: SchedulerObservationIdentity;
+      }).schedulerObservationIdentity,
+    );
   }
 
   /**
@@ -1831,13 +1844,39 @@ export class Scheduler {
       event: any,
     ) => void,
   ): Cancel {
-    return addSchedulerEventHandler({
+    const cancel = addSchedulerEventHandler({
       eventHandlers: this.#eventHandlers,
     }, {
       handler,
       ref,
       populateDependencies,
     });
+    wakePieceStartWaits(this.#eventQueueState, ref);
+    return cancel;
+  }
+
+  /**
+   * Ends the wait of every queued event whose piece could not be started
+   * yet, settling each with an error. A runtime being disposed calls this
+   * before it waits for the scheduler to go idle: such a wait is held open
+   * by another participant's commit, which a closing runtime has no reason
+   * to wait for.
+   */
+  endPieceStartWaits(): void {
+    this.#pieceStartWaitsEnded = true;
+    endPieceStartWaits(this.#eventQueueState);
+  }
+
+  /**
+   * Ends the wait of every queued event held for its piece's pattern change,
+   * each then dispatching as it would have without the wait. A runtime being
+   * disposed calls this before it waits for the scheduler to go idle: such a
+   * wait can be held by a pattern load that only the disposal's later
+   * cancellation of the piece would release.
+   */
+  endPatternChangeWaits(): void {
+    this.#patternChangeWaitsEnded = true;
+    endPatternChangeWaits({ patternChangeWaits: this.#patternChangeWaits });
   }
 
   onConsole(fn: ConsoleHandler): void {
@@ -2584,6 +2623,8 @@ export class Scheduler {
     // `unsubscribe` is optional on the capability, so a manager without one is
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
+    this.endPieceStartWaits();
+    this.endPatternChangeWaits();
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -3282,6 +3323,9 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
+      pieceStartWaits: this.#pieceStartWaits,
+      pieceStartWaitsEnded: () => this.#pieceStartWaitsEnded,
+      handleError: (error, target) => this.#handleError(error, target),
     };
   }
 
@@ -3290,7 +3334,11 @@ export class Scheduler {
       this.#eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
+      eventHandlers: this.#eventHandlers,
       eventQueue: this.#eventQueue,
+      trackBackgroundTask: (work) => this.trackBackgroundTask(work),
+      patternChangeWaits: this.#patternChangeWaits,
+      patternChangeWaitsEnded: () => this.#patternChangeWaitsEnded,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),

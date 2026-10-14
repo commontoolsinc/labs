@@ -78,6 +78,10 @@ mapped in [`../README.md`](../README.md).
   host: snapshotting one space's store and serving the copy from rapids, what
   installing it commits you to, and the questions a local clone answers more
   cheaply
+- [`space-compaction.md`](space-compaction.md) — compacting one space's
+  revision history on a host: the clone rehearsal, the verification that
+  stands between the result and the install, and the Estuary recipe with its
+  rollback
 - [`CI_PERFORMANCE.md`](CI_PERFORMANCE.md) — how continuous-integration wall
   time is tracked, the dials that govern the lanes, and when to move them
 - [`COVERAGE.md`](COVERAGE.md) — the two coverage mechanisms, which suite

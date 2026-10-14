@@ -40,6 +40,7 @@ import {
   externalizeSchema,
   getStableInternalPathSegment,
   KeepAsCell,
+  sanitizeAndFreezeSchemaForLinks,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
@@ -675,8 +676,17 @@ function factoryFromPattern<T, R>(
   });
 
   const pattern: Pattern & toEncodableForm & toJSON = {
-    argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
-    resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
+    // Deep-frozen, each with a root of its own. Binding a node narrows the
+    // argument schema at every slot it binds, and `schemaAtPath()` keeps a
+    // narrowing only for a deep-frozen schema.
+    argumentSchema: sanitizeAndFreezeSchemaForLinks(
+      argumentSchema,
+      KeepAsCell.All,
+    ),
+    resultSchema: sanitizeAndFreezeSchemaForLinks(
+      resultSchema,
+      KeepAsCell.OnlyStream,
+    ),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,

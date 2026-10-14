@@ -6,6 +6,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   NAME,
   pattern,
   TESTS,
@@ -56,7 +57,7 @@ const sendGesture = {
 };
 const reactGesture = { surface: CHAT_REACT_SURFACE, action: CHAT_REACT_ACTION };
 
-const reactionCount = (messages: Writable<MessagesValue>): number =>
+const reactionCount = (messages: Cell<MessagesValue>): number =>
   ((messages.get() as MessageRecord[])[0]?.reactions?.get() ?? []).length;
 
 // How the element `id` under `root` is displayed.
@@ -97,6 +98,10 @@ export default pattern(() => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   } as RowArg);
 

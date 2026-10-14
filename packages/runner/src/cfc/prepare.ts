@@ -242,13 +242,10 @@ import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 
 // The link-source schema read, which reactivity SEES. Prepare's other reads
-// carry `ignoreReadForScheduling` and are invisible to it. This one decides
-// whether a link write can be labeled at all, and the commit boundary ends
-// the retries on a refusal it cannot answer, so the run is re-triggered when
-// the member it went looking for lands. The stored `["cfc"]` envelope, the
-// other half of that decision, is a dependency of the writer already, through
-// `readStoredCfcMetadata` (cfc/metadata.ts, called from data-updating.ts when
-// the link is written). The read is a commit-time precondition either way:
+// carry `ignoreReadForScheduling` and are invisible to it. The schema is
+// evidence a write floor weighs for a linked value (`linkedSourceEvidence`),
+// and the run that wrote the link is triggered again when the member lands.
+// The read is a commit-time precondition either way:
 // `ignoreReadForScheduling` gates reactivity alone.
 const LINK_SOURCE_SCHEMA_META = {
   ...internalVerifierRead,
@@ -2721,34 +2718,6 @@ export class VerifierMetadataResolver {
     this.#seenWrites = writes.length;
   }
 }
-
-// Whether this transaction's view of the document has a root value.
-//
-// `storedMetadataFor` answers `undefined` both for a document that stores no
-// CFC metadata and for one whose root the transaction cannot see, and the two
-// differ in whether reading again can change the answer. `readOrThrow`
-// collapses them; the storage layer separates them by the error rather than
-// the value, so the same read is issued again here to see it: a document with
-// no root value answers every read below the root with `NotFoundError`, while
-// one with a root answers a missing `["cfc"]` slot with a successful read of
-// `undefined`. A root that cannot carry the path answers with a type mismatch
-// and counts as no root.
-//
-// The view a read resolves against includes this transaction's own writes, so
-// a document the replica never pulled reads as having a root once this
-// transaction writes into it. The address and the meta are the ones
-// `storedMetadataFor` already read, so this adds nothing to the transaction's
-// read set.
-const documentRootIsReadable = (
-  tx: IExtendedStorageTransaction,
-  space: MemorySpace,
-  id: URI,
-  scope: ReturnType<typeof normalizeCellScope>,
-  type: MediaType,
-): boolean =>
-  tx.read({ space, id, scope, type, path: ["cfc"] }, {
-    meta: INTERNAL_VERIFIER_META,
-  }).ok !== undefined;
 
 /** Collects each target's distinct generated paths in input order. */
 const generatedOutputPathsByTarget = (
@@ -8781,35 +8750,18 @@ const linkedSourceEvidence = (
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel &&
     pendingSourceView === undefined
   ) {
-    // Name the SOURCE document, which is the one carrying no metadata, and
-    // the target location the link was being written into.
-    const reason = `missing link source metadata for ${input.source.id} at /${
-      input.source.path.join("/")
-    }, linked into ${input.target.id} at /${input.target.path.join("/")}`;
-    // A source whose root this transaction cannot see is what the untagged
-    // default is for: reading the document is what decides, so the reason
-    // stays retryable.
-    //
-    // Where the root IS readable, two of its members decided — `["cfc"]`
-    // above and `["schema"]` through `setupResultSchemaFor` — and the rest of
-    // the decision is the link value and the writer's own schema inputs,
-    // which a re-run reconstructs identically. So an immediate re-run refuses
-    // over the same absence, which is a verdict.
-    //
-    // Those immediate attempts are what end here, not the subscription. A
-    // later revision of the source can carry either member, and the run
-    // depends on both: `["cfc"]` through the writer's `readStoredCfcMetadata`
-    // and `["schema"]` through this pass's `LINK_SOURCE_SCHEMA_META` read. The
-    // arriving member re-triggers the reader, with the full retry budget the
-    // terminal disposition clears.
-    const sourceRootIsReadable = documentRootIsReadable(
-      tx,
-      input.source.space,
-      input.source.id as URI,
-      input.source.scope,
-      "application/json",
-    );
-    return { reason: sourceRootIsReadable ? verdictReason(reason) : reason };
+    // The source holds no evidence at the linked path: no stored labels, no
+    // schema this transaction holds for it, and nothing the link declares or
+    // carries. The reason ends the derivation that walks through this link,
+    // which hands a floor over the slot an absent label, so the floor fails
+    // closed and its own failure is what the refusal reports. It names the
+    // source document, which is the one holding nothing, and the target
+    // location the link was being written into.
+    return {
+      reason: `link source ${input.source.id} holds no evidence at /${
+        input.source.path.join("/")
+      }, linked into ${input.target.id} at /${input.target.path.join("/")}`,
+    };
   }
   // A pending reference covering this source supplies its author. A stored
   // container's claim cannot become the reference's claim when an obsolete
@@ -8837,7 +8789,10 @@ const linkedSourceEvidence = (
   }
   // The source path holds a reference where the transaction's final value
   // there is a link: the source's containers then vouch for nothing it
-  // reaches.
+  // reaches. An absent value reads as `undefined`. A read that storage fails
+  // for another reason throws, as the read of the source's envelope above
+  // does, and the transaction refuses the commit over the crash: no evidence
+  // is derived from a document that could not be read.
   const sourceHoldsReference = isPrimitiveCellLink(tx.readValueOrThrow({
     space: input.source.space,
     id: input.source.id as URI,
@@ -10970,6 +10925,12 @@ const verifyWriteFloor = function* (
             trust,
           )
         ) {
+          // Untagged, as the concrete branch's failure below is, so the
+          // refusal is retried rather than final. A later revision of the
+          // source can store the atom, and this pass reads the source's
+          // stored labels without the run depending on them: a verdict would
+          // end the retries with nothing left to run the writer again
+          // (cfc/verdict-reason.ts).
           failures.push(
             `write floor failed at /${
               linkPath.join("/")

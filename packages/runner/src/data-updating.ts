@@ -378,13 +378,14 @@ const recordLinkWritePolicyInput = (
   }
   const carriedCfcLabelView = cloneCfcLabelView(cfcLabelView);
   // The slot's label is the reference's own (CFC §8.2.3): the link schema's
-  // declarations and the handle's carried restriction, which the persist
-  // loop joins with the creating attempt's flow join where flow labels
-  // persist. The source's labels stay with the source, so what the source
-  // stores decides nothing here, and this write takes no dependency on the
-  // source's envelope. Every link write is recorded, so that a floor or a
-  // claim the receiving slot's schema declares, whenever that schema arrives
-  // in this transaction, is checked against the reference.
+  // declarations and the handle's carried restriction, in one link entry,
+  // beside which the persist loop stamps the creating attempt's flow join as
+  // a `structure` entry of its own where flow labels persist. The source's
+  // labels stay with the source, so what the source stores decides nothing
+  // here, and this write takes no dependency on the source's envelope. Every
+  // link write is recorded, so that a floor or a claim the receiving slot's
+  // schema declares, whenever that schema arrives in this transaction, is
+  // checked against the reference.
   //
   // What the write does not do on its own is make the transaction one the
   // boundary prepares. Preparing is what the reference's own restriction,
