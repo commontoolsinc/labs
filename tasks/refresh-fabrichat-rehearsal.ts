@@ -66,16 +66,20 @@ if (import.meta.main) {
     ...listed.split("\n").filter((path) => path !== "" && isCopied(path)),
     ...ALSO,
   ];
+  // Every module is read before the old copy is removed, so a revision missing
+  // one leaves the old copy as it was.
+  const modules = await Promise.all(
+    paths.map(async (path) => ({
+      target: join(FIXTURES, `${path.slice("packages/patterns/".length)}.txt`),
+      text: await git("show", `${commit}:${path}`),
+    })),
+  );
   await Deno.remove(FIXTURES, { recursive: true }).catch((error) => {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   });
-  for (const path of paths) {
-    const target = join(
-      FIXTURES,
-      `${path.slice("packages/patterns/".length)}.txt`,
-    );
+  for (const { target, text } of modules) {
     await Deno.mkdir(dirname(target), { recursive: true });
-    await Deno.writeTextFile(target, await git("show", `${commit}:${path}`));
+    await Deno.writeTextFile(target, text);
   }
   await Deno.writeTextFile(join(FIXTURES, "SOURCE.txt"), `${commit}\n`);
   console.log(
