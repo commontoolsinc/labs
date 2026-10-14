@@ -591,14 +591,6 @@ export interface MergeCfcSchemaEnvelopeOptions {
   beneathStoredLink?: (path: readonly string[]) => boolean;
 
   /**
-   * Whether the merge keeps the stored claims, rather than taking the
-   * candidate's, at a position `beneathStoredLink` names, where both
-   * envelopes declare one: an envelope that re-describes nothing the stored
-   * document links to.
-   */
-  keepsStoredBeneathStoredLink?: boolean;
-
-  /**
    * Whether a stamped writer claim may adopt an unstamped stored one spelled
    * below another pattern root (see `writerClaimPatternFilesCorrespond`):
    * only a stamp the release installs, or the writer the stamp names, may.
@@ -1036,7 +1028,7 @@ const mergeSchemaNode = (
   }
 
   const ifc = options.beneathStoredLink?.(logicalPath)
-    ? options.keepsStoredBeneathStoredLink ? left.ifc : right.ifc ?? left.ifc
+    ? right.ifc ?? left.ifc
     : mergeIfc(left.ifc, right.ifc, path, options.adoptsStamp);
   const required = mergeRequired(
     left.required,
