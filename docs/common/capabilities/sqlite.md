@@ -244,9 +244,14 @@ shows; where the question is a smaller one, ask the smaller question:
 
   The figures are the sample's — the first rows a scan yields, usually the
   oldest — and not the table's, so a column empty in the sample may still be
-  filled further on. For a column of long text or blobs, count
-  `nullif(typeof(c), 'null')` in place of `c`, which SQLite answers from the
-  row header without loading the value.
+  filled further on. For a column of long text or blobs, select
+  `nullif(typeof(c), 'null')` in the inner query in place of `c`, which SQLite
+  answers from the row header without loading the value:
+
+  ```sql
+  SELECT count(*) AS sampled, count(f) AS filled
+  FROM (SELECT nullif(typeof(c), 'null') AS f FROM t LIMIT 1000)
+  ```
 
 ## A connector store's tombstones, and a query that returns no rows
 

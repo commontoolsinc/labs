@@ -175,7 +175,9 @@ const connectorFillDescription = (
   grant: HarnessConnectorGrantSpec,
 ): string => {
   const presence = grant.tableHasRows;
-  if (presence === undefined) {
+  // A receipt that names no table says nothing about presence, so a row count
+  // it also carries is the better description.
+  if (presence === undefined || Object.keys(presence).length === 0) {
     return `Physical rows at injection: ${
       grant.rowCount ?? "unknown"
     } (including metadata and history).`;
@@ -190,10 +192,8 @@ const connectorFillDescription = (
     { state: "unreadable", tables: named(null) },
   ].filter(({ tables }) => tables.length > 0);
   return `Tables at injection: ${
-    groups.length === 0
-      ? "none reported"
-      : groups.map(({ state, tables }) => `${state} ${tables.join(", ")}`)
-        .join("; ")
+    groups.map(({ state, tables }) => `${state} ${tables.join(", ")}`)
+      .join("; ")
   }.`;
 };
 
@@ -212,7 +212,7 @@ const connectorGrantDescription = (
     connectorFillDescription(grant)
   } Newest observed at: ${
     connectorObservationDescription(grant.observation)
-  } (when Loom observed a record, not its content time). Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is across a sample of each table's first rows, because a column with no value in any sampled row is a filter likely to return nothing. Refer to the connection by its human name when speaking to the user, never by a handle token.`;
+  } (when Loom observed a record, not its content time). Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is across a sample of each table's first rows, because a column with no value in any sampled row is a filter likely to return nothing — though the sample is a table's first rows, usually its oldest, so a column a store began filling later can read as empty there. Refer to the connection by its human name when speaking to the user, never by a handle token.`;
 };
 
 /**

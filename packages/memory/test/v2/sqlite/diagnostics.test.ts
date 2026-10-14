@@ -187,6 +187,21 @@ describe("diagnostics", () => {
       expect(() => assertReadOnly(fillSampleSql('odd "name"', ["a", 'b"c'])))
         .not.toThrow();
     });
+
+    it("reads each sampled column's type without loading its value", () => {
+      // SQLite flags a column read that feeds only `typeof()` with
+      // OPFLAG_TYPEOFARG (0x80 in `p5`) and answers it from the record header,
+      // so a sample over a column of large blobs never loads them.
+
+      const plan = database.prepare(
+        `EXPLAIN ${fillSampleSql("messages", ["body", "received_at"])}`,
+      ).values<[number, string, number, number, number, unknown, number]>();
+      const columnReads = plan.filter(([, opcode]) => opcode === "Column");
+      expect(columnReads.length).toBe(2);
+      for (const [, , , , , , p5] of columnReads) {
+        expect(p5 & 0x80).toBe(0x80);
+      }
+    });
   });
 
   describe("readFillSample()", () => {

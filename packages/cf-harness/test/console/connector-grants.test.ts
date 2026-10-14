@@ -1027,7 +1027,7 @@ describe("connector-grants", () => {
       expect(message).not.toContain("Physical rows");
     });
 
-    it("describes a receipt that records presence for no table as reporting none", async () => {
+    it("describes a receipt that records presence for no table by the row count it carries", async () => {
       const result = resolveConnectorGrants(records({
         handlesJson: handlesJson([
           handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
@@ -1042,8 +1042,8 @@ describe("connector-grants", () => {
         result.grants,
       );
       const message = wellKnownGrantsContextMessage(grants);
-      expect(message).toContain("Tables at injection: none reported.");
-      expect(message).not.toContain("Physical rows");
+      expect(message).toContain("Physical rows at injection: 19");
+      expect(message).not.toContain("Tables at injection");
     });
 
     for (
