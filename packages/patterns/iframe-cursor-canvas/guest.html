@@ -218,10 +218,13 @@
     }
 
     /*
-    ** A shape a peer holds takes that peer's color as a ring, set inline.
+    ** A shape a peer holds takes that peer's color as a ring, set inline,
+    ** and moves with the same easing as the peer's cursor, so the two
+    ** arrive together.
     */
     .shape[data-held-by] {
       box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--holder);
+      transition: transform 70ms linear;
     }
 
     .cursor {
@@ -253,7 +256,8 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .cursor {
+      .cursor,
+      .shape[data-held-by] {
         transition: none;
       }
     }
