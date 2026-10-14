@@ -151,8 +151,9 @@ participant whose profile the reader can't read.
 A client sends to the room's own streams, never through a placement or an
 adapter.
 
-A room refuses a bad event silently, so a client MUST check each event against
-its stream's rules before sending it: a non-empty body, a reply whose target is
+A room records why it refused a message act in the sender's
+`messageRequests`, where a client shows it to the person, but a client still
+MUST check each event against its stream's rules before sending it: a non-empty body, a reply whose target is
 in the same room and allowed for its `shownIn`, a single emoji (see
 [`ChatRoomOutput`](ChatRoomOutput.md#streams)). A client uses the room's
 `canSend` to tell the person when they can't send at all. A client mints a fresh
