@@ -5868,6 +5868,24 @@ describe("piece schema compatibility", () => {
       });
     }
 
+    it("accepts a candidate argument whose optional cell property no longer admits `undefined` beside the cell", () => {
+      // The cell's own value still admits `undefined`; only the alternative
+      // beside the cell, which the property's `?` adds, goes.
+      const cell: JSONSchema = {
+        anyOf: [{ type: "undefined" }, { type: "string" }],
+        asCell: ["cell"],
+      };
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            objectWith({ anyOf: [cell, { type: "undefined" }] }),
+            { type: "object" },
+          ),
+          pattern(objectWith(cell), { type: "object" }),
+        )
+      ).not.toThrow();
+    });
+
     it("reads a property whose only alternative is `undefined` as holding no value", () => {
       expect(() =>
         assertSchemaSubset(

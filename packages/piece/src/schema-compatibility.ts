@@ -1141,7 +1141,8 @@ function additionalPropertiesOf(schema: SchemaObject): JSONSchema {
  * describes no value the source holds, and the target need not accept it: a
  * schema generator that leaves out the `undefined` an optional property's `?`
  * adds narrows nothing a piece stores. A property whose only alternative is
- * `undefined` holds no value at all, and reads as `false`.
+ * `undefined` holds no value at all, and reads as `false`; one with a single
+ * other alternative reads as that alternative.
  */
 function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
   if (!isObjectNotArray(schema)) return schema;
@@ -1160,6 +1161,16 @@ function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
     );
     if (alternatives.length === schema.anyOf.length) return schema;
     if (alternatives.length === 0) return false;
+    // One alternative left is the property's schema itself, read with the
+    // node's other keywords where they do not overlap it.
+    const { anyOf: _, ...rest } = schema;
+    const [only] = alternatives;
+    if (
+      alternatives.length === 1 && isObjectNotArray(only) &&
+      Object.keys(rest).every((key) => !Object.hasOwn(only, key))
+    ) {
+      return { ...rest, ...only };
+    }
     return { ...schema, anyOf: alternatives };
   }
   return schema;
