@@ -2215,6 +2215,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;

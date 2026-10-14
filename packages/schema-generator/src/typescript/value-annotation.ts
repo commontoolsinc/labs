@@ -157,8 +157,11 @@ function namedBindings(
   let unresolved = false;
   const collect = (part: ts.Node): void => {
     const within = namedBindings(part, checker, seen);
-    if (within) found.push(...within);
-    else unresolved = true;
+    if (within) {
+      for (const bound of within) found.push(bound);
+    } else {
+      unresolved = true;
+    }
   };
   if (ts.isTypeReferenceNode(node)) {
     const name = ts.isIdentifier(node.typeName)
