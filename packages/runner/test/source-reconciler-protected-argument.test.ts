@@ -900,28 +900,28 @@ interface Input {
       );
     });
 
-    it("refuses a release that changes the policy of a slot the document does not hold yet, and keeps the fields as they were", async () => {
-      // The stored envelope already guards `label`, so the release's policy
-      // there changes a declared one rather than adding one.
-      const guarded = (writer: string) =>
+    it("refuses a release that adds a policy at a guarded slot the document does not hold yet, and keeps the fields as they were", async () => {
+      // The stored envelope already guards `label`, so a UI contract the
+      // release adds there joins a declared policy rather than a new field's.
+      const guarded = (policy: string) =>
         withRecord()
           .replace(
             'label?: Default<WriteAuthorizedBy<About, typeof relabel>, { title: "" }>;',
-            `label?: WriteAuthorizedBy<About, typeof ${writer}>;`,
+            `label?: ${policy};`,
           )
           .replace("  label: About;\n", "  label?: About;\n")
           .replace(
             "{ label: Writable<About> }",
             "{ label: Writable<About | undefined> }",
           );
-      const previous = guarded("relabel");
-      const current = guarded("describeRoom");
+      const previous = guarded("WriteAuthorizedBy<About, typeof relabel>");
+      const current = guarded(
+        'TrustedActionWrite<About, typeof relabel, "Relabel", "GuardedRoom">',
+      );
       expect(previous).toContain(
         "label?: WriteAuthorizedBy<About, typeof relabel>;",
       );
-      expect(current).toContain(
-        "label?: WriteAuthorizedBy<About, typeof describeRoom>;",
-      );
+      expect(current).toContain("label?: TrustedActionWrite<About");
       expect(current).toContain("{ label: Writable<About | undefined> }");
       await reconcileRelease(
         "unheld-policy-release",
