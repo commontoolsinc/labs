@@ -119,8 +119,23 @@ describe("model", () => {
         }),
       ).toStrictEqual({
         id: "shape-1",
-        position: { x: 40, y: 50 },
+        position: { x: 40, y: 0 },
         size: { width: MIN_SHAPE_SIZE, height: BOARD_HEIGHT },
+      });
+    });
+
+    it("returns a position that keeps the resized box on the board", () => {
+      expect(
+        readDrag({
+          id: "shape-1",
+          position: { x: BOARD_WIDTH, y: BOARD_HEIGHT - 10 },
+          width: 100,
+          height: 60,
+        }),
+      ).toStrictEqual({
+        id: "shape-1",
+        position: { x: BOARD_WIDTH - 100, y: BOARD_HEIGHT - 60 },
+        size: { width: 100, height: 60 },
       });
     });
 

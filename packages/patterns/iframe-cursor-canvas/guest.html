@@ -268,6 +268,27 @@
       cursor: nwse-resize;
     }
 
+    /*
+    ** On a side touching the board's edge, which clips, the handles sit
+    ** inside the shape. The 8px overhang above is `HANDLE_OVERHANG` in the
+    ** guest.
+    */
+    .shape[data-at-left] .handle[data-corner$="w"] {
+      left: 0;
+    }
+
+    .shape[data-at-right] .handle[data-corner$="e"] {
+      right: 0;
+    }
+
+    .shape[data-at-top] .handle[data-corner^="n"] {
+      top: 0;
+    }
+
+    .shape[data-at-bottom] .handle[data-corner^="s"] {
+      bottom: 0;
+    }
+
     .cursor {
       position: absolute;
       top: 0;

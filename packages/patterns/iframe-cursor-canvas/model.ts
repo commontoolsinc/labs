@@ -153,7 +153,8 @@ export function readDrag(value: unknown): PeerDrag | undefined {
   const width = readLength(value.width, BOARD_WIDTH);
   const height = readLength(value.height, BOARD_HEIGHT);
   if (width === undefined || height === undefined) return undefined;
-  return { id: value.id, position, size: { width, height } };
+  const size = { width, height };
+  return { id: value.id, position: clampToBoard(position, size), size };
 }
 
 /**

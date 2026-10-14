@@ -68,6 +68,9 @@ interface LocalDrag {
   box: ShapeBox;
 }
 
+/** How far a resize handle hangs past its corner, in board pixels. */
+const HANDLE_OVERHANG = 8;
+
 /** The corners a selected shape shows a resize handle on. */
 const CORNERS: readonly Corner[] = ["nw", "ne", "sw", "se"];
 
@@ -309,6 +312,18 @@ function renderShapes(): void {
     element.style.background = fill(shape.hue);
     element.style.borderColor = ink(shape.hue);
     element.toggleAttribute("data-selected", selectedId === shape.id);
+    // A handle hangs past its corner, and the board clips what passes its
+    // edge, so on a side touching the edge the handles sit inside instead.
+    element.toggleAttribute("data-at-left", box.position.x < HANDLE_OVERHANG);
+    element.toggleAttribute("data-at-top", box.position.y < HANDLE_OVERHANG);
+    element.toggleAttribute(
+      "data-at-right",
+      box.position.x + box.width > BOARD_WIDTH - HANDLE_OVERHANG,
+    );
+    element.toggleAttribute(
+      "data-at-bottom",
+      box.position.y + box.height > BOARD_HEIGHT - HANDLE_OVERHANG,
+    );
     element.toggleAttribute("data-dragging", drag?.id === shape.id);
     if (holder) {
       element.dataset.heldBy = holder.name;
@@ -576,14 +591,17 @@ function endDrag(event: PointerEvent, drop: boolean): void {
   void (async () => {
     try {
       const shape = await resolveShape(held.id);
-      if (
-        box.position.x !== from.position.x || box.position.y !== from.position.y
-      ) {
+      // A move changes only the position, so it writes that field alone. A
+      // resize changes the box as a whole, so it lands in one write or none.
+      if (box.width === from.width && box.height === from.height) {
         await shape.key("position").set(box.position);
-      }
-      if (box.width !== from.width) await shape.key("width").set(box.width);
-      if (box.height !== from.height) {
-        await shape.key("height").set(box.height);
+      } else {
+        await shape.update((current) => ({
+          ...current,
+          position: box.position,
+          width: box.width,
+          height: box.height,
+        }));
       }
       await state.pull();
     } catch (cause) {
