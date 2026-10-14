@@ -553,6 +553,49 @@ export type AddMemberOutcome =
 export type AddMemberRefusalCode = "direct-room";
 
 /**
+ * Why a room refused one of a sender's message acts: a send, an edit, a
+ * deletion, an obliteration, or a reaction added or removed.
+ * - `no-profile`: the sender's profile hasn't resolved, so the act can't name
+ *   them.
+ * - `not-member`: the sender can't write in the room, or isn't signed in.
+ * - `invalid-body`: a message with no text, or a reaction that isn't a single
+ *   emoji.
+ * - `out-of-window`: the act's time is outside the room's window.
+ * - `bad-reply`: a reply to a message not in the room, or shown where its
+ *   target can't be.
+ * - `deleted-target`: the message acted on, or replied to, is deleted.
+ * - `unknown-target`: the message acted on isn't in the room.
+ * - `not-allowed`: the act is one only the message's author, or an owner, may
+ *   make.
+ */
+export type MessageActRefusalCode =
+  | "no-profile"
+  | "not-member"
+  | "invalid-body"
+  | "out-of-window"
+  | "bad-reply"
+  | "deleted-target"
+  | "unknown-target"
+  | "not-allowed";
+
+/** The outcome of one of a sender's message acts, by its `requestId`. */
+export type MessageActOutcome =
+  | {
+    /** The act took effect, or had nothing left to change. */
+    status: "done";
+  }
+  | {
+    /** The act was refused, and wrote nothing to the room. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /** Which refusal it is, for a client to act on. */
+    code: MessageActRefusalCode;
+  };
+
+/**
  * The `requestId` under which an add to the room in `space` asks the adder's
  * manager to offer the room, given the add's own `requestId`, which the offer
  * carries as its `id`. It names the room as well as the add, so adds to two
