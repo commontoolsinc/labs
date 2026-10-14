@@ -337,15 +337,17 @@ field `Writable<T>` (or `Cell<T>` for links); `any` never preserves cell-ness.
 ## Style object declaration order
 
 **Symptom:** Two declarations of a `style={{ ... }}` object set the same
-property, and the one listed first takes effect. With
+property, and the one listed last is not the one that takes effect. With
 `{ borderTop: "2px solid", borderColor: "red" }` the top border comes out in
 the text color.
 
 **Why:** A style object's declarations are written to the `style` attribute in
 the UTF-8 order of their keys, not in the order the object lists them. Stored
 data keeps no order for an object's keys, so the renderer has none to follow.
-CSS lets the later of two declarations of one property win, and here
-`border-top` is written after `border-color` and resets the color.
+CSS lets the later of two declarations of one property win, so the winner is
+the one whose key sorts later, wherever the object lists it. Here
+`border-top` is written after `border-color` and resets the color, and listing
+`borderColor` first instead changes nothing.
 
 **Fix:** Write the style so that the result does not depend on which
 declaration comes last.
