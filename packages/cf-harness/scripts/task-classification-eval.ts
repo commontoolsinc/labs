@@ -18,6 +18,11 @@ import {
   FileHarnessCredentialStore,
 } from "../src/auth/credential-store.ts";
 import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
+import {
+  recordUndeclaredFlags,
+  refuseFlagsWithoutValue,
+  refuseUndeclaredFlags,
+} from "../src/cli-flags.ts";
 import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
 import { researchModel } from "../src/research/runner.ts";
 import {
@@ -27,10 +32,25 @@ import {
 } from "../src/task-classification.ts";
 import { PLAYTEST_2026_10_13_TASKS } from "../test/task-classification-cases.ts";
 
+const undeclared: string[] = [];
 const args = parseArgs(Deno.args, {
   string: ["harness-home", "owner"],
   boolean: ["rule-only"],
+  unknown: recordUndeclaredFlags(undeclared),
 });
+// Before any call: a misspelled `--harness-home` would otherwise score
+// against the default credential store.
+try {
+  refuseFlagsWithoutValue(Deno.args, ["harness-home", "owner"]);
+  refuseUndeclaredFlags(
+    undeclared,
+    ["harness-home", "owner", "rule-only"],
+    "`task-classification-eval`",
+  );
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  Deno.exit(2);
+}
 const harnessHome = args["harness-home"] ??
   join(Deno.env.get("HOME") ?? ".", ".cf-harness");
 const ownerKey = args.owner ?? "local";

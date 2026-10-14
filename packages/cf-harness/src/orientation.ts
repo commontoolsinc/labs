@@ -68,4 +68,6 @@ export const orientationGuidance = (
 /** Whether a task with these tags is told how to delegate. */
 export const delegationGuided = (
   tags: ReadonlySet<HarnessTaskTag> | undefined,
-): boolean => tags === undefined || tags.has("act") || tags.has("author");
+): boolean =>
+  tags === undefined || tags.has("act") || tags.has("pieces") ||
+  tags.has("author");

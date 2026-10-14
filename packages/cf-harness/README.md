@@ -2037,16 +2037,16 @@ run holds (input cells, attached patterns, a browser); when no rule applies, one
 call to the cheap research model tags it, and when that fails the task gets
 every tag. The tags, the path that chose them (`rule`, `model`, `fallback`), and
 the classification's wall time are recorded as `taskClassification` in
-`run-state.json`; a model call's attempts and tokens land in the run report and
-the run's total usage like research's. Only an `author` task gets the opening
-research pass. The parent's orientation follows the tags: `pieces` adds the
-piece-targeting guidance, `pieces` and `find` the held-handle and grant
-guidance, `find` and `author` the findable and pattern-index guidance, `author`
-the opening-research rule, `act` and `author` delegation, `act` the Weaver
-command and browser guidance, and revision verification goes with `pieces` or
-`author`. The tool allow-list does not narrow, so a task given too few tags can
-still reach what it needs; a run with no classification carries all of the
-orientation.
+`run-state.json` and `run-report.json`; a model call's attempts and tokens land
+in the run report and the run's total usage like research's. Only an `author`
+task gets the opening research pass. The parent's orientation follows the tags:
+`pieces` and `author` add the piece-targeting and revision-verification
+guidance, `pieces` and `find` the held-handle and grant guidance, `find` and
+`author` the findable and pattern-index guidance, `author` the opening-research
+rule, `act`, `pieces` and `author` delegation, `find` and `act` the Weaver
+command guidance, and `act` the browser guidance. The tool allow-list does not
+narrow, so a task given too few tags can still reach what it needs; a run with
+no classification carries all of the orientation.
 
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit

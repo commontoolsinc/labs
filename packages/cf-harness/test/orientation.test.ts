@@ -5,6 +5,7 @@ import { buildCfHarnessBaseSystemPrompt } from "../src/cli.ts";
 import { PIECE_TARGETING_GUIDANCE } from "../src/piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import { orientContextMessages } from "../src/session-assembly.ts";
+import { WEAVER_COMMAND_GUIDANCE } from "../src/tools/weaver-action.ts";
 import { finishTaskTool } from "../src/tools/finish-task.ts";
 
 describe("orientation", () => {
@@ -118,6 +119,15 @@ describe("orientation", () => {
       expect(prompt).not.toContain("When you delegate");
     });
 
+    it("gives a pieces task the delegation guidance", () => {
+      expect(
+        buildCfHarnessBaseSystemPrompt({
+          patternIndex: true,
+          tags: new Set(["pieces"]),
+        }),
+      ).toContain("When you delegate");
+    });
+
     it("gives an author task the opening-research rule, index search, and delegation", () => {
       const prompt = buildCfHarnessBaseSystemPrompt({
         patternIndex: true,
@@ -127,6 +137,15 @@ describe("orientation", () => {
       expect(prompt).toContain("attached patternRefs or explicit");
       expect(prompt).toContain("Search the pattern index");
       expect(prompt).toContain("When you delegate");
+    });
+
+    it("keeps the Weaver's commands for a find task and withholds them from a respond task", () => {
+      const messages = ["input cells", WEAVER_COMMAND_GUIDANCE];
+
+      expect(orientContextMessages(messages, new Set(["find"])))
+        .toEqual(messages);
+      expect(orientContextMessages(messages, new Set(["respond"])))
+        .toEqual(["input cells"]);
     });
 
     it("withholds piece targeting and revision verification from a respond task's context", () => {

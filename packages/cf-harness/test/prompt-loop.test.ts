@@ -3093,12 +3093,24 @@ describe("CfHarnessPromptLoop opening research", () => {
       sourceIds: [],
       missing: ["an exact implementation contract"],
     });
-    const classifiedLoop = (runId: string, runIds: string[]) =>
+    const classifiedLoop = (
+      runId: string,
+      runIds: string[],
+      artifactRoot?: string,
+    ) =>
       new CfHarnessPromptLoop({
         engine: new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
           model: "gpt-test",
+          ...(artifactRoot !== undefined
+            ? {
+              artifactStore: createFileSystemHarnessArtifactStore({
+                artifactRoot,
+                runId,
+              }),
+            }
+            : {}),
         }),
         modelClient: {
           providerId: "test-provider",
@@ -3119,22 +3131,36 @@ describe("CfHarnessPromptLoop opening research", () => {
 
     it("runs no opening research for a respond task", async () => {
       const runIds: string[] = [];
-      const loop = classifiedLoop("run-classified-respond", runIds);
+      const root = await Deno.makeTempDir({ prefix: "cf-harness-classified-" });
+      try {
+        const loop = classifiedLoop("run-classified-respond", runIds, root);
 
-      const classification = await loop.classifyTask("thanks!");
-      const result = await loop.runPrompt({
-        prompt: "thanks!",
-        openingResearchTask: "thanks!",
-        promptSlotBinding: directPromptSlotBinding,
-      });
+        const classification = await loop.classifyTask("thanks!");
+        const result = await loop.runPrompt({
+          prompt: "thanks!",
+          openingResearchTask: "thanks!",
+          promptSlotBinding: directPromptSlotBinding,
+        });
 
-      expect(classification.tags).toEqual(["respond"]);
-      expect(runIds).toEqual(["run-classified-respond"]);
-      expect(result.runState.openingResearch).toBeUndefined();
-      expect(result.runState.taskClassification).toMatchObject({
-        tags: ["respond"],
-        path: "rule",
-      });
+        expect(classification.tags).toEqual(["respond"]);
+        expect(runIds).toEqual(["run-classified-respond"]);
+        expect(result.runState.openingResearch).toBeUndefined();
+        expect(result.runState.taskClassification).toMatchObject({
+          tags: ["respond"],
+          path: "rule",
+        });
+        const report = JSON.parse(
+          await Deno.readTextFile(
+            join(root, "run-classified-respond", "run-report.json"),
+          ),
+        );
+        expect(report.taskClassification).toMatchObject({
+          tags: ["respond"],
+          path: "rule",
+        });
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
     });
 
     it("counts a model classification's tokens in the run's total usage", async () => {

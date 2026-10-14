@@ -104,6 +104,25 @@ describe("task-classification", () => {
       ).toEqual(["act", "find"]);
     });
 
+    it("returns act, not author, for making a reservation", () => {
+      expect(
+        tagsOf(classifyTaskByRule("make me a reservation at Zuni", {
+          browserHost: true,
+        })),
+      ).toEqual(["act"]);
+    });
+
+    it("returns act and find for opening a URL", () => {
+      expect(tagsOf(classifyTaskByRule("open https://example.com", {})))
+        .toEqual(["act", "find"]);
+    });
+
+    it("leaves a polite request for an action to the model rather than calling it a question", () => {
+      expect(
+        classifyTaskByRule("Can you add an appointment to my calendar?", {}),
+      ).toBeUndefined();
+    });
+
     it("returns undefined when no rule applies", () => {
       expect(classifyTaskByRule("the quarterly numbers for Q3 sales", {}))
         .toBeUndefined();

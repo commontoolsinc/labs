@@ -517,7 +517,8 @@ const establishContextMessages = async (
 /**
  * Drops from a run's context messages the host guidance its task tags do not
  * call for: piece targeting and revision verification belong to work on
- * pieces and to authoring, and the Weaver's commands to acting. Every other
+ * pieces and to authoring, and the Weaver's commands, which read as well as
+ * change the person's application, to finding and acting. Every other
  * message passes through.
  */
 export const orientContextMessages = (
@@ -530,7 +531,7 @@ export const orientContextMessages = (
       PIECE_TARGETING_GUIDANCE,
       REVISION_VERIFICATION_GUIDANCE,
     ]),
-    ...(tags.has("act") ? [] : [WEAVER_COMMAND_GUIDANCE]),
+    ...(tags.has("act") || tags.has("find") ? [] : [WEAVER_COMMAND_GUIDANCE]),
   ]);
   return messages.filter((message) => !withheld.has(message));
 };

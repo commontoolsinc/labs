@@ -47,19 +47,21 @@ export type TaskClassificationContext =
   & { browserHost?: boolean };
 
 const NAVIGATE =
-  /\b(?:take me to|go to|open|navigate to|switch to|bring up)\b.*\bloom\b/;
+  /\b(?:take me to|go to|open|navigate to|switch to|bring up)\b.*\bloom\b|\b(?:open|go to|visit|navigate to)\s+https?:\/\//;
 const ACT =
   /\b(?:deploy|add\b.*\bto (?:this|the|my|a) loom|move\b.*\b(?:panel|loom))\b/;
 const WEB_ACT =
-  /\b(?:buy|order|book|purchase|sign up|fill (?:in|out)|check ?out|browse)\b/;
+  /\b(?:buy|order|book|purchase|reserve|sign up|fill (?:in|out)|check ?out|browse)\b|\breservation\b/;
 const QUESTION =
   /^(?:what|what's|whats|when|who|whom|whose|where|which|why|how|is|are|was|were|do|does|did|can|could|has|have)\b|\?\s*$/;
+/** A request phrased as a question, which asks for an action, not an answer. */
+const POLITE_REQUEST = /^(?:can|could|would|will) you\b/;
 const LOOKUP =
   /\b(?:find|search|look (?:up|for)|list|show me|summari[sz]e|check|browse)\b/;
 const EXPLICIT_LOOKUP = /\b(?:find|search|look (?:up|for))\b/;
 const URL = /\bhttps?:\/\/\S+/;
 const AUTHOR =
-  /\b(?:make|build|write|create|author|code|design|generate)\b(?:\s+(?:me|us))?\s+(?:a|an|new|some)\b(?!\s+(?:note|loom)\b)/;
+  /\b(?:make|build|write|create|author|code|design|generate)\b(?:\s+(?:me|us))?\s+(?:a|an|new|some)\b(?!\s+(?:note|loom|reservation|booking|appointment|payment|call)\b)/;
 const DEICTIC = /\b(?:it|this|these)\b(?!\s+(?:week|month|year|loom)\b)/;
 const CONVERSATIONAL =
   /^(?:hi|hey|hello|thanks|thank you|ok|okay|cool|great|nice|yes|no|sure|got it)\b/;
@@ -113,7 +115,8 @@ export const classifyTaskByRule = (
   if (ACT.test(text) || (context.browserHost && WEB_ACT.test(text))) {
     tags.add("act");
   }
-  const lookup = QUESTION.test(text) || LOOKUP.test(text) || URL.test(task);
+  const lookup = (QUESTION.test(text) && !POLITE_REQUEST.test(text)) ||
+    LOOKUP.test(text) || URL.test(task);
   if (lookup && (!pointsAtHeldPiece || EXPLICIT_LOOKUP.test(text))) {
     tags.add("find");
   }
