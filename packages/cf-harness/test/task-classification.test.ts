@@ -8,7 +8,6 @@ import {
   classifyTaskByRule,
   HARNESS_TASK_TAGS,
   type HarnessTaskTag,
-  type TaskClassificationContext,
 } from "../src/task-classification.ts";
 
 const cell = (name: string) => ({
