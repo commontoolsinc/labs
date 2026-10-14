@@ -760,8 +760,11 @@ function sanitizeSchemaForLinksInternal(
     case "canonical":
       return deepFrozenCloneAndInternSchema(output);
     case "frozen":
-      // Freezing in place reaches only what this call built: for this form
-      // the strip copies what lies below its depth cap.
+      // Freezing in place changes nothing the caller holds. The strip
+      // rebuilds every record and array it walks, and for this form copies
+      // what lies below its depth cap. What it carries by reference is a
+      // `FabricPrimitive`, which is frozen from its construction, or a
+      // function, which `deepFreeze()` leaves as it is.
       return deepFreeze(output);
     case "mutable":
       return output;

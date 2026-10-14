@@ -135,7 +135,8 @@ arguments or preceding-parameter defaults (§4.1). A member the bindings cannot
 read, such as an indexed access with no checker-created instantiation, remains
 unread at that member; it does not discard the enclosing object's readable
 shape. Missing required arguments and deferred conditional declarations remain
-unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers
+unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers,
+read through parentheses as other wrappers are (`resolveScopeWrapperNode()`),
 from their own payload argument without resolving the wrapper's name (the
 transformer prints a wrapper it builds as `__cfHelpers.PerUser<…>`, a name no
 scope declares), and follows CFC alias chains under their bindings (§11). A
@@ -1437,7 +1438,8 @@ Mechanics:
   a named policy alias such as `Readonly<Protected>`. An ordinary value query
   such as `Partial<typeof value>` retains the checker's utility-type semantics.
   Non-generic tuples and literal index signatures also retain authored writer
-  queries. Recursive definitions keep each writer's query origin even when
+  queries, a tuple named through a non-generic alias as much as one written in
+  place: it is read as the tuple the alias declares. Recursive definitions keep each writer's query origin even when
   handlers have identical types. An indexed access or conditional member that
   leaves a writer carrier without binding syntax, in a schema that defines a
   document, reports `cfc-write-authorized-by:unread` and explains the
@@ -1806,8 +1808,10 @@ and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`definesDocument` or `cellsOpaque` lookup reads the node (`formatChildType` in
-`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
+`definesDocument` lookup reads the node (`formatChildType` in
+`schema-generator.ts`); a `cellsOpaque` lookup reads the node wherever a member
+is formatted (`formatChildType`), and the generation root, or the print a
+printed root is read in place of (`#generateSchemaInternal`); a `spelledBy` lookup reads the node, wherever a member
 or a printed generation root is formatted (`formatChildType` and
 `#generateSchemaInternal` in
 `schema-generator.ts`).
@@ -1913,9 +1917,11 @@ or a printed generation root is formatted (`formatChildType` and
   policy, and reads that policy in part (§11, `definesDocument`). A value
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
-- **`cellsOpaque`** marks the remainder of a recursion the contract overlay of
-  a handler's event or state cuts (`overlayContractCapabilities()`), whose
-  cells no use the callback makes reaches. Every cell the node's reading reaches, outside
+- **`cellsOpaque`** marks a node the contract overlay of a handler's event or
+  state (`overlayContractCapabilities()`) reads without reading inside it, whose
+  cells no use the callback makes reaches: the remainder of a recursion it cuts,
+  or a node it keeps as written because it cannot read inside it, as a tuple or
+  a scoped cell. Every cell the node's reading reaches, outside
   the value of another cell, is `opaque`, whatever capability its wrapper
   writes; a stream or a SQLite handle keeps its brand
   (`isCellCapabilityKind`), and the cells inside a cell's value are read as

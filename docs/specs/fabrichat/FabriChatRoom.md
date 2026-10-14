@@ -82,14 +82,17 @@ room's own composer builds a send's `{ version: { body, sentAt }, replyTo? }`
 from the text the person submitted, which its handler reads as `target.value`,
 and the composer event's time as the proposed `sentAt`.
 
-A successful message or reaction in a room that is its space's root sends
-`joinRoom` to the viewer's manager, when one is available. The manager's
-separate event checks its private Home catalog and lists or restores the room;
-joining an already listed room without a `requestId` changes nothing. Room
-write handlers hold the manager's stream but read no catalog, so the catalog's
-confidentiality stays out of the transaction that stores shared messages and
-reactions. A social space's embedded chat sends no join: the space's own
-membership already governs that conversation.
+A successful message or reaction sends `joinRoom` to the viewer's manager
+when one is available and the room is either standalone or its space's root
+explicitly declares it through `chatRoom`. A declared container room includes
+that root as `container`; a standalone room needs no container, including when
+another space declares it. The manager's separate event checks private Home
+membership and lists or restores the conversation. Joining an already listed
+room without a `requestId` changes nothing. Room write handlers send their
+local `joined` stream after recording the write. Its `tellManagerJoined`
+handler reads the manager binding and sends `joinRoom` in a separate event,
+so the transaction that stores shared messages and reactions reads neither
+the manager nor its private catalog.
 
 Every handler in the table but `commitSetTitle` first checks its event's sender
 and `requestId` against a keyed collection of the requests the room has acted
