@@ -10,6 +10,15 @@
  * the whole table rather than from any one row, so they are disclosed under
  * every label the table's rows carry.
  *
+ * Both are exact, and exact costs the whole table. `total` alone is a bare
+ * `count(*)`, which SQLite answers by walking the narrowest index the table
+ * has, or the table itself where it has none. A predicate is evaluated on
+ * every row, which reads every row whatever indexes the table has. On a
+ * connector store another process writes — gigabytes, with full-text tables
+ * a count always walks — either is a scan of the whole table each time the
+ * inputs change, so a caller that only needs to know whether a table holds
+ * rows asks `EXISTS` instead.
+ *
  * @hashtags count, rows, table, total, matching, predicate, sqlite, connector
  * @keywords row count, how many rows, count the rows of a table, total rows,
  * matching rows, count with a predicate, aggregate count, SqliteDb handle
@@ -64,7 +73,9 @@ export interface SourceRowCountOutput {
 /** One row of the aggregate, under the names the statement gives its columns. */
 interface CountRow {
   total: number;
-  matching: number;
+
+  /** Absent from the statement for an empty predicate, which every row meets. */
+  matching?: number;
 }
 
 /**
@@ -80,21 +91,25 @@ const quotedIdentifier = (name: string): string =>
   `"${name.replace(/"/g, '""')}"`;
 
 /**
- * Both numbers in one statement: `count(*)` over the whole table, and a sum
- * over the predicate, which is one row and therefore one row document.
+ * The numbers in one statement, which is one row and therefore one row
+ * document: `count(*)` over the whole table, and a sum over the predicate
+ * where there is one.
  *
- * The predicate is parenthesized, so an expression holding `OR` counts the
- * rows it reads as satisfying it rather than widening the sum to every row.
- * An empty predicate becomes the constant true, which is what makes
- * `matching` equal `total` for a caller that names none.
+ * An empty predicate leaves the sum out rather than summing a constant, so
+ * the statement is a bare `count(*)`, which SQLite can answer from the
+ * narrowest index rather than the table; `matching` is then `total`. The
+ * predicate is parenthesized, so an expression holding `OR` counts the rows
+ * it reads as satisfying it rather than widening the sum to every row.
  */
 const countSql = (table: string, predicate: string): string =>
-  [
-    "SELECT count(*) AS total,",
-    `  COALESCE(sum(CASE WHEN (${predicate === "" ? "1" : predicate})`,
-    "    THEN 1 ELSE 0 END), 0) AS matching",
-    `FROM ${quotedIdentifier(table)}`,
-  ].join("\n");
+  predicate === ""
+    ? `SELECT count(*) AS total FROM ${quotedIdentifier(table)}`
+    : [
+      "SELECT count(*) AS total,",
+      `  COALESCE(sum(CASE WHEN (${predicate})`,
+      "    THEN 1 ELSE 0 END), 0) AS matching",
+      `FROM ${quotedIdentifier(table)}`,
+    ].join("\n");
 
 /**
  * What a query reports about a failure, empty when it has not failed.
@@ -119,7 +134,13 @@ export const SourceRowCount = pattern<
   );
 
   const total = computed(() => countRead.result?.[0]?.total ?? 0);
-  const matching = computed(() => countRead.result?.[0]?.matching ?? 0);
+  // Read off the row rather than off the predicate, so the two numbers always
+  // come from the same statement: a row without `matching` answered a count
+  // with no predicate, which every row meets.
+  const matching = computed(() => {
+    const row = countRead.result?.[0];
+    return row?.matching ?? row?.total ?? 0;
+  });
   const pending = computed(() => countRead.pending === true);
   const errorMessage = computed(() => errorText(countRead.error));
   const hasError = computed(() => errorMessage !== "");

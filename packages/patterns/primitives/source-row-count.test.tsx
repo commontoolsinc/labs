@@ -4,8 +4,8 @@
  * figure, and the failure text a table or column the store does not carry
  * produces.
  *
- * The atom takes no `reactOn`, because a database it only reads has nothing to
- * react to. Its `table` and `predicate` inputs are reactive, so a test seeds
+ * The atom takes no `reactOn`, so it reads again only when one of its inputs
+ * changes. Its `table` and `predicate` inputs are reactive, so a test seeds
  * the rows and then names a predicate, which is what re-runs the aggregate
  * over them.
  *
