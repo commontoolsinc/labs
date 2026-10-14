@@ -2589,7 +2589,16 @@ each operand of a fallback, wherever on the member spine it sits, a call on
   applied as the member, the value its callback returns, where that names only
   policies (`getExplicitValueTypeNode` in `transformers/schema-injection.ts`;
   the schema-generator mapping spec's §13; the runner's
-  `test/cfc-result-policy-binding.test.ts`)
+  `test/cfc-result-policy-binding.test.ts`). What these rules do not reach
+  keeps the print as the type spells it, with the policy's brand as an atom no
+  exchange rule matches, `{}`, and the `cfc-label:unread` warning, so the
+  position stays closed to every reader: an array literal whose elements read
+  bindings declared apart, one labelled by `readers` beside one by `writers`;
+  an alias beside the same type written out, which denote a type apart; a
+  spread, a hole, or an element that reads no binding, such as a member
+  access; a tuple print, as `as const` gives one; and an `AnyOf` whose only
+  alternative is such a `PolicyOf`. Each is a shape to recover should a
+  pattern write it
 - a pass that reads the structure of a node printed from a type reads the
   print's unfolding in its place: a node of the print's own kind built from the
   type it was printed from, each type node below it printed afresh from its own
