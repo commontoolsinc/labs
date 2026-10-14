@@ -329,8 +329,9 @@ A record does not carry the DID of the member that published it.
 
 A room is latest-state, not a message stream. A publish replaces the member's
 record, and the host sends at most one publication per animation frame, so a
-peer hears the latest value of a facet and not every value. State that must be
-agreed on, or that must survive, belongs in a cell.
+peer hears the latest value of a facet and not every value. A page that is not
+being drawn, such as a background tab, publishes nothing until it is shown.
+State that must be agreed on, or that must survive, belongs in a cell.
 
 A facet's contents are whatever a peer's guest wrote. Check their shape before
 using them, as for any value a stranger supplied.
@@ -342,7 +343,9 @@ at most 32 characters long, and 8 KiB for the record as encoded. A room holds
 with a `failure` whose code is `presence-refused` and whose message is the
 relay's. The other codes are `presence-unsupported`, for a host with no relay,
 and `presence-disconnected`, for a room the host lost. Nothing follows a
-`failure`; a guest that still wants the room calls `join()` again.
+`failure`; a guest that still wants the room calls `join()` again. A guest whose
+host grants no resource of that name hears a `failure` with the code
+`resource-not-found`.
 
 The publishing methods reject while the guest has not joined, and the room
 publishes nothing for a member with no name.
@@ -406,6 +409,10 @@ own frame from accumulating them.
 - The remaining window `postMessage()` lifecycle, port handoff, and alarm
   traffic uses source-window checks but not origin-bound messages; audit that
   path before treating this as a hardened security boundary.
+- A `presence` resource lets the guest announce the user in a room, under a name
+  the guest chooses, to everyone with access to the space, and read what the
+  guests of other members publish there. Grant one only to a guest that should
+  do both.
 - Allowed script CDNs and their logging services can exfiltrate data.
 - Links opened with `target="_blank"`, `document.baseURI`, and browser
   fingerprinting capabilities can reveal information outside the bridge.

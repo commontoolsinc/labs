@@ -340,6 +340,7 @@ in progress. Divide state by the lifecycle that owns it:
 | State | Owner | Examples |
 | --- | --- | --- |
 | Durable collaborative data | Fabric Cell or SQLite | records, committed positions, shared edges |
+| Live status others see and nobody keeps | A presence room | pointers, a peer's drag in flight, who is here |
 | Local user intent not yet committed | React state or refs | a text draft, open menu, active drag, pending selection |
 | Third-party interaction state | The library's local component state | `dragging`, measured bounds, viewport, focus, selection handles |
 | Pure presentation | Derived during render | labels, colors, filtered rows |
@@ -369,6 +370,12 @@ remount: native popups close, focus moves, selections flash, and dragged items
 snap between local and durable positions. Keep component types, React keys, and
 the library root stable for the same reason. The full loading view belongs only
 to initial hydration; an ordinary mutation must not remount the application.
+
+A presence room is declared in the contract and read through
+`fabric.presence(name)`; its events arrive outside React, so hold what a
+component renders from them in state or an external store.
+[`iframe-pattern-guide.md`](./iframe-pattern-guide.md), "Optional presence",
+is the contract.
 
 ### Reconcile asynchronous gestures by identity
 

@@ -453,6 +453,18 @@ describe("presence", () => {
       });
     });
 
+    it("ends the room with `resource-not-found` for a name the host grants no resource under", async () => {
+      await withGuest({}, async (client) => {
+        const events = queue<PresenceRoomEvent>();
+        client.presence("cursors").join((event) => events.push(event));
+
+        expect(await events.next()).toMatchObject({
+          kind: "failure",
+          error: { code: "resource-not-found", resource: "cursors" },
+        });
+      });
+    });
+
     it("ends the room on its failure, rejects a publication to it, and joins a fresh room after", async () => {
       const first = fakeRoom([ada]);
       const second = fakeRoom();

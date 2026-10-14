@@ -258,6 +258,12 @@ state.
 Append new members with `push()` as the complete guest above does, so
 concurrent additions compose.
 
+Status that other viewers should see while it happens and that nobody needs
+afterwards, such as a brush in progress or each viewer's hovered mark, travels
+through a presence room instead of a Cell.
+[`iframe-pattern-guide.md`](./iframe-pattern-guide.md), "Optional presence",
+is the contract.
+
 When an interaction starts from an array position, resolve that position to a
 stable Cell before subscribing or writing. The returned handle remains attached
 to the same item even when it moves:
