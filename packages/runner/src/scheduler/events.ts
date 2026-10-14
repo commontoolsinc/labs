@@ -46,6 +46,7 @@ import {
   isReadIgnoredForScheduling,
 } from "../storage/reactivity-log.ts";
 import {
+  isCfcEnforcementRejection,
   isConflictRejection,
   isPermanentRejection,
   isStorageTransactionInconsistent,
@@ -390,6 +391,21 @@ export function isExplicitTransactionAbort(
 } {
   return error?.name === "StorageTransactionAborted" &&
     error.abortedBeforeStorage === true;
+}
+
+/**
+ * Whether an event's commit failed in commit preparation for a cause a fresh
+ * attempt may clear: a crash (`CommitPreparationError`), or a CFC refusal
+ * that is not wholly a verdict, which keeps the retryable
+ * `StorageTransactionAborted` name (`cfc/verdict-reason.ts`). A CFC verdict,
+ * `CfcCommitRefusalError`, is not one.
+ */
+function failedCommitPreparation(
+  error: { name?: string; message?: string } | undefined,
+): boolean {
+  return error?.name === "CommitPreparationError" ||
+    (error?.name === "StorageTransactionAborted" &&
+      isCfcEnforcementRejection(error));
 }
 
 export function isHeadEventParked(
@@ -2921,18 +2937,16 @@ export async function dispatchQueuedEvent(state: {
           telemetryFailure = { error };
         }
 
-        // A served event's DETERMINISTIC CFC pre-storage refusal seals an
-        // error consequence (events.md §5: the error IS the consequence — the
-        // same honesty as the throw arm in `finalize` above). Without one the
-        // durable entry stays unconsequenced and every wave re-drains it into
-        // the identical refusal. Scoped to exactly the class
-        // `reportDroppedCfcRejectedWrite` reports: every other non-retried
-        // outcome has its own explicit routing below: typed delivery failures
-        // checkpoint, proven-no-commit failures terminalize, and a handler abort
-        // seals a safe error consequence. Called before the commit callback on
-        // both paths that carry a refusal, so the drain's in-flight guard sees
-        // the staged notice ("marked") rather than releasing the still-"queued"
-        // copy.
+        // A served event's CFC verdict seals an error consequence (events.md
+        // §5: the error IS the consequence — the same honesty as the throw arm
+        // in `finalize` above). Without one the durable entry stays
+        // unconsequenced and every later drain pass runs it into the identical
+        // refusal. Scoped to exactly the class `reportDroppedCfcRejectedWrite`
+        // reports; a CFC refusal that is not a verdict defers instead
+        // (`deferCommitPreparationFailure`). Called before the commit callback
+        // on both paths that carry a refusal, so the drain's in-flight guard
+        // sees the staged notice ("marked") rather than releasing the
+        // still-"queued" copy.
         const sealCfcRefusalConsequence = (): void => {
           if (served === undefined || !isCfcRejectedCommitError(error)) return;
           reportServedEventFailure(served, {
@@ -2956,11 +2970,17 @@ export async function dispatchQueuedEvent(state: {
             message: error.message,
           });
         };
-        const deferCommitPreparationFailure = (): void => {
-          if (
-            served === undefined || error?.name !== "CommitPreparationError"
-          ) {
-            return;
+        // For a served event, a commit preparation that failed for a cause a
+        // fresh attempt may clear (`failedCommitPreparation`) is a delivery
+        // failure in the commit-preparation phase: the drain checkpoints the
+        // durable entry, holds the events behind it, retries it on input, and
+        // covers it for attention once its failed-state budget is spent
+        // (events.md §5). Sealing an error consequence instead would end an
+        // event a later attempt can still deliver. Returns whether it
+        // deferred.
+        const deferCommitPreparationFailure = (): boolean => {
+          if (served === undefined || !failedCommitPreparation(error)) {
+            return false;
           }
           reportServedEventFailure(served, {
             kind: "deferred",
@@ -2973,6 +2993,15 @@ export async function dispatchQueuedEvent(state: {
               permanentEvidence: false,
             },
           });
+          // The deferral carries the drain's arrival-order barrier
+          // (events.md §2): a later arrival the drain queued in the same pass
+          // sits behind this head and would dispatch and seal next.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose commit preparation failed",
+          );
+          return true;
         };
         const routeProvenNoCommitFailure = (): void => {
           if (served === undefined || error === undefined) return;
@@ -3054,21 +3083,24 @@ export async function dispatchQueuedEvent(state: {
             runFinalCommitCallback();
             break;
           }
-          case "give-up":
-            deferCommitPreparationFailure();
+          case "give-up": {
+            const deferred = deferCommitPreparationFailure();
             routeProvenNoCommitFailure();
             sealExplicitHandlerAbort();
             sealCfcRefusalConsequence();
             sealAclDocumentRefusalConsequence();
             runFinalCommitCallback();
             reportDroppedCfcRejectedWrite(error, handlerId);
-            // No further attempt at this event is coming, so anything staged on
-            // the transaction and waiting for it to commit is waiting for
-            // nothing.
+            // This transaction never commits, and an attempt the drain makes
+            // at a deferred event runs in a fresh one, so anything staged on
+            // this one and waiting for it to commit is waiting for nothing.
             tx.abandonStagedWork(error as CommitError);
             logger.warn(
               "scheduler",
-              disposition.reason === "non-retryable"
+              deferred
+                ? "Event handler commit failed in commit preparation; the " +
+                  "served event is deferred as a delivery failure"
+                : disposition.reason === "non-retryable"
                 ? "Event handler commit failed with a non-stale-basis rejection " +
                   "that re-running cannot resolve; dropping the write without retry"
                 : "Event handler commit failed and the caller opted out of " +
@@ -3079,6 +3111,7 @@ export async function dispatchQueuedEvent(state: {
               reportRefusedClientCommit("non-retryable");
             }
             break;
+          }
           case "backoff":
             logger.debug(
               "scheduler",

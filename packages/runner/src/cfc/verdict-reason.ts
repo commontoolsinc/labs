@@ -40,13 +40,14 @@
 // safe direction — a deterministic refusal left untagged — and the cost
 // depends on the writer. A reactive writer takes some doomed re-runs, then the
 // convergence budget; a client's own event is reported refused after one
-// attempt; a served event's entry is sealed no consequence
-// (`sealCfcRefusalConsequence` in `scheduler/events.ts`), so it stays pending
-// and every later drain pass runs its handler into the same refusal. Get it
-// wrong in the other direction and the cost is a write that never lands and
-// never retries: an absent pattern result, a served-wish state that never
-// materializes and whose UI silently never mounts. It will not look like a
-// labelling bug; it looks like the computation simply stopped.
+// attempt; a served event is deferred as a delivery failure
+// (`deferCommitPreparationFailure` in `scheduler/events.ts`), holding the
+// events behind it and retried on input until its failed-state budget is
+// spent and an attention notice covers it. Get it wrong in the other
+// direction and the cost is a write that never lands and never retries: an
+// absent pattern result, a served-wish state that never materializes and
+// whose UI silently never mounts. It will not look like a labelling bug; it
+// looks like the computation simply stopped.
 //
 // That asymmetry is why the default sits here rather than at "verdict". An
 // earlier revision of this work defaulted the other way, on the argument that
