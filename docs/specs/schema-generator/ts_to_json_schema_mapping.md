@@ -413,9 +413,8 @@ types.
 Every type with a usable name is hoisted into `$defs` and referenced by
 `{ "$ref": "#/$defs/<Name>" }` at non-root occurrences
 (`src/schema-generator.ts`). A reading under the `definesDocument` hint inside
-a schema that views other documents is hoisted as `<Name>:document`, and one
-under the `cellsOpaque` hint as `<Name>:opaque` (§13), so neither shares a
-definition with another reading of the same type. The variant is part of the
+a schema that views other documents is hoisted as `<Name>:document`, so it
+shares no definition with another reading of the same type. The variant is part of the
 reading's cycle identity too, so a recursion met inside such a reading refers
 to the definition that reading stores. No TypeScript name holds a `:`, so no
 type's name can take it. The emitted container key is `$defs` —
@@ -1799,7 +1798,7 @@ producing alias in this package as of this writing.
 Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,
 SchemaHint>`, where `SchemaHint` is `{ items?: unknown; cfcUiContract?:
 UiContractHint; narrowedFrom?: NarrowedFrom; spelledBy?: ts.TypeNode;
-definesDocument?: true; cellsOpaque?: true }`,
+definesDocument?: true }`,
 `UiContractHint` is
 `{ helper: "UiAction" | "UiPromptSlot" | "UiDisclosure"; action?; surface?;
 role?; kind?; trustedPattern?; requiredEventIntegrity? }`, and `NarrowedFrom`
@@ -1808,15 +1807,13 @@ generator only reads hints, and copies the `requiredEventIntegrity` list on the
 way into the emitted schema. A node holds a hint of each kind, recorded apart
 from the others. The producer writes `items` and `cfcUiContract` to the node
 and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
-`definesDocument` and `cellsOpaque` to the node alone. A `cfcUiContract` lookup tries the node and
+and `definesDocument` to the node alone. A `cfcUiContract` lookup tries the node and
 `ts.getOriginalNode(node)` (`src/ui-contract.ts`, called from
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
 `definesDocument` lookup reads the node (`formatChildType` in
-`schema-generator.ts`); a `cellsOpaque` lookup reads the node wherever a member
-is formatted (`formatChildType`), and the generation root, or the print a
-printed root is read in place of (`#generateSchemaInternal`); a `spelledBy` lookup reads the node, wherever a member
+`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
 or a printed generation root is formatted (`formatChildType` and
 `#generateSchemaInternal` in
 `schema-generator.ts`).
@@ -1925,17 +1922,6 @@ or a printed generation root is formatted (`formatChildType` and
   policy, and reads that policy in part (§11, `definesDocument`). A value
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
-- **`cellsOpaque`** marks a node the contract overlay of a handler's event or
-  state (`overlayContractCapabilities()`) reads without reading inside it, whose
-  cells no use the callback makes reaches: the remainder of a recursion it cuts,
-  or a node it keeps as written because it cannot read inside it, as a tuple or
-  a scoped cell. Every cell the node's reading reaches, outside
-  the value of another cell, is `opaque`, whatever capability its wrapper
-  writes; a stream or a SQLite handle keeps its brand
-  (`isCellCapabilityKind`), and the cells inside a cell's value are read as
-  written, as the overlay leaves a cell's value. A named type read there is
-  stored under a definition of its own, `<Name>:opaque`, apart from other
-  readings of the same type.
 
 ## 14. Options
 
