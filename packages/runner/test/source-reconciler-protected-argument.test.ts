@@ -621,5 +621,27 @@ describe("source-reconciler-protected-argument", () => {
         },
       );
     });
+
+    it("refuses a release that adds a policy at the links themselves, and keeps the list as it was", async () => {
+      // A claim at the position holding the links governs which links this
+      // document may hold, so it is this document's to keep.
+      const current = LINKED_SOURCE.replace(
+        "type NotesCell = Writable<Note[] | Default<[]>>;",
+        "type NotesCell = Writable<WriteAuthorizedBy<Note, typeof post>[] | Default<[]>>;",
+      );
+      expect(current).not.toBe(LINKED_SOURCE);
+      await reconcileRelease(
+        "linked-position-release",
+        LINKED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+      );
+    });
   });
 });
