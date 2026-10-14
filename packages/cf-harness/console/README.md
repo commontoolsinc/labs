@@ -1632,12 +1632,19 @@ references for that store are reported and withheld. Grants carry the class list
 as `cfcClasses`; persisted grants with a singular `cfcClass` or a class as their
 name remain readable.
 
-The session description carries the receipt's account identity, physical row
-count, and newest record observation time. Counts come from linked `sources`
-rows joined by piece, connection, and companion key. They include metadata and
-history across the declared tables, so they are not a count of current events or
-query-visible rows. Missing, invalid, or conflicting counts remain unknown; zero
-means the count succeeded and found no rows.
+The session description carries the receipt's account identity, what the store
+held at injection, and newest record observation time. Both come from linked
+`sources` rows joined by piece, connection, and companion key. What the store
+held is read from the row's `table_has_rows` where it has one: per table, `true`
+for a table holding a row, `false` for one holding none, and `null` for one the
+receipt could not read, described as tables with rows, empty, and unreadable.
+Each table name must be a plain identifier of at most 64 characters, since it is
+quoted into the description. A row with no `table_has_rows` is described by its
+physical row count, `row_count`, which includes metadata and history across the
+declared tables, so it is not a count of current events or query-visible rows;
+zero means the count succeeded and found no rows. A malformed or conflicting
+`table_has_rows` counts as absent, and a missing, malformed, or conflicting
+`row_count` remains unknown.
 
 Account metadata comes from the source row's `viewer` object: `kind`,
 `source_id`, `email`, `label`, and `absent_reason`. An `account` identity
@@ -1649,11 +1656,12 @@ null or absent viewer says the identity was not recorded in the receipt. When
 there is no source row, the launcher reads the handle's `viewer` object. It
 reads no connection configuration or authentication file.
 
-Repeated source or handle receipts must agree on each metadata field. A count
-disagreement leaves the count unknown; an account disagreement is described as
-conflicting receipts, distinct from an unrecorded or explicitly unknown
-identity. An observation disagreement reports `conflicting-receipts` rather than
-choosing one timestamp. Fields the receipts agree on remain available.
+Repeated source or handle receipts must agree on each metadata field. A count or
+table-presence disagreement leaves that field unknown; an account disagreement
+is described as conflicting receipts, distinct from an unrecorded or explicitly
+unknown identity. An observation disagreement reports `conflicting-receipts`
+rather than choosing one timestamp. Fields the receipts agree on remain
+available.
 
 The source row's `newest_observed_at` is when Loom observed the newest record,
 not the content's timestamp or the receipt's `written_at`. When no observation

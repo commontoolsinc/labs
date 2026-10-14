@@ -167,7 +167,13 @@ export function linkColumnsOf(t: TableSchema): string[] {
     .map(([name]) => name);
 }
 
-const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
+/**
+ * `name` as a quoted SQLite identifier, with an embedded quote doubled. Every
+ * string comes out as the one identifier it names, so no table or column name
+ * can carry structure into the statement it is written into.
+ */
+export const quoteIdentifier = (name: string): string =>
+  `"${name.replaceAll('"', '""')}"`;
 
 /**
  * Additive DDL for a table (Phase 2: create-only). Column names are quoted and
@@ -202,11 +208,11 @@ export function createTableSQL(
       // `db.tables` that never passed through `table()`/normalizeColumn.
       const sqlType = col_schema.sqlType ?? "text";
       assertSafeColumn(col, sqlType);
-      return `  ${quoteIdent(col)} ${sqlType}`;
+      return `  ${quoteIdentifier(col)} ${sqlType}`;
     },
   );
   const target = schema
-    ? `${quoteIdent(schema)}.${quoteIdent(name)}`
-    : quoteIdent(name);
+    ? `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`
+    : quoteIdentifier(name);
   return `CREATE TABLE IF NOT EXISTS ${target} (\n${cols.join(",\n")}\n)`;
 }

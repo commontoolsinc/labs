@@ -989,6 +989,127 @@ describe("connector-grants", () => {
       expect(message).not.toContain("2026-09-11T01:45:19.283Z");
     });
 
+    it("describes which tables held rows from a receipt that records table presence", async () => {
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+        ], [{
+          ...sourceReceipt(MAIL_PIECE.name, "gmail-work", undefined),
+          table_row_counts: undefined,
+          table_has_rows: {
+            messages: true,
+            participants: true,
+            drafts: false,
+            attachments: null,
+          },
+        }]),
+      }));
+      expect(result.unnamed).toEqual([]);
+      const specs = parseConnectorGrants(JSON.stringify(result.grants));
+      expect(specs[0]!.tableHasRows).toEqual({
+        messages: true,
+        participants: true,
+        drafts: false,
+        attachments: null,
+      });
+      const { grants } = await mintWellKnownGrants(
+        undefined,
+        "table-presence",
+        specs,
+      );
+      const message = wellKnownGrantsContextMessage(
+        JSON.parse(JSON.stringify(grants)),
+      );
+      expect(message).toContain(
+        "Tables at injection: with rows `messages`, `participants`; " +
+          "empty `drafts`; unreadable `attachments`.",
+      );
+      expect(message).not.toContain("Physical rows");
+    });
+
+    it("describes a receipt that records presence for no table by the row count it carries", async () => {
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+        ], [{
+          ...sourceReceipt(MAIL_PIECE.name, "gmail-work", 19),
+          table_has_rows: {},
+        }]),
+      }));
+      const { grants } = await mintWellKnownGrants(
+        undefined,
+        "no-table-presence",
+        result.grants,
+      );
+      const message = wellKnownGrantsContextMessage(grants);
+      expect(message).toContain("Physical rows at injection: 19");
+      expect(message).not.toContain("Tables at injection");
+    });
+
+    for (
+      const presence of [
+        [],
+        "yes",
+        { messages: 1 },
+        { "two words": true },
+        { "x`y": true },
+      ]
+    ) {
+      it(`keeps malformed table presence ${JSON.stringify(presence)} unknown and describes the row count instead`, async () => {
+        const result = resolveConnectorGrants(records({
+          handlesJson: handlesJson([
+            handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+          ], [{
+            ...sourceReceipt(MAIL_PIECE.name, "gmail-work", 19),
+            table_has_rows: presence,
+          }]),
+        }));
+        expect(result.unnamed).toEqual([]);
+        expect(result.grants).toHaveLength(1);
+        expect(result.grants[0]!.tableHasRows).toBeUndefined();
+        const { grants } = await mintWellKnownGrants(
+          undefined,
+          "malformed-presence",
+          result.grants,
+        );
+        const message = wellKnownGrantsContextMessage(grants);
+        expect(message).toContain("Physical rows at injection: 19");
+        expect(message).not.toContain("Tables at injection");
+      });
+    }
+
+    it("keeps table presence unknown where repeated receipts disagree about it", () => {
+      const receipt = {
+        ...sourceReceipt(MAIL_PIECE.name, "gmail-work", 19),
+        table_has_rows: { messages: true },
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+        ], [receipt, { ...receipt, table_has_rows: { messages: false } }]),
+      }));
+      expect(result.unnamed).toEqual([]);
+      expect(result.grants).toHaveLength(1);
+      expect(result.grants[0]!.tableHasRows).toBeUndefined();
+      expect(result.grants[0]!.rowCount).toBe(19);
+    });
+
+    it("keeps table presence where repeated receipts agree about it", () => {
+      const receipt = {
+        ...sourceReceipt(MAIL_PIECE.name, "gmail-work", 19),
+        table_has_rows: { messages: true, drafts: null },
+      };
+      const result = resolveConnectorGrants(records({
+        handlesJson: handlesJson([
+          handle(MAIL_PIECE.name, "gmail-work", MAIL_REF),
+        ], [receipt, { ...receipt }]),
+      }));
+      expect(result.grants[0]!.tableHasRows).toEqual({
+        messages: true,
+        drafts: null,
+      });
+    });
+
     it("keeps a null source viewer distinct from an explicitly unknown viewer", async () => {
       for (const viewer of [null, { kind: "unknown", absent_reason: null }]) {
         const result = resolveConnectorGrants(records({
@@ -1390,6 +1511,20 @@ describe("connector-grants", () => {
       expect(line).not.toContain("``");
       expect(line).not.toContain("gmail-work ()");
       expect(line).not.toContain("gmail-work (gmail-work)");
+    });
+
+    it("rejects table presence that does not map table names to true, false, or null", () => {
+      for (const tableHasRows of [[], { messages: "yes" }, { "x y": true }]) {
+        expect(() =>
+          parseConnectorGrants(JSON.stringify([{
+            name: "gmail-work",
+            cfcClasses: ["email"],
+            tableHasRows,
+            ref: MAIL_REF,
+            source: { connection: "gmail-work", piece: MAIL_PIECE.name },
+          }]))
+        ).toThrow("tableHasRows must map table names");
+      }
     });
 
     it("rejects competing singular and plural class metadata", () => {

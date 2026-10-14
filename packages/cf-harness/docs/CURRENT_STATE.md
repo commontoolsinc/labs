@@ -933,20 +933,23 @@ The current package provides:
   `database` instead: its tables, one property per table whose own properties
   are that table's columns with their types, reduced by the same allowlist, and
   one label entry per column that declares an `ifc`, addressed by table name and
-  column name. Beside those it reports `fill`: per table the rows it holds, and
-  per disclosed column how many of those rows are non-NULL there, so a column
-  filled on no row is visible before a query filters on it and comes back empty.
-  A table that could not be counted reports `unread` rather than zero, and a run
-  whose storage provider offers no query reports no `fill` at all. That is the
-  one place the tool reads a value, and it is conditional on nothing being
+  column name. Beside those it reports `fill`, judged from a sample of each
+  table's first rows, at most `fill.sampleLimit` of them: per table how many
+  rows the sample read, and per disclosed column how many of those are non-NULL
+  there, so a column with no value in any sampled row is visible before a query
+  filters on it and comes back empty. The figures are the sample's and never a
+  total, so they cost the same on a multi-gigabyte connector store as on a small
+  one. A table that could not be read reports `unread` rather than zero, and a
+  run whose storage provider offers no query reports no `fill` at all. That is
+  the one place the tool reads a value, and it is conditional on nothing being
   declared — a database's tables are the contract it was created under, its rows
-  are in the database file, and nothing here opens one; a count is taken of a
-  whole table and of whole columns, never under a caller's own predicate.
-  Disclosure admits addresses in the session's own space and foreign DIDs the
-  operator lists with their host in `--fabric-foreign-spaces`; that bound is on
-  the handle's own address rather than on everything the document reaches from
-  it. Answering from the fabric establishes the run's fabric session despite the
-  tool's `read` effect class;
+  are in the database file, and nothing here opens one; a figure is taken of a
+  table's first rows and of whole columns across them, never under a caller's
+  own predicate. Disclosure admits addresses in the session's own space and
+  foreign DIDs the operator lists with their host in `--fabric-foreign-spaces`;
+  that bound is on the handle's own address rather than on everything the
+  document reaches from it. Answering from the fabric establishes the run's
+  fabric session despite the tool's `read` effect class;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,
   using persisted operational provenance rather than request content or personal
   identifiers;

@@ -334,6 +334,23 @@ describe("connector-reading primitives", () => {
       expect(result.matching).toBe(2);
     });
 
+    it("counts every row as matching when the caller names no predicate", async () => {
+      const source = await seedDatabase(LEDGER_TABLES, [
+        ledgerRow("live", "2026-03-04", "Pacific Gas", 84.2, 0),
+        ledgerRow("gone", "2026-03-06", "Refunded Co", 9, 1),
+      ]);
+
+      const result = await runAtom(
+        await atomSource("source-row-count.tsx"),
+        { source, table: "rows_plaid_transaction" },
+      );
+
+      expect(result.errorMessage).toBe("");
+      expect(result.predicate).toBe("");
+      expect(result.total).toBe(2);
+      expect(result.matching).toBe(2);
+    });
+
     it("counts no row for a predicate the store's rows do not satisfy", async () => {
       // The other tombstone spelling over a store that writes the text column
       // never-NULL: the difference between the two numbers is what says the

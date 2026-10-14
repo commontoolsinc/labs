@@ -52,6 +52,7 @@ import {
 import { blankWriteSql, parseWriteTable } from "./write-targets.ts";
 import { bindArgs, runWrite, type WriteResult } from "./exec.ts";
 import { assertWriteSafe } from "./guard.ts";
+import { quoteIdentifier } from "./schema.ts";
 
 /** Policy cap on rows one statement may write into a rule-bearing table: each
  *  affected row runs the rule's regexes on the shared, single-threaded
@@ -83,8 +84,6 @@ const fail = (message: string): never => {
   throw new RowLabelCommitError(`sqlite commit refused: ${message}`);
 };
 
-const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
-
 // Rowids and rule inputs both cross into JS as TEXT, rendered by SQLite —
 // see `rowidText` and `renderedInput` below for why. A rowid is therefore a
 // string of digits here; anything else means the render did not happen.
@@ -107,7 +106,7 @@ const isRowidValue = (v: unknown): v is string =>
 // exists to prevent.
 const rowidText = (rowid: string) => `CAST(${rowid} AS TEXT)`;
 const renderedInput = (column: string) => {
-  const id = quoteIdent(column);
+  const id = quoteIdentifier(column);
   return `CASE WHEN typeof(${id}) = 'integer' THEN CAST(${id} AS TEXT) ` +
     `ELSE ${id} END AS ${id}`;
 };
@@ -293,7 +292,9 @@ export function applySqliteCommitWrite(
     // The digits bind as text and cast back to the integer inside SQL, so the
     // comparison is still rowid-to-rowid and still takes the rowid index.
     const readSql = `SELECT ${rowidText(rowidName)} AS __cf_rowid, ` +
-      `${selectCols} FROM ${quoteIdent(declaredKey)} WHERE ${rowidName} IN (${
+      `${selectCols} FROM ${
+        quoteIdentifier(declaredKey)
+      } WHERE ${rowidName} IN (${
         chunk.map(() => "CAST(? AS INTEGER)").join(", ")
       })`;
     const readStmt = db.prepare(readSql);

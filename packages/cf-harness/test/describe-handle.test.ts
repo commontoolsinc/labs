@@ -7,10 +7,13 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/data-model";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { createSession, Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
+import { FILL_SAMPLE_LIMIT } from "@commonfabric/memory/sqlite/diagnostics";
+import { runQuery } from "@commonfabric/memory/sqlite/exec";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -169,17 +172,6 @@ const SPENDING_PATTERN_SOURCE = [
 ].join("\n");
 
 /**
- * A SQLite database handle in the shape one arrives in when a connector
- * injects it: the tables it was created under, carried in the handle's own
- * value, with nothing declaring a schema for the cell that holds it. The
- * table title, the column description and the column default are the prose
- * and values a reduction has to drop; the `ifc` annotations are what a reader
- * has to be told.
- */
-/** One `COUNT("<column>") AS "<alias>"` clause of a count statement. */
-const COUNT_CLAUSE = /COUNT\("([^"]+)"\) AS "([^"]+)"/g;
-
-/**
  * A database whose one table carries a per-row label rule. The rule reads
  * `status`, which a query must project or the read is refused, and `status` is
  * a disclosed column so the disclosure may name it.
@@ -211,6 +203,14 @@ const BANK_DB_HANDLE = {
   },
 };
 
+/**
+ * A SQLite database handle in the shape one arrives in when a connector
+ * injects it: the tables it was created under, carried in the handle's own
+ * value, with nothing declaring a schema for the cell that holds it. The
+ * table title, the column description and the column default are the prose
+ * and values a reduction has to drop; the `ifc` annotations are what a reader
+ * has to be told.
+ */
 const MAIL_DB_HANDLE = {
   id: "db-mail",
   rev: 3,
@@ -1520,7 +1520,7 @@ describe("describe_handle", () => {
       /**
        * Replaces the query the session's storage provider offers for this
        * space, and returns what to restore. The emulated provider offers
-       * none, so a test that wants counts supplies the one the count read
+       * none, so a test that wants a sample supplies the one the sample read
        * calls.
        */
       const withProviderQuery = (
@@ -1533,7 +1533,7 @@ describe("describe_handle", () => {
         ) as { sqliteQuery?: unknown };
         const previous = provider.sqliteQuery;
         // Installed as a method that reads its receiver, because the real one
-        // does: a count read that lifted the name off the provider and called
+        // does: a sample read that lifted the name off the provider and called
         // it detached would arrive here with `this` undefined, and a fake
         // arrow function would never notice.
         provider.sqliteQuery = query === undefined ? undefined : function (
@@ -1551,31 +1551,75 @@ describe("describe_handle", () => {
         };
       };
 
-      it("reports the rows a table holds and how many of them each column is non-NULL on", async () => {
+      /** The in-memory databases a case opened, closed after it. */
+      let databases: Database[] = [];
+
+      afterEach(() => {
+        for (const database of databases) {
+          database.close();
+        }
+        databases = [];
+      });
+
+      /**
+       * A query over an in-memory database built by `statements`, run through
+       * the server's own read path — the statement guard, then SQLite — so a
+       * case asserts what the statement `describe_handle` sends reads from real
+       * rows, and every statement it sends is recorded in `sent`.
+       */
+      const queryOver = (
+        statements: readonly string[],
+        sent: string[] = [],
+      ): (db: unknown, sql: string) => Promise<{ rows: unknown[] }> => {
+        const database = new Database(":memory:");
+        databases.push(database);
+        for (const statement of statements) {
+          database.exec(statement);
+        }
+        // A provider's query returns a promise, and an in-memory database
+        // answers synchronously.
+        // deno-lint-ignore require-await
+        return async (_db, sql) => {
+          sent.push(sql);
+          return { rows: runQuery(database, sql) };
+        };
+      };
+
+      /** The numbers `1` to `count`, as rows of one `value` column. */
+      const series = (count: number): string =>
+        "(WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 " +
+        `FROM n WHERE value < ${count}) SELECT value FROM n)`;
+
+      /** `messages` as `MAIL_DB_HANDLE` declares it. */
+      const MAIL_TABLE_SQL =
+        "CREATE TABLE messages (sender TEXT, body TEXT, received INTEGER)";
+
+      /** `rows_txn` as `BANK_DB_HANDLE` declares it, holding thirty rows. */
+      const BANK_TABLE_SQL = [
+        "CREATE TABLE rows_txn (amount REAL, status TEXT)",
+        "INSERT INTO rows_txn (amount, status) SELECT value, 'posted' " +
+        `FROM ${series(30)}`,
+      ];
+
+      it("reports how many rows a sample of each table read and how many of them carry a value in each column", async () => {
+        // `received` NULL on every row is the finding the sample exists for: a
+        // query filtering on it matches nothing while the table is full. The
+        // table holds more rows than one sample reads, so a figure that is the
+        // table's total rather than the sample's shows up as the wrong number.
+
         const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
         const minted = await mintAddressHandle(
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        // `received` NULL on every row is the finding the counts exist for: a
-        // query filtering on it matches nothing while the table is full. The
-        // fake reads the aliases out of the statement it is given, so what it
-        // returns is tied to the column each alias counts rather than to the
-        // order the disclosure happens to list them in.
-        const filled: Record<string, number> = {
-          sender: 1687,
-          body: 1600,
-          received: 0,
-        };
+        const rows = FILL_SAMPLE_LIMIT + 200;
         const statements: string[] = [];
-        const restore = withProviderQuery((_db, sql) => {
-          statements.push(sql);
-          const row: Record<string, number> = { n: 1687 };
-          for (const [, column, alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = filled[column] ?? -1;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver([
+          MAIL_TABLE_SQL,
+          "INSERT INTO messages (sender, body, received) SELECT " +
+          "'sender-' || value, CASE WHEN value % 2 = 0 THEN 'body' END, NULL " +
+          `FROM ${series(rows)}`,
+        ], statements));
 
         let output;
         try {
@@ -1587,16 +1631,47 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
-          table: "messages",
-          rows: 1687,
-          nonNull: { sender: 1687, body: 1600, received: 0 },
-        }]);
+        expect(output.database?.fill).toEqual({
+          sampleLimit: FILL_SAMPLE_LIMIT,
+          tables: [{
+            table: "messages",
+            sampled: FILL_SAMPLE_LIMIT,
+            nonNull: {
+              sender: FILL_SAMPLE_LIMIT,
+              body: FILL_SAMPLE_LIMIT / 2,
+              received: 0,
+            },
+          }],
+        });
         // One statement per table, over the table itself and no predicate.
         expect(statements).toHaveLength(1);
-        expect(statements[0]).toContain('SELECT COUNT(*) AS "n"');
         expect(statements[0]).toContain('FROM "messages"');
         expect(statements[0]).not.toContain("WHERE");
+      });
+
+      it("reports a table that holds no row as sampling none", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+        const restore = withProviderQuery(queryOver([MAIL_TABLE_SQL]));
+
+        let output;
+        try {
+          output = await describeHandleTool.invoke(
+            contextWith(minted.table, session),
+            { token: minted.token },
+          );
+        } finally {
+          restore();
+        }
+
+        expect(output.database?.fill?.tables).toEqual([{
+          table: "messages",
+          sampled: 0,
+          nonNull: { sender: 0, body: 0, received: 0 },
+        }]);
       });
 
       it("names the columns a table's per-row label rule reads", async () => {
@@ -1609,13 +1684,7 @@ describe("describe_handle", () => {
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery((_db, sql) => {
-          const row: Record<string, number> = { n: 30 };
-          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = 30;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver(BANK_TABLE_SQL));
 
         let output;
         try {
@@ -1627,9 +1696,9 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
+        expect(output.database?.fill?.tables).toEqual([{
           table: "rows_txn",
-          rows: 30,
+          sampled: 30,
           nonNull: { amount: 30, status: 30 },
           rowLabelReads: ["status"],
         }]);
@@ -1641,13 +1710,7 @@ describe("describe_handle", () => {
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery((_db, sql) => {
-          const row: Record<string, number> = { n: 1 };
-          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = 1;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver([MAIL_TABLE_SQL]));
 
         let output;
         try {
@@ -1659,24 +1722,22 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill?.[0]).not.toHaveProperty("rowLabelReads");
-        expect(output.database?.fill?.[0]).not.toHaveProperty(
-          "rowLabelReadsIncomplete",
-        );
+        const entry = output.database?.fill?.tables[0];
+        expect(entry?.table).toBe("messages");
+        expect(entry).not.toHaveProperty("rowLabelReads");
+        expect(entry).not.toHaveProperty("rowLabelReadsIncomplete");
       });
 
-      it("names a table's rule columns even when it could not be counted", async () => {
+      it("names a table's rule columns even when it could not be read", async () => {
         // What a query must project is a property of the declaration, so a
-        // table nothing could count still has to be queried correctly.
+        // table nothing could read still has to be queried correctly.
 
         const ref = await seedUndeclaredCell(BANK_DB_HANDLE);
         const minted = await mintAddressHandle(
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery(() =>
-          Promise.reject(new Error("no such table: rows_txn"))
-        );
+        const restore = withProviderQuery(queryOver([]));
 
         let output;
         try {
@@ -1688,7 +1749,7 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
+        expect(output.database?.fill?.tables).toEqual([{
           table: "rows_txn",
           rowLabelReads: ["status"],
           unread: "no such table: rows_txn",
@@ -1723,13 +1784,7 @@ describe("describe_handle", () => {
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery((_db, sql) => {
-          const row: Record<string, number> = { n: 30 };
-          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = 30;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver(BANK_TABLE_SQL));
 
         let output;
         try {
@@ -1741,7 +1796,7 @@ describe("describe_handle", () => {
           restore();
         }
 
-        const entry = output.database?.fill?.[0];
+        const entry = output.database?.fill?.tables[0];
         expect(entry).not.toHaveProperty("rowLabelReads");
         expect(entry?.rowLabelReadsIncomplete).toBe(true);
       });
@@ -1767,13 +1822,7 @@ describe("describe_handle", () => {
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery((_db, sql) => {
-          const row: Record<string, number> = { n: 30 };
-          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = 30;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver(BANK_TABLE_SQL));
 
         let output;
         try {
@@ -1785,7 +1834,7 @@ describe("describe_handle", () => {
           restore();
         }
 
-        const entry = output.database?.fill?.[0];
+        const entry = output.database?.fill?.tables[0];
         expect(entry).not.toHaveProperty("rowLabelReads");
         expect(entry?.rowLabelReadsIncomplete).toBe(true);
       });
@@ -1820,13 +1869,7 @@ describe("describe_handle", () => {
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery((_db, sql) => {
-          const row: Record<string, number> = { n: 30 };
-          for (const [, , alias] of sql.matchAll(COUNT_CLAUSE)) {
-            row[alias] = 30;
-          }
-          return Promise.resolve({ rows: [row] });
-        });
+        const restore = withProviderQuery(queryOver(BANK_TABLE_SQL));
 
         let output;
         try {
@@ -1838,20 +1881,18 @@ describe("describe_handle", () => {
           restore();
         }
 
-        const entry = output.database?.fill?.[0];
+        const entry = output.database?.fill?.tables[0];
         expect(entry).not.toHaveProperty("rowLabelReads");
         expect(entry?.rowLabelReadsIncomplete).toBe(true);
       });
 
-      it("reports a table it could not count as unread rather than as empty", async () => {
+      it("reports a table it could not read as unread rather than as empty", async () => {
         const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
         const minted = await mintAddressHandle(
           createHarnessHandleTable("run-describe"),
           ref,
         );
-        const restore = withProviderQuery(() =>
-          Promise.reject(new Error("no such table: messages"))
-        );
+        const restore = withProviderQuery(queryOver([]));
 
         let output;
         try {
@@ -1863,16 +1904,16 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
-          table: "messages",
-          unread: "no such table: messages",
-        }]);
-        // The contract still discloses, so a database that cannot be counted
-        // is still one an agent can write a query against.
+        expect(output.database?.fill).toEqual({
+          sampleLimit: FILL_SAMPLE_LIMIT,
+          tables: [{ table: "messages", unread: "no such table: messages" }],
+        });
+        // The contract still discloses, so a database that cannot be read is
+        // still one an agent can write a query against.
         expect(output.database?.tables).toBeDefined();
       });
 
-      it("reports a table whose count query refused with no error object as unread", async () => {
+      it("reports a table whose sample query refused with no error object as unread", async () => {
         // What a provider throws is its own, and not every refusal arrives as
         // an `Error`. The reason still has to reach the caller as text.
         const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
@@ -1894,13 +1935,13 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
+        expect(output.database?.fill?.tables).toEqual([{
           table: "messages",
           unread: "the store is closed",
         }]);
       });
 
-      it("reports a table whose count query returned no count as unread", async () => {
+      it("reports a table whose sample query returned no count as unread", async () => {
         // The provider answered, so nothing threw, and what came back holds no
         // row count. Zero is the one thing that must not be reported for it.
         const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
@@ -1920,9 +1961,9 @@ describe("describe_handle", () => {
           restore();
         }
 
-        expect(output.database?.fill).toEqual([{
+        expect(output.database?.fill?.tables).toEqual([{
           table: "messages",
-          unread: "the count query returned no row count",
+          unread: "the sample query returned no row count",
         }]);
       });
 

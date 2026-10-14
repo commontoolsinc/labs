@@ -53,6 +53,13 @@ const GRANT_DESCRIPTIONS: Record<HarnessWellKnownGrantName, string> = {
 const CONNECTION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 const COMPANION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+/**
+ * A table name a receipt may report presence for. It is interpolated into
+ * model-facing text between backticks, so it is held to a plain SQL
+ * identifier: nothing that could close the span or carry prose.
+ */
+const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
 const isDescriptionText = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
 
@@ -64,6 +71,20 @@ export const isConnectorObservationTimestamp = (
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
     .test(value) &&
   Number.isFinite(Date.parse(value));
+
+/**
+ * Whether `value` is a table-presence record a connector grant may carry: an
+ * object naming each table by a plain identifier, with `true`, `false`, or
+ * `null` for each.
+ */
+export const isConnectorTablePresence = (
+  value: unknown,
+): value is Readonly<Record<string, boolean | null>> =>
+  isObjectNotArray(value) &&
+  Object.entries(value).every(([table, hasRows]) =>
+    TABLE_NAME_PATTERN.test(table) &&
+    (hasRows === true || hasRows === false || hasRows === null)
+  );
 
 /** The Loom store identity, independent of which piece exposes it. */
 export const connectorGrantName = (
@@ -146,6 +167,37 @@ const connectorObservationDescription = (
 };
 
 /**
+ * Describes what the receipt says the store held at injection: which tables
+ * held rows, where the receipt records that, and otherwise the physical row
+ * count it records, if any.
+ */
+const connectorFillDescription = (
+  grant: HarnessConnectorGrantSpec,
+): string => {
+  const presence = grant.tableHasRows;
+  // A receipt that names no table says nothing about presence, so a row count
+  // it also carries is the better description.
+  if (presence === undefined || Object.keys(presence).length === 0) {
+    return `Physical rows at injection: ${
+      grant.rowCount ?? "unknown"
+    } (including metadata and history).`;
+  }
+  const named = (hasRows: boolean | null): string[] =>
+    Object.entries(presence)
+      .filter(([, value]) => value === hasRows)
+      .map(([table]) => `\`${table}\``);
+  const groups = [
+    { state: "with rows", tables: named(true) },
+    { state: "empty", tables: named(false) },
+    { state: "unreadable", tables: named(null) },
+  ].filter(({ tables }) => tables.length > 0);
+  return `Tables at injection: ${
+    groups.map(({ state, tables }) => `${state} ${tables.join(", ")}`)
+      .join("; ")
+  }.`;
+};
+
+/**
  * Describes a connector using validated identity, classes, and receipt metadata.
  */
 const connectorGrantDescription = (
@@ -156,13 +208,11 @@ const connectorGrantDescription = (
     classes.length === 0
       ? "whose reads carry CFC labels"
       : `whose columns carry \`${classes.join("`, `")}\` CFC labels`
-  }. Account identity: ${
-    connectorViewerDescription(grant.viewer)
-  }. Physical rows at injection: ${
-    grant.rowCount ?? "unknown"
-  } (including metadata and history). Newest observed at: ${
+  }. Account identity: ${connectorViewerDescription(grant.viewer)}. ${
+    connectorFillDescription(grant)
+  } Newest observed at: ${
     connectorObservationDescription(grant.observation)
-  } (when Loom observed a record, not its content time). Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is, because a column that is empty for every row is a filter that returns nothing. Refer to the connection by its human name when speaking to the user, never by a handle token.`;
+  } (when Loom observed a record, not its content time). Wire it into run_pattern \`inputs\` and read it with \`db.query\`; use describe_handle first to see its tables and how full each column is across a sample of each table's first rows, because a column with no value in any sampled row is a filter likely to return nothing — though the sample is a table's first rows, usually its oldest, so a column a store began filling later can read as empty there. Refer to the connection by its human name when speaking to the user, never by a handle token.`;
 };
 
 /**
@@ -247,6 +297,14 @@ export const checkConnectorGrantSpec = (
     (!Number.isSafeInteger(spec.rowCount) || spec.rowCount < 0)
   ) {
     throw new Error("connector row count must be a nonnegative safe integer");
+  }
+  if (
+    spec.tableHasRows !== undefined &&
+    !isConnectorTablePresence(spec.tableHasRows)
+  ) {
+    throw new Error(
+      `connector table presence must map table names matching ${TABLE_NAME_PATTERN} to true, false, or null`,
+    );
   }
   const viewer = spec.viewer;
   if (
@@ -391,6 +449,9 @@ export const mintWellKnownGrants = async (
             : { cfcClasses: grant.cfcClasses }),
           ...(grant.cfcClass === undefined ? {} : { cfcClass: grant.cfcClass }),
           ...(grant.rowCount === undefined ? {} : { rowCount: grant.rowCount }),
+          ...(grant.tableHasRows === undefined
+            ? {}
+            : { tableHasRows: grant.tableHasRows }),
           ...(grant.viewer === undefined ? {} : { viewer: grant.viewer }),
           ...(grant.observation === undefined
             ? {}

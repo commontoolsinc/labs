@@ -57,6 +57,13 @@ export interface HarnessConnectorGrantSpec {
   rowCount?: number;
 
   /**
+   * Per table, whether it held a row at injection: `true` it did, `false` it
+   * held none, and `null` the receipt could not read it. Absent when the
+   * receipt records no table presence, or repeated receipts disagree.
+   */
+  tableHasRows?: Readonly<Record<string, boolean | null>>;
+
+  /**
    * Account identity from the receipt; absent when the receipt did not record it.
    */
   viewer?:
