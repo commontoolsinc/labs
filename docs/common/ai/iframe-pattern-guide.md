@@ -400,25 +400,70 @@ deno task cf check packages/patterns/quick-notes/main.tsx --no-run
 If the pattern is intentionally outside the repository, pass its directory as
 `--root`; otherwise the CLI uses the repository as its source boundary.
 
-Launch a repository pattern against local servers from the repository root:
+Launch a repository pattern against local servers from the repository root.
+Start the servers first:
 
 ```bash
 ./scripts/start-local-dev.sh
+```
+
+The script serves on ports 8000 and 5173 and fails when either is taken, which
+is the usual case when another checkout has servers running. Start it with
+`--port-offset=<n>` then. Continue only once it reports that both servers
+started, and use the `Toolshed:` address it prints,
+`http://localhost:<8000 + n>`, as `CF_API_URL` below: a `cf` command pointed at
+port 8000 would deploy to the other checkout's server.
+[`LOCAL_DEV_SERVERS.md`](../../development/LOCAL_DEV_SERVERS.md) covers the
+scripts.
+
+Then mint a key, create a space, and create the piece in it:
+
+```bash
 mkdir -p .cf
 test -e .cf/iframe-pattern.key || \
   deno task cf id new > .cf/iframe-pattern.key
-CF_API_URL=http://localhost:8000 \
-CF_IDENTITY=.cf/iframe-pattern.key \
+# The Toolshed address that start-local-dev.sh printed.
+export CF_API_URL=http://localhost:8000
+export CF_IDENTITY=.cf/iframe-pattern.key
+export CF_SPACE="$(deno task cf space create --label "Iframe quick notes")"
 deno task cf piece new packages/patterns/quick-notes/main.tsx \
-  --root . --space iframe-quick-notes --slug quick-notes
+  --root . --slug quick-notes
 ```
 
 Never overwrite an existing key file: doing so selects a different PerUser
-identity. Open `http://localhost:8000/iframe-quick-notes/quick-notes`. If the
-shell shows its first-use login, register a new key and complete the passphrase
-confirmation. Exercise the meaningful action and check the browser console;
-compilation alone does not prove that the guest loaded or that a bridge write
-completed.
+identity. `cf piece new` does not create the space it names, so
+`cf space create` runs first. It prints the new space's DID, which `CF_SPACE`
+and `--space` accept. Run both commands once: each `cf space create` makes
+another space, and a second `cf piece new` leaves the slug with the first
+piece. `cf piece new` prints the page address under `Open in browser`, which is
+`$CF_API_URL/$CF_SPACE/quick-notes`. It also prints the `cf piece setsrc`
+command that updates the piece after a source change.
+
+Open the page address. A browser that has not signed in is shown the shell's
+login. Sign it in with the key the CLI used: choose **Register**, which a
+browser that has signed in before labels **Register New Key**, then
+**Import CLI Key**, and select `.cf/iframe-pattern.key`. The browser then acts
+as the identity that created the space, the only one the space admits, and `cf`
+commands read the PerUser values the page wrote.
+[`shared-identity.md`](../../features/shared-identity.md) covers that workflow.
+
+**Use Passphrase** on the same screen, followed by generating and confirming a
+passphrase, registers a new identity instead, and the space refuses it: the
+shell reports `Slug "quick-notes" not found.`, and the console carries
+`AuthorizationError: Principal did:key:… lacks READ on space did:key:…`.
+Take that route only when the tool driving the browser cannot choose a file, or
+for the second identity the multi-user checks below need. The principal the
+error names is the browser's DID, which
+`globalThis.app.state().identity.did()` also returns in the page's console.
+Grant it access with the CLI key, in a shell that has the three exports above,
+then reload the page:
+
+```bash
+deno task cf acl set <browser DID> WRITE
+```
+
+Exercise the meaningful action and check the browser console; compilation alone
+does not prove that the guest loaded or that a bridge write completed.
 
 Then run the pattern and exercise its meaningful interaction. Check that input
 renders, state survives at its declared scope, output changes only when the
@@ -426,7 +471,8 @@ guest intends, and any SQLite data has the declared isolation. A generated
 wrapper that compiles but never loads the guest is not complete.
 
 For multi-user behavior, cover two sessions of one identity, a second identity,
-and a reload. PerSpace data must agree everywhere; PerUser data must agree only
+and a reload. The second identity opens the piece only after the `cf acl set`
+grant above. PerSpace data must agree everywhere; PerUser data must agree only
 between the first identity's sessions; PerSession data must remain distinct.
 Exercise first use while scoped defaults and SQLite handles materialize, not
 only a warmed-up piece. When the pattern or bridge must support both execution

@@ -434,6 +434,25 @@ export type QueuedEvent = {
   endPieceStartWait?: (cause: PieceStartWake) => void;
 
   /**
+   * The FIFO slot is held while the piece the handler belongs to, or a piece
+   * that instantiated it, changes pattern (`Runner.pendingPatternChangeFor`).
+   * The head parks the queue as it does for a loading handler. The wait ends
+   * when the change settles, when the piece stops, when the event is dropped,
+   * or when the scheduler is disposed. The event then takes the handler
+   * registered for its stream, or keeps the one it was queued with when none
+   * is, and the flag clears; an event whose handler belongs to a graph its
+   * still-running piece replaced, with none registered, is dropped instead.
+   */
+  patternChangePending?: boolean;
+
+  /**
+   * Ends the wait of a head held for its piece's pattern change. Set when the
+   * wait begins and removed once the wait's end has been handled, a microtask
+   * after it is called.
+   */
+  endPatternChangeWait?: () => void;
+
+  /**
    * The FIFO slot is held while the stale-basis retry that requeued this
    * event waits for the state it will re-run against (the conflict's
    * catch-up and the pull of the document it names). The head parks the
