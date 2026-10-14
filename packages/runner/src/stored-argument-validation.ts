@@ -254,20 +254,26 @@ function topLevelSchema(
  * neither `undefined` nor `null`, so a branch of the slot's `anyOf` or `oneOf`
  * that admits only those says nothing about it, and the slot declares a handle
  * when its other branches do: one typed `Cell<T> | undefined` holds a handle as
- * one typed `Cell<T>` does.
+ * one typed `Cell<T>` does. The union is read where the slot's schema reaches
+ * it, through a `$ref` at its root as much as written in place, which is how a
+ * slot typed by a named alias of such a union arrives.
  */
 function declaresHandleForLink(schema: JSONSchema): boolean {
   if (ContextualFlowControl.declaredHandleKind(schema) !== undefined) {
     return true;
   }
   if (!isObjectNotArray(schema)) return false;
+  const union = typeof schema.$ref === "string"
+    ? resolveCfcSchemaRefs(schema)
+    : schema;
+  if (!isObjectNotArray(union)) return false;
   return (["anyOf", "oneOf"] as const).some((keyword) => {
-    const branches = schema[keyword];
+    const branches = union[keyword];
     if (!Array.isArray(branches)) return false;
     const linkable = branches.filter((branch) => !admitsOnlyAbsence(branch));
     return linkable.length > 0 && linkable.length < branches.length &&
       ContextualFlowControl.declaredHandleKind({
-          ...schema,
+          ...union,
           [keyword]: linkable,
         }) !== undefined;
   });

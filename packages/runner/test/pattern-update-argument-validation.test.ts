@@ -152,6 +152,22 @@ const tallyHandleOrUndefined = (marker: string): RuntimeProgram =>
   ].join("\n"));
 
 /**
+ * The same slot as {@link tallyHandleOrUndefined}, spelled through a named
+ * alias, so the slot's schema may reach the union through a `$ref`.
+ */
+const tallyHandleOrUndefinedAlias = (marker: string): RuntimeProgram =>
+  programOf([
+    "import { pattern, Writable } from 'commonfabric';",
+    "interface Counter { count?: number }",
+    "type MaybeTally = Writable<Counter> | undefined;",
+    "interface Args { tally: MaybeTally; spare?: MaybeTally; [key: string]: any }",
+    "export default pattern<Args, { marker: string }>(() => {",
+    `  return { marker: ${JSON.stringify(marker)} };`,
+    "});",
+    "",
+  ].join("\n"));
+
+/**
  * A version whose `stamp` is a `Date`, which generates `{ type: "object" }`
  * and is stored as a `FabricEpochNsec`.
  */
@@ -1476,6 +1492,53 @@ describe("pattern update validates the stored argument", () => {
       expect(await confidentialityOf(counterId)).toContainEqual(
         personalSpaceOf(space),
       );
+    });
+
+    it("leaves the linked document's confidentiality off what the update writes when the slot is a named handle-or-undefined alias", async () => {
+      const counter = rt.getCell<Record<string, unknown>>(
+        space,
+        "cell-or-undefined-alias-slot-labeled-counter",
+      );
+      const counterId = counter.getAsNormalizedFullLink().id;
+      const seed = rt.edit();
+      writeSeedEnvelopeDoc(seed, space);
+      seedStoredEnvelope(seed, {
+        space,
+        scope: "space",
+        id: counterId,
+        path: [],
+      }, {
+        value: { count: 3 },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["count"],
+              label: { confidentiality: [personalSpaceOf(space)] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const { cell } = await setupVintage(
+        openArgument("v1"),
+        { tally: counter },
+        "cell-or-undefined-alias-slot-labeled-link",
+      );
+
+      const { error } = await rollForward(
+        cell,
+        tallyHandleOrUndefinedAlias("v2"),
+      );
+
+      expect(error).toBeUndefined();
+      expect(
+        await confidentialityOf(cell.getAsNormalizedFullLink().id),
+        "the update read the linked counter through the aliased " +
+          "handle-or-undefined slot",
+      ).not.toContainEqual(personalSpaceOf(space));
     });
 
     it("rolls forward when the link reaches a value the handle's schema refuses", async () => {
