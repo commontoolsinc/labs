@@ -12,6 +12,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   multiUserTest,
   pattern,
   TESTS,
@@ -74,15 +75,15 @@ interface Setup {
 }
 
 // The messages' bodies, in the order they were recorded.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string" ? message.body : "<gone>"
   ).join(" | ");
 
-// Whether a message row's reaction field, one of its write controls, is
-// disabled.
-const reactingDisabled = (row: unknown): unknown =>
-  propValue(findNodeByProp(row, "placeholder", "Any emoji"), "disabled");
+// Whether the reaction field of a room's first message row, one of the row's
+// write controls, is disabled.
+const reactingDisabled = (room: unknown): unknown =>
+  propValue(findNodeByProp(room, "placeholder", "Any emoji"), "disabled");
 
 // Whether a room's main composer is disabled.
 const composerDisabled = (room: unknown): unknown =>
@@ -124,6 +125,10 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   } as RowArg);
 
@@ -179,6 +184,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   } as RowArg);
 
@@ -188,7 +197,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === true && composerDisabled(room[UI]) === false &&
-          reactingDisabled(onAlices[UI]) === false
+          reactingDisabled(room[UI]) === false
         ),
       },
       {
@@ -226,14 +235,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
   );
-  const onAlices = FabriChatMessageRow({
-    message: setup.records.messages.key(0),
-    myProfile: profile,
-    inThread: false,
-    kind: "group" as const,
-    composer: Writable.of({}),
-    ...records,
-  } as RowArg);
 
   return {
     [TESTS]: [
@@ -243,7 +244,7 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === false && composerDisabled(room[UI]) === true &&
-          reactingDisabled(onAlices[UI]) === true
+          reactingDisabled(room[UI]) === true
         ),
       },
     ],

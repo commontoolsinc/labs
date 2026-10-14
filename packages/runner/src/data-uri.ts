@@ -239,44 +239,14 @@ function mapLinks(
  * media type is returned as it came in, on the same footing as a link
  * naming a document in a space.
  *
- * The value a `data:` link carries is searched in turn, so a `data:` link
- * held inside it is inlined as well, to any depth.
- *
  * A `FabricPrimitive` comes back as the same instance: a leaf holds no link to
  * inline. A `FabricInstance` is refused, since passing one through would leave
- * a link inside it un-inlined. The refusal covers `value` and the root of the
- * value a `data:` link carries. A `FabricInstance` below that root comes back
- * as the same instance, with any link inside it left as it is, unless
- * `options.refuseCarriedInstances` asks for the refusal there as well.
+ * a link inside it un-inlined.
  *
  * @param value - The value to find and inline data: URI links in.
- * @param options.refuseCarriedInstances - Refuses a `FabricInstance` anywhere
- *   in the value a `data:` link carries. For a caller whose destination admits
- *   no instance, where returning one whole would put it there.
  * @returns The value with any data: URI links inlined.
- * @throws If it reaches a `FabricInstance` it refuses.
  */
-export function findAndInlineDataUriLinks(
-  value: any,
-  options: { refuseCarriedInstances?: boolean } = {},
-): any {
-  return inlineDataUriLinks(
-    value,
-    false,
-    options.refuseCarriedInstances === true,
-  );
-}
-
-/**
- * Recursive worker for {@link findAndInlineDataUriLinks}. `decoded` says
- * `value` lies inside the value a `data:` link carried, where a
- * `FabricInstance` is returned whole unless `refuseCarried` is set.
- */
-function inlineDataUriLinks(
-  value: any,
-  decoded: boolean,
-  refuseCarried: boolean,
-): any {
+export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
@@ -312,7 +282,7 @@ function inlineDataUriLinks(
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return inlineDataUriLinks(newSigilLink, decoded, refuseCarried);
+          return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length > 0) {
           // TODO(danfuzz): a path segment naming something inside a
@@ -331,6 +301,10 @@ function inlineDataUriLinks(
       // over directly is refused, while the same one decoded out of a `data:`
       // URI leaves silently, and a guard with a way around it is worse than no
       // guard, since it reads as covering the case.
+      //
+      // Only the payload itself is checked, because a decoded payload is
+      // returned rather than walked -- nothing here descends one, so there is
+      // no descent for a nested instance to be caught by.
       if (dataValue instanceof FabricInstance) {
         refuseFabricInstance(
           dataValue,
@@ -338,11 +312,7 @@ function inlineDataUriLinks(
         );
       }
 
-      // The payload can hold a `data:` link of its own, an immutable cell
-      // that was handed a snapshot's cell for one, so it is walked as well.
-      // The descent ends: an id embedded in a payload is shorter than the id
-      // that encodes the payload, so no id can contain itself.
-      return inlineDataUriLinks(dataValue, true, refuseCarried);
+      return dataValue;
     } else {
       return value;
     }
@@ -351,7 +321,7 @@ function inlineDataUriLinks(
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = inlineDataUriLinks(current, decoded, refuseCarried);
+      const inlined = findAndInlineDataUriLinks(current);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -368,11 +338,6 @@ function inlineDataUriLinks(
     // than an omission.
     return value;
   } else if (value instanceof FabricInstance) {
-    // Below the root of a decoded payload an instance is returned whole, and
-    // a link inside it survives as a link, for a caller that has not asked
-    // for the refusal there.
-    if (decoded && !refuseCarried) return value;
-
     // Refused. An instance's state can carry a `data:` URI link, and inlining
     // those is what this walk is for, so passing the value through would hand
     // it back _untransformed_ -- the link surviving as a link, the walk's
@@ -396,7 +361,7 @@ function inlineDataUriLinks(
   } else if (isObjectOrArray(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = inlineDataUriLinks(entry, decoded, refuseCarried);
+      const inlined = findAndInlineDataUriLinks(entry);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

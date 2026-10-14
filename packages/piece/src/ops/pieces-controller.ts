@@ -11,6 +11,7 @@ import {
 } from "@commonfabric/home-schemas";
 import {
   createSession,
+  type DID,
   Identity,
   legacySpaceDid,
   type Session,
@@ -115,6 +116,10 @@ import {
   assertPieceInputPath,
   PieceInputPathError,
 } from "./piece-input-path.ts";
+import {
+  type JoinVisitDecision,
+  joinVisitedRoomOf,
+} from "./join-visited-room.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
@@ -963,6 +968,17 @@ export class PiecesController<T = unknown> {
    * Resolve a piece to its canonical result cell, optionally starting it.
    * In view-scoped mode, the narrow root watch demands server execution;
    * mounted renderers own local graph registration and deeper replication.
+   *
+   * An open that reconciles waits, as {@link openPiece} does, for a piece
+   * that is already running to be re-instantiated on the pattern its pointer
+   * moved to, whether or not the open also starts it. The wait covers the
+   * move this open's own reconcile made and any earlier move the piece's
+   * pattern watcher has observed. It does not cover a move committed
+   * elsewhere that the watcher has yet to observe, a re-instantiation that
+   * fails, or one that follows a serving wave's settlement, so in those cases
+   * this resolves with the outgoing pattern's graph still running. As after
+   * any start, the piece's computations run when something demands their
+   * results.
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
@@ -1031,6 +1047,10 @@ export class PiecesController<T = unknown> {
         // just replaced — and reads through the returned cell describe it.
         piece = await piece.withTx().sync();
       }
+      await timePiecePhase(
+        "get.patternPointerFollowed",
+        () => this.#patternPointerFollowed(piece, outcome === "updated"),
+      );
     }
     if (start && !viewScoped) {
       // start() handles pattern loading and running. It's idempotent - no
@@ -1039,6 +1059,11 @@ export class PiecesController<T = unknown> {
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
+      // A start that was in flight before the pointer moved may have
+      // instantiated the outgoing pattern. Its watcher begins the follow as
+      // it is installed, which the wait ahead of the start came too early
+      // to observe.
+      if (reconcile) await this.#patternPointerFollowed(piece, false);
     }
 
     // If caller provided a schema, use it
@@ -1819,6 +1844,15 @@ export class PiecesController<T = unknown> {
    * moments ago from the source it was created with is started directly
    * through {@link startPiece} instead: following that origin again would only
    * fetch what it was just built from.
+   *
+   * A piece that is already running keeps its graph through a start, and the
+   * runner's pattern watcher re-instantiates it on the pattern its pointer
+   * moved to. This resolves once the watcher has, for the move this open's
+   * own reconcile made and for any earlier move the watcher has observed. A
+   * re-instantiation that fails is logged by the runner and leaves the piece
+   * on the pattern it was running. On a runtime that seals its writes into a
+   * serving wave, the re-instantiation follows the wave's settlement, and
+   * this resolves with the outgoing pattern's graph still running.
    */
   async openPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
     const piece = typeof pieceOrId === "string"
@@ -1836,9 +1870,51 @@ export class PiecesController<T = unknown> {
     // have handed us a cell bound to a read transaction older than it. Detach
     // and resync, or the start below loads the identity the origin just
     // replaced.
-    await this.startPiece(
-      outcome === "updated" ? await piece.withTx().sync() : piece,
+    const opened = outcome === "updated" ? await piece.withTx().sync() : piece;
+    await timePiecePhase(
+      "openPiece.patternPointerFollowed",
+      () => this.#patternPointerFollowed(opened, outcome === "updated"),
     );
+    await this.startPiece(opened);
+    // A start that was in flight before the pointer moved may have
+    // instantiated the outgoing pattern. Its watcher begins the follow as it
+    // is installed, which the wait ahead of the start came too early to
+    // observe.
+    await this.#patternPointerFollowed(opened, false);
+  }
+
+  /**
+   * Helper for the opens that reconcile a piece with its origin, which
+   * resolves once a piece that is already running runs the pattern its
+   * pointer names. A start leaves such a piece's graph as it is, and the
+   * runner's pattern watcher swaps in the incoming pattern after reading from
+   * storage, so until the swap a field the incoming pattern adds is unset and
+   * a stream it adds has no handler. Resolves at once for a piece that is not
+   * running: it has no watcher, and its start instantiates the pattern the
+   * pointer names.
+   *
+   * `movedHere` says this open's own reconcile moved the pointer. The watcher
+   * observes a move in a scheduler pass, so for that move this awaits
+   * `Runtime.idle()` first. An open that moved nothing does not, because
+   * `idle()` waits for the whole runtime, and so it waits only for a move
+   * the watcher has already observed. A move committed elsewhere that the
+   * watcher has yet to observe is not waited for.
+   *
+   * The wait is for this piece's watcher alone, and lasts as long as the
+   * watcher takes. Where another replica moved the pointer to a pattern this
+   * runtime has not compiled, the watcher loads that pattern, which a start
+   * of the same piece would wait for as well were it not running. A swap
+   * that fails is logged by the runner and leaves the piece on the pattern
+   * it was running.
+   */
+  async #patternPointerFollowed(
+    piece: Cell<unknown>,
+    movedHere: boolean,
+  ): Promise<void> {
+    const runner = this.runtime.runner;
+    if (!runner.isRunning(piece)) return;
+    if (movedHere) await this.runtime.idle();
+    await runner.patternPointerFollowed(piece);
   }
 
   /**
@@ -2143,8 +2219,8 @@ export class PiecesController<T = unknown> {
    *
    * A Home is created once, on its user's first open
    * ({@link ensureDefaultPattern}), by the Home space's own server under
-   * server execution, or ahead of a client handler that holds a cell a wish
-   * handed out beneath its empty root slot, and changes only by an in-place
+   * server execution, or by a client handler's first write through a cell a
+   * wish handed out beneath its empty root slot, and changes only by an in-place
    * source update, which retains the account data its root owns: profiles,
    * favorites, navigation, the shared-space catalog and the inbox pointer.
    * There is no path that drops or replaces that root, absent or present,
@@ -2395,6 +2471,28 @@ export class PiecesController<T = unknown> {
     );
   }
 
+  /**
+   * Tells the identity's chat manager that the identity has joined the
+   * FabriChat room whose space is `space`, when the space passes vetting, as
+   * `joinVisitedRoomOf()` says. This controller must be over the identity's
+   * Home space, and Home is brought up, created where it has no root, so a
+   * caller that must not create Home checks first that it exists.
+   *
+   * Resolves with what was decided, once any event is sent, which is before
+   * the manager has handled it. Rejects when Home cannot be brought up, or when
+   * reading what vetting needs fails other than by a refusal of access.
+   */
+  async joinVisitedRoom(space: DID): Promise<JoinVisitDecision> {
+    this.#assertHomeSpace("join a visited room");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    return await joinVisitedRoomOf(
+      this.runtime,
+      home,
+      this.runtime.userIdentityDID,
+      space,
+    );
+  }
+
   #assertHomeSpace(operation: string): void {
     if (this.#space !== this.runtime.userIdentityDID) {
       throw new Error(
@@ -2446,6 +2544,14 @@ export class PiecesController<T = unknown> {
    * race conditions - if multiple processes try to create the pattern
    * simultaneously, the first successful commit wins and others gracefully
    * discover the existing pattern on retry.
+   *
+   * An existing root follows its origin before it is started. A root that was
+   * already running when its origin moved it has been re-instantiated on the
+   * incoming pattern by the time this resolves, as one started here has. The
+   * exception is a runtime that seals its writes into a serving wave: there
+   * the re-instantiation follows the wave's settlement, which a call made
+   * within the wave's cycle cannot wait for, and this resolves with the
+   * outgoing pattern's graph still running.
    *
    * @returns The default pattern piece, either existing or newly created
    */
@@ -2747,6 +2853,20 @@ export class PiecesController<T = unknown> {
     await timePiecePhase(
       "ensureDefaultPattern.runtime.idle",
       () => this.runtime.idle(),
+    );
+    // A root that was already running when its origin moved it keeps its
+    // graph through the start above, and the runner's pattern watcher swaps
+    // in the incoming pattern. The watcher has observed the move by the time
+    // the runtime is idle, and what it does next reads from storage, which
+    // `idle()` does not wait for. Until the swap the root runs the outgoing
+    // pattern's graph: a field the incoming pattern adds is unset, and a
+    // stream it adds has no handler.
+    await timePiecePhase(
+      "ensureDefaultPattern.patternPointerFollowed",
+      async () => {
+        await this.runtime.runner.patternPointerFollowed(rootToStart);
+        await this.runtime.idle();
+      },
     );
     await timePiecePhase(
       "ensureDefaultPattern.synced",
