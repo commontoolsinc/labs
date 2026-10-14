@@ -468,13 +468,17 @@ member of `anyOf`, `oneOf` and `allOf`. A use at a path reaches every position
 above it, the event itself among them, so an event that is a cell earns the
 capability of every use the body makes. A cell's value is not read: its
 capabilities are its own reads'. An identity-only comparison of a plain
-position adds the `comparable` marker the runtime materializes it through. A
-cell the body uses in a way its summary does not record one path at a time
-keeps the capability written for it, since no narrower one can be shown to
-suffice: one at or below a value that escaped whole (`escapedPaths`), a cell's
-handle passed to a helper with no summary among them, and one strictly below a
-wildcard's prefix (`wildcardPaths`), as a destructuring of an array, an
-object's rest element, or a key that can name any element reaches. The
+position adds the `comparable` marker the runtime materializes it through, and
+a position whose schema is `true`, which admits any value, becomes a
+`comparable` cell. A cell the body uses in a way its summary does not record
+one path at a time keeps the capability written for it, since no narrower one
+can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among
+them, and one strictly below a wildcard's prefix (`wildcardPaths`), as a
+destructuring of an array, an object's rest element, or a key that can name any
+element reaches. Where the body uses a cell in a way the summary cannot verify
+at all (`hasUnverifiedCellUse`), as a mutator called by a name the body
+computes, every cell of the event keeps the capability written for it. The
 prefix's own cell keeps the capability its recorded use earns: a `.get()`
 before `JSON.stringify()` reads it, and a write through such a key writes it.
 

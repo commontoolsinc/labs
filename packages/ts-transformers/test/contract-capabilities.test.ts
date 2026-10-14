@@ -339,6 +339,61 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
 
       expect(schema).toEqual(before);
     });
+
+    it("keeps every cell as written where the body uses a cell in a way the summary cannot verify", () => {
+      // A dynamic mutator call (`e.c[e.method](1)`) leaves the summary's
+      // writes incomplete, so no cell's capability may be narrowed below what
+      // the author wrote.
+
+      const schema = event({ c: cell("cell"), d: cell("cell") });
+
+      expect(
+        narrowEventCapabilities(
+          schema,
+          summaryOf({ readPaths: [["d"]], hasUnverifiedCellUse: true }),
+        ),
+      ).toBe(schema);
+    });
+
+    it("marks a position whose schema admits any value `comparable` where the body compares it by identity alone", () => {
+      expect(
+        narrowEventCapabilities(
+          event({ v: true, never: false }),
+          summaryOf({ identityCellPaths: [["v"], ["never"]] }),
+        ),
+      ).toEqual(event({ v: { asCell: ["comparable"] }, never: false }));
+      expect(
+        narrowEventCapabilities(true, summaryOf({ identityCellPaths: [[]] })),
+      ).toEqual({ asCell: ["comparable"] });
+    });
+
+    it("leaves a `$ref` inside a definition's data as written when it renames the definition", () => {
+      const marker = { $ref: "#/$defs/Tree_narrowed" };
+      const narrowed = narrowEventCapabilities(
+        {
+          $ref: "#/$defs/Tree",
+          $defs: {
+            Tree: event({
+              c: cell("cell"),
+              kids: { type: "array", items: { $ref: "#/$defs/Tree" } },
+              marker: { type: "object", default: marker, const: marker },
+            }),
+          },
+        },
+        summaryOf({}),
+      );
+
+      expect(narrowed).toEqual({
+        $ref: "#/$defs/Tree",
+        $defs: {
+          Tree: event({
+            c: cell("opaque"),
+            kids: { type: "array", items: { $ref: "#/$defs/Tree" } },
+            marker: { type: "object", default: marker, const: marker },
+          }),
+        },
+      });
+    });
   });
 
   it("reports nothing unread for an event holding arrays of objects nested nine deep", async () => {
@@ -1496,6 +1551,74 @@ type Ev = { "": Writable<number>; other: Writable<number> };`,
       expect((schema.properties as Record<string, unknown>).other).toEqual(
         cell("opaque"),
       );
+    });
+  });
+
+  describe("a use the summary cannot record exactly", () => {
+    it("keeps a cell the body calls a mutator on by a name it computes as written", async () => {
+      const { event: schema } = await eventSchema(
+        "",
+        '{ c: Writable<number>; method: "set" | "send" }',
+        "(e) => { e.c[e.method](1); }",
+      );
+
+      expect(
+        (schema.properties as Record<string, Record<string, unknown>>).c!
+          .asCell,
+      ).toEqual(["cell"]);
+    });
+
+    it("marks a member typed `any` the body compares by identity alone `comparable`", async () => {
+      const { event: schema } = await eventSchema(
+        `import { equals } from "commonfabric";
+type Ev = { v: any };`,
+        "Ev",
+        "(e, { c }) => { c.set(equals(e.v, e.v) ? 1 : 0); }",
+      );
+
+      expect((schema.properties as Record<string, unknown>).v).toEqual({
+        asCell: ["comparable"],
+      });
+    });
+
+    it("marks an event typed `any` the body compares by identity alone `comparable`", async () => {
+      const { event: schema } = await eventSchema(
+        `import { equals } from "commonfabric";`,
+        "any",
+        "(e, { c }) => { c.set(equals(e, e) ? 1 : 0); }",
+      );
+
+      expect(schema).toEqual({ asCell: ["comparable"] });
+    });
+
+    it("keeps a recursion's default data as written when it renames the recursion", async () => {
+      const { event: schema } = await eventSchema(
+        `import { Default } from "commonfabric";
+const marker = { "$ref": "#/$defs/Ev_narrowed" } as const;
+type Ev = {
+  c: Writable<number>;
+  next?: Ev;
+  marker: Default<{ "$ref": string }, typeof marker>;
+};`,
+        "Ev",
+        "(e, { c }) => { c.set(e.c.get()); }",
+      );
+      const defaults: unknown[] = [];
+      const collect = (node: unknown): void => {
+        if (typeof node !== "object" || node === null) return;
+        const record = node as Record<string, unknown>;
+        const marker =
+          (record.properties as Record<string, unknown> | undefined)
+            ?.marker as Record<string, unknown> | undefined;
+        if (marker !== undefined) defaults.push(marker.default);
+        Object.values(record).forEach(collect);
+      };
+      collect(schema);
+
+      expect(defaults.length).toBeGreaterThan(0);
+      for (const value of defaults) {
+        expect(value).toEqual({ $ref: "#/$defs/Ev_narrowed" });
+      }
     });
   });
 });

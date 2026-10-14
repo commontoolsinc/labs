@@ -12,6 +12,13 @@
  * not record keeps the capability written for it.
  */
 
+import type { JSONSchema } from "@commonfabric/api";
+import {
+  forEachSubschema,
+  isSubschema,
+  mapSubschemas,
+} from "@commonfabric/data-model-schema/schema-walk";
+
 import type { CapabilityParamSummary } from "../core/mod.ts";
 
 type Path = readonly string[];
@@ -154,7 +161,10 @@ class ContractUses {
       ],
       summary.escapedPaths ?? [],
       summary.wildcardPaths ?? [],
-      false,
+      // A use the summary cannot verify, such as a mutator called by a name
+      // the body computes, leaves its writes incomplete, so it may reach any
+      // cell of the event.
+      summary.hasUnverifiedCellUse ?? false,
     );
   }
 }
@@ -182,7 +192,9 @@ export function narrowEventCapabilities(
   schema: unknown,
   summary: CapabilityParamSummary,
 ): unknown {
-  if (!isSchemaObject(schema)) return schema;
+  if (!isSchemaObject(schema)) {
+    return comparedAny(schema, ContractUses.of(summary));
+  }
   const definitions = isSchemaObject(schema.$defs) ? schema.$defs : {};
   const specialized = new Map<string, Specialization>();
   const names = new Map<string, string>();
@@ -241,7 +253,7 @@ export function narrowEventCapabilities(
   };
 
   const narrow = (node: unknown, uses: ContractUses): unknown => {
-    if (!isSchemaObject(node)) return node;
+    if (!isSchemaObject(node)) return comparedAny(node, uses);
     if (Array.isArray(node.asCell) && node.asCell.length > 0) {
       return narrowCell(node, uses);
     }
@@ -275,7 +287,10 @@ export function narrowEventCapabilities(
       }
       if (changed) set("properties", narrowedProperties);
     }
-    if (isSchemaObject(node.additionalProperties)) {
+    if (
+      isSchemaObject(node.additionalProperties) ||
+      node.additionalProperties === true
+    ) {
       const declared = new Set(
         isSchemaObject(node.properties) ? Object.keys(node.properties) : [],
       );
@@ -284,7 +299,7 @@ export function narrowEventCapabilities(
         narrow(node.additionalProperties, uses.undeclared(declared)),
       );
     }
-    if (isSchemaObject(node.items)) {
+    if (isSchemaObject(node.items) || node.items === true) {
       set("items", narrow(node.items, uses.element()));
     }
     for (const keyword of ["anyOf", "oneOf", "allOf"]) {
@@ -317,25 +332,27 @@ export function narrowEventCapabilities(
     }
   }
   if (renamed.size === 0) return withDefinitions(root, all, reached);
-  const rename = (node: unknown): unknown => {
-    if (Array.isArray(node)) return node.map(rename);
-    if (!isSchemaObject(node)) return node;
-    return Object.fromEntries(
-      Object.entries(node).map(([key, value]) => {
-        const name = key === "$ref" && typeof value === "string"
-          ? definitionName(value)
-          : undefined;
-        const to = name !== undefined ? renamed.get(name) : undefined;
-        return [key, to !== undefined ? `#/$defs/${to}` : rename(value)];
-      }),
-    );
+  // Only schema positions are walked, so a `$ref` inside data, a `default`
+  // or a `const`, stays as written.
+  const rename = (node: JSONSchema): JSONSchema => {
+    if (typeof node === "boolean") return node;
+    const name = typeof node.$ref === "string"
+      ? definitionName(node.$ref)
+      : undefined;
+    const to = name !== undefined ? renamed.get(name) : undefined;
+    const children = mapSubschemas(node, rename, { includeUnused: true });
+    return to === undefined ? children : { ...children, $ref: `#/$defs/${to}` };
   };
   const renamedDefinitions: Record<string, unknown> = {};
   for (const name of Object.keys(all)) {
     if (!reached.has(name)) continue;
-    renamedDefinitions[renamed.get(name) ?? name] = rename(all[name]);
+    const definition = all[name];
+    renamedDefinitions[renamed.get(name) ?? name] = isSubschema(definition)
+      ? rename(definition)
+      : definition;
   }
-  const renamedRoot = rename(root) as Schema;
+  const renamedRoot = isSubschema(root) ? rename(root) : root;
+  if (!isSchemaObject(renamedRoot)) return renamedRoot;
   return withDefinitions(
     renamedRoot,
     renamedDefinitions,
@@ -347,6 +364,17 @@ type Specialization =
   | { readonly kind: "same" }
   | { readonly kind: "inline"; readonly schema: unknown }
   | { readonly kind: "ref"; readonly name: string };
+
+/**
+ * `node`, a schema that is not an object, as a position the body compares by
+ * identity alone reads: `true`, which admits any value, becomes a comparable
+ * cell; `false` admits nothing and stays as it is.
+ */
+function comparedAny(node: unknown, uses: ContractUses): unknown {
+  return node === true && uses.comparedHere && !uses.untrackedHere
+    ? { asCell: ["comparable"] }
+    : node;
+}
 
 /** `node`, a cell, with its outermost entry narrowed to what `uses` earn. */
 function narrowCell(node: Schema, uses: ContractUses): Schema {
@@ -374,24 +402,23 @@ function reachableDefinitions(
   root: Schema,
   definitions: Record<string, unknown>,
 ): Set<string> {
-  const { $defs: _, ...body } = root;
   const reached = new Set<string>();
-  const visit = (node: unknown) => {
-    if (Array.isArray(node)) return node.forEach(visit);
-    if (!isSchemaObject(node)) return;
-    for (const [key, value] of Object.entries(node)) {
-      if (key === "$ref" && typeof value === "string") {
-        const name = definitionName(value);
-        if (name !== undefined && !reached.has(name) && name in definitions) {
-          reached.add(name);
-          visit(definitions[name]);
-        }
-      } else {
-        visit(value);
-      }
+  // Only schema positions are walked, so a `$ref` inside data reaches
+  // nothing.
+  const visit = (node: unknown): void => {
+    if (!isSubschema(node) || typeof node === "boolean") return;
+    const name = typeof node.$ref === "string"
+      ? definitionName(node.$ref)
+      : undefined;
+    if (name !== undefined && !reached.has(name) && name in definitions) {
+      reached.add(name);
+      visit(definitions[name]);
     }
+    forEachSubschema(node, (child) => {
+      visit(child);
+    }, { includeUnused: true });
   };
-  visit(body);
+  visit(root);
   return reached;
 }
 
