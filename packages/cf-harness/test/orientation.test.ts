@@ -108,6 +108,16 @@ describe("orientation", () => {
       expect(prompt).not.toContain("opening research");
     });
 
+    it("gives a find task the instruction to inspect held handles and grants", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["find"]),
+      });
+
+      expect(prompt).toContain("A grant's name is a lead, not its contents");
+      expect(prompt).not.toContain("When you delegate");
+    });
+
     it("gives an author task the opening-research rule, index search, and delegation", () => {
       const prompt = buildCfHarnessBaseSystemPrompt({
         patternIndex: true,

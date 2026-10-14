@@ -57,7 +57,7 @@ export const orientationGuidance = (
   return [
     ...(tagged("author") ? [OPENING_RESEARCH_GUIDANCE] : []),
     GOAL_GUIDANCE,
-    ...(tagged("pieces") ? [GIVEN_GUIDANCE] : []),
+    ...(tagged("pieces", "find") ? [GIVEN_GUIDANCE] : []),
     ...(tagged("find", "author") ? [findableGuidance(patternIndex)] : []),
     ACTION_PATH_GUIDANCE,
     EVIDENCE_GUIDANCE,

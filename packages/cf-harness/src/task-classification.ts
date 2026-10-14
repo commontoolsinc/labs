@@ -55,7 +55,7 @@ const WEB_ACT =
 const QUESTION =
   /^(?:what|what's|whats|when|who|whom|whose|where|which|why|how|is|are|was|were|do|does|did|can|could|has|have)\b|\?\s*$/;
 const LOOKUP =
-  /\b(?:find|search|look (?:up|for)|list|show me|summari[sz]e|check)\b/;
+  /\b(?:find|search|look (?:up|for)|list|show me|summari[sz]e|check|browse)\b/;
 const EXPLICIT_LOOKUP = /\b(?:find|search|look (?:up|for))\b/;
 const URL = /\bhttps?:\/\/\S+/;
 const AUTHOR =
@@ -64,27 +64,35 @@ const DEICTIC = /\b(?:it|this|these)\b(?!\s+(?:week|month|year|loom)\b)/;
 const CONVERSATIONAL =
   /^(?:hi|hey|hello|thanks|thank you|ok|okay|cool|great|nice|yes|no|sure|got it)\b/;
 
-/** Words of a held piece's name long enough to identify it in a request. */
-const nameWords = (name: string): string[] =>
-  name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) =>
-    word.length >= 4
-  );
+/** Lowercased letter-and-number runs of `text`, in any script. */
+const words = (text: string): string[] =>
+  text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
 
+/**
+ * Whether `text` names a held piece: its whole name, or two adjacent words
+ * of it, appear in the text. One shared word is not enough, since a name such
+ * as "Packing List" holds words any request may use.
+ */
 const mentionsHeldPiece = (
   text: string,
   inputCells: TaskClassificationContext["inputCells"],
-): boolean =>
-  (inputCells ?? []).some((inputCell) =>
-    nameWords(inputCell.name).some((word) =>
-      new RegExp(`\\b${word}\\b`, "u").test(text)
-    )
-  );
+): boolean => {
+  const spoken = ` ${words(text).join(" ")} `;
+  return (inputCells ?? []).some((inputCell) => {
+    const name = words(inputCell.name);
+    const phrases = name.length === 1
+      ? name
+      : name.slice(1).map((word, index) => `${name[index]} ${word}`);
+    return phrases.some((phrase) => spoken.includes(` ${phrase} `));
+  });
+};
 
 /**
  * Tags a task by keyword alone, or answers `undefined` when no rule applies.
  * A task naming a held piece, or pointing at one, is about that piece: a
  * listing or question it asks is answered from the piece rather than looked
- * up elsewhere, unless it says to search.
+ * up elsewhere, unless it says to search. An attached pattern or an explicit
+ * marker adds `pieces` without taking anything away.
  */
 export const classifyTaskByRule = (
   task: string,
@@ -93,10 +101,11 @@ export const classifyTaskByRule = (
   const text = task.trim().toLowerCase();
   const tags = new Set<HarnessTaskTag>();
   const holdsPieces = (context.inputCells?.length ?? 0) > 0;
-  const pieces = isClosedResearchTask(task, context) ||
-    (holdsPieces &&
-      (DEICTIC.test(text) || mentionsHeldPiece(text, context.inputCells)));
-  if (pieces) tags.add("pieces");
+  const pointsAtHeldPiece = holdsPieces &&
+    (DEICTIC.test(text) || mentionsHeldPiece(text, context.inputCells));
+  if (pointsAtHeldPiece || isClosedResearchTask(task, context)) {
+    tags.add("pieces");
+  }
   if (NAVIGATE.test(text)) {
     tags.add("act");
     tags.add("find");
@@ -105,8 +114,10 @@ export const classifyTaskByRule = (
     tags.add("act");
   }
   const lookup = QUESTION.test(text) || LOOKUP.test(text) || URL.test(task);
-  if (lookup && (!pieces || EXPLICIT_LOOKUP.test(text))) tags.add("find");
-  if (AUTHOR.test(text) && !context.patternRefs?.length) tags.add("author");
+  if (lookup && (!pointsAtHeldPiece || EXPLICIT_LOOKUP.test(text))) {
+    tags.add("find");
+  }
+  if (AUTHOR.test(text)) tags.add("author");
   if (
     tags.size === 0 && CONVERSATIONAL.test(text) &&
     text.split(/\s+/).length <= 6

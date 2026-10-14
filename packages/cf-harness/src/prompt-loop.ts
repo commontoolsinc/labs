@@ -3103,6 +3103,15 @@ export class CfHarnessPromptLoop {
   #lastReservedSubagentSequence = 0;
 
   /**
+   * What the task-classification model call cost, held from `classifyTask`
+   * until the run's records exist, which the next transcript run opens and
+   * this then lands in: its attempts in the run report, its tokens in the
+   * total.
+   */
+  #classificationAttempts: HarnessModelAttemptDiagnostic[] = [];
+  #classificationUsage: HarnessModelUsage | undefined;
+
+  /**
    * The parent's subagent runs as they stood when the current turn's tool
    * calls were dispatched, and `undefined` outside a turn. Skill custody is
    * judged against this rather than the live state, so a delegation is not
@@ -3748,7 +3757,11 @@ export class CfHarnessPromptLoop {
             ? { reasoningEffort: this.#researchReasoningEffort }
             : {}),
           ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          onAttempt: (attempt) => {
+            this.#classificationAttempts.push(attempt);
+          },
         });
+        this.#classificationUsage = result.usage;
         return result.assistant.content;
       },
     });
@@ -3971,6 +3984,13 @@ export class CfHarnessPromptLoop {
       onUsage: recordModelUsage,
     });
     this.engine.setResearchRunner(runResearch);
+    for (const attempt of this.#classificationAttempts.splice(0)) {
+      recordModelAttempt(attempt);
+    }
+    if (this.#classificationUsage !== undefined) {
+      await recordModelUsage(this.#classificationUsage);
+      this.#classificationUsage = undefined;
+    }
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {

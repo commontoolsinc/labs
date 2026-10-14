@@ -16,6 +16,10 @@ const cell = (name: string) => ({
   ref: `of:fid1:${name.length}`,
 });
 
+const attachedPattern = {
+  patternId: "v6_KSFHs9AmTg9PKwMmPdZyEHxZ9Oykhno4HBOfUo5s",
+} as HarnessPatternRef;
+
 const tagsOf = (tags: ReadonlySet<HarnessTaskTag> | undefined) =>
   tags === undefined ? undefined : [...tags].sort();
 
@@ -27,11 +31,7 @@ describe("task-classification", () => {
 
     it("returns pieces for an attached pattern ref", () => {
       expect(tagsOf(classifyTaskByRule("Rename it.", {
-        patternRefs: [
-          {
-            patternId: "v6_KSFHs9AmTg9PKwMmPdZyEHxZ9Oykhno4HBOfUo5s",
-          } as HarnessPatternRef,
-        ],
+        patternRefs: [attachedPattern],
       }))).toEqual(["pieces"]);
     });
 
@@ -70,6 +70,38 @@ describe("task-classification", () => {
           }),
         ),
       ).toEqual(["act"]);
+    });
+
+    it("returns find, not pieces, when a request shares only a generic word with a held piece's name", () => {
+      expect(tagsOf(classifyTaskByRule("list my favorite colors", {
+        inputCells: [cell("Packing List")],
+      }))).toEqual(["find"]);
+    });
+
+    it("returns pieces for a request naming a held piece with a non-Latin name", () => {
+      expect(tagsOf(classifyTaskByRule("add a stop to 東京", {
+        inputCells: [cell("東京")],
+      }))).toEqual(["pieces"]);
+    });
+
+    it("keeps author for a request to make something new beside an attached pattern", () => {
+      expect(tagsOf(classifyTaskByRule("make me a new tracker", {
+        patternRefs: [attachedPattern],
+      }))).toEqual(["author", "pieces"]);
+    });
+
+    it("keeps find for a question beside an attached pattern", () => {
+      expect(tagsOf(classifyTaskByRule("what's on Thursday?", {
+        patternRefs: [attachedPattern],
+      }))).toEqual(["find", "pieces"]);
+    });
+
+    it("returns act and find for browsing the web", () => {
+      expect(
+        tagsOf(classifyTaskByRule("browse the web for recent studies", {
+          browserHost: true,
+        })),
+      ).toEqual(["act", "find"]);
     });
 
     it("returns undefined when no rule applies", () => {

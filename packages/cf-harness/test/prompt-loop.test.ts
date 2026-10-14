@@ -3137,6 +3137,43 @@ describe("CfHarnessPromptLoop opening research", () => {
       });
     });
 
+    it("counts a model classification's tokens in the run's total usage", async () => {
+      const task = "the quarterly numbers for Q3 sales";
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: "run-classified-by-model",
+          model: "gpt-test",
+        }),
+        modelClient: {
+          providerId: "test-provider",
+          complete: (request) =>
+            Promise.resolve(
+              request.runId.endsWith(":task-classification")
+                ? {
+                  assistant: { role: "assistant", content: "find" },
+                  usage: { totalTokens: 5 },
+                }
+                : {
+                  assistant: { role: "assistant", content: "Done." },
+                  usage: { totalTokens: 7 },
+                },
+            ),
+        },
+      });
+
+      const classification = await loop.classifyTask(task);
+      const result = await loop.runPrompt({
+        prompt: task,
+        openingResearchTask: task,
+        promptSlotBinding: directPromptSlotBinding,
+      });
+
+      expect(classification).toMatchObject({ tags: ["find"], path: "model" });
+      expect(result.usage?.totalTokens).toBe(7);
+      expect(result.totalUsage?.totalTokens).toBe(12);
+    });
+
     it("runs opening research for an author task", async () => {
       const runIds: string[] = [];
       const loop = classifiedLoop("run-classified-author", runIds);
