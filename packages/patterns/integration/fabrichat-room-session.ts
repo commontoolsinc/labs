@@ -277,7 +277,7 @@ export class RoomSession {
     await waitForSettledText(
       this.#page,
       MESSAGES,
-      messageHeading(messageCount - 1, members.length),
+      messageHeading(messageCount - 1),
     );
     await waitForCondition(this.#page, badgesShow, {
       args: [members.map((member) => member.name)],
@@ -309,7 +309,7 @@ export class RoomSession {
    * yet.
    */
   reaction(index: number): () => Promise<void> {
-    const heading = messageHeading(index, this.#fixture.members.length);
+    const heading = messageHeading(index);
     return async () => {
       await clickInRow(
         this.#page,
@@ -329,7 +329,7 @@ export class RoomSession {
    */
   async openThread(thread: number): Promise<void> {
     const { root, replies } = this.#fixture.threads[thread];
-    const heading = messageHeading(root, this.#fixture.members.length);
+    const heading = messageHeading(root);
     await clickInRow(
       this.#page,
       heading,

@@ -926,6 +926,139 @@ the functional assertions, declared collection sizes, and render windows when
 adjusting a ceiling; a budget failure should lead to attribution of the added
 reads before changing the limit.
 
+## The FabriChat room benchmarks
+
+Three bench files measure a FabriChat group room, on the pattern in
+`packages/patterns/fabrichat/`. Two drive a browser against a running toolshed
+as the Topics benchmarks do, and one runs many runtimes against one storage
+server as the lunch-poll contention benchmark does.
+
+### The seeded room
+
+`packages/patterns/integration/fabrichat-room-fixture.ts` builds a room the way
+people come to have one, and `fabrichat-room-seed.ts` runs it in a child Deno so
+that the members' runtimes do not stay with the process that drives the
+browser. Each member is an identity derived from a passphrase, with a real Home
+brought up by `ensureDefaultPattern()` and a profile created through Home's
+`createProfile` under its reviewed action. That profile is the root of a space
+of its own and carries the `represents-principal` label, as one created in the
+browser does. The starter creates the room from their manager's `createGroup`,
+naming every other member by address, and the members write in it with trusted
+`ChatSend` events. Writing is what joins a member to the room's roster.
+
+The profiles are the reason the fixture goes through Home rather than a
+stand-in. Every participant chip and every author badge reads a profile in
+another space, so a room of twelve members opens thirteen spaces besides its
+own, and a stand-in profile would leave all of those reads out.
+
+The room's write policy admits a message only from `ChatSend`, and the room
+stamps each message with the time it arrives, refusing a proposed time more
+than ten minutes old. So a room cannot be written in bulk or back-dated, and the
+seed sends one message at a time. Members write in blocks of consecutive
+messages, and a member's runtime runs only while they write their block: every
+runtime running the room recomputes it on each message, so a room whose members
+all stayed open would cost one recompute per member per message. A second member
+stays open throughout, to add a reaction to every third message while it is the
+newest, and to write the thread's replies alongside the last writer.
+
+Every body is derived from its index, so two rooms of one size carry the same
+text. Each benchmark process derives its members from a passphrase new to that
+process, so each starter's Home lists only that process's room, and a toolshed
+that kept an earlier run's spaces does not change what a later run loads.
+
+A seeded room's first load in a browser builds and commits the derived state of
+every row, which no later load repeats. Each room is therefore loaded once,
+untimed, before any benchmark visits it.
+
+### The fixed-size room
+
+`packages/patterns/integration/fabrichat-room.bench.ts` measures a visit to a
+room of twelve members and thirty messages, with one thread of five replies,
+signed in as the starter. Its `fabrichat room` group has one series per
+segment: `load` (until the shell has routed to the room), `sign in` (until the
+runtime is idle), `messages` (until the last message has rendered and a badge
+names every member), `send` (a message sent from the composer, until its row
+renders), `react` (the viewer's reaction added to one another member left,
+until the tally counts both), `thread` (until every reply renders in the thread
+pane), and `journey` (`load`, `sign in` and `messages` together). Each segment
+reaches its starting point untimed in a browser of its own, as the navigation
+benchmark's do.
+
+`send` and `react` write, so they visit a second room of the same shape. Each
+`send` iteration adds one message to it and each `react` iteration adds one
+reaction, to a different message each time. One read-accounted sample each of
+`messages` and `send`, taken in a browser of its own, goes to stderr with the
+same counters the rendered lunch-poll benchmark records.
+
+`react` adds to an existing reaction's tally rather than picking one from the
+row's reaction picker. At the shell's 1024-pixel viewport, the picker the row
+opens lays its quick reactions out under the row's author avatar, which takes
+the click.
+
+`CF_FABRICHAT_MEMBERS` and `CF_FABRICHAT_MESSAGES` resize both rooms for a
+local run. The `react` segment needs one seeded reaction per invocation, which
+a room of fewer than nineteen messages does not carry, and the file says so
+before it seeds anything.
+
+### Room size
+
+`packages/patterns/integration/fabrichat-room-scale.bench.ts` measures two of
+those segments across rooms of 10, 30, 100 and 300 messages, all with twelve
+members, in a `fabrichat room scale` group: `<size>` is `messages`, and
+`send <size>` is `send`. A room renders a row for every message it holds and
+hides those outside the main conversation's view rather than leaving them out,
+so a room of three hundred messages builds three hundred rows although its
+`latest` holds a hundred; these curves say what that costs. Each size seeds two
+rooms, one for each series, so that sends do not grow the room `<size>` loads.
+Sizes above 100 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
+the limit.
+
+### Concurrent sends
+
+`packages/patterns/integration/fabrichat-send-burst.bench.ts` has twelve
+members, each a `MultiRuntimeHarness` session with a profile, send five messages
+each into one room, all sixty dispatched before any settles, timed until every
+member's runtime holds every message. Its `fabrichat` group carries one series,
+`send burst 12x5`. The members use the `fabrichat-add-offer` fixture as their
+Home: it holds a profile created as Home creates one and a manager the room's
+`#chatManager` wish resolves to. The harness hosts its own storage server,
+enforcing access.
+
+A message is a keyed write, but the same send also appends to the room's recent
+activity, reading the activity list and the counters record every send writes,
+and claims its recorded time from the times the room has used. Concurrent sends
+from different members therefore collide, which a lunch-poll vote does not. A
+contention accounting of rejected commits and rolled-back writes over one
+untimed burst goes to stderr; on three members sending two messages each it
+counted 15 and 37.
+
+A burst adds sixty messages, so each iteration sends into a room of its own,
+created outside the measurement by the first member, into which each member has
+written one message. Every burst therefore lands in a room of twelve messages
+and twelve participants. `CF_FABRICHAT_BURST_MEMBERS` and
+`CF_FABRICHAT_BURST_MESSAGES` resize it for a local run, and the size names the
+series.
+
+### Running them locally
+
+Start client-execution dev servers as described in
+[Local dev servers](LOCAL_DEV_SERVERS.md), then run, for example:
+
+```sh
+EXPERIMENTAL_SERVER_EXECUTION=false \
+API_URL=http://localhost:8000 FRONTEND_URL=http://localhost:5173 \
+CF_LOG_LEVEL=silent \
+deno bench --json -A \
+  packages/patterns/integration/fabrichat-room.bench.ts \
+  > /tmp/fabrichat-room.json 2> /tmp/fabrichat-room.log
+```
+
+The browser benchmarks read the server-execution posture the deployment declares
+and refuse one that declares none; the send burst resolves its posture from
+`EXPERIMENTAL_SERVER_EXECUTION` as the contention benchmark does. To build a
+room by hand for profiling, run `fabrichat-room-seed.ts` directly; its header
+gives the flags.
+
 ## Consumed CFC source collection
 
 `packages/runner/test/cfc-consumed-source-dedup.bench.ts` calls

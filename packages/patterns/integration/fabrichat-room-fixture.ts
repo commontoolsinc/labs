@@ -12,9 +12,17 @@
  * spaces besides its own.
  *
  * Writing joins a member to the room: the room tells the writer's manager,
- * which lists the room and puts the member on its roster. So by the time every
- * member has written once, the roster holds them all, with no step of their
- * own beyond the message.
+ * which lists the room and puts the member on its roster. So every member who
+ * has written once is on the roster, with no step of their own beyond the
+ * message.
+ *
+ * The members write in turn, each a block of consecutive messages, and a
+ * member's runtime runs only while they write their block. Every runtime that
+ * runs the room recomputes it on each message, so a room whose members all
+ * stayed open would cost a recompute per member per message. One second member
+ * stays open throughout to add the reactions and, with the last writer, the
+ * thread replies; neither is the starter, whose reaction is the one a
+ * benchmark adds.
  *
  * Every message is a trusted `ChatSend`, sent one at a time. The room's write
  * policy admits a message from that action alone, and the room stamps each
@@ -75,7 +83,10 @@ export interface FabrichatRoomFixture {
   /** The room's title. */
   title: string;
 
-  /** The members, the starter first. */
+  /**
+   * The members who wrote in the room, and so are on its roster, the starter
+   * first. A room of fewer messages than members leaves the rest out.
+   */
   members: SeededMember[];
 
   /** How many messages the room's main conversation holds. */
@@ -189,31 +200,46 @@ export function memberName(index: number): string {
 }
 
 /**
- * The member who writes the message at `index`. Messages go round the members
- * in order, so authors alternate the way they do in a conversation.
+ * How many consecutive messages each member writes: as many as divides the
+ * messages over the members, so that every member writes when there are at
+ * least as many messages as members.
  */
-export function authorOf(index: number, memberCount: number): number {
-  return index % memberCount;
+function blockSize(messageCount: number, memberCount: number): number {
+  return Math.max(1, Math.ceil(messageCount / memberCount));
 }
 
-/**
- * The body of the main conversation's message at `index`. Its heading, up to
- * and including the period, is unique among a room's messages: the number is
- * followed by " from", so no message's heading holds another's.
- */
-export function messageBody(index: number, memberCount: number): string {
+/** The member who writes the message at `index`. */
+export function authorOf(
+  index: number,
+  messageCount: number,
+  memberCount: number,
+): number {
+  return Math.floor(index / blockSize(messageCount, memberCount));
+}
+
+/** How many members write in a room of this shape. */
+export function writerCount(messageCount: number, memberCount: number): number {
+  return messageCount === 0
+    ? 0
+    : authorOf(messageCount - 1, messageCount, memberCount) + 1;
+}
+
+/** The body of the main conversation's message at `index`. */
+export function messageBody(index: number): string {
   const words = Array.from(
     { length: BODY_WORDS },
     (_, position) => VOCABULARY[(index * 7 + position * 5) % VOCABULARY.length],
   );
-  return `${messageHeading(index, memberCount)} ${words.join(" ")}.`;
+  return `${messageHeading(index)} ${words.join(" ")}.`;
 }
 
-/** The unique opening of {@link messageBody}. */
-export function messageHeading(index: number, memberCount: number): string {
-  return `Message ${index + 1} from ${
-    memberName(authorOf(index, memberCount))
-  }.`;
+/**
+ * The opening of {@link messageBody}, unique among a room's messages: the
+ * number sits between "Message " and a period, so no message's heading holds
+ * another's.
+ */
+export function messageHeading(index: number): string {
+  return `Message ${index + 1}.`;
 }
 
 /** The body of the reply at `reply` in the thread at `thread`. */
@@ -236,19 +262,15 @@ export function threadRoots(
 }
 
 /**
- * The member who reacts to the message at `index`: never the starter, whose
- * own reaction is the one a benchmark adds.
+ * The indexes of messages that carry a reaction. A room of one member has
+ * none: its one member is the viewer, whose reaction a benchmark adds.
  */
-export function reactorOf(index: number, memberCount: number): number {
-  return memberCount === 1 ? 0 : 1 + index % (memberCount - 1);
-}
-
-/** The indexes of messages that carry a reaction. */
 export function reactedMessages(
   messageCount: number,
+  memberCount: number,
   reactionEvery: number,
 ): number[] {
-  if (reactionEvery <= 0) return [];
+  if (reactionEvery <= 0 || memberCount < 2) return [];
   return Array.from({ length: messageCount }, (_, index) => index)
     .filter((index) => index % reactionEvery === 0);
 }
@@ -315,10 +337,9 @@ interface MemberSession {
  */
 async function openMember(
   apiUrl: URL,
-  passphrase: string,
+  identity: Identity,
   index: number,
 ): Promise<MemberSession> {
-  const identity = await memberIdentity(passphrase, index);
   const controller = await initializePiecesController({
     space: identity.did(),
     apiUrl,
@@ -337,6 +358,16 @@ async function openMember(
   return { index, identity, controller, home, sent: 0 };
 }
 
+/**
+ * Waits for `member`'s writes to reach the server, and releases their
+ * runtime.
+ */
+async function closeMember(member: MemberSession): Promise<void> {
+  await member.controller.runtime.idle();
+  await member.controller.synced();
+  await member.controller.dispose();
+}
+
 /** The space the member's first profile is the root of. */
 async function profileSpaceOf(member: MemberSession): Promise<DID> {
   const profile = await member.home.key("profiles").key(0)
@@ -350,14 +381,14 @@ async function profileSpaceOf(member: MemberSession): Promise<DID> {
  */
 async function createRoom(
   starter: MemberSession,
-  others: readonly MemberSession[],
+  others: readonly Identity[],
 ): Promise<Cell<unknown>> {
   const manager = starter.home.key("chatManager");
   const requestId = "benchmark-room";
   await sendTrusted(starter.controller, manager.key("createGroup"), {
     requestId,
     title: ROOM_TITLE,
-    members: others.map((member) => member.identity.did()),
+    members: others.map((identity) => identity.did()),
   }, CHAT_START);
   const outcome = await until(
     manager.key("requests").key(requestId) as Cell<
@@ -472,6 +503,15 @@ function mainMessage(
     .asSchema<Cell<unknown>>({ asCell: ["cell"] }).pull();
 }
 
+/** What a seeded room records of `member`, who must still be open. */
+async function describeMember(member: MemberSession): Promise<SeededMember> {
+  return {
+    did: member.identity.did(),
+    name: memberName(member.index),
+    profileSpace: await profileSpaceOf(member),
+  };
+}
+
 /**
  * Creates a room whose members each have a real Home and profile, and fills
  * it. Every member's runtime is disposed before this returns, so the room is
@@ -490,57 +530,83 @@ export async function seedFabrichatRoom(
     reactionEvery = DEFAULT_REACTION_EVERY,
   } = options;
   if (memberCount < 1) throw new Error("A room needs at least one member");
+  if (messageCount < 1) throw new Error("A room needs at least one message");
   const roots = threadRoots(messageCount, threadCount);
-  const reacted = reactedMessages(messageCount, reactionEvery);
+  const reacting = new Set(
+    reactedMessages(messageCount, memberCount, reactionEvery),
+  );
+  const writers = writerCount(messageCount, memberCount);
+  const block = blockSize(messageCount, memberCount);
   const total = messageCount + roots.length * repliesPerThread;
+  const identities = await Promise.all(
+    Array.from(
+      { length: memberCount },
+      (_, index) => memberIdentity(passphrase, index),
+    ),
+  );
 
-  const members: MemberSession[] = [];
-  try {
-    // Every Home is brought up at once: each is its own runtime and its own
-    // space, and none of them reads another's.
-    const opened = await Promise.allSettled(
-      Array.from(
-        { length: memberCount },
-        (_, index) => openMember(apiUrl, passphrase, index),
-      ),
-    );
-    for (const result of opened) {
-      if (result.status === "fulfilled") members.push(result.value);
+  // Every runtime this seed holds open, so that a failure releases them all.
+  const open = new Set<MemberSession>();
+  const acted = new Map<number, SeededMember>();
+  const openRoomMember = async (index: number): Promise<MemberSession> => {
+    const member = await openMember(apiUrl, identities[index], index);
+    open.add(member);
+    return member;
+  };
+  const release = async (member: MemberSession): Promise<void> => {
+    open.delete(member);
+    await closeMember(member);
+  };
+  const record = async (member: MemberSession): Promise<void> => {
+    if (!acted.has(member.index)) {
+      acted.set(member.index, await describeMember(member));
     }
-    const failed = opened.find((result) => result.status === "rejected");
-    if (failed) throw (failed as PromiseRejectedResult).reason;
+  };
 
-    const [starter, ...others] = members;
-    const room = await createRoom(starter, others);
-    await Promise.all(members.map((member) => enterRoom(member, room)));
+  try {
+    const starter = await openRoomMember(0);
+    const room = await createRoom(starter, identities.slice(1));
+    const roomId = new PieceController(starter.controller, room).id;
+    await enterRoom(starter, room);
+    // The member who reacts, and replies beside the last writer, open from
+    // the start: the second member, or the starter in a room of one.
+    const helper = memberCount > 1 ? await openRoomMember(1) : starter;
+    if (helper !== starter) await enterRoom(helper, room);
 
     let written = 0;
-    const reacting = new Set(reacted);
-    for (let index = 0; index < messageCount; index++) {
-      const author = members[authorOf(index, memberCount)];
-      // The author's copy has every earlier message before they write, so
-      // their write reads the room as it stands rather than conflicting with
-      // the message before it.
-      await until(countOf(author), (count) => (count ?? 0) >= written);
-      await writeAs(author, {
-        target: { value: messageBody(index, memberCount) },
-      }, ++written);
-      options.onMessage?.(written, total);
-      // A message is reacted to while it is the newest, and so within the
-      // window of the latest messages the room addresses its messages by.
-      if (reacting.has(index)) {
-        await reactAs(
-          members[reactorOf(index, memberCount)],
-          index,
-          index + 1,
-          written,
-        );
+    let last = starter;
+    for (let writer = 0; writer < writers; writer++) {
+      const author = writer === 0
+        ? starter
+        : writer === helper.index
+        ? helper
+        : await openRoomMember(writer);
+      if (author.room === undefined) await enterRoom(author, room);
+      const end = Math.min(messageCount, (writer + 1) * block);
+      for (let index = writer * block; index < end; index++) {
+        // The author's copy has every earlier message before they write, so
+        // their write reads the room as it stands rather than conflicting
+        // with the message before it.
+        await until(countOf(author), (count) => (count ?? 0) >= written);
+        await writeAs(author, {
+          target: { value: messageBody(index) },
+        }, ++written);
+        options.onMessage?.(written, total);
+        // A message is reacted to while it is the newest, and so within the
+        // window of the latest messages the room addresses its messages by.
+        if (reacting.has(index)) {
+          await reactAs(helper, index, index + 1, written);
+          await record(helper);
+        }
       }
+      await record(author);
+      if (last !== helper && last !== author) await release(last);
+      last = author;
     }
 
     for (const [thread, root] of roots.entries()) {
       for (let reply = 0; reply < repliesPerThread; reply++) {
-        const author = members[(root + reply + 1) % memberCount];
+        const author = reply % 2 === 0 ? last : helper;
         await until(countOf(author), (count) => (count ?? 0) >= written);
         await writeAs(author, {
           target: { value: replyBody(thread, reply) },
@@ -549,38 +615,30 @@ export async function seedFabrichatRoom(
             shownIn: "thread",
           },
         }, ++written);
+        await record(author);
         options.onMessage?.(written, total);
       }
     }
 
-    // Every member has written once only in a room of at least as many
-    // messages as members; one who has not is not on the roster, and the
-    // room shows them nowhere.
-    const roster = starter.room!.key("roster") as Cell<unknown[] | undefined>;
-    const expected = Math.min(memberCount, messageCount);
-    await until(roster, (list) => (list ?? []).length >= expected);
+    // Writing or reacting joined each member who did either, and no one else.
+    const roster = helper.room!.key("roster") as Cell<unknown[] | undefined>;
+    await until(roster, (list) => (list ?? []).length >= acted.size);
 
-    await Promise.all(members.map(async (member) => {
-      await member.controller.runtime.idle();
-      await member.controller.synced();
-    }));
-
+    for (const member of [...open]) await release(member);
     return {
       passphrase,
       roomSpace: room.space as DID,
-      roomId: new PieceController(starter.controller, room).id,
+      roomId,
       title: ROOM_TITLE,
-      members: await Promise.all(members.map(async (member) => ({
-        did: member.identity.did(),
-        name: memberName(member.index),
-        profileSpace: await profileSpaceOf(member),
-      }))),
+      members: [...acted.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, member]) => member),
       messageCount,
       threads: roots.map((root) => ({ root, replies: repliesPerThread })),
-      reacted,
+      reacted: [...reacting],
     };
   } finally {
-    await Promise.all(members.map((member) => member.controller.dispose()));
+    await Promise.all([...open].map((member) => member.controller.dispose()));
   }
 }
 

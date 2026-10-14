@@ -106,7 +106,11 @@ const PASSPHRASE = runPassphrase("fabrichat room benchmark");
 // another member's, a different one each invocation, so it needs one such
 // message per invocation of its body. Checked here, ahead of minutes of
 // seeding, so a room resized through the environment says so at once.
-const REACTABLE = reactedMessages(MESSAGES, DEFAULT_REACTION_EVERY);
+const REACTABLE = reactedMessages(
+  MESSAGES,
+  MEMBERS,
+  DEFAULT_REACTION_EVERY,
+);
 if (REACTABLE.length < BENCH_INVOCATIONS) {
   throw new Error(
     `The \`react\` segment reacts to one seeded reaction per invocation, so ` +
