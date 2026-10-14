@@ -20,7 +20,12 @@ const offered = (subagentProfiles?: readonly HarnessSubagentProfile[]) => {
       string,
       { enum?: string[]; description?: string }
     >).profile;
-  return { enum: profile.enum, description: profile.description ?? "" };
+  return {
+    enum: profile.enum,
+    description: profile.description ?? "",
+    required: (descriptor.inputSchema as { required: string[] }).required,
+    text: JSON.stringify(descriptor.inputSchema),
+  };
 };
 
 describe("delegate-task", () => {
@@ -37,6 +42,17 @@ describe("delegate-task", () => {
       '"pattern-author"',
     );
     expect(offered(["default"]).description).not.toContain("pattern-author");
+  });
+
+  it("names pattern-author nowhere in the descriptor of a run that may not delegate to it", () => {
+    expect(offered(["default", "browser"]).text).not.toContain(
+      "pattern-author",
+    );
+  });
+
+  it("requires a profile when the default profile is not among those offered", () => {
+    expect(offered(["pattern-author"]).required).toEqual(["goal", "profile"]);
+    expect(offered(["default", "pattern-author"]).required).toEqual(["goal"]);
   });
 
   it("offers every profile to a run that names none", () => {

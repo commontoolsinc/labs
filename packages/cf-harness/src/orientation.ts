@@ -6,7 +6,7 @@ const researchGuidance = (patternIndex: boolean): string =>
     `Research is a private pass that reads ${
       patternIndex ? "the pattern index, docs, and source" : "docs and source"
     } and reports what to run; it cannot execute anything.`,
-    "A fresh task gets one opening research pass before its first turn, except that attached patternRefs or explicit pattern:<space>/<slug>, cf:pattern:<id>, or skill:<id> markers in the current request skip that pass. A skill marker names a registered skill or an owner/repository/skill address. Prose such as 'use the named skill X' remains open unless X uses a marker.",
+    "A fresh task eligible for opening research gets one pass before its first turn, except that attached patternRefs or explicit pattern:<space>/<slug>, cf:pattern:<id>, or skill:<id> markers in the current request skip that pass. A skill marker names a registered skill or an owner/repository/skill address. Prose such as 'use the named skill X' remains open unless X uses a marker.",
     "Use the selected implementation through its ordinary tools; call research for a specific unresolved question if needed.",
   ].join(" ");
 

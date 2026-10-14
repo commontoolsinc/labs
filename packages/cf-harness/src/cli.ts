@@ -2441,7 +2441,7 @@ export const buildCfHarnessBaseSystemPrompt = (
       : []),
     allowedToolIds === undefined || allowedToolIds.includes("finish_task")
       ? "Use finish_task to ask the user for the input or choice that would unblock the task, or to give a concrete reason you cannot proceed."
-      : "Act on reasonable defaults rather than asking. When the task truly cannot be done, finish with a result that says why.",
+      : "Act on reasonable defaults rather than asking. When the task truly cannot be done, finish with a result that says why. Where other guidance says to ask the user, say in your result what you need instead.",
     orientationGuidance({
       patternIndex,
       ...(tags !== undefined ? { tags } : {}),

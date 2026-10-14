@@ -4,6 +4,7 @@ import type {
   HarnessSubagentProfile,
 } from "../contracts/subagent.ts";
 import {
+  DEFAULT_SUBAGENT_PROFILE,
   HARNESS_SUBAGENT_PROFILES,
   MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
   MAX_DELEGATE_PATTERN_REFS,
@@ -21,94 +22,109 @@ const PATTERN_AUTHOR_DESCRIPTION =
 
 /**
  * The delegate_task descriptor offering `profiles`, in their usual order, and
- * describing pattern-author only when it is among them.
+ * naming pattern-author only when it is among them.
  */
 const delegateTaskDescriptor = (
   profiles: readonly HarnessSubagentProfile[],
-): HarnessToolDescriptor => ({
-  toolId: "delegate_task",
-  title: "Delegate Task",
-  description:
-    "Run one focused subagent with a fresh context and return only its structured summary and retained run references.",
-  effectClass: "side-effect",
-  inputSchema: {
-    type: "object",
-    additionalProperties: false,
-    required: ["goal"],
-    properties: {
-      goal: {
-        type: "string",
-        description:
-          'Specific task for the child run. Include all context the child needs; it will not see the parent transcript. Keep a "pattern-author" delegation focused on one buildable piece so its compile/fix loop fits the child turn budget. Name the words the capability should be findable under, so a later delegation can search the pattern index for the same component instead of asking for it again.',
-      },
-      profile: {
-        type: "string",
-        enum: HARNESS_SUBAGENT_PROFILES.filter((profile) =>
-          profiles.includes(profile)
-        ),
-        description: profiles.includes(PATTERN_AUTHOR_SUBAGENT_PROFILE)
-          ? `${PROFILE_DESCRIPTION} ${PATTERN_AUTHOR_DESCRIPTION}`
-          : PROFILE_DESCRIPTION,
-      },
-      context: {
-        type: "string",
-        description:
-          "Optional supporting context, paths, constraints, or expected output for the child run.",
-      },
-      patternRefs: {
-        type: "array",
-        maxItems: MAX_DELEGATE_PATTERN_REFS,
-        items: {
-          type: "object",
-          properties: {
-            patternId: {
-              type: "string",
-              minLength: 1,
-              description:
-                "Pattern id exactly as this parent received it from search_patterns or host-confirmed research.",
-            },
-            note: {
-              type: "string",
-              maxLength: MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
-              description:
-                "Optional parent-authored context for this pattern selection. It reaches the child verbatim.",
-            },
-          },
-          required: ["patternId"],
-          additionalProperties: false,
+): HarnessToolDescriptor => {
+  const authors = profiles.includes(PATTERN_AUTHOR_SUBAGENT_PROFILE);
+  return {
+    toolId: "delegate_task",
+    title: "Delegate Task",
+    description:
+      "Run one focused subagent with a fresh context and return only its structured summary and retained run references.",
+    effectClass: "side-effect",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      // An omitted profile is the default one, so a run that may not use it
+      // must name the profile it delegates to.
+      required: profiles.includes(DEFAULT_SUBAGENT_PROFILE)
+        ? ["goal"]
+        : ["goal", "profile"],
+      properties: {
+        goal: {
+          type: "string",
+          description:
+            `Specific task for the child run. Include all context the child needs; it will not see the parent transcript. ${
+              authors
+                ? 'Keep a "pattern-author" delegation focused on one buildable piece so its compile/fix loop fits the child turn budget. '
+                : ""
+            }Name the words the capability should be findable under, so a later delegation can search the pattern index for the same component instead of asking for it again.`,
         },
-        description:
-          "Optional published patterns selected from this parent's earlier search_patterns results or host-confirmed research. The harness attaches their trusted metadata to the child; supply ids and optional notes only.",
-      },
-      maxModelTurns: {
-        type: "integer",
-        minimum: 1,
-        maximum: 64,
-        description:
-          "Optional child model-turn cap. Defaults to the harness subagent cap.",
-      },
-      returnSchema: {
-        anyOf: [
-          { type: "boolean" },
-          { type: "object", additionalProperties: true },
-        ],
-        description:
-          'Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them. Some profiles declare their own return contract and refuse a schema here — "pattern-author" is one — because the shape of what they hand back is the point of the profile.',
-      },
-      skillHandle: {
-        type: "string",
-        description:
-          "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it. A delegation that failed does not carry its handle forward: re-issuing it means passing the same token again.",
-      },
-      withoutSkillHandle: {
-        type: "boolean",
-        description:
-          "States that this delegation deliberately runs with no acquired skill. Required only after a delegation carrying a skillHandle failed, where omitting both fields is refused: the harness cannot tell a considered choice from a dropped one, and the child's work would carry no record either way. It attaches nothing and permits nothing.",
+        profile: {
+          type: "string",
+          enum: HARNESS_SUBAGENT_PROFILES.filter((profile) =>
+            profiles.includes(profile)
+          ),
+          description: authors
+            ? `${PROFILE_DESCRIPTION} ${PATTERN_AUTHOR_DESCRIPTION}`
+            : PROFILE_DESCRIPTION,
+        },
+        context: {
+          type: "string",
+          description:
+            "Optional supporting context, paths, constraints, or expected output for the child run.",
+        },
+        patternRefs: {
+          type: "array",
+          maxItems: MAX_DELEGATE_PATTERN_REFS,
+          items: {
+            type: "object",
+            properties: {
+              patternId: {
+                type: "string",
+                minLength: 1,
+                description:
+                  "Pattern id exactly as this parent received it from search_patterns or host-confirmed research.",
+              },
+              note: {
+                type: "string",
+                maxLength: MAX_DELEGATE_PATTERN_REF_NOTE_LENGTH,
+                description:
+                  "Optional parent-authored context for this pattern selection. It reaches the child verbatim.",
+              },
+            },
+            required: ["patternId"],
+            additionalProperties: false,
+          },
+          description:
+            "Optional published patterns selected from this parent's earlier search_patterns results or host-confirmed research. The harness attaches their trusted metadata to the child; supply ids and optional notes only.",
+        },
+        maxModelTurns: {
+          type: "integer",
+          minimum: 1,
+          maximum: 64,
+          description:
+            "Optional child model-turn cap. Defaults to the harness subagent cap.",
+        },
+        returnSchema: {
+          anyOf: [
+            { type: "boolean" },
+            { type: "object", additionalProperties: true },
+          ],
+          description:
+            `Optional JSON Schema for a structured child return. When provided, the child must return only JSON matching this schema; open-ended strings are linkified before the parent sees them.${
+              authors
+                ? ' Some profiles declare their own return contract and refuse a schema here — "pattern-author" is one — because the shape of what they hand back is the point of the profile.'
+                : ""
+            }`,
+        },
+        skillHandle: {
+          type: "string",
+          description:
+            "Optional handle (cfh:a:… token) naming a cell whose string value is skill text for the child. The text is materialized on the trusted host side and injected into the child's context; this run never sees it. A delegation that failed does not carry its handle forward: re-issuing it means passing the same token again.",
+        },
+        withoutSkillHandle: {
+          type: "boolean",
+          description:
+            "States that this delegation deliberately runs with no acquired skill. Required only after a delegation carrying a skillHandle failed, where omitting both fields is refused: the harness cannot tell a considered choice from a dropped one, and the child's work would carry no record either way. It attaches nothing and permits nothing.",
+        },
       },
     },
-  },
-  tags: ["subagent", "orchestration"],
-});
+    tags: ["subagent", "orchestration"],
+  };
+};
 
 const delegateTaskDescriptorAll = delegateTaskDescriptor(
   HARNESS_SUBAGENT_PROFILES,

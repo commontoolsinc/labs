@@ -18,7 +18,7 @@ export const PIECE_TARGETING_GUIDANCE = [
  * piece-targeting rules a pattern-authoring task needs.
  */
 export const HELD_PIECES_GUIDANCE =
-  "The input cells are the pieces on the person's screen, named by where they are: focused_piece, on_screen_…, in_loom_…. Use describe_handle for a piece's shape and verbs, read_value for its data, and call_verb to act on it. Never search for or make a pattern that is already in hand.";
+  "The input cells are the pieces of the loom the person is in, named by where each was: focused_piece, on_screen_…, in_loom_…. Use describe_handle for a held piece's shape and verbs, read_value for its data, and call_verb to act on it. Never search for or make a pattern that is already in hand.";
 
 /** What a task not tagged as about its pieces is told about them. */
 export const MAY_HOLD_PIECES_GUIDANCE =

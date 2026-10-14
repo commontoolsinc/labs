@@ -341,6 +341,20 @@ Deno.test("classifyHarnessPolicyEventFailure records denied tool usage", () => {
   });
 });
 
+Deno.test("classifyHarnessPolicyEventFailure records no failure for an event that denied nothing", () => {
+  const failure = classifyHarnessPolicyEventFailure(
+    createHarnessPolicyEvent({
+      severity: "warning",
+      mode: "observe",
+      toolId: "write_file",
+      detail: "write_file would require direct-command authorization",
+      at: "2026-04-22T23:10:00.000Z",
+    }),
+  );
+
+  assertEquals(failure, undefined);
+});
+
 Deno.test("classifyBashToolFailure uses the capability snapshot to explain missing python", async () => {
   const snapshot = await collectHarnessCapabilitySnapshot(
     new FakeSandboxRuntime(),

@@ -113,6 +113,9 @@ describe("orientation", () => {
 
       expect(prompt).toContain("Act on reasonable defaults rather than asking");
       expect(prompt).toContain("finish with a result that says why");
+      expect(prompt).toContain(
+        "Where other guidance says to ask the user, say in your result what you need instead",
+      );
     });
   });
 
@@ -224,6 +227,9 @@ describe("orientation", () => {
       expect(find).not.toContain("Private research");
       expect(find).not.toContain("call research");
       expect(author.split("Research is a private pass").length).toBe(2);
+      expect(author).toContain(
+        "A fresh task eligible for opening research gets one pass",
+      );
       expect(author).toContain(
         "reads the pattern index, docs, and source and reports what to run; it cannot execute anything",
       );

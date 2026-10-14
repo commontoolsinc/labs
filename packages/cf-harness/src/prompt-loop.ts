@@ -3754,11 +3754,13 @@ export class CfHarnessPromptLoop {
           signal: options.signal === undefined
             ? bound
             : AbortSignal.any([options.signal, bound]),
+          // A call past its bound no longer belongs to this run's accounting,
+          // which may already have been flushed into the run's records.
           onAttempt: (attempt) => {
-            this.#classificationAttempts.push(attempt);
+            if (!bound.aborted) this.#classificationAttempts.push(attempt);
           },
         });
-        this.#classificationUsage = result.usage;
+        if (!bound.aborted) this.#classificationUsage = result.usage;
         return result.assistant.content;
       },
     });
