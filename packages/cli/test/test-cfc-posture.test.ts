@@ -60,8 +60,10 @@ describe("test-cfc-posture", () => {
         // A commit whose activity stands since its preparation hashes no
         // digest, and a successful write skips refusal-source collection.
         // Each zero count must remain visible beside the active preparation
-        // spans.
+        // spans. A step that prepares nothing counts no digest either way, so
+        // the digest's row is also held to zero on every step.
         expect(report).toMatch(/cfc\/preparedDigestFor\s+Δn=\s*0/);
+        expect(report).not.toMatch(/cfc\/preparedDigestFor\s+Δn=\s*[1-9]/);
         expect(report).toMatch(/cfc\/collectConsumedLabel\s+Δn=\s*0/);
       } else {
         expect(report).not.toMatch(/cfc\/deriveFlowJoin\s+Δn=\s*[1-9]/);
