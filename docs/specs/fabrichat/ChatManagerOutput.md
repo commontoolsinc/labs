@@ -147,16 +147,20 @@ room's members by principal or by profile itself.
   user belongs to and hasn't forgotten, newest first. An entry is a link to its
   room and never a copy of the room's data: what a room holds is read from the
   room, under the reader's own access. Through the link a reader finds the
-  room's `about`, and where its conversation stands, `messages.count` and
-  `messages.newestAt`; [`ChatIndexEntry`](ChatIndexEntry.md) says why the link
-  declares those and no more. `rooms` is drawn from the user's shared-space
-  catalog, Home's: each entry the catalog keeps as a saved `fabrichat-room`,
-  whose space's root is a room.
+  room's `about`, its title included, which follows a retitle, and where its
+  conversation stands, `messages.count` and `messages.newestAt`;
+  [`ChatIndexEntry`](ChatIndexEntry.md) says why the link declares those and no
+  more. `rooms` is drawn from the user's shared-space catalog, Home's: each
+  entry the catalog keeps as a saved `fabrichat-room`, whose space's root is a
+  room.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
-  stored. Membership checks belong to the manager's Home-space handling. A
-  room sends [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput)
-  after a successful message or reaction without reading this private catalog.
+  stored. An entry's `title` is the room's title when the entry was registered,
+  a display hint the catalog doesn't refresh: a client reads a room's current
+  title from the room. Membership checks belong to the manager's Home-space
+  handling. A room sends
+  [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput) after a
+  successful message or reaction without reading this private catalog.
 - **`direct`** holds, for each counterpart principal, the entry of the direct
   room this user shares with them. It has at most one entry per counterpart. It
   keeps a direct room's entry even after the room is forgotten, so the

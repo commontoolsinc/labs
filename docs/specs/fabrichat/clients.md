@@ -80,6 +80,9 @@ A client that draws natively MUST:
   change, so a changed name shows on everything the person sent. A profile that
   can't be read shows as a neutral placeholder (see
   [`ChatProfile.md`](ChatProfile.md#when-a-profile-cant-be-read)).
+- **Show the room's title as the room holds it**, from `about.title`, read when
+  drawn and redrawn when it changes, since any member can change it. A direct
+  room with no title is shown by its other member.
 - **Identify people by their profile links**, compared with `equals()`, and
   never by display name.
 - **Show members from the room's space.** A room's `participants` are its
@@ -134,6 +137,7 @@ gesture on the reviewed surface its policy names:
 | remove a reaction | room | `deleteReaction` | `ChatReactSurface` |
 | start a conversation | manager | `openDirect`, `createGroup` | `ChatStartSurface` |
 | add a member | room | `addMember` | `ChatAddMemberSurface` |
+| retitle a room | room | `setTitle` | `ChatRetitleSurface` |
 
 A client that draws natively sends `addMember` through
 [the sanctioned issuing path](#the-sanctioned-issuing-path) on
@@ -153,6 +157,15 @@ room's `participantPrincipals`, the principals the room's `participantEntries`
 hold. It is a best-effort set to leave out, not an access list: someone who
 has been added but has never joined isn't among them, and neither is a
 participant whose profile the reader can't read.
+
+A client that draws natively retitles a room the same way: it sends `setTitle`
+through the sanctioned issuing path on `ChatRetitleSurface`, finds it in
+`[VIEWS]` beside `titleRequests`, where each retitle's outcome is recorded under
+its `requestId`, and checks that the title has some text in it before sending
+(see
+[`ChatRoomOutput`](ChatRoomOutput.md#settitlerequestid-string-title-string)).
+Any member who can write in the room may retitle it, in a group room or a
+direct one, but not a space's own chat, which is shown by its space's name.
 
 A client sends to the room's own streams, never through a placement or an
 adapter.
