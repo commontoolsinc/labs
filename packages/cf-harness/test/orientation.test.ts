@@ -44,8 +44,9 @@ describe("orientation", () => {
     expect(prompt).not.toContain("pattern index");
     expect(prompt).not.toContain("indexed pattern");
     expect(prompt).toContain("not given does not mean absent");
-    expect(prompt).toContain("Private research inspects candidates");
-    expect(prompt).toContain("resolve_piece first for a slug");
+    expect(prompt).toContain(
+      "Research is a private pass that reads docs and source",
+    );
   });
 
   it("checks the send path before asking for a recipient in the landlord-email rehearsal", () => {
@@ -63,11 +64,11 @@ describe("orientation", () => {
 
   it("keeps discovery scoped and a release refusal out of the question path", () => {
     const prompt = buildCfHarnessBaseSystemPrompt({ patternIndex: true });
-    expect(prompt).toContain("resolve_piece first for a slug");
-    expect(prompt).toContain("zero registry reads for an unnamed target");
-    expect(prompt).toContain("at most one lookup for a display name");
-    expect(prompt).toContain(
-      "Explicit requests to list or analyze the space are not missing-target lookups",
+    expect(PIECE_TARGETING_GUIDANCE).toContain("call resolve_piece");
+    expect(PIECE_TARGETING_GUIDANCE).toContain("make zero registry reads");
+    expect(PIECE_TARGETING_GUIDANCE).toContain("at most one registry read");
+    expect(PIECE_TARGETING_GUIDANCE).toContain(
+      "not to an explicit request to list or analyze the space",
     );
     expect(prompt).toContain(
       "An unavailable, refused, or pending read stays unknown",
@@ -203,6 +204,39 @@ describe("orientation", () => {
           tags: new Set(["pieces"]),
         }),
       ).toContain("When you delegate");
+    });
+
+    it("says what research is once, and only to an author task", () => {
+      const find = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["find"]),
+      });
+      const author = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["author"]),
+      });
+
+      expect(find).not.toContain("Research is");
+      expect(find).not.toContain("Private research");
+      expect(find).not.toContain("call research");
+      expect(author.split("Research is a private pass").length).toBe(2);
+      expect(author).toContain(
+        "reads the pattern index, docs, and source and reports what to run; it cannot execute anything",
+      );
+      expect(author).toContain(
+        "call research for a specific unresolved question",
+      );
+      expect(author).not.toContain("Private research inspects candidates");
+    });
+
+    it("cites no piece-targeting bounds to a find task, which is not sent them", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["find"]),
+      });
+
+      expect(prompt).not.toContain("piece-targeting");
+      expect(prompt).not.toContain("resolve_piece");
     });
 
     it("gives an author task the opening-research rule, index search, and delegation", () => {
