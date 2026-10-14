@@ -32,15 +32,19 @@
 //
 // WATCH(cfc-verdict): THE DEFAULT IS "NOT A VERDICT", AND THAT IS DELIBERATE.
 //
-// An UNTAGGED reason is retryable. A reason is terminal only when its producer
+// An UNTAGGED reason keeps the rejection's retryable name,
+// `StorageTransactionAborted`. A reason is terminal only when its producer
 // says so by wrapping it in `verdictReason(...)`. Get the tagging wrong in the
-// safe direction — a deterministic refusal left untagged — and the cost is the
-// bounded-retry behaviour that predates this split: some doomed re-runs, then
-// the convergence budget. Get it wrong in the other direction and the cost is
-// a write that never lands and never retries: an absent pattern result, a
-// served-wish state that never materializes and whose UI silently never
-// mounts. It will not look like a labelling bug; it looks like the computation
-// simply stopped.
+// safe direction — a deterministic refusal left untagged — and the cost
+// depends on the writer. A reactive writer takes some doomed re-runs, then the
+// convergence budget; a client's own event is reported refused after one
+// attempt; a served event's entry is sealed no consequence
+// (`sealCfcRefusalConsequence` in `scheduler/events.ts`), so it stays pending
+// and every later drain pass runs its handler into the same refusal. Get it
+// wrong in the other direction and the cost is a write that never lands and
+// never retries: an absent pattern result, a served-wish state that never
+// materializes and whose UI silently never mounts. It will not look like a
+// labelling bug; it looks like the computation simply stopped.
 //
 // That asymmetry is why the default sits here rather than at "verdict". An
 // earlier revision of this work defaulted the other way, on the argument that

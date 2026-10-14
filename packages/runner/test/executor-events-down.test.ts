@@ -2269,6 +2269,124 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
+  it("seals a write floor's verdict on a served event as the entry's error consequence, and runs its handler once", async () => {
+    // The probe links the pattern's own argument document, which the serving
+    // runtime holds and which carries no integrity, into a list whose
+    // elements require some. Every document the floor weighs is held, so its
+    // refusal is a verdict (`verifyWriteFloor` in cfc/prepare.ts).
+
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "floor-verdict-arg",
+      result: "floor-verdict-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await awaitAdmitted(server, () => sidecarIdsIn(engine).length === 1);
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const sidecarValue = () =>
+      Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined;
+    const entryByKind = (kind: string) =>
+      (sidecarValue()?.entries ?? []).find((entry) =>
+        (entry.payload as { kind?: string } | undefined)?.kind === kind
+      );
+    await awaitAdmitted(
+      server,
+      () => entryByKind("warmup")?.consequenced === true,
+    );
+    await awaitActive();
+
+    const warmup = entryByKind("warmup")!;
+    const streamLink = {
+      space,
+      id: warmup.stream.id as never,
+      path: [...warmup.stream.path],
+      scope: (warmup.stream.scope ?? "space") as never,
+    };
+    const floorSchema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "string",
+            ifc: { requiredIntegrity: ["admin-approved"] },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    /** Every served run of the probe, by event kind. */
+    const probeRuns = new ArrivalLog<string>();
+    /** The commit outcome of every served run of the probe. */
+    const commitOutcomes = new ArrivalLog<{ kind: string; error: unknown }>();
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      (tx, event) => {
+        const kind = (event as { kind?: string }).kind ?? "unknown";
+        probeRuns.record(kind);
+        tx.addCommitCallback((_tx, outcome) =>
+          commitOutcomes.record({ kind, error: outcome.error })
+        );
+        if (kind !== "refused") return;
+        const argument = servingRuntime!.getCell(
+          space,
+          "floor-verdict-arg",
+          undefined,
+          tx,
+        );
+        servingRuntime!.getCell(
+          space,
+          "floor-verdict-sink",
+          floorSchema,
+          tx,
+        ).set({ items: [argument as unknown as string] });
+      },
+      streamLink,
+    );
+    try {
+      result.key("bump").send({ kind: "refused" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      const refusal = (await commitOutcomes.matching((outcome) =>
+        outcome.kind === "refused"
+      )).error as { name?: string; message?: string } | undefined;
+      expect(refusal?.name).toBe("CfcCommitRefusalError");
+      expect(refusal?.message).toContain("write floor failed at /items/0");
+      await awaitAdmitted(server, () => {
+        const entry = entryByKind("refused");
+        return entry?.consequenced === true && typeof entry.error === "string";
+      });
+      const refused = entryByKind("refused")!;
+      expect(refused.error).toContain("write floor failed at /items/0");
+      expect(refused.status).toBeUndefined();
+
+      // A later event is consequenced behind it, and the refused entry's
+      // handler does not run again.
+      result.key("bump").send({ kind: "follower" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await awaitAdmitted(
+        server,
+        () => entryByKind("follower")?.consequenced === true,
+      );
+      expect(probeRuns.count((kind) => kind === "refused")).toBe(1);
+      expect(sidecarValue()?.eventWatermark).toBe(
+        entryByKind("follower")!.seq,
+      );
+    } finally {
+      cancelProbe();
+      cancelDemand();
+    }
+  });
+
   it("a served RetryImmediately retry remains settlement and never creates a delivery checkpoint", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);
