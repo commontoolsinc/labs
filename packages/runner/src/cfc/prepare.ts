@@ -13203,6 +13203,10 @@ export function* prepareBoundaryCommitSteps(
     // the documents linked there, which the release may re-describe; they
     // govern nothing in this document, so they are not compared.
     let keepsStoredSchema = false;
+    // TODO(danfuzz): Like the restatement deferral this waiver discharges,
+    // leaving these positions out admits more than §8.15.4 permits, and runs
+    // by default by Dan's decision; the marker at that deferral names the
+    // specs ruling both wait on.
     const governsNothingHere = foreignPositions === undefined
       ? () => false
       : beneathForeignPosition(foreignPositions);

@@ -572,28 +572,52 @@ describe("source-reconciler-protected-argument", () => {
     // which describe the documents linked there: each `Note`'s `tags` names
     // the release's `post`. None of them governs this document.
 
+    const prime = async (runtime: Runtime, room: Cell<Room>) => {
+      await send(
+        runtime,
+        room,
+        "describeRoom",
+        trustedEvent("Describe", { title: "lunch" }),
+      );
+      await send(runtime, room, "join", { name: "ada" });
+      await send(runtime, room, "post", { text: "hello" });
+      expect(room.get().about).toEqual({ title: "lunch" });
+      expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+    };
+
     it("adopts a release that re-describes what lies beneath the links, and keeps what the fields hold", async () => {
       await reconcileRelease(
         "linked-release",
         releaseBehind(LINKED_SOURCE),
         LINKED_SOURCE,
-        async (runtime, room) => {
-          await send(
-            runtime,
-            room,
-            "describeRoom",
-            trustedEvent("Describe", { title: "lunch" }),
-          );
-          await send(runtime, room, "join", { name: "ada" });
-          await send(runtime, room, "post", { text: "hello" });
-          expect(room.get().about).toEqual({ title: "lunch" });
-          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
-        },
+        prime,
         ({ outcome, room, currentIdentity }) => {
           expect(outcome).toBe("updated");
           expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
           expect(room.get().about).toEqual({ title: "lunch" });
           expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+      );
+    });
+
+    it("refuses a release that adds a policy beside the links, and keeps the field as it was", async () => {
+      // `roster` holds no links, so a policy the release adds to
+      // `Roster.items` governs this document, links or no links beside it.
+      const current = LINKED_SOURCE.replace(
+        "items?: WriteAuthorizedBy<string[], typeof join>;",
+        'items?: TrustedActionWrite<string[], typeof join, "Join", "GuardedRoom">;',
+      );
+      expect(current).not.toBe(LINKED_SOURCE);
+      await reconcileRelease(
+        "linked-policy-release",
+        LINKED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().roster).toEqual({ items: ["ada"] });
         },
       );
     });
