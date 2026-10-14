@@ -12,6 +12,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   multiUserTest,
   pattern,
   TESTS,
@@ -74,7 +75,7 @@ interface Setup {
 }
 
 // The messages' bodies, in the order they were recorded.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string" ? message.body : "<gone>"
   ).join(" | ");
@@ -126,7 +127,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
-    openThreadKey: "",
     cannotWrite: false,
     isOwner: false,
     ...records,
@@ -186,7 +186,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     composer: Writable.of({}),
     // Stand-ins for what the room derives; a row's streams read none of it.
     places: {},
-    openThreadKey: "",
     cannotWrite: false,
     isOwner: false,
     ...records,

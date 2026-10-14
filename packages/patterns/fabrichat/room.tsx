@@ -102,6 +102,7 @@ import {
   type ChatRoomLink,
   type ChatRoomPolicy,
   isPrincipalDID,
+  type MessageActOutcome,
   type ProfileCell,
 } from "./schemas.tsx";
 
@@ -921,6 +922,12 @@ export interface ChatRoomView {
    * the member was told of the room once that is decided.
    */
   addRequests: Record<string, AddMemberOutcome>;
+
+  /**
+   * The outcome of each of this reader's message acts, by its `requestId`:
+   * sends, edits, deletions, obliterations, and reactions added or removed.
+   */
+  messageRequests: Record<string, MessageActOutcome>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -1039,9 +1046,17 @@ export const FabriChatRoomCore = pattern<
   const canJoin = computed(() =>
     ownSpace && manager?.joinRoom !== undefined && self !== undefined
   );
+  // The sender's outcomes, which follow them, and only them, across sessions,
+  // and why the session's latest act was refused, which the composer shows.
+  const messageRequests = new Writable.perUser<
+    Record<string, MessageActOutcome>
+  >({});
+  const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
     composer,
+    outcomes: messageRequests,
+    refusal,
     messages,
     reactionLists,
     requests,
@@ -1133,14 +1148,28 @@ export const FabriChatRoomCore = pattern<
   const title = computed(() =>
     about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
   );
-  // The key of the session's open thread's root, which each row compares its
-  // own message's place against; `""` while no thread is open.
+  // The key of the session's open thread's root; `""` while no thread is
+  // open.
   const openThreadKey = computed(() => {
     const root = composer.get()?.thread;
     return (root?.get() === undefined ? undefined : entryFor(entries, root))
       ?.key ?? "";
   });
   const hasThread = computed(() => openThreadKey !== "");
+  // The session's open thread: its root, and every message in the thread the
+  // root starts, in the order the room recorded them. The thread's list maps
+  // it, so a session holds a thread row for each message of the thread it has
+  // open, and none while it has no thread open. The list is the session's
+  // own, as the open thread is, and the rows mapped from it are stored per
+  // session with it, so no viewer's rows replace another's.
+  const threadMessages = computed((): PerSession<MessageCell[]> =>
+    openThreadKey === ""
+      ? []
+      : entries.filter((entry) =>
+        entry.key === openThreadKey ||
+        places[entry.key]?.thread === openThreadKey
+      ).map((entry) => entry.cell)
+  );
   const replyingTo = computed(() => bodyText(composer.get()?.replyTo?.get()));
   // Per-session and per-viewer parts are hidden by a prop, never built as a
   // different tree (see `FabriChatMessageRow`).
@@ -1151,6 +1180,11 @@ export const FabriChatRoomCore = pattern<
     (): ChatDisplay => (hasThread ? "flex" : "none"),
   );
   const isEmpty = computed(() => mainEntries.length === 0);
+  // Per session, so hidden by a prop rather than a branch (see
+  // `FabriChatMessageRow`).
+  const refusalDisplay = computed((): ChatDisplay =>
+    refusal.get() === "" ? "none" : "block"
+  );
   const threadShownIn = computed((): ShownIn =>
     alsoToMain.get() ? "both" : "thread"
   );
@@ -1214,6 +1248,7 @@ export const FabriChatRoomCore = pattern<
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
+    messageRequests,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1263,7 +1298,6 @@ export const FabriChatRoomCore = pattern<
               kind={kind}
               composer={composer}
               places={places}
-              openThreadKey={openThreadKey}
               cannotWrite={cannotSend}
               isOwner={isOwner}
               messages={messages}
@@ -1272,6 +1306,8 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
               self={self}
@@ -1306,6 +1342,14 @@ export const FabriChatRoomCore = pattern<
             onClick={composeSend}
           />
         </div>
+        <cf-text
+          id="fabrichat-act-refusal"
+          variant="caption"
+          hidden
+          style={{ display: refusalDisplay }}
+        >
+          {refusal}
+        </cf-text>
 
         <cf-vstack
           id="fabrichat-thread"
@@ -1323,7 +1367,7 @@ export const FabriChatRoomCore = pattern<
               Close
             </cf-button>
           </cf-hstack>
-          {messages.map((message) => (
+          {threadMessages.map((message) => (
             <FabriChatMessageRow
               message={message}
               inThread
@@ -1331,7 +1375,6 @@ export const FabriChatRoomCore = pattern<
               kind={kind}
               composer={composer}
               places={places}
-              openThreadKey={openThreadKey}
               cannotWrite={cannotSend}
               isOwner={isOwner}
               messages={messages}
@@ -1340,6 +1383,8 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
               self={self}
@@ -1484,6 +1529,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
+      messageRequests: room.messageRequests,
       [UI]: (
         <cf-screen>
           {room[UI]}
