@@ -105,6 +105,7 @@ import {
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
+  type ChatContainer,
   type ChatDisplay,
   type ChatProfile,
   type ChatRequestOutcome,
@@ -1046,6 +1047,9 @@ export interface ChatRoomOutput extends ChatRoomView {
 
 /** What a room stores, and who is looking at it. */
 export interface FabriChatRoomCoreInput {
+  /** The space's root, which may explicitly declare this conversation. */
+  container?: Cell<ChatContainer>;
+
   /** The viewer's profile, which holds no value while it is unknown. */
   myProfile: ProfileCell | undefined;
 
@@ -1138,6 +1142,7 @@ export const FabriChatRoomCore = pattern<
 >((input) => {
   const {
     myProfile,
+    container,
     about,
     messages,
     reactionLists,
@@ -1178,7 +1183,9 @@ export const FabriChatRoomCore = pattern<
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
   const canJoin = computed(() =>
-    ownSpace && manager?.joinRoom !== undefined && self !== undefined
+    (ownSpace || (container?.key("chatRoom").get() !== undefined &&
+      equals(container?.key("chatRoom").get(), self))) &&
+    manager?.joinRoom !== undefined && self !== undefined
   );
   // The sender's outcomes, which follow them, and only them, across sessions,
   // and why the session's latest act was refused, which the composer shows.
@@ -1200,6 +1207,7 @@ export const FabriChatRoomCore = pattern<
     counters,
     joined: tellManagerJoined({
       canJoin,
+      container: ownSpace ? undefined : container,
       joinRoom: manager?.joinRoom,
       self,
     }),
@@ -1547,6 +1555,7 @@ export const FabriChatRoomCore = pattern<
               outcomes={messageRequests}
               refusal={refusal}
               canJoin={canJoin}
+              container={ownSpace ? undefined : container}
               joinRoom={manager?.joinRoom}
               self={self}
             />
@@ -1625,6 +1634,7 @@ export const FabriChatRoomCore = pattern<
               outcomes={messageRequests}
               refusal={refusal}
               canJoin={canJoin}
+              container={ownSpace ? undefined : container}
               joinRoom={manager?.joinRoom}
               self={self}
             />
@@ -1717,6 +1727,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     [SELF]: self,
   }) => {
     const profileWish = wish<ChatProfile>({ query: "#profile" });
+    const containerWish = wish<Cell<ChatContainer>>({ query: "#default" });
     // The viewer's adds' outcomes, which follow them, and only them, across
     // sessions.
     const addRequests = new Writable.perUser<
@@ -1737,6 +1748,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     const room = FabriChatRoomCore(
       {
         myProfile: profileWish.result,
+        container: containerWish.result,
         about,
         messages,
         reactionLists,

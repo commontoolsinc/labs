@@ -406,23 +406,18 @@ design, as below.
   creator to send on. Whoever opens the room's link, and whoever forgot the
   room, joins it by writing in it: the room sends the writer's manager
   `joinRoom`, which lists the room, or lists a forgotten one again.
-- **The index is the catalog's.** The manager's `rooms` lists the
-  `fabrichat-room` entries the user's Home shared-space catalog keeps as saved,
-  each room found as its space's root. Creating a room registers its space in
-  the user's Home shared-space catalog
-  ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), in the
-  creating transaction once the space's name has resolved, and so does accepting
-  a room a manager created. Each room registered is registered under the
-  manager's own host, since a pattern can't read which host serves a space.
-  Finding a direct room again, or accepting a room, restores its entry if it was
-  archived, and forgetting a room archives its entry, at the revision the
-  request names. A direct room's counterpart is the one `direct` holds the room
-  under, or else the room's labeled creator, and `openDirect` finds only a room
-  `direct` holds. A room reports a successful message or reaction through
-  `joinRoom`; the manager checks its private catalog in a separate Home-space
-  event, leaving an already saved room unchanged. Accepting a
-  space's own chat is refused, since the catalog lists rooms by their own
-  spaces.
+- **The index discovers rooms and keeps individual choices.** The manager
+  lists saved standalone rooms from Home's shared-space catalog, and finds
+  declared conversations through other saved spaces' root `chatRoom` links.
+  Explicit per-room membership records keep joins and forgotten conversations
+  independently of their containers. Resolved room identity deduplicates every
+  discovery path. A room added to a saved container appears reactively;
+  forgetting it leaves the container saved. Accepting or joining a declared
+  room supplies its container's declaration, and restores an archived room
+  unless an acceptance sets `keepArchived`. A successful message or reaction
+  sends this declaration to `joinRoom`. The host can also join the declared
+  conversation when the user visits a container
+  ([visiting rooms](../../features/private-inbox.md#joining-a-room-the-user-visits)).
 - **Request ids.** A rendered control sends no `requestId`, and the room and
   the manager use the event's own key (`eventKey()`), which is the same on
   every run of that event.
