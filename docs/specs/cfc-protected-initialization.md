@@ -251,12 +251,19 @@ the definition it names, so a definition no reference reaches declares nothing;
 a release whose merged envelope keeps the stored claims in force, under another
 layout of definitions, leaves them the same. In a release, the claims beneath a
 position where the stored document holds links describe the documents linked
-there, which the release may re-describe, so they are not compared. The stored
-schema document and envelope version are then kept, and labels elsewhere in the
-document persist as for any write. An authoritative transaction, which commits
-each document whole, receives no deferral. Any other write attempt at a
-protected field — pattern code setting a whole document with the field's own
-bytes among them — requires the field's ordinary writer.
+there, which the release may re-describe, so they are not compared. Nor are the
+claims at or beneath a new field: a concrete property the document held nothing
+at before the transaction, which the stored envelope declares nothing at or
+beneath, and which lies beneath no protected field the setup restates. Such a
+field is initialized as "New fields during a source update" above describes, and
+a list there whose entries are protected may hold no entry. The stored schema
+document and envelope version are then kept where the comparison left out no new
+field's claims; otherwise the envelope the transaction derives, which declares
+them, is stored. Labels elsewhere in the document persist as for any write. An
+authoritative transaction, which commits each document whole, receives no
+deferral. Any other write attempt at a protected field — pattern code setting a
+whole document with the field's own bytes among them — requires the field's
+ordinary writer.
 
 ## Attribution of an initialized value
 
