@@ -231,18 +231,32 @@ replay. The record permits nothing but leaving those bytes as they are. A slot
 the changed code's argument schema refuses is not carried over, and receives
 no record.
 
-Preparation defers a protected field's writer requirement when the field lies
-at or under a recorded replay slot and no write the transaction recorded
-changes a byte at the field, at an ancestor where the difference reaches the
-field, or below it. The deferred requirement is waived only when the envelope
-the transaction would store leaves the field as it was too: the policy claims
-and the label positions they declare are the same throughout the document,
-and every label entry at the field, above it or below it is the same. The
-stored schema document and envelope version are then kept, and labels
-elsewhere in the document persist as for any write. An authoritative
-transaction, which commits each document whole, receives no deferral. Any other
-write attempt at a protected field — pattern code setting a whole document with
-the field's own bytes among them — requires the field's ordinary writer.
+A piece whose own code changed, as when its origin publishes a release the
+source reconciler adopts, is set up again over its stored argument with no
+argument supplied. Every slot the document holds is carried over and recorded
+as a replay, and a default the changed schema adds where the document holds
+nothing is not. A stored slot the changed schema refuses refuses the setup as
+a whole.
+
+Preparation defers a protected field's writer requirements — its
+`writeAuthorizedBy`, and the trusted event its UI contract requires — when the
+field lies at or under a recorded replay slot and no write the transaction
+recorded changes a byte at the field, at an ancestor where the difference
+reaches the field, or below it. The deferred requirement is waived only when the
+envelope the transaction would store leaves the field as it was too: the policy
+claims and the label positions they declare are the same throughout the
+document, and every label entry at the field, above it or below it is the same.
+Claims are compared at the positions they apply to, each reference followed to
+the definition it names, so a definition no reference reaches declares nothing;
+a release whose merged envelope keeps the stored claims in force, under another
+layout of definitions, leaves them the same. In a release, the claims beneath a
+position where the stored document holds links describe the documents linked
+there, which the release may re-describe, so they are not compared. The stored
+schema document and envelope version are then kept, and labels elsewhere in the
+document persist as for any write. An authoritative transaction, which commits
+each document whole, receives no deferral. Any other write attempt at a
+protected field — pattern code setting a whole document with the field's own
+bytes among them — requires the field's ordinary writer.
 
 ## Attribution of an initialized value
 

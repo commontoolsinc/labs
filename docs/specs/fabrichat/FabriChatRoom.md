@@ -24,6 +24,9 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
 - Those who joined the room: profile links, in the order they were added, a
   roster only `addParticipant` writes
   (`packages/patterns/loom/participants.tsx`).
+- The title a member last set: one keyed record, absent until a member sets
+  one, which only `commitSetTitle` writes. `about.title` is computed from it
+  and, where it is absent, from the title `about.record` holds.
 
 `participants` is computed from those who joined, the participants the space's
 root lists when the room is not that root (`wish({ query: "#default" })`), and
@@ -66,6 +69,7 @@ Every write goes through one handler per stream:
 | `commitObliterate` | `obliterateMessage` | `ChatObliterateSurface` |
 | `commitSendReaction` | `sendReaction` | `ChatReactSurface` |
 | `commitDeleteReaction` | `deleteReaction` | `ChatReactSurface` |
+| `commitSetTitle` | `setTitle` | `ChatRetitleSurface` |
 
 Those who joined the room are the exception. The room's `addParticipant`
 stream is bound to the roster's one writer, also named `addParticipant`, which
@@ -89,16 +93,16 @@ confidentiality stays out of the transaction that stores shared messages and
 reactions. A social space's embedded chat sends no join: the space's own
 membership already governs that conversation.
 
-Every handler in the table first checks its event's sender and `requestId`
-against a keyed collection of the requests the room has acted on, and does
-nothing for one it finds. It records the request there in the same transaction
-as its effect, and the collection drops a request once it was recorded longer
-ago than the greater of `proposedTimeMaxAgeNsec` plus `proposedTimeMaxLeadNsec`,
-and `recentActivityWindowNsec`. The collection keeps a request even after its
-message is obliterated: it says only that the sender made a request, not what,
-and without it a late redelivery of the original send would send the message
-again. The two bounds of its window for proposed times are constants of the
-pattern, documented beside it.
+Every handler in the table but `commitSetTitle` first checks its event's sender
+and `requestId` against a keyed collection of the requests the room has acted
+on, and does nothing for one it finds. It records the request there in the same
+transaction as its effect, and the collection drops a request once it was
+recorded longer ago than the greater of `proposedTimeMaxAgeNsec` plus
+`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The collection keeps
+a request even after its message is obliterated: it says only that the sender
+made a request, not what, and without it a late redelivery of the original send
+would send the message again. The two bounds of its window for proposed times
+are constants of the pattern, documented beside it.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` moves the current version into `earlierVersions` before recording
@@ -143,14 +147,21 @@ to check.
 
 `about.record` is stored as `AuthoredByCurrentUser`, written once by the handler
 that creates the room, so it is labeled with its creator, and `about` links it.
+`commitSetTitle` stores the title a member sets the same way, as a record of its
+own, so it is labeled with that member, and the creator's record keeps its
+label. It records each retitle's outcome in the sender's own `titleRequests`,
+kept `PerUser`, under the event's `requestId`, and a request already there
+changes nothing; a refusal writes nothing else. So, unlike the other handlers
+in the table, it keeps no request memory, claims no time, and appends no
+`recentActivity` entry.
 `canSend` is computed for each viewer from their access and whether their
 profile resolves.
 
-Every handler that changes the room's own record appends its `recentActivity`
-entry in the same transaction as the change, so the log never disagrees with the
-messages. Entries older than the window are dropped as new ones are appended.
-`commitObliterate`, and `commitDelete` when it obliterates, also remove the
-message's earlier entries.
+Every handler that changes the room's messages or reactions appends its
+`recentActivity` entry in the same transaction as the change, so the log never
+disagrees with the messages. Entries older than the window are dropped as new
+ones are appended. `commitObliterate`, and `commitDelete` when it obliterates,
+also remove the message's earlier entries.
 
 The message list keeps `windows` as a `PerSession` keyed collection, and
 fulfills `openWindow` and `closeWindow` by setting and removing entries in it.
