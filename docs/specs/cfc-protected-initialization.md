@@ -231,6 +231,13 @@ replay. The record permits nothing but leaving those bytes as they are. A slot
 the changed code's argument schema refuses is not carried over, and receives
 no record.
 
+A piece whose own code changed, as when its origin publishes a release the
+source reconciler adopts, is set up again over its stored argument with no
+argument supplied. Every slot the document holds is carried over and recorded
+as a replay, and a default the changed schema adds where the document holds
+nothing is not. A stored slot the changed schema refuses refuses the setup as
+a whole.
+
 Preparation defers a protected field's writer requirement when the field lies
 at or under a recorded replay slot and no write the transaction recorded
 changes a byte at the field, at an ancestor where the difference reaches the

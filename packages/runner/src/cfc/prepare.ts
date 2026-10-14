@@ -11555,6 +11555,12 @@ export function* prepareBoundaryCommitSteps(
         index === 0 ? prefixProvenance : undefined,
         stored.status === "loaded"
           ? (reason, path) => {
+            // SPEC-PENDING https://github.com/commonfabric/specs/pull/NN
+            // TODO(danfuzz): Restating a replayed argument slot admits more
+            // than §8.15.4 permits, and runs by default rather than behind
+            // the dial `cfc-spec-correspondence.md` step 4 asks for, by
+            // Dan's decision. Drop this, or put it behind a dial, when the
+            // specs ruling lands.
             if (
               writeReplaysArgumentSlot(tx, target, path) &&
               writeLeavesPathUnchanged(tx, target, path)
