@@ -21,6 +21,7 @@ import { recordReferencedArgumentFields } from "../src/cfc/reference-initializat
 import type { LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
 import { setCfcImplementationIdentity } from "../src/storage/extended-storage-transaction.ts";
 
@@ -1392,5 +1393,280 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  describe("verdicts", () => {
+    // A floor's refusal is terminal, `CfcCommitRefusalError`, where every
+    // document whose evidence decided it is one the transaction holds, so that
+    // an immediate re-run refuses identically. A refusal resting on a document
+    // the transaction does not hold stays the retryable
+    // `StorageTransactionAborted`.
+
+    const LIST_FLOOR_SCHEMA = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "string",
+            ifc: { requiredIntegrity: [ADMIN_ATOM] },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    // The two held sources a floor finds short of its atom: one storing no
+    // labels at all, and one storing a label without the atom.
+    const HELD_SOURCES = {
+      "a bare document": async (runtime: Runtime, id: string) => {
+        const seed = runtime.edit();
+        runtime.getCell(signer.did(), id, undefined, seed).set("unendorsed");
+        expect((await seed.commit().settled).error).toBeUndefined();
+      },
+      "a document labeled without the atom": (runtime: Runtime, id: string) =>
+        seedLabeledDoc(runtime, id, "unendorsed", {}),
+    };
+
+    // Links `sourceId` into the floored list and commits.
+    const linkIntoList = async (
+      runtime: Runtime,
+      sourceId: string,
+      sinkId: string,
+    ) => {
+      const tx = runtime.edit();
+      const source = runtime.getCell(signer.did(), sourceId, undefined, tx);
+      const sink = runtime.getCell(
+        signer.did(),
+        sinkId,
+        LIST_FLOOR_SCHEMA,
+        tx,
+      );
+      sink.set({ items: [source as unknown as string] });
+      tx.prepareCfc();
+      return (await tx.commit().settled).error;
+    };
+
+    for (const [kind, seed] of Object.entries(HELD_SOURCES)) {
+      it(`rejects a link into a floored list to ${kind} as \`CfcCommitRefusalError\``, async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = makeRuntime({
+          storageManager,
+          cfcWriteFloor: "enforce",
+        });
+        try {
+          await seed(runtime, "wf-verdict-list-src");
+          const error = await linkIntoList(
+            runtime,
+            "wf-verdict-list-src",
+            "wf-verdict-list-sink",
+          );
+          expect(error?.name).toBe("CfcCommitRefusalError");
+          expect(error?.message).toContain("write floor failed at /items/0");
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
+
+    it("rejects a link into a floored list to a document the transaction does not hold as a retryable `StorageTransactionAborted`", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+      try {
+        const error = await linkIntoList(
+          runtime,
+          "wf-verdict-unheld-src",
+          "wf-verdict-unheld-sink",
+        );
+        expect(error?.name).toBe("StorageTransactionAborted");
+        expect((error as { reason?: Error } | undefined)?.reason?.message)
+          .toBe("cfc-refusal-not-a-verdict");
+        expect(error?.message).toContain("write floor failed at /items/0");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    for (const held of [true, false]) {
+      it(`rejects a link into a floored list through a reference the transaction stages to ${held ? "a held bare document as `CfcCommitRefusalError`" : "a document it does not hold as a retryable `StorageTransactionAborted`"}`, async () => {
+        // The listed reference reaches its value through a second reference
+        // the same transaction writes into its source, so the evidence the
+        // floor weighs is the second reference's source.
+
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = makeRuntime({
+          storageManager,
+          cfcWriteFloor: "enforce",
+        });
+        try {
+          if (held) await HELD_SOURCES["a bare document"](runtime, "wf-far");
+          const seed = runtime.edit();
+          runtime.getCell(signer.did(), "wf-near", undefined, seed).set({
+            x: "plain",
+          });
+          expect((await seed.commit().settled).error).toBeUndefined();
+          const tx = runtime.edit();
+          const far = runtime.getCell(signer.did(), "wf-far", undefined, tx);
+          const near = runtime.getCell<{ x: unknown }>(
+            signer.did(),
+            "wf-near",
+            undefined,
+            tx,
+          );
+          near.key("x").set(far);
+          const sink = runtime.getCell(
+            signer.did(),
+            "wf-staged-sink",
+            LIST_FLOOR_SCHEMA,
+            tx,
+          );
+          sink.set({ items: [near.key("x") as unknown as string] });
+          tx.prepareCfc();
+          const error = (await tx.commit().settled).error;
+          expect(error?.name).toBe(
+            held ? "CfcCommitRefusalError" : "StorageTransactionAborted",
+          );
+          expect(error?.message).toContain("write floor failed at /items/0");
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
+
+    for (const held of [true, false]) {
+      it(`rejects a link at a floored field to ${held ? "a held document without the atom as `CfcCommitRefusalError`" : "a document the transaction does not hold as a retryable `StorageTransactionAborted`"}`, async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = makeRuntime({
+          storageManager,
+          cfcWriteFloor: "enforce",
+        });
+        try {
+          if (held) {
+            await seedLabeledDoc(runtime, "wf-verdict-field-src", "v", {});
+          }
+          const tx = runtime.edit();
+          const source = runtime.getCell(
+            signer.did(),
+            "wf-verdict-field-src",
+            undefined,
+            tx,
+          );
+          const sink = runtime.getCell(
+            signer.did(),
+            "wf-verdict-field-sink",
+            FLOOR_SCHEMA,
+            tx,
+          );
+          sink.set({ out: source as unknown as string });
+          tx.prepareCfc();
+          const error = (await tx.commit().settled).error;
+          expect(error?.name).toBe(
+            held ? "CfcCommitRefusalError" : "StorageTransactionAborted",
+          );
+          expect(error?.message).toContain("write floor failed at /out");
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
+
+    it("rejects an ancestor link to a held document whose nested value lacks the atom as `CfcCommitRefusalError`", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+      try {
+        await seedLabeledDoc(
+          runtime,
+          "wf-verdict-anc-src",
+          { secret: "unendorsed" },
+          {},
+        );
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "wf-verdict-anc-src",
+          undefined,
+          tx,
+        );
+        const sink = runtime.getCell(
+          signer.did(),
+          "wf-verdict-anc-sink",
+          {
+            type: "object",
+            properties: {
+              out: {
+                type: "object",
+                properties: {
+                  secret: {
+                    type: "string",
+                    ifc: { requiredIntegrity: [ADMIN_ATOM] },
+                  },
+                },
+              },
+            },
+          } as const satisfies JSONSchema,
+          tx,
+        );
+        sink.set({ out: source as unknown as { secret: string } });
+        tx.prepareCfc();
+        const error = (await tx.commit().settled).error;
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(error?.message).toContain("write floor failed at /out/secret");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("runs a reactive writer the floor refused again once the linked document stores the atom", async () => {
+      // The refusal ends the writer's retries, so only a change to what the
+      // floor weighed can run it again: here, the source storing the atom.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+      try {
+        await seedLabeledDoc(runtime, "wf-rerun-src", "pending", {});
+        const errors: Error[] = [];
+        runtime.scheduler.onError((error) => errors.push(error));
+        const source = runtime.getCell(signer.did(), "wf-rerun-src");
+        const sink = runtime.getCell(
+          signer.did(),
+          "wf-rerun-sink",
+          LIST_FLOOR_SCHEMA,
+        );
+        let runs = 0;
+        runtime.scheduler.subscribe(
+          (actionTx: IExtendedStorageTransaction) => {
+            runs++;
+            sink.withTx(actionTx).set({ items: [source as unknown as string] });
+          },
+          { reads: [], shallowReads: [], writes: [] },
+          { isEffect: true },
+        );
+        await runtime.scheduler.idleWithPendingCommits();
+        expect(runs).toBe(1);
+        expect(errors.map((error) => error.name)).toEqual([
+          "CfcCommitRefusalError",
+        ]);
+
+        await seedLabeledDoc(runtime, "wf-rerun-src", "pending", {
+          integrity: [ADMIN_ATOM],
+        });
+        await runtime.scheduler.idleWithPendingCommits();
+        expect(runs).toBe(2);
+        expect(errors).toHaveLength(1);
+        const read = runtime.edit();
+        try {
+          expect(sink.withTx(read).key("items").get()).toEqual(["pending"]);
+        } finally {
+          read.abort();
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
   });
 });

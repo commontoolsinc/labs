@@ -97,6 +97,7 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IReadActivity,
+  IReadOptions,
   MediaType,
 } from "../storage/interface.ts";
 import {
@@ -241,13 +242,17 @@ import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 
-// The link-source schema read, which reactivity SEES. Prepare's other reads
-// carry `ignoreReadForScheduling` and are invisible to it. The schema is
-// evidence a write floor weighs for a linked value (`linkedSourceEvidence`),
-// and the run that wrote the link is triggered again when the member lands.
-// The read is a commit-time precondition either way:
-// `ignoreReadForScheduling` gates reactivity alone.
-const LINK_SOURCE_SCHEMA_META = {
+// The reads of a link's source that reactivity SEES. Prepare's other reads
+// carry `ignoreReadForScheduling` and are invisible to it. The source's
+// `["schema"]` member is evidence a write floor weighs for a linked value
+// (`linkedSourceEvidence`) and is always read this way, so the run that wrote
+// the link is triggered again when the member lands. What else the floor
+// weighed, the source's stored labels and the values along the linked path,
+// is read this way again when the floor's refusal is a verdict
+// (`holdLinkedSources`), since nothing else would run the writer again. The
+// reads are commit-time preconditions either way: `ignoreReadForScheduling`
+// gates reactivity alone.
+const LINK_SOURCE_DEPENDENCY_META = {
   ...internalVerifierRead,
 };
 
@@ -5963,10 +5968,22 @@ const previousWriteValueForTarget = (
  * names its cell relative to the document holding it resolves against that
  * document. A read that fails, and a walk following more links than link
  * resolution follows, return `undefined`.
+ *
+ * Each value along the way is read with `walk.read`, by default an internal
+ * verifier read reactivity does not see, and `walk.visit` is called with the
+ * document of each read before the read is made.
  */
 const resolveValueThroughLinks = (
   tx: IExtendedStorageTransaction,
   address: CfcAddress,
+  walk: {
+    read?: IReadOptions;
+    visit?: (document: {
+      space: MemorySpace;
+      id: URI;
+      scope: ReturnType<typeof normalizeCellScope>;
+    }) => void;
+  } = {},
 ): { held: CfcAddress; stored: boolean } | "absent" | undefined => {
   let document = {
     space: address.space,
@@ -5980,11 +5997,13 @@ const resolveValueThroughLinks = (
   // links followed bounds the walk.
   let hops = 0;
   while (true) {
+    walk.visit?.(document);
     let value: FabricValue;
     try {
-      value = tx.readValueOrThrow({ ...document, path }, {
-        meta: INTERNAL_VERIFIER_META,
-      });
+      value = tx.readValueOrThrow(
+        { ...document, path },
+        walk.read ?? { meta: INTERNAL_VERIFIER_META },
+      );
     } catch {
       return undefined;
     }
@@ -6009,6 +6028,67 @@ const resolveValueThroughLinks = (
     path = [...path, segment];
     remaining = rest;
   }
+};
+
+/**
+ * Whether every document a write floor weighed through `sources` is one this
+ * transaction holds, so that an immediate re-run weighs the same evidence;
+ * where it is, makes the run depend on that evidence.
+ *
+ * Each source is the address of a link source whose evidence the floor
+ * derived (`linkedSourceEvidence`), walked from the root of its document as
+ * the derivation walked it. A document is held where its root is readable: a
+ * read of its `["cfc"]` member returns, with the stored labels or with
+ * nothing, rather than failing as it does for a document absent from this
+ * transaction's view. A document the replica has not pulled reads the same as
+ * one nobody wrote.
+ *
+ * The derivation read the stored labels and the values along each walk
+ * invisibly to reactivity. Where every document is held they are read again
+ * with `LINK_SOURCE_DEPENDENCY_META`: each document's `["cfc"]` member, and
+ * each value along a walk without its children, which is what the walk's
+ * course depends on. A writer the floor refuses then runs again when that
+ * evidence changes, as a fresh trigger rather than a retry.
+ */
+const holdLinkedSources = (
+  tx: IExtendedStorageTransaction,
+  sources: readonly CfcAddress[],
+): boolean => {
+  /** A document one of the walks read. */
+  type Walked = {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  };
+
+  const documents = new Map<string, Walked>();
+  for (const source of sources) {
+    resolveValueThroughLinks(tx, source, {
+      visit: (document) => documents.set(targetKey(document), document),
+    });
+  }
+  const labelsOf = (document: Walked) => ({
+    ...document,
+    type: "application/json" as const,
+    path: ["cfc"],
+  });
+  for (const document of documents.values()) {
+    if (
+      tx.read(labelsOf(document), { meta: INTERNAL_VERIFIER_META }).ok ===
+        undefined
+    ) {
+      return false;
+    }
+  }
+  for (const source of sources) {
+    resolveValueThroughLinks(tx, source, {
+      read: { meta: LINK_SOURCE_DEPENDENCY_META, nonRecursive: true },
+    });
+  }
+  for (const document of documents.values()) {
+    tx.read(labelsOf(document), { meta: LINK_SOURCE_DEPENDENCY_META });
+  }
+  return true;
 };
 
 /** Whether this transaction wrote at `path` of `document`, or above it. */
@@ -8328,7 +8408,7 @@ const setupResultSchemaFor = (
     type: "application/json",
     path: [SCHEMA_META_MEMBER],
   }, {
-    meta: LINK_SOURCE_SCHEMA_META,
+    meta: LINK_SOURCE_DEPENDENCY_META,
   });
   if (schema === undefined || schema === null) return undefined;
   return recomposeSchemaRefs(schema as JSONSchema, (hash) => {
@@ -9037,6 +9117,12 @@ type DerivedLink = {
 
   /** Refusals from any hop in the reference chain. */
   reasons: string[];
+
+  /**
+   * The link sources whose stored evidence the derivation weighed, at any hop,
+   * each as the address its walk starts from (`holdLinkedSources`).
+   */
+  sources: readonly CfcAddress[];
 };
 
 /** Resolves recorded links through the references staged into their sources. */
@@ -9053,13 +9139,17 @@ type LinkLabelDeriver = {
 
   /**
    * Derives the label a recorded link carries at `relativePath` below its
-   * receiving slot, or `undefined` when the link itself, or its source's label
-   * at that path, cannot be derived.
+   * receiving slot, `undefined` when the link itself, or its source's label
+   * at that path, cannot be derived, beside the link sources the derivation
+   * weighed.
    */
   labelAt: (
     input: LinkWritePolicyInput,
     relativePath: readonly string[],
-  ) => Generator<void, IFCLabel | undefined>;
+  ) => Generator<
+    void,
+    { label?: IFCLabel; sources: readonly CfcAddress[] }
+  >;
 };
 
 /** Whether repeated pending sources form a document graph without cycles. */
@@ -9170,12 +9260,17 @@ const createLinkLabelDeriver = (
   };
 
   // The labels the references staged into the source document bring to the
-  // source path, or the refusals of the first one that cannot be derived.
+  // source path, or the refusals of the first one that cannot be derived,
+  // beside the link sources the derivations weighed up to there.
   const pendingSourceView = function* (
     input: LinkWritePolicyInput,
     walk: Walk,
-  ): Generator<void, { view?: CfcLabelView; reasons: string[] }> {
+  ): Generator<
+    void,
+    { view?: CfcLabelView; reasons: string[]; sources: CfcAddress[] }
+  > {
     const views: (CfcLabelView | undefined)[] = [];
+    const sources: CfcAddress[] = [];
     const sourcePath = canonicalizeLogicalPath(input.source.path);
     for (const upstream of linkWrites.get(targetKey(input.source)) ?? []) {
       const upstreamPath = canonicalizeLogicalPath(upstream.target.path);
@@ -9210,7 +9305,10 @@ const createLinkLabelDeriver = (
         requested,
         memo: walk.memo,
       });
-      if (resolved.reasons.length > 0) return { reasons: resolved.reasons };
+      for (const source of resolved.sources) sources.push(source);
+      if (resolved.reasons.length > 0) {
+        return { reasons: resolved.reasons, sources };
+      }
       yield;
       // A downstream hop sees the representation the upstream hop persists,
       // including protected fields when it crosses a space boundary.
@@ -9256,7 +9354,7 @@ const createLinkLabelDeriver = (
       }
     }
     yield;
-    return { view: mergeCfcLabelViews(views), reasons: [] };
+    return { view: mergeCfcLabelViews(views), reasons: [], sources };
   };
 
   const derive = function* (
@@ -9283,6 +9381,7 @@ const createLinkLabelDeriver = (
         reasons: [
           verdictReason("cyclic staged reference in link label derivation"),
         ],
+        sources: [],
       };
     }
     // Projection requests carry dependencies on the caller's source values.
@@ -9302,7 +9401,11 @@ const createLinkLabelDeriver = (
       memo: walk.memo,
     });
     if (pending.reasons.length > 0) {
-      return { entries: [], reasons: pending.reasons };
+      return {
+        entries: [],
+        reasons: pending.reasons,
+        sources: pending.sources,
+      };
     }
     yield;
     const identity = identityForInput(input);
@@ -9317,8 +9420,9 @@ const createLinkLabelDeriver = (
       bindCreator,
       pending.view,
     );
+    const sources = [...pending.sources, input.source];
     if (result.reason !== undefined) {
-      return { entries: [], reasons: [result.reason] };
+      return { entries: [], reasons: [result.reason], sources };
     }
     yield;
     // What a downstream hop sees of this one: the label at the linked path
@@ -9345,7 +9449,12 @@ const createLinkLabelDeriver = (
       if (!hasLabelValues(gated)) continue;
       entries.push({ path: canonicalizeLogicalPath(entry.path), label: gated });
     }
-    const resolved: DerivedLink = { label: result.label, entries, reasons: [] };
+    const resolved: DerivedLink = {
+      label: result.label,
+      entries,
+      reasons: [],
+      sources,
+    };
     memo?.set(input, resolved);
     return resolved;
   };
@@ -9367,7 +9476,7 @@ const createLinkLabelDeriver = (
       metadataResolver,
     );
     if (result.reason !== undefined) {
-      return { entries: [], reasons: [result.reason] };
+      return { entries: [], reasons: [result.reason], sources: [] };
     }
     yield;
     return {
@@ -9376,6 +9485,7 @@ const createLinkLabelDeriver = (
         ? [{ path: [], label: result.label }]
         : [],
       reasons: [],
+      sources: [],
     };
   };
 
@@ -9386,14 +9496,15 @@ const createLinkLabelDeriver = (
   const labelAt = function* (
     input: LinkWritePolicyInput,
     relativePath: readonly string[],
-  ): Generator<void, IFCLabel | undefined> {
-    if (
-      (yield* derive(input, {
-        ...emptyWalk(),
-        requested: [requestPath(relativePath)],
-      }))
-        .reasons.length > 0
-    ) return undefined;
+  ): Generator<
+    void,
+    { label?: IFCLabel; sources: readonly CfcAddress[] }
+  > {
+    const derived = yield* derive(input, {
+      ...emptyWalk(),
+      requested: [requestPath(relativePath)],
+    });
+    if (derived.reasons.length > 0) return { sources: derived.sources };
     const nested: LinkWritePolicyInput = {
       ...input,
       source: {
@@ -9406,18 +9517,22 @@ const createLinkLabelDeriver = (
       },
     };
     const pending = yield* pendingSourceView(nested, emptyWalk());
-    if (pending.reasons.length > 0) return undefined;
-    return linkedSourceEvidence(
-      tx,
-      nested,
-      candidates,
-      identityForInput(input),
-      metadataResolver,
-      valueTargets,
-      linkWrites,
-      bindCreator,
-      pending.view,
-    ).label;
+    const sources = [...derived.sources, ...pending.sources];
+    if (pending.reasons.length > 0) return { sources };
+    return {
+      label: linkedSourceEvidence(
+        tx,
+        nested,
+        candidates,
+        identityForInput(input),
+        metadataResolver,
+        valueTargets,
+        linkWrites,
+        bindCreator,
+        pending.view,
+      ).label,
+      sources: [...sources, nested.source],
+    };
   };
 
   return { persisted, evidence, labelAt };
@@ -10876,6 +10991,24 @@ const attemptedWritePathsUnder = (
 };
 
 /**
+ * A floor-declaring path a write fails, and what decided the failure besides
+ * the transaction's own writes, schema and author.
+ */
+type WriteFloorFailure = {
+  /** The untagged refusal reason. */
+  reason: string;
+
+  /**
+   * One list per contribution that missed the floor on evidence an immediate
+   * re-run weighs again wherever the listed link sources are held
+   * (`holdLinkedSources`). An empty list is a miss the transaction's own data
+   * decided. A contribution resting on stored state the run cannot be made to
+   * depend on has no list.
+   */
+  verdictSources: readonly (readonly CfcAddress[])[];
+};
+
+/**
  * Epic D3 — the write-side `requiredIntegrity` FLOOR (§8.12.4.1 / SC-18),
  * dual of the read-side gate in `verifyInputRequirements`: where that gate
  * quantifies over the transaction's consumed reads, the floor tests the
@@ -10921,13 +11054,18 @@ const verifyWriteFloor = function* (
     linkWriteInputs: readonly LinkWritePolicyInput[];
     linkLabels: LinkLabelDeriver;
     flowIntegrity: readonly CfcAtom[];
+    // The stored state `flowIntegrity` was read from, as link sources a
+    // verdict's refusal holds (`holdLinkedSources`): empty where the flow
+    // join credits nothing, and `undefined` where the run cannot be made to
+    // depend on what it read.
+    flowSources: readonly CfcAddress[] | undefined;
     // The stamp decision persistence consumes too (`ValueStamp`): a floor
     // is credited only by a stamp the decision names at its path, with the
     // atoms the write's author may mint.
     valueStamps: readonly ValueStamp[];
   },
-): Generator<void, string[]> {
-  const failures: string[] = [];
+): Generator<void, WriteFloorFailure[]> {
+  const failures: WriteFloorFailure[] = [];
   // Built once per verify (not per entry/contribution): the closure and acting
   // principal are tx-wide. Concept floors on the written value resolve through
   // it; plain floors ignore it (Epic D5).
@@ -10972,17 +11110,18 @@ const verifyWriteFloor = function* (
             trust,
           )
         ) {
-          // Untagged, as the concrete branch's failure below is. The floor
-          // cannot tell a source that lacks the atom from one this
-          // transaction does not hold, since either reaches it as a label
-          // short of the floor, and the run does not depend on the source's
-          // stored labels, so a later revision that stores the atom would
-          // not run the writer again after a verdict (cfc/verdict-reason.ts).
-          failures.push(
-            `write floor failed at /${
+          // Besides the transaction's own schema and author, the link's
+          // evidence decided the miss. A source that lacks the atom and one
+          // this transaction does not hold both reach the floor as a label
+          // short of it, so the refusal is a verdict only where every source
+          // the evidence weighed is held, and the commit boundary decides
+          // that (cfc/verdict-reason.ts).
+          failures.push({
+            reason: `write floor failed at /${
               linkPath.join("/")
             } (requiredIntegrity, §8.12.4.1)`,
-          );
+            verdictSources: [derived.sources],
+          });
         }
       }
       continue;
@@ -11063,12 +11202,23 @@ const verifyWriteFloor = function* (
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    const contributions: (readonly CfcAtom[])[] = [];
+    // Each carries the link sources whose evidence decided it, or none where
+    // stored state the run cannot depend on did (`WriteFloorFailure`).
+    const contributions: {
+      integrity: readonly CfcAtom[];
+      sources: readonly CfcAddress[] | undefined;
+    }[] = [];
+    // The ancestor links' walks that found nothing at the floor path. They
+    // decide whether the written value is all that lands there.
+    const absentWalks: CfcAddress[] = [];
     for (const input of linksHere) {
       const derived = yield* ctx.linkLabels.evidence(input);
       // An underivable link (`reasons` set, `label` undefined) contributes empty
       // integrity — it fails the floor, fail-closed.
-      contributions.push(derived.label?.integrity ?? []);
+      contributions.push({
+        integrity: derived.label?.integrity ?? [],
+        sources: derived.sources,
+      });
     }
     for (const input of ancestorLinks) {
       // Re-point the derivation at the floor path INSIDE the linked source:
@@ -11085,16 +11235,22 @@ const verifyWriteFloor = function* (
       // floored value.
       const linkPath = canonicalizeLogicalPath(input.target.path);
       const relative = entry.path.slice(linkPath.length);
-      const resolved = resolveValueThroughLinks(tx, {
+      const walked = {
         ...input.source,
         path: [...canonicalizeLogicalPath(input.source.path), ...relative],
+      };
+      const resolved = resolveValueThroughLinks(tx, walked);
+      if (resolved === "absent") {
+        absentWalks.push(walked);
+        continue;
+      }
+      const at = yield* (resolved?.stored === true
+        ? ctx.linkLabels.labelAt({ ...input, source: resolved.held }, [])
+        : ctx.linkLabels.labelAt(input, relative));
+      contributions.push({
+        integrity: at.label?.integrity ?? [],
+        sources: [walked, ...at.sources],
       });
-      if (resolved === "absent") continue;
-      contributions.push(
-        (yield* (resolved?.stored === true
-          ? ctx.linkLabels.labelAt({ ...input, source: resolved.held }, [])
-          : ctx.linkLabels.labelAt(input, relative)))?.integrity ?? [],
-      );
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
     // A value contribution exists when plain data lands at/under the floor
@@ -11131,17 +11287,27 @@ const verifyWriteFloor = function* (
       (written !== undefined && !isPureLinkStructure(written)) ||
       descendantValueWrite ||
       contributions.length === 0;
-    if (valueWritten) contributions.push(ctx.flowIntegrity);
+    if (valueWritten) {
+      contributions.push({
+        integrity: ctx.flowIntegrity,
+        sources: ctx.flowSources === undefined
+          ? undefined
+          : [...absentWalks, ...ctx.flowSources],
+      });
+    }
 
-    const misses = contributions.some((extra) =>
-      !cfcIntegritySatisfiesFloor([...base, ...extra], floor, trust)
+    const misses = contributions.filter(({ integrity }) =>
+      !cfcIntegritySatisfiesFloor([...base, ...integrity], floor, trust)
     );
-    if (misses) {
-      failures.push(
-        `write floor failed at /${
+    if (misses.length > 0) {
+      failures.push({
+        reason: `write floor failed at /${
           entry.path.join("/")
         } (requiredIntegrity, §8.12.4.1)`,
-      );
+        verdictSources: misses.flatMap(({ sources }) =>
+          sources === undefined ? [] : [sources]
+        ),
+      });
     }
   }
   return failures;
@@ -11793,7 +11959,7 @@ export function* prepareBoundaryCommitSteps(
     // `observe` diagnoses; `enforce` records a reason (rejecting the commit
     // under the enforcing enforcement modes, mirroring requirementFailure).
     if (state.writeFloorMode !== "off") {
-      let floorFailures: string[] = [];
+      let floorFailures: WriteFloorFailure[] = [];
       for (const schema of verificationSchemas) {
         const failures = yield* verifyWriteFloor(tx, schema, target, {
           identityForPath: (path) =>
@@ -11809,6 +11975,10 @@ export function* prepareBoundaryCommitSteps(
           // integrity that never lands (codex/cubic review). Only `persist`
           // writes the derived component.
           flowIntegrity: flowPersist ? flowIntegrity : [],
+          // The flow join weighs the stored labels of everything the
+          // transaction read, invisibly to reactivity, so a miss it decided
+          // is no verdict.
+          flowSources: flowPersist ? undefined : [],
         });
         if (failures.length > 0) {
           floorFailures = failures;
@@ -11817,12 +11987,23 @@ export function* prepareBoundaryCommitSteps(
       }
       if (floorFailures.length > 0) {
         if (state.writeFloorMode === "enforce") {
-          for (const failure of floorFailures) reasons.push(failure);
+          // A failure is a verdict where a contribution that missed the floor
+          // was decided by the transaction's own data and by link sources it
+          // holds, which `holdLinkedSources` makes the run depend on.
+          for (const failure of floorFailures) {
+            reasons.push(
+              failure.verdictSources.some((sources) =>
+                  holdLinkedSources(tx, sources)
+                )
+                ? verdictReason(failure.reason)
+                : failure.reason,
+            );
+          }
           if (!isIngestTarget) continue;
           ingestVerificationFailed = true;
         } else {
           for (const failure of floorFailures) {
-            tx.noteCfcDiagnostic(`write-floor(observe): ${failure}`);
+            tx.noteCfcDiagnostic(`write-floor(observe): ${failure.reason}`);
           }
         }
       }
