@@ -496,6 +496,11 @@ describe("private inbox across runtimes", () => {
       await refusals(owner) > unmarkedBefore ||
       (await owner.read(replacingHeld)) !== undefined
     );
+    // Under server execution the handler is refused twice, by the owner's
+    // own run and by the served one, and the wait above returns on the
+    // first. The served refusal is the event's consequence, so once that is
+    // back, neither refusal can land in the marked replacement's count.
+    await owner.awaitEventConsequences();
     unmarkedReplacement = {
       refusals: await refusals(owner) - unmarkedBefore,
       held: await owner.read(replacingHeld),
@@ -1059,6 +1064,24 @@ describe("private inbox across runtimes", () => {
     };
     await harness.settleUntil(readsBack);
     expect(await readsBack()).toBe(true);
+
+    // What the sender reads is what the inbox holds, row for row. Under
+    // server execution the sender's runtime previews its own deliveries, and
+    // a preview is a row in a document of its own that the inbox's space
+    // never holds, so a sender still reading one has not read its delivery
+    // back. A preview stands until the consequence of the event behind it
+    // arrives, which is what the comparison waits for.
+    await sender.awaitEventConsequences();
+    const rows = async (from: MultiRuntimeSession): Promise<string[]> => {
+      const count =
+        ((await from.read(["offers"], { piece: inbox })) as unknown[]).length;
+      const ids: string[] = [];
+      for (let index = 0; index < count; index++) {
+        ids.push((await from.link(["offers", index], { piece: inbox })).id);
+      }
+      return ids;
+    };
+    expect(await rows(sender)).toEqual(await rows(owner));
   });
 
   it("refuses a stranger's served copy of the offers", {
