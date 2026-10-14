@@ -9483,6 +9483,19 @@ describe("runtime-processor", () => {
       })).rejects.toThrow("valid SqliteDb cell handle");
     });
 
+    it("rejects a database reference whose external mark is not a boolean", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: {}, external: "yes" },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database external mark.");
+    });
+
     it("rejects a database reference with an unknown scope", async () => {
       const db = { id: "db-1", tables: { notes: {} }, scope: "tenant" };
       const processor = processorWith(

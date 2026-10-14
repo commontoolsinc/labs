@@ -2734,6 +2734,9 @@ export class RuntimeProcessor {
     if (raw.owner !== undefined && typeof raw.owner !== "string") {
       throw new TypeError("Invalid SQLite database owner.");
     }
+    if (raw.external !== undefined && typeof raw.external !== "boolean") {
+      throw new TypeError("Invalid SQLite database external mark.");
+    }
     const materialized = cell.asSchema<{
       tables?: FabricValue;
     }>({ type: "object", additionalProperties: true }).get();

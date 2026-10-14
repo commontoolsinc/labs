@@ -106,8 +106,9 @@ export class DiskSourceRegistry {
   }
 
   /** Resolve the on-disk descriptor for `(space, id)`, or undefined if it is not
-   *  an injected on-disk source (caller falls back to cell-derived). Throws
-   *  when the registry file cannot be read. */
+   *  registered (the server then fails a read of a handle marked `external`
+   *  as unavailable, and reads any other handle as cell-derived). Throws when
+   *  the registry file cannot be read. */
   get(space: string, id: string): DiskSourceDescriptor | undefined {
     this.#readable();
     const d = this.#byKey.get(this.#key(space, id));
@@ -170,7 +171,8 @@ export class DiskSourceRegistry {
   /**
    * Helper for `register()`, which writes `registrations` to the registry
    * file, flushed to disk before it replaces the file whole, so a reader never
-   * sees half a write.
+   * sees half a write, and flushes the directory that records the
+   * replacement.
    */
   #save(registrations: Map<string, DiskSourceDescriptor>): void {
     if (this.#file === undefined) return;
@@ -200,6 +202,14 @@ export class DiskSourceRegistry {
       file.close();
     }
     Deno.renameSync(partial, this.#file);
+    // The rename lives in the directory's entries, which a crash can lose
+    // unless the directory itself is flushed too.
+    const directory = Deno.openSync(Path.dirname(this.#file), { read: true });
+    try {
+      directory.syncSync();
+    } finally {
+      directory.close();
+    }
   }
 }
 

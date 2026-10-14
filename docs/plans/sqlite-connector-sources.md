@@ -113,12 +113,17 @@ is converted to fabric values on the main thread. Each wants a bound that is
 not a wall-clock timeout — a row or byte cap with a typed error, an allowance
 per principal — and a measurement that shows it is needed (spec 08, Q8).
 
+Ruling: the sqlite-builtin owner, since a cap changes what a query may return,
+once a measurement shows a bound is needed.
+
 ### A restart signal
 
 `hello.ok` carries the serving process's boot id, so a client can tell a
 reconnect from a restart. Durable registrations make it unnecessary for
 injected sources; it is general, and presence or anything else a client keeps
 in a server's memory can use it.
+
+Ruling: the memory protocol's owner (memory-v2 §4, the `hello` handshake).
 
 ## Not proposed
 
