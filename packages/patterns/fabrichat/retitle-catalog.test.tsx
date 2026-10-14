@@ -4,7 +4,9 @@
  * lists the room under the new title at once. Another member's catalog follows
  * when their manager next hears of the room: here, on their next message. A
  * retitle moves the entry's title and nothing else, so its revision and
- * membership stay as they were.
+ * membership stay as they were. A retitle is a write in the room, and writing
+ * in a room is joining it, so a member who forgot the room and retitles it has
+ * it back among their chats, as a message or a reaction would.
  */
 import {
   action,
@@ -27,7 +29,7 @@ import {
   registerSharedSpaceIn,
   type SharedSpaceCatalogStorage,
 } from "../system/shared-space-catalog.ts";
-import { FabriChatManagerCore } from "./manager.tsx";
+import { FabriChatManagerCore, type ManagerStreamEvent } from "./manager.tsx";
 import {
   type ActivityCounters,
   type MessagesValue,
@@ -107,6 +109,9 @@ interface EntryState {
 
   /** The room. */
   room: Cell<ChatRoomLink>;
+
+  /** The manager's `forget`. */
+  forget?: Stream<ManagerStreamEvent>;
 }
 
 /** Lists the room in the catalog, under no title, as accepting it can. */
@@ -115,6 +120,18 @@ const listRoom = handler<unknown, EntryState>((_event, { catalog, room }) => {
     space: spaceOf(room) ?? "",
     host: "http://localhost:8000",
     kind: CHAT_ROOM_OFFER_KIND,
+  });
+});
+
+/** Forgets the room, at the revision its catalog entry holds. */
+const forgetRoom = handler<unknown, EntryState>((
+  _event,
+  { catalog, room, forget },
+) => {
+  forget?.send({
+    room,
+    revision: readSharedSpaceCatalog(catalog).entries[spaceOf(room) ?? ""]
+      ?.revision,
   });
 });
 
@@ -148,6 +165,9 @@ interface ViewerOutput {
 
   /** Lists the room in the viewer's catalog. */
   list: Stream<unknown>;
+
+  /** Has the viewer's manager forget the room. */
+  forget: Stream<unknown>;
 
   /** The title the room's entry in the viewer's catalog holds. */
   entryTitle?: string;
@@ -206,6 +226,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     sendMessage: room.sendMessage,
     setTitle: room.setTitle,
     list: listRoom({ catalog, room: self }),
+    forget: forgetRoom({ catalog, room: self, forget: manager.forget }),
     entryTitle: computed(() => entry?.title),
     entryRevision: computed(() => entry?.revision),
     entryState: computed(() => entry?.state),
@@ -280,6 +301,21 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         assertion: assert(() =>
           viewer.entryTitle === "Weekend plans" &&
           viewer.entryState === "saved"
+        ),
+      },
+      // Once he forgets the room, retitling it puts it back among his chats,
+      // under the new title.
+      { action: viewer.forget, event: {} },
+      { assertion: assert(() => viewer.entryState === "archived") },
+      {
+        action: viewer.setTitle,
+        event: { requestId: "t-bob", title: "Weekend plans, take two" },
+        trustedUi: retitleGesture,
+      },
+      {
+        assertion: assert(() =>
+          viewer.entryState === "saved" &&
+          viewer.entryTitle === "Weekend plans, take two"
         ),
       },
       { label: "bob-done" },
