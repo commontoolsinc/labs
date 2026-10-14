@@ -456,6 +456,12 @@ export interface ChatRoomLink {
   roster?: ManagerProfileCell[];
 }
 
+/** A container's explicit declaration of the conversation it holds. */
+export interface ChatContainer {
+  /** The declared conversation, wherever its room lives. */
+  chatRoom?: Cell<ChatRoomLink>;
+}
+
 /** One room in a user's chat manager. */
 export interface ChatIndexEntry {
   /** The room. */
@@ -467,13 +473,13 @@ export interface ChatIndexEntry {
   /** A direct room's other member, by principal. */
   counterpart?: string;
 
-  /** When this user's catalog admitted it. */
+  /** When first listed for this user, using catalog admission for discovery. */
   since: FabricEpochNsec;
 
   /**
-   * The revision of the room's entry in the user's catalog, as listed, which a
-   * request to forget the room names; absent where the entry is not one the
-   * catalog keeps revisions of.
+   * The opaque revision supplied by `rooms` for its membership or discovery
+   * source. A request to forget uses that view's revision; direct mappings
+   * and act outcomes may omit it.
    */
   revision?: string;
 }
@@ -510,8 +516,8 @@ export type ChatRequestOutcome =
 
 /**
  * A refusal a client can act on, which stays the same whatever its `reason`
- * says. `space-own-chat`: `accept` named a social space's own chat, which a
- * user's chats don't list, since the catalog lists rooms by their own spaces.
+ * says. `space-own-chat`: `accept` or `joinRoom` named a container's chat
+ * without supplying the matching root `chatRoom` declaration it needs.
  * `shared-inbox`: `createGroup` named profiles of two people that point at
  * the same share inbox, so an offer meant for one would reach the other.
  */

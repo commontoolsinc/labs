@@ -180,17 +180,26 @@ before the retitle still names the current revision. Home exposes no command
 for it; the application that knows the root's current title calls it from its
 own handler.
 
-FabriChat's Home-local manager calls all three from its own handlers, and lists
-the rooms the catalog keeps as saved. Creating a room, or accepting one a
-manager created, registers the room's space. Forgetting a room archives its
-entry, naming the revision the person's list showed. Finding a direct room
-again, or accepting a room, restores its entry if it was archived. Asking to
-open or accept the room is the person's choice to have it listed, so that
-restore names the revision the handler reads. Registration takes the room's
-title, direct room or group, and whenever the manager hears of a listed room,
-from a join or an acceptance, it retitles the entry where the room's title has
-moved on. A room's retitle tells the retitling member's manager at once; another
+FabriChat's manager in Home calls all three from its own handlers. For standalone
+`fabrichat-room` spaces, the catalog's current state and revision govern the
+chat list, including when a saved container also declares that room. Creating a
+room, or accepting one a manager created, registers the room's space. Forgetting
+a standalone room archives its entry, naming the revision the person's list
+showed. Finding a direct room again, or accepting a room, restores its entry if
+it was archived. Asking to open or accept the room is the person's choice to
+have it listed, so that restore names the revision the handler reads. Catalog
+restoration supersedes a prior room tombstone; catalog archive or removal
+supersedes a saved room record. Registration takes a standalone room's title,
+direct room or group, and whenever the manager hears of a listed room, from a
+join or an acceptance, it retitles the entry where the room's title has moved
+on. A room's retitle tells the retitling member's manager at once; another
 member's catalog follows on their manager's next event for that room.
+
+Other saved spaces expose conversations through their roots' explicit
+`chatRoom` declarations. FabriChat keeps choices about those individual rooms
+separately from the container's catalog entry. Forgetting such a conversation
+leaves its container saved and suppresses rediscovery through the declaration.
+See [FabriChatManager](../specs/fabrichat/FabriChatManager.md).
 
 FabriChat consumes the manager's flat fields through its room-specific schema.
 Shared-record handlers bind individual streams without materializing a manager

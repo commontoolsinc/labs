@@ -309,12 +309,28 @@ On each pushed `derived` commit with `derivedThrough = W` and
    speculative run, never a durable entry of its own (a root fire's
    echo carries no thread; another intent's cascade does not reach
    `e`); a retired descendant's id joins the jobless set so a LATE
-   grandchild drops at seal. Cost, stated: when the server's LT1 child
+   grandchild drops at seal. The space an entry sealed into is no part
+   of that scope. An entry lives in the space its run wrote, and an
+   event id names one event in every space, so `e`'s mark, which
+   arrives on the sidecar in the space `e` was fired in, retires `e`'s
+   own echo and its descendants in every space. A handler that sends to
+   a stream in another space leaves its cascade child's echo in that
+   space, where no mark, watermark or arrival would otherwise name it.
+   A handler that writes into another space itself leaves its own echo
+   there. The served handler's write to that space commits apart from
+   the mark, so that echo can go before the write lands, the same
+   one-wave flicker a descendant costs below, and uncounted, as a
+   descendant in another space is.
+   Cost, stated: when the server's LT1 child
    of `e` did not complete in `e`'s appending wave (events.md §4's
    purge; the drain delivers it a wave later), the descendant echo goes
    at `e`'s consequence while the child's own consequence is still a
    wave away — a visible one-wave flicker, COUNTED
-   (`cascade-echo-retired-unarrived`), not hidden; the owner-level
+   (`cascade-echo-retired-unarrived`), not hidden, for a descendant in
+   the mark's own space: the count compares the seq of a document the
+   echo wrote with the mark's, and a seq orders commits within one
+   space, so a descendant in another space is retired uncounted; the
+   owner-level
    alternative (deterministic cascade ids derived from the parent id +
    send ordinal on both sides — which would also make the frame-caused
    entity ids agree, so the arrival gate would carry the echo to the
@@ -322,7 +338,8 @@ On each pushed `derived` commit with `derivedThrough = W` and
    NOT taken here. Impl: `overlay-destination.ts` `retireIntent` (the
    cascade arm) over `OverlayEntry.parentEventId` + `#cascadeParents`;
    pinned in `speculation-intent-listener.test.ts` (W2.1-1…4 scripted,
-   each with its mutation, + the W2.1 e2e lunch-join shape, RED on the
+   each with its mutation, the cases under "an echo sealed into a space
+   other than its intent's", + the W2.1 e2e lunch-join shape, RED on the
    pre-W2.1 tip).
    **The match, and its carrier (RULED 2026-08-18 — the stage-C design
    pass, items 5/6, landed with W2):** the match is on the pushed

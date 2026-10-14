@@ -2473,7 +2473,7 @@ export class PiecesController<T = unknown> {
 
   /**
    * Tells the identity's chat manager that the identity has joined the
-   * FabriChat room whose space is `space`, when the space passes vetting, as
+   * FabriChat room declared by `space`, when the space passes vetting, as
    * `joinVisitedRoomOf()` says. This controller must be over the identity's
    * Home space, and Home is brought up, created where it has no root, so a
    * caller that must not create Home checks first that it exists.
