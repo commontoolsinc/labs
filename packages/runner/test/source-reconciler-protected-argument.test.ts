@@ -187,6 +187,92 @@ export default pattern<Input, Output>(({ about, roster }) => ({
 }));
 `;
 
+// `NAMED_SOURCE` with `notes` beside its fields: links, each to a document of
+// its own whose `tags` only `post` and `describeRoom` may write, as a
+// FabriChat room's `messages` do.
+const LINKED_SOURCE = `/// <cts-enable />
+import {
+  type AuthoredByCurrentUser,
+  Default,
+  handler,
+  pattern,
+  Stream,
+  type TrustedActionWrite,
+  Writable,
+  type WriteAuthorizedBy,
+  type WritePolicyAnyOf,
+} from "commonfabric";
+
+interface About {
+  title: string;
+}
+
+const describeRoom = handler<
+  { title: string },
+  { about: Writable<About | undefined> }
+>(({ title }, { about }) => {
+  about.set({ title });
+});
+
+type StoredAbout = AuthoredByCurrentUser<
+  TrustedActionWrite<About, typeof describeRoom, "Describe", "GuardedRoom">
+>;
+
+interface Note {
+  text: string;
+  tags?: WritePolicyAnyOf<string[], [
+    WriteAuthorizedBy<unknown, typeof post>,
+    WriteAuthorizedBy<unknown, typeof describeRoom>,
+  ]>;
+}
+
+type NotesCell = Writable<Note[] | Default<[]>>;
+
+const join = handler<{ name: string }, { roster: RosterCell }>(
+  ({ name }, { roster }) => {
+    roster.key("items").push(name);
+  },
+);
+
+interface Roster {
+  items?: WriteAuthorizedBy<string[], typeof join>;
+}
+
+type RosterCell = Writable<Roster | Default<Record<PropertyKey, never>>>;
+
+const post = handler<{ text: string }, { notes: NotesCell }>(
+  ({ text }, { notes }) => {
+    const note = notes.elementById(text);
+    note.set({ text, tags: ["new"] });
+    notes.addUnique(note);
+  },
+);
+
+interface Input {
+  about?: StoredAbout;
+  roster?: RosterCell;
+  notes?: NotesCell;
+}
+
+interface Output {
+  about?: About;
+  roster: Roster;
+  notes: Note[];
+  describeRoom: Stream<{ title: string }>;
+  join: Stream<{ name: string }>;
+  post: Stream<{ text: string }>;
+}
+
+export default pattern<Input, Output>(({ about, roster, notes }) => ({
+  about,
+  roster,
+  notes,
+  describeRoom: describeRoom({ about }),
+  join: join({ roster }),
+  post: post({ notes }),
+}));
+`;
+
 /** What a test reads off a room. */
 type Room = Record<string, unknown>;
 
@@ -476,6 +562,38 @@ describe("source-reconciler-protected-argument", () => {
           expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().roster).toEqual({ items: ["ada"] });
+        },
+      );
+    });
+  });
+
+  describe("fields beside a list of links", () => {
+    // A release re-describes the claims beneath a position holding links,
+    // which describe the documents linked there: each `Note`'s `tags` names
+    // the release's `post`. None of them governs this document.
+
+    it("adopts a release that re-describes what lies beneath the links, and keeps what the fields hold", async () => {
+      await reconcileRelease(
+        "linked-release",
+        releaseBehind(LINKED_SOURCE),
+        LINKED_SOURCE,
+        async (runtime, room) => {
+          await send(
+            runtime,
+            room,
+            "describeRoom",
+            trustedEvent("Describe", { title: "lunch" }),
+          );
+          await send(runtime, room, "join", { name: "ada" });
+          await send(runtime, room, "post", { text: "hello" });
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+        ({ outcome, room, currentIdentity }) => {
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
         },
       );
     });

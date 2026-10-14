@@ -249,12 +249,14 @@ document, and every label entry at the field, above it or below it is the same.
 Claims are compared at the positions they apply to, each reference followed to
 the definition it names, so a definition no reference reaches declares nothing;
 a release whose merged envelope keeps the stored claims in force, under another
-layout of definitions, leaves them the same. The stored schema document and
-envelope version are then kept, and labels elsewhere in the document persist as
-for any write. An authoritative transaction, which commits each document whole,
-receives no deferral. Any other write attempt at a protected field — pattern
-code setting a whole document with the field's own bytes among them — requires
-the field's ordinary writer.
+layout of definitions, leaves them the same. In a release, the claims beneath a
+position where the stored document holds links describe the documents linked
+there, which the release may re-describe, so they are not compared. The stored
+schema document and envelope version are then kept, and labels elsewhere in the
+document persist as for any write. An authoritative transaction, which commits
+each document whole, receives no deferral. Any other write attempt at a
+protected field — pattern code setting a whole document with the field's own
+bytes among them — requires the field's ordinary writer.
 
 ## Attribution of an initialized value
 

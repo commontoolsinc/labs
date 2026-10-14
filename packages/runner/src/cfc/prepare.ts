@@ -13199,11 +13199,21 @@ export function* prepareBoundaryCommitSteps(
     // runtime spelled inline. The stored schema is kept: writing another
     // spelling of it is the writer's to do. Labels elsewhere in the document
     // are not the writer policy's to guard, and persist as for any write.
+    // In a release, the claims beneath a position holding links describe
+    // the documents linked there, which the release may re-describe; they
+    // govern nothing in this document, so they are not compared.
     let keepsStoredSchema = false;
+    const governsNothingHere = foreignPositions === undefined
+      ? () => false
+      : beneathForeignPosition(foreignPositions);
     if (
       deferredWriterRefusal !== undefined && !deferredPreservedOutput &&
       existing !== undefined && storedSchema !== undefined &&
-      cfcSchemaPoliciesEqual(storedSchema, schemaAndHash.schema)
+      cfcSchemaPoliciesEqual(
+        storedSchema,
+        schemaAndHash.schema,
+        governsNothingHere,
+      )
     ) {
       const storedEntries = canonicalizeCfcMetadata(existing).labelMap.entries;
       const derivedEntries = canonicalizeCfcMetadata(metadata).labelMap.entries;
@@ -13217,7 +13227,9 @@ export function* prepareBoundaryCommitSteps(
       // the positions both schemas declare are compared whole, not at the
       // deferred paths alone.
       const declaredPositions = (schema: JSONSchema) =>
-        cfcSchemaEntries(schema).map((entry) => ({
+        cfcSchemaEntries(schema).filter((entry) =>
+          !governsNothingHere(entry.path)
+        ).map((entry) => ({
           path: encodePointer(entry.path),
           ifc: withoutUndefinedMembers(
             isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,

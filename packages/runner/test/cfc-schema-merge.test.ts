@@ -2153,4 +2153,45 @@ describe("cfcSchemaPoliciesEqual", () => {
       ).toBe(false);
     });
   });
+
+  describe("with positions left out", () => {
+    // `inline` with a claim beneath each item of `list`, which differs
+    // between the two documents.
+    const beneath = (claim: unknown) =>
+      ({
+        type: "object",
+        properties: {
+          list: {
+            ...inline.properties.list,
+            items: {
+              type: "object",
+              properties: { n: { type: "number", ifc: claim } },
+            },
+          },
+        },
+      }) as unknown as JSONSchemaObj;
+    const left = beneath(CLAIM);
+    const right = beneath({ writeAuthorizedBy: ["other"] });
+
+    it("compares two documents equal where they differ only beneath a position left out", () => {
+      expect(cfcSchemaPoliciesEqual(left, right)).toBe(false);
+      expect(
+        cfcSchemaPoliciesEqual(
+          left,
+          right,
+          (path) => path.length > 2 && path[0] === "list" && path[1] === "*",
+        ),
+      ).toBe(true);
+    });
+
+    it("tells apart a changed claim at a position not left out", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          left,
+          right,
+          (path) => path.length > 0 && path[0] === "other",
+        ),
+      ).toBe(false);
+    });
+  });
 });
