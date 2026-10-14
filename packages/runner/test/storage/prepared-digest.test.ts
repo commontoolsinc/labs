@@ -571,6 +571,11 @@ describe("prepared digest transaction binding", () => {
       expect(state.status === "invalidated" && state.reasons).toEqual([reason]);
       const { error } = await tx.commit().settled;
       expect(error?.name).toBe("StorageTransactionAborted");
+      // The reason the invalidation refuses under, where a commit refused by
+      // the digest recheck carries `cfc-prepared-digest-mismatch`.
+      expect((error as { reason?: Error }).reason?.message).toBe(
+        "cfc-refusal-not-a-verdict",
+      );
     };
 
     it("leaves the transaction prepared, and commits it, after an empty batch", async () => {

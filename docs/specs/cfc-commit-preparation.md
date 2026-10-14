@@ -151,8 +151,8 @@ rejects the commit, as `StorageTransactionAborted` carrying
 `cfc-prepared-digest-mismatch`, which a caller may retry in a fresh
 transaction.
 
-**Activity after the preparation.** The condition on what follows a
-preparation is:
+**Activity after the preparation.** The condition §8.10.1 places on what
+follows a preparation is:
 
 > any post-prepare activity in the transaction — any further read or write,
 > including metadata — invalidates the preparation: commit MUST fail or
@@ -169,7 +169,8 @@ and the invalidation records which kind it was:
   (`sqlite-write-after-prepare`), and a recorded mergeable op
   (`mergeable-op-after-prepare`);
 - a decision input the transaction had not recorded, such as a write-policy
-  input or a dereference.
+  input (`write-policy-input-added`) or a dereference
+  (`dereference-trace-added`).
 
 A write invalidates whatever the storage layer goes on to do with it. The
 specification counts among the attempted writes "successful write operations
