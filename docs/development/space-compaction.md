@@ -163,6 +163,7 @@ against the same reads on the uncompacted snapshot with the same engine
 | patch replays after the cold board load | 44,928 | 14,273 |
 | one patch on each of the six longest-tailed documents, through the engine | 1–5 ms | 1–5 ms |
 | a topic title edit through the served API, via `cf cell set`: the cold edit of each of two sessions, then the median and range of seven warm edits | 9.0 s and 9.2 s cold; 2.7 s (2.6–3.1 s) warm | 10.7 s and 8.9 s cold; 3.3 s (2.8–3.7 s) warm |
+| the same edit's server `transact` frame (`CF_SLOW_QUERY_THRESHOLD_MS=0`), five edits a side, then five more with a browser's board session holding its watch | 4, 3, 2, 6, 5 ms; then 3, 3, 2, 6, 2 ms; the board session's refresh per edit 2–3 ms | 2, 6, 6, 2, 2 ms; then 2, 1, 1, 1, 1 ms; refresh 1–2 ms |
 
 The board's cold load is a traversal over 21,901 documents either way, which
 compaction does not touch; the replays that remain come from the authored
@@ -170,24 +171,45 @@ documents the selection left alone. The engine's write timings were already
 below the storm's 180 ms after stage 1's bounded base search, and stay there;
 after compaction the longest tails in the store are authored documents, since
 every compacted instance is down to its one row. The edit through the served
-API is another matter: its seconds are the session's watch add over the
-topic's graph (6.4 s cold on the uncompacted file, 7.2 s on the compacted,
-2,864 traversals each, `session.watch.add` the only slow query), not the
-write, whose server-side frame is in the noise. Measured the same way on both
-files, the comparison is **inconclusive**, and the plan's "no slower"
-acceptance check for the served edit is **open**: over seven warm edits a
-side, served in turn on one laptop, the compacted file's median is 0.5 s
-slower (3.3 s against 2.7 s); its two cold edits, one per session, point in
-opposite directions (10.7 s against 9.0 s in the first session, 8.9 s
-against 9.2 s in the second); its warm series trends down through the run
-(3.5 s to 2.8 s); and `cf`'s own warm reads on that side run 0.1 s slower
-too — so the gap is as consistent with a colder server as with the file. Nothing here proves a regression, and nothing
-proves its absence. What would settle it is the instrument the storm record
-used, a browser-side `transact` timing with the watch already in place, run
-alternately against both files; `cf`'s round trip carries the watch add and
-is not that number. What the compaction buys is
+API, read as `cf`'s round trip, is seconds on both files, and the seconds are
+a watch add, not the write — and a broad one: the session's request of 932
+watches delivering 5,613 documents (6.4 s on the uncompacted file, 7.2 s on
+the compacted; `stage6/health-after-edit{,-baseline}.json`). The single-topic
+watch in those same sessions, one watch delivering 314 documents, took
+214–224 ms; the follow-up's edit sessions registered only that single-topic
+watch and, after a board read had warmed the documents, it took 31–105 ms on
+either file. The two widths are not one request, so the seconds say what the
+broad watch costs, not what warming saved. Read where the storm record's 180 ms was read, as the server's
+`transact` frame with the slow-query threshold at zero, the write is 2–6 ms
+on both files with no lock wait, and with a browser's board session holding
+its watch while the edits land it is 1–2 ms compacted against 2–6 ms
+uncompacted, the board session's refresh 1–2 ms against 2–3 ms. The plan's
+"no slower" acceptance check for the served edit is **closed** on that
+instrument (2026-10-13; the compacted file ran first each round, so the
+laptop's wall clock, 0.9–1.3 s a round trip against 1.4–3.0 s, is reported
+and not relied on). What the compaction buys is
 the file: 8.45 GB where there was 22.71 GB, and a history that no longer
 grows a reader's work with every storm.
+
+### What a browser's board page costs, which `cf` understates
+
+The shell's board page, loaded cold in a browser against the same two files
+(2026-10-13, threshold zero), is a different workload from the `cf` read
+above. Its first watch is the same 20,567 upserts over 20,489 reads (7.7 s
+on the compacted file; the page renders right after), but the page then
+hydrates its 934 cards with a second wave of 6,577 watches delivering 84,220
+upserts over 103,426 reads (14.3 s compacted, 30.8 s uncompacted), followed
+by a refresh across 23,414 watches (8.4 s). The server reads 111,758
+documents for one load, past the document cache's 65,536-entry cap (46,222
+evictions), and on the uncompacted file `/api/health/stats` did not answer
+within ten seconds while the wave ran: the storm record's pegged instance,
+from one page. Compaction halves the server's work for that load (watch adds
+61 s to 24 s in all) and moves nothing else: the width is the pattern's
+declarations, and a `cf` read of the board's computed `index`, the Topics
+skill's bounded survey, runs the pattern in the CLI and leaves 936
+session-scoped `computed:` instances behind as 936 commits. The first browser
+load also wrote ~930 topic patches, the index link-bind the pattern README
+calls a one-time rewire; a reload wrote one commit.
 
 ## The host run
 

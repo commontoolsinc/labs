@@ -182,7 +182,10 @@ present; no stage handles a missing one.
      data it returns under a writer policy is data its result document holds:
      a literal, an object or array literal (spreads and computed keys
      included, a member its type does not name read against the type's index
-     signature), a constant, a plain call's result, at any depth. That result
+     signature), a constant, a plain call's result, at any depth. A cell or a
+     stream such data holds is a link: a writer policy inside the type it
+     links to is that document's, so it does not make the data the result
+     document's own. That result
      is rebuilt from the returned object, and each such member's type node
      carries the `definesDocument` schema hint, which the generator reads the
      same way for that member alone. A returned value the rebuild cannot read
@@ -470,7 +473,15 @@ past the cut to hold one, and the expansion stops there unless a use the body
 makes reaches below. The remainder is printed from its instantiation and marked
 `SchemaHint.cellsOpaque`, so every cell in it is `opaque`, the capability a
 cell no use reaches earns; a finite chain deeper than the cut reads the same as
-reading it to its end would. Observed
+reading it to its end would. A cell the body uses in a way its summary does not
+record one path at a time keeps the capability written for it, past such a cut
+too, since no narrower one can be shown to suffice: one at or below a value that escaped whole
+(`escapedPaths`), a cell's handle passed to a helper with no summary among them,
+and one strictly below a wildcard's prefix (`wildcardPaths`), as a destructuring
+of an array, an object's rest element, or a key that can name any element
+reaches. The prefix's own cell keeps the capability its recorded use earns: a
+`.get()` before `JSON.stringify()` reads it, and a write through such a key
+writes it. Observed
 paths still validate against the authored type via `validateShrinkCoverage`.
 
 A reference the alias reading above does not see through — to an interface, or
@@ -2621,7 +2632,10 @@ computation's input schema:
   opaque access at or below that path. Comparable and cell-like subsets are
   pruned with the surviving identity paths. Since #4714, a wildcard records the
   unknown access's static prefix and erases identity/comparable paths that
-  overlap it in either direction; disjoint paths survive. A root wildcard still
+  overlap it in either direction; disjoint paths survive. The summary carries
+  those prefixes as `wildcardPaths`, which the contract overlay reads (§6.3a),
+  and a caller takes on a helper's at the path it handed the helper, as it
+  does the helper's reads, writes, and escapes. A root wildcard still
   suppresses `identityOnly`. This matters because closure captures share one
   synthetic root: blanket erasure degraded disjoint `equals()`-only captures
   into unsatisfiable full-value self-demands
@@ -2668,7 +2682,11 @@ Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
 in another file, the callee's declared Common Fabric wrapper parameter type
 (`Writable<T>` → read+write, `ReadonlyCell<T>` → read, `WriteonlyCell<T>` →
-write, etc.) is what capability analysis charges to that argument. Spread
+write, etc.) is what capability analysis charges to that argument. A
+parameter spelled bare `Cell<T>` declares no capability, write intent being
+spelled `Writable<T>`: its argument is charged the whole read of a value that
+leaves the analysis, and no write (`getExplicitCellKindFromTypeNode`;
+`test/policy/capability-analysis.test.ts`). Spread
 arguments of fixed-length tuple type expand positionally against the callee's
 parameter list before matching (#4578). Two write-tracking hardenings
 (#4554): `send` is a WRITER_METHOD (`Stream.send()` delegates to `set()` at

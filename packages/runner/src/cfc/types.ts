@@ -905,6 +905,14 @@ export type PostCommitSideEffect = {
   abandon?(error: unknown): void;
 };
 
+/**
+ * Where a transaction's boundary verification stands. `prepared` holds the
+ * activity the verification ran over as `input`, frozen, and `digest` is the
+ * digest of that input. `invalidated` keeps the digest of the preparation it
+ * invalidated, when there was one. A transaction computes a digest when one
+ * is first read, so reading `digest` canonicalizes and hashes the input and
+ * copying a state reads it.
+ */
 export type CfcPrepareState =
   | { status: "unprepared" }
   | { status: "prepared"; digest: string; input: PreparedDigestInput }

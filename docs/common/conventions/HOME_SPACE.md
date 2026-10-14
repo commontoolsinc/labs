@@ -220,8 +220,16 @@ next ensure. Home decides only when an ensure runs, so a pointer that moves is
 decided at the first bring-up of Home in the next runtime worker to start, once
 the current worker's ensure has succeeded. A loom daemon does the same in the
 other direction, adopting the inbox a profile advertises and never replacing a
-pointer to a different one. [The private inbox](../../features/private-inbox.md)
-describes the whole arrangement.
+pointer to a different one. A client that would otherwise create an inbox of its
+own, as a loom daemon does, asks Home for it through
+`defaultPattern.requestPrivateInbox`, naming the profile it finds the owner by:
+Home ensures its inbox with an event naming nothing, which keeps or creates
+Home's inbox and points the profiles that point at none but adopts nothing,
+and its handling's receipt links to Home's answer for that profile, which
+reads `ensured` once the profile points at Home's inbox, or a final status
+saying why it never will.
+[The private inbox](../../features/private-inbox.md) describes the whole
+arrangement, and the request's contract under "Requesting it".
 
 ## Spaces
 
