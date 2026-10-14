@@ -25,13 +25,13 @@ import {
 import { createCell, isCell } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   getDerivedInternalCellLink,
   getMetaCell,
   parseLink,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import {
   causalFormOfBinding,

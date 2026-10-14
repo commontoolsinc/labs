@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
 import { createSession, Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   sharedSpaceCollectionViewSchema,
   sharedSpaceCommandsSchema,
@@ -47,7 +48,10 @@ import type {
   SharedSpaceRegistration,
   SharedSpaceRemoval,
 } from "../system/shared-space-catalog.ts";
-import type { SharedSpaceInterface } from "../system/shared-space-interface.ts";
+import type {
+  SharedSpaceCollectionView,
+  SharedSpaceInterface,
+} from "../system/shared-space-interface.ts";
 
 const owner = await Identity.fromPassphrase("Home catalog owner");
 const service = await Identity.fromPassphrase("Home catalog service");
@@ -591,8 +595,23 @@ describe("Home shared-space catalog", () => {
         expect(await client.key("messages").pull()).toEqual([
           "A public social-space write",
         ]);
-        const view = await home.key("sharedSpaces").key("view")
-          .asSchema(sharedSpaceCollectionViewSchema).pull();
+        const viewCell = home.key("sharedSpaces").key("view")
+          .asSchema(sharedSpaceCollectionViewSchema);
+        if (serving) {
+          // Served, Home's `register` commits in Home's space apart from the
+          // social-space event, whose consequence retires the local preview
+          // of that write before it lands. The wait is on the record itself,
+          // so what is asserted below is the served write, not the preview.
+          await waitForCellValue<SharedSpaceCollectionView>(
+            runtime,
+            viewCell,
+            (value) =>
+              value?.status === "ready" &&
+              value.saved.some((entry) => entry.space === social),
+            { stuckLabel: "the social space saved in Home's collection view" },
+          );
+        }
+        const view = await viewCell.pull();
         expect(view).toMatchObject({
           status: "ready",
           saved: [{ space: social }],

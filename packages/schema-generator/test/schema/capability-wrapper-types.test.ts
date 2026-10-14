@@ -467,6 +467,36 @@ describe("Schema: Capability wrapper types", () => {
     });
   });
 
+  describe("a generation root whose reading marks its cells opaque", () => {
+    // The contract overlay marks so an event it does not read inside, whose
+    // cells no use reaches (`SchemaHint.cellsOpaque`).
+
+    it("narrows every cell the root reaches to opaque, keeping a stream's brand", async () => {
+      const code = `
+        interface X { a: Writable<number>; s: Stream<number> }
+        interface Holder { root: X }
+      `;
+      const { checker, sourceFile } = await createTestProgram(code);
+      const root = findInterfaceMemberTypeNode(sourceFile, "Holder", "root");
+      const schemaHints = new WeakMap<ts.Node, { cellsOpaque?: true }>();
+      schemaHints.set(root, { cellsOpaque: true });
+
+      const result = asObjectSchema(
+        new SchemaGenerator().generateSchema(
+          checker.getTypeFromTypeNode(root),
+          checker,
+          root,
+          undefined,
+          schemaHints,
+        ),
+      );
+      const properties = result.properties as Record<string, any>;
+
+      expect(properties.a.asCell).toEqual(["opaque"]);
+      expect(properties.s.asCell).toEqual(["stream"]);
+    });
+  });
+
   describe("a member whose reading marks its cells opaque", () => {
     // The contract overlay marks so the remainder past a recursion it cuts,
     // whose cells no use reaches (`SchemaHint.cellsOpaque`).

@@ -70,10 +70,9 @@ a line for each new document to the index below.
 - [`lazy-cell-materialization.md`](lazy-cell-materialization.md) — the
   schema-observing view a marked transaction hands back from a read, what it
   checks and when, and the rules that keep it agreeing with an eager read
-- [`data-uri-identifiers.md`](data-uri-identifiers.md) — the cell identifiers
-  that carry their own frozen value rather than naming a document in a space,
-  why the runtime keeps both a broad and a narrow test for one, and what follows
-  from there being nothing stored behind such an address
+- [`immutable-cell-identifiers.md`](immutable-cell-identifiers.md) — native
+  snapshot ownership, relative-link origins, portable value-carrying IDs, and
+  expansion at storage and transport boundaries
 
 ## Identity and people
 

@@ -1,6 +1,9 @@
+import { estimateFabricValueSize } from "@commonfabric/data-model";
 import { hashSchema } from "@commonfabric/data-model-schema";
 import { LRUCache } from "@commonfabric/utils/cache";
 
+import { immutableSnapshot, isImmutableCellId } from "./immutable-cell.ts";
+import type { URI } from "./sigil-types.ts";
 import { addressKey, type NormalizedFullLink } from "./link-types.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 
@@ -164,4 +167,11 @@ function linkMembers(link: NormalizedFullLink): [string, string | null] {
     addressKey(link),
     link.schema === undefined ? null : hashSchema(link.schema),
   ];
+}
+
+/** The weight of an inputs document, including a native snapshot's payload. */
+export function nodeBindingInputsWeight(id: URI): number {
+  return isImmutableCellId(id)
+    ? id.length + estimateFabricValueSize(immutableSnapshot(id).value)
+    : id.length;
 }

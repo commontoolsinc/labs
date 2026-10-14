@@ -32,6 +32,7 @@ import {
   principalOf,
   SELF,
   spaceAccess,
+  type SpaceAccessLevel,
   spaceOf,
   Stream,
   UI,
@@ -57,6 +58,7 @@ import {
   commitObliterate,
   commitSend,
   commitSendReaction,
+  commitSetTitle,
   commitWindow,
   compareEntries,
   type ComposerState,
@@ -67,15 +69,23 @@ import {
   type MessageCell,
   messageEntries,
   type MessageEntry,
+  type MessageRights,
+  messageRightsOf,
   type MessagesCell,
   NO_ACTIVITY,
+  NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
+  ownersMayObliterateBy,
+  ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
   type RoomWindowEvent,
+  type SetTitleEvent,
   type StoredAbout,
   tellManagerJoined,
+  TITLE_KEY,
+  type TitlesCell,
   type UsedTimesCell,
   type WindowsCell,
   type WindowsValue,
@@ -89,10 +99,13 @@ import {
   type AddMemberRefusalCode,
   CHAT_ADD_MEMBER_ACTION,
   CHAT_ADD_MEMBER_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
+  type ChatContainer,
   type ChatDisplay,
   type ChatProfile,
   type ChatRequestOutcome,
@@ -105,6 +118,7 @@ import {
   isPrincipalDID,
   type MessageActOutcome,
   type ProfileCell,
+  type SetTitleOutcome,
 } from "./schemas.tsx";
 
 /**
@@ -853,6 +867,42 @@ export interface ChatMessageList {
   closeWindow: Stream<RoomWindowEvent>;
 }
 
+/** Who is reading a room. */
+export interface ChatRoomViewer {
+  /**
+   * The reader's profile, as a link to the profile itself, which is the form
+   * a message's `authorProfile` takes; absent until it resolves.
+   */
+  profile?: ProfileCell;
+
+  /**
+   * The principal the reader's profile's `represents-principal` label attests;
+   * absent when it attests none, or the label can't be read.
+   */
+  principal?: string;
+
+  /**
+   * The reader's access to the room's space, as its access list grants it;
+   * absent while that isn't known.
+   */
+  role?: SpaceAccessLevel;
+}
+
+/**
+ * The reader's profile, as a link to the profile itself, which `myProfile`
+ * may reach only through another link; `undefined` while it holds no value.
+ */
+const viewerProfileOf = (
+  myProfile: ProfileCell | undefined,
+): ProfileCell | undefined =>
+  myProfile?.get() === undefined ? undefined : myProfile.resolveAsCell();
+
+/** What a room's reader may do to one of its messages. */
+export interface ChatMessageRights extends MessageRights {
+  /** The message, as `messages.latest` links it. */
+  message: MessageCell;
+}
+
 /** A room's data face, for hosts that draw it natively. */
 export interface ChatRoomView {
   /** What the room says about itself. */
@@ -917,6 +967,15 @@ export interface ChatRoomView {
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
+  /** Who is reading the room: their profile, its principal, and their access. */
+  viewer: ChatRoomViewer;
+
+  /**
+   * What this reader may do to each of the room's messages, oldest first.
+   * Nothing at all while `canSend` doesn't hold.
+   */
+  messageRights: ChatMessageRights[];
+
   /** Sends a message. */
   sendMessage: Stream<RoomStreamEvent>;
 
@@ -961,6 +1020,17 @@ export interface ChatRoomView {
    * sends, edits, deletions, obliterations, and reactions added or removed.
    */
   messageRequests: Record<string, MessageActOutcome>;
+
+  /**
+   * Sets the room's title, which every member shares, from a trusted gesture
+   * on the rendering's `ChatRetitleSurface`, or from a client's own control
+   * through the sanctioned issuing path. Any member who can write in the room
+   * may, in a group room or a direct one.
+   */
+  setTitle: Stream<SetTitleEvent>;
+
+  /** The outcome of each of this reader's retitles, by its `requestId`. */
+  titleRequests: Record<string, SetTitleOutcome>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -977,6 +1047,9 @@ export interface ChatRoomOutput extends ChatRoomView {
 
 /** What a room stores, and who is looking at it. */
 export interface FabriChatRoomCoreInput {
+  /** The space's root, which may explicitly declare this conversation. */
+  container?: Cell<ChatContainer>;
+
   /** The viewer's profile, which holds no value while it is unknown. */
   myProfile: ProfileCell | undefined;
 
@@ -1004,6 +1077,12 @@ export interface FabriChatRoomCoreInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
+
   /** Those who joined the room; absent for a room nobody can join. */
   roster?: ParticipantRosterCell;
 
@@ -1030,6 +1109,14 @@ export interface FabriChatRoomCoreInput {
    * while the viewer has none, or theirs hasn't resolved.
    */
   manager?: RoomManager;
+
+  /**
+   * Whether the room's policy lets an OWNER of its space obliterate its
+   * messages, which picks the policy `about.policy` links; absent, as for
+   * every room the room's own pattern runs, yes for a group room and no for a
+   * direct room.
+   */
+  ownersMayObliterate?: boolean;
 }
 
 /**
@@ -1055,6 +1142,7 @@ export const FabriChatRoomCore = pattern<
 >((input) => {
   const {
     myProfile,
+    container,
     about,
     messages,
     reactionLists,
@@ -1062,22 +1150,42 @@ export const FabriChatRoomCore = pattern<
     usedTimes,
     activity,
     counters,
+    titles,
     roster,
     addRequests,
     startsDirect,
     startDirect,
     self,
     manager,
+    ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
   const ownSpace = computed(() => about?.get() !== undefined);
+  // The room's policy, a document of its own that `about` links, and which
+  // the message acts read: one for each answer to whether OWNERs may
+  // obliterate, since the rest of a room's policy is the same.
+  const policyWithOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: true,
+  });
+  const policyWithoutOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: false,
+  });
+  const policy = computed((): Cell<ChatRoomPolicy> =>
+    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
+      ? policyWithOwners
+      : policyWithoutOwners
+  );
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
   const canJoin = computed(() =>
-    ownSpace && manager?.joinRoom !== undefined && self !== undefined
+    (ownSpace || (container?.key("chatRoom").get() !== undefined &&
+      equals(container?.key("chatRoom").get(), self))) &&
+    manager?.joinRoom !== undefined && self !== undefined
   );
   // The sender's outcomes, which follow them, and only them, across sessions,
   // and why the session's latest act was refused, which the composer shows.
@@ -1087,6 +1195,7 @@ export const FabriChatRoomCore = pattern<
   const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
+    policy,
     composer,
     outcomes: messageRequests,
     refusal,
@@ -1098,6 +1207,7 @@ export const FabriChatRoomCore = pattern<
     counters,
     joined: tellManagerJoined({
       canJoin,
+      container: ownSpace ? undefined : container,
       joinRoom: manager?.joinRoom,
       self,
     }),
@@ -1176,11 +1286,42 @@ export const FabriChatRoomCore = pattern<
   });
   const cannotSend = computed(() => !canSend);
   const isOwner = computed(() => isOwnerOf(messages));
-  // The policy is a document of its own, which `about` links.
-  const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
+  const viewer = computed((): ChatRoomViewer => {
+    const profile = viewerProfileOf(myProfile);
+    const principal = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    const role = spaceAccess(messages);
+    return {
+      ...(profile === undefined ? {} : { profile }),
+      ...(principal === undefined ? {} : { principal }),
+      ...(role === undefined ? {} : { role }),
+    };
+  });
+  // Every message's rights for the reader, by the rule the handlers admit an
+  // act by, derived once for the whole list as `places` is.
+  const messageRights = computed((): ChatMessageRights[] => {
+    const profile = viewerProfileOf(myProfile);
+    return sortedEntries.map((entry) => ({
+      message: entry.cell,
+      ...(canSend && profile !== undefined
+        ? messageRightsOf(
+          entry.record,
+          profile,
+          kind,
+          isOwner,
+          ownersMayObliterateBy(policy),
+        )
+        : NO_MESSAGE_RIGHTS),
+    }));
+  });
+  // The title a member last set outranks the one the room was created with.
+  const title = computed((): string | undefined =>
+    titles?.elementById(TITLE_KEY).get()?.title ?? about?.get()?.title
+  );
   const aboutView = {
     kind,
-    title: computed(() => about?.get()?.title),
+    title,
     createdAt: computed(() => about?.get()?.createdAt),
     policy,
     // The stored record itself, as a link, so a reader can read its label.
@@ -1190,8 +1331,32 @@ export const FabriChatRoomCore = pattern<
     ((counters.elementById(NUMBERING_KEY).get() ??
       NO_ACTIVITY) as ActivityCounters).expiredThrough
   );
-  const title = computed(() =>
-    about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  const name = computed(() =>
+    title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  );
+  // The sender's retitles' outcomes, which follow them, and only them, across
+  // sessions, and why the session's latest was refused, which the rendered
+  // control shows.
+  const titleRequests = new Writable.perUser<
+    Record<string, SetTitleOutcome>
+  >({});
+  const titleRefusal = new Writable.perSession<string>("");
+  const setTitle = commitSetTitle({
+    titles,
+    ownSpace,
+    messages,
+    outcomes: titleRequests,
+    refusal: titleRefusal,
+    joined: records.joined,
+  });
+  // Who may retitle differs by viewer, and what came of a retitle by session,
+  // so both are hidden by a prop rather than built as a different tree (see
+  // `FabriChatMessageRow`).
+  const retitleDisplay = computed((): ChatDisplay =>
+    ownSpace && titles !== undefined && canSend ? "flex" : "none"
+  );
+  const titleRefusalDisplay = computed((): ChatDisplay =>
+    titleRefusal.get() === "" ? "none" : "block"
   );
   // The key of the session's open thread's root; `""` while no thread is
   // open.
@@ -1294,23 +1459,54 @@ export const FabriChatRoomCore = pattern<
     openWindow,
     closeWindow,
     canSend,
+    viewer,
+    messageRights,
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
     messageRequests,
+    setTitle,
+    titleRequests,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
 
   return {
-    [NAME]: title,
+    [NAME]: name,
     [UI]: (
       <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "720px" }}>
         <cf-hstack justify="between" align="center" gap="4">
-          <cf-heading level={3}>{title}</cf-heading>
+          <cf-heading level={3}>{name}</cf-heading>
           <cf-profile-badge $profile={myProfile} size="sm" />
         </cf-hstack>
+        <cf-vstack
+          id="fabrichat-retitle"
+          gap="1"
+          hidden
+          style={{ display: retitleDisplay }}
+        >
+          <div
+            data-ui-pattern={CHAT_RETITLE_SURFACE}
+            data-ui-event-integrity={CHAT_RETITLE_SURFACE}
+          >
+            <cf-submit-input
+              data-ui-action={CHAT_RETITLE_ACTION}
+              inputId="fabrichat-title"
+              placeholder="New title"
+              buttonText="Rename"
+              onClick={setTitle}
+            />
+          </div>
+          <cf-text
+            id="fabrichat-retitle-refusal"
+            variant="caption"
+            hidden
+            style={{ display: titleRefusalDisplay }}
+          >
+            {titleRefusal}
+          </cf-text>
+        </cf-vstack>
 
         {
           /* A plain flex row, not `cf-hstack`, whose host clips overflow
@@ -1350,6 +1546,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1359,6 +1556,7 @@ export const FabriChatRoomCore = pattern<
               outcomes={messageRequests}
               refusal={refusal}
               canJoin={canJoin}
+              container={ownSpace ? undefined : container}
               joinRoom={manager?.joinRoom}
               self={self}
             />
@@ -1427,6 +1625,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1436,6 +1635,7 @@ export const FabriChatRoomCore = pattern<
               outcomes={messageRequests}
               refusal={refusal}
               canJoin={canJoin}
+              container={ownSpace ? undefined : container}
               joinRoom={manager?.joinRoom}
               self={self}
             />
@@ -1496,6 +1696,12 @@ export interface FabriChatRoomInput {
   counters?: ActivityCountersCell;
 
   /**
+   * The room's title as a member last set it. It changes only through
+   * `setTitle`.
+   */
+  titles?: TitlesCell;
+
+  /**
    * Those who joined the room. It changes only through `addParticipant`, the
    * one writer its write contract admits.
    */
@@ -1516,11 +1722,13 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     usedTimes,
     activity,
     counters,
+    titles,
     participants,
     // The room itself, the link another member's manager lists it by.
     [SELF]: self,
   }) => {
     const profileWish = wish<ChatProfile>({ query: "#profile" });
+    const containerWish = wish<Cell<ChatContainer>>({ query: "#default" });
     // The viewer's adds' outcomes, which follow them, and only them, across
     // sessions.
     const addRequests = new Writable.perUser<
@@ -1541,6 +1749,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     const room = FabriChatRoomCore(
       {
         myProfile: profileWish.result,
+        container: containerWish.result,
         about,
         messages,
         reactionLists,
@@ -1548,6 +1757,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         usedTimes,
         activity,
         counters,
+        titles,
         roster: participants,
         addRequests,
         startsDirect,
@@ -1572,6 +1782,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       openWindow: room.openWindow,
       closeWindow: room.closeWindow,
       canSend: room.canSend,
+      viewer: room.viewer,
+      messageRights: room.messageRights,
       sendMessage: room.sendMessage,
       editMessage: room.editMessage,
       deleteMessage: room.deleteMessage,
@@ -1582,6 +1794,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       canAdd: room.canAdd,
       addRequests: room.addRequests,
       messageRequests: room.messageRequests,
+      setTitle: room.setTitle,
+      titleRequests: room.titleRequests,
       [UI]: (
         <cf-screen>
           {room[UI]}

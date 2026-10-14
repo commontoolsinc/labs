@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
+import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   areNormalizedLinksSameIgnoringScope,
   createLLMFriendlyLink,
@@ -31,6 +32,7 @@ import {
   sanitizeSchemaForLinks,
   schemaForSpaceCrossing,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
@@ -1138,6 +1140,43 @@ describe("link-utils", () => {
         for (const primitive of [undefined, true, false]) {
           expect(sanitizeAndFreezeSchemaForLinks(primitive)).toBe(primitive);
         }
+      });
+
+      it("leaves as they were the values a mutable schema holds that the strip does not rebuild", () => {
+        // The strip rebuilds every record and array, and carries by reference
+        // a fabric primitive, which is frozen from its construction, and a
+        // function.
+        const stamp = new FabricEpochNsec(123n);
+        const describeIt = () => "described";
+        const held = { list: [{ n: 1 }] };
+        const schema = {
+          type: "object",
+          default: { stamp, describeIt, held },
+        } as unknown as JSONSchema;
+        const frozen = sanitizeAndFreezeSchemaForLinks(schema) as {
+          default: { stamp: unknown; describeIt: unknown; held: unknown };
+        };
+        expect(isDeepFrozen(frozen)).toBe(true);
+        expect(frozen.default.stamp).toBe(stamp);
+        expect(frozen.default.describeIt).toBe(describeIt);
+        expect(Object.isFrozen(describeIt)).toBe(false);
+        expect(frozen.default.held).toEqual(held);
+        expect(frozen.default.held).not.toBe(held);
+        expect(Object.isFrozen(held)).toBe(false);
+        expect(Object.isFrozen(held.list)).toBe(false);
+        expect(Object.isFrozen(held.list[0])).toBe(false);
+      });
+
+      it("throws for a mutable schema holding a `FabricInstance`, as `sanitizeSchemaForLinks()` does", () => {
+        const schema = () =>
+          ({
+            type: "object",
+            default: FabricError.fromNativeError(new Error("boom")),
+          }) as unknown as JSONSchema;
+        expect(() => sanitizeAndFreezeSchemaForLinks(schema())).toThrow(
+          "FabricError",
+        );
+        expect(() => sanitizeSchemaForLinks(schema())).toThrow("FabricError");
       });
 
       it("leaves unfrozen a part of a mutable schema nested past the depth the strip rebuilds", () => {

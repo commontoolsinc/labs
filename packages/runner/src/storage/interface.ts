@@ -2215,6 +2215,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;
@@ -3760,7 +3767,7 @@ export interface IStorageTransactionWriteIsolationError extends IStorageError {
 }
 
 /**
- * Error returned when attempting to write to a read-only address (data: URI).
+ * Error returned when attempting to write to a read-only address (`snapshot:` or `data:` URI).
  */
 export interface IReadOnlyAddressError extends IStorageError {
   readonly name: "ReadOnlyAddressError";

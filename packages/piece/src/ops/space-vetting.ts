@@ -1,9 +1,9 @@
 /**
  * Vetting a shared space as its user, before the host acts on it: that the
  * user may write there, that the space is the kind it is taken for, and that
- * its root is the one its genesis commit reserves. The share intake vets an
- * offered space this way, and so does joining a room the user visits. Vetting
- * reads the space's access list, the kind it declares, and its root, and loads
+ * its root is the one its genesis commit reserves. Share intake and visits to
+ * standalone rooms use this contract. Container visits share the access and
+ * own-root checks. Vetting reads the access list, kind, and root, and loads
  * and runs none of the space's code.
  */
 
@@ -53,6 +53,43 @@ export async function vetSpace<Refusal extends string = never>(
   kind: string,
   admits?: (acl: ACL | undefined) => Refusal | undefined,
 ): Promise<SpaceRefusal | Refusal | Cell<unknown>> {
+  const writable = await readWritableSpace(runtime, space, identity, admits);
+  if (typeof writable === "string") return writable;
+  const { root } = writable;
+  // An access list naming a concrete owner was written by the space's genesis
+  // commit or after it, so the kind read here is the one the space keeps.
+  const declared = await runtime.spaceKind(space);
+  if (declared === undefined) return "space-kind-undeclared";
+  if (declared !== kind) return "space-kind-mismatch";
+  if (!isOwnRoot(root, space)) return "space-root-missing";
+  if (!root.equalLinks(runtime.getCell(space, inSpaceRootCause(space)))) {
+    return "space-root-misplaced";
+  }
+  return root;
+}
+
+/**
+ * Returns a writable space's own document root, with no constraint on its
+ * declared kind or root reservation. Access failures use the same refusals
+ * as `vetSpace()`.
+ */
+export async function vetWritableSpaceRoot(
+  runtime: Runtime,
+  space: DID,
+  identity: DID,
+): Promise<SpaceRefusal | Cell<unknown>> {
+  const writable = await readWritableSpace(runtime, space, identity);
+  if (typeof writable === "string") return writable;
+  return isOwnRoot(writable.root, space) ? writable.root : "space-root-missing";
+}
+
+/** Reads a space's root and requires the identity's write access to it. */
+async function readWritableSpace<Refusal extends string = never>(
+  runtime: Runtime,
+  space: DID,
+  identity: DID,
+  admits?: (acl: ACL | undefined) => Refusal | undefined,
+): Promise<SpaceRefusal | Refusal | { root: unknown }> {
   let stored;
   let root;
   try {
@@ -69,23 +106,15 @@ export async function vetSpace<Refusal extends string = never>(
   if (!isWriter(acl?.[identity] ?? acl?.["*"])) {
     return "recipient-access-refused";
   }
-  // An access list naming a concrete owner was written by the space's genesis
-  // commit or after it, so the kind read here is the one the space keeps.
-  const declared = await runtime.spaceKind(space);
-  if (declared === undefined) return "space-kind-undeclared";
-  if (declared !== kind) return "space-kind-mismatch";
-  // When the pointer reaches no document of the space, this read returns the
-  // space cell's own `defaultPattern` key, so the path check is what refuses a
-  // pointer into another space. The space check covers a read that follows
-  // such a pointer; no test reaches it, since this read does not.
-  if (
-    !isCell(root) || root.space !== space ||
-    root.getAsNormalizedFullLink().path.length !== 0
-  ) return "space-root-missing";
-  if (!root.equalLinks(runtime.getCell(space, inSpaceRootCause(space)))) {
-    return "space-root-misplaced";
-  }
-  return root;
+  return { root };
+}
+
+/** Whether a space's root pointer names a document of that same space. */
+function isOwnRoot(root: unknown, space: DID): root is Cell<unknown> {
+  // A pointer into another space can read as the space cell's own
+  // `defaultPattern` key, which the empty-path check refuses.
+  return isCell(root) && root.space === space &&
+    root.getAsNormalizedFullLink().path.length === 0;
 }
 
 /** Whether an access-list grant lets its holder write. */

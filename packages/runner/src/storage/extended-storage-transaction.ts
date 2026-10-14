@@ -38,6 +38,7 @@ import {
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDecomposedEnvelopes,
+  type CfcDenialCode,
   type CfcDereferenceTrace,
   cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
@@ -99,7 +100,18 @@ import {
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
-import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
+import {
+  isTerminalRefusal,
+  plainReason,
+  untaggedReason,
+} from "../cfc/verdict-reason.ts";
+import {
+  bindImmutableCells,
+  findImmutableCells,
+  hasInlineCellScheme,
+  type ImmutableCellStore,
+  ownImmutableCells,
+} from "../immutable-cell.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -126,7 +138,7 @@ import {
 } from "../runtime-secret.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { CooperativeYield } from "../scheduler/cooperative-yield.ts";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
+
 import { externalizeLinkSchemasInValue } from "../link-utils.ts";
 import { getContentAddressedSchemasConfig } from "../schema-doc-config.ts";
 import {
@@ -834,6 +846,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #preparedSnapshot: ActivitySnapshot | undefined;
 
   /**
+   * Whether the latest preparation refused the transaction. With neither this
+   * nor `#preparedSnapshot` set, no preparation has run since the transaction
+   * began or was aborted.
+   */
+  #preparationRefused = false;
+
+  /**
    * The last _negative_ flow-label probe verdict, with the activity epoch it
    * was taken at (stamped _after_ the probe, whose own metadata reads are
    * internal-verifier reads that never change the verdict but do move the
@@ -846,7 +865,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     cfcInstrumentation: CfcInstrumentationHooks = {},
+    immutableCells: ImmutableCellStore = findImmutableCells(tx) ??
+      ownImmutableCells(tx),
   ) {
+    bindImmutableCells(this, immutableCells);
+    bindImmutableCells(tx, immutableCells);
     this.#cfcInstrumentation = cfcInstrumentation;
   }
 
@@ -1002,6 +1025,35 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       labelMetadataProtection: this.#cfcState.labelMetadataProtectionMode,
       declaredMonotonicity: this.#cfcState.declaredMonotonicityMode,
     };
+  }
+
+  /**
+   * Helper for `commit()`, which returns the kind of denial, and its summary,
+   * for a commit refused because the transaction is not prepared.
+   *
+   * The kind follows which pass recorded the reasons, never their text, since
+   * `invalidateCfc()` takes any string. A refused preparation reports
+   * `write-policy-gate`, whatever invalidations add to its reasons afterwards.
+   * A preparation that passed and was invalidated since reports
+   * `write-prepare-invalidated`: no policy check refused, and the transaction
+   * changed after the check passed. With no preparation run, the commit
+   * reports `write-unprepared`, whatever reasons a caller recorded.
+   */
+  #unpreparedCommitDenial(): readonly [code: CfcDenialCode, summary: string] {
+    if (this.#preparationRefused) {
+      return ["write-policy-gate", "a policy check refused the commit"];
+    }
+    if (this.#preparedSnapshot !== undefined) {
+      return [
+        "write-prepare-invalidated",
+        "a change to the transaction after it prepared invalidated the " +
+        "preparation",
+      ];
+    }
+    return [
+      "write-unprepared",
+      "a CFC-relevant transaction reached commit without preparing",
+    ];
   }
 
   getCfcState(): Readonly<CfcTxState> {
@@ -1711,12 +1763,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /** @inheritDoc */
   invalidateCfc(reason: string): void {
     this.#activitySnapshotMemo = undefined;
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
+    const recorded = untaggedReason(reason);
     const reasons = this.#cfcState.prepare.status === "invalidated"
-      ? [...this.#cfcState.prepare.reasons, reason]
-      : [reason];
+      ? [...this.#cfcState.prepare.reasons, recorded]
+      : [recorded];
     // The digest the preparation had stays readable, and reading it is what
     // hashes it: an invalidation asks for no digest.
     const prepared = this.#preparedSnapshot;
@@ -1731,7 +1785,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         reasons,
       };
     if (wasPrepared) {
-      this.#cfcInstrumentation.onDigestInvalidation?.(reason);
+      this.#cfcInstrumentation.onDigestInvalidation?.(recorded);
     }
   }
 
@@ -2861,7 +2915,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * (`docs/specs/content-addressed-schemas.md`): the closure each reference
    * names is staged with the write (`#stageSchemaDocsForValue`), so the
    * stored form travels with its documents and a same-transaction read
-   * through the link resolves. A `data:` document is never written, and a
+   * through the link resolves. Neither `snapshot:` nor `data:` names a written
+   * document, and a
    * `cid:` document's keywords may hold link-shaped data, so neither is
    * rewritten; with the flag off the value is stored as given.
    */
@@ -2870,7 +2925,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: FabricValue,
   ): FabricValue {
     if (!getContentAddressedSchemasConfig()) return value;
-    if (address.id.startsWith("cid:") || hasDataUriScheme(address.id)) {
+    if (address.id.startsWith("cid:") || hasInlineCellScheme(address.id)) {
       return value;
     }
     return externalizeLinkSchemasInValue(value);
@@ -3328,6 +3383,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // hole, Codex P2 on #4070).
       this.markCfcRelevant("prepare-reasons");
       this.#preparedSnapshot = undefined;
+      this.#preparationRefused = true;
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
@@ -3345,6 +3401,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // whenever it is read.
     const snapshot = this.#activitySnapshot();
     this.#preparedSnapshot = snapshot;
+    this.#preparationRefused = false;
     const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
     this.#cfcState.prepare = {
       status: "prepared",
@@ -3466,6 +3523,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // so the commit falls back to the plain whole-array diff already written.
     if (this.tx.poisonMergeableOp && this.tx.recordMergeableOp) {
       this.#noteCfcActivity();
+      // An intent replaces the diff of the value it covers in the commit, and
+      // is held on the document entry, outside the journal the prepared
+      // digest is derived from. One recorded after a preparation changes what
+      // the transaction commits without changing that digest, so it
+      // invalidates the preparation here, as a write does.
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("mergeable-op-after-prepare");
+      }
       this.tx.recordMergeableOp(address, delta);
       this.#noteWrite();
     }
@@ -3486,6 +3551,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       );
     }
     this.#noteCfcActivity();
+    // The statement commits with the transaction and is held outside the
+    // journal the prepared digest is derived from. One recorded after a
+    // preparation is a write the verification did not cover and the digest
+    // does not bind, so it invalidates the preparation here, as a write does.
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("sqlite-write-after-prepare");
+    }
     this.tx.recordSqliteWrite(space, op);
     this.#noteWrite();
   }
@@ -3775,10 +3847,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       ) => this.#noteSystemWrite(address, value);
       // Capture the identity per yielded write, not once up front: an empty
       // batch authored nothing, so it must not record a write for the
-      // transaction's write-identity summary.
+      // transaction's write-identity summary. A preparation is invalidated on
+      // the same terms. An empty batch leaves it standing, and a write the
+      // batch yields invalidates it whatever the storage layer does with the
+      // write: one elided as equal to the value already there, or a delete
+      // that finds nothing, is an attempted write that reaches no record the
+      // prepared digest is derived from. The CFC specification's §8.10.1
+      // counts a write that leaves the value unchanged among the attempted
+      // writes, and has any write after a preparation invalidate it;
+      // `docs/specs/cfc-commit-preparation.md` covers the arrangement.
       const noteWriteIdentity = () => {
         this.#noteCfcActivity();
         this.#noteWriteIdentity();
+        if (this.#cfcState.prepare.status === "prepared") {
+          this.invalidateCfc("write-after-prepare");
+        }
       };
       const refuseMalformedSchemaMeta = (
         address: IMemorySpaceAddress,
@@ -3856,6 +3939,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.prepare = { status: "unprepared" };
     this.#activitySnapshotMemo = undefined;
     this.#preparedSnapshot = undefined;
+    this.#preparationRefused = false;
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
     this.#cfcState.assertedValueRoots = [];
@@ -4026,9 +4110,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           });
         }
         // The step above prepares a relevant transaction, so reaching here
-        // means prepare ran and refused, recording why. The empty arm is the
-        // fail-closed backstop for a prepare state that step does not
-        // produce, and an unreasoned refusal is classified as retryable.
+        // means prepare ran and either refused, recording why, or succeeded
+        // and was invalidated since, recording what invalidated it. That step
+        // does not prepare a transaction a caller invalidated before any
+        // preparation, so that one arrives here with only the caller's
+        // reasons. The empty arm is the fail-closed backstop for a prepare
+        // state that step does not produce, and an unreasoned refusal is
+        // classified as retryable.
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
@@ -4047,11 +4135,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // both a reason prepare recorded and one a later invalidation added.
         if (!this.#cfcDenialReported) {
           this.#cfcDenialReported = true;
+          const [code, summary] = this.#unpreparedCommitDenial();
           reportCfcDenial(
-            reasons.length > 0 ? "write-policy-gate" : "write-unprepared",
-            reasons.length > 0
-              ? "a policy check refused the commit"
-              : "a CFC-relevant transaction reached commit without preparing",
+            code,
+            summary,
             () => ({
               reasons: plainReasons,
               refusals,
