@@ -200,28 +200,24 @@ export function memberName(index: number): string {
 }
 
 /**
- * How many consecutive messages each member writes: as many as divides the
- * messages over the members, so that every member writes when there are at
- * least as many messages as members.
+ * The member who writes the message at `index`. Each member writes a block of
+ * consecutive messages, the blocks as even as the counts allow, so every
+ * member writes when there are at least as many messages as members, and the
+ * first `messageCount` members write one each when there are fewer.
  */
-function blockSize(messageCount: number, memberCount: number): number {
-  return Math.max(1, Math.ceil(messageCount / memberCount));
-}
-
-/** The member who writes the message at `index`. */
 export function authorOf(
   index: number,
   messageCount: number,
   memberCount: number,
 ): number {
-  return Math.floor(index / blockSize(messageCount, memberCount));
+  return messageCount < memberCount
+    ? index
+    : Math.floor(index * memberCount / messageCount);
 }
 
 /** How many members write in a room of this shape. */
 export function writerCount(messageCount: number, memberCount: number): number {
-  return messageCount === 0
-    ? 0
-    : authorOf(messageCount - 1, messageCount, memberCount) + 1;
+  return Math.min(messageCount, memberCount);
 }
 
 /** The body of the main conversation's message at `index`. */
@@ -535,8 +531,13 @@ export async function seedFabrichatRoom(
   const reacting = new Set(
     reactedMessages(messageCount, memberCount, reactionEvery),
   );
-  const writers = writerCount(messageCount, memberCount);
-  const block = blockSize(messageCount, memberCount);
+  const blocks: number[][] = Array.from(
+    { length: writerCount(messageCount, memberCount) },
+    () => [],
+  );
+  for (let index = 0; index < messageCount; index++) {
+    blocks[authorOf(index, messageCount, memberCount)].push(index);
+  }
   const total = messageCount + roots.length * repliesPerThread;
   const identities = await Promise.all(
     Array.from(
@@ -575,15 +576,14 @@ export async function seedFabrichatRoom(
 
     let written = 0;
     let last = starter;
-    for (let writer = 0; writer < writers; writer++) {
+    for (const [writer, block] of blocks.entries()) {
       const author = writer === 0
         ? starter
         : writer === helper.index
         ? helper
         : await openRoomMember(writer);
       if (author.room === undefined) await enterRoom(author, room);
-      const end = Math.min(messageCount, (writer + 1) * block);
-      for (let index = writer * block; index < end; index++) {
+      for (const index of block) {
         // The author's copy has every earlier message before they write, so
         // their write reads the room as it stands rather than conflicting
         // with the message before it.
