@@ -89,7 +89,7 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   toolId: "call_verb",
   title: "Call Verb",
   description:
-    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece must be in this run's own space.",
+    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing; the refusal names the field and the rule of the event schema it broke. A handler that rejects an event fails the call with the handler's own message. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece must be in this run's own space.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -182,7 +182,7 @@ const OPAQUE_LINK_SCHEMA = {
  * than a value: the positions where the verb returned a reference to another
  * cell, a piece it created or was handed among them.
  */
-const storedLinkPaths = (
+export const storedLinkPaths = (
   raw: unknown,
   path: readonly (string | number)[] = [],
 ): (string | number)[][] => {
@@ -202,7 +202,7 @@ const storedLinkPaths = (
 
 /** `value` with `replacement` at `path`, or `value` itself where the path
  * does not reach. Copies only the containers along the path. */
-const replacedAt = (
+export const replacedAt = (
   value: unknown,
   path: readonly (string | number)[],
   replacement: unknown,

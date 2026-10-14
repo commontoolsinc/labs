@@ -787,6 +787,7 @@ const CLI_PARENT_TOOL_IDS = [
   "assign_slug",
   "resolve_piece",
   "call_verb",
+  "read_value",
   "search_patterns",
   "record_feedback",
   "search_skills",
@@ -2021,6 +2022,7 @@ export const parseCfHarnessCliArgs = async (
     "assign_slug",
     "resolve_piece",
     "call_verb",
+    "read_value",
     "acquire_skill",
   ] as const)
     .find(

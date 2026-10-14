@@ -190,6 +190,18 @@ What works today:
     booleans and nulls as themselves, a piece the verb returns as that piece's
     handle, every other position as a handle into the handling's receipt; a
     handler that throws returns its message)
+  - `read_value` (present only when the run configures a fabric session; returns
+    the value behind a handle the run holds, optionally narrowed by a
+    `/`-separated `select` path, in the session's space or an admitted foreign
+    space. A handle `describe_handle` has not answered for in this run is
+    refused, so a value is read after its shape was looked at; the handle table
+    records the answer on the entry. A link at the read position is followed; a
+    link inside the value returns as the linked document's handle. What it reads
+    is measured through its own transaction against the release ceiling with the
+    model as the sink, the measurement `call_verb` and `run_pattern` apply to
+    their results; a refused read names the offending atoms and that
+    `delegate_task` can hand the handle to a subagent. A released read's label
+    joins the run's model context)
   - `search_patterns` (present only when the run configures a pattern index with
     `--pattern-index-url`; finds published patterns by hashtag or free text and
     reports each one's kind, evidence quality, declared shapes, and import
@@ -1431,7 +1443,10 @@ pass on by accident. No shape is stated on the flag, by rule: an input cell
 carries its own declared schema in the fabric — the same place its CFC labels
 live — and `describe_handle` answers from that declaration, so there is one
 source of truth and nothing an operator-written view could drift from or quietly
-claim.
+claim. A run granted `read_value` can read an input's value once
+`describe_handle` has answered for it; that value arrives as a tool result,
+measured against the release ceiling like any other, and its label joins the
+run's model context.
 
 A `<link>` may also be a piece's NAME: `pattern:<space>/<slug>`, or the bare
 `<slug>` meaning a piece in the session's own space. That is what a surface
