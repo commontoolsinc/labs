@@ -2152,6 +2152,26 @@ describe("cfcSchemaPoliciesEqual", () => {
         cfcSchemaPoliciesEqual(inline, referenced(undefined, CLAIM)),
       ).toBe(false);
     });
+
+    it("tells apart a changed claim in a referenced body beside a claim at the reference", () => {
+      const sited = (bodyClaim: unknown) =>
+        ({
+          type: "object",
+          properties: { list: { $ref: "#/$defs/List", ifc: CLAIM } },
+          $defs: {
+            List: {
+              ...inline.properties.list,
+              ifc: { confidentiality: bodyClaim },
+            },
+          },
+        }) as unknown as JSONSchemaObj;
+      expect(cfcSchemaPoliciesEqual(sited(["one"]), sited(["one"]))).toBe(
+        true,
+      );
+      expect(cfcSchemaPoliciesEqual(sited(["one"]), sited(["two"]))).toBe(
+        false,
+      );
+    });
   });
 
   describe("with positions left out", () => {

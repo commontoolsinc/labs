@@ -1386,8 +1386,10 @@ function resolvedSchemaPolicyGraph(
       return { ifc: schema.ifc, ref: "#recursive", children: [] };
     }
   }
+  // A claim beside a reference overlays the referenced body's claims of the
+  // same kind and keeps the others, as the merge reads them.
   const resolved = typeof schema.$ref === "string"
-    ? resolveCfcSchemaRefs(schema, root) ?? schema
+    ? resolveKeepingBodyClaims(schema as JSONSchemaObj, root) ?? schema
     : schema;
   if (!isObjectNotArray(resolved)) return undefined;
   const childRoot = resolved !== schema
