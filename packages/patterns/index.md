@@ -119,8 +119,10 @@ explorations), `fabrichat/` (chat among real profiles: a room per conversation,
 whose messages and reactions are written only through reviewed surfaces, each
 user's manager of their rooms, and placements that show a room in other spaces),
 `file-share/` (a minimal file-sharing example: bytes go to the blob store, cells
-hold descriptors), `habit-tracker/`, `lobby/`, `lunch-poll/`,
-`profile-group-chat/`, `project-list/`,
+hold descriptors), `habit-tracker/`, `iframe-cursor-canvas/` (a shared board in
+a sandboxed iframe: shapes are stored, while each viewer's pointer and a shape
+held mid-drag travel through a presence room and are stored nowhere), `lobby/`,
+`lunch-poll/`, `profile-group-chat/`, `project-list/`,
 [`recommend-a-book/`](recommend-a-book/README.md) (personal reading shelf and
 private visitor recommendations), `router/`, `scoped-group-chat/`,
 `scoped-user-directory/`, `scrabble/`, `shared-note/` (a shared Markdown
