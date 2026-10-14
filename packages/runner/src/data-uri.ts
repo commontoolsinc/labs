@@ -382,9 +382,10 @@ function inlineDataUriLinks(
     // asks with `refuseCarried`, one inside the value a `data:` link carries,
     // such as an immutable cell holding a `FabricError` sent in an event.
     // Nothing in the tree does either today, de facto rather than by
-    // construction. A `FabricError` is exposed to pattern authors, but
-    // nothing attaches a cell to one or sends one in an event; the whole
-    // suite runs green with this throw in place.
+    // construction. A `FabricError` is exposed to pattern authors, and the
+    // fetch builtins store one as a result, but nothing writes one through
+    // this walk or sends one in an event; the whole suite runs green with
+    // this throw in place.
     //
     // It cannot be narrowed to instances that actually carry such a link, which
     // is the shape that would sound safer: deciding that means reading the
