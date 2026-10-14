@@ -1134,6 +1134,37 @@ function additionalPropertiesOf(schema: SchemaObject): JSONSchema {
   return unconstrained ? true : additional;
 }
 
+/**
+ * `schema`, the schema of a property of a source object, without the
+ * `undefined` alternative it may hold. An object stores no property whose
+ * value is `undefined` (`docs/specs/json_schema.md`), so that alternative
+ * describes no value the source holds, and the target need not accept it: a
+ * schema generator that leaves out the `undefined` an optional property's `?`
+ * adds narrows nothing a piece stores. A property whose only alternative is
+ * `undefined` holds no value at all, and reads as `false`.
+ */
+function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
+  if (!isObjectNotArray(schema)) return schema;
+  if (schema.type === "undefined") return false;
+  if (Array.isArray(schema.type) && schema.type.includes("undefined")) {
+    const types = schema.type.filter((type) => type !== "undefined");
+    if (types.length === 0) return false;
+    return { ...schema, type: types.length === 1 ? types[0]! : types };
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const alternatives = schema.anyOf.filter((alternative) =>
+      !isObjectNotArray(alternative) || alternative.type !== "undefined" ||
+      Object.keys(alternative).some((key) =>
+        key !== "type" && !DESCRIPTIVE_ANNOTATION_KEYS.has(key)
+      )
+    );
+    if (alternatives.length === schema.anyOf.length) return schema;
+    if (alternatives.length === 0) return false;
+    return { ...schema, anyOf: alternatives };
+  }
+  return schema;
+}
+
 function objectSubsetIssue(
   source: SchemaObject,
   target: SchemaObject,
@@ -1324,7 +1355,9 @@ function objectSubsetIssue(
 
   for (const property of Object.keys(previousProperties)) {
     const propertyPath = `${path}.${property}`;
-    const sourceDirect = sourceProperties[property];
+    const sourceDirect = withoutUndefinedAlternative(
+      sourceProperties[property],
+    );
     const sourceContracts = [
       sourceDirect,
       ...matchingPatternPropertySchemas(source.patternProperties, property),

@@ -5820,6 +5820,79 @@ describe("piece schema compatibility", () => {
         .toThrow(/type object is not accepted/);
     });
   });
+
+  describe("an `undefined` alternative of a property", () => {
+    // An object stores no property whose value is `undefined`, so that
+    // alternative of a property's schema describes no value a piece holds,
+    // and a candidate need not accept it.
+
+    const objectWith = (
+      x: JSONSchema,
+      required: string[] = [],
+    ): JSONSchema => ({
+      type: "object",
+      properties: { x },
+      required,
+    });
+
+    for (
+      const [spelling, withUndefined, without] of [
+        [
+          "an `anyOf` arm",
+          { anyOf: [{ type: "number" }, { type: "undefined" }] },
+          { type: "number" },
+        ],
+        [
+          "a `type` list member",
+          { type: ["number", "undefined"] },
+          { type: "number" },
+        ],
+      ] as const
+    ) {
+      it(`accepts a candidate argument whose property no longer admits \`undefined\` as ${spelling}`, () => {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern(objectWith(withUndefined), { type: "object" }),
+            pattern(objectWith(without), { type: "object" }),
+          )
+        ).not.toThrow();
+      });
+
+      it(`accepts a candidate result whose property admits \`undefined\` as ${spelling}`, () => {
+        expect(() =>
+          assertPatternSchemasBackwardCompatible(
+            pattern({ type: "object" }, objectWith(without, ["x"])),
+            pattern({ type: "object" }, objectWith(withUndefined, ["x"])),
+          )
+        ).not.toThrow();
+      });
+    }
+
+    it("reads a property whose only alternative is `undefined` as holding no value", () => {
+      expect(() =>
+        assertSchemaSubset(
+          objectWith({ type: "undefined" }),
+          objectWith({ type: "number" }),
+        )
+      ).not.toThrow();
+    });
+
+    it("still rejects a candidate argument that no longer admits a defined alternative", () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            objectWith({
+              anyOf: [{ type: "number" }, { type: "string" }, {
+                type: "undefined",
+              }],
+            }),
+            { type: "object" },
+          ),
+          pattern(objectWith({ type: "number" }), { type: "object" }),
+        )
+      ).toThrow(/x: a schema alternative accepted previously is not accepted/);
+    });
+  });
 });
 
 describe("verb event closed-world transitions", () => {
