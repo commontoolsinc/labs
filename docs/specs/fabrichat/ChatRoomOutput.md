@@ -38,6 +38,10 @@ interface ChatRoomOutput {
   /** The room's messages: facts, the newest, and this session's windows. */
   messages: ChatMessageList;
 
+  /** `messages.openWindow` and `messages.closeWindow`, at the top level. */
+  openWindow: ChatMessageList["openWindow"];
+  closeWindow: ChatMessageList["closeWindow"];
+
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
@@ -89,6 +93,39 @@ interface ChatRoomOutput {
       deliveryRefusal?: string;
     }
     | { status: "refused"; reason: string; code?: "direct-room" }
+  >;
+
+  /** The outcome of each of this reader's message acts, by its `requestId`. */
+  messageRequests: Record<
+    string,
+    | { status: "done" }
+    | {
+      status: "refused";
+      reason: string;
+      code:
+        | "no-profile"
+        | "not-member"
+        | "invalid-body"
+        | "out-of-window"
+        | "bad-reply"
+        | "deleted-target"
+        | "unknown-target"
+        | "not-allowed";
+    }
+  >;
+
+  /** Sets the room's title, which every member shares. */
+  setTitle: Stream<{ requestId: string; title: string }>;
+
+  /** The outcome of each of this reader's retitles, by its `requestId`. */
+  titleRequests: Record<
+    string,
+    | { status: "done" }
+    | {
+      status: "refused";
+      reason: string;
+      code: "not-member" | "invalid-title" | "fixed-title";
+    }
   >;
   [UI]: VNode;
   [VIEWS]: { room: object };
@@ -153,8 +190,10 @@ space.
 
 ## Facts
 
-- **`about`** is a [`ChatRoomAbout`](ChatRoomAbout.md), set once when the room
-  is created.
+- **`about`** is a [`ChatRoomAbout`](ChatRoomAbout.md), set when the room is
+  created. Its `title` changes through
+  [`setTitle`](#settitlerequestid-string-title-string), and the rest of it
+  never does.
 - **Messages.** The room holds its [`ChatMessage`](ChatMessage.md)s, ordered by
   `sentAt`, which is unique in the room. A client reads the newest of them from
   `messages`, and the rest through windows (see
@@ -199,10 +238,17 @@ space.
   access list. A client uses it to leave the people already in the room out of
   its own add control.
 - **`messages`** is a [`ChatMessageList`](ChatMessageList.md): how many messages
-  the room holds, the span of their times, and `latest`, the newest messages of
-  the main conversation, which every member can read, a READ member included. It
-  also holds the reading session's own windows onto the messages, and the
-  streams that open and close them.
+  the room holds, the span of their times, `latest`, the newest messages of
+  the main conversation, and `threads`, each thread's reply count and latest
+  reply time, which every member can read, a READ member included. It also
+  holds the reading session's own windows onto the messages, and the streams
+  that open and close them.
+- **`openWindow`** and **`closeWindow`** are `messages.openWindow` and
+  `messages.closeWindow` themselves, the same streams offered again at the
+  room's top level, for a client that sends only to a view's own streams. A
+  window either one opens is in `messages.windows`, so such a client reads a
+  thread, or pages the main conversation, through the room alone (see
+  [`ChatMessageList`](ChatMessageList.md#windows)).
 - **`canSend`** says whether the reader can send, edit, delete, and react right
   now: their access is WRITE or OWNER, and their profile resolves. It lets a
   client tell a READ member why their gestures would be refused before they
@@ -217,6 +263,31 @@ space.
   added was told of the room, once that is decided. It reads the verdicts from
   the reader's own manager, so it is the reader's alone, like the outcomes it
   holds.
+- **`messageRequests`** holds the outcome of each of the reader's message acts,
+  by its `requestId`: `sendMessage`, `editMessage`, `deleteMessage`,
+  `obliterateMessage`, `sendReaction`, and `deleteReaction`. An act that takes
+  effect, or has nothing left to change, is `done`. One the room refuses is
+  `refused`, with a `reason` for a person to read and a `code` a client acts
+  on:
+  - `no-profile`: the reader's profile hasn't resolved, as where their Home
+    lists no profile, so the act can't name them;
+  - `not-member`: the reader can't write in the room, or isn't signed in;
+  - `invalid-body`: a message with no text, or a reaction that isn't a single
+    emoji;
+  - `out-of-window`: the act's time is outside the room's window (see
+    [recorded times](#recorded-times));
+  - `bad-reply`: a reply to a message not in the room, or shown where its
+    target can't be;
+  - `deleted-target`: the message acted on, or replied to, is deleted;
+  - `unknown-target`: the message acted on isn't in the room;
+  - `not-allowed`: an act only the message's author, or an owner, may make.
+
+  A request the room has already acted on, sent again, keeps the outcome it
+  has. A rendered control's act carries no `requestId`, and its outcome is
+  recorded under the event's own key.
+- **`titleRequests`** holds the outcome of each of the reader's
+  [`setTitle`](#settitlerequestid-string-title-string) requests, by its
+  `requestId`. Like `addRequests`, it is the reader's alone.
 - **`recentActivity`** is a log of what the room recorded recently: each message
   sent, edited, deleted, or obliterated, and each reaction added or removed, as
   a [`ChatRoomActivity`](ChatRoomActivity.md), in `seq` order. A client follows
@@ -250,8 +321,9 @@ client:
   Passing the room's link to someone else never passes a session's windows:
   they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
-  That is only `addRequests`, the outcomes of the reader's own adds. No one
-  else reads them.
+  That is only `addRequests`, `messageRequests`, and `titleRequests`, the
+  outcomes of the reader's own adds, message acts, and retitles. No one else
+  reads them.
 - **Computed for each reader**: `canSend` and `canAdd`. Each is derived when
   it's read, from the reader's own access and profile, so each reader sees
   their own answer, through the room or through a placement, and it needs no
@@ -322,13 +394,19 @@ These rules hold for every stream:
   so a room the sender reached by its link, or forgot, becomes one of their
   chats. The manager checks membership in its own Home-space event and leaves
   an already saved room unchanged. The room reads no private catalog and sends
-  nothing for a sender with no manager.
-- A refusal is silent: the room records no outcome, so a sender can't tell a
-  refused event from one that hasn't taken effect yet. A room could record
-  outcomes, as the manager does in `requests`, but a room's record is shared by
-  every member, so an outcome there would tell everyone about each member's
-  refused requests. A room keeps them to itself instead. A client MUST check an
-  event against the stream's rules before sending it (see
+  nothing for a sender with no manager. It sends `joinRoom` in an event of its
+  own, once the write has landed, so the write reads nothing of the manager. A
+  manager in a person's Home can carry a confidentiality label, such as their
+  `PersonalSpace`, that the room's space doesn't admit, and a write that read
+  it would be refused; such a manager can keep the join from happening, never
+  the write.
+- A refusal writes nothing to the room's shared record. The sender's outcome
+  is recorded where only they read it: in `messageRequests` for a message
+  act, in `addRequests` for an add, and in `titleRequests` for a retitle, each
+  `refused` with a reason and a code. The room's own composer shows the
+  session's latest refusal until an act takes effect. A refused `openWindow` or
+  `closeWindow` records no outcome. A client still checks an event against the
+  stream's rules before sending it (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
 - A refused event is spent: it is not retried.
 
@@ -408,8 +486,8 @@ because a proposal lands on each side for a different reason:
 A proposal within the window is recorded as the time, except that a proposal
 after the clock is recorded at the current time (see below). The room MAY adjust
 the time first, for example to coarsen it to the system's clock resolution. A
-proposal outside the window is refused, silently, like any refusal: it is a very
-stale retry, a badly wrong clock, or a forgery.
+proposal outside the window is refused, with `out-of-window` in the sender's
+`messageRequests`: it is a very stale retry, a badly wrong clock, or a forgery.
 
 Whatever the proposal, a room MUST NOT record a time later than its own current
 time, meaning its handler clock's reading when it makes the record. A proposal
@@ -604,7 +682,9 @@ with them.
   room's space, for a group room in a space of its own.
 - **Effect:** grants the principal OWNER on the room's space, so they too may
   add others. Granting someone the OWNER they already hold changes nothing.
-  Then, for a reader with a manager, the room sends the manager's
+  Then, in an event of its own, so that the add reads nothing of the manager,
+  for the reason a write that joins a room doesn't (see the rules every stream
+  holds to), for a reader with a manager the room sends the manager's
   [`offerRoom`](ChatManagerOutput.md#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile),
   naming the person and the `profile` when the add has one, under a
   `requestId` composed of the room's space and the add's own. The manager
@@ -630,8 +710,8 @@ with them.
   whether it arrived; `noticed`, a notice in the manager's `outgoingNotices`
   for a client to deliver; or `access-only`, told nothing, so that the adder
   has to send them the room's link. An add with no manager to send to records
-  `access-only` at once: the reader has no manager, theirs hasn't resolved yet,
-  or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
+  `access-only` in that event: the reader has no manager, theirs hasn't
+  resolved yet, or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
   once a manager resolves, since nothing runs then to send it. Otherwise
   `delivery` is the manager's verdict, which `addRequests` reads from the
   manager's `requests` once it is recorded, and is absent until then. A
@@ -659,16 +739,52 @@ manager adds its user when it creates or accepts the room.
   already. The profile's document must carry a label, as a profile does; one
   that carries none is refused.
 
+### `setTitle(requestId: string, title: string)`
+
+- `requestId: string` — Chosen by the sender, and unique among its retitles.
+  The outcome is recorded under it in `titleRequests`, and sending the same
+  event again with it changes nothing. The rendered retitle control's click
+  carries none, and is given one of its own.
+- `title: string` — The new title, exactly as the person saw it when they set
+  it. It must have some text in it: a string, not empty or only whitespace.
+
+Sets the room's title, which every member shares: the `title` the room's
+`about` shows (see [`ChatRoomAbout`](ChatRoomAbout.md)), and the name a
+manager's list shows it by, read through the room's link (see
+[`ChatIndexEntry`](ChatIndexEntry.md#fields)). Like `addMember`, it takes a
+gesture of its own, records its outcome, and is in `[VIEWS]`.
+
+- **Admitted:** as a trusted gesture on `ChatRetitleSurface`, from the room's
+  rendered retitle control, or from a client's own control through the
+  sanctioned issuing path (see
+  [`clients.md`](clients.md#the-sanctioned-issuing-path)), from any member who
+  can write in the room, in a group room or a direct one.
+- **Effect:** records the title, trimmed of the whitespace around it, labeled
+  `authored-by` the sender, as the title a member last set. It replaces any
+  title set before, and outranks the one the room was created with, which
+  `about.record` keeps. Nothing else about the room changes, and nothing is
+  added to `recentActivity`, which logs messages and reactions: a client
+  follows the title by reading `about.title`.
+- **Refused:** a sender who can't write in the room, or isn't signed in
+  (`not-member`); a `title` with no text in it (`invalid-title`); and a room
+  that shares an existing space, a space's own chat, which is shown by its
+  space's name (`fixed-title`).
+- **Outcome:** recorded in `titleRequests`: `done`, or `refused` with a
+  `reason` for a person to read and a `code` a client acts on, which stays the
+  same whatever the `reason` says. A refusal changes nothing else. A retitle the
+  stream doesn't admit, as one without the gesture, records nothing.
+
 ## Renderings
 
 - **`[UI]`** is the room's own rendering, with its reviewed surfaces. An
   adapter's rendering embeds it, so a composer is always the room's own surface.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
   that draw natively. It includes `messages`, through whose link a client
-  reaches its own windows and their streams, `canSend`, and `addMember` with
-  `canAdd` and `addRequests`. A client uses it to
-  show a room outside any container. Inside a container, it reads the
-  placement's `chat` group instead
+  reaches its own windows and their streams, `openWindow` and `closeWindow`,
+  the same streams at the group's top level, `canSend`, `messageRequests`,
+  `addMember` with `canAdd` and `addRequests`, and `setTitle` with
+  `titleRequests`. A client uses it to show a room outside any container. Inside
+  a container, it reads the placement's `chat` group instead
   ([`FabriChatPlacement.md`](FabriChatPlacement.md#outputs)).
 
 ## Implementation-defined behavior

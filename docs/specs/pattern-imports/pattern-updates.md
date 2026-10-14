@@ -344,11 +344,12 @@ document, and "not yet synced" is not "invalid"), and a root carrying no
 completion marker at all, which gets one unvalidated setup because absence
 cannot be distinguished from a pending apply. A link stored in a slot the new
 schema types as a cell handle (`Writable`, `Cell`, `Stream`) is judged as a
-handle: validation reads only the top level of what it reaches, without
-descending, and holds it to the type the slot's schema allows. What lies below
-is checked by the reactive reads that follow the handle, and leaving it unread
-keeps its labels out of the transaction that writes the piece's own stores. A
-write to a piece's input validates the input it lands in the same way.
+handle, as it is in a slot typed as a handle or `undefined` (or `null`), since
+a link is neither: validation reads only the top level of what it reaches,
+without descending, and holds it to the type the slot's schema allows. What lies
+below is checked by the reactive reads that follow the handle, and leaving it
+unread keeps its labels out of the transaction that writes the piece's own
+stores. A write to a piece's input validates the input it lands in the same way.
 
 A nested piece is set up again the same way when its code changes, over its
 existing argument document, with the argument its parent's expression supplies
@@ -389,6 +390,11 @@ pattern's setup has settled, so that a withdrawn setup leaves the old graph in
 place, and a wave settles after the cycle that sealed into it has ended. A call
 made within that cycle cannot wait for the settlement, so on such a runtime
 `ensureDefaultPattern` returns with the old pattern's graph still running.
+On a client runtime the watcher re-instantiates only once the setup it stages
+for the new pattern has committed, and a refused setup leaves the old pattern
+running under the moved pointer. Until the piece settles on one of the two, an
+event for its streams waits, and then runs the handler of the pattern it
+settled on.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and

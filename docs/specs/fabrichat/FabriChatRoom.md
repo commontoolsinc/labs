@@ -24,15 +24,18 @@ The room keeps these `PerSpace` values, shared by everyone the space admits:
 - Those who joined the room: profile links, in the order they were added, a
   roster only `addParticipant` writes
   (`packages/patterns/loom/participants.tsx`).
+- The title a member last set: one keyed record, absent until a member sets
+  one, which only `commitSetTitle` writes. `about.title` is computed from it
+  and, where it is absent, from the title `about.record` holds.
 
 `participants` is computed from those who joined, the participants the space's
 root lists when the room is not that root (`wish({ query: "#default" })`), and
 the messages' authors, keyed by profile cell. A room with `about`, which only a
 manager creates, is its space's root, and reads only its own roster: its
 `#default` is itself. `roster` is computed from those who joined alone.
-`messages` (its `count`, `oldestAt`, `newestAt`, and
-`latest`) is computed from the messages, and `canSend` from the reader's access
-and profile, when they're read. Neither is stored.
+`messages` (its `count`, `oldestAt`, `newestAt`, `latest`, and `threads`) is
+computed from the messages, and `canSend` from the reader's access and profile,
+when they're read. Neither is stored.
 
 `participantEntries` is computed from `participants`, reading the
 `represents-principal` label on each profile with `principalOf()`, and
@@ -64,6 +67,7 @@ Every write goes through one handler per stream:
 | `commitObliterate` | `obliterateMessage` | `ChatObliterateSurface` |
 | `commitSendReaction` | `sendReaction` | `ChatReactSurface` |
 | `commitDeleteReaction` | `deleteReaction` | `ChatReactSurface` |
+| `commitSetTitle` | `setTitle` | `ChatRetitleSurface` |
 
 Those who joined the room are the exception. The room's `addParticipant`
 stream is bound to the roster's one writer, also named `addParticipant`, which
@@ -78,25 +82,28 @@ room's own composer builds a send's `{ version: { body, sentAt }, replyTo? }`
 from the text the person submitted, which its handler reads as `target.value`,
 and the composer event's time as the proposed `sentAt`.
 
-A successful message or reaction in a room that is its space's root sends
-`joinRoom` to the viewer's manager, when one is available. The manager's
-separate event checks its private Home catalog and lists or restores the room;
-joining an already listed room without a `requestId` changes nothing. Room
-write handlers hold the manager's stream but read no catalog, so the catalog's
-confidentiality stays out of the transaction that stores shared messages and
-reactions. A social space's embedded chat sends no join: the space's own
-membership already governs that conversation.
+A successful message or reaction sends `joinRoom` to the viewer's manager
+when one is available and the room is either standalone or its space's root
+explicitly declares it through `chatRoom`. A declared container room includes
+that root as `container`; a standalone room needs no container, including when
+another space declares it. The manager's separate event checks private Home
+membership and lists or restores the conversation. Joining an already listed
+room without a `requestId` changes nothing. Room write handlers send their
+local `joined` stream after recording the write. Its `tellManagerJoined`
+handler reads the manager binding and sends `joinRoom` in a separate event,
+so the transaction that stores shared messages and reactions reads neither
+the manager nor its private catalog.
 
-Every handler in the table first checks its event's sender and `requestId`
-against a keyed collection of the requests the room has acted on, and does
-nothing for one it finds. It records the request there in the same transaction
-as its effect, and the collection drops a request once it was recorded longer
-ago than the greater of `proposedTimeMaxAgeNsec` plus `proposedTimeMaxLeadNsec`,
-and `recentActivityWindowNsec`. The collection keeps a request even after its
-message is obliterated: it says only that the sender made a request, not what,
-and without it a late redelivery of the original send would send the message
-again. The two bounds of its window for proposed times are constants of the
-pattern, documented beside it.
+Every handler in the table but `commitSetTitle` first checks its event's sender
+and `requestId` against a keyed collection of the requests the room has acted
+on, and does nothing for one it finds. It records the request there in the same
+transaction as its effect, and the collection drops a request once it was
+recorded longer ago than the greater of `proposedTimeMaxAgeNsec` plus
+`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The collection keeps
+a request even after its message is obliterated: it says only that the sender
+made a request, not what, and without it a late redelivery of the original send
+would send the message again. The two bounds of its window for proposed times
+are constants of the pattern, documented beside it.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` moves the current version into `earlierVersions` before recording
@@ -136,17 +143,25 @@ to check.
 
 `about.record` is stored as `AuthoredByCurrentUser`, written once by the handler
 that creates the room, so it is labeled with its creator, and `about` links it.
+`commitSetTitle` stores the title a member sets the same way, as a record of its
+own, so it is labeled with that member, and the creator's record keeps its
+label. It records each retitle's outcome in the sender's own `titleRequests`,
+kept `PerUser`, under the event's `requestId`, and a request already there
+changes nothing; a refusal writes nothing else. So, unlike the other handlers
+in the table, it keeps no request memory, claims no time, and appends no
+`recentActivity` entry.
 `canSend` is computed for each viewer from their access and whether their
 profile resolves.
 
-Every handler that changes the room's own record appends its `recentActivity`
-entry in the same transaction as the change, so the log never disagrees with the
-messages. Entries older than the window are dropped as new ones are appended.
-`commitObliterate`, and `commitDelete` when it obliterates, also remove the
-message's earlier entries.
+Every handler that changes the room's messages or reactions appends its
+`recentActivity` entry in the same transaction as the change, so the log never
+disagrees with the messages. Entries older than the window are dropped as new
+ones are appended. `commitObliterate`, and `commitDelete` when it obliterates,
+also remove the message's earlier entries.
 
 The message list keeps `windows` as a `PerSession` keyed collection, and
-fulfills `openWindow` and `closeWindow` by setting and removing entries in it. A
+fulfills `openWindow` and `closeWindow` by setting and removing entries in it.
+The room offers those same two streams at its top level as well. A
 window is a computed selection over the record, so it stays live as the messages
 in it change.
 

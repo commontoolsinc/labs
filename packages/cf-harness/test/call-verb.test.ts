@@ -2,7 +2,7 @@
  * `call_verb` sends an event to a verb of a piece the run holds, and
  * `describe_handle` is where the run learns which verbs that piece has and
  * what each takes and returns. Together they are what lets an agent drive a
- * piece it was handed rather than only read it.
+ * piece it holds rather than only read it.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
@@ -511,10 +511,9 @@ describe("call-verb", () => {
       expect((called as { message: string }).message).toContain("lacks READ");
     });
 
-    it("refuses a verb of a piece in an admitted space the run was not handed", async () => {
-      // The run holds a handle to the second timer, and the space is
-      // admitted; only the first was handed in, so the second stays readable
-      // and not writable.
+    it("calls a verb of a piece the run reached in another space without being handed it", async () => {
+      // Anything the run reaches through the pieces it was given is in its
+      // scope, so a piece found beside a handed one is as callable as it.
       const handed = await foreignTimer();
       const other = await foreignTimer();
 
@@ -523,11 +522,8 @@ describe("call-verb", () => {
         { token: other.ref, verb: "start", event: { minutes: 10 } },
       );
 
-      expect(output.status).toBe("error");
-      expect((output as { message: string }).message).toContain(
-        "this run's own space",
-      );
-      expect(await readField(other.ref, "status")).toBe("idle");
+      expect(output).toMatchObject({ status: "ok", verb: "start" });
+      expect(await readField(other.ref, "status")).toBe("running");
     });
   });
 

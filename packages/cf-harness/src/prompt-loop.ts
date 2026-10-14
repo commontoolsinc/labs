@@ -166,6 +166,7 @@ import { OpenAICompatibleGatewayClient } from "./gateway/openai-client.ts";
 import {
   createHarnessHandleTable,
   defineOwnEntry,
+  markHandleDescribed,
   mintAddressHandle,
   mintReferentHandle,
   referentDraft,
@@ -1230,7 +1231,11 @@ export const seedSubagentHandleTable = (
   }
   return {
     ...createHarnessHandleTable(childRunId),
-    entries: [...seeded.values()].map((entry) => ({ ...entry })),
+    // A child looks at a handle's shape itself before read_value admits it,
+    // so a parent's describe does not carry over.
+    entries: [...seeded.values()].map(({ described: _described, ...entry }) =>
+      entry
+    ),
     ...(seededReferents.size > 0
       ? {
         referents: [...seededReferents.values()].map((referent) => ({
@@ -4428,6 +4433,28 @@ export class CfHarnessPromptLoop {
   }
 
   /**
+   * Helper for `#invokeToolCall()`, which records on the handle that
+   * `describe_handle` answered for it, which is what admits a `read_value` of
+   * that handle. A token the table does not hold, or a refusal, marks nothing.
+   */
+  async #recordDescribedHandle(
+    toolId: BuiltinToolId,
+    output: unknown,
+  ): Promise<void> {
+    if (
+      toolId !== "describe_handle" || !isObjectNotArray(output) ||
+      output.known !== true || output.error !== undefined ||
+      typeof output.token !== "string"
+    ) {
+      return;
+    }
+    const table = this.engine.handleTable;
+    if (table === undefined) return;
+    const marked = markHandleDescribed(table, output.token);
+    if (marked !== table) await this.engine.recordHandleTable(marked);
+  }
+
+  /**
    * Helper for `#invokeToolCall()`, which records the source a `run_pattern`
    * call carried beside that call's tool output, under the same `outputId`.
    *
@@ -5261,6 +5288,7 @@ export class CfHarnessPromptLoop {
       result.output,
     );
     await this.#persistRunPatternSource(toolId, input, result.resultRef);
+    await this.#recordDescribedHandle(toolId, result.output);
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolId,
       result.output,
@@ -5650,6 +5678,33 @@ export class CfHarnessPromptLoop {
             "model-context-truncation",
             resultRef,
             output.truncated === true ? ["/entries"] : [],
+          ),
+        ),
+      };
+    }
+    if (toolId === "read_value" && isObjectNotArray(output)) {
+      // The value reaches the model; its label stays on the artifact as the
+      // observation the run's model context accumulates.
+      const { cfc, ...publicOutput } = output;
+      const label = isObjectNotArray(cfc) ? cfc.observedLabel : undefined;
+      return {
+        output: stripInternalToolFields(publicOutput),
+        ...(label !== undefined
+          ? {
+            cfcModelContextObservations: [{
+              toolCallId,
+              toolId,
+              outputId: resultRef.outputId,
+              channels: ["output" as const],
+              label: label as IFCLabel,
+            }],
+          }
+          : {}),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            presentFieldPointers(output, ["cfc"]),
           ),
         ),
       };

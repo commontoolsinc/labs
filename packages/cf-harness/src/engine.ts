@@ -262,6 +262,10 @@ import {
   type CallVerbToolInput,
   type CallVerbToolOutput,
 } from "./tools/call-verb.ts";
+import type {
+  ReadValueToolInput,
+  ReadValueToolOutput,
+} from "./tools/read-value.ts";
 import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
@@ -347,6 +351,7 @@ export interface BuiltinToolInputMap {
   read_piece_source: ReadPieceSourceToolInput;
   revise_piece: RevisePieceToolInput;
   call_verb: CallVerbToolInput;
+  read_value: ReadValueToolInput;
   assign_slug: AssignSlugToolInput;
   resolve_piece: ResolvePieceToolInput;
   describe_handle: DescribeHandleToolInput;
@@ -388,6 +393,7 @@ export interface BuiltinToolOutputMap {
   read_piece_source: ReadPieceSourceToolOutput;
   revise_piece: RevisePieceToolOutput;
   call_verb: CallVerbToolOutput;
+  read_value: ReadValueToolOutput;
   assign_slug: AssignSlugToolOutput;
   resolve_piece: ResolvePieceToolOutput;
   describe_handle: DescribeHandleToolOutput;

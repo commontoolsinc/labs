@@ -345,6 +345,11 @@ deno check packages/patterns/babylon-shared-scene/guest.ts
 deno task cf check packages/patterns/babylon-shared-scene/main.tsx --no-run
 ```
 
+Launch the pattern with the steps under
+[Verify](./iframe-pattern-guide.md#verify) in the plain DOM guide, substituting
+this pattern's path, a space label, and a slug. Those steps start local
+servers, create the space, and sign the browser in as its owner.
+
 Verify in a real browser that WebGL renders, picking and camera controls work,
 shared updates reconcile without recreating the Engine, concurrent additions
 compose, a stable entity survives reordering, declared user/session scopes stay

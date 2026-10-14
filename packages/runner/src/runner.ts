@@ -78,6 +78,7 @@ import {
   cellRuntime,
   cellTx,
   createCell,
+  internCellLinkSchema,
   isCell,
   schemaCellScope,
   syncCellForIdentity,
@@ -475,27 +476,48 @@ type StartAttempt = {
 };
 
 /**
+ * What `schemaWithEventSlotAsStream()` returned for each deep-frozen handler
+ * argument schema, by that schema.
+ */
+const eventSlotAsStreamSchemas = new WeakMap<object, JSONSchema>();
+
+/**
  * `schema` with a handler's `$event` slot declared as a stream: what a
  * handler node's bound inputs are synced under at start, where the slot
  * holds the stream link rather than an event. Declared so, the slot's
  * document is not loaded under the event schema the link carries; the
  * stream is named whole beside the plan (`#cellsNodePlanReads`).
+ *
+ * The result is the interned schema, and one handler schema gets the same
+ * one on every call: each plan of a handler node attaches it to its inputs
+ * cell, which interns what it is given, and a schema built per plan would be
+ * hashed whole per plan. A schema declaring an `$event` slot is interned as a
+ * cell interns one (`internCellLinkSchema()`), which deep-freezes it in place
+ * unless it holds a value read out of a cell.
  */
-function schemaWithEventSlotAsStream(
+export function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
+  // A result is kept only for a deep-frozen schema, which cannot change
+  // under it.
+  internCellLinkSchema(schema);
+  const keep = isDeepFrozen(schema);
+  const remembered = keep ? eventSlotAsStreamSchemas.get(schema) : undefined;
+  if (remembered !== undefined) return remembered;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
-  return {
+  const declared = internCellLinkSchema({
     ...schema,
     properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
-  };
+  });
+  if (keep) eventSlotAsStreamSchemas.set(schema, declared);
+  return declared;
 }
 
 // The debug-name builders reuse the action's already-computed
@@ -2292,6 +2314,9 @@ type WatcherFollows = {
 
   /** Resolves when the registration is cancelled. */
   cancelled: Promise<void>;
+
+  /** Whether the registration has been cancelled. */
+  isCancelled: boolean;
 };
 
 export class Runner {
@@ -4114,6 +4139,16 @@ export class Runner {
               nextArgument,
             );
           }
+          // No caller names a slot, so every slot the document holds is
+          // staged again with the bytes it holds, as a setup replay stages
+          // the slots its caller leaves out. A default the merge adds where
+          // the document holds nothing is no replay, and gets no record.
+          recordReplayedArgumentSlots(
+            tx,
+            argumentLink,
+            undefined,
+            previousArgument,
+          );
 
           // Stage the exact Fabric-layer representation before validating
           // it. The untyped materialization inside resolves ordinary sigil
@@ -5534,8 +5569,15 @@ export class Runner {
     const setupPatternWatcher = () => {
       const { promise: cancelled, resolve: markCancelled } = Promise
         .withResolvers<void>();
-      const follows: WatcherFollows = { pending: new Set(), cancelled };
-      addCancel(markCancelled);
+      const follows: WatcherFollows = {
+        pending: new Set(),
+        cancelled,
+        isCancelled: false,
+      };
+      addCancel(() => {
+        follows.isCancelled = true;
+        markCancelled();
+      });
       // A hot-swap targets a DIFFERENT program over this piece's existing doc:
       // the incoming pattern's internal cells and its argument-schema
       // defaults have never been materialized here. A fresh start() does
@@ -5601,46 +5643,16 @@ export class Runner {
           }
           this.#evictResultPatternMemos(`${pieceLink.space}/${pieceLink.id}`);
         };
-        if (!this.#runtime.sealDestinationInstalled) {
-          // The OFF arm (and ON-arm client speculation): setup commits to
-          // the store and the swap proceeds synchronously.
-          try {
-            this.#applySetupState(
-              setupTx,
-              pattern,
-              newRef,
-              {
-                sameStoredSetup: false,
-                restageStoredArgument: true,
-                storedSetupMatches: false,
-              },
-              undefined,
-              resultCell,
-            );
-            this.#runtime.prepareTxForCommit(setupTx);
-            setupTx.commit();
-          } catch (error) {
-            logger.error(
-              "pattern-swap-setup-error",
-              `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
-              error,
-            );
-            keepRunningPattern();
-            return;
-          }
-          finishSwap();
-          return;
-        }
-        // ON-arm serving: the setup seals into the wave, and the wave
-        // can still WITHDRAW it at the commit step (a conflict drop, a
-        // lease-lost abort) after `commit().settled` resolved — so the running
-        // graph is replaced only once the setup is DURABLY accepted
-        // (waveSettlementOf). On withdrawal the OLD graph stays: v2
-        // running against withdrawn setup would read internal cells that
-        // setup never materialized, while old-graph-plus-new-pointer is a
-        // coherent not-yet-swapped state a later pointer write (or
-        // reactivation) repairs.
-        void (async () => {
+        // The running graph is replaced only once the setup it reads is
+        // accepted. A commit can be refused, and a serving wave can still
+        // WITHDRAW one at the commit step (a conflict drop, a lease-lost
+        // abort) after `commit().settled` resolved (waveSettlementOf). Either
+        // way the OLD graph stays: v2 running against setup that never landed
+        // would read internal cells nothing materialized, while
+        // old-graph-plus-new-pointer is a coherent not-yet-swapped state a
+        // later pointer write (or reactivation) repairs. Events for the piece
+        // wait for the outcome (`pendingPatternChangeFor`).
+        const setupWork = (async () => {
           try {
             this.#applySetupState(
               setupTx,
@@ -5659,7 +5671,7 @@ export class Runner {
             if (committed.error !== undefined) {
               logger.error(
                 "pattern-swap-setup-error",
-                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at the seal`,
+                `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} was refused at commit`,
                 committed.error,
               );
               keepRunningPattern();
@@ -5695,7 +5707,25 @@ export class Runner {
           if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
           if (currentPatternKey !== patternIdentityKey(newRef)) return;
           finishSwap();
-        })();
+        })().catch((error) => {
+          logger.error(
+            "pattern-swap-setup-error",
+            `Setup for swapped-in pattern ${newRef.identity}#${newRef.symbol} failed`,
+            error,
+          );
+        });
+        // A serving runtime's setup waits for its wave, which settles after
+        // the cycle that sealed into it ends, so a caller in that cycle could
+        // not wait for it (`patternPointerFollowed()`), and an event held on it
+        // would hold the wave (`pendingPatternChangeFor()`).
+        if (this.#runtime.sealDestinationInstalled) {
+          this.#pendingWatcherPatternLoads.add(setupWork);
+          setupWork.finally(() =>
+            this.#pendingWatcherPatternLoads.delete(setupWork)
+          );
+        } else {
+          this.#trackWatcherPatternLoad(pieceKey, follows, setupWork);
+        }
       };
       // The session-swap half of the watcher (see `#sessionPatternSwaps`):
       // exactly the sinkMeta arm's semantics, driven directly with a live
@@ -10228,6 +10258,47 @@ export class Runner {
   }
 
   /**
+   * The change of pattern that a piece among `pieces`, or a piece that
+   * instantiated one of them, is making on this runtime, or `undefined` when
+   * none is: the follow its pattern watcher has in flight from seeing the
+   * pointer move until the piece runs the incoming pattern, or keeps the one
+   * it runs because that pattern's setup did not land. Until it settles, the
+   * handlers registered for those pieces may be about to be replaced, so the
+   * scheduler holds an event for them on it. A serving runtime reports none:
+   * its swap waits for the wave its setup seals into, and a wave commits only
+   * once the scheduler is idle.
+   *
+   * @param pieces - The result cells of the pieces a handler belongs to.
+   */
+  pendingPatternChangeFor(
+    pieces: readonly NormalizedFullLink[],
+  ): Promise<void> | undefined {
+    if (
+      this.#watcherFollowsByPiece.size === 0 ||
+      this.#runtime.sealDestinationInstalled
+    ) {
+      return undefined;
+    }
+    const keys = new Set<string>();
+    for (const piece of pieces) {
+      const scopeKey = resolveScopeKey(
+        piece.scope,
+        this.#runtime.scopeKeyIdentity,
+      );
+      for (const id of this.#demandRootChains.get(piece.id) ?? [piece.id]) {
+        const key = `${piece.space}/${scopeKey}/${id}`;
+        // A cancelled registration's follows run on to no effect.
+        if (this.#watcherFollowsByPiece.get(key)?.isCancelled === false) {
+          keys.add(key);
+        }
+      }
+    }
+    if (keys.size === 0) return undefined;
+    return Promise.all([...keys].map((key) => this.#watcherFollowsSettled(key)))
+      .then(() => {});
+  }
+
+  /**
    * Whether a graph is registered for `resultCell`'s document: the piece is
    * running, and a start would return on its fast path without touching the
    * stored doc. A subpath cell stands for its root document.
@@ -10443,12 +10514,20 @@ export class Runner {
    * wave settles after the cycle that sealed into it has ended, so a caller
    * running within that cycle could not wait for it.
    */
-  async patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
+  patternPointerFollowed<T>(resultCell: Cell<T>): Promise<void> {
     const link = resultCell.getAsNormalizedFullLink();
     const rootCell = link.path.length > 0
       ? this.#runtime.getCellFromLink({ ...link, path: [] })
       : resultCell;
-    const key = this.#getDocKey(rootCell);
+    return this.#watcherFollowsSettled(this.#getDocKey(rootCell));
+  }
+
+  /**
+   * Helper for `patternPointerFollowed()` and `pendingPatternChangeFor()`,
+   * which resolves once the piece whose doc key is `key` has no follow in
+   * flight, or once the watcher registration that started them is cancelled.
+   */
+  async #watcherFollowsSettled(key: string): Promise<void> {
     // A settled follow's continuation can start another, so the entry is read
     // again after each wait. A cancelled registration's follows run on to no
     // effect, so the wait ends with the cancellation, unless the piece has
