@@ -1017,7 +1017,9 @@ so a room of three hundred messages builds three hundred rows although its
 `latest` holds a hundred; these curves say what that costs. Each size seeds two
 rooms, one for each series, so that sends do not grow the room `<size>` loads.
 The `send <size>` room does grow, by one message per send: it holds `<size>`
-messages before the first of its five sends and four more before the last. A
+messages before the first of its five sends — one per invocation of the body,
+`n + 2` of them, and one for its read-accounted sample — and four more before
+the last. A
 fresh room per send would multiply each size's seeding by five, and against
 sizes a factor of three or more apart that growth stays well inside one step of
 the curve.

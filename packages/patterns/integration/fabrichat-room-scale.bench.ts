@@ -25,8 +25,9 @@
  * series, because a `send` adds a message to the room it measures, and a
  * hundred-message room's `<size>` would otherwise measure a room some sends
  * larger than its name. The `send <size>` room itself grows by one message per
- * send, from `<size>` before the first of its five sends to four more before
- * the last; a fresh room per send would multiply each size's seeding by five,
+ * send, from `<size>` before the first of its five sends, one per invocation
+ * of the body and one for its read-accounted sample, to four more before the
+ * last; a fresh room per send would multiply each size's seeding by five,
  * and that growth stays well inside one step of a curve whose sizes are a
  * factor of three or more apart.
  *
