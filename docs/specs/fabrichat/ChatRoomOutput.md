@@ -234,10 +234,11 @@ space.
   access list. A client uses it to leave the people already in the room out of
   its own add control.
 - **`messages`** is a [`ChatMessageList`](ChatMessageList.md): how many messages
-  the room holds, the span of their times, and `latest`, the newest messages of
-  the main conversation, which every member can read, a READ member included. It
-  also holds the reading session's own windows onto the messages, and the
-  streams that open and close them.
+  the room holds, the span of their times, `latest`, the newest messages of
+  the main conversation, and `threads`, each thread's reply count and latest
+  reply time, which every member can read, a READ member included. It also
+  holds the reading session's own windows onto the messages, and the streams
+  that open and close them.
 - **`canSend`** says whether the reader can send, edit, delete, and react right
   now: their access is WRITE or OWNER, and their profile resolves. It lets a
   client tell a READ member why their gestures would be refused before they
@@ -764,9 +765,8 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
   that draw natively. It includes `messages`, through whose link a client
   reaches its own windows and their streams, `canSend`, `messageRequests`,
   `addMember` with `canAdd` and `addRequests`, and `setTitle` with
-  `titleRequests`. A client uses it to show a room outside any container.
-  Inside a container, it reads the
-  placement's `chat` group instead
+  `titleRequests`. A client uses it to show a room outside any container. Inside
+  a container, it reads the placement's `chat` group instead
   ([`FabriChatPlacement.md`](FabriChatPlacement.md#outputs)).
 
 ## Implementation-defined behavior
