@@ -125,6 +125,68 @@ export default pattern<Input, Output>(({ about, badge }) => ({
 }));
 `;
 
+// The shapes a FabriChat room's inputs take: a record whose type is a named
+// definition, written by `describeRoom` alone from its surface's trusted
+// event, and a list under a named record, grown by `join` alone.
+const NAMED_SOURCE = `/// <cts-enable />
+import {
+  type AuthoredByCurrentUser,
+  Default,
+  handler,
+  pattern,
+  Stream,
+  type TrustedActionWrite,
+  Writable,
+  type WriteAuthorizedBy,
+} from "commonfabric";
+
+interface About {
+  title: string;
+}
+
+const describeRoom = handler<
+  { title: string },
+  { about: Writable<About | undefined> }
+>(({ title }, { about }) => {
+  about.set({ title });
+});
+
+type StoredAbout = AuthoredByCurrentUser<
+  TrustedActionWrite<About, typeof describeRoom, "Describe", "GuardedRoom">
+>;
+
+const join = handler<{ name: string }, { roster: RosterCell }>(
+  ({ name }, { roster }) => {
+    roster.key("items").push(name);
+  },
+);
+
+interface Roster {
+  items?: WriteAuthorizedBy<string[], typeof join>;
+}
+
+type RosterCell = Writable<Roster | Default<Record<PropertyKey, never>>>;
+
+interface Input {
+  about?: StoredAbout;
+  roster?: RosterCell;
+}
+
+interface Output {
+  about?: About;
+  roster: Roster;
+  describeRoom: Stream<{ title: string }>;
+  join: Stream<{ name: string }>;
+}
+
+export default pattern<Input, Output>(({ about, roster }) => ({
+  about,
+  roster,
+  describeRoom: describeRoom({ about }),
+  join: join({ roster }),
+}));
+`;
+
 /** What a test reads off a room. */
 type Room = Record<string, unknown>;
 
@@ -358,6 +420,62 @@ describe("source-reconciler-protected-argument", () => {
           expect(recorded?.detail).toContain("at /badge");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().badge).toEqual({ text: "hi" });
+        },
+      );
+    });
+  });
+
+  describe("fields whose types are named definitions", () => {
+    // Across a release, the merged envelope keeps the stored claims in force
+    // under another layout of definitions: it names the release's own
+    // definitions apart, and spells out in place what the stored one names
+    // by reference.
+
+    const prime = async (runtime: Runtime, room: Cell<Room>) => {
+      await send(
+        runtime,
+        room,
+        "describeRoom",
+        trustedEvent("Describe", { title: "lunch" }),
+      );
+      await send(runtime, room, "join", { name: "ada" });
+      expect(room.get().about).toEqual({ title: "lunch" });
+      expect(room.get().roster).toEqual({ items: ["ada"] });
+    };
+
+    it("adopts a release that leaves the fields as they are, and keeps what they hold", async () => {
+      await reconcileRelease(
+        "named-release",
+        releaseBehind(NAMED_SOURCE),
+        NAMED_SOURCE,
+        prime,
+        ({ outcome, room, currentIdentity }) => {
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().roster).toEqual({ items: ["ada"] });
+        },
+      );
+    });
+
+    it("refuses a release that adds a policy to a named definition, and keeps the field as it was", async () => {
+      // The release guards `Roster.items` with a UI contract as well, a
+      // policy the stored envelope does not declare there.
+      const current = NAMED_SOURCE.replace(
+        "items?: WriteAuthorizedBy<string[], typeof join>;",
+        'items?: TrustedActionWrite<string[], typeof join, "Join", "GuardedRoom">;',
+      );
+      expect(current).not.toBe(NAMED_SOURCE);
+      await reconcileRelease(
+        "named-policy-release",
+        NAMED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().roster).toEqual({ items: ["ada"] });
         },
       );
     });

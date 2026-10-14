@@ -2112,4 +2112,45 @@ describe("cfcSchemaPoliciesEqual", () => {
     } as unknown as JSONSchemaObj;
     expect(cfcSchemaPoliciesEqual(inline, dropped)).toBe(false);
   });
+
+  describe("over definitions", () => {
+    // `inline` with `list` named by reference into the root's definition
+    // map, which also holds `extra`, a definition nothing references.
+    const referenced = (listClaim: unknown, extraClaim: unknown) =>
+      ({
+        type: "object",
+        properties: { list: { $ref: "#/$defs/List" } },
+        $defs: {
+          List: { ...inline.properties.list, ifc: listClaim },
+          Extra: { type: "string", ifc: extraClaim },
+        },
+      }) as unknown as JSONSchemaObj;
+
+    it("compares a claim reached through a reference equal to the same claim inline", () => {
+      expect(cfcSchemaPoliciesEqual(inline, referenced(CLAIM, CLAIM))).toBe(
+        true,
+      );
+    });
+
+    it("compares two documents equal where only a definition no reference reaches differs", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          referenced(CLAIM, CLAIM),
+          referenced(CLAIM, { writeAuthorizedBy: ["other"] }),
+        ),
+      ).toBe(true);
+    });
+
+    it("tells apart a changed claim in a definition a reference reaches", () => {
+      expect(
+        cfcSchemaPoliciesEqual(
+          referenced(CLAIM, CLAIM),
+          referenced({ writeAuthorizedBy: ["other"] }, CLAIM),
+        ),
+      ).toBe(false);
+      expect(
+        cfcSchemaPoliciesEqual(inline, referenced(undefined, CLAIM)),
+      ).toBe(false);
+    });
+  });
 });
