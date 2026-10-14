@@ -67,6 +67,15 @@ export type CellRef = NormalizedFullLink & {
    * this ref asked for one.
    */
   cfcLabelView?: CfcLabelView;
+  /**
+   * The schema of the ancestor this cell was keyed from, on a ref that has no
+   * schema of its own. `schema` describes the cell at `path.slice(0, depth)`,
+   * and the worker reads this cell as that ancestor's `key()` along the rest
+   * of the path, under the schema the runtime narrows to there. The main
+   * thread holds no schema narrowing of its own, which is why the ancestor's
+   * schema crosses rather than the child's.
+   */
+  keyedFrom?: { depth: number; schema: JSONSchema };
 };
 
 /** A piece as this connection names it, by the cell that holds it. */

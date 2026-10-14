@@ -863,6 +863,11 @@ export class CellHandle<T = unknown> {
    * refusal: the child names a read of its own, which the worker decides on
    * its own, and may admit where it refuses the whole, so the child is
    * unread until that read answers, as it is when this handle is.
+   *
+   * The child is read under the schema the worker narrows this handle's
+   * schema to at the key, as the runtime's own `Cell.key()` is, and under
+   * none when neither this handle nor an ancestor it was keyed from has one.
+   * Its `ref().schema` stays unset: the narrowing happens in the worker.
    */
   key<K extends keyof T>(valueKey: K): CellHandle<T[K]> {
     const childRef = this.#extendPath(String(valueKey));
@@ -1416,7 +1421,7 @@ export class CellHandle<T = unknown> {
    * this handle's, or nothing yet. Its first read of its own replaces it.
    */
   asSchema<U = unknown>(schema: JSONSchema): CellHandle<U> {
-    const { schema: _schema, ...rest } = this.#ref;
+    const { schema: _schema, keyedFrom: _keyedFrom, ...rest } = this.#ref;
     const newCell = new CellHandle(this.#rt, {
       ...rest,
       schema,
@@ -1428,12 +1433,17 @@ export class CellHandle<T = unknown> {
   }
 
   #extendPath(key: string): CellRef {
+    // The child's schema is the worker's to narrow, so the child carries the
+    // nearest ancestor schema instead of one of its own.
+    const keyedFrom = this.#ref.schema !== undefined
+      ? { depth: this.#ref.path.length, schema: this.#ref.schema }
+      : this.#ref.keyedFrom;
     return {
       id: this.#ref.id,
       space: this.#ref.space,
       scope: this.#ref.scope,
       path: [...this.#ref.path, key],
-      // Child schema is unknown, so we don't include it
+      ...(keyedFrom !== undefined && { keyedFrom }),
       ...(this.#ref.cfcLabelView !== undefined && {
         cfcLabelView: rebaseCfcLabelView(this.#ref.cfcLabelView, [key]),
       }),

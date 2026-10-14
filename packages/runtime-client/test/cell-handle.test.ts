@@ -72,6 +72,87 @@ describe("cell-handle", () => {
     );
   }
 
+  describe("CellHandle key() schema", () => {
+    const runtime = {
+      [$conn]: () => ({ peersOf: () => [] }),
+    } as unknown as RuntimeClient;
+    const schema = {
+      type: "object",
+      properties: {
+        state: {
+          type: "object",
+          properties: { shapes: { type: "array" } },
+        },
+      },
+    } as const;
+    const ref: CellRef = {
+      id: "of:keyed" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: ["root"],
+      schema,
+    };
+
+    it("hands a child the schema of the handle it was keyed from, for the worker to narrow", () => {
+      const child = new CellHandle<{ state: unknown }>(runtime, ref).key(
+        "state",
+      );
+
+      expect(child.ref()).toEqual({
+        id: ref.id,
+        space: ref.space,
+        scope: ref.scope,
+        path: ["root", "state"],
+        keyedFrom: { depth: 1, schema },
+      });
+    });
+
+    it("keeps the nearest schema'd ancestor through each further key", () => {
+      const grandchild = new CellHandle<{ state: { shapes: unknown } }>(
+        runtime,
+        ref,
+      ).key("state").key("shapes");
+
+      expect(grandchild.ref().path).toEqual(["root", "state", "shapes"]);
+      expect(grandchild.ref().keyedFrom).toEqual({ depth: 1, schema });
+    });
+
+    it("hands a child of a handle with no schema anywhere above it none", () => {
+      const { schema: _schema, ...unschemed } = ref;
+
+      const child = new CellHandle<{ state: unknown }>(runtime, unschemed)
+        .key("state");
+
+      expect(child.ref()).not.toHaveProperty("keyedFrom");
+      expect(child.ref()).not.toHaveProperty("schema");
+    });
+
+    it("replaces an ancestor's schema with the one `asSchema()` gives", () => {
+      const own = { type: "array" } as const;
+
+      const child = new CellHandle<{ state: unknown }>(runtime, ref)
+        .key("state")
+        .asSchema(own);
+
+      expect(child.ref().schema).toEqual(own);
+      expect(child.ref()).not.toHaveProperty("keyedFrom");
+    });
+
+    it("keys subscriptions on the ancestor a child was keyed from", () => {
+      const first = new CellHandle<{ state: unknown }>(runtime, ref).key(
+        "state",
+      );
+      const second = new CellHandle<{ state: unknown }>(runtime, {
+        ...ref,
+        schema: { type: "object" },
+      }).key("state");
+
+      expect(cellRefToKey(first.ref())).not.toEqual(
+        cellRefToKey(second.ref()),
+      );
+    });
+  });
+
   describe("SQLite IPC", () => {
     const ref: CellRef = {
       id: "of:database" as CellRef["id"],
