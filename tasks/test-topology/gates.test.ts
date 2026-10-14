@@ -409,6 +409,32 @@ describe("the repository's gate suites", () => {
     expect(typecheck.unitsForChange!(new Set(["README.md"]))).toEqual([]);
   });
 
+  it("maps a changed path to the patterns whose contract it can change", () => {
+    const compat = byId("pattern-compat");
+    const reached = (at: string) => compat.unitsForChange!(new Set([at]));
+    // A pattern's own source, though its unit is a key and not that path.
+    expect(reached("packages/patterns/fabrichat/room.tsx")).toContain(
+      "fabrichat/room.tsx",
+    );
+    // A module the pattern imports, which is not a pattern itself.
+    expect(reached("packages/patterns/fabrichat/room-records.tsx")).toContain(
+      "fabrichat/room.tsx",
+    );
+    // One of its recorded contracts.
+    expect(
+      reached("packages/patterns/baselines/fabrichat/room.tsx/x.json"),
+    ).toEqual(["fabrichat/room.tsx"]);
+    // The accepted breaks, which reach every pattern they name.
+    expect(reached("tasks/pattern-compat-accepted-breaks.ts")).toContain(
+      "system/home.tsx",
+    );
+    // A runtime module every pattern builds on is left to a lane's choice
+    // rather than making every pattern mandatory, and a path the gate
+    // never reads reaches nothing.
+    expect(reached("packages/runner/src/cell.ts")).toEqual([]);
+    expect(reached("README.md")).toEqual([]);
+  });
+
   it("keeps the type check and the pattern check apart by name", () => {
     // Both record under `typecheck` and the pattern check under scope
     // `repo`, so only the name separates them.
