@@ -219,12 +219,53 @@
 
     /*
     ** A shape a peer holds takes that peer's color as a ring, set inline,
-    ** and moves with the same easing as the peer's cursor, so the two
-    ** arrive together.
+    ** and moves and resizes with the same easing as the peer's cursor, so
+    ** the two arrive together.
     */
     .shape[data-held-by] {
       box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--holder);
-      transition: transform 70ms linear;
+      transition:
+        transform 70ms linear,
+        width 70ms linear,
+        height 70ms linear;
+    }
+
+    .handle {
+      position: absolute;
+      display: none;
+      width: 12px;
+      height: 12px;
+      background: var(--surface);
+      border: 2px solid var(--accent);
+      border-radius: 3px;
+    }
+
+    .shape[data-selected] .handle {
+      display: block;
+    }
+
+    .handle[data-corner="nw"] {
+      top: -8px;
+      left: -8px;
+      cursor: nwse-resize;
+    }
+
+    .handle[data-corner="ne"] {
+      top: -8px;
+      right: -8px;
+      cursor: nesw-resize;
+    }
+
+    .handle[data-corner="sw"] {
+      bottom: -8px;
+      left: -8px;
+      cursor: nesw-resize;
+    }
+
+    .handle[data-corner="se"] {
+      right: -8px;
+      bottom: -8px;
+      cursor: nwse-resize;
     }
 
     .cursor {

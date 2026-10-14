@@ -1,8 +1,9 @@
 /**
- * The cursor canvas guest: a board of shapes several people move at once.
- * Shapes are durable, in the `state` cell. Where each person's pointer is,
- * and where a shape is while someone drags it, are not: they travel through
- * the `cursors` presence room and reach a cell only when a drag ends.
+ * The cursor canvas guest: a board of shapes several people move and resize
+ * at once. Shapes are durable, in the `state` cell. Where each person's
+ * pointer is, and a shape's box while someone drags or resizes it, are not:
+ * they travel through the `cursors` presence room and reach a cell only when
+ * the gesture ends.
  */
 
 import {
@@ -22,6 +23,7 @@ import {
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
+  type Corner,
   createShape,
   displayNameOf,
   DRAG_FACET,
@@ -30,6 +32,9 @@ import {
   POINTER_FACET,
   readHue,
   readPeer,
+  resizeBox,
+  sameBox,
+  type ShapeBox,
   shapeIndex,
   USER_FACET,
   visitorName,
@@ -38,23 +43,33 @@ import {
 /** How the presence room stands, as the status line reports it. */
 type RoomStatus = "joining" | "live" | "unsupported" | "lost";
 
+/** What a local gesture does to the shape it holds. */
+type Gesture =
+  /** Moves the shape, held at `grab`, an offset from its top-left corner. */
+  | { readonly kind: "move"; readonly grab: Point }
+  /** Resizes the shape by dragging `corner`. */
+  | { readonly kind: "resize"; readonly corner: Corner };
+
 /** A shape the local user holds, from pointer down to pointer up. */
 interface LocalDrag {
   /** Id of the shape held. */
   readonly id: string;
 
-  /** Pointer holding it, whose later events are the drag's. */
+  /** Pointer holding it, whose later events are the gesture's. */
   readonly pointerId: number;
 
-  /** Where on the shape it was grabbed, as an offset from its corner. */
-  readonly grab: Point;
+  /** What the gesture does. */
+  readonly gesture: Gesture;
 
-  /** Corner the shape was at when grabbed. */
-  readonly from: Point;
+  /** The shape's box when it was grabbed. */
+  readonly from: ShapeBox;
 
-  /** Corner the shape is dragged to. */
-  position: Point;
+  /** The box the gesture has taken the shape to. */
+  box: ShapeBox;
 }
+
+/** The corners a selected shape shows a resize handle on. */
+const CORNERS: readonly Corner[] = ["nw", "ne", "sw", "se"];
 
 /** Name and hue the local user is shown as. */
 interface Profile {
@@ -89,10 +104,10 @@ let added = 0;
 const peers = new Map<string, Peer>();
 
 /**
- * Positions the local user dropped shapes at whose writes have not been read
- * back yet, by shape id. A shape is drawn here until its cell holds it.
+ * Boxes the local user left shapes in whose writes have not been read back
+ * yet, by shape id. A shape is drawn here until its cell holds it.
  */
-const settling = new Map<string, Point>();
+const settling = new Map<string, ShapeBox>();
 
 const shapeElements = new Map<string, HTMLDivElement>();
 
@@ -177,7 +192,7 @@ board.dataset.testid = "board";
 const hint = document.createElement("p");
 hint.className = "hint";
 hint.textContent =
-  "Add a shape, then drag it. Open this board in a second window to see each other's pointers.";
+  "Add a shape, then drag it or a corner of it. Open this board in a second window to see each other's pointers.";
 board.append(hint);
 stage.append(board);
 
@@ -218,23 +233,41 @@ function holderOf(id: string): Peer | undefined {
 }
 
 /**
- * Returns where the shape is drawn: where the local user holds or dropped
- * it, else where a peer holds it, else where its cell says it is.
+ * Returns the box the shape is drawn in: the one the local user holds or
+ * left it in, else the one a peer holds it in, else the one its cell holds.
  */
-function shownPosition(shape: CanvasShape): Point {
-  if (drag?.id === shape.id) return drag.position;
-  return settling.get(shape.id) ?? holderOf(shape.id)?.drag?.position ??
-    shape.position;
+function shownBox(shape: CanvasShape): ShapeBox {
+  if (drag?.id === shape.id) return drag.box;
+  const settled = settling.get(shape.id);
+  if (settled) return settled;
+  const held = holderOf(shape.id)?.drag;
+  return {
+    position: held?.position ?? shape.position,
+    width: held?.size?.width ?? shape.width,
+    height: held?.size?.height ?? shape.height,
+  };
 }
 
 function shapeElement(id: string): HTMLDivElement {
   let element = shapeElements.get(id);
   if (!element) {
-    element = document.createElement("div");
-    element.className = "shape";
-    element.dataset.testid = "shape";
-    element.dataset.shapeId = id;
-    element.addEventListener("pointerdown", (event) => grab(id, event));
+    const shape = document.createElement("div");
+    element = shape;
+    shape.className = "shape";
+    shape.dataset.testid = "shape";
+    shape.dataset.shapeId = id;
+    for (const corner of CORNERS) {
+      const handle = document.createElement("div");
+      handle.className = "handle";
+      handle.dataset.corner = corner;
+      handle.dataset.testid = `resize-${corner}`;
+      handle.addEventListener(
+        "pointerdown",
+        (event) => grab(id, event, handle, corner),
+      );
+      shape.append(handle);
+    }
+    shape.addEventListener("pointerdown", (event) => grab(id, event, shape));
     element.addEventListener("pointermove", (event) => moveDrag(event));
     element.addEventListener("pointerup", (event) => endDrag(event, true));
     element.addEventListener(
@@ -266,12 +299,13 @@ function renderShapes(): void {
   }
   for (const shape of shapes) {
     const element = shapeElement(shape.id);
-    const position = shownPosition(shape);
+    const box = shownBox(shape);
     const holder = drag?.id === shape.id ? undefined : holderOf(shape.id);
     element.dataset.kind = shape.kind;
-    element.style.width = `${shape.width}px`;
-    element.style.height = `${shape.height}px`;
-    element.style.transform = `translate(${position.x}px, ${position.y}px)`;
+    element.style.width = `${box.width}px`;
+    element.style.height = `${box.height}px`;
+    element.style.transform =
+      `translate(${box.position.x}px, ${box.position.y}px)`;
     element.style.background = fill(shape.hue);
     element.style.borderColor = ink(shape.hue);
     element.toggleAttribute("data-selected", selectedId === shape.id);
@@ -463,68 +497,99 @@ async function resolveShape(id: string) {
   return await shapesCell.key(index).resolve();
 }
 
-function grab(id: string, event: PointerEvent): void {
+/**
+ * Starts a gesture on the shape `id`: a resize when `corner` names the
+ * handle grabbed, else a move. `target` holds the pointer until it is let
+ * go, and the shape's element hears its events as they bubble.
+ */
+function grab(
+  id: string,
+  event: PointerEvent,
+  target: HTMLElement,
+  corner?: Corner,
+): void {
   if (!hydrated || event.button !== 0 || drag) return;
   const shape = storedShapes().find((entry) => entry.id === id);
   if (!shape) return;
   event.preventDefault();
   event.stopPropagation();
   selectedId = id;
-  const from = shownPosition(shape);
+  const from = shownBox(shape);
   const pointer = boardPoint(event);
   drag = {
     id,
     pointerId: event.pointerId,
-    grab: { x: pointer.x - from.x, y: pointer.y - from.y },
+    gesture: corner === undefined
+      ? {
+        kind: "move",
+        grab: {
+          x: pointer.x - from.position.x,
+          y: pointer.y - from.position.y,
+        },
+      }
+      : { kind: "resize", corner },
     from,
-    position: from,
+    box: from,
   };
-  shapeElement(id).setPointerCapture(event.pointerId);
+  target.setPointerCapture(event.pointerId);
   render();
 }
 
 function moveDrag(event: PointerEvent): void {
   if (!drag || event.pointerId !== drag.pointerId) return;
-  const held = drag.id;
-  const shape = storedShapes().find((entry) => entry.id === held);
-  if (!shape) return;
-  drag.position = dragPosition(boardPoint(event), drag.grab, shape);
+  const pointer = boardPoint(event);
+  drag.box = drag.gesture.kind === "move"
+    ? {
+      ...drag.box,
+      position: dragPosition(pointer, drag.gesture.grab, drag.box),
+    }
+    : resizeBox(drag.from, drag.gesture.corner, pointer);
   if (leaveRoom) {
     publish(cursors.setFacet(DRAG_FACET, {
       id: drag.id,
-      position: { ...drag.position },
+      position: { ...drag.box.position },
+      width: drag.box.width,
+      height: drag.box.height,
     }));
   }
   renderShapes();
 }
 
 /**
- * Ends the local drag. A drop that moved the shape writes its position, and
- * the room keeps showing peers the dropped position until the cell holds it,
- * so the shape does not return to where it was in between.
+ * Ends the local gesture. One that changed the shape's box writes the
+ * fields that changed, and the room keeps showing peers the box it was left
+ * in until the cell holds it, so the shape does not return to where it was
+ * in between.
  */
 function endDrag(event: PointerEvent, drop: boolean): void {
   if (!drag || event.pointerId !== drag.pointerId) return;
   const held = drag;
   drag = undefined;
-  const moved = held.position.x !== held.from.x ||
-    held.position.y !== held.from.y;
-  if (!drop || !moved) {
+  if (!drop || sameBox(held.box, held.from)) {
     releaseDragFacet();
     render();
     return;
   }
-  settling.set(held.id, held.position);
+  const { box, from } = held;
+  settling.set(held.id, box);
   render();
   void (async () => {
     try {
       const shape = await resolveShape(held.id);
-      await shape.key("position").set(held.position);
+      if (
+        box.position.x !== from.position.x || box.position.y !== from.position.y
+      ) {
+        await shape.key("position").set(box.position);
+      }
+      if (box.width !== from.width) await shape.key("width").set(box.width);
+      if (box.height !== from.height) {
+        await shape.key("height").set(box.height);
+      }
       await state.pull();
     } catch (cause) {
       showError(cause);
     } finally {
-      if (settling.get(held.id) === held.position) settling.delete(held.id);
+      if (settling.get(held.id) === box) settling.delete(held.id);
       releaseDragFacet();
       render();
     }

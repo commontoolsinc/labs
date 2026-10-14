@@ -23,13 +23,37 @@ export const DRAG_FACET = "drag";
 /** The facet a participant's chosen hue travels under. */
 export const USER_FACET = "user";
 
-/** A shape a peer holds mid-drag, at where the peer holds it. */
+/** Smallest width or height a resize leaves a shape, in board pixels. */
+export const MIN_SHAPE_SIZE = 24;
+
+/** A corner of a shape's bounding box, which a resize handle sits on. */
+export type Corner = "nw" | "ne" | "sw" | "se";
+
+/** Where a shape is drawn: its bounding box on the board. */
+export interface ShapeBox {
+  /** Top-left corner of the box. */
+  position: Point;
+
+  /** Width of the box, in board pixels. */
+  width: number;
+
+  /** Height of the box, in board pixels. */
+  height: number;
+}
+
+/** A shape a peer holds mid-drag or mid-resize, as the peer holds it. */
 export interface PeerDrag {
   /** Id of the shape. */
   id: string;
 
-  /** Top-left corner the peer has dragged the shape to. */
+  /** Top-left corner the peer has moved the shape to. */
   position: Point;
+
+  /**
+   * The size the peer has resized the shape to, or `undefined` when the
+   * peer's facet carries none and the shape keeps its own.
+   */
+  size: ShapeSize | undefined;
 }
 
 /** What one peer shows on the board, read from its presence record. */
@@ -122,7 +146,23 @@ export function readDrag(value: unknown): PeerDrag | undefined {
     return undefined;
   }
   const position = readPoint(value.position);
-  return position && { id: value.id, position };
+  if (!position) return undefined;
+  if (value.width === undefined && value.height === undefined) {
+    return { id: value.id, position, size: undefined };
+  }
+  const width = readLength(value.width, BOARD_WIDTH);
+  const height = readLength(value.height, BOARD_HEIGHT);
+  if (width === undefined || height === undefined) return undefined;
+  return { id: value.id, position, size: { width, height } };
+}
+
+/**
+ * Reads `value` as a shape's width or height, at least `MIN_SHAPE_SIZE` and
+ * at most `max`, or returns `undefined` unless it is a finite number.
+ */
+function readLength(value: unknown, max: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(Math.max(Math.round(value), MIN_SHAPE_SIZE), max);
 }
 
 /** Reads what `record` shows on the board, ignoring every facet it cannot. */
@@ -165,6 +205,43 @@ export function dragPosition(
     x: Math.round(pointer.x - grab.x),
     y: Math.round(pointer.y - grab.y),
   }, size);
+}
+
+/**
+ * Returns the box `from` takes when its `corner` is dragged to `pointer`.
+ * The opposite corner stays where it is, neither side shrinks below
+ * `MIN_SHAPE_SIZE`, and the box stays on the board.
+ */
+export function resizeBox(
+  from: ShapeBox,
+  corner: Corner,
+  pointer: Point,
+): ShapeBox {
+  const target = clampToBoard({
+    x: Math.round(pointer.x),
+    y: Math.round(pointer.y),
+  });
+  const left = from.position.x;
+  const top = from.position.y;
+  const right = left + from.width;
+  const bottom = top + from.height;
+  const west = corner === "nw" || corner === "sw";
+  const north = corner === "nw" || corner === "ne";
+  const x0 = west ? Math.min(target.x, right - MIN_SHAPE_SIZE) : left;
+  const x1 = west ? right : Math.max(target.x, left + MIN_SHAPE_SIZE);
+  const y0 = north ? Math.min(target.y, bottom - MIN_SHAPE_SIZE) : top;
+  const y1 = north ? bottom : Math.max(target.y, top + MIN_SHAPE_SIZE);
+  return {
+    position: { x: x0, y: y0 },
+    width: x1 - x0,
+    height: y1 - y0,
+  };
+}
+
+/** Returns whether `a` and `b` are the same box. */
+export function sameBox(a: ShapeBox, b: ShapeBox): boolean {
+  return a.position.x === b.position.x && a.position.y === b.position.y &&
+    a.width === b.width && a.height === b.height;
 }
 
 /**
