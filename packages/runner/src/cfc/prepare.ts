@@ -74,7 +74,11 @@ import {
   registerSchemaDocument,
 } from "../schema-registry.ts";
 import { storedLabelMapEntries } from "./label-documents.ts";
-import { readStoredCfcMetadata, StoredCfcMetadataError } from "./metadata.ts";
+import {
+  readStoredCfcMetadata,
+  StoredCfcMetadataError,
+  type StoredCfcTarget,
+} from "./metadata.ts";
 import {
   assertStoredPrincipalConfidentialityBound,
   bindCurrentPrincipalConfidentiality,
@@ -243,17 +247,17 @@ import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 
 const INTERNAL_VERIFIER_META = stableInternalVerifierRead;
 
-// The reads of a link's source that reactivity SEES. Prepare's other reads
-// carry `ignoreReadForScheduling` and are invisible to it. The source's
-// `["schema"]` member is evidence a write floor weighs for a linked value
+// The reads of a write floor's evidence that reactivity SEES. Prepare's other
+// reads carry `ignoreReadForScheduling` and are invisible to it. A link
+// source's `["schema"]` member is evidence a floor weighs for a linked value
 // (`linkedSourceEvidence`) and is always read this way, so the run that wrote
-// the link is triggered again when the member lands. What else the floor
-// weighed, the source's stored labels and the values along the linked path,
-// is read this way again when the floor's refusal is a verdict
-// (`holdLinkedSources`), since nothing else would run the writer again. The
-// reads are commit-time preconditions either way: `ignoreReadForScheduling`
-// gates reactivity alone.
-const LINK_SOURCE_DEPENDENCY_META = {
+// the link is triggered again when the member lands. The rest of what a floor
+// weighed, stored labels and the values along a linked path, is read this way
+// again where the floor's refusal is a verdict (`holdFloorEvidence`), since
+// nothing else would run the writer again. The reads are commit-time
+// preconditions either way: `ignoreReadForScheduling` gates reactivity
+// alone.
+const FLOOR_EVIDENCE_META = {
   ...internalVerifierRead,
 };
 
@@ -4570,11 +4574,24 @@ const deriveFlowJoinImpl = (
      * originated outside the destination space.
      */
     collectLabeledSpaces?: boolean;
+
+    /**
+     * Collect the documents whose stored labels the join read, so that a
+     * refusal the join decided can make the run depend on them.
+     */
+    collectLabelSources?: boolean;
   },
 ): {
   confidentiality: CfcConfClause[];
   integrity: CfcAtom[];
   labeledSpaces?: ReadonlySet<MemorySpace>;
+
+  /**
+   * With `collectLabelSources`, the documents whose stored labels the join
+   * read, or `undefined` where the join also weighed a label no document
+   * holds: the flow of external content.
+   */
+  labelSources?: readonly StoredCfcTarget[];
 } => {
   const atoms: unknown[] = [];
   // Class-aware integrity meet (§8.9.3 / §3.1.6.2): hereditary atoms
@@ -4604,6 +4621,21 @@ const deriveFlowJoinImpl = (
   const labeledSpaces = options?.collectLabeledSpaces === true
     ? new Set<MemorySpace>()
     : undefined;
+  let labelSources = options?.collectLabelSources === true
+    ? new Map<string, StoredCfcTarget>()
+    : undefined;
+  let labelWithoutDocument = false;
+  const noteLabelSource = (
+    document: { space: MemorySpace; id: string; scope?: CellScope },
+    type: MediaType,
+  ): void => {
+    labelSources?.set(stringTupleKey([targetKey(document), type]), {
+      space: document.space,
+      id: document.id,
+      scope: normalizeCellScope(document.scope),
+      type,
+    });
+  };
   // Each pass owns its snapshots: prepare can run again after metadata writes.
   const metadataByDoc = new Map<string, {
     metadata: CfcMetadata | undefined;
@@ -4709,6 +4741,7 @@ const deriveFlowJoinImpl = (
       }
       let document = metadataByDoc.get(key);
       if (document === undefined) {
+        noteLabelSource({ space, id, scope }, type);
         document = {
           metadata: storedMetadataFor(tx, space, id, scope, type),
           indexes: new Map(),
@@ -4979,6 +5012,7 @@ const deriveFlowJoinImpl = (
   // stamped entry representation-eligible, same posture as a foreign labeled
   // read.
   for (const observation of tx.getCfcState().labelMetadataObservations) {
+    noteLabelSource(observation.target, "application/json");
     if (observation.confidentiality.length === 0) continue;
     labeledSpaces?.add(observation.target.space);
     for (const atom of observation.confidentiality) atoms.push(atom);
@@ -4991,6 +5025,7 @@ const deriveFlowJoinImpl = (
   for (
     const observation of tx.getCfcState().externalContentObservations ?? []
   ) {
+    labelWithoutDocument = true;
     if (
       labeledSpaces !== undefined &&
       ((observation.flow.confidentiality?.length ?? 0) > 0 ||
@@ -5074,15 +5109,15 @@ const deriveFlowJoinImpl = (
     }
     const metadataOf = (location: ObservedLocation) => {
       const key = docKey(location);
-      return metadataByDoc.has(key)
-        ? metadataByDoc.get(key)!.metadata
-        : storedMetadataFor(
-          tx,
-          location.space,
-          location.id,
-          location.scope,
-          "application/json",
-        );
+      if (metadataByDoc.has(key)) return metadataByDoc.get(key)!.metadata;
+      noteLabelSource(location, "application/json");
+      return storedMetadataFor(
+        tx,
+        location.space,
+        location.id,
+        location.scope,
+        "application/json",
+      );
     };
     // A slot whose stamp the envelope does not place witnesses nothing,
     // whether its reference is followed or only observed: the stamp does
@@ -5168,10 +5203,14 @@ const deriveFlowJoinImpl = (
       integrity.push(atom);
     }
   }
+  if (labelWithoutDocument) labelSources = undefined;
   return {
     confidentiality,
     integrity: uniqueCfcAtoms(integrity),
     ...(labeledSpaces !== undefined ? { labeledSpaces } : {}),
+    ...(options?.collectLabelSources === true
+      ? { labelSources: labelSources && [...labelSources.values()] }
+      : {}),
   };
 };
 
@@ -6068,45 +6107,77 @@ const resolveValueThroughLinks = (
 };
 
 /**
- * Whether every document a write floor weighed through `sources` is one this
- * transaction holds, so that an immediate re-run weighs the same evidence;
- * where it is, makes the run depend on that evidence.
- *
- * Each source is the address of a link source whose evidence the floor
- * derived (`linkedSourceEvidence`), walked from the root of its document as
- * the derivation walked it. A document is held where its root is readable: a
- * read of its `["cfc"]` member returns, with the stored labels or with
- * nothing, rather than failing as it does for a document absent from this
- * transaction's view. A document the replica has not pulled reads the same as
- * one nobody wrote.
- *
- * The derivation read the stored labels and the values along each walk
- * invisibly to reactivity. Where every document is held they are read again
- * with `LINK_SOURCE_DEPENDENCY_META`: each document's `["cfc"]` member, and
- * each value along a walk without its children, which is what the walk's
- * course depends on. A writer the floor refuses then runs again when that
- * evidence changes, as a fresh trigger rather than a retry.
+ * The stored state a write floor weighed for one contribution, besides the
+ * transaction's own writes, schema and author.
  */
-const holdLinkedSources = (
-  tx: IExtendedStorageTransaction,
-  sources: readonly CfcAddress[],
-): boolean => {
-  /** A document one of the walks read. */
-  type Walked = {
-    space: MemorySpace;
-    id: URI;
-    scope: ReturnType<typeof normalizeCellScope>;
-  };
+type FloorEvidence = {
+  /**
+   * Addresses the floor walked from the root of their documents through every
+   * link on the way (`resolveValueThroughLinks`): the sources of the links
+   * whose evidence it derived (`linkedSourceEvidence`), and the ancestor
+   * links' walks that found nothing at the floor path.
+   */
+  readonly walks: readonly CfcAddress[];
 
-  const documents = new Map<string, Walked>();
-  for (const source of sources) {
-    resolveValueThroughLinks(tx, source, {
-      visit: (document) => documents.set(targetKey(document), document),
-    });
+  /** Documents whose stored labels the flow join read. */
+  readonly labeled: readonly StoredCfcTarget[];
+};
+
+/** `addresses` with each address once, in the order they first appear. */
+const distinctAddresses = (
+  addresses: Iterable<CfcAddress>,
+): CfcAddress[] => {
+  const distinct = new Map<string, CfcAddress>();
+  for (const address of addresses) {
+    const key = stringTupleKey([
+      targetKey(address),
+      encodePointer(address.path),
+    ]);
+    if (!distinct.has(key)) distinct.set(key, address);
   }
-  const labelsOf = (document: Walked) => ({
-    ...document,
-    type: "application/json" as const,
+  return [...distinct.values()];
+};
+
+/**
+ * Whether every document behind `evidence` is one this transaction holds, so
+ * that an immediate re-run weighs the same evidence; where it is, makes the
+ * run depend on that evidence.
+ *
+ * The documents are the labeled ones and those each walk reads on its way. A
+ * document is held where its root is readable: a read of its `["cfc"]` member
+ * returns, with the stored labels or with nothing, rather than failing as it
+ * does for a document absent from this transaction's view. A document the
+ * replica has not pulled reads the same as one nobody wrote.
+ *
+ * The floor read the documents' stored labels, and the values along each
+ * walk, invisibly to reactivity. Where every document is held they are read
+ * again with `FLOOR_EVIDENCE_META`: each document's `["cfc"]` member, and each
+ * value along a walk without its children, which is what the walk's course
+ * depends on. A writer the floor refuses then runs again when that evidence
+ * changes, as a fresh trigger rather than a retry.
+ */
+const holdFloorEvidence = (
+  tx: IExtendedStorageTransaction,
+  evidence: FloorEvidence,
+): boolean => {
+  const documents = new Map<string, StoredCfcTarget>();
+  const note = (document: StoredCfcTarget) =>
+    documents.set(
+      stringTupleKey([
+        targetKey(document),
+        document.type ?? "application/json",
+      ]),
+      document,
+    );
+  for (const document of evidence.labeled) note(document);
+  for (const walk of evidence.walks) {
+    resolveValueThroughLinks(tx, walk, { visit: note });
+  }
+  const labelsOf = (document: StoredCfcTarget) => ({
+    space: document.space,
+    id: document.id as URI,
+    scope: normalizeCellScope(document.scope),
+    type: document.type ?? "application/json",
     path: ["cfc"],
   });
   for (const document of documents.values()) {
@@ -6117,13 +6188,13 @@ const holdLinkedSources = (
       return false;
     }
   }
-  for (const source of sources) {
-    resolveValueThroughLinks(tx, source, {
-      read: { meta: LINK_SOURCE_DEPENDENCY_META, nonRecursive: true },
+  for (const walk of evidence.walks) {
+    resolveValueThroughLinks(tx, walk, {
+      read: { meta: FLOOR_EVIDENCE_META, nonRecursive: true },
     });
   }
   for (const document of documents.values()) {
-    tx.read(labelsOf(document), { meta: LINK_SOURCE_DEPENDENCY_META });
+    tx.read(labelsOf(document), { meta: FLOOR_EVIDENCE_META });
   }
   return true;
 };
@@ -8443,7 +8514,7 @@ const setupResultSchemaFor = (
     type: "application/json",
     path: [SCHEMA_META_MEMBER],
   }, {
-    meta: LINK_SOURCE_DEPENDENCY_META,
+    meta: FLOOR_EVIDENCE_META,
   });
   if (schema === undefined || schema === null) return undefined;
   return recomposeSchemaRefs(schema as JSONSchema, (hash) => {
@@ -9141,7 +9212,7 @@ type DerivedLink = {
 
   /**
    * The link sources whose stored evidence the derivation weighed, at any hop,
-   * each as the address its walk starts from (`holdLinkedSources`).
+   * each as the address its walk starts from (`holdFloorEvidence`).
    */
   sources: readonly CfcAddress[];
 };
@@ -9328,7 +9399,10 @@ const createLinkLabelDeriver = (
       });
       for (const source of resolved.sources) sources.push(source);
       if (resolved.reasons.length > 0) {
-        return { reasons: resolved.reasons, sources };
+        return {
+          reasons: resolved.reasons,
+          sources: distinctAddresses(sources),
+        };
       }
       yield;
       // A downstream hop sees the representation the upstream hop persists,
@@ -9375,7 +9449,11 @@ const createLinkLabelDeriver = (
       }
     }
     yield;
-    return { view: mergeCfcLabelViews(views), reasons: [], sources };
+    return {
+      view: mergeCfcLabelViews(views),
+      reasons: [],
+      sources: distinctAddresses(sources),
+    };
   };
 
   const derive = function* (
@@ -9441,7 +9519,7 @@ const createLinkLabelDeriver = (
       bindCreator,
       pending.view,
     );
-    const sources = [...pending.sources, input.source];
+    const sources = distinctAddresses([...pending.sources, input.source]);
     if (result.reason !== undefined) {
       return { entries: [], reasons: [result.reason], sources };
     }
@@ -9538,7 +9616,10 @@ const createLinkLabelDeriver = (
       },
     };
     const pending = yield* pendingSourceView(nested, emptyWalk());
-    const sources = [...derived.sources, ...pending.sources];
+    const sources = distinctAddresses([
+      ...derived.sources,
+      ...pending.sources,
+    ]);
     if (pending.reasons.length > 0) return { sources };
     return {
       label: linkedSourceEvidence(
@@ -9552,7 +9633,7 @@ const createLinkLabelDeriver = (
         bindCreator,
         pending.view,
       ).label,
-      sources: [...sources, nested.source],
+      sources: distinctAddresses([...sources, nested.source]),
     };
   };
 
@@ -11073,13 +11154,11 @@ type WriteFloorFailure = {
   reason: string;
 
   /**
-   * One list per contribution that missed the floor on evidence an immediate
-   * re-run weighs again wherever the listed link sources are held
-   * (`holdLinkedSources`). An empty list is a miss the transaction's own data
-   * decided. A contribution resting on stored state the run cannot be made to
-   * depend on has no list.
+   * The evidence of each contribution that missed the floor, empty where the
+   * transaction's own data alone decided it. A contribution resting on a
+   * label no document holds has none.
    */
-  verdictSources: readonly (readonly CfcAddress[])[];
+  verdictEvidence: readonly FloorEvidence[];
 };
 
 /**
@@ -11133,11 +11212,10 @@ const verifyWriteFloor = function* (
     linkWriteInputs: readonly LinkWritePolicyInput[];
     linkLabels: LinkLabelDeriver;
     flowIntegrity: readonly CfcAtom[];
-    // The stored state `flowIntegrity` was read from, as link sources a
-    // verdict's refusal holds (`holdLinkedSources`): empty where the flow
-    // join credits nothing, and `undefined` where the run cannot be made to
-    // depend on what it read.
-    flowSources: readonly CfcAddress[] | undefined;
+    // The documents whose stored labels `flowIntegrity` was read from
+    // (`deriveFlowJoin`): empty where the flow join credits nothing, and
+    // `undefined` where it weighed a label no document holds.
+    flowLabelSources: readonly StoredCfcTarget[] | undefined;
     // The stamp decision persistence consumes too (`ValueStamp`): a floor
     // is credited only by a stamp the decision names at its path, with the
     // atoms the write's author may mint.
@@ -11199,7 +11277,7 @@ const verifyWriteFloor = function* (
             reason: `write floor failed at /${
               linkPath.join("/")
             } (requiredIntegrity, §8.12.4.1)`,
-            verdictSources: [derived.sources],
+            verdictEvidence: [{ walks: derived.sources, labeled: [] }],
           });
         }
       }
@@ -11292,12 +11370,12 @@ const verifyWriteFloor = function* (
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
     // Each carries what the store keeps at its position to credit it, and the
-    // link sources whose evidence decided it, or none where stored state the
-    // run cannot depend on did (`WriteFloorFailure`).
+    // evidence that decided it, or none where the flow join weighed a label no
+    // document holds (`WriteFloorFailure`).
     const contributions: {
       integrity: readonly CfcAtom[];
       credit: readonly CfcAtom[];
-      sources: readonly CfcAddress[] | undefined;
+      evidence: FloorEvidence | undefined;
     }[] = [];
     // The ancestor links' walks that found nothing at the floor path. They
     // decide whether the written value is all that lands there.
@@ -11313,7 +11391,7 @@ const verifyWriteFloor = function* (
       contributions.push({
         integrity: derived.label?.integrity ?? [],
         credit: atSlot ? declaredBase : base,
-        sources: derived.sources,
+        evidence: { walks: derived.sources, labeled: [] },
       });
     }
     for (const input of ancestorLinks) {
@@ -11346,7 +11424,10 @@ const verifyWriteFloor = function* (
       contributions.push({
         integrity: at.label?.integrity ?? [],
         credit: declaredBase,
-        sources: [walked, ...at.sources],
+        evidence: {
+          walks: distinctAddresses([walked, ...at.sources]),
+          labeled: [],
+        },
       });
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
@@ -11388,9 +11469,9 @@ const verifyWriteFloor = function* (
       contributions.push({
         integrity: ctx.flowIntegrity,
         credit: base,
-        sources: ctx.flowSources === undefined
+        evidence: ctx.flowLabelSources === undefined
           ? undefined
-          : [...absentWalks, ...ctx.flowSources],
+          : { walks: absentWalks, labeled: ctx.flowLabelSources },
       });
     }
 
@@ -11402,8 +11483,8 @@ const verifyWriteFloor = function* (
         reason: `write floor failed at /${
           entry.path.join("/")
         } (requiredIntegrity, §8.12.4.1)`,
-        verdictSources: misses.flatMap(({ sources }) =>
-          sources === undefined ? [] : [sources]
+        verdictEvidence: misses.flatMap(({ evidence }) =>
+          evidence === undefined ? [] : [evidence]
         ),
       });
     }
@@ -11513,9 +11594,12 @@ export function* prepareBoundaryCommitSteps(
   const labelProtectionMode = state.labelMetadataProtectionMode;
   const valueTargets = valueWriteTargets(tx);
   const flowTargets = flowMode === "off" ? undefined : valueTargets;
-  const flowJoin = flowMode === "off"
+  const flowJoin: ReturnType<typeof deriveFlowJoin> = flowMode === "off"
     ? { confidentiality: [], integrity: [] }
-    : deriveFlowJoin(tx, { collectLabeledSpaces: true });
+    : deriveFlowJoin(tx, {
+      collectLabeledSpaces: true,
+      collectLabelSources: flowPersist,
+    });
   const flowConfidentiality = flowJoin.confidentiality;
   // Read provenance for a refusal's remedy channel, computed only if a gate
   // below actually refuses. `collectConsumedLabel` walks every read against
@@ -12082,10 +12166,7 @@ export function* prepareBoundaryCommitSteps(
           // integrity that never lands (codex/cubic review). Only `persist`
           // writes the derived component.
           flowIntegrity: flowPersist ? flowIntegrity : [],
-          // The flow join weighs the stored labels of everything the
-          // transaction read, invisibly to reactivity, so a miss it decided
-          // is no verdict.
-          flowSources: flowPersist ? undefined : [],
+          flowLabelSources: flowPersist ? flowJoin.labelSources : [],
         });
         if (failures.length > 0) {
           floorFailures = failures;
@@ -12095,12 +12176,13 @@ export function* prepareBoundaryCommitSteps(
       if (floorFailures.length > 0) {
         if (state.writeFloorMode === "enforce") {
           // A failure is a verdict where a contribution that missed the floor
-          // was decided by the transaction's own data and by link sources it
-          // holds, which `holdLinkedSources` makes the run depend on.
+          // was decided by the transaction's own data and by stored state in
+          // documents it holds, which `holdFloorEvidence` makes the run
+          // depend on.
           for (const failure of floorFailures) {
             reasons.push(
-              failure.verdictSources.some((sources) =>
-                  holdLinkedSources(tx, sources)
+              failure.verdictEvidence.some((evidence) =>
+                  holdFloorEvidence(tx, evidence)
                 )
                 ? verdictReason(failure.reason)
                 : failure.reason,
