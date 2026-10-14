@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { stub } from "@std/testing/mock";
+
 import { createSession, Identity } from "@commonfabric/identity";
 import type { ACL } from "@commonfabric/memory/acl";
 import {
@@ -30,17 +32,21 @@ const program: RuntimeProgram = {
   files: [{
     name: "/home.tsx",
     contents: `
-import { type Cell, handler, pattern, spaceOf, Writable } from "commonfabric";
+import { type Cell, equals, handler, pattern, spaceOf, Writable } from "commonfabric";
 
-type Join = { room?: Cell<unknown>; requestId?: string };
+type Join = { room?: Cell<unknown>; container?: Cell<{ chatRoom: Cell<unknown> }>; requestId?: string };
 
-type Joined = { space?: string; named: boolean };
+type Joined = { space?: string; named: boolean; container?: string; declared?: boolean };
 
 const joinRoom = handler<Join, { joined: Writable<Joined[]> }>(
   (event, { joined }) => {
     joined.push({
       space: spaceOf(event.room),
       named: event.requestId !== undefined,
+      ...(event.container ? {
+        container: spaceOf(event.container),
+        declared: equals(event.container.key("chatRoom").get(), event.room),
+      } : {}),
     });
   },
 );
@@ -97,6 +103,14 @@ describe("join-visited-room", () => {
     await storage.close();
   });
 
+  /** Commits fixture writes and surfaces any refused transaction. */
+  async function edit(
+    fn: Parameters<Runtime["editWithRetry"]>[0],
+  ): Promise<void> {
+    const { error } = await runtime.editWithRetry(fn);
+    expect(error).toBeUndefined();
+  }
+
   /**
    * A space granting `grants`, owned by the visitor unless `owner` says
    * otherwise, which declares `spaceKind`, `fabrichat-room` by default, or no
@@ -118,7 +132,18 @@ describe("join-visited-room", () => {
       root: (created) => ({ cause: inSpaceRootCause(created) }),
       ...(spaceKind === null ? {} : { spaceKind }),
     });
-    if (root !== false) {
+    if (root !== false && spaceKind !== "fabrichat-room") {
+      const container = runtime.getCell(
+        space,
+        root === "reserved" ? inSpaceRootCause(space) : "container",
+      );
+      await edit((tx) => {
+        container.withTx(tx).set({ about: { kind: "group" } });
+        runtime.getSpaceCell(space).withTx(tx).key("defaultPattern").set(
+          container,
+        );
+      });
+    } else if (root !== false) {
       // Disposing a controller disposes the runtime, which `afterEach` does
       // through the Home space's controller.
       const rooms = new PiecesController(
@@ -172,14 +197,240 @@ describe("join-visited-room", () => {
       expect(await joinedNow()).toStrictEqual([]);
     });
 
-    it("returns `space-kind-undeclared` for a space declaring no kind, and `space-kind-mismatch` for one declaring another", async () => {
+    it("returns `chat-room-missing` for an undeclared or other kind with no explicit chat declaration", async () => {
       const undeclared = await visitedSpace({}, { spaceKind: null });
       const other = await visitedSpace({}, { spaceKind: "loom" });
 
       expect([
         await joinVisitedRoomOf(runtime, home, identity.did(), undeclared),
         await joinVisitedRoomOf(runtime, home, identity.did(), other),
-      ]).toStrictEqual(["space-kind-undeclared", "space-kind-mismatch"]);
+      ]).toStrictEqual(["chat-room-missing", "chat-room-missing"]);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    for (const spaceKind of [null, "loom", "photo-album"]) {
+      it(`sends a declared nested room and its container for kind ${spaceKind}`, async () => {
+        const space = await visitedSpace({}, { spaceKind, root: "misplaced" });
+        const root = await runtime.getSpaceCell(space).key("defaultPattern")
+          .pull();
+        const room = runtime.getCell(space, "nested-chat");
+        await edit((tx) => {
+          room.withTx(tx).set({ about: { kind: "group" } });
+          root!.withTx(tx).key("chatRoom").set(room);
+        });
+
+        expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+          .toBe("sent");
+        expect(await joinedNow()).toStrictEqual([
+          { space, named: false, container: space, declared: true },
+        ]);
+      });
+    }
+
+    it("returns `chat-room-missing` for a declaration alias with no room yet", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const declaration = runtime.getCell(space, "pending-room");
+      await edit((tx) => {
+        declaration.withTx(tx).set(undefined);
+        root!.withTx(tx).key("chatRoom").set(declaration);
+      });
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("chat-room-missing");
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("follows a declaration alias to a foreign standalone room", async () => {
+      const space = await visitedSpace({}, { spaceKind: null });
+      const roomSpace = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const room = await runtime.getSpaceCell(roomSpace).key("defaultPattern")
+        .pull();
+      const alias = runtime.getCell(space, "room-alias");
+      await edit((tx) => {
+        alias.withTx(tx).set(room);
+        root!.withTx(tx).key("chatRoom").set(alias);
+      });
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("sent");
+      expect(await joinedNow()).toStrictEqual([
+        { space: roomSpace, named: false, container: space, declared: true },
+      ]);
+    });
+
+    it("returns `chat-room-invalid` for inline objects, scalars, and links into a document", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const nested = runtime.getCell(space, "nested-value");
+      await edit((tx) => {
+        nested.withTx(tx).set({ room: { about: { kind: "group" } } });
+      });
+      for (
+        const declaration of [
+          42,
+          { about: { kind: "group" } },
+          nested.key("room"),
+        ]
+      ) {
+        await edit((tx) => {
+          root!.withTx(tx).key("chatRoom").set(declaration);
+        });
+        expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+          .toBe("chat-room-invalid");
+      }
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `recipient-access-refused` for a read-only container or its read-only foreign room", async () => {
+      const roomSpace = await visitedSpace({ "*": "READ" }, {
+        owner: someoneElse,
+      });
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const readOnly = await visitedSpace({ "*": "READ" }, {
+        owner: someoneElse,
+        spaceKind: "loom",
+      });
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const readOnlyRoot = await runtime.getSpaceCell(readOnly).key(
+        "defaultPattern",
+      ).pull();
+      const room = await runtime.getSpaceCell(roomSpace).key("defaultPattern")
+        .pull();
+      await edit((tx) => {
+        root!.withTx(tx).key("chatRoom").set(room);
+      });
+      await edit((tx) => {
+        readOnlyRoot!.withTx(tx).key("chatRoom").set(root);
+      });
+
+      expect([
+        await joinVisitedRoomOf(runtime, home, identity.did(), space),
+        await joinVisitedRoomOf(runtime, home, identity.did(), readOnly),
+      ]).toStrictEqual([
+        "recipient-access-refused",
+        "recipient-access-refused",
+      ]);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("refuses a foreign declaration target whose space is unkinded or whose room is not its root", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const unkinded = await visitedSpace({}, { spaceKind: null });
+      const standalone = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const unknownRoom = await runtime.getSpaceCell(unkinded).key(
+        "defaultPattern",
+      ).pull();
+      const otherRoom = runtime.getCell(standalone, "other-room");
+      await edit((tx) => {
+        otherRoom.withTx(tx).set({ about: { kind: "group" } });
+      });
+      const decisions = [];
+      for (const target of [unknownRoom, otherRoom]) {
+        await edit((tx) => {
+          root!.withTx(tx).key("chatRoom").set(target);
+        });
+        decisions.push(
+          await joinVisitedRoomOf(runtime, home, identity.did(), space),
+        );
+      }
+      expect(decisions).toStrictEqual([
+        "space-kind-undeclared",
+        "chat-room-invalid",
+      ]);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `recipient-access-refused` when the declared room cannot be read for want of access", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const foreign = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const room = await runtime.getSpaceCell(foreign).key("defaultPattern")
+        .pull();
+      await edit((tx) => root!.withTx(tx).key("chatRoom").set(room));
+      const failure = new Error("room access refused");
+      using _session = stub(
+        storage,
+        "spaceSessionError",
+        (each) => each === foreign ? failure : undefined,
+      );
+      using _refused = stub(
+        storage,
+        "spaceAccessError",
+        (each) => each === foreign ? failure : undefined,
+      );
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("recipient-access-refused");
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("throws the original failure when reading a declaration fails without an access refusal", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const foreign = await visitedSpace({});
+      const root = await runtime.getSpaceCell(space).key("defaultPattern")
+        .pull();
+      const room = await runtime.getSpaceCell(foreign).key("defaultPattern")
+        .pull();
+      await edit((tx) => root!.withTx(tx).key("chatRoom").set(room));
+      const failure = new Error("declaration transport failed");
+      using _session = stub(
+        storage,
+        "spaceSessionError",
+        (each) => each === foreign ? failure : undefined,
+      );
+
+      await expect(joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .rejects.toBe(failure);
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `recipient-access-refused` when access is revoked after the kind lookup", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      let revoked = false;
+      const spaceKind = runtime.spaceKind.bind(runtime);
+      using _kind = stub(runtime, "spaceKind", async (each) => {
+        const kind = await spaceKind(each);
+        if (each === space) revoked = true;
+        return kind;
+      });
+      using _refused = stub(
+        storage,
+        "spaceAccessError",
+        (each) =>
+          revoked && each === space ? new Error("access revoked") : undefined,
+      );
+
+      expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+        .toBe("recipient-access-refused");
+      expect(await joinedNow()).toStrictEqual([]);
+    });
+
+    it("returns `space-root-missing` for a container root in another space or inside a document", async () => {
+      const space = await visitedSpace({}, { spaceKind: "loom" });
+      const elsewhere = await visitedSpace({});
+      const foreign = await runtime.getSpaceCell(elsewhere).key(
+        "defaultPattern",
+      ).pull();
+      const own = runtime.getCell(space, "own-container");
+      for (const target of [foreign, own.key("inside")]) {
+        await edit((tx) => {
+          own.withTx(tx).set({ inside: { chatRoom: foreign } });
+          runtime.getSpaceCell(space).withTx(tx).key("defaultPattern").set(
+            target,
+          );
+        });
+        expect(await joinVisitedRoomOf(runtime, home, identity.did(), space))
+          .toBe("space-root-missing");
+      }
       expect(await joinedNow()).toStrictEqual([]);
     });
 

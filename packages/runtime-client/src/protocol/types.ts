@@ -1892,7 +1892,7 @@ export type EnsureHomePatternRunningRequest = BaseRequest & {
 export type JoinVisitedRoomRequest = BaseRequest & {
   type: RequestType.JoinVisitedRoom;
 
-  /** The space of the room the user visited. */
+  /** The visited space declaring a room through its kind or root. */
   space: DID;
 };
 
@@ -3647,7 +3647,7 @@ export type HomePatternResponse = {
  * What a {@link RequestType.JoinVisitedRoom} request came to, absent where the
  * user has no Home: `sent` to the chat manager, `no-chat-manager` for a Home
  * whose chat manager has no `joinRoom`, or the reason vetting refused the
- * space.
+ * space or its declared chat.
  */
 export type JoinVisitedRoomResponse = {
   decision?: JoinVisitDecision;

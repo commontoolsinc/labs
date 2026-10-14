@@ -804,14 +804,30 @@ Each time a runtime shows a piece of a space other than the last one it showed,
 the shell waits for Home's bring-up to answer and for the view to settle, and
 then asks the worker, through `RuntimeClient.joinVisitedRoom()`, to join the
 user to the room in that space. The worker does nothing for a user with no
-Home, and creates none. Otherwise it vets the space as the share intake vets an
-offered one, with the same reasons for a refusal (`vetSpace()` in
-`packages/piece/src/ops/space-vetting.ts`, which both use): the user can write
-there, through an entry of their own or the grant to every principal, the space
-declares itself a `fabrichat-room`, and its root is the room at the address the
-space's genesis commit reserves. A space that passes has its root sent to
-Home's `chatManager.joinRoom`, when Home has that stream, with no `requestId`
-(`joinVisitedRoomOf()` in `packages/piece/src/ops/join-visited-room.ts`).
+Home, and creates none. If Home has no `chatManager.joinRoom` stream, it
+returns `no-chat-manager` without vetting. Otherwise it requires write access
+to the visited space, through the user's own entry or the grant to every principal, and uses
+the space's declared kind to select its locator:
+
+- A `fabrichat-room` uses the same strict vetting as a share offer
+  (`vetSpace()` in `packages/piece/src/ops/space-vetting.ts`): its root is a
+  document of that space at the address its genesis commit reserves.
+- Every other kind, including an undeclared kind, uses the root's explicit
+  `chatRoom` link. The root must be a document of the visited space; its
+  address need not be reserved. The link may follow aliases, and must resolve
+  to a room document in that space or to the root of a foreign standalone
+  `fabrichat-room` space that passes strict vetting, including write access.
+  Inline objects and links to paths inside a document are refused. A missing
+  declaration yields `chat-room-missing`; a malformed one yields
+  `chat-room-invalid`. The host infers nothing from room-like fields.
+
+A passing visit sends the room to Home's `chatManager.joinRoom`, when Home has
+that stream, with no `requestId`. A declaration-based join also sends the
+root as `container`; the manager verifies that its `chatRoom` names the same
+room (`joinVisitedRoomOf()` in
+`packages/piece/src/ops/join-visited-room.ts`). Visiting a container counts as
+visiting its declared chat. A placement with no declaration is outside this
+locator contract. The share intake still requires a standalone room.
 
 The manager makes the room one of the user's chats, and, once the user's
 profile has resolved, adds them to its participants; a room their chats list
