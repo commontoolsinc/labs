@@ -149,21 +149,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
   );
-  const rowRecords = {
-    myProfile: profile,
-    inThread: false,
-    kind: "group" as const,
-    composer: Writable.of({}),
-    // Stand-ins for what the room derives; a row's streams read none of it.
-    places: {},
-    cannotWrite: false,
-    isOwner: false,
-    ...records,
-  };
-  const onBobs = FabriChatMessageRow({
-    message: setup.records.messages.key(1),
-    ...rowRecords,
-  } as RowArg);
 
   return {
     [TESTS]: [
@@ -207,8 +192,11 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
       {
-        action: onBobs.obliterateMessage,
-        event: {},
+        action: room.obliterateMessage,
+        event: {
+          requestId: "o-bobs",
+          message: messageOf(setup.records.messages.key(1)),
+        },
         trustedUi: obliterateGesture,
       },
       {

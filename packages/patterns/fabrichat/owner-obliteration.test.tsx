@@ -26,6 +26,7 @@ import {
   type SentActivity,
   type UsedTime,
 } from "./room-records.tsx";
+import { FabriChatMessageRow } from "./message-row.tsx";
 import { type ChatMessageRights, FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_DELETE_ACTION,
@@ -39,6 +40,7 @@ import {
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
+type RowArg = Parameters<typeof FabriChatMessageRow>[0];
 
 // A labeled stand-in for a viewer's `#profile`.
 type TestProfile = AddIntegrity<
@@ -137,6 +139,25 @@ export default pattern(() => {
   const bobInDirect = FabriChatRoomCore(
     { myProfile: bobProfile, ...directRecords } as RoomArg,
   );
+  // Bob's control on Alice's message in the group room, bound to the room's
+  // records but to no policy, where a group room's kind alone would let an
+  // OWNER obliterate.
+  const bobOnHersUnbound = FabriChatMessageRow({
+    message: groupMessages.key(0),
+    myProfile: bobProfile,
+    inThread: false,
+    kind: "group" as const,
+    composer: Writable.of({}),
+    places: {},
+    cannotWrite: false,
+    isOwner: true,
+    messages: groupMessages,
+    reactionLists: groupRecords.reactionLists,
+    requests: groupRecords.requests,
+    usedTimes: groupRecords.usedTimes,
+    activity: groupRecords.activity,
+    counters: groupRecords.counters,
+  } as RowArg);
 
   return {
     [TESTS]: [
@@ -249,6 +270,19 @@ export default pattern(() => {
         assertion: assert(() =>
           outcomeOf(bobInDirect.messageRequests, "o-hers") === "done" &&
           bodies(directMessages) === "<obliterated>"
+        ),
+      },
+
+      // An act bound to no policy lets no OWNER obliterate, though the room's
+      // kind would.
+      {
+        action: bobOnHersUnbound.obliterateMessage,
+        event: {},
+        trustedUi: obliterateGesture,
+      },
+      {
+        assertion: assert(() =>
+          bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
     ],

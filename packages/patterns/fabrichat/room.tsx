@@ -75,6 +75,7 @@ import {
   NO_ACTIVITY,
   NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
+  ownersMayObliterateBy,
   ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
@@ -1106,9 +1107,10 @@ export interface FabriChatRoomCoreInput {
   manager?: RoomManager;
 
   /**
-   * Whether an OWNER of the room's space may obliterate its messages; absent,
-   * as for every room the room's own pattern runs, yes for a group room and no
-   * for a direct room.
+   * Whether the room's policy lets an OWNER of its space obliterate its
+   * messages, which picks the policy `about.policy` links; absent, as for
+   * every room the room's own pattern runs, yes for a group room and no for a
+   * direct room.
    */
   ownersMayObliterate?: boolean;
 }
@@ -1157,12 +1159,9 @@ export const FabriChatRoomCore = pattern<
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
   const ownSpace = computed(() => about?.get() !== undefined);
-  // Whether the room's OWNERs may obliterate, which the message acts read,
-  // and the policy that says so, a document of its own that `about` links:
-  // one for each answer, since the rest of a room's policy is the same.
-  const ownersMayObliterate = computed(() =>
-    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
-  );
+  // The room's policy, a document of its own that `about` links, and which
+  // the message acts read: one for each answer to whether OWNERs may
+  // obliterate, since the rest of a room's policy is the same.
   const policyWithOwners = new Writable.perSpace<ChatRoomPolicy>({
     ...FABRICHAT_POLICY,
     ownersMayObliterate: true,
@@ -1172,7 +1171,9 @@ export const FabriChatRoomCore = pattern<
     ownersMayObliterate: false,
   });
   const policy = computed((): Cell<ChatRoomPolicy> =>
-    ownersMayObliterate ? policyWithOwners : policyWithoutOwners
+    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
+      ? policyWithOwners
+      : policyWithoutOwners
   );
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
@@ -1187,7 +1188,7 @@ export const FabriChatRoomCore = pattern<
   const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
-    ownersMayObliterate,
+    policy,
     composer,
     outcomes: messageRequests,
     refusal,
@@ -1301,7 +1302,7 @@ export const FabriChatRoomCore = pattern<
           profile,
           kind,
           isOwner,
-          ownersMayObliterate,
+          ownersMayObliterateBy(policy),
         )
         : NO_MESSAGE_RIGHTS),
     }));
@@ -1536,7 +1537,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              ownersMayObliterate={ownersMayObliterate}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1614,7 +1615,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              ownersMayObliterate={ownersMayObliterate}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}

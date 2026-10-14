@@ -96,7 +96,8 @@ const NSEC_PER_SEC = 1_000_000_000n;
 /**
  * The policy every room starts from, a group room's. Each setting is read by
  * the handlers it governs, and `about.policy` states it, so the two cannot
- * disagree. A room's own `ownersMayObliterate` is `ownersMayObliterateIn()`'s.
+ * disagree. A room's `ownersMayObliterate` is `ownersMayObliterateIn()`'s,
+ * and the message acts read it from the room's stated policy.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -110,9 +111,11 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
 };
 
 /**
- * Whether an OWNER of a room of `kind` may obliterate its messages: `given`,
- * where the room is configured, and otherwise yes for a group room and no for
- * a direct room.
+ * The `ownersMayObliterate` a room of `kind` states in its policy, which
+ * decides which policy document `about.policy` links: `given`, where the room
+ * is configured, and otherwise yes for a group room and no for a direct room.
+ * What the room enforces is what that document states
+ * (`ownersMayObliterateBy()`).
  */
 export const ownersMayObliterateIn = (
   kind: ChatRoomKind,
@@ -732,6 +735,14 @@ export const messageRightsOf = (
 };
 
 /**
+ * Whether the room whose policy `policy` is lets its OWNERs obliterate, as
+ * the policy states it; a policy that is absent, or doesn't read yet, doesn't.
+ */
+export const ownersMayObliterateBy = (
+  policy: Cell<ChatRoomPolicy> | undefined,
+): boolean => policy?.get()?.ownersMayObliterate === true;
+
+/**
  * Why an obliteration `messageRightsOf()` doesn't allow is refused, for a
  * person to read.
  */
@@ -927,10 +938,10 @@ export interface RoomActState {
   closesPicker?: boolean;
 
   /**
-   * Whether an OWNER of the room's space may obliterate its messages, as the
-   * room's policy says; absent, `ownersMayObliterateIn()` decides by `kind`.
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
    */
-  ownersMayObliterate?: boolean;
+  policy?: Cell<ChatRoomPolicy>;
 
   /**
    * Tells the viewer's manager the viewer has joined the room, as
@@ -949,12 +960,6 @@ export interface ManagerJoinState {
    * itself to the manager by. Absent, it can't.
    */
   canJoin?: boolean;
-
-  /**
-   * Whether an OWNER of the room's space may obliterate its messages, as the
-   * room's policy says; absent, `ownersMayObliterateIn()` decides by `kind`.
-   */
-  ownersMayObliterate?: boolean;
 
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
@@ -1187,10 +1192,7 @@ const performMessageAct = (
     return;
   }
   const current = entry.record;
-  const ownersMayObliterate = ownersMayObliterateIn(
-    kind,
-    state.ownersMayObliterate,
-  );
+  const ownersMayObliterate = ownersMayObliterateBy(state.policy);
   const rights = messageRightsOf(
     current,
     profile,

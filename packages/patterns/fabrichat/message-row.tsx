@@ -37,7 +37,7 @@ import {
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
-  ownersMayObliterateIn,
+  ownersMayObliterateBy,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
@@ -60,6 +60,7 @@ import {
   type ChatReactionTally,
   type ChatRoomKind,
   type ChatRoomLink,
+  type ChatRoomPolicy,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -145,11 +146,10 @@ export interface FabriChatMessageRowInput {
   isOwner: boolean;
 
   /**
-   * Whether an OWNER of the room's space may obliterate its messages, as the
-   * room's policy says; absent, the room's kind decides, as
-   * `ownersMayObliterateIn()` does.
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
    */
-  ownersMayObliterate?: boolean;
+  policy?: Cell<ChatRoomPolicy>;
 
   /** The room's messages. */
   messages: MessagesCell;
@@ -238,7 +238,7 @@ export const FabriChatMessageRow = pattern<
     places,
     cannotWrite,
     isOwner,
-    ownersMayObliterate,
+    policy,
     messages,
     reactionLists,
     requests,
@@ -254,7 +254,7 @@ export const FabriChatMessageRow = pattern<
   const joined = tellManagerJoined({ canJoin, joinRoom, self });
   const records = {
     kind,
-    ownersMayObliterate,
+    policy,
     composer,
     messages,
     reactionLists,
@@ -289,7 +289,7 @@ export const FabriChatMessageRow = pattern<
         myProfile.resolveAsCell(),
         kind,
         isOwner === true,
-        ownersMayObliterateIn(kind, ownersMayObliterate),
+        ownersMayObliterateBy(policy),
       )
   );
   const isEditing = computed(() => {
