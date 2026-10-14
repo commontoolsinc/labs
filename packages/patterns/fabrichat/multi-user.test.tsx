@@ -6,6 +6,7 @@
 import {
   type AddIntegrity,
   assert,
+  type Cell,
   multiUserTest,
   pattern,
   TESTS,
@@ -68,12 +69,12 @@ interface Setup {
 }
 
 // The messages' bodies, in the order they were recorded.
-const bodies = (messages: Writable<MessagesValue>): string =>
+const bodies = (messages: Cell<MessagesValue>): string =>
   ((messages.get() ?? []) as MessageRecord[]).map((message) =>
     typeof message?.body === "string" ? message.body : "<gone>"
   ).join(" | ");
 
-const reactionsOnFirst = (messages: Writable<MessagesValue>): number => {
+const reactionsOnFirst = (messages: Cell<MessagesValue>): number => {
   const first = ((messages.get() ?? []) as MessageRecord[])[0];
   return ((first?.reactions?.get() ?? []) as ChatReaction[]).length;
 };
@@ -167,6 +168,10 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     messages: setup.records.messages,
     reactionLists: setup.records.reactionLists,
     requests: setup.records.requests,

@@ -18,7 +18,8 @@
 import { join } from "@std/path";
 
 import type { HarnessTranscriptEvent } from "@commonfabric/cf-harness/contracts/transcript";
-import { Identity } from "@commonfabric/identity";
+import { Identity, legacySpaceDid } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity/did";
 import type { ACL } from "@commonfabric/memory/acl";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
@@ -31,7 +32,11 @@ import {
 } from "../harness-job.ts";
 import { LocalJobBrowserHost } from "./browser-host.ts";
 import type { LocalJobProfile, LocalJobProfiles } from "./profiles.ts";
-import { narrowLocalJobProfile } from "./profiles.ts";
+import {
+  type LocalJobFabric,
+  localJobForeignSpaces,
+  narrowLocalJobProfile,
+} from "./profiles.ts";
 import {
   LOCAL_JOB_TERMINAL_STATES,
   type LocalJob,
@@ -96,6 +101,28 @@ export interface LocalJobLaneOptions {
 }
 
 /**
+ * The `foreignSpaces` of a job's fabric part: the spaces of the pieces it was
+ * handed that lie outside the profile's own, compared as DIDs — a profile
+ * naming its space by name resolves it as its session does — each routed to
+ * the origin the request names for it, or nothing when every input is in the
+ * profile's space.
+ */
+const foreignSpacesOf = async (
+  fabric: LocalJobFabric,
+  request: LocalJob["request"],
+): Promise<{ foreignSpaces?: Record<string, string> }> => {
+  const own = isDID(fabric.space)
+    ? fabric.space
+    : await legacySpaceDid(fabric.space);
+  const foreignSpaces = localJobForeignSpaces(
+    request.inputs,
+    request.foreignSpaces,
+    own,
+  );
+  return Object.keys(foreignSpaces).length > 0 ? { foreignSpaces } : {};
+};
+
+/**
  * The spec a job runs as: its request's task, framing and schema, under its
  * profile narrowed to what the request asked for. The task binds as the
  * profile's role, never as anything the request says. Screen context and
@@ -103,7 +130,11 @@ export interface LocalJobLaneOptions {
  * profile narrowed to a browser host adds the tool and the subagent profile
  * the browser runs under, for this job alone. A profile's fabric session is
  * read-capped at the ceiling the host grants its identity in its space, as
- * the Fabric lane resolves it, with nothing narrower requested.
+ * the Fabric lane resolves it, with nothing narrower requested. The request's
+ * `inputs` become the run's input cells, each held by the model as a handle,
+ * and the space of each one living outside the profile's is admitted for the
+ * run on the host the request's `foreignSpaces` names for it; `narrowLocalJobProfile` has already refused them
+ * under a profile with no fabric session.
  *
  * SHORTCUT: context reaches the model inside the system prompt, marked as
  * data rather than instructions, because a batch job has one prompt slot and
@@ -170,7 +201,8 @@ export const localJobSpecOf = async (
         fabric.space,
         undefined,
       ),
-      inputs: {},
+      inputs: { ...request.inputs },
+      ...await foreignSpacesOf(fabric, request),
     },
     patternIndexUrl: profile.patternIndexUrl,
     patternIndexPublish: profile.patternIndexPublish,

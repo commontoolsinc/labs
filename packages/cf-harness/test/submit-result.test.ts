@@ -141,12 +141,10 @@ const finalTurn = (content: string) => ({
 const scriptedFetch = (
   payloads: readonly unknown[],
   requestCount: { value: number },
-  offeredTools: string[][] = [],
+  requests: ReturnType<typeof chatViewOfRequest>[] = [],
 ): typeof fetch =>
 async (_input, init) => {
-  offeredTools.push(
-    chatViewOfRequest(JSON.parse(String(init?.body ?? "{}"))).tools,
-  );
+  requests.push(chatViewOfRequest(JSON.parse(String(init?.body ?? "{}"))));
   const payload = payloads[requestCount.value];
   requestCount.value += 1;
   if (payload === undefined) {
@@ -184,9 +182,14 @@ describe("submit_result", () => {
   const run = async (
     runId: string,
     turns: readonly unknown[],
-    options: { schema?: boolean; allowedToolIds?: string[] } = {},
+    options: {
+      schema?: boolean;
+      allowedToolIds?: string[];
+      maxModelTurns?: number;
+      finalizeOnTurnLimit?: boolean;
+    } = {},
   ) => {
-    const offeredTools: string[][] = [];
+    const requests: ReturnType<typeof chatViewOfRequest>[] = [];
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
@@ -202,13 +205,20 @@ describe("submit_result", () => {
         // deno-lint-ignore no-explicit-any
         ? { allowedToolIds: options.allowedToolIds as any }
         : {}),
-      fetchFn: scriptedFetch(turns, { value: 0 }, offeredTools),
+      ...(options.maxModelTurns !== undefined
+        ? { maxModelTurns: options.maxModelTurns }
+        : {}),
+      ...(options.finalizeOnTurnLimit !== undefined
+        ? { finalizeOnTurnLimit: options.finalizeOnTurnLimit }
+        : {}),
+      fetchFn: scriptedFetch(turns, { value: 0 }, requests),
     });
     const result = await loop.runPrompt({
       prompt: "Recommend a book.",
       promptSlotBinding: contextPromptSlotBinding,
     });
-    return { result, offeredTools, engine };
+    const offeredTools = requests.map((request) => request.tools);
+    return { result, requests, offeredTools, engine };
   };
 
   const submit = (id: string, result: unknown) =>
@@ -354,6 +364,60 @@ describe("submit_result", () => {
 
     expect(result.finalAssistantText).toBe("Hyperion it is.");
     expect(result.modelTurns).toBe(1);
+  });
+
+  it("answers a first blank turn with a notice and completes on the submission after it", async () => {
+    const { result, requests } = await run("run-blank-then-submit", [
+      finalTurn(""),
+      submit("call-1", { answer: "Hyperion" }),
+    ]);
+
+    expect(requests).toHaveLength(2);
+    expect(result.runState.status).toBe("completed");
+    expect(requests[1].messages.at(-1)).toMatchObject({
+      role: "user",
+      content:
+        "Host completion check: the last turn carried no words and no tool call. Call submit_result with the answer, or with why it cannot be given.",
+    });
+    expect(JSON.parse(await Deno.readTextFile(resultPath))).toEqual({
+      answer: "Hyperion",
+    });
+  });
+
+  it("fails the run on a second blank turn", async () => {
+    await expect(
+      run("run-blank-twice", [finalTurn(""), finalTurn(" \n")]),
+    ).rejects.toMatchObject({
+      name: "HarnessControlError",
+      code: "provider-unavailable",
+      message:
+        "The model returned an empty assistant response with no tool calls",
+    });
+  });
+
+  it("fails a blank turn at once where the turn after it is the reserved final one", async () => {
+    // The finalizing turn offers no tools, so a notice to call submit_result
+    // would ask for what that turn cannot do.
+    await expect(
+      run("run-blank-before-final", [finalTurn(""), finalTurn("Partial.")], {
+        maxModelTurns: 2,
+        finalizeOnTurnLimit: true,
+      }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("fails a blank turn at once where it is the last turn of the budget", async () => {
+    await expect(
+      run("run-blank-last-turn", [finalTurn("")], { maxModelTurns: 1 }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("fails a blank turn at once where the run takes no result", async () => {
+    await expect(
+      run("run-blank-no-schema", [finalTurn(""), finalTurn("Done.")], {
+        schema: false,
+      }),
+    ).rejects.toMatchObject({ code: "provider-unavailable" });
   });
 
   it("gives the model another turn after a refused submission", async () => {

@@ -6,6 +6,7 @@
  */
 
 import {
+  type Cell,
   eventKey,
   handler,
   isWellFormedDID,
@@ -111,9 +112,16 @@ export function sharedSpaceOfferKey(from: string, id: string): string {
   return JSON.stringify([from, id]);
 }
 
-/** Reads an initialized catalog, refusing unavailable or malformed values. */
+/**
+ * Reads an initialized catalog, refusing unavailable or malformed values. It
+ * writes nothing, which its parameter declares by being a `Cell` where the
+ * catalog's writers take a `Writable`: a computation that hands a cell to a
+ * `Writable` parameter is scheduled as a writer of that cell.
+ *
+ * @throws When `catalog` holds something other than a valid catalog.
+ */
 export function readSharedSpaceCatalog(
-  catalog: Writable<SharedSpaceCatalogStorage>,
+  catalog: Cell<SharedSpaceCatalogStorage>,
 ): SharedSpaceCatalog {
   const value = catalog.get();
   if (!isSharedSpaceCatalog(value)) {

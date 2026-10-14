@@ -2,6 +2,7 @@ import {
   deepFreeze,
   type FabricPlainObject,
   type FabricValue,
+  hashOf,
   type MutableFabricPlainObjectLayer,
   shallowMutableClone,
   taggedHashStringOf,
@@ -287,7 +288,13 @@ export type CfcInstrumentationHooks = {
 
   onPreparedTx?(): void;
 
-  /** Whether the prepared digest was computed or reused at the activity epoch. */
+  /**
+   * One prepared digest was canonicalized and hashed (`computed`), or a
+   * commit-time recheck found the activity its preparation verified still
+   * standing and hashed nothing (`memo`). A read of a digest already hashed
+   * reports nothing, except through `accessForTestingOnly.preparedDigest()`,
+   * which reports `memo`.
+   */
   onPreparedDigest?(outcome: "computed" | "memo"): void;
 
   /** One structured refusal detail was recorded. Measurement only. */
@@ -346,6 +353,42 @@ export type CfcInstrumentationHooks = {
     tx: IExtendedStorageTransaction,
   ): boolean;
 };
+
+/**
+ * A transaction's CFC activity as of one activity epoch, and the prepared
+ * digest of that activity once something has read it.
+ */
+type ActivitySnapshot = {
+  /** The activity epoch the snapshot was taken at. */
+  readonly epoch: number;
+
+  /**
+   * The activity, frozen at every level when the snapshot is taken, so that
+   * its digest is a function of the snapshot alone.
+   */
+  readonly input: PreparedDigestInput;
+
+  /** Digest of `input`, absent until `#digestOf()` hashes it. */
+  digest?: string;
+};
+
+/**
+ * Helper for `#buildPreparedDigestInput()`, which deep-freezes and hashes each
+ * member a snapshot record takes over from a journal record, other than a
+ * string, a number or a boolean: a read's `meta`, and anything else the
+ * journal's record holds. Hashing is what admits the member to a snapshot
+ * whose digest may never be computed: a value the hash refuses throws here,
+ * where the snapshot is taken. The hash is kept by the frozen object, so a
+ * `meta` many reads share costs one lookup per read.
+ */
+function sealJournalMembers(members: object): void {
+  for (const key in members) {
+    const member = (members as Record<string, unknown>)[key];
+    const kind = typeof member;
+    if (kind === "string" || kind === "number" || kind === "boolean") continue;
+    hashOf(deepFreeze(member) as FabricValue);
+  }
+}
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
 // `Readonly<CfcTxState>` is compile-time only, so handing out the live state
@@ -779,12 +822,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   #cfcActivityEpoch = 0;
 
-  /** Digest and input bound to one immutable activity snapshot. */
-  #preparedDigestMemo: {
-    epoch: number;
-    input: PreparedDigestInput;
-    digest: string;
-  } | undefined;
+  /** The snapshot of the activity at the epoch it names, once one is built. */
+  #activitySnapshotMemo: ActivitySnapshot | undefined;
+
+  /**
+   * The snapshot the standing preparation verified, which its digest is
+   * derived from. An invalidated preparation keeps the snapshot it had, and
+   * with it that digest; a refused preparation and an unprepared transaction
+   * have none.
+   */
+  #preparedSnapshot: ActivitySnapshot | undefined;
 
   /**
    * The last _negative_ flow-label probe verdict, with the activity epoch it
@@ -1665,21 +1712,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   invalidateCfc(reason: string): void {
-    this.#preparedDigestMemo = undefined;
+    this.#activitySnapshotMemo = undefined;
     const wasPrepared = this.#cfcState.prepare.status === "prepared";
-    const previousDigest = this.#cfcState.prepare.status === "prepared"
-      ? this.#cfcState.prepare.digest
-      : this.#cfcState.prepare.status === "invalidated"
-      ? this.#cfcState.prepare.digest
-      : undefined;
     const reasons = this.#cfcState.prepare.status === "invalidated"
       ? [...this.#cfcState.prepare.reasons, reason]
       : [reason];
-    this.#cfcState.prepare = {
-      status: "invalidated",
-      digest: previousDigest,
-      reasons,
-    };
+    // The digest the preparation had stays readable, and reading it is what
+    // hashes it: an invalidation asks for no digest.
+    const prepared = this.#preparedSnapshot;
+    const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
+    this.#cfcState.prepare = prepared === undefined
+      ? { status: "invalidated", digest: undefined, reasons }
+      : {
+        status: "invalidated",
+        get digest() {
+          return digestOf(prepared);
+        },
+        reasons,
+      };
     if (wasPrepared) {
       this.#cfcInstrumentation.onDigestInvalidation?.(reason);
     }
@@ -2507,25 +2557,73 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.#postCommitEffects ?? Promise.resolve();
   }
 
-  #preparedDigest(): string {
-    if (this.#preparedDigestMemo?.epoch === this.#cfcActivityEpoch) {
-      this.#cfcInstrumentation.onPreparedDigest?.("memo");
-      return this.#preparedDigestMemo.digest;
+  /** Returns the snapshot of the activity at the current epoch, built once. */
+  #activitySnapshot(): ActivitySnapshot {
+    const memo = this.#activitySnapshotMemo;
+    if (memo?.epoch === this.#cfcActivityEpoch) return memo;
+    const snapshot: ActivitySnapshot = {
+      epoch: this.#cfcActivityEpoch,
+      input: this.#buildPreparedDigestInput(),
+    };
+    this.#activitySnapshotMemo = snapshot;
+    return snapshot;
+  }
+
+  /** Returns a snapshot's digest, canonicalizing and hashing it on first use. */
+  #digestOf(snapshot: ActivitySnapshot): string {
+    if (snapshot.digest === undefined) {
+      snapshot.digest = preparedDigestFor(snapshot.input);
+      this.#cfcInstrumentation.onPreparedDigest?.("computed");
     }
-    const input = this.#buildPreparedDigestInput();
-    const digest = preparedDigestFor(input);
-    this.#preparedDigestMemo = { epoch: this.#cfcActivityEpoch, input, digest };
-    this.#cfcInstrumentation.onPreparedDigest?.("computed");
-    return digest;
+    return snapshot.digest;
+  }
+
+  /** Returns the digest of the activity at the current epoch. */
+  #preparedDigest(): string {
+    const snapshot = this.#activitySnapshot();
+    if (snapshot.digest !== undefined) {
+      this.#cfcInstrumentation.onPreparedDigest?.("memo");
+    }
+    return this.#digestOf(snapshot);
+  }
+
+  /**
+   * Decides the commit-time recheck: whether the activity this transaction
+   * commits with has the digest of the activity its preparation verified
+   * (the CFC specification's §8.10.1, `08-10-validation-at-boundaries.md`,
+   * "a cheap recheck at *commit* time that the digest still matches").
+   *
+   * While the activity epoch stands where the preparation left it, the
+   * snapshot at the current epoch is the snapshot the preparation verified:
+   * one frozen input, whose digest equals itself, so neither side is hashed.
+   * Once the epoch has moved, the activity is snapshotted again and the two
+   * digests are computed and compared.
+   */
+  #preparedActivityStands(): boolean {
+    const prepared = this.#preparedSnapshot;
+    // A prepared state always has its snapshot; without one there is nothing
+    // the commit could be shown to match.
+    if (prepared === undefined) return false;
+    const current = this.#activitySnapshot();
+    if (current === prepared) {
+      this.#cfcInstrumentation.onPreparedDigest?.("memo");
+      return true;
+    }
+    return this.#digestOf(current) === this.#digestOf(prepared);
   }
 
   #buildPreparedDigestInput(): PreparedDigestInput {
-    // Each pushed record is deepFrozen so that every CfcAddress (and every
-    // path inside one) that flows into the digest input is immutable from
-    // the moment of construction. This makes the records safe to use as
-    // identity-stable cache keys (e.g. for the `hashStringOf()` WeakMap
-    // cache) and matches the chokepoint freeze applied to dereference
-    // traces and write-policy inputs.
+    // Every record pushed here is frozen at every level, so the input is
+    // immutable from the moment of construction: a digest hashed from it
+    // later is the digest of the activity as it stood here. A record holds
+    // a path the canonical path functions froze, members built here from
+    // primitives, and the members it takes over from the journal's record,
+    // which `sealJournalMembers()` deep-freezes and hashes, so
+    // `Object.freeze()` on the record covers the rest and the record is one
+    // the digest's hash accepts. The records stay out of the deep-frozen
+    // cache, which nothing asks of them: entering one costs more than
+    // building it, and `isDeepFrozen()` walks a record the cache lacks to the
+    // same answer.
     // Activity-clock ranks for the digest: the prefix-provenance gate
     // consumes only the RELATIVE order of non-internal reads and write
     // attempts, so the digest binds dense ranks over exactly that set. Raw
@@ -2562,7 +2660,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // explicit undefined would hash differently from absence), and the
       // record's one path.
       const { journalIndex: _raw, path, ...bare } = read;
-      consumedReads.push(deepFreeze({
+      sealJournalMembers(bare);
+      consumedReads.push(Object.freeze({
         ...bare,
         scope: normalizeCellScope(read.scope),
         ...cfcRecordPath(path),
@@ -2572,20 +2671,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
     const log = this.getReactivityLog();
     const attemptedWrites: CfcRecordAddress[] = (log.attemptedWrites ?? [])
-      .map(({ path, ...address }) =>
-        deepFreeze({
+      .map(({ path, ...address }) => {
+        sealJournalMembers(address);
+        return Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           // The reactivity log records the journal's document-rooted paths.
           ...cfcRecordPath(toDocumentPath(path)),
-        })
-      );
+        });
+      });
 
     const writes: CfcRecordAddress[] = [];
     for (const space of getTransactionWrittenSpaces(this)) {
       for (const write of this.getWriteDetails(space)) {
         const { path, ...address } = write.address;
-        writes.push(deepFreeze({
+        sealJournalMembers(address);
+        writes.push(Object.freeze({
           ...address,
           scope: normalizeCellScope(address.scope),
           ...cfcRecordPath(path),
@@ -2598,104 +2699,110 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // OrderedWriteAttempt.
     const writeAttemptLog: OrderedWriteAttempt[] = [];
     for (const attempt of rawAttempts) {
-      writeAttemptLog.push(deepFreeze({
+      writeAttemptLog.push(Object.freeze({
         space: attempt.space,
         id: attempt.id,
         scope: normalizeCellScope(attempt.scope),
-        path: [...attempt.path],
+        path: Object.freeze([...attempt.path]),
         journalIndex: rankByRaw.get(attempt.journalIndex)!,
       }));
     }
 
-    return {
-      consumedReads,
-      attemptedWrites,
-      writes,
-      writeAttemptLog,
-      dereferenceTraces: [...this.#cfcState.dereferenceTraces],
-      triggerReads: [...this.#cfcState.triggerReads],
-      writePolicyInputs: [...this.#cfcState.writePolicyInputs],
-      ...(this.#cfcState.assertedValueRoots.length > 0
-        ? { assertedValueRoots: [...this.#cfcState.assertedValueRoots] }
-        : {}),
-      ...(this.#cfcState.structureContainers.length > 0
-        ? { structureContainers: [...this.#cfcState.structureContainers] }
-        : {}),
-      implementationIdentity: this.#cfcState.implementationIdentity,
-      trustSnapshot: this.#cfcState.trustSnapshot,
-      ...(this.#cfcState.moduleDelegations.size > 0
-        ? {
-          moduleDelegations: [...this.#cfcState.moduleDelegations]
-            .flatMap(([space, spaceDelegations]) =>
-              [...spaceDelegations].map(([
-                moduleIdentity,
-                delegatedModuleIdentities,
-              ]) => ({
-                space,
-                moduleIdentity,
-                delegatedModuleIdentities: [
-                  ...delegatedModuleIdentities,
-                ].sort(),
-              }))
-            )
-            .sort((left, right) =>
-              left.space < right.space
-                ? -1
-                : left.space > right.space
-                ? 1
-                : left.moduleIdentity < right.moduleIdentity
-                ? -1
-                : left.moduleIdentity > right.moduleIdentity
-                ? 1
-                : 0
-            ),
-        }
-        : {}),
-      // Digest-only projection: the decision-relevant identity of the policy
-      // set (Epic B5). The snapshot itself is frozen Runtime config; only its
-      // identity needs to invalidate.
-      policySnapshot: this.#cfcState.policySnapshot === undefined
-        ? undefined
-        : { digest: this.#cfcState.policySnapshot.digest },
-      // Consulted grants (§8.12.7 route 2a): the resolution-time content
-      // digests recorded by the grant resolver — a boundary decision's
-      // policy-state inputs, bound the same way policySnapshot.digest is
-      // (drift between prepare and the commit-time rebuild mismatches →
-      // cfc-prepared-digest-mismatch). EXTERNAL mutation between prepare
-      // and commit is additionally rejected for WRITING transactions by the
-      // storage layer's claim pass — the resolver's read validated the
-      // grant document snapshot; a zero-write transaction skips that pass,
-      // the same snapshot-consistency posture every labeled read has, and a
-      // revocation then takes effect on the next evaluation (design §2.2).
-      ...(this.#cfcState.consultedGrants.length > 0
-        ? { consultedGrants: [...this.#cfcState.consultedGrants] }
-        : {}),
-      ...(this.#cfcState.consultedPolicyManifests.length > 0
-        ? {
-          consultedPolicyManifests: [
-            ...this.#cfcState.consultedPolicyManifests,
-          ],
-        }
-        : {}),
-      // Label-metadata observations (inv-12 Stage 2): boundary-decision
-      // inputs (they change the flow join and the consumed set), bound like
-      // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
-      // byte-identical.
-      ...(this.#cfcState.labelMetadataObservations.length > 0
-        ? {
-          labelMetadataObservations: [
-            ...this.#cfcState.labelMetadataObservations,
-          ],
-        }
-        : {}),
-      ...(this.#cfcState.externalContentObservations.length > 0
-        ? {
-          externalContentObservations: [
-            ...this.#cfcState.externalContentObservations,
-          ],
-        }
-        : {}),
-    };
+    // The four arrays above hold records frozen where they were made. Every
+    // other member is small, and holds records the transaction deep-froze
+    // when it recorded them or containers built here, which `deepFreeze()`
+    // finishes.
+    return Object.freeze({
+      consumedReads: Object.freeze(consumedReads),
+      attemptedWrites: Object.freeze(attemptedWrites),
+      writes: Object.freeze(writes),
+      writeAttemptLog: Object.freeze(writeAttemptLog),
+      ...deepFreeze({
+        dereferenceTraces: [...this.#cfcState.dereferenceTraces],
+        triggerReads: [...this.#cfcState.triggerReads],
+        writePolicyInputs: [...this.#cfcState.writePolicyInputs],
+        ...(this.#cfcState.assertedValueRoots.length > 0
+          ? { assertedValueRoots: [...this.#cfcState.assertedValueRoots] }
+          : {}),
+        ...(this.#cfcState.structureContainers.length > 0
+          ? { structureContainers: [...this.#cfcState.structureContainers] }
+          : {}),
+        implementationIdentity: this.#cfcState.implementationIdentity,
+        trustSnapshot: this.#cfcState.trustSnapshot,
+        ...(this.#cfcState.moduleDelegations.size > 0
+          ? {
+            moduleDelegations: [...this.#cfcState.moduleDelegations]
+              .flatMap(([space, spaceDelegations]) =>
+                [...spaceDelegations].map(([
+                  moduleIdentity,
+                  delegatedModuleIdentities,
+                ]) => ({
+                  space,
+                  moduleIdentity,
+                  delegatedModuleIdentities: [
+                    ...delegatedModuleIdentities,
+                  ].sort(),
+                }))
+              )
+              .sort((left, right) =>
+                left.space < right.space
+                  ? -1
+                  : left.space > right.space
+                  ? 1
+                  : left.moduleIdentity < right.moduleIdentity
+                  ? -1
+                  : left.moduleIdentity > right.moduleIdentity
+                  ? 1
+                  : 0
+              ),
+          }
+          : {}),
+        // Digest-only projection: the decision-relevant identity of the policy
+        // set (Epic B5). The snapshot itself is frozen Runtime config; only its
+        // identity needs to invalidate.
+        policySnapshot: this.#cfcState.policySnapshot === undefined
+          ? undefined
+          : { digest: this.#cfcState.policySnapshot.digest },
+        // Consulted grants (§8.12.7 route 2a): the resolution-time content
+        // digests recorded by the grant resolver — a boundary decision's
+        // policy-state inputs, bound the same way policySnapshot.digest is
+        // (drift between prepare and the commit-time rebuild mismatches →
+        // cfc-prepared-digest-mismatch). EXTERNAL mutation between prepare
+        // and commit is additionally rejected for WRITING transactions by the
+        // storage layer's claim pass — the resolver's read validated the
+        // grant document snapshot; a zero-write transaction skips that pass,
+        // the same snapshot-consistency posture every labeled read has, and a
+        // revocation then takes effect on the next evaluation (design §2.2).
+        ...(this.#cfcState.consultedGrants.length > 0
+          ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+          : {}),
+        ...(this.#cfcState.consultedPolicyManifests.length > 0
+          ? {
+            consultedPolicyManifests: [
+              ...this.#cfcState.consultedPolicyManifests,
+            ],
+          }
+          : {}),
+        // Label-metadata observations (inv-12 Stage 2): boundary-decision
+        // inputs (they change the flow join and the consumed set), bound like
+        // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
+        // byte-identical.
+        ...(this.#cfcState.labelMetadataObservations.length > 0
+          ? {
+            labelMetadataObservations: [
+              ...this.#cfcState.labelMetadataObservations,
+            ],
+          }
+          : {}),
+        ...(this.#cfcState.externalContentObservations.length > 0
+          ? {
+            externalContentObservations: [
+              ...this.#cfcState.externalContentObservations,
+            ],
+          }
+          : {}),
+      }),
+    });
   }
 
   /**
@@ -2946,8 +3053,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   /**
-   * Settle whether this transaction is CFC-relevant, and run `prepareCfc()`
-   * when it is.
+   * Settle whether this transaction is CFC-relevant, and run the verification
+   * `prepareCfc()` runs when it is. Nothing here reads the digest of what was
+   * verified, so none is hashed.
    *
    * `commit()` runs this itself, so a transaction reaches the enforcement
    * ladder prepared whether or not anything ran it earlier. Callers still run
@@ -2965,7 +3073,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * it; a transaction that admits no writes has nothing to stamp anyway.
    */
   prepareForCommit(): void {
-    if (this.#needsCfcPreparation()) this.prepareCfc();
+    if (!this.#needsCfcPreparation()) return;
+    const started = performance.now();
+    try {
+      this.#prepareCfcWithoutYielding();
+    } finally {
+      logger.time(started, "prepareCfc");
+    }
   }
 
   /** Prepares between cooperative yields, aborting canceled or changed work. */
@@ -2999,7 +3113,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.abort(signal.reason);
       }
     } finally {
-      steps.return("");
+      steps.return();
       logger.time(started, "prepareCfc");
     }
   }
@@ -3067,21 +3181,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.#cfcState.prepare.status === "unprepared";
   }
 
-  /** Evaluates CFC gates and records the complete preparation interval. */
+  /**
+   * Evaluates CFC gates and returns the digest of the activity they verified,
+   * or the empty string when they refused. Records the complete preparation
+   * interval, which includes hashing that digest.
+   */
   prepareCfc(): string {
     const started = performance.now();
     try {
-      const steps = this.#prepareCfc();
-      let step = steps.next();
-      while (!step.done) step = steps.next();
-      return step.value;
+      this.#prepareCfcWithoutYielding();
+      const prepare = this.#cfcState.prepare;
+      return prepare.status === "prepared" ? prepare.digest : "";
     } finally {
       logger.time(started, "prepareCfc");
     }
   }
 
-  /** Evaluates gates and seals preparation inputs for this transaction. */
-  *#prepareCfc(): Generator<void, string> {
+  /** Runs the boundary checks to completion in one synchronous pass. */
+  #prepareCfcWithoutYielding(): void {
+    const steps = this.#prepareCfc();
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+  }
+
+  /**
+   * Evaluates gates and seals the snapshot of the activity they verified.
+   * The digest of that snapshot is not computed here; see `#digestOf()`.
+   */
+  *#prepareCfc(): Generator<void, void> {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
     // matches real activity, so accepting an external input here would let a
@@ -3200,6 +3327,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // reject would silently fail open (same shape as the late-sink-request
       // hole, Codex P2 on #4070).
       this.markCfcRelevant("prepare-reasons");
+      this.#preparedSnapshot = undefined;
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
@@ -3209,20 +3337,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const reason of reasons) {
         this.#cfcState.diagnostics.push(plainReason(reason));
       }
-      return "";
+      return;
     }
-    const digest = this.#preparedDigest();
-    const preparedInput = this.#preparedDigestMemo!.input;
+    // The snapshot is taken here, by the pass that verified it, of the
+    // journal as that pass left it, and it is frozen at every level. Its
+    // digest is a function of the snapshot alone, so it is the same string
+    // whenever it is read.
+    const snapshot = this.#activitySnapshot();
+    this.#preparedSnapshot = snapshot;
+    const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
     this.#cfcState.prepare = {
       status: "prepared",
-      digest,
-      input: preparedInput,
+      get digest() {
+        return digestOf(snapshot);
+      },
+      input: snapshot.input,
     };
     if (!this.#reportedCfcPrepared) {
       this.#reportedCfcPrepared = true;
       this.#cfcInstrumentation.onPreparedTx?.();
     }
-    return digest;
   }
 
   enableMultiSpaceWrites(order?: readonly MemorySpace[]): void {
@@ -3720,7 +3854,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#statusOverride = undefined;
     this.#clearPostCommitOutbox();
     this.#cfcState.prepare = { status: "unprepared" };
-    this.#preparedDigestMemo = undefined;
+    this.#activitySnapshotMemo = undefined;
+    this.#preparedSnapshot = undefined;
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
     this.#cfcState.assertedValueRoots = [];
@@ -3953,8 +4088,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
 
       if (this.#cfcState.prepare.status === "prepared") {
-        const currentDigest = this.#preparedDigest();
-        if (currentDigest !== this.#cfcState.prepare.digest) {
+        if (!this.#preparedActivityStands()) {
           this.invalidateCfc("prepared-digest-mismatch");
           if (this.#cfcState.enforcementMode !== "observe") {
             reportCfcDenial(
