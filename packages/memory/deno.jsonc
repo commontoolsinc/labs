@@ -51,6 +51,7 @@
     "./v2/compact": "./v2/compact.ts",
     "./sqlite": "./v2/sqlite/mod.ts",
     "./sqlite/columns": "./v2/sqlite/columns.ts",
+    "./sqlite/diagnostics": "./v2/sqlite/diagnostics.ts",
     "./sqlite/guard": "./v2/sqlite/guard.ts",
     "./sqlite/schema": "./v2/sqlite/schema.ts",
     "./sqlite/row-label": "./v2/sqlite/row-label.ts",
