@@ -2041,14 +2041,14 @@ the classification's wall time are recorded as `taskClassification` in
 in the run report and the run's total usage like research's. Only an `author`
 task gets the opening research pass. The parent's orientation follows the tags:
 `pieces` and `author` add the code-authoring framing (reading docs and skills,
-verifying and repairing code, acquiring a skill by its id) and the
-piece-targeting and revision-verification guidance, `pieces` and `find` the
-held-handle and grant guidance, `find` and `author` the findable and
-pattern-index guidance, `author` the opening-research rule, `act`, `pieces` and
-`author` delegation, `find` and `act` the Weaver command guidance, and `act` the
-browser guidance. The tool allow-list does not narrow, so a task given too few
-tags can still reach what it needs; a run with no classification carries all of
-the orientation.
+repairing code, acquiring a skill by its id) and the piece-targeting guidance,
+`author` alone the instruction to verify an effect and the revision-verification
+guidance, `pieces` and `find` the held-handle and grant guidance, `find` and
+`author` the findable and pattern-index guidance, `author` the opening-research
+rule, `act`, `pieces` and `author` delegation, `find` and `act` the Weaver
+command guidance, and `act` the browser guidance. The tool allow-list does not
+narrow, so a task given too few tags can still reach what it needs; a run with
+no classification carries all of the orientation.
 
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit

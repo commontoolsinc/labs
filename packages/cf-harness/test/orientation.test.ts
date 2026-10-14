@@ -76,7 +76,7 @@ describe("orientation", () => {
       "Inspect run_pattern outputConcerns and the declared error branch",
     );
     expect(prompt).toContain(
-      "describe only the successfully applied change, say the result could not be inspected",
+      "Describe only the successfully applied change, say the result could not be inspected",
     );
     expect(finishTaskTool.descriptor.description).toContain(
       "Never ask for a nonexistent permission to release results",
@@ -234,8 +234,34 @@ describe("orientation", () => {
 
       expect(orientContextMessages(messages, new Set(["respond"])))
         .toEqual(["input cells"]);
-      expect(orientContextMessages(messages, new Set(["pieces"])))
+      expect(orientContextMessages(messages, new Set(["author"])))
         .toEqual(messages);
+    });
+
+    it("keeps revision verification for an author task and withholds it from a pieces task", () => {
+      const messages = ["input cells", REVISION_VERIFICATION_GUIDANCE];
+
+      expect(orientContextMessages(messages, new Set(["pieces"])))
+        .toEqual(["input cells"]);
+      expect(orientContextMessages(messages, new Set(["author"])))
+        .toEqual(messages);
+    });
+
+    it("tells only an author task to verify what it did", () => {
+      const pieces = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["pieces"]),
+      });
+      const author = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["author"]),
+      });
+
+      expect(pieces).not.toContain("verification");
+      expect(pieces).not.toContain("verify");
+      expect(author).toContain("run focused verification commands");
+      expect(author).toContain("When code verification fails");
+      expect(author).toContain("include concise verification details");
     });
   });
 });

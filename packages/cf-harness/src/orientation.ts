@@ -31,7 +31,7 @@ const EVIDENCE_GUIDANCE =
   "Found requires released evidence; absent is limited to the scope actually checked. An unavailable, refused, or pending read stays unknown. Inspect run_pattern outputConcerns and the declared error branch before treating an empty result as data. Do not repeat probes or delegation to rediscover the same blocker. Offer the useful part you can achieve without silently substituting a different source or claiming the original goal is complete.";
 
 const RELEASE_REFUSAL_GUIDANCE =
-  "A release refusal is not a request for a new permission. Follow the existing not-checked verification rule: describe only the successfully applied change, say the result could not be inspected, and point to the piece. Never ask the user to release aggregates or change a sink ceiling through a control that does not exist. Actual execution or write failures still need repair or an honest failure report.";
+  "A release refusal is not a request for a new permission. Describe only the successfully applied change, say the result could not be inspected, and point to the piece. Never ask the user to release aggregates or change a sink ceiling through a control that does not exist. Actual execution or write failures still need repair or an honest failure report.";
 
 /** How the parent hands work to a child and reads what comes back. */
 export const DELEGATION_GUIDANCE = [
@@ -73,8 +73,8 @@ export const delegationGuided = (
   tags.has("author");
 
 /**
- * Whether a task with these tags is framed as code to read, verify, and
- * repair: work on held pieces or patterns, and writing one.
+ * Whether a task with these tags is framed as code to read and repair: work
+ * on held pieces or patterns, and writing one.
  */
 export const codeWorkGuided = (
   tags: ReadonlySet<HarnessTaskTag> | undefined,
