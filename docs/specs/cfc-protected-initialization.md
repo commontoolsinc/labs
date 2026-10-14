@@ -16,9 +16,11 @@ the pattern is recorded as the same initialization, whether the pattern exports
 the cell, passes it to a sub-pattern, or keeps it to itself. An internal cell
 with no default whose schema says who may write it (`writeAuthorizedBy`,
 `writePolicyAnyOf` or `uiContract`, at any depth) has that schema declared
-instead: setup records it for CFC preparation and writes no value, so the
-cell's envelope commits with no value beside it and holds the cell to its writer
-from the first write. Without the declaration the document would store no
+instead: setup records it for CFC preparation as the cell's declaration and
+writes no value, so the cell's envelope commits with no value beside it and
+holds the cell to its writer, and to its UI contract, from the first write. A
+UI contract is otherwise stored only where a write brings a value; a
+declaration stores it at every position it guards. Without the declaration the document would store no
 policy, and any code holding a link to it could write it. With no value written,
 the first write finds the cell absent, as it would find a cell with no policy,
 and a write to one key of the cell creates the object around it. Nothing is

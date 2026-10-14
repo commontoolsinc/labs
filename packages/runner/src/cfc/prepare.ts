@@ -1293,7 +1293,8 @@ const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
  * branch's values only. The exception is an optional value, a union of
  * `{ type: "undefined" }` and a single other branch: any value written there
  * takes that branch, so its positions are the branch's. `allOf` holds where
- * any of its parts does.
+ * any of its parts does. With `uiContract`, a position whose schema declares
+ * a UI contract is claimed as well.
  *
  * Paths spell array items and record entries as `*` and tuple slots by
  * index, as `cfcSchemaEntries` does; references resolve against `root`, and
@@ -1301,6 +1302,7 @@ const hasPersistedPolicyClaim = (schema: JSONSchema): boolean => {
  */
 const writerClaimedPositions = (
   root: JSONSchema,
+  options: { readonly uiContract?: boolean } = {},
 ): (readonly string[])[] => {
   const positions: (readonly string[])[] = [];
   const resolve = (schema: JSONSchema): JSONSchema =>
@@ -1328,7 +1330,9 @@ const writerClaimedPositions = (
     if (
       isObjectOrArray(resolved.ifc) &&
       (resolved.ifc.writeAuthorizedBy !== undefined ||
-        resolved.ifc.writePolicyAnyOf !== undefined)
+        resolved.ifc.writePolicyAnyOf !== undefined ||
+        (options.uiContract === true &&
+          resolved.ifc.uiContract !== undefined))
     ) return true;
     const next = [...active, schema];
     const unions = [resolved.anyOf, resolved.oneOf].filter(Array.isArray);
@@ -13025,8 +13029,12 @@ export function* prepareBoundaryCommitSteps(
     // is written, and an unwritten target keeps no entry
     // (cfc-projection.test.ts); an input floor and a UI contract gate what a
     // write brings, which §8.15 does not make a property of an absent
-    // position. A claim on one branch of a union is not marked either: which
-    // branch a position takes is decided by the value written there, so a
+    // position. The exception is a target's own declaration, a schema input
+    // marked `declaration` that a setup records for a cell it writes no
+    // value: the declaration is all the cell holds, so its UI-contract
+    // positions are marked too, or the contract would not guard the cell's
+    // first write. A claim on one branch of a union is not marked either:
+    // which branch a position takes is decided by the value written there, so a
     // position holding nothing is on no branch — and an envelope persisted
     // for it ahead of a value would meet every later writer of another branch
     // with the merge's refusal of divergent branch ifc. A union every branch
@@ -13067,7 +13075,15 @@ export function* prepareBoundaryCommitSteps(
         .map((entry) => canonicalizeLogicalPath(entry.path));
       const declaredAtOrAbove = (path: readonly string[]): boolean =>
         declaredPaths.some((declared) => concretePathHasPrefix(path, declared));
-      for (const claimedPath of writerClaimedPositions(schemaAndHash.schema)) {
+      const declared = state.writePolicyInputs.some((input) =>
+        input.kind === "schema" && input.declaration === true &&
+        targetKey(input.target) === key
+      );
+      for (
+        const claimedPath of writerClaimedPositions(schemaAndHash.schema, {
+          uiContract: declared,
+        })
+      ) {
         const wildcard = claimedPath.indexOf("*");
         if (wildcard !== -1 && wildcard !== claimedPath.length - 1) continue;
         const path = canonicalizeLogicalPath(

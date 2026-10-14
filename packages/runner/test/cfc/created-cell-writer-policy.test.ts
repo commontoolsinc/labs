@@ -29,6 +29,9 @@ const space = signer.did();
 // is, except `init`, which is created with a value. `nested` declares its
 // policy on a field only, and `mixed` beside a field a node may fill. `keyed`'s
 // writer `k` writes one key of the cell, as fabrichat's window registry does.
+// `ui`, `uiNested` and `uiInit` are guarded by a UI contract alone, on the
+// whole cell or on one field, which `g`'s unlabeled write brings no trusted
+// event for.
 const program: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
@@ -46,10 +49,15 @@ type Protected = WriteAuthorizedBy<Entry, typeof f>;
 type NestedProtected = { host: WriteAuthorizedBy<string, typeof f> };
 type MixedProtected = { host?: WriteAuthorizedBy<string, typeof f>; produced?: number };
 type Keyed = WriteAuthorizedBy<Entry, typeof k>;
+type UiPolicy = { helper: "UiAction"; action: "Post"; trustedPattern: "Poster"; requiredEventIntegrity: ["Poster"] };
+type UiOnly = Cfc<Entry, { uiContract: UiPolicy }>;
+type UiNested = { host: Cfc<string, { uiContract: UiPolicy }> };
 type Owned = RepresentsCurrentUser<Cfc<WriteAuthorizedBy<Entry, typeof f>, { ownerPrincipal: CurrentPrincipal }>>;
 export default pattern<{}, {
   undef: Protected; init: Protected; owned: Owned; nested: NestedProtected;
   mixed: MixedProtected; keyed: Keyed;
+  ui: UiOnly; uiInit: UiOnly; uiNested: UiNested;
+  gUi: Stream<string>; gUiInit: Stream<string>; gUiNested: Stream<string>;
   fUndef: Stream<string>; gUndef: Stream<string>; hUndef: Stream<string>;
   fNested: Stream<string>; gNested: Stream<string>;
   fMixed: Stream<string>; gMixed: Stream<string>;
@@ -62,9 +70,15 @@ export default pattern<{}, {
   const nested = new Writable<NestedProtected | undefined>(undefined).for("nested");
   const mixed = new Writable<MixedProtected | undefined>(undefined).for("mixed");
   const keyed = new Writable<Keyed | undefined>(undefined).for("keyed");
+  const ui = new Writable<UiOnly | undefined>(undefined).for("ui");
+  const uiInit = new Writable<UiOnly | undefined>({ host: "initial" }).for("uiInit");
+  const uiNested = new Writable<UiNested | undefined>(undefined).for("uiNested");
   return {
     undef: undef as any, init: init as any, owned: owned as any, nested: nested as any,
     mixed: mixed as any, keyed: keyed as any,
+    ui: ui as any, uiInit: uiInit as any, uiNested: uiNested as any,
+    gUi: g({ value: ui as any }), gUiInit: g({ value: uiInit as any }),
+    gUiNested: g({ value: uiNested as any }),
     fUndef: f({ value: undef as any }), gUndef: g({ value: undef as any }), hUndef: h({ value: undef as any }),
     fNested: f({ value: nested as any }), gNested: g({ value: nested as any }),
     fMixed: f({ value: mixed as any }), gMixed: g({ value: mixed as any }),
@@ -260,6 +274,38 @@ describe("created cell writer policy", () => {
       expect(stored("keyed").status).toBe("loaded");
       expect(await send("kKeyed", "k")).toEqual(["ok"]);
       expect(host("keyed")).toBe("k");
+    });
+  });
+
+  describe("on a cell a UI contract alone guards", () => {
+    it("stores the contract at setup, and refuses a write that brings no trusted event", async () => {
+      await setUp();
+
+      expect(stored("ui").status).toBe("loaded");
+      const outcomes = await send("gUi", "g");
+      expect(outcomes).toHaveLength(1);
+      expect(String(outcomes[0])).toContain("trusted-event");
+      expect(host("ui")).toBeUndefined();
+    });
+
+    it("stores a contract declared on a field only, and refuses a write that brings no trusted event", async () => {
+      await setUp();
+
+      expect(stored("uiNested").status).toBe("loaded");
+      const outcomes = await send("gUiNested", "g");
+      expect(outcomes).toHaveLength(1);
+      expect(String(outcomes[0])).toContain("trusted-event");
+      expect(host("uiNested")).toBeUndefined();
+    });
+
+    it("refuses the same write on the cell created with a value", async () => {
+      await setUp();
+
+      expect(stored("uiInit").status).toBe("loaded");
+      const outcomes = await send("gUiInit", "g");
+      expect(outcomes).toHaveLength(1);
+      expect(String(outcomes[0])).toContain("trusted-event");
+      expect(host("uiInit")).toBe("initial");
     });
   });
 

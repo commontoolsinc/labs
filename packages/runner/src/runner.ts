@@ -746,6 +746,29 @@ const recordSchemaPolicyInputForLink = (
   });
 };
 
+/**
+ * Records `schema` as the policy the derived internal cell at `link` declares
+ * for itself, where its setup writes it no value
+ * (`derivedCellInitialization()`).
+ */
+const recordDeclaredSchemaPolicyInput = (
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  schema: JSONSchema,
+): void => {
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      path: [...link.path],
+    },
+    schema,
+    declaration: true,
+  });
+};
+
 const recordRawBuiltinBindingSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -3908,7 +3931,7 @@ export class Runner {
           if (initialization.kind === "declaration") {
             // The schema input is what `prepare` stores the envelope from;
             // the cell holds no value until its first write.
-            recordSchemaPolicyInputForLink(tx, seeded, initialization.schema);
+            recordDeclaredSchemaPolicyInput(tx, seeded, initialization.schema);
           } else {
             derivedCell.setRawUntyped(initialization.value);
             // The cell is the pattern's own and absent until now, so its
@@ -9274,7 +9297,7 @@ export class Runner {
           if (initialization.kind === "declaration") {
             // The schema input is what `prepare` stores the envelope from;
             // the instance holds no value until its first write.
-            recordSchemaPolicyInputForLink(
+            recordDeclaredSchemaPolicyInput(
               tx,
               { ...derivedLink, path: [] },
               initialization.schema,
