@@ -187,10 +187,14 @@ refuses them. An empty batch yields no write and leaves the preparation
 standing.
 
 `commit()` does not prepare an invalidated transaction again. In an enforcing
-mode the ladder refuses it as relevant and not prepared, and an invalidation
-is not a verdict on the transaction's data, so the rejection carries the
-retryable `StorageTransactionAborted` name. The verification from scratch
-happens in the fresh transaction a retrying caller opens.
+mode the ladder refuses it as relevant and not prepared. An invalidation is
+not a verdict on the transaction's data, and `invalidateCfc()` records its
+reason without a verdict tag whoever supplied it, so the rejection carries the
+retryable `StorageTransactionAborted` name that §8.10.1 asks of a failure
+after preparation. It reports the denial `write-prepare-invalidated`
+([cfc-denial-reporting.md](../features/cfc-denial-reporting.md)). The
+verification from scratch happens in the fresh transaction a retrying caller
+opens.
 
 Activity that advances the epoch without invalidating reaches the recheck
 instead, which decides by digest alone. A decision input recorded a second

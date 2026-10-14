@@ -59,6 +59,12 @@ const obliterateGesture = {
 
 const typed = (text: string) => ({ type: "click", target: { value: text } });
 
+/** A message of the room's records, as an event names it. */
+function messageOf(cell: unknown): Writable<MessageRecord>;
+function messageOf(cell: unknown): unknown {
+  return cell;
+}
+
 const stored = (messages: Writable<MessagesValue>): MessageRecord[] =>
   messages.get() as MessageRecord[];
 
@@ -131,11 +137,6 @@ export default pattern(() => {
   const bobOnFirstReply = FabriChatMessageRow({
     message: messages.key(2),
     myProfile: bobProfile,
-    ...rowRecords,
-  } as RowArg);
-  const aliceOnNested = FabriChatMessageRow({
-    message: messages.key(5),
-    myProfile: aliceProfile,
     ...rowRecords,
   } as RowArg);
 
@@ -231,9 +232,11 @@ export default pattern(() => {
         event: {},
         trustedUi: deleteGesture,
       },
+      // Obliterated through the room's own stream, which reads the room's
+      // policy, as the OWNER this lane's user is may.
       {
-        action: aliceOnNested.obliterateMessage,
-        event: {},
+        action: alice.obliterateMessage,
+        event: { requestId: "o-nested", message: messageOf(messages.key(5)) },
         trustedUi: obliterateGesture,
       },
       {

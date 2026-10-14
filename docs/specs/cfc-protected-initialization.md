@@ -229,7 +229,9 @@ both, the slots the caller does not name are carried over from the stored
 document with the bytes they hold, and the runtime records each such slot as a
 replay. The record permits nothing but leaving those bytes as they are. A slot
 the changed code's argument schema refuses is not carried over, and receives
-no record.
+no record. Its value is copied into the piece's refused-slot store instead
+([pattern updates](./pattern-imports/pattern-updates.md)), which the runtime
+names as a store it owns for the piece.
 
 A piece whose own code changed, as when its origin publishes a release the
 source reconciler adopts, is set up again over its stored argument with no
@@ -251,12 +253,26 @@ the definition it names, so a definition no reference reaches declares nothing;
 a release whose merged envelope keeps the stored claims in force, under another
 layout of definitions, leaves them the same. In a release, the claims beneath a
 position where the stored document holds links describe the documents linked
-there, which the release may re-describe, so they are not compared. The stored
-schema document and envelope version are then kept, and labels elsewhere in the
-document persist as for any write. An authoritative transaction, which commits
-each document whole, receives no deferral. Any other write attempt at a
-protected field — pattern code setting a whole document with the field's own
-bytes among them — requires the field's ordinary writer.
+there, which the release may re-describe, so they are not compared. Nor are the
+claims at or beneath a new field: a concrete property the object holding it
+lacked before the transaction, so that one holding `undefined` is not new, which
+the stored envelope declares nothing at or beneath, and which lies beneath no
+protected field the setup restates. Such a field is initialized as "New fields
+during a source update" above describes, and a list there whose entries are
+protected may hold no entry. The stored schema document and envelope version are
+then kept where the comparison left out no new field's claims. Otherwise the
+envelope the transaction derives is stored. It differs from the stored one at
+the new fields, whose claims it declares, and, in a release, beneath links,
+where it re-describes the claims as the specification's link-position rule
+("Claims Beneath a Link Position", "Release") lets a release do. Labels
+elsewhere in the document persist as for any write. An authoritative
+transaction, which commits each document whole, receives no deferral. Any other
+write attempt at a protected field — pattern code setting a whole document with
+the field's own bytes among them — requires the field's ordinary writer. The
+same requirements are deferred at the root of a document holding a runtime
+output that a re-run initializer preserves, as "New cells" above describes, and
+are waived there only when the transaction leaves the complete stored envelope
+as it was.
 
 ## Attribution of an initialized value
 

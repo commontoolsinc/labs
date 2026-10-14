@@ -58,9 +58,10 @@ export type SchemaHint = {
 
   /**
    * Set on the remainder of a recursion the contract overlay of a handler's
-   * event or state cuts (`overlayContractCapabilities()`): every cell its
-   * reading reaches, outside the value of another cell, is opaque, since no
-   * use the body makes reaches it. Schema generation reads it as
+   * event or state cuts (`overlayContractCapabilities()`), and on a node it
+   * keeps as written because it cannot read inside it, where no use the body
+   * makes reaches inside: every cell its reading reaches, outside the value of
+   * another cell, is opaque. Schema generation reads it as
    * `SchemaHint.cellsOpaque`.
    */
   readonly cellsOpaque?: true;
