@@ -344,11 +344,12 @@ document, and "not yet synced" is not "invalid"), and a root carrying no
 completion marker at all, which gets one unvalidated setup because absence
 cannot be distinguished from a pending apply. A link stored in a slot the new
 schema types as a cell handle (`Writable`, `Cell`, `Stream`) is judged as a
-handle: validation reads only the top level of what it reaches, without
-descending, and holds it to the type the slot's schema allows. What lies below
-is checked by the reactive reads that follow the handle, and leaving it unread
-keeps its labels out of the transaction that writes the piece's own stores. A
-write to a piece's input validates the input it lands in the same way.
+handle, as it is in a slot typed as a handle or `undefined` (or `null`), since
+a link is neither: validation reads only the top level of what it reaches,
+without descending, and holds it to the type the slot's schema allows. What lies
+below is checked by the reactive reads that follow the handle, and leaving it
+unread keeps its labels out of the transaction that writes the piece's own
+stores. A write to a piece's input validates the input it lands in the same way.
 
 A nested piece is set up again the same way when its code changes, over its
 existing argument document, with the argument its parent's expression supplies
