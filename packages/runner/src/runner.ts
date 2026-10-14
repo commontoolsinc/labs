@@ -1114,22 +1114,22 @@ function samePatternRef(
 
 /**
  * Whether the gate before the start of a piece a resume pre-sync has named
- * takes the record of `link`, a cell the piece owns, for the cell; the
- * piece's result cell is at `resultScope`. It does for a derived cell
- * (`computed:`), which holds a value only once its computation has produced
- * one: after the pre-sync has asked the store for it, a record holding no
- * value is what the store holds. It does not for a cell owed a default at a
- * scope narrower than the result's, which a start's preparation seeds when
- * the cell holds no value.
+ * takes the record of `link`, a cell an instance in the piece's tree owns,
+ * for the cell; the owning instance's result cell is at `ownerScope`. It does
+ * for a derived cell (`computed:`), which holds a value only once its
+ * computation has produced one: after the pre-sync has asked the store for
+ * it, a record holding no value is what the store holds. It does not for a
+ * cell owed a default at a scope narrower than its owner's result, which a
+ * start's preparation seeds when the cell holds no value.
  */
 function ownedCellRecordSuffices(
   link: NormalizedFullLink,
-  resultScope: CellScope,
+  ownerScope: CellScope,
 ): boolean {
   if (entityKindOfIdString(link.id) !== "computed") return false;
   const owesSeed = isObjectOrArray(link.schema) &&
     link.schema.default !== undefined &&
-    scopeRank(link.scope) > scopeRank(resultScope);
+    scopeRank(link.scope) > scopeRank(ownerScope);
   return !owesSeed;
 }
 
@@ -7239,20 +7239,26 @@ export class Runner {
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
     // sub-pieces the run instantiates — the same walk the resume pre-sync
-    // syncs by name.
-    const owned: Cell<any>[] = [];
+    // syncs by name. Each is weighed against the instance that owns it,
+    // whose result's scope decides whether a seed is owed to it.
+    const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
       cell,
-      owned,
+      [],
       new Set(),
       readTx,
+      instances,
     );
-    const resultScope = resultCell.getAsNormalizedFullLink().scope;
-    for (const ownedCell of owned) {
-      const link = ownedCell.getAsNormalizedFullLink();
-      const record = presyncNamed && ownedCellRecordSuffices(link, resultScope);
-      if (!present(link, record)) return hold("an owned cell");
+    for (const { pattern: owner, resultCell: ownerCell } of instances) {
+      const ownerScope = ownerCell.getAsNormalizedFullLink().scope;
+      for (const descriptor of owner.derivedInternalCells ?? []) {
+        const link = getDerivedInternalCell(ownerCell, descriptor)
+          .getAsNormalizedFullLink();
+        const record = presyncNamed &&
+          ownedCellRecordSuffices(link, ownerScope);
+        if (!present(link, record)) return hold("an owned cell");
+      }
     }
     return false;
   }

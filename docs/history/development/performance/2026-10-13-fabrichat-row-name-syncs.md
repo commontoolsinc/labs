@@ -160,7 +160,7 @@ next describes.
 For an instance the resume pre-sync planned and named, the gate takes the
 record of a derived cell, a document whose id has the `computed:` scheme,
 for the cell, unless the cell is owed a default at a scope narrower than
-its piece's result (`ownedCellRecordSuffices` in
+the result of the instance that owns it (`ownedCellRecordSuffices` in
 `packages/runner/src/runner.ts`). A derived cell whose record has arrived
 is here; one this replica never loaded has no record and still holds the
 start. `packages/runner/test/resume-presync-plan-count.test.ts` resumes a
@@ -171,11 +171,14 @@ each of three rows.
 A cell owed such a default keeps its hold because a start's preparation is
 what seeds the default when the cell holds no value. On a resume through
 `Runner.start()` the root's preparation already seeds it for every instance
-its pre-sync named, before any row reaches the gate, so a test of that
-path, also in the file above, passes with or without the exception. The
-pre-syncs that name instances and seed nothing are `runSynced()`'s and
-`syncStoredPieceCells()`'s, and the exception keeps a later start of such
-an instance seeding as it did.
+its pre-sync named, before any row reaches the gate. The pre-syncs that
+name instances and seed nothing are `runSynced()`'s and
+`syncStoredPieceCells()`'s. A test in the same file resumes through a
+synced run in a caller's transaction and expects each row's start to seed
+its per-user default; without the exception no row is seeded. Another
+expects one name-sync for a tree whose rows each run a sub-instance scoped
+to the user that owns such a cell: the default is owed relative to the
+sub-instance's own result, which is per-user too, so none is owed.
 
 The counts in the table above were taken with a first form of the change,
 which took the record for every derived cell, whether or not the pre-sync
