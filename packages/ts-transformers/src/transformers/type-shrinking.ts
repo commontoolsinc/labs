@@ -627,7 +627,7 @@ function getArrayItemPaths(
   for (const path of paths) {
     if (path.length === 0) continue;
     const [head, ...tail] = path;
-    if (!head) continue;
+    if (head === undefined) continue;
     if (isArrayRootOnlyPath(path)) {
       continue;
     }

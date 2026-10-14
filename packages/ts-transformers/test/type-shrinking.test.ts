@@ -1059,13 +1059,20 @@ export default pattern<{ v: any }>(({ v }) => ({ m: l(v) }));`,
       );
     });
 
-    it("reports a read through it that the type does not hold", async () => {
-      const { reported } = await liftInput(
-        'const l = lift((r: { other: number }) => (r as any)[""].length);',
-      );
+    for (
+      const [shape, parameter] of [
+        ["an object", "{ other: number }"],
+        ["an array", "number[]"],
+      ] as const
+    ) {
+      it(`reports a read through it that ${shape} does not hold`, async () => {
+        const { reported } = await liftInput(
+          `const l = lift((r: ${parameter}) => (r as any)[""].length);`,
+        );
 
-      expect(reported).toContain("schema:path-not-in-type");
-    });
+        expect(reported).toContain("schema:path-not-in-type");
+      });
+    }
   });
 
   it("records a node printed for a value read whole as printed from its type", () => {
