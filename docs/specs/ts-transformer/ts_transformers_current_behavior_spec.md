@@ -3901,9 +3901,12 @@ the transformer (`src/transformers/module-scope-cf-data.ts` imports) and the
 verifier (`packages/runner/src/sandbox/policy.ts` re-exports) consume. On the
 verifier side (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`):
 
-- raw mutable initializers — normalized text starting `{`, `[`, `/`, or `new`
+- raw mutable initializers — normalized text starting `{`, `[`, or `/`, or a
+  first token that is the `new` keyword, `new.target` included
   (`isRawMutableExpression`) — are rejected with "Mutable top-level data must
-  be wrapped in __cf_data() in SES mode";
+  be wrapped in __cf_data() in SES mode". An identifier that merely begins
+  with `new`, such as `newShape`, is not a `new` expression and is classified
+  like any other reference;
 - calls to local functions or untrusted imports are rejected with "Top-level
   call results must be wrapped in __cf_data() in SES mode"
   (`TOP_LEVEL_CALL_RESULT_ERROR`, `policy.ts`); IIFEs are likewise rejected
