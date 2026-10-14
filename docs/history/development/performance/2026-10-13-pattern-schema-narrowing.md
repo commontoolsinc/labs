@@ -24,12 +24,16 @@ objects and were not interned.
 - The client: a Deno `cf piece render` of the room through
   `skills/perf-investigation/scripts/profile-cf.ts`.
 - The code: main at `83c5203f2e` for the base arm, and that commit with the
-  change for the new arm.
-- The machine ran at a one-minute load of 250 to 390 throughout, from other
-  sessions. A render took five to ten minutes. So nothing here is a wall
-  time. The counts are exact. The shares are of the samples a V8 profile
-  took outside `(idle)`, compared between two renders started together, one
-  per arm, with the arm that started first alternating.
+  change for the new arm. Two further pairs of renders are from main at
+  `1ed00a44f1`, forty-three commits later, and that commit with the change.
+- The machine ran at a one-minute load of 250 to 470 throughout, from other
+  sessions. A render took five to thirty-two minutes. So nothing here is a
+  wall time. The counts are exact. The shares are of the samples a V8
+  profile took outside `(idle)`, compared between two renders started
+  together, one per arm, with the arm that started first alternating. They
+  count samples and not the time between them: at this load most of the
+  time between two samples is time the process was descheduled, and summing
+  it weighs a function by where the process happened to be parked.
 
 The narrowings were counted with a temporary counter in
 `unwrapOneLevelAndBindToDoc()`. For each argument alias bound it counted the
@@ -43,7 +47,8 @@ copy of one.
 
 ## Which schemas were narrowed
 
-A reload bound 62,250 aliases in every render of either arm. Of those,
+The counts are from main at `83c5203f2e`. A reload bound 62,250 aliases in
+every render of either arm. Of those,
 62,136 were argument aliases bound under a pattern's argument schema, and
 they narrowed it 75,317 times. The other 114 bound with no such schema to
 narrow.
@@ -91,46 +96,67 @@ the binding in that shape.
 
 ## What the narrowings cost
 
-Three pairs of renders, each pair started together. Each cell is the
-inclusive time of the function over the profile's samples outside `(idle)`,
-as a share of those samples.
+Five pairs of renders, each pair started together: three at `83c5203f2e`
+and two at `1ed00a44f1`. Each cell is the share of the profile's samples
+outside `(idle)` whose stack holds the function.
 
-| pair | arm | `selectReferencedCfcSchemaDefs` | `schemaAtPath` | `unwrapOneLevelAndBindToDoc` | `sanitizeSchemaForLinksInternal` | `factoryFromPattern` | `withAliasBindings` |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | base | 4.88% | 5.59% | 12.77% | 2.04% | 1.51% | 1.20% |
-| 1 | new | 0.66% | 0.92% | 5.26% | 0.67% | 1.70% | 1.39% |
-| 2 | base | 4.43% | 5.18% | 12.36% | 2.68% | 0.78% | 0.65% |
-| 2 | new | 0.70% | 1.91% | 5.66% | 0.54% | 0.99% | 0.80% |
-| 3 | base | 4.26% | 4.78% | 10.36% | 1.63% | 1.00% | 0.79% |
-| 3 | new | 0.56% | 0.73% | 4.90% | 0.40% | 1.15% | 0.93% |
+| base | pair | arm | samples | `selectReferencedCfcSchemaDefs` | `schemaAtPath` | `unwrapOneLevelAndBindToDoc` | `sanitizeSchemaForLinksInternal` | `factoryFromPattern` |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `83c5203f2e` | 1 | base | 114,904 | 4.36% | 5.05% | 11.53% | 1.78% | 0.68% |
+| | 1 | new | 104,874 | 0.62% | 0.83% | 4.82% | 0.46% | 0.76% |
+| | 2 | base | 127,666 | 4.43% | 5.10% | 11.71% | 2.28% | 0.66% |
+| | 2 | new | 117,413 | 0.68% | 2.06% | 5.09% | 0.50% | 0.75% |
+| | 3 | base | 129,276 | 4.51% | 5.09% | 11.46% | 1.80% | 0.73% |
+| | 3 | new | 115,215 | 0.64% | 0.83% | 5.16% | 0.49% | 0.80% |
+| `1ed00a44f1` | 4 | base | 99,104 | 1.81% | 2.16% | 3.64% | 0.87% | 0.77% |
+| | 4 | new | 96,792 | 0.53% | 0.67% | 1.16% | 0.24% | 0.79% |
+| | 5 | base | 69,355 | 1.24% | 1.51% | 2.12% | 0.47% | 0.54% |
+| | 5 | new | 68,833 | 0.42% | 0.73% | 0.91% | 0.25% | 0.45% |
 
-The binding walk's share fell by more than the narrowing's. The walk also
+At `83c5203f2e` the binding walk fell from 11.5–11.7% of the samples to
+4.8–5.2%, and `selectReferencedCfcSchemaDefs` from 4.4–4.5% to 0.6–0.7%.
+The new arm of each pair took 8 to 11% fewer samples outside `(idle)` than
+the base arm it ran beside.
+
+At `1ed00a44f1` the walk fell from 2.1–3.6% to 0.9–1.2%, and
+`selectReferencedCfcSchemaDefs` from 1.2–1.8% to 0.4–0.5%. The new arm took
+2.3% and 0.8% fewer samples. Between the two commits main began holding a node's
+binding from the resume pre-sync to the node's instantiation
+(`packages/runner/src/node-binding-memo.ts`), so a reload binds a node
+fewer times and makes fewer narrowings for this change to remove. The
+counts above were not taken again at that commit.
+
+The binding walk's share falls by more than the narrowing's. The walk also
 sanitizes and interns the argument link's schema on every call
 (`canonicalSchemaLink()`), and that is a memo hit for a deep-frozen schema
 and a strip, a clone and a hash for a mutable one.
 
-The builder's own share rose by 0.15 to 0.2 of a percentage point in each
-pair, for the freezing it now does.
+The builder's own share rose by 0.07 to 0.09 of a percentage point in each
+pair at `83c5203f2e`, for the freezing it now does, and moved by less than
+the pairs differ at `1ed00a44f1`.
 
-The samples outside `(idle)` came to 415, 299 and 298 seconds on the base
-arm and 381, 267 and 249 on the new, each against the render it was paired
-with. Those are wall seconds of a process sharing its cores, and are given
-for the direction they agree on.
-
-All six renders, and the renders that carried the counter, wrote the same
-232,190 bytes of HTML.
+At `83c5203f2e` all six renders, and the renders that carried the counter,
+wrote the same 232,190 bytes of HTML. At `1ed00a44f1` the four renders
+wrote 232,190 bytes each that differ in the order of the declarations
+inside `style` attributes and in nothing else: sorting each attribute's
+declarations makes the four equal to one another and to the earlier
+renders. The order differs between the two base renders, in 140 places,
+and one base render and the new render beside it are byte for byte the
+same, so the order is not something the change moves.
 
 ## What interning costs in the same reload
 
-`internSchema()` was 9.6%, 11.5% and 9.3% of the base arm's samples and
-8.9%, 10.3% and 8.2% of the new arm's. The change did not aim at it. In the
-new arm's three profiles its inclusive time divides by caller as follows.
+`internSchema()` was 9.5%, 10.4% and 9.8% of the base arm's samples at
+`83c5203f2e` and 8.2%, 9.9% and 8.3% of the new arm's; at `1ed00a44f1` it
+was 9.3% and 8.8% of the base arm's and 7.6% and 8.8% of the new arm's. The
+change did not aim at it. In the new arm's five profiles its samples divide
+by caller as follows.
 
-| caller | pair 1 | pair 2 | pair 3 |
-| --- | ---: | ---: | ---: |
-| `internPathSelector`, under a sync's `normalizeSyncSelector` and `externalizeSyncSelector` | 27.2% | 26.1% | 27.2% |
-| `internCellLinkSchema` in `asSchema`, under `#cellsNodePlanReads` | 20.9% | 18.7% | 17.4% |
-| `internSchemaPairAsKey`, under `combineSchemaForLink` and `mergeSchemaFlags` | 17.9% | 18.1% | 21.0% |
+| caller | pair 1 | pair 2 | pair 3 | pair 4 | pair 5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `internPathSelector`, under a sync's `normalizeSyncSelector` and `externalizeSyncSelector` | 30.9% | 26.9% | 29.9% | 30.7% | 36.0% |
+| `internCellLinkSchema` in `asSchema`, under `#cellsNodePlanReads` | 19.0% | 15.5% | 18.5% | 19.0% | 14.9% |
+| `internSchemaPairAsKey`, under `combineSchemaForLink` and `mergeSchemaFlags` | 20.1% | 18.1% | 20.7% | 19.9% | 15.6% |
 
 ## Why the schemas were not interned
 

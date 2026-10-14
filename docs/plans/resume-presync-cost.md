@@ -274,9 +274,9 @@ where the pre-sync was no longer the whole cost.
       room's counts and profile shares are in
       [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md).
 - [ ] Interning a schema is 8 to 10% of the same reload's profile samples
-      (the record above has the split). About a quarter of it is the
-      selectors a sync interns, about a fifth `asSchema` under
-      `#cellsNodePlanReads`, and about a fifth the schema pairs
+      (the record above has the split). About three tenths of it is the
+      selectors a sync interns, and a sixth to a fifth each `asSchema`
+      under `#cellsNodePlanReads` and the schema pairs
       `combineSchemaForLink` and `mergeSchemaFlags` key their memos by.
 - [x] A preparation seals a frozen snapshot of the transaction's activity
       and computes its digest only when something reads it. A commit whose
