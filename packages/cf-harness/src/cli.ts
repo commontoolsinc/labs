@@ -2407,12 +2407,15 @@ const toWorkspaceSandboxPath = (
 
 /**
  * The parent's standing instructions. Task tags narrow the orientation to the
- * kinds of work the task calls for; without them it carries all of it.
+ * kinds of work the task calls for; without them it carries all of it. A run
+ * whose allowed tools leave out finish_task is told to act on defaults rather
+ * than to ask; with no allow-list it holds every tool.
  */
 export const buildCfHarnessBaseSystemPrompt = (
-  { patternIndex, tags }: {
+  { patternIndex, tags, allowedToolIds }: {
     patternIndex: boolean;
     tags?: ReadonlySet<HarnessTaskTag>;
+    allowedToolIds?: readonly BuiltinToolId[];
   },
 ): string =>
   [
@@ -2420,7 +2423,10 @@ export const buildCfHarnessBaseSystemPrompt = (
     "Common Fabric is a system for building and operating reactive patterns: TypeScript/JSX modules that transform shared state, expose actions, and render UI across a fabric of pieces.",
     "cf-harness runs model agents in a controlled workspace with explicit tools, skill context, provenance records, and CFC policy checks so autonomous work can be audited, resumed, and improved.",
     "Be proactive and resourceful. Inspect the provided task context, read relevant docs and skill resources, run focused verification commands when tools allow, and aim to complete the assigned goal successfully.",
-    "When code verification fails, use its diagnostics to form a narrow hypothesis, repair the defect, and verify again. Missing data or authority is a decision to report, not a code defect to keep authoring around. Use finish_task to ask the user for the input or choice that would unblock the task, or to give a concrete reason you cannot proceed.",
+    "When code verification fails, use its diagnostics to form a narrow hypothesis, repair the defect, and verify again. Missing data or authority is a decision to report, not a code defect to keep authoring around.",
+    allowedToolIds === undefined || allowedToolIds.includes("finish_task")
+      ? "Use finish_task to ask the user for the input or choice that would unblock the task, or to give a concrete reason you cannot proceed."
+      : "Act on reasonable defaults rather than asking. When the task truly cannot be done, finish with a result that says why.",
     orientationGuidance({
       patternIndex,
       ...(tags !== undefined ? { tags } : {}),
@@ -2511,6 +2517,9 @@ export const buildCfHarnessOperatorSystemPrompt = (
     buildCfHarnessBaseSystemPrompt({
       patternIndex: config.patternIndex !== undefined,
       ...(config.taskTags !== undefined ? { tags: config.taskTags } : {}),
+      ...(config.allowedToolIds !== undefined
+        ? { allowedToolIds: config.allowedToolIds }
+        : {}),
     }),
     "",
     "Operator guidance for cf-harness runs:",
@@ -2546,6 +2555,9 @@ export const buildCfHarnessBatchSystemPrompt = (
     buildCfHarnessBaseSystemPrompt({
       patternIndex: config.patternIndex !== undefined,
       ...(config.taskTags !== undefined ? { tags: config.taskTags } : {}),
+      ...(config.allowedToolIds !== undefined
+        ? { allowedToolIds: config.allowedToolIds }
+        : {}),
     }),
   ];
   if (

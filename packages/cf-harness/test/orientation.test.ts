@@ -83,6 +83,34 @@ describe("orientation", () => {
     );
   });
 
+  describe("without finish_task", () => {
+    it("names finish_task to a run that holds it and to no other", () => {
+      const holding = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["finish_task", "submit_result"],
+      });
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["submit_result"],
+      });
+
+      expect(holding).toContain("Use finish_task to ask the user");
+      expect(prompt).not.toContain("finish_task");
+      expect(PIECE_TARGETING_GUIDANCE).not.toContain("finish_task");
+      expect(REVISION_VERIFICATION_GUIDANCE).not.toContain("finish_task");
+    });
+
+    it("tells a run that cannot ask to act on defaults and say in its result why it cannot go on", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["submit_result"],
+      });
+
+      expect(prompt).toContain("Act on reasonable defaults rather than asking");
+      expect(prompt).toContain("finish with a result that says why");
+    });
+  });
+
   describe("with task tags", () => {
     it("gives a respond task none of the handle, research, or delegation guidance", () => {
       const prompt = buildCfHarnessBaseSystemPrompt({
