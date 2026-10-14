@@ -50,6 +50,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
 - [Security and privacy roadmap](security-privacy-roadmap.md) gives an overview
   of current trust boundaries and the path from runtime security to operator
   exclusion, with remaining work and technical references in an appendix.
+- [Connector SQLite stores as first-class sources: what remains](sqlite-connector-sources.md)
+  lists what is left after injected SQLite sources moved onto read workers,
+  survived restarts and stopped reading as empty: native freshness so
+  `reactOn: db` works for a connector store, unanswered reads left pending,
+  shared reads, releasing a connection's turn once a read is dispatched,
+  cell-derived reads on the workers, bounds, and a restart signal, each with
+  the ruling it needs.
 - [Discovering Loom resources with wish](loom-resource-discovery.md) proposes
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
