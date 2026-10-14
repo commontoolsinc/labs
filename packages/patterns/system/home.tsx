@@ -7,6 +7,7 @@ import {
   NAME,
   pattern,
   type PatternFactory,
+  SELF,
   Stream,
   toSchema,
   UI,
@@ -22,7 +23,9 @@ import FabriChatManager, {
 } from "../fabrichat/manager.tsx";
 import FavoritesManager from "./favorites-manager.tsx";
 import Self from "../self.tsx";
-import SharedSpaceCollection from "./shared-space-collection.tsx";
+import SharedSpaceCollection, {
+  type SharedSpaceCollectionOutput,
+} from "./shared-space-collection.tsx";
 import {
   sharedSpaceCollectionViewOf,
   type SharedSpaceInterface,
@@ -104,6 +107,8 @@ type SpaceEntry = {
 };
 
 export type HomeOutput = {
+  /** The collection browser's named instance and session-local controls. */
+  socialSpaceCollection: SharedSpaceCollectionOutput;
   [NAME]: string;
   [UI]: VNode;
   // These defaults are part of Home's published result contract. Pattern setup
@@ -358,7 +363,8 @@ const homeResultSchema = __cf_data(
 );
 
 const Home = pattern(
-  (_: Record<string, never>): HomeOutput => {
+  (input: Record<string, never> & { [SELF]: HomeOutput }): HomeOutput => {
+    const home = input[SELF];
     // OWN the data cells (.for for id stability)
     const favorites = new Writable<Favorite[]>([]).for("favorites");
     const journal = new Writable<JournalEntry[]>([]).for("journal");
@@ -465,11 +471,6 @@ const Home = pattern(
     // Child components
     const favoritesComponent = FavoritesManager({});
     const agentQueue = AgentQueue({});
-    // Existing child panels retain their relative positions. Inserting a
-    // panel ahead of one shifts the child's deployed position, so its update
-    // runs on the state of the child that previously held that position.
-    // Stored slots the argument schema refuses are dropped with a
-    // `setup-stored-slot-dropped` warning.
     const chatManager = FabriChatManager({ sharedSpaceCatalog: catalog });
     const ensurePrivateInboxStream = ensurePrivateInbox({
       privateInbox,
@@ -503,15 +504,17 @@ const Home = pattern(
       profiles: profiles as any,
       requested: privateInboxRequests,
     });
-    const registerSpace = registerSharedSpace({ catalog });
-    const changeMembership = changeSharedSpaceMembership({ catalog });
-    const removeImportedSpace = removeSharedSpace({ catalog });
     const sharedSpaces = {
       view: computed(() => sharedSpaceCollectionViewOf(catalog.get())),
       receipts: computed(() => sharedSpaceReceiptViewOf(catalog.get())),
-      commands: { register: registerSpace, changeMembership },
-      imports: { remove: removeImportedSpace },
+      commands: {
+        register: home.registerSharedSpace,
+        changeMembership: home.changeSharedSpaceMembership,
+      },
+      imports: { remove: home.removeSharedSpace },
     };
+    // The builder numbers unnamed roots in input/result walk order, including
+    // the UI. Naming this spot preserves every existing positional cause.
     const socialSpaceCollection = SharedSpaceCollection({
       catalog,
       view: sharedSpaces.view,
@@ -690,6 +693,7 @@ const Home = pattern(
       ) as VNode,
 
       // Exported data
+      socialSpaceCollection,
       favorites,
       journal,
       spaces,
@@ -709,9 +713,9 @@ const Home = pattern(
       sharedSpaceCatalog: computed(() => readSharedSpaceCatalog(catalog)),
 
       // Exported handlers
-      registerSharedSpace: registerSpace,
-      changeSharedSpaceMembership: changeMembership,
-      removeSharedSpace: removeImportedSpace,
+      registerSharedSpace: registerSharedSpace({ catalog }),
+      changeSharedSpaceMembership: changeSharedSpaceMembership({ catalog }),
+      removeSharedSpace: removeSharedSpace({ catalog }),
       addFavorite: addFavorite({ favorites }),
       removeFavorite: removeFavorite({ favorites }),
       addJournalEntry: addJournalEntry({ journal }),

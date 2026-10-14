@@ -865,6 +865,41 @@
         ],
         "type": "object"
       },
+      "CollectionChoiceEvent": {
+        "properties": {
+          "target": {
+            "properties": {
+              "dataset": {
+                "properties": {
+                  "revision": {
+                    "type": "string"
+                  },
+                  "space": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "space",
+                  "revision",
+                  "state"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "dataset"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
       "CreateProfileEvent": {
         "properties": {
           "detail": {
@@ -1522,7 +1557,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/private-inbox.tsx",
-              "moduleIdentity": "tMQokoYPRCPmbrD8RQK_CMfnEIocqc3S_dhsy3M9H8M",
+              "moduleIdentity": "5OBVSze6q_RXO5lLvLcAuGW9x7CBx8AZ8aOyGn346K8",
               "path": [
                 "replaceRefusedPrivateInbox"
               ]
@@ -1535,6 +1570,18 @@
           "replacement": {
             "$ref": "#/$defs/PrivateInboxReplacement",
             "description": "The replacement."
+          }
+        },
+        "type": "object"
+      },
+      "PrivateInboxRequest": {
+        "properties": {
+          "from": {
+            "$ref": "#/$defs/InboxPointable",
+            "description": "The profile the client finds the owner by, which is to advertise Home's\ninbox: the one `#profile` answers with.",
+            "tags": [
+              "profile"
+            ]
           }
         },
         "type": "object"
@@ -1713,6 +1760,40 @@
       "SharedSpaceCatalogStorage": {
         "additionalProperties": true,
         "properties": {},
+        "type": "object"
+      },
+      "SharedSpaceCollectionOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "chooseMembership": {
+            "$ref": "#/$defs/CollectionChoiceEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "membership": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "search",
+          "kind",
+          "membership",
+          "chooseMembership",
+          "$NAME",
+          "$UI"
+        ],
         "type": "object"
       },
       "SharedSpaceCollectionView": {
@@ -2427,6 +2508,12 @@
           "opaque"
         ]
       },
+      "requestPrivateInbox": {
+        "$ref": "#/$defs/PrivateInboxRequest",
+        "asCell": [
+          "stream"
+        ]
+      },
       "retainedPrivateInboxes": {
         "default": [],
         "items": {
@@ -2440,6 +2527,10 @@
       "sharedSpaces": {
         "$ref": "#/$defs/SharedSpaceInterface"
       },
+      "socialSpaceCollection": {
+        "$ref": "#/$defs/SharedSpaceCollectionOutput",
+        "description": "The collection browser's named instance and session-local controls."
+      },
       "spaces": {
         "default": [],
         "items": {
@@ -2449,6 +2540,7 @@
       }
     },
     "required": [
+      "socialSpaceCollection",
       "favorites",
       "journal",
       "spaces",
@@ -2468,6 +2560,7 @@
       "removeSharedSpace",
       "createProfile",
       "ensurePrivateInbox",
+      "requestPrivateInbox",
       "replaceRefusedPrivateInbox",
       "addFavorite",
       "removeFavorite",

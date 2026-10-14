@@ -44,6 +44,8 @@ Host projections are exported by `@commonfabric/home-schemas`:
 `sharedSpaceReceiptViewSchema`, and `sharedSpaceImportCommandsSchema`. Apply a
 projection to its individual role cell, for example
 `home.key("sharedSpaces").key("view").asSchema(sharedSpaceCollectionViewSchema)`.
+The host's materialized view type is `HomeSharedSpaceCollectionView`; the
+authored pattern observation type is `SharedSpaceCollectionView`.
 These schemas describe the interface; Home's authored validator and handlers
 own the catalog rules. Command projections retain every event field so an
 optional malformed value reaches that validator. Handler result receipts remain
@@ -55,6 +57,12 @@ source changes; a resolved stream endpoint is a snapshot of one binding. The
 Home root and the catalog backing cell retain their identity. The flat and
 grouped paths expose the same current streams.
 
+The flat command streams keep their named Home addresses; grouped commands
+alias them through Home's own result. Home exposes its collection browser as
+`socialSpaceCollection`, including its session-local controls. That result key
+names the browser's instance, so adding it does not consume an existing
+anonymous cause or move the flat catalog observation's computed document.
+
 The collection view is either `status: "ready"` or `status: "unavailable"`.
 An unavailable observation reports `loading` for an undefined value and
 `malformed` for a value the complete catalog validator refuses. A ready view has
@@ -63,9 +71,9 @@ also has `byKind`, whose keys are the kinds actually present and whose values
 contain those three lists. An absent kind has no entry. For presentation, lists
 sort admission hints newest first, treating missing times as zero and breaking
 ties by space DID. This display order establishes no authoritative chronology
-or conflict precedence. Entries retain extension fields and opaque revisions; unfamiliar states
-appear under `other`. The receipts view has the same availability distinction
-and exposes `offers` when ready.
+or conflict precedence. Entries retain extension fields and opaque revisions;
+unfamiliar states appear under `other`. The receipts view has the same
+availability distinction and exposes `offers` when ready.
 
 Read availability establishes a valid initialized observation. It does not
 establish synchronized loading, producer-interface absence, or durable command
@@ -163,12 +171,12 @@ person's request is the choice whatever the entry's state. A new revision names
 the calling handler's event, so only a handler can call it.
 
 FabriChat's Home-local manager calls both from its own handlers, and lists the
-rooms the catalog keeps as saved. Creating a room, or accepting one a manager created,
-registers the room's space. Forgetting a room archives its entry, naming the
-revision the person's list showed. Finding a direct room again, or accepting a
-room, restores its entry if it was archived. Asking to open or accept the room
-is the person's choice to have it listed, so that restore names the revision the
-handler reads.
+rooms the catalog keeps as saved. Creating a room, or accepting one a manager
+created, registers the room's space. Forgetting a room archives its entry,
+naming the revision the person's list showed. Finding a direct room again, or
+accepting a room, restores its entry if it was archived. Asking to open or
+accept the room is the person's choice to have it listed, so that restore
+names the revision the handler reads.
 
 FabriChat consumes the manager's flat fields through its room-specific schema.
 Shared-record handlers bind individual streams without materializing a manager

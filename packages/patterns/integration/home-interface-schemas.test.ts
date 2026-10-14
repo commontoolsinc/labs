@@ -1,4 +1,4 @@
-/** Checks host projection fields against schemas compiled from authored Home types. */
+/** Checks host fields, requiredness and literals against compiled Home types. */
 
 import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
@@ -21,13 +21,18 @@ import {
   newLoopbackServer,
 } from "@commonfabric/runner/storage/cache.deno";
 
-/** Collects declared field paths and requiredness, ignoring producer metadata. */
+/** Collects field paths, requiredness and literal choices without producer metadata. */
 function declaredFields(schema: JSONSchema): string[] {
   const fields = new Set<string>();
   const visit = (input: JSONSchema, path: string) => {
     if (typeof input === "boolean") return;
     const node = ContextualFlowControl.resolveSchemaRefsOrThrow(input, schema);
     if (typeof node === "boolean") return;
+    const literals = node.enum ??
+      (Object.hasOwn(node, "const") ? [node.const] : []);
+    for (const value of literals) {
+      fields.add(`${path}:literal:${JSON.stringify(value)}`);
+    }
     for (const [name, child] of Object.entries(node.properties ?? {})) {
       const at = `${path}/${name}`;
       fields.add(
@@ -48,7 +53,7 @@ function declaredFields(schema: JSONSchema): string[] {
 }
 
 describe("Home interface schemas", () => {
-  it("keeps every authored observation field and its requiredness in the host projections", async () => {
+  it("keeps authored observation fields, requiredness and literal choices in the host projections", async () => {
     const owner = await Identity.fromPassphrase("Home schema drift");
     const server = newLoopbackServer();
     const storage = EmulatedStorageManager.connectTo(server, { as: owner });

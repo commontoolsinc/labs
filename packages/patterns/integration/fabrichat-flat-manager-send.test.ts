@@ -1,11 +1,16 @@
-/** A shared room reaching Home's manager through its live wrapper link chain. */
+/** A production room send over flat bindings in a synthetic Home wrapper chain. */
 
 import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
-import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import {
+  type JSONSchema,
+  Runtime,
+  RuntimeTelemetryEvent,
+  type RuntimeTelemetryMarker,
+} from "@commonfabric/runner";
 import {
   markRendererTrustedEvent,
   reviewedActionProvenance,
@@ -19,10 +24,15 @@ import {
 const owner = await Identity.fromPassphrase("fabrichat-manager-roles");
 const PATTERNS = fromFileUrl(new URL("..", import.meta.url));
 
-describe("FabriChat manager roles", () => {
+describe("FabriChat flat manager sends", () => {
   let server: ReturnType<typeof newLoopbackServer>;
   let storage: EmulatedStorageManager;
   let runtime: Runtime;
+  let observation: AbortController;
+  let refusals: Extract<
+    RuntimeTelemetryMarker,
+    { type: "cfc.prepare-reject" }
+  >[];
 
   beforeEach(() => {
     server = newLoopbackServer();
@@ -31,11 +41,20 @@ describe("FabriChat manager roles", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
     });
+    observation = new AbortController();
+    refusals = [];
+    runtime.telemetry.addEventListener("telemetry", (event) => {
+      if (
+        event instanceof RuntimeTelemetryEvent &&
+        event.marker.type === "cfc.prepare-reject"
+      ) refusals.push(event.marker);
+    }, { signal: observation.signal });
   });
 
   afterEach(async () => {
     await runtime?.idle();
     await storage?.synced();
+    observation?.abort();
     await runtime?.dispose();
     await storage?.close();
     await server?.close();
@@ -99,8 +118,8 @@ describe("FabriChat manager roles", () => {
           requests: { privateRequest: { status: "pending" } },
           people: {},
         });
-        // Home publishes the manager wrapper, whose fields resolve through a
-        // document-valued link to the core. The core alone carries the label.
+        // The fixture models Home's wrapper and document-valued link to the
+        // core. Only the room's manager discovery runs production Home access.
         const mid = runtime.getCell(home, "manager mid", undefined, tx);
         mid.set(manager);
         const wrapper = runtime.getCell(home, "manager wrapper", undefined, tx);
@@ -126,7 +145,7 @@ describe("FabriChat manager roles", () => {
               new URL(
                 discovered
                   ? "../fabrichat/room.tsx"
-                  : "./fixtures/fabrichat-manager-roles/main.tsx",
+                  : "./fixtures/fabrichat-flat-manager-send/main.tsx",
                 import.meta.url,
               ),
             ),
@@ -148,6 +167,20 @@ describe("FabriChat manager roles", () => {
         expect((await roomTx.commit().settled).error).toBeUndefined();
         await runtime.idle();
         await room.pull();
+        // Root-private setup can refuse one manager-derived computation. This
+        // send guard bounds that known debt and permits no additional refusal.
+        expect(refusals.length).toBeLessThanOrEqual(labeled ? 1 : 0);
+        for (const refusal of refusals) {
+          expect(refusal.terminal).toBe(true);
+          expect(refusal.reasons.length).toBeGreaterThan(0);
+          expect(
+            refusal.reasons.every((reason) =>
+              reason.includes("writer-fit confidentiality misfit") &&
+              reason.includes("PersonalSpace")
+            ),
+          ).toBe(true);
+        }
+        const refusedBeforeSend = refusals.length;
         const click = {
           type: "click",
           requestId: "flat-manager-send",
@@ -169,6 +202,7 @@ describe("FabriChat manager roles", () => {
             "body",
           ).pull(),
         ).toBe("A shared message");
+        expect(refusals.length).toBe(refusedBeforeSend);
       });
     }
   }

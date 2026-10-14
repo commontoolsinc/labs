@@ -62,7 +62,7 @@ export {
 export { type Home, homeSchema } from "./home.ts";
 
 export {
-  type SharedSpaceCollectionView,
+  type HomeSharedSpaceCollectionView,
   sharedSpaceCollectionViewSchema,
   sharedSpaceCommandsSchema,
   sharedSpaceEntrySchema,

@@ -46,7 +46,7 @@ export interface SharedSpaceUnavailable {
 
 /**
  * A reactive collection observation. Entries retain their opaque revision and
- * extension fields; lists are ordered by admission time, then space DID.
+ * extension fields; lists display admission hints, then space DID.
  * Availability describes this observation, not durable command completion.
  */
 export type SharedSpaceCollectionView = SharedSpaceUnavailable | {

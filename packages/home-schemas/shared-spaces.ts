@@ -59,7 +59,7 @@ export const sharedSpaceCollectionViewSchema = {
 } as const satisfies JSONSchema;
 
 /** A host's materialized collection observation, including explicit availability. */
-export type SharedSpaceCollectionView = Schema<
+export type HomeSharedSpaceCollectionView = Schema<
   typeof sharedSpaceCollectionViewSchema
 >;
 

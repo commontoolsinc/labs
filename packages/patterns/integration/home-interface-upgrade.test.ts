@@ -14,15 +14,24 @@ import {
   FabricDurationNsec,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  ensurePrivateInboxOf,
+  PiecesController,
+} from "@commonfabric/piece/ops";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
   type Cell,
   getDerivedInternalCellLink,
   getPatternIdentityRef,
   getPatternSource,
+  parseLink,
   Runtime,
+  sendEvent,
 } from "@commonfabric/runner";
+import {
+  markRendererTrustedEvent,
+  reviewedActionProvenance,
+} from "@commonfabric/runner/cfc";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -41,20 +50,31 @@ const droppedSlots = (): number =>
 
 describe("Home interface upgrade", () => {
   for (
-    const { mode, fixture, suffix, hasInboxRequests } of [
+    const { mode, fixture, suffix, hasInboxRequests, update } of [
       { fixture: "home-before.tsx.txt", suffix: "", hasInboxRequests: false },
       {
         fixture: "home-with-inbox-request.tsx.txt",
         suffix: " from the inbox-request Home",
         hasInboxRequests: true,
       },
-    ].flatMap((release) =>
-      (["explicit", "automatic-running", "automatic-cold"] as const).map(
-        (mode) => ({ ...release, mode }),
-      )
-    )
+    ].flatMap((release) => [
+      ...(["explicit", "automatic-running", "automatic-cold"] as const).map(
+        (mode) => ({ ...release, mode, update: true }),
+      ),
+      ...(release.hasInboxRequests
+        ? (["automatic-running", "automatic-cold"] as const).map((mode) => ({
+          ...release,
+          mode,
+          update: false,
+        }))
+        : []),
+    ])
   ) {
-    const description = mode === "explicit"
+    const description = !update
+      ? `retains populated Home state through a ${
+        mode === "automatic-cold" ? "cold" : "running"
+      } system-origin reopen without a source update`
+      : mode === "explicit"
       ? "preserves manager requests, direct counterparts and queued notices across the Home code change"
       : `preserves populated Home and manager state through a ${
         mode === "automatic-cold" ? "cold" : "running"
@@ -145,6 +165,66 @@ describe("Home interface upgrade", () => {
         await runtime.idle();
         await home.pull();
 
+        await ensurePrivateInboxOf(runtime, home, owner.did());
+        await runtime.idle();
+        const earlierInbox = await home.key("privateInbox").key("piece")
+          .asSchema<Cell<unknown>>({ asCell: ["cell"] }).pull();
+        expect(earlierInbox).toBeDefined();
+        const retainTx = runtime.edit();
+        home.withTx(retainTx).key("privateInbox").set({});
+        home.withTx(retainTx).key("retainedPrivateInboxes").set([earlierInbox]);
+        runtime.prepareTxForCommit(retainTx);
+        expect((await retainTx.commit().settled).error).toBeUndefined();
+        await ensurePrivateInboxOf(runtime, home, owner.did());
+        await runtime.idle();
+        const heldInbox = await home.key("privateInbox").key("piece")
+          .asSchema<Cell<unknown>>({ asCell: ["cell"] }).pull();
+        expect(heldInbox).toBeDefined();
+        expect(heldInbox.equalLinks(earlierInbox)).toBe(false);
+        const create = {
+          type: "click",
+          target: { value: "Retained profile" },
+          provenance: reviewedActionProvenance("dom", {
+            surface: "ProfileCreateSurface",
+            action: "CreateProfile",
+          }),
+        };
+        markRendererTrustedEvent(create);
+        const createTx = runtime.edit();
+        home.withTx(createTx).key("createProfile").send(create);
+        runtime.prepareTxForCommit(createTx);
+        expect((await createTx.commit().settled).error).toBeUndefined();
+        await runtime.idle();
+        const profiles = await home.key("profiles").asSchema<Cell<unknown>[]>({
+          type: "array",
+          items: { asCell: ["cell"] },
+        }).pull();
+        expect(profiles).toHaveLength(1);
+        let retainedRequest: Record<string, boolean> = {};
+        if (hasInboxRequests) {
+          await new Promise<void>((resolve, reject) =>
+            sendEvent(
+              home.key("requestPrivateInbox"),
+              { from: profiles[0] },
+              (tx) => {
+                if (tx.status().status === "error") {
+                  reject(new Error("Inbox request failed"));
+                } else resolve();
+              },
+            )
+          );
+          await runtime.idle();
+          retainedRequest = await runtime.getCellFromLink(
+            getDerivedInternalCellLink(home, {
+              partialCause: "privateInboxRequests",
+            }),
+          ).asSchema<Record<string, boolean>>({
+            type: "object",
+            additionalProperties: { type: "boolean" },
+          }).pull();
+          expect(Object.values(retainedRequest)).toEqual([true]);
+        }
+
         const social = await runtime.createSpace({});
         const roomTx = runtime.edit();
         const room = runtime.getCell(social, "direct room", undefined, roomTx);
@@ -172,20 +252,6 @@ describe("Home interface upgrade", () => {
         runtime.prepareTxForCommit(roomTx);
         expect((await roomTx.commit().settled).error).toBeUndefined();
         const seedTx = runtime.edit();
-        const unlistedProfile = runtime.getCell(
-          owner.did(),
-          "retained unlisted profile",
-        ).getAsNormalizedFullLink();
-        const retainedRequest = {
-          [`${unlistedProfile.space}/${unlistedProfile.id}`]: true,
-        };
-        if (hasInboxRequests) {
-          runtime.getCellFromLink(
-            getDerivedInternalCellLink(home, {
-              partialCause: "privateInboxRequests",
-            }),
-          ).withTx(seedTx).set(retainedRequest);
-        }
         const counterpart =
           (await Identity.fromPassphrase("retained direct counterpart")).did();
         const direct = {
@@ -280,6 +346,15 @@ describe("Home interface upgrade", () => {
             address: { space, id, path },
             value: catalog.getRaw(),
           }];
+          for (const field of ["privateInbox", "retainedPrivateInboxes"]) {
+            const stored = root.key(field).resolveAsCell();
+            await stored.sync();
+            const { space, id, path } = stored.getAsNormalizedFullLink();
+            owned.push({
+              address: { space, id, path },
+              value: stored.getRaw(),
+            });
+          }
           if (hasInboxRequests) {
             const requests = reader.getCellFromLink(
               getDerivedInternalCellLink(root, {
@@ -292,9 +367,58 @@ describe("Home interface upgrade", () => {
               address: { space, id, path },
               value: requests.getRaw(),
             });
+            const spot = reader.getCellFromLink(
+              getDerivedInternalCellLink(root, {
+                partialCause: { $generated: 4 },
+              }),
+            );
+            await spot.sync();
+            const answering = spot.resolveAsCell();
+            const { space: answerSpace, id: answerId, path: answerPath } =
+              answering.getAsNormalizedFullLink();
+            const answers = await answering.key("answers").pull();
+            expect(answers).toMatchObject({
+              profiles: {
+                [Object.keys(retainedRequest)[0]]: { status: "ensured" },
+              },
+            });
+            owned.push({
+              address: { space: answerSpace, id: answerId, path: answerPath },
+              value: answers,
+            });
           }
           return owned;
         };
+        const flatBindings = async (root: Cell<unknown>) =>
+          await Promise.all([
+            "registerSharedSpace",
+            "changeSharedSpaceMembership",
+            "removeSharedSpace",
+            "sharedSpaceCatalog",
+          ].map(async (name) => {
+            const field = root.key(name);
+            await field.pull();
+            const { space, id, path } = field.resolveAsCell()
+              .getAsNormalizedFullLink();
+            return {
+              name,
+              pointer: (() => {
+                // The older fixture's catalog computed uses cause 6; the
+                // inbox-request fixture and current Home use cause 7. Both
+                // pin the catalog target, and the latter pins its spot too.
+                if (name === "sharedSpaceCatalog" && !hasInboxRequests) return;
+                const link = parseLink(
+                  field.getRaw(),
+                  root.getAsNormalizedFullLink(),
+                );
+                expect(link).toBeDefined();
+                return { space: link!.space, id: link!.id, path: link!.path };
+              })(),
+              address: name === "sharedSpaceCatalog"
+                ? undefined
+                : { space, id, path },
+            };
+          }));
         const noticeRecords = async (root: Cell<unknown>) => {
           const items = await root.key("chatManager").key("outgoingNotices")
             .asSchema<{ id: string; recipient: string; room: Cell<unknown> }[]>(
@@ -322,6 +446,7 @@ describe("Home interface upgrade", () => {
           });
         };
         const ownedBefore = await ownedFields(runtime, home);
+        const flatBefore = await flatBindings(home);
         for (const field of ownedBefore.slice(0, 3)) {
           expect(field.value).toHaveLength(1);
         }
@@ -336,7 +461,7 @@ describe("Home interface upgrade", () => {
           },
         });
         if (hasInboxRequests) {
-          expect(ownedBefore[4].value).toEqual(retainedRequest);
+          expect(ownedBefore[6].value).toEqual(retainedRequest);
         }
         // Raw stored snapshots retain complete data and serialized room links;
         // a projected query result can lazily change as the source rolls.
@@ -368,7 +493,7 @@ describe("Home interface upgrade", () => {
         } else {
           // A fresh route instance models a release replacing its source cache.
           // Home follows its origin through the ordinary open path.
-          route = new PatternsRoute(patterns);
+          if (update) route = new PatternsRoute(patterns);
           if (mode === "automatic-cold") {
             await runtime.idle();
             await storage.synced();
@@ -388,18 +513,30 @@ describe("Home interface upgrade", () => {
         const rolled = (await controller.getDefaultPattern(false))!;
         await rolled.pull();
         expect(rolled.equalLinks(home)).toBe(true);
-        expect(getPatternIdentityRef(rolled)?.identity).not.toBe(identity);
-        expect(
-          await rolled.key("sharedSpaces").key("view").key("status").pull(),
-        )
-          .toBe("ready");
-        expect(
-          await rolled.key("sharedSpaces").key("view").key("entries")
-            .key(social).key("title").pull(),
-        ).toBe("Saved chat");
+        if (update) {
+          expect(getPatternIdentityRef(rolled)?.identity).not.toBe(identity);
+          expect(
+            await rolled.key("sharedSpaces").key("view").key("status").pull(),
+          )
+            .toBe("ready");
+          expect(
+            await rolled.key("sharedSpaces").key("view").key("entries")
+              .key(social).key("title").pull(),
+          ).toBe("Saved chat");
+        } else {
+          expect(getPatternIdentityRef(rolled)?.identity).toBe(identity);
+        }
         const after = await storedFields(runtime, rolled);
-        expect(after).toEqual(before);
+        if (update) expect(after).toEqual(before);
+        else {
+          expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
+          expect(await noticeRecords(rolled)).toEqual(noticesBefore);
+        }
         expect(await ownedFields(runtime, rolled)).toEqual(ownedBefore);
+        expect(await rolled.key("sharedSpaceCatalog").pull()).toEqual(
+          ownedBefore[3].value,
+        );
+        expect(await flatBindings(rolled)).toEqual(flatBefore);
         expect(droppedSlots()).toBe(droppedBefore);
         if (mode !== "explicit") {
           expect(getPatternSource(rolled)).toBe("system:system/home.tsx");
@@ -436,8 +573,15 @@ describe("Home interface upgrade", () => {
           // and rebase its element links. Requests and direct bindings keep
           // their addresses; the queued notice content and room stay intact.
           expect(reopenedFields.slice(0, 2)).toEqual(before.slice(0, 2));
+          if (!update) {
+            expect(reopenedFields[2].address).not.toEqual(before[2].address);
+          }
           expect(await noticeRecords(reopened)).toEqual(noticesBefore);
           expect(await ownedFields(peer, reopened)).toEqual(ownedBefore);
+          expect(await reopened.key("sharedSpaceCatalog").pull()).toEqual(
+            ownedBefore[3].value,
+          );
+          expect(await flatBindings(reopened)).toEqual(flatBefore);
           expect(droppedSlots()).toBe(droppedBefore);
         } finally {
           await peerController.dispose();
