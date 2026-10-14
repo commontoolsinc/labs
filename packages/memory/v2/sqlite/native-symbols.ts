@@ -21,14 +21,19 @@
 
 import { download } from "@denosaurs/plug";
 
+// The column-origin symbols are optional: a libsqlite3 built without
+// SQLITE_ENABLE_COLUMN_METADATA lacks them, and binds them as `null`, while
+// `sqlite3_interrupt`, which every build exports, still binds.
 const SYMBOLS = {
   sqlite3_column_origin_name: {
     parameters: ["pointer", "i32"],
     result: "pointer",
+    optional: true,
   },
   sqlite3_column_table_name: {
     parameters: ["pointer", "i32"],
     result: "pointer",
+    optional: true,
   },
   sqlite3_interrupt: {
     parameters: ["pointer"],
@@ -147,10 +152,8 @@ export async function openSource(source: LibrarySource): Promise<Resolution> {
     return { symbols: Deno.dlopen(path, SYMBOLS).symbols };
   } catch (e) {
     return {
-      problem: `${label} names ${path}, whose column-origin and interrupt ` +
-        `symbols could not be bound (${describe(e)}). A libsqlite3 built ` +
-        `without SQLITE_ENABLE_COLUMN_METADATA does not export the ` +
-        `column-origin ones.`,
+      problem: `${label} names ${path}, whose symbols could not be bound ` +
+        `(${describe(e)})`,
     };
   }
 }

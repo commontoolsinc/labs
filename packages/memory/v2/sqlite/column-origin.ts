@@ -29,8 +29,9 @@ import {
  * Callers that need provenance MUST await this before `columnOrigins()` and
  * fail loudly when it returns false.
  */
-export function ensureColumnOriginAvailable(): Promise<boolean> {
-  return ensureNativeSymbols();
+export async function ensureColumnOriginAvailable(): Promise<boolean> {
+  await ensureNativeSymbols();
+  return columnOriginAvailable();
 }
 
 /**
@@ -38,7 +39,7 @@ export function ensureColumnOriginAvailable(): Promise<boolean> {
  * `ensureColumnOriginAvailable()` has resolved.
  */
 export function columnOriginAvailable(): boolean {
-  return nativeSymbols() !== undefined;
+  return originSymbols() !== undefined;
 }
 
 /**
@@ -46,7 +47,32 @@ export function columnOriginAvailable(): boolean {
  * resolved false. Undefined while they are bound or unresolved.
  */
 export function columnOriginUnavailableReason(): string | undefined {
-  return nativeSymbolsUnavailableReason();
+  const symbols = nativeSymbols();
+  if (symbols === undefined) return nativeSymbolsUnavailableReason();
+  return originSymbols() === undefined
+    ? "the libsqlite3 @db/sqlite loaded was built without " +
+      "SQLITE_ENABLE_COLUMN_METADATA, so it exports no column-origin symbols"
+    : undefined;
+}
+
+/** The two column-origin functions, when the library exports both. */
+function originSymbols():
+  | {
+    tableName: (
+      statement: Deno.PointerValue,
+      column: number,
+    ) => Deno.PointerValue;
+    originName: (
+      statement: Deno.PointerValue,
+      column: number,
+    ) => Deno.PointerValue;
+  }
+  | undefined {
+  const symbols = nativeSymbols();
+  const tableName = symbols?.sqlite3_column_table_name;
+  const originName = symbols?.sqlite3_column_origin_name;
+  if (!tableName || !originName) return undefined;
+  return { tableName, originName };
 }
 
 export type ColumnOrigin = {
@@ -73,11 +99,11 @@ export function columnOrigins(
   stmtHandle: Deno.PointerValue,
   count: number,
 ): ColumnOrigin[] {
-  const symbols = nativeSymbols();
+  const symbols = originSymbols();
   if (symbols === undefined) {
     throw new Error(
       "sqlite: column-origin FFI not bound — " +
-        (nativeSymbolsUnavailableReason() ??
+        (columnOriginUnavailableReason() ??
           "ensureColumnOriginAvailable() must resolve before a labeled query " +
             "reads column provenance"),
     );
@@ -85,8 +111,8 @@ export function columnOrigins(
   const out: ColumnOrigin[] = [];
   for (let i = 0; i < count; i++) {
     out.push({
-      table: cstr(symbols.sqlite3_column_table_name(stmtHandle, i)),
-      column: cstr(symbols.sqlite3_column_origin_name(stmtHandle, i)),
+      table: cstr(symbols.tableName(stmtHandle, i)),
+      column: cstr(symbols.originName(stmtHandle, i)),
     });
   }
   return out;

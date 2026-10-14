@@ -313,8 +313,9 @@ export class ReadWorkerPool {
 
   /** Helper for `#dispatch()`, which starts a worker. */
   #start(): ReadWorker {
-    // A worker takes no read before the interrupt symbol is bound, so that a
-    // read can always be interrupted once it is running.
+    // A worker takes no read before the interrupt symbol has been looked for,
+    // so that a running read can be interrupted whenever the library exports
+    // it; when it cannot be bound, a cancelled read runs to its end.
     this.#symbols ??= ensureNativeSymbols().then(
       (bound) => {
         if (!bound) warnUninterruptible(nativeSymbolsUnavailableReason());
