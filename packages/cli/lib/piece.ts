@@ -1848,16 +1848,19 @@ export async function newPiece(
   // ensure — it does so on activation, ahead of the verb this command sends
   // — and a served creation that finds no root retains its piece and reports
   // failed registration, which the same request key can resume.
-  // Otherwise registration through `pieces.add()` requires an existing
-  // default pattern and fails before sending if none exists. Ensuring it
-  // creates an absent root and reconciles and repairs an existing one; fail
-  // here with the cause if initialization fails.
+  // Otherwise registration delivers into the root's `addPiece` stream, which
+  // needs the root to exist and to run here, though not to be current. So an
+  // absent root is created, and an existing one is started on the pattern it
+  // holds, before the piece exists. Its origin is followed only if that
+  // pattern cannot load, and otherwise left to the opens that follow it, such
+  // as `cf piece ls`. Fail here with the cause if the root cannot be created
+  // or started.
   const served = servesLifecycleVerbs(pieces);
   try {
     if (!served) {
       await timeCliPhase(
         "newPiece.ensureDefaultPattern",
-        () => pieces.ensureDefaultPattern(),
+        () => pieces.ensureDefaultPattern({ reconcile: false }),
       );
     }
   } catch (error) {
@@ -1874,6 +1877,9 @@ export async function newPiece(
       }\n` +
         `The new piece cannot be registered in the space's piece list ` +
         `without it.\n` +
+        `A root whose pattern the deployment has since replaced is updated ` +
+        `when it is opened: ${cliCommand(["piece", "ls"])} follows its ` +
+        `origin before starting it. ` +
         `If a non-Home space's root pattern predates a runtime format change, ` +
         `repair it with: ${cliCommand(["space", "recreate-root"])}. ` +
         `Update an existing Home in place with ${
@@ -1970,10 +1976,11 @@ export async function newPiece(
     }
   }
 
-  // Explicitly add the piece to the space's registry.
+  // Explicitly add the piece to the space's registry, through the root the
+  // ensure above started, without following its origin.
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
-    () => pieces.add([piece.getCell()]),
+    () => pieces.add([piece.getCell()], { reconcile: false }),
   );
 
   return piece.id;
@@ -2542,10 +2549,11 @@ async function tryResolveLivePieceToolCallable(
  * nor reconciles its source or repairs its setup. A client-side event addressed
  * to a root with no pattern metadata is dropped with a scheduler warning.
  *
- * `newPiece()` ensures the root because `pieces.add()` requires an existing
- * default pattern and fails before sending if none exists. That ensure creates
- * an absent root and also supplies source reconciliation and cold-start setup
- * repair for an existing one.
+ * `newPiece()` ensures the root because its registration needs an existing
+ * default pattern and leaves the created piece unregistered if none exists.
+ * That ensure creates an absent root and starts an existing one on the pattern
+ * it holds, before the piece is created, following the root's origin only if
+ * that pattern cannot load.
  *
  * Discovery (`verbs`, `describe`) only reads the addressed piece's stored
  * callable surface and pattern metadata. It neither starts the piece nor asks
