@@ -705,10 +705,12 @@ const ACCEPTED_BREAKS_FILE = "tasks/pattern-compat-accepted-breaks.ts";
 /**
  * Helper for `patternCompatSuite()`, which names the patterns among `units` a
  * change reaches: one whose source changed, one importing a changed module of
- * a pattern tree directly or through other such modules, one whose recorded
- * contracts changed, and, when the list of accepted breaks changed, every one
- * that list names. `files` are the pattern sources the tree holds, which the
- * import graph is read from on the first change that needs it.
+ * a pattern tree directly or through other such modules, and one whose
+ * recorded contracts changed. A change to the list of accepted breaks reaches
+ * every pattern: removing an entry changes the verdict of a pattern the list
+ * no longer names, and what the list named before is not visible here. `files`
+ * are the pattern sources the tree holds, which the import graph is read from
+ * on the first change that needs it.
  *
  * Imports are followed only within the pattern trees. A contract is also
  * built from what lies outside them, the schema generator and the API's
@@ -728,9 +730,7 @@ function patternsReached(
     const pending: string[] = [];
     for (const at of changed) {
       if (at === ACCEPTED_BREAKS_FILE) {
-        for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
-          if (units.has(accepted.pattern)) reached.add(accepted.pattern);
-        }
+        return [...units].sort();
       } else if (at.startsWith(`${BASELINES_DIR}/`)) {
         // A baseline is `<key>/<label>.json` under the baselines directory.
         const rest = at.slice(BASELINES_DIR.length + 1);

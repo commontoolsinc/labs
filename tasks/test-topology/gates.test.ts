@@ -424,9 +424,10 @@ describe("the repository's gate suites", () => {
     expect(
       reached("packages/patterns/baselines/fabrichat/room.tsx/x.json"),
     ).toEqual(["fabrichat/room.tsx"]);
-    // The accepted breaks, which reach every pattern they name.
-    expect(reached("tasks/pattern-compat-accepted-breaks.ts")).toContain(
-      "system/home.tsx",
+    // The accepted breaks reach every pattern, since removing an entry
+    // changes the verdict of a pattern the list no longer names.
+    expect(reached("tasks/pattern-compat-accepted-breaks.ts")).toEqual(
+      [...compat.units].sort(),
     );
     // A runtime module every pattern builds on is left to a lane's choice
     // rather than making every pattern mandatory, and a path the gate
