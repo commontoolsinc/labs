@@ -111,9 +111,10 @@ roots, add routing hints, grant access, or change the navigation list.
 
 Each catalog entry is keyed by space DID and has an accepted memory host, kind,
 collection state, and membership revision. The initial registration may also
-provide a display title. The space DID is its identity; the host is a routing
-fact. Registration refuses an existing entry with a different host or kind.
-Applications resolve the current root from the space when opening it.
+provide a display title, which a retitle can later refresh. The space DID is its
+identity; the host is a routing fact. Registration refuses an existing entry
+with a different host or kind. Applications resolve the current root from the
+space when opening it.
 
 Authored code validates routes with the sandbox's existing `URL` global. Stored
 hosts are canonical HTTP or HTTPS origins, the same rule used by inbox offers.
@@ -170,13 +171,26 @@ revision and names that one gives the check up, which is right only where the
 person's request is the choice whatever the entry's state. A new revision names
 the calling handler's event, so only a handler can call it.
 
-FabriChat's Home-local manager calls both from its own handlers, and lists the
-rooms the catalog keeps as saved. Creating a room, or accepting one a manager
-created, registers the room's space. Forgetting a room archives its entry,
-naming the revision the person's list showed. Finding a direct room again, or
-accepting a room, restores its entry if it was archived. Asking to open or
-accept the room is the person's choice to have it listed, so that restore
-names the revision the handler reads.
+`retitleSharedSpaceIn()` sets an existing entry's display title in the calling
+handler's transaction, to the title the space's root now gives. It writes only
+when the title differs, and returns `retitled`, `unchanged`, or `conflict` for a
+space with no entry. It moves no revision, state, or last action: a title is a
+display hint, not a membership choice, so a choice made from a list shown
+before the retitle still names the current revision. Home exposes no command
+for it; the application that knows the root's current title calls it from its
+own handler.
+
+FabriChat's Home-local manager calls all three from its own handlers, and lists
+the rooms the catalog keeps as saved. Creating a room, or accepting one a
+manager created, registers the room's space. Forgetting a room archives its
+entry, naming the revision the person's list showed. Finding a direct room
+again, or accepting a room, restores its entry if it was archived. Asking to
+open or accept the room is the person's choice to have it listed, so that
+restore names the revision the handler reads. Registration takes the room's
+title, direct room or group, and whenever the manager hears of a listed room,
+from a join or an acceptance, it retitles the entry where the room's title has
+moved on. A room's retitle tells the retitling member's manager at once; another
+member's catalog follows on their manager's next event for that room.
 
 FabriChat consumes the manager's flat fields through its room-specific schema.
 Shared-record handlers bind individual streams without materializing a manager
@@ -329,11 +343,11 @@ operation.
 
 ## Repair and retention
 
-Host, kind, title, and admission provenance describe the first accepted
-registration. A title is a display hint; applications read the space's root for
-its current name. Repeated registration does not refresh that hint. Host and
+Host, kind, and admission provenance describe the first accepted registration.
+A title is a display hint: repeated registration does not refresh it, a retitle
+does, and applications read the space's root for its current name. Host and
 kind conflicts require investigation rather than an automatic rewrite. There is
-no supported route-migration or retitle operation in this API.
+no supported route-migration operation in this API.
 
 Changing a target's host or kind is an exceptional owner-authorized repair. It
 must preserve a backup, compare its observed catalog at commit, and update every

@@ -387,8 +387,9 @@ These rules hold for every stream:
 - `sendMessage`, `editMessage`, and `sendReaction` record the sender's profile,
   and refuse an event that arrives before it resolves. The
   other streams don't depend on a profile.
-- Writing in a room is joining it. When `sendMessage` appends a message, or
-  `sendReaction` adds a reaction, to a room in a space of its own, the room
+- Writing in a room is joining it. When `sendMessage` appends a message,
+  `sendReaction` adds a reaction, or `setTitle` sets the title, in a room in a
+  space of its own, the room
   sends the sender's manager's
   [`joinRoom`](ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput),
   so a room the sender reached by its link, or forgot, becomes one of their
@@ -764,7 +765,11 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
   title set before, and outranks the one the room was created with, which
   `about.record` keeps. Nothing else about the room changes, and nothing is
   added to `recentActivity`, which logs messages and reactions: a client
-  follows the title by reading `about.title`.
+  follows the title by reading `about.title`. Then, as a write in the room
+  does, it sends the sender's manager's `joinRoom`, in an event of its own,
+  and the manager brings the title its catalog lists the room under up to the
+  new one (see
+  [`joinRoom`](ChatManagerOutput.md#joinroomrequestid-string-room-cellchatroomoutput)).
 - **Refused:** a sender who can't write in the room, or isn't signed in
   (`not-member`); a `title` with no text in it (`invalid-title`); and a room
   that shares an existing space, a space's own chat, which is shown by its

@@ -1462,6 +1462,15 @@ export interface SetTitleState {
    * shows; empty once one takes effect.
    */
   refusal: Writable<string>;
+
+  /**
+   * Tells the viewer's manager the viewer has joined the room, as
+   * `tellManagerJoined` does, in an event of its own, which brings the title
+   * the manager's catalog lists the room under up to the new one; absent where
+   * nothing is told. The retitle's own transaction reads nothing of the
+   * manager.
+   */
+  joined?: Stream<void>;
 }
 
 /**
@@ -1469,10 +1478,11 @@ export interface SetTitleState {
  * `ChatRetitleSurface`. Any member who can write in the room may, in a group
  * room or a direct one. The outcome is recorded under the event's
  * `requestId` in the sender's own outcomes, and a refusal leaves the title as
- * it is.
+ * it is. A retitle that takes effect then tells the sender's manager, as a
+ * write in the room does, so the catalog lists the room under the new title.
  */
 export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
-  (event, { titles, ownSpace, messages, outcomes, refusal }) => {
+  (event, { titles, ownSpace, messages, outcomes, refusal, joined }) => {
     const requestId = event?.requestId ?? eventKey();
     if (outcomes.key(requestId).get() !== undefined) return;
     const refuse = (code: SetTitleRefusalCode, reason: string): void => {
@@ -1503,5 +1513,6 @@ export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
     titles.addUnique(record);
     outcomes.key(requestId).set({ status: "done" });
     refusal.set("");
+    joined?.send();
   },
 );

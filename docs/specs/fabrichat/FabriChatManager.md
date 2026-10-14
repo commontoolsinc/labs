@@ -36,20 +36,29 @@ read is listed with no counterpart. A room appears in `rooms` once its root
 resolves and its `about` reads. The manager's rendering labels each listed room
 with its `about.title`, read through the room's link, so a retitle shows there
 once the room records it, and labels a direct room with no title by its
-counterpart. The title registered with a room's catalog entry is the room's
-title when it was registered, a display hint the catalog doesn't refresh
-([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), so
-neither the rendering nor `rooms` reads it. `people` is drawn from `rooms` in
-the same session: each listed room's `roster`, read through the room's link,
-with each profile keyed by the principal its own `represents-principal` label
-attests (`principalOf()`). `offerRoom` reads it, to offer a room to a member
-named by principal alone. `direct` holds one entry per counterpart, including
-forgotten rooms, for the direct rooms this manager created or accepted, and
-`openDirect` finds a direct room there and nowhere else. A room another manager
-created and offered the user is there too, once the user's host has registered
-the offer, since the host's share intake then has the manager accept it on the
-user's behalf (see [first contact](#first-contact)). `rooms` can also hold a
-second direct room with the same counterpart, after crossing creations.
+counterpart. The catalog entry holds the room's title too, as a display hint for
+readers of the catalog
+([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), which
+neither the rendering nor `rooms` reads. Registration takes the room's title,
+whatever its kind. Whenever the manager handles `accept` or `joinRoom` for a
+room its catalog lists, it reads the room's `about`, and retitles the entry
+(`retitleSharedSpaceIn()`) where the room's title differs from the entry's,
+moving neither its revision nor its membership. A join of an already-listed room
+arrives with every write in the room, so that is all it reads of the room, and
+it writes the catalog only on a mismatch. The member who retitles a room tells
+their manager at once; another member's entry follows on their manager's next
+event for that room: their next message, reaction, or retitle, an acceptance, or
+a client's `joinRoom` when they open it. `people` is drawn from `rooms` in the
+same session: each listed room's `roster`, read through the room's link, with
+each profile keyed by the principal its own `represents-principal` label attests
+(`principalOf()`). `offerRoom` reads it, to offer a room to a member named by
+principal alone. `direct` holds one entry per counterpart, including forgotten
+rooms, for the direct rooms this manager created or accepted, and `openDirect`
+finds a direct room there and nowhere else. A room another manager created and
+offered the user is there too, once the user's host has registered the offer,
+since the host's share intake then has the manager accept it on the user's
+behalf (see [first contact](#first-contact)). `rooms` can also hold a second
+direct room with the same counterpart, after crossing creations.
 
 `direct`'s entries, and the entry a `done` outcome in `requests` carries, hold a
 room as `FabriChatRoom.inSpace(…)` returned it at creation, or as `accept` was
