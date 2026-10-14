@@ -512,8 +512,11 @@ Rules:
   signed-open clients; a connection-auth client does not replace its audience
   or held challenge from that response
 - any other stale `sessionToken` MUST fail with `SessionRevokedError`
-- when a resumed session already has watches installed, `sync` carries the
-  catch-up delta the client missed while offline
+- when a resumed session already has watches installed, a non-routed connection
+  may receive `session/effect` while catch-up is pending, before the
+  `session.open` response; the response's `sync` carries only the remaining
+  catch-up delta. Reconnecting clients route early frames to their existing
+  session and apply them as they arrive
 - a resuming client that advertises `sessionHoldings` (and whose server does)
   sends `holdings`: the documents its replica holds, each at the seq it holds
   it at. The server replaces its memory of what the session was delivered with
