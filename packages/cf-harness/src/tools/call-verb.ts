@@ -89,7 +89,7 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   toolId: "call_verb",
   title: "Call Verb",
   description:
-    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing; the refusal names the field and the rule of the event schema it broke. A handler that rejects an event fails the call with the handler's own message. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece must be in this run's own space.",
+    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing; the refusal names the field and the rule of the event schema it broke. A handler that rejects an event fails the call with the handler's own message. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece may be in this run's own space or in a space admitted to it.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -366,19 +366,14 @@ export const callVerbTool: HarnessToolDefinition<
     const session = await sessionPieces("call_verb", context);
     if (!session.ok) return fail(session.message);
     const { pieces } = session;
-    // A piece in another space is writable only where the run was handed it
-    // as an input and its space is admitted to the session. A piece merely
-    // discovered there stays readable and not writable.
-    const handedKey = handleRefAddressKey(ref);
-    const handed = handedKey !== undefined &&
-      (context.inputCells ?? []).some((cell) =>
-        handleRefAddressKey(cell.ref) === handedKey
-      );
+    // Anything the run reaches through the pieces it was given is in its
+    // scope. A space reaches the session only by being admitted to it, so a
+    // piece in another space is callable wherever that space is admitted.
     const piece = await resolvePiece(
       "call_verb",
       pieces,
       ref,
-      (space) => handed && Object.hasOwn(session.foreignSpaces, space),
+      (space) => Object.hasOwn(session.foreignSpaces, space),
     );
     if (!piece.ok) return fail(piece.message);
 

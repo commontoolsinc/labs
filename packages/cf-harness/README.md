@@ -177,8 +177,8 @@ What works today:
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `call_verb` (present only when the run configures a fabric session; sends an
     event to a handler verb on the result of a piece in the session's own space,
-    or of a piece the run was handed as an input in an admitted foreign space; a
-    piece merely discovered in a foreign space stays read-only. The piece, and
+    or of a piece in a foreign space admitted to the session: anything the run
+    reaches through the pieces it was given is in its scope. The piece, and
     every piece the event names, must be behind a handle the run holds; an
     address written out in full is refused unless the run holds it. The verb is
     found among the result-side handlers `cf piece verbs` lists, and the event
