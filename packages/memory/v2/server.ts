@@ -2502,11 +2502,13 @@ export class Server {
   #diskSources: DiskSourceRegistry;
 
   /**
-   * The `(space, id)` keys whose registered path this process has checked, as
-   * registration checks a path. A registration read back after a restart is
-   * checked again before it is read, since the file system may have moved on.
+   * The path to read each injected source at, by `(space, id)` key, once this
+   * process has checked it as registration checks a path. A registration read
+   * back after a restart is checked again before its first read, since the
+   * file system may have moved on; the check's result stays here and is never
+   * written back to the registry.
    */
-  #checkedDiskSources = new Set<string>();
+  #checkedDiskSourcePaths = new Map<string, string>();
 
   /**
    * Pooled read-only connections (keyed by canonical file path) for reads of
@@ -4019,7 +4021,7 @@ export class Server {
     // callers do not need to provide it.
     beforeRegister?.(engine);
     this.#diskSources.register(space, id, { path: canonical });
-    this.#checkedDiskSources.add(diskSourceKey(space, id));
+    this.#checkedDiskSourcePaths.set(diskSourceKey(space, id), canonical);
   }
 
   /**
@@ -4085,29 +4087,37 @@ export class Server {
    * Returns the path to read the injected source registered for `(space,
    * id)`, checking a registration this process has not checked yet — one read
    * back after a restart — as registration checks a path. Throws a
-   * `SqliteSourceUnavailable` error for a source that is not registered or no
-   * longer passes.
+   * `SqliteSourceUnavailable` error for a source that is not registered, that
+   * no longer passes, or whose registry cannot be read.
    */
-  async #diskSourcePath(
-    engine: Engine.Engine,
-    space: string,
-    id: string,
-  ): Promise<string> {
-    const disk = this.#diskSources.get(space, id);
+  async #diskSourcePath(space: string, id: string): Promise<string> {
+    const key = diskSourceKey(space, id);
+    const checked = this.#checkedDiskSourcePaths.get(key);
+    if (checked !== undefined) return checked;
+    let disk: { path: string } | undefined;
+    try {
+      disk = this.#diskSources.get(space, id);
+    } catch {
+      throw sqliteSourceUnavailable("the server cannot read its registrations");
+    }
     if (disk === undefined) {
       throw sqliteSourceUnavailable("it is not registered on this server");
     }
-    const key = diskSourceKey(space, id);
-    if (this.#checkedDiskSources.has(key)) return disk.path;
     let canonical: string;
     try {
-      canonical = await this.#checkDiskSourcePath(engine, disk.path);
+      canonical = await this.#checkDiskSourcePath(
+        await this.#openEngine(space),
+        disk.path,
+      );
     } catch {
       throw sqliteSourceUnavailable("its registered file cannot be read");
     }
-    this.#diskSources.register(space, id, { path: canonical });
-    this.#checkedDiskSources.add(key);
-    return canonical;
+    // A registration made while the check ran has been checked by
+    // registration itself, and wins.
+    if (!this.#checkedDiskSourcePaths.has(key)) {
+      this.#checkedDiskSourcePaths.set(key, canonical);
+    }
+    return this.#checkedDiskSourcePaths.get(key) ?? canonical;
   }
 
   /**
@@ -4782,11 +4792,7 @@ export class Server {
         this.#diskSources.has(message.space, message.db.id);
       const result = injected
         ? await this.#readWorkers.query(
-          await this.#diskSourcePath(
-            await this.#openEngine(message.space),
-            message.space,
-            message.db.id,
-          ),
+          await this.#diskSourcePath(message.space, message.db.id),
           message.sql,
           queryParams,
           { labeled: wantColumns, signal, requester },

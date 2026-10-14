@@ -2715,6 +2715,7 @@ export class RuntimeProcessor {
         tables?: unknown;
         scope?: unknown;
         owner?: unknown;
+        external?: unknown;
       }
       | undefined;
     if (!raw || typeof raw.id !== "string") {
@@ -2747,6 +2748,7 @@ export class RuntimeProcessor {
       ...((raw.scope === "space" || raw.scope === "user" ||
         raw.scope === "session") && { scope: raw.scope }),
       ...(typeof raw.owner === "string" && { owner: raw.owner }),
+      ...(raw.external === true && { external: true }),
     };
   }
 

@@ -30,6 +30,7 @@ describe("linkSqliteDiskSource handle seeding", () => {
   let originalWarn: typeof console.warn;
   let linkCalls: unknown[][];
   let registered: Array<[string, string]>;
+  let refuseRegistration = false;
   let deps: { loadPieces: () => Promise<unknown> };
 
   const handleCell = (): Cell<unknown> =>
@@ -46,6 +47,7 @@ describe("linkSqliteDiskSource handle seeding", () => {
     });
     linkCalls = [];
     registered = [];
+    refuseRegistration = false;
     warnings = [];
     originalWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -56,8 +58,11 @@ describe("linkSqliteDiskSource handle seeding", () => {
       registerSqliteDiskSource?: (id: string, path: string) => Promise<void>;
     };
     // The registration talks to a server this test does not run; the seam
-    // under test is the handle write that precedes it.
+    // under test is the handle write that follows it.
     provider.registerSqliteDiskSource = (id: string, path: string) => {
+      if (refuseRegistration) {
+        return Promise.reject(new Error("registration refused"));
+      }
       registered.push([id, path]);
       return Promise.resolve();
     };
@@ -116,6 +121,18 @@ describe("linkSqliteDiskSource handle seeding", () => {
     ]]);
     expect(linkCalls.length).toBe(1);
     expect(warnings).toEqual([]);
+  });
+
+  it("leaves the handle unwritten when the registration fails", async () => {
+    // The link registers the source before it writes the handle, so a query
+    // the handle write would re-issue never reaches a server without the
+    // registration, and a refused registration changes nothing.
+    refuseRegistration = true;
+    await expect(link()).rejects.toThrow("registration refused");
+    const handle = handleCell();
+    await handle.pull();
+    expect(handle.get()).toBeUndefined();
+    expect(linkCalls.length).toBe(0);
   });
 
   it("keeps a declared contract on a re-link, and says that it did", async () => {

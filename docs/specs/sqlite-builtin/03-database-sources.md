@@ -168,6 +168,10 @@ action detects the scheme before its normal `parseLink`):
    cell-to-cell link, and linking the same path twice resolves to the same
    handle, so multiple pieces share one handle cell.
 
+`cf` registers the source before it writes the handle, so a query the handle
+write re-issues finds the registration in place, and a registration that fails
+leaves the handle as it was.
+
 **Pending-until-connected** falls out of reactivity: an unpopulated `db` input
 is an empty cell, so `sqliteQuery` reports `pending: true`; when `cf` writes the
 link, the input cell changes, the query action re-runs, and it connects. (A
@@ -178,7 +182,8 @@ server has no registration for, or whose registered file is missing or cannot
 be opened, fails with an error named `SqliteSourceUnavailable`. It never falls
 back to a cell-derived database, which for a never-written id would read as
 `[]` — the answer an empty store gives. A handle without the mark keeps that
-fallback.
+fallback. An unavailable result is an answer like any other: it settles under
+its request hash and stays until an input of the query changes.
 
 v1 behavior: the server reads the registered file instead of the cell-derived
 db, on a **read-only** connection of a read worker, off the toolshed's main

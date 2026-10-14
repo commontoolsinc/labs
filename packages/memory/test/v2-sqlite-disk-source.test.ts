@@ -131,13 +131,41 @@ describe("DiskSourceRegistry", () => {
       expect(reg.has(SPACE_A, "of:x")).toBe(false);
     });
 
-    it("throws when the file does not hold a list of registrations", () => {
+    it("refuses reads and registrations, and reports nothing registered, when the file does not hold a list of registrations", () => {
       const file = `${dir}/disk-sources.json`;
       Deno.writeTextFileSync(file, JSON.stringify([{ space: SPACE_A }]));
       const reg = new DiskSourceRegistry(4096, file);
-      expect(() => reg.has(SPACE_A, "of:x")).toThrow(
-        "does not hold a list of registrations",
-      );
+      const logged = silenceConsoleError();
+      try {
+        expect(reg.has(SPACE_A, "of:x")).toBe(false);
+        expect(() => reg.get(SPACE_A, "of:x")).toThrow("cannot be read");
+        expect(() => reg.register(SPACE_A, "of:x", { path: "/abs/x.db" }))
+          .toThrow("cannot be read");
+        expect(logged.length).toBe(1);
+      } finally {
+        logged.restore();
+      }
+      // The file is left as it was for an operator to repair.
+      expect(JSON.parse(Deno.readTextFileSync(file))).toEqual([
+        { space: SPACE_A },
+      ]);
+    });
+
+    it("takes a registration effect only once its file is written", () => {
+      // A directory where the write's temporary file belongs makes the write
+      // fail for any user, root included, while the registry reads as empty.
+      const file = `${dir}/disk-sources.json`;
+      Deno.mkdirSync(`${file}.partial`);
+      const reg = new DiskSourceRegistry(4096, file);
+      expect(() => reg.register(SPACE_A, "of:x", { path: "/abs/x.db" }))
+        .toThrow();
+      expect(reg.has(SPACE_A, "of:x")).toBe(false);
+
+      Deno.removeSync(`${file}.partial`);
+      reg.register(SPACE_A, "of:x", { path: "/abs/x.db" });
+      expect(new DiskSourceRegistry(4096, file).get(SPACE_A, "of:x")).toEqual({
+        path: "/abs/x.db",
+      });
     });
   });
 });
@@ -444,6 +472,52 @@ describe("server keeps an injected source's state across a restart", () => {
     ).rejects.toThrow("read-only");
   });
 
+  it("fails a read of a restored registration whose path now resolves inside the store directory", async () => {
+    // A registration read back after a restart is checked again, as
+    // registration checks a path, before its first read: a registry entry that
+    // names one of the store's own files is refused rather than opened.
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+    const engineDir = `${storeDir}/engine-v3`;
+    const storeFile = [...Deno.readDirSync(engineDir)]
+      .find((entry) => entry.name.endsWith(".sqlite"))?.name;
+    expect(storeFile).toBeDefined();
+    Deno.writeTextFileSync(
+      `${engineDir}/disk-sources.json`,
+      JSON.stringify([
+        { space: SPACE, id: handleId, path: `${engineDir}/${storeFile}` },
+      ]),
+    );
+
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("keeps cell-derived databases working when the registry cannot be read", async () => {
+    Deno.mkdirSync(`${storeDir}/engine-v3`, { recursive: true });
+    Deno.writeTextFileSync(`${storeDir}/engine-v3/disk-sources.json`, "{");
+    const logged = silenceConsoleError();
+    try {
+      const { session } = await start();
+      const cellDerived = await session.sqliteQuery(
+        { id: `of:cell-${crypto.randomUUID()}` },
+        "SELECT 1",
+      );
+      expect(cellDerived.rows).toEqual([]);
+      const error = await rejectionOf(
+        session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+      );
+      expect(error.name).toBe("SqliteSourceUnavailable");
+      expect(error.message).not.toContain(storeDir);
+    } finally {
+      logged.restore();
+    }
+  });
+
   it("refuses a write to a registered source after a restart", async () => {
     const first = await start();
     await first.session.registerSqliteDiskSource(handleId, diskPath);
@@ -473,4 +547,16 @@ async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
     throw new Error(`rejected with a non-error: ${String(error)}`);
   }
   throw new Error("resolved, where a rejection was expected");
+}
+
+/**
+ * Collects what `console.error` is given until `restore()` is called, so a
+ * case that expects the registry to report an unreadable file keeps the report
+ * out of the test output.
+ */
+function silenceConsoleError(): unknown[][] & { restore(): void } {
+  const original = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => logged.push(args);
+  return Object.assign(logged, { restore: () => console.error = original });
 }

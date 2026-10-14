@@ -45,8 +45,11 @@ after a sync — a verb such as `sqlite.disk-source-changed`, authorized as
 registration is. The server reads `PRAGMA data_version` on a connection it keeps
 for the source, which moves on another connection's commit and not on a
 checkpoint, and increments the handle's `rev` with a patch at `/value/rev`
-when it moved. A hint carries no generation, so a rebuilt store or a writer that
-crashes before hinting leaves `rev` where the data says. The companion
+when it moved. A store rebuilt by renaming a new file over the old one leaves
+that connection on the old file, so the check also compares the file's device
+and inode with the connection's and reopens it when they differ. A hint
+carries no generation, so a rebuilt store or a writer that crashes before
+hinting leaves `rev` where the data says. The companion
 freshness cell then has nothing left to do.
 
 Rulings: the sqlite-builtin owner, on `rev` written by the server rather than

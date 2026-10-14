@@ -122,6 +122,21 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     await tx2.commit().settled;
   });
 
+  it("refuses a write to a handle marked external that no source is registered for", async () => {
+    // The mark rides the folded op to the server, which refuses the write
+    // rather than creating a cell-derived database under the source's id.
+    const dbRef: SqliteDbRef = {
+      id: `of:exec-${crypto.randomUUID()}`,
+      tables: { notes: table({ id: "integer primary key", body: "text" }) },
+      external: true,
+    };
+    const tx = runtime.edit();
+    const db = sqliteDb(dbRef, tx, "db-external");
+    db.exec("INSERT INTO notes (body) VALUES (?)", ["hi"]);
+    const res = await tx.commit().settled;
+    expect(res.error?.message).toContain("read-only");
+  });
+
   it("reads the handle via getRaw even when the cell schema shapes it to {}", async () => {
     // A pattern compiled before the handle descriptor landed declares the
     // handle as an object type with NO properties, and handler-input

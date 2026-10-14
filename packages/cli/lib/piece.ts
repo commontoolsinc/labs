@@ -4231,16 +4231,17 @@ export async function linkPieces(
 /**
  * Phase 7: link a pattern field to an injected on-disk SQLite source
  * (`cf piece link sqlite:<absPath> <piece>/<field>`, read-only v1). Derives a
- * stable handle id from (space, absPath), settles the handle cell at that id,
- * registers the on-disk source with the server (so reads attach the file
- * read-only for that id), then links the handle into the target field.
+ * stable handle id from (space, absPath), registers the on-disk source with the
+ * server for that id (so reads open the file read-only), settles the handle
+ * cell at that id, then links the handle into the target field.
  *
  * What the handle cell ends up holding is `diskHandleSeed`'s decision, made
  * against whatever is already there. A first link seeds the empty contract
- * `{ id, tables: {}, rev: 0 }`. A RE-link — the same path, so the same handle
- * id (same cell, same registration) — leaves a handle whose `id` is already
- * the derived one exactly as it stands, contract included, and says on stderr
- * how many tables it kept. A handle whose stored `id` is missing, empty, or
+ * `{ id, tables: {}, rev: 0, external: true }`. A RE-link — the same path, so
+ * the same handle id (same cell, same registration) — leaves a handle whose
+ * `id` is already the derived one exactly as it stands, contract included,
+ * adding only an `external` mark it lacks, and says on stderr how many tables
+ * it kept. A handle whose stored `id` is missing, empty, or
  * names a different source is unusable and gets REPAIRED: the id is rewritten,
  * a declared contract is carried onto it rather than dropped (labels may only
  * strengthen), and the repair is reported on stderr when it carried one. v1 is
@@ -4259,7 +4260,20 @@ export async function linkSqliteDiskSource(
   const space = pieces.getSpace();
   const id = deriveDiskHandleId(space, absPath);
 
-  // 1. Seed the handle cell AT the deterministic id. Its entity id == its
+  // 1. Register the on-disk source with the server before the handle names
+  //    it. A query the handle write below re-issues then finds the
+  //    registration in place, rather than settling as unavailable under a
+  //    request hash no later registration would change, and a registration
+  //    that fails leaves the handle as it was.
+  const provider = pieces.runtime.storageManager.open(space);
+  if (!provider.registerSqliteDiskSource) {
+    throw new Error(
+      "storage provider does not support injected sqlite disk sources",
+    );
+  }
+  await provider.registerSqliteDiskSource(id, absPath);
+
+  // 2. Seed the handle cell AT the deterministic id. Its entity id == its
   //    value.id == the server registry key, so a pattern read of the linked
   //    handle resolves to the id the server holds a disk descriptor for.
   //    `diskHandleSeed` decides whether to write at all: a first link seeds an
@@ -4314,17 +4328,8 @@ export async function linkSqliteDiskSource(
     );
   }
   // The handle is committed, so the space has been written to whether or not
-  // the registration and link below succeed.
+  // the link below succeeds.
   noteWroteTo(config.space);
-
-  // 2. Register the on-disk source with the server (read-only attach for `id`).
-  const provider = pieces.runtime.storageManager.open(space);
-  if (!provider.registerSqliteDiskSource) {
-    throw new Error(
-      "storage provider does not support injected sqlite disk sources",
-    );
-  }
-  await provider.registerSqliteDiskSource(id, absPath);
 
   // 3. Link the handle (addressed by entity id) into the target field.
   const resolvedTarget = await resolveLinkEndpointAddress(

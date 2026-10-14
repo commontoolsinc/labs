@@ -9222,6 +9222,28 @@ describe("runtime-processor", () => {
       ]]);
     });
 
+    it("carries an injected handle's external mark to its storage provider", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-injected", tables: {}, external: true },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [] });
+        },
+      );
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      });
+      expect(calls[0]?.[0]).toEqual({
+        id: "db-injected",
+        tables: {},
+        external: true,
+      });
+    });
+
     it("waits for a scoped database factory commit before loading its handle", async () => {
       const calls: string[] = [];
       const db = { id: "db-1", tables: { notes: {} }, scope: "user" };

@@ -10,9 +10,11 @@
 // this package's integration lane (integration/sqlite-cfc-label-injected.test.ts).
 // Both seed a real file with `@db/sqlite`; this UNIT lane does not, and proves
 // only the runner-specific delta: the provider delegates register/execute to
-// the session, and the server's read-only rejection for a registered id
-// surfaces back through the runner. The write is rejected on `id` membership
-// BEFORE any file attach, so no on-disk file is needed here.
+// the session, the server's read-only rejection for a registered id surfaces
+// back through the runner, and a handle marked `external` reaches the server
+// with its mark, so a query of one with no registration reports the source as
+// unavailable. The write is rejected on `id` membership BEFORE any file
+// attach, so no on-disk file is needed here.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
