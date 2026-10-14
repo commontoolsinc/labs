@@ -1347,6 +1347,7 @@ export const FabriChatRoomCore = pattern<
     messages,
     outcomes: titleRequests,
     refusal: titleRefusal,
+    joined: records.joined,
   });
   // Who may retitle differs by viewer, and what came of a retitle by session,
   // so both are hidden by a prop rather than built as a different tree (see

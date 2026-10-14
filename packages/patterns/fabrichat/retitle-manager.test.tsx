@@ -1,9 +1,11 @@
 /**
- * A FabriChat manager's list following a retitle of a room it created: the
- * room's entry in `rooms` links the room, so it reads the title a member last
- * set through the link, and the rendered list labels the room with it, for a
- * group room and for a direct room, which the list otherwise labels with whom
- * it is with.
+ * A FabriChat manager's list and catalog following a retitle of a room it
+ * created. The room's entry in `rooms` links the room, so it reads the title a
+ * member last set through the link, and the rendered list labels the room
+ * with it, for a group room and for a direct room, which the list otherwise
+ * labels with whom it is with. The catalog lists the room under the new title
+ * once the manager next hears of the room, as from a client's `joinRoom` when
+ * the person opens it, with the entry's revision as it was.
  */
 import {
   action,
@@ -12,12 +14,17 @@ import {
   type Cell,
   equals,
   pattern,
+  spaceOf,
   type Stream,
   TESTS,
   UI,
   Writable,
 } from "commonfabric";
-import { type SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
+import {
+  readSharedSpaceCatalog,
+  type SharedSpaceCatalogStorage,
+  type SharedSpaceEntry,
+} from "../system/shared-space-catalog.ts";
 import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
 import { FabriChatManagerCore } from "./manager.tsx";
 import { type SetTitleEvent } from "./room-records.tsx";
@@ -87,15 +94,23 @@ const listed = (
     ? undefined
     : rooms.find((entry) => equals(entry.room, held));
 
+/** The entry `catalog` holds for the space `room` lives in. */
+const catalogEntryOf = (
+  catalog: Writable<SharedSpaceCatalogStorage>,
+  room: Cell<ChatRoomLink> | undefined,
+): SharedSpaceEntry | undefined =>
+  readSharedSpaceCatalog(catalog).entries[spaceOf(room) ?? ""];
+
 export default pattern(() => {
   const profile = Writable.of<TestProfile>({ name: "Tester" });
   const requests = Writable.of<Record<string, ChatRequestOutcome>>({});
+  const catalog = Writable.of<SharedSpaceCatalogStorage>({
+    entries: {},
+    offers: {},
+  });
   const manager = FabriChatManagerCore({
     myProfile: profile,
-    sharedSpaceCatalog: Writable.of<SharedSpaceCatalogStorage>({
-      entries: {},
-      offers: {},
-    }),
+    sharedSpaceCatalog: catalog,
     direct: Writable.of<Record<string, ChatIndexEntry>>({}),
     requests,
     outgoingNotices: Writable.of<ChatManagerNotice[]>([]),
@@ -108,6 +123,19 @@ export default pattern(() => {
     held.key("direct").set(
       requests.key("d-1").key("entry").key("room").resolveAsCell(),
     );
+  });
+  // Each entry's revision before the retitles, which they leave as is.
+  const revisions = Writable.of<{ group?: string; direct?: string }>({});
+  const action_note_revisions = action(() =>
+    revisions.set({
+      group: catalogEntryOf(catalog, held.key("group").get())?.revision,
+      direct: catalogEntryOf(catalog, held.key("direct").get())?.revision,
+    })
+  );
+  // What a client sends when the person opens each room.
+  const action_open_rooms = action(() => {
+    manager.joinRoom.send({ room: held.key("group").resolveAsCell() });
+    manager.joinRoom.send({ room: held.key("direct").resolveAsCell() });
   });
 
   return {
@@ -131,9 +159,12 @@ export default pattern(() => {
           listed(manager.rooms, held.key("group").get())?.room.key("about")
               .get()?.title === "Team" &&
           equals(cellLinked(manager[UI], "Team"), held.key("group")) &&
-          equals(cellLinked(manager[UI], `With ${BOB}`), held.key("direct"))
+          equals(cellLinked(manager[UI], `With ${BOB}`), held.key("direct")) &&
+          catalogEntryOf(catalog, held.key("group").get())?.title === "Team" &&
+          catalogEntryOf(catalog, held.key("direct").get())?.title === undefined
         ),
       },
+      { action: action_note_revisions },
       // A member retitles each room, through the room itself.
       {
         action: setTitleOf(held.key("group").key("setTitle")),
@@ -158,6 +189,21 @@ export default pattern(() => {
           cellLinked(manager[UI], "Team") === undefined &&
           cellLinked(manager[UI], `With ${BOB}`) === undefined
         ),
+      },
+      // Opening each room brings the title its catalog entry holds up to the
+      // room's, and leaves the entry's revision and membership as they were.
+      { action: action_open_rooms },
+      {
+        assertion: assert(() => {
+          const group = catalogEntryOf(catalog, held.key("group").get());
+          const direct = catalogEntryOf(catalog, held.key("direct").get());
+          return group?.title === "Weekend plans" &&
+            direct?.title === "Bob and me" &&
+            revisions.get().group !== undefined &&
+            group?.revision === revisions.get().group &&
+            direct?.revision === revisions.get().direct &&
+            group?.state === "saved" && direct?.state === "saved";
+        }),
       },
     ],
   };

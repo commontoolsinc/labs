@@ -12,7 +12,6 @@ import {
   refuseFabricInstance,
   valueEqual,
 } from "@commonfabric/data-model";
-import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { type ACL, aclDocId } from "@commonfabric/memory/acl";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -137,7 +136,11 @@ import {
   type RawBuiltinReturnType,
   type RawNodeCause,
 } from "./module.ts";
-import { NodeBindingMemo } from "./node-binding-memo.ts";
+import {
+  nodeBindingInputsWeight,
+  NodeBindingMemo,
+} from "./node-binding-memo.ts";
+import { hasInlineCellScheme } from "./immutable-cell.ts";
 import { runtimeOwnedStoreOwnerKey } from "./cfc/runtime-owned-stores.ts";
 import { writeResultSchemaMeta } from "./result-schema-meta.ts";
 import {
@@ -586,8 +589,7 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
  * or a link, whose kind belongs to whatever it resolves to rather than to the
  * receipt.
  *
- * A `data:` link is the exception among links: it carries its value inside
- * its own identifier, and the write inlines it, so the receipt holds that
+ * An immutable `snapshot:` or Fabric `data:` link is expanded on write, so the receipt holds that
  * value rather than a link to it. The description comes from the same
  * inlining, so it describes what is stored.
  *
@@ -860,13 +862,13 @@ const recordRawBuiltinResultSchemaPolicyInput = (
 };
 
 /**
- * Whether `argumentLink` names a stand-in: the `data:` document a pre-sync
+ * Whether `argumentLink` names a stand-in: the immutable document a pre-sync
  * builds from the inputs of an instance that has no stored argument.
  */
 function isStandInArgument(
   argumentLink: NormalizedFullLink | undefined,
 ): boolean {
-  return argumentLink !== undefined && hasDataUriScheme(argumentLink.id);
+  return argumentLink !== undefined && hasInlineCellScheme(argumentLink.id);
 }
 
 /**
@@ -2619,7 +2621,8 @@ export class Runner {
   readonly #nodeIOBindings = new NodeBindingMemo<NodeIOBinding>({
     capacity: NODE_BINDING_LIMIT,
     maxWeight: NODE_BINDING_WEIGHT_LIMIT,
-    weigh: (binding) => binding.inputsCell.getAsNormalizedFullLink().id.length,
+    weigh: (binding) =>
+      nodeBindingInputsWeight(binding.inputsCell.getAsNormalizedFullLink().id),
   });
 
   /**
@@ -9306,7 +9309,7 @@ export class Runner {
 
     // The nodes bind against the piece's argument document once setup has
     // written it. Before that, on a fresh run, they bind against an
-    // immutable stand-in holding the caller's argument: a data-URI document,
+    // immutable stand-in holding the caller's argument: a native snapshot document,
     // local by construction, whose links are the caller's, so a plan bound
     // against it names the same stored documents the run will read through
     // them. Planning resolves each node's output redirect chain, which reads
@@ -9520,8 +9523,9 @@ export class Runner {
         "node",
       );
       // Each node's plan, synced under the schema its run reads through. The
-      // inputs document is a data URI, so syncing it under a schema hands the
-      // server one selector per binding link, and the server's query walk
+      // inputs document may be stored or an immutable stand-in. Syncing it
+      // under the schema hands the server one selector per binding link,
+      // and the server's query walk
       // follows links from there the way a read does: as deep as the
       // declaration goes, through `asCell` positions, stopping at an opaque
       // one. What arrives is what the node's first run reads.
@@ -10874,7 +10878,7 @@ export class Runner {
    * links. What a plan reads through its transaction, the redirect chains
    * its outputs write through, is resolved by each plan in its own.
    *
-   * A binding against a stand-in argument, a `data:` document a pre-sync
+   * A binding against a stand-in argument, an immutable document a pre-sync
    * builds for an instance with no stored argument, is never held: the
    * instance's instantiation binds against the argument document its setup
    * writes, so no later plan has that argument link.

@@ -56,6 +56,7 @@ import { utf8Compare } from "@commonfabric/utils/utf8";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { areLinksSame } from "../link-equality.ts";
 import {
   droppedStoredClaim,
   type ForeignPositions,
@@ -83,7 +84,6 @@ import {
 } from "./current-principal-confidentiality.ts";
 import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
 import {
-  areLinksSame,
   isPrimitiveCellLink,
   isWriteRedirectLink,
   type NormalizedLink,

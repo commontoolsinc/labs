@@ -240,6 +240,31 @@ describe("resume-presync-plan-count", () => {
           badgePattern.nodes.length);
   }
 
+  it("holds no stand-in bindings after a fresh tree starts", async () => {
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(TREE_PROGRAM, {
+      space,
+    });
+    const tx = author.edit();
+    const result = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      "fresh-tree-stand-in-bindings",
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, result);
+    await tx.commit().settled;
+    await result.pull();
+    await author.settled();
+    expect(
+      result.key("rows").getAsQueryResult().map((row: { value: number }) =>
+        row.value
+      ),
+    )
+      .toEqual([2, 4, 6]);
+    expect(author.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
+  });
+
   it("plans each node of each instance once on a cold resume", async () => {
     const cellId = "resume-presync-plan-count-root";
     const compiled = await authorTree(cellId);
