@@ -229,6 +229,8 @@ import {
   type IPCClientNotification,
   IPCClientRequest,
   isCellRef,
+  type JoinVisitedRoomRequest,
+  type JoinVisitedRoomResponse,
   type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -2793,6 +2795,25 @@ export class RuntimeProcessor {
   }
 
   /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * declared by the space `request` names, when it passes vetting, as
+   * `PiecesController.joinVisitedRoom()` says, and returns what was
+   * decided. A user with no Home gets nothing done and no decision: Home is
+   * never created for it, and an existing Home is brought up as any other
+   * bring-up does.
+   */
+  async handleJoinVisitedRoom(
+    request: JoinVisitedRoomRequest,
+  ): Promise<JoinVisitedRoomResponse> {
+    if (!(await this.#homeExists())) return {};
+    await this.#ensureHomePattern();
+    const decision = await this.#homeController().joinVisitedRoom(
+      request.space,
+    );
+    return { decision };
+  }
+
+  /**
    * Ensures the user's Home pattern is running and returns its result cell,
    * once the worker's housekeeping over Home has adopted the Home space
    * list's name-only entries, as `#startHomeHousekeeping()` says.
@@ -3941,6 +3962,8 @@ export class RuntimeProcessor {
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:
         return await this.handleEnsureHomePatternRunning(request);
+      case RequestType.JoinVisitedRoom:
+        return await this.handleJoinVisitedRoom(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.ListEventAttention:

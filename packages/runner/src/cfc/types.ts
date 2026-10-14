@@ -905,6 +905,14 @@ export type PostCommitSideEffect = {
   abandon?(error: unknown): void;
 };
 
+/**
+ * Where a transaction's boundary verification stands. `prepared` holds the
+ * activity the verification ran over as `input`, frozen, and `digest` is the
+ * digest of that input. `invalidated` keeps the digest of the preparation it
+ * invalidated, when there was one. A transaction computes a digest when one
+ * is first read, so reading `digest` canonicalizes and hashes the input and
+ * copying a state reads it.
+ */
 export type CfcPrepareState =
   | { status: "unprepared" }
   | { status: "prepared"; digest: string; input: PreparedDigestInput }
@@ -1170,6 +1178,12 @@ export type CfcTxState = {
   // closed). Config identity is covered by TrustSnapshot.revision, not a
   // separate digest input.
   trustConfig?: CfcTrustConfig;
+  // The serving runtime's own identity, set once by the Runtime at tx
+  // creation on the serving posture and absent everywhere else. A trust
+  // snapshot naming it is the runtime's ambient one, which no
+  // current-principal claim or owner binding may resolve to unless a run is
+  // stamped as acting for that identity.
+  servingIdentity?: string;
   // Addresses of writes to a document's ["cfc"] label-map path made OUTSIDE the
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything
@@ -1216,4 +1230,6 @@ export type CfcPreparationWork =
   | "stagedReferenceDerivations"
   | "stagedReferenceCacheHits"
   | "flowTemplateEntriesMinted"
-  | "flowTemplateContainers";
+  | "flowTemplateContainers"
+  | "inputReadViewsBuilt"
+  | "inputReadViewsReused";

@@ -55,7 +55,10 @@ import {
   hostMountsToAdditionalMounts,
 } from "./host-mounts.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
-import { pieceTargetingContextMessages } from "./piece-targeting.ts";
+import {
+  PIECE_TARGETING_GUIDANCE,
+  pieceTargetingContextMessages,
+} from "./piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import { WEAVER_COMMAND_GUIDANCE } from "./tools/weaver-action.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
@@ -66,6 +69,7 @@ import type {
 } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import type { HarnessTaskTag } from "./task-classification.ts";
 import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 
 /**
@@ -508,4 +512,26 @@ const establishContextMessages = async (
   }
   messages.push(REVISION_VERIFICATION_GUIDANCE);
   return messages;
+};
+
+/**
+ * Drops from a run's context messages the host guidance its task tags do not
+ * call for: piece targeting and revision verification belong to work on
+ * pieces and to authoring, and the Weaver's commands, which read as well as
+ * change the person's application, to finding and acting. Every other
+ * message passes through.
+ */
+export const orientContextMessages = (
+  messages: readonly string[],
+  tags: ReadonlySet<HarnessTaskTag>,
+): string[] => {
+  const pieceWork = tags.has("pieces") || tags.has("author");
+  const withheld = new Set([
+    ...(pieceWork ? [] : [
+      PIECE_TARGETING_GUIDANCE,
+      REVISION_VERIFICATION_GUIDANCE,
+    ]),
+    ...(tags.has("act") || tags.has("find") ? [] : [WEAVER_COMMAND_GUIDANCE]),
+  ]);
+  return messages.filter((message) => !withheld.has(message));
 };

@@ -40,6 +40,7 @@ import type { HarnessBrowserHost } from "../src/contracts/browser-host.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
+import { RESEARCH_MODEL } from "../src/research/runner.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import type { HarnessModelClient } from "../src/model/client.ts";
 import {
@@ -4639,6 +4640,24 @@ Deno.test({
             return new CfHarnessPromptLoop({
               ...options,
               fetchFn: (_input, init) => {
+                // The task matches no classification rule, so the cheap
+                // model tags it before the run's own turns.
+                if (
+                  (JSON.parse(String(init?.body)) as { model?: string })
+                    .model === RESEARCH_MODEL
+                ) {
+                  return Promise.resolve(
+                    new Response(
+                      JSON.stringify(responsesBodyFromChatFixture({
+                        choices: [{
+                          index: 0,
+                          message: { role: "assistant", content: "act" },
+                        }],
+                      })),
+                      { status: 200 },
+                    ),
+                  );
+                }
                 fetchCalls.push(init ?? {});
                 const payload = fetchCalls.length === 1
                   ? {
@@ -4731,7 +4750,7 @@ Deno.test("buildCfHarnessOperatorSystemPrompt appends user instructions after gu
       systemPrompt: "Use bash and read_file only. Do not modify files.",
     }),
     [
-      buildCfHarnessBaseSystemPrompt(),
+      buildCfHarnessBaseSystemPrompt({ patternIndex: false }),
       "",
       "Operator guidance for cf-harness runs:",
       "- Prefer exploration within /workspace/packages/cf-harness.",
@@ -4758,6 +4777,27 @@ Deno.test("resolveCfHarnessCliSystemPrompt bypasses operator guidance in batch m
       systemPrompt: "You are a Loom batch worker.",
     }),
   );
+});
+
+Deno.test("resolveCfHarnessCliSystemPrompt offers the pattern index only to a run configured with one", () => {
+  const config = {
+    workspace: "/tmp/project",
+    focusRoot: "/tmp/project/packages/cf-harness",
+    outputMode: "batch" as const,
+  };
+  const indexed = resolveCfHarnessCliSystemPrompt({
+    ...config,
+    patternIndex: { baseUrl: "https://index.example" },
+  });
+  const unindexed = resolveCfHarnessCliSystemPrompt(config);
+
+  assertStringIncludes(indexed!, "Search the pattern index");
+  assertStringIncludes(
+    indexed!,
+    "The parent can run an indexed pattern with run_pattern",
+  );
+  assertEquals(unindexed?.includes("pattern index"), false);
+  assertEquals(unindexed?.includes("indexed pattern"), false);
 });
 
 Deno.test("buildCfHarnessBatchSystemPrompt omits submit_result guidance when the tool is not allowed", () => {

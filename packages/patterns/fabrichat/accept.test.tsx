@@ -3,9 +3,8 @@
  * links the record its creator's manager wrote, labeled `authored-by` the
  * creator, and the accepting manager takes the counterpart from that label: it
  * refuses an event naming someone else, and with no counterpart named, records
- * the creator. The room offers its other member the control that asks their
- * manager to list it, until the manager does, and accepting the room lists
- * them among its participants, while a manager whose user's profile hasn't
+ * the creator. Accepting the room lists it, and lists its other member among
+ * its participants, while a manager whose user's profile hasn't
  * resolved accepts it without joining them. A room a host registered and
  * accepted on the user's behalf, as its share intake does, is found by a start
  * with its creator, again once it is forgotten, and an acceptance that keeps
@@ -30,7 +29,6 @@ import {
   spaceOf,
   type Stream,
   TESTS,
-  UI,
   Writable,
 } from "commonfabric";
 import {
@@ -38,14 +36,7 @@ import {
   registerSharedSpace,
   type SharedSpaceCatalogStorage,
 } from "../system/shared-space-catalog.ts";
-import {
-  clickButton,
-  findNodeById,
-  propValue,
-  readValue,
-} from "../test/vnode-helpers.ts";
 import { FabriChatManagerCore, type ManagerStreamEvent } from "./manager.tsx";
-import { AddToChats } from "./room.tsx";
 import {
   CHAT_ROOM_OFFER_KIND,
   CHAT_START_ACTION,
@@ -66,7 +57,6 @@ type TestProfile = AddIntegrity<
   ChatProfile,
   readonly ["fabrichat-test-profile"]
 >;
-type AddArg = Parameters<typeof AddToChats>[0];
 
 /** The gesture a start takes, as a client's start control makes it. */
 const startGesture = { surface: CHAT_START_SURFACE, action: CHAT_START_ACTION };
@@ -115,21 +105,13 @@ const introduce = handler<unknown, IntroduceState>((_event, { me }) => {
   me.set(currentPrincipal() ?? "");
 });
 
-// How a room's control adding it to the viewer's chats is displayed.
-const addDisplay = (root: unknown): unknown =>
-  readValue(
-    (propValue(findNodeById(root, "fabrichat-add-to-chats"), "style") as {
-      display?: unknown;
-    })?.display,
-  );
-
 /** An empty shared-space catalog, as a manager lists its rooms from. */
 const emptyCatalog = () =>
   Writable.of<SharedSpaceCatalogStorage>({ entries: {}, offers: {} });
 
 /** Why the request `id` was refused, or its status if it wasn't. */
 const reasonOf = (
-  requests: Writable<Record<string, ChatRequestOutcome>>,
+  requests: Cell<Record<string, ChatRequestOutcome>>,
   id: string,
 ): string => {
   const outcome = requests.get()?.[id];
@@ -225,8 +207,8 @@ const forgetListed = handler<unknown, ForgetListedState>((
 
 /** The state of `catalog`'s entry for the held room. */
 const stateOf = (
-  catalog: Writable<SharedSpaceCatalogStorage>,
-  held: Writable<{ room?: Cell<HeldRoom> }>,
+  catalog: Cell<SharedSpaceCatalogStorage>,
+  held: Cell<{ room?: Cell<HeldRoom> }>,
 ): string | undefined =>
   readSharedSpaceCatalog(catalog).entries[spaceOf(held.key("room")) ?? ""]
     ?.state;
@@ -391,13 +373,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       counterpart: CAROL,
     })
   );
-  // The room's own control, which sends `accept` with the room alone.
-  const adder = AddToChats({
-    room: setup.held.key("room"),
-    catalog: manager.sharedSpaceCatalog,
+  // An acceptance with the room alone, naming no counterpart.
+  const action_accept = acceptAsHost({
     accept: manager.accept,
-  } as AddArg);
-  const action_add = action(() => clickButton(adder[UI], "Add to my chats"));
+    held: setup.held,
+    requestId: "a-2",
+    keepArchived: false,
+  });
 
   // A manager whose user's profile hasn't resolved.
   const profilelessDirect = Writable.of<Record<string, ChatIndexEntry>>({});
@@ -521,22 +503,21 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
       { action: action_accept_naming_carol },
-      // The room isn't listed, so the room offers to add it.
       {
         assertion: assert(() =>
           reasonOf(requests, "a-1") ===
             "The counterpart is not the room's creator." &&
           manager.rooms.length === 0 &&
-          Object.keys(readSharedSpaceCatalog(catalog).entries).length === 0 &&
-          addDisplay(adder[UI]) === "flex"
+          Object.keys(readSharedSpaceCatalog(catalog).entries).length === 0
         ),
       },
-      { action: action_add },
+      // With no counterpart named, the acceptance records the room's creator.
+      { action: action_accept },
       {
         assertion: assert(() =>
+          requests.get()["a-2"]?.status === "done" &&
           manager.rooms.length === 1 &&
-          manager.rooms[0]?.counterpart === setup.aliceDid.get() &&
-          addDisplay(adder[UI]) === "none"
+          manager.rooms[0]?.counterpart === setup.aliceDid.get()
         ),
       },
       // Accepting it registers its space in Bob's catalog, as a saved

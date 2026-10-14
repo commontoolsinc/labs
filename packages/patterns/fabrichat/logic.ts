@@ -117,34 +117,12 @@ export const isInMain = (item: ViewItem): boolean =>
   item.replyTo === undefined || item.replyTo.shownIn !== "thread";
 
 /**
- * The key of the thread a message is in, by its root, or `undefined` for a
- * message in no thread. Threads are flat: a reply to a message already in a
- * thread joins that thread. It walks a reply chain iteratively, so a long
- * chain costs its length and no stack, and stops at a message it has already
- * visited.
- */
-export const threadRootOf = (
-  item: ViewItem,
-  byKey: ReadonlyMap<string, ViewItem>,
-): string | undefined => {
-  const visited = new Set<string>();
-  let current: ViewItem | undefined = item;
-  let root: string | undefined;
-  while (current !== undefined) {
-    const reply: ViewItem["replyTo"] = current.replyTo;
-    if (reply === undefined || reply.shownIn === "main") return root;
-    if (visited.has(reply.key)) return reply.key;
-    visited.add(reply.key);
-    root = reply.key;
-    current = byKey.get(reply.key);
-  }
-  return root;
-};
-
-/**
  * Each message's thread root, by the message's key, for every message in a
- * thread. Each reply chain is walked once: a message whose target's root is
- * known takes it, and one whose target is in no thread takes the target.
+ * thread. Threads are flat: a reply to a message already in a thread joins
+ * that thread. Each reply chain is walked once, iteratively, so a long chain
+ * costs its length and no stack: a message whose target's root is known takes
+ * it, one whose target is in no thread takes the target, and a chain that
+ * returns to a message it has already visited stops there.
  */
 export const threadRoots = (
   items: readonly ViewItem[],
@@ -217,14 +195,60 @@ export const threadView = <T extends ViewItem>(
   );
 };
 
-/** How many messages each thread holds besides its root, by root key. */
-export const threadReplyCounts = (
+/** A message's place in the two views of a conversation. */
+export interface ViewPlace {
+  /** Whether the message is shown in the main conversation. */
+  inMain: boolean;
+
+  /** How many messages the thread it roots holds besides it; 0 for none. */
+  replies: number;
+
+  /**
+   * The newest `sentAt` among the messages the thread it roots holds besides
+   * it; absent when it roots none.
+   */
+  latestReplyAt?: bigint;
+
+  /**
+   * The key of the root of the thread the message is in; absent for a message
+   * in no thread.
+   */
+  thread?: string;
+}
+
+/**
+ * Every message's place in the views, by the message's key. The reply chains
+ * are walked once for the whole list, as `threadRoots()` walks them.
+ */
+export const viewPlaces = (
   items: readonly ViewItem[],
-): Map<string, number> =>
-  [...threadRoots(items).values()].reduce((counts, root) => {
-    counts.set(root, (counts.get(root) ?? 0) + 1);
-    return counts;
-  }, new Map<string, number>());
+): Record<string, ViewPlace> => {
+  const roots = threadRoots(items);
+  const replies = new Map<string, { count: number; latestAt: bigint }>();
+  for (const item of items) {
+    const root = roots.get(item.key);
+    if (root === undefined) continue;
+    const known = replies.get(root);
+    replies.set(root, {
+      count: (known?.count ?? 0) + 1,
+      latestAt: known === undefined || item.sentAt > known.latestAt
+        ? item.sentAt
+        : known.latestAt,
+    });
+  }
+  return Object.fromEntries(
+    items.map((item): [string, ViewPlace] => {
+      const thread = roots.get(item.key);
+      const own = replies.get(item.key);
+      return [item.key, {
+        inMain: isInMain(item),
+        replies: own?.count ?? 0,
+        ...(own === undefined ? {} : { latestReplyAt: own.latestAt }),
+        ...(thread === undefined ? {} : { thread }),
+      }];
+    }),
+  );
+};
 
 /** Where a window sits in its view. */
 export type WindowAnchor =

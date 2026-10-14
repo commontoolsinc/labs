@@ -1,42 +1,28 @@
 import {
   type EnvReader,
-  EXPERIMENTAL_ENV_VARS,
   type ExperimentalOptions,
   experimentalOptionsFromEnv,
+  withServerExecutionDefault,
 } from "@commonfabric/runner";
 
 /**
  * Resolves the experimental flags of a runtime `cf test` builds from `env`,
- * refusing server execution.
+ * deciding its server-execution posture as a deployed entry point does: the
+ * explicit `EXPERIMENTAL_SERVER_EXECUTION`, else the first-party default.
+ * `serverExecution` is `true` in the result exactly when that posture is ON;
+ * otherwise the result holds what `env` sets and nothing more, so a run on
+ * the OFF arm names no flag its environment did not.
  *
- * `cf test` runs a single-user test over emulated storage and a multi-user
- * test against a plain memory server, and neither has a serving loop beside
- * it. A runtime with server execution on commits the event a handler is fired
- * with and leaves the handler to that loop, so with no loop the event is
- * admitted and never served: each client sees only its own speculative
- * writes, and a test fails for a reason that has nothing to do with the
- * pattern under test.
- *
- * The refusal covers the environment and nothing else. A serving host
- * elsewhere in the same realm holds the process's ambient flag on while it
- * lives, and a runtime built from what this returns runs on that arm all the
- * same.
- *
- * @throws Error when `env` turns server execution on.
+ * The posture decides the topology as well as the runtime's flags. A runtime
+ * on the server-execution arm commits the event a handler is fired with and
+ * leaves the handler to a serving loop, so a run on that arm hosts one beside
+ * its memory server, and a run on the other arm hosts none.
  */
 export function patternTestExperimentalOptions(
   env: EnvReader,
 ): ExperimentalOptions {
   const experimental = experimentalOptionsFromEnv(env);
-  if (experimental.serverExecution === true) {
-    const name = EXPERIMENTAL_ENV_VARS.serverExecution;
-    throw new Error(
-      `\`cf test\` refuses \`${name}=true\`: it hosts no serving loop, so ` +
-        `nothing would serve the events its runtimes commit, and every ` +
-        `handler's writes would stay speculative. Unset \`${name}\` or set ` +
-        `it to \`false\`. See "The ON topology in one process" in ` +
-        `\`docs/development/TESTING.md\`.`,
-    );
-  }
-  return experimental;
+  return withServerExecutionDefault(experimental).serverExecution
+    ? { ...experimental, serverExecution: true }
+    : experimental;
 }

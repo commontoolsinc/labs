@@ -100,9 +100,12 @@ result cell and that partial cause:
 createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
 ```
 
-(`packages/runner/src/link-utils.ts`, `getDerivedInternalCellLink`). The
-result is a `FabricHash`: hash bytes plus an algorithm tag, stringified as
-`<tag>:<base64urlHash>`, e.g. `fid1:abc…`
+(`packages/runner/src/derived-internal-cell-ids.ts`,
+`DerivedInternalCellIds.idFor()`, which `getDerivedInternalCellLink` in
+`packages/runner/src/link-utils.ts` calls; a runtime keeps the ids it has
+hashed, by result cell and partial cause). The result is a `FabricHash`: hash
+bytes plus an algorithm tag, stringified as `<tag>:<base64urlHash>`, e.g.
+`fid1:abc…`
 (`packages/data-model/src/fabric-primitives/FabricHash.ts`). The hash is
 opaque: nothing about the preimage — including `type: "internal"` or the
 partial cause — is recoverable from the id. `hashOf` mints the `fid1` tag at
@@ -132,7 +135,8 @@ name given to more than one root in a pattern names none of them, and each
 keeps a positional cause. A stream root never takes an instance name, and a
 name given to one does not count toward another root's. A named instance's
 child stays where it is however its siblings are rearranged, and moves only
-when the instance is renamed.
+when the instance is renamed. A named instance stamps its name on the child it
+sets up, in the child's `instanceName` meta.
 
 A named instance also records, as its descriptor's `legacyPartialCause`, the
 `{ $generated: N }` it would take without its name. It still consumes that
@@ -143,24 +147,30 @@ A sub-pattern instance with a positional cause moves to another child's state
 when a cell is added ahead of it, since its child is the one minted from
 whatever number it now takes. A parent's setup refuses
 (`refuseDisplacedChildren` in `packages/runner/src/runner.ts`), with an error
-naming both pattern identities, to set up a child at a positional spot over a
-stored child of another pattern identity when the parent shows its positional
-children have moved spots:
+naming whichever of the two pattern identities it knows, to set up a child:
 
-- a child of the incoming pattern identity runs at another positional spot of
-  the parent; or
-- another positional spot of the pattern sets up the stored child's pattern
+- at a positional spot or a named instance's spot, over a stored child stamped
+  with another instance's name, whatever the two pattern identities, and
+  whether or not the stored child records one;
+- at a positional spot, over a stored child of another pattern identity, when a
+  child of the incoming pattern identity runs at another positional spot of the
+  parent; or
+- at a positional spot, over a stored child of another pattern identity, when
+  another positional spot of the pattern sets up the stored child's pattern
   identity.
 
-A stored child of a different identity with neither sign is taken for the same
-child under a newer version of its own source, since a child's identity changes
-whenever its own source does, so neither rule blocks an ordinary update of a
-child's source. Only positional spots are judged: a spot a result key, a node
-input or `.for()` names does not shift. Nor is a child that is its space's
-root, which its space's genesis places whatever its cause, or a child managed
-independently in a space of its own, which its parent resumes rather than sets
-up. A spot whose node sets up a space's root is not counted as another
-positional spot either, since its child does not sit there.
+The last two see the parent's positional children having moved spots. A stored
+child of a different identity with no such sign is taken for the same child
+under a newer version of its own source, since a child's identity changes
+whenever its own source does, so none of the rules blocks an ordinary update of
+a child's source. Only positional spots are judged by the last two: a spot a
+result key, a node input, `.for()` or an instance name names does not shift. A
+spot a result key, a node input or `.for()` names is not judged at all, since
+only a named instance stamps the child it sets up. No rule judges a child that
+is its space's root, which its space's genesis places whatever its cause, or a
+child managed independently in a space of its own, which its parent resumes
+rather than sets up. A spot whose node sets up a space's root is not counted as
+another positional spot either, since its child does not sit there.
 
 Only a parent its updater has pointed at a new pattern is judged: its stored
 `patternIdentity` already names the incoming pattern, while its setup marker,
@@ -169,9 +179,10 @@ pointer before the setup it asks for, and a live update follows the pointer's
 move. A parent that runs whichever pattern a computation returns, such as a
 `computed` choosing among sub-pattern instances, is set up with a pattern its
 pointer does not yet name, and an unrelated pattern there is no sign that its
-children moved. The guard reads a child only at a positional spot the parent's
-stored manifest of internal cells records, since no child can be set up at any
-other, so a fresh parent's setup reads no child at all.
+children moved. The guard reads a child only at a positional spot or a named
+instance's spot that the parent's stored manifest of internal cells records,
+since no child can be set up at any other, so a fresh parent's setup reads no
+child at all.
 
 The refusal comes before anything the setup stages commits, so a refused
 update changes none of the piece's state. A live update the guard refuses
@@ -183,8 +194,8 @@ accepts, such as the source the piece ran before.
 What this leaves open:
 
 - Where a child's own source changed in the same update that moved it, its
-  identity changed with it, so the rules have nothing to judge by and let the
-  setup through. A child can then take another's state.
+  identity changed with it, so the positional rules have nothing to judge by
+  and let the setup through. A child can then take another's state.
 - When a positional root moves to a number nothing held, its children are
   minted afresh and the old ones are orphaned with no refusal, since nothing
   sets up over them.

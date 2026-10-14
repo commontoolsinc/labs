@@ -84,7 +84,7 @@ labels and are admitted by their own writers:
   streams, each admitted only as a trusted gesture on its own surface (see
   [`ChatRoomOutput`](ChatRoomOutput.md#streams)). Each version is labeled
   `authored-by` the principal who recorded it, so an obliterated message's
-  tombstone is labeled with the OWNER who obliterated it.
+  tombstone is labeled with whoever obliterated it.
 - **Each reaction** is written only by the room's `sendReaction` and
   `deleteReaction` streams, as a trusted gesture on `ChatReactSurface`, and is
   labeled `authored-by` its reactor.
@@ -98,11 +98,12 @@ message's writer can set.
 
 A message can be removed entirely, with its history, using the room's
 `obliterateMessage` (see [`ChatRoomOutput`](ChatRoomOutput.md#streams)): by an
-OWNER curating a group room, or by either person in a direct room, for their own
+OWNER of the room's space curating the conversation, where the room's policy
+lets OWNERs obliterate, or by either person in a direct room, for their own
 messages. A sender's `deleteMessage` does the same to their own message where
 the implementation makes deletion obliteration. Whether a sender deleting their
-own message obliterates it, and whether a room allows OWNERs to obliterate at
-all, are left to the implementation
+own message obliterates it, and whether a room lets its OWNERs obliterate, are
+left to the implementation
 ([`ChatRoomOutput`](ChatRoomOutput.md#implementation-defined-behavior)). What is
 left is a tombstone, kept so that replies to the message and a thread rooted at
 it aren't orphaned:
@@ -160,9 +161,10 @@ times](#unique-times)). Clients MUST NOT make up ids from content or position.
 ## Deleted messages
 
 A deleted message, whether deleted by its sender or obliterated, accepts nothing
-further except obliteration. The room refuses, silently, an `editMessage`, a
+further except obliteration. The room refuses an `editMessage`, a
 `deleteMessage`, a `sendReaction`, or a `deleteReaction` on it, and a
-`sendMessage` that replies to it. Replies it already had, and a thread rooted at
+`sendMessage` that replies to it, recording `deleted-target` in the sender's
+`messageRequests`. Replies it already had, and a thread rooted at
 it, keep their links.
 
 There is no undeletion, and no redacting a single earlier version. Obliteration

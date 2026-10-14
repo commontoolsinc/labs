@@ -2,15 +2,17 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 
-import type {
-  CreateHarnessPromptLoopOptions,
-  HarnessPromptLoopResult,
+import {
+  CfHarnessPromptLoop,
+  type CreateHarnessPromptLoopOptions,
+  type HarnessPromptLoopResult,
 } from "@commonfabric/cf-harness/prompt-loop";
 import type { HarnessTranscriptEvent } from "@commonfabric/cf-harness/contracts/transcript";
 import { HarnessControlError } from "@commonfabric/cf-harness/control-errors";
 import { renderCellReference } from "@commonfabric/runner/shared";
 
 import {
+  HARNESS_JOB_GRANT_ENV_KEYS,
   type HarnessJobSpec,
   runHarnessJob,
   selectHarnessJobSandboxRuntime,
@@ -35,6 +37,18 @@ const plainSpec = (
   model: "scripted",
   ...overrides,
 });
+
+/** The environment a scripted job's harness reads. */
+const SCRIPTED_ENV = {
+  CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
+  CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+  // Named, with a `runsc` and a rootfs nothing runs, so a job selects
+  // the same sandbox on every machine: macOS and Linux otherwise take
+  // the native runtime, from a store this has none of.
+  CF_HARNESS_SANDBOX_RUNTIME: "runsc",
+  CF_HARNESS_RUNSC_BINARY: "/nonexistent/harness-job-test/runsc",
+  CF_HARNESS_SANDBOX_ROOTFS: "/nonexistent/harness-job-test/rootfs",
+};
 
 /** What the scripted loop saw of one job. */
 interface Seen {
@@ -96,6 +110,12 @@ describe("runHarnessJob()", () => {
       onEvent?: (event: HarnessTranscriptEvent) => void;
       report?: (message: string) => void;
       browserHost?: LocalJobBrowserHost;
+
+      /** Leaves the harness to read the process's environment. */
+      processEnv?: boolean;
+
+      /** Classifies the task with a real loop on the job's own engine. */
+      classify?: boolean;
     } = {},
   ) => {
     const seen: Seen = {};
@@ -108,16 +128,7 @@ describe("runHarnessJob()", () => {
         ? { browserHost: options.browserHost }
         : {}),
       harnessDeps: {
-        env: {
-          CF_HARNESS_MODEL_PROVIDER: "openai-compatible-gateway",
-          CF_HARNESS_GATEWAY_AUTH_MODE: "none",
-          // Named, with a `runsc` and a rootfs nothing runs, so a job selects
-          // the same sandbox on every machine: macOS and Linux otherwise take
-          // the native runtime, from a store this has none of.
-          CF_HARNESS_SANDBOX_RUNTIME: "runsc",
-          CF_HARNESS_RUNSC_BINARY: "/nonexistent/harness-job-test/runsc",
-          CF_HARNESS_SANDBOX_ROOTFS: "/nonexistent/harness-job-test/rootfs",
-        },
+        ...(options.processEnv === true ? {} : { env: SCRIPTED_ENV }),
         fabricSessionFactory: () =>
           Promise.reject(new Error("this job opens no fabric session")),
         createPromptLoop: (loopOptions) => {
@@ -145,6 +156,17 @@ describe("runHarnessJob()", () => {
               });
             },
             runTranscript: () => Promise.reject(new Error("not a resume")),
+            ...(options.classify
+              ? {
+                classifyTask: (task: string, taskOptions?: {
+                  signal?: AbortSignal;
+                }) =>
+                  new CfHarnessPromptLoop(loopOptions).classifyTask(
+                    task,
+                    taskOptions,
+                  ),
+              }
+              : {}),
           };
         },
       },
@@ -205,6 +227,49 @@ describe("runHarnessJob()", () => {
     ]);
   });
 
+  it("takes no grant from the runner's environment, and keeps its model settings", async () => {
+    const set = {
+      ...SCRIPTED_ENV,
+      CF_HARNESS_MODEL: "from-the-environment",
+      ...Object.fromEntries(
+        HARNESS_JOB_GRANT_ENV_KEYS.map((key) => [key, `/granted/${key}`]),
+      ),
+      CF_HARNESS_FABRIC_API_URL: "https://toolshed.example",
+      CF_HARNESS_FABRIC_SPACE: SPACE,
+      CF_HARNESS_FABRIC_FOREIGN_SPACES: "did:key:z6MkforeignSpace",
+      CF_HARNESS_PATTERN_INDEX_URL: "https://index.example",
+      CF_HARNESS_CFC_ENFORCEMENT_MODE: "disabled",
+      CF_CFC_MODE: "disabled",
+    };
+    const before = Object.fromEntries(
+      Object.keys(set).map((key) => [key, Deno.env.get(key)]),
+    );
+    for (const [key, value] of Object.entries(set)) Deno.env.set(key, value);
+    try {
+      const { result, seen } = await runScripted(
+        plainSpec({ model: undefined }),
+        answering("Titan"),
+        { processEnv: true },
+      );
+
+      expect(result.outcome).toBe("completed");
+      expect(seen.loopOptions?.model).toBe("from-the-environment");
+      expect(seen.loopOptions?.fabricSession).toBeUndefined();
+      expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
+      expect(seen.loopOptions?.loomRetrieval).toBeUndefined();
+      expect(seen.loopOptions?.loomCommands).toBeUndefined();
+      // An inherited `disabled` would let a `context` task use write tools.
+      expect(seen.loopOptions?.cfcEnforcementModeOverride).toBe(
+        "enforce-explicit",
+      );
+    } finally {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) Deno.env.delete(key);
+        else Deno.env.set(key, value);
+      }
+    }
+  });
+
   it("allows no subagent profile and hands no host when the spec names none", async () => {
     const { seen } = await runScripted(plainSpec(), answering("Titan"));
     expect(seen.loopOptions?.engine?.browserHost).toBeUndefined();
@@ -236,6 +301,19 @@ describe("runHarnessJob()", () => {
         "submit_result",
       ]);
       expect(seen.loopOptions?.model).toBe("scripted");
+    });
+
+    it("records the task's classification in the job's run state and orients the prompt by it", async () => {
+      const { result, seen } = await runScripted(
+        plainSpec({ task: "what's on Thursday?" }),
+        answering("Nothing."),
+        { classify: true },
+      );
+
+      expect(result.outcome).toBe("completed");
+      expect(seen.loopOptions?.engine?.getRunState().taskClassification)
+        .toMatchObject({ tags: ["find"], path: "rule" });
+      expect(seen.systemPrompt).not.toContain("When you delegate");
     });
 
     it("passes no fabric session and no input cell", async () => {
@@ -365,6 +443,89 @@ describe("runHarnessJob()", () => {
       expect(
         (seen.loopOptions?.inputCells ?? []).map((cell) => cell.name),
       ).toEqual(["book"]);
+    });
+
+    it("admits the spec's foreign spaces to the fabric session", async () => {
+      // A piece handed in from another space is reached in that space.
+      const other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      const { seen } = await runScripted(
+        plainSpec({
+          fabric: {
+            host: "https://toolshed.example",
+            space: SPACE,
+            identityKeyPath: join(runRoot, "unused.key"),
+            maxConfidentiality: [
+              { type: "https://cfc.test/atom/user", subject: "me" },
+            ] as never,
+            inputs: {},
+            foreignSpaces: { [other]: "https://toolshed.example" },
+          },
+        }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.fabricSession?.foreignSpaces).toEqual({
+        [other]: "https://toolshed.example/",
+      });
+    });
+
+    /** A fabric part with no input cells, as a local job's is. */
+    const localFabric = () => ({
+      host: "https://toolshed.example",
+      space: SPACE,
+      identityKeyPath: join(runRoot, "unused.key"),
+      maxConfidentiality: [
+        { type: "https://cfc.test/atom/user", subject: "me" },
+      ] as never,
+      inputs: {},
+    });
+
+    it("configures the spec's pattern index, publishing unless the spec says not to", async () => {
+      for (
+        const [publish, expected] of [
+          [undefined, { baseUrl: "https://index.example" }],
+          [true, { baseUrl: "https://index.example" }],
+          [false, { baseUrl: "https://index.example", publish: false }],
+        ] as const
+      ) {
+        const { seen } = await runScripted(
+          plainSpec({
+            tools: ["run_pattern", "search_patterns", "delegate_task"],
+            subagentProfiles: ["default", "pattern-author"],
+            fabric: localFabric(),
+            patternIndexUrl: "https://index.example",
+            ...(publish !== undefined ? { patternIndexPublish: publish } : {}),
+          }),
+          answering("Titan"),
+        );
+
+        expect(seen.loopOptions?.engine?.config.patternIndex).toEqual(
+          expected,
+        );
+        expect(seen.loopOptions?.fabricSession).toMatchObject({
+          apiUrl: "https://toolshed.example",
+          space: SPACE,
+        });
+        expect(seen.loopOptions?.allowedSubagentProfiles).toEqual([
+          "default",
+          "pattern-author",
+        ]);
+        expect(seen.loopOptions?.allowedToolIds).toEqual([
+          "run_pattern",
+          "search_patterns",
+          "delegate_task",
+          "submit_result",
+        ]);
+      }
+    });
+
+    it("configures no pattern index for a spec that names none", async () => {
+      const { seen } = await runScripted(
+        plainSpec({ tools: ["run_pattern"], fabric: localFabric() }),
+        answering("Titan"),
+      );
+
+      expect(seen.loopOptions?.engine?.config.patternIndex).toBeUndefined();
     });
   });
 

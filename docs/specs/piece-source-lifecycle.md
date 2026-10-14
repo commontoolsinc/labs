@@ -794,8 +794,10 @@ historical origin retains that origin.
 Preflight and setup share stored-argument validation. Optional fields holding
 `undefined` count as absent. An argument document or linked value unreadable in
 the validating transaction defers to reactive reads; a readable wrong-typed
-value is refused. Preflight does not establish that every linked value is
-available.
+value is refused. A link stored at a position the schema types as a cell
+handle validates as that handle: only the top level of what it reaches is
+read, without descending, and held to the type the position allows. Preflight
+does not establish that every linked value is available.
 
 When validation needs to distinguish unreadable links from literal absence, its
 fallback builds a view whose fields follow stored links as validation reads
@@ -1234,6 +1236,19 @@ is the batch lane's,
    active origin and accepted origin revision, set `patternIdentity` to the
    candidate value even when it is unchanged, and advance the revision head.
 7. Start the accepted pattern on the existing piece result cell.
+
+A piece that is already running when it is opened keeps its reactive nodes
+through step 7. The runner's pattern watcher re-instantiates it on the accepted
+pattern, and the open waits for the watcher to finish. Where the
+re-instantiation succeeds, the caller is handed a piece running the pattern its
+`patternIdentity` names, as it is for a piece that was not running.
+
+Two cases leave the caller with the outgoing pattern's nodes still running. A
+re-instantiation that fails is logged, and the piece stays on the pattern it
+was running. On a runtime that seals its writes into a serving wave, the
+re-instantiation follows the wave's settlement, and the open does not wait for
+it. [In-place apply](pattern-imports/pattern-updates.md#in-place-apply) states
+which pointer moves the wait covers.
 
 If reconciliation fails and the current source remains loadable, the runtime
 starts that source. A piece in that state is not following its origin any

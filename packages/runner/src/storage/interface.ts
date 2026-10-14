@@ -497,6 +497,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   authorizationError?(space: MemorySpace): Error | undefined;
 
+  /**
+   * The terminal error of a space's remote subscription. Ordinary reconnects
+   * and reads supplied by an authoritative local store return `undefined`.
+   */
+  spaceSessionError?(space: MemorySpace): Error | undefined;
+
   /** The latest authoritative access loss for a space, cleared on reopening. */
   spaceAccessError?(space: MemorySpace): Error | undefined;
 
@@ -2209,6 +2215,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;
@@ -2356,8 +2369,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Settles whether this transaction is CFC-relevant — the flow-label
-   * relevance probe, then the sink-request ceiling probe — and runs
-   * `prepareCfc()` when it is.
+   * relevance probe, then the sink-request ceiling probe — and runs the
+   * verification `prepareCfc()` runs when it is, without reading the digest.
    *
    * `commit()` runs this itself, so the enforcement ladder always decides on
    * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
@@ -2377,11 +2390,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   prepareForCommitCooperatively(signal: AbortSignal): Promise<void>;
 
   /**
-   * Runs CFC boundary verification for this transaction and records the
-   * prepared digest. Takes no caller-supplied input: the commit-time digest
-   * recheck only confirms the prepared input matches real activity, so an
-   * external input override would let a caller skip verification while still
-   * passing the recheck (audit S2).
+   * Runs CFC boundary verification for this transaction, seals the activity
+   * it verified as the prepared input, and returns that input's digest, or
+   * the empty string when verification refused. Takes no caller-supplied
+   * input: the commit-time digest recheck only confirms the prepared input
+   * matches real activity, so an external input override would let a caller
+   * skip verification while still passing the recheck (audit S2).
    */
   prepareCfc(): string;
 

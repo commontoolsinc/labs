@@ -200,6 +200,7 @@ import {
   mergeableOpRead,
   writeDestinationRead,
 } from "./storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
 ensureNotRenderThread();
@@ -621,26 +622,60 @@ export type StreamSendOptions = {
 // import runner internals — can produce an array the send path accepts.
 const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
 
+/** How a sent event's delivery failed: its append was refused, or its
+ * served handling ended without committing (events.md §5) — the handler
+ * threw (`errored`), admission refused it (`refused`), it was dropped, or it
+ * needs attention. */
+export type EventDeliveryFailure =
+  | "append-refused"
+  | "errored"
+  | "refused"
+  | "dropped"
+  | "needs-attention";
+
+/** The error a sender's commit callback reads from `tx.status()` when the
+ * durable-ack coupling reports a failed delivery: `kind` says which failure
+ * and `reason` carries the outcome's own words, so a caller can tell a
+ * handler that refused the event (`errored`, `refused`) from one that never
+ * ran without reading the message. */
+export class EventDeliveryError extends Error {
+  #kind: EventDeliveryFailure;
+  #reason: string;
+
+  constructor(kind: EventDeliveryFailure, reason: string) {
+    super(
+      kind === "append-refused"
+        ? `event append refused: ${reason}`
+        : `event handling ${kind}: ${reason}`,
+    );
+    this.name = "EventDeliveryError";
+    this.#kind = kind;
+    this.#reason = reason;
+  }
+
+  get kind(): EventDeliveryFailure {
+    return this.#kind;
+  }
+
+  get reason(): string {
+    return this.#reason;
+  }
+}
+
 /** An error-status VIEW of a transaction (the durable-ack coupling;
  * verdict blocker, 2026-08-12): everything passes through except
- * `status()`, which reports the append/consequence failure — so a
- * caller that reads the settle callback's tx as the durable
- * acknowledgment (the CLI verb dispatch's verb-contract Settlement
- * read) sees the authoritative failure instead of the speculative
- * echo's local state. */
+ * `status()`, which reports the append/consequence failure as `error` — so
+ * a caller that reads the settle callback's tx as the durable
+ * acknowledgment (the CLI verb dispatch's verb-contract Settlement read)
+ * sees the authoritative failure instead of the speculative echo's local
+ * state. */
 const errorStatusTxView = (
   tx: IExtendedStorageTransaction,
-  message: string,
+  error: EventDeliveryError,
 ): IExtendedStorageTransaction => {
   const status = () => {
     const real = tx.status();
-    return {
-      ...real,
-      status: "error" as const,
-      error: Object.assign(new Error(message), {
-        name: "EventDeliveryError",
-      }),
-    };
+    return { ...real, status: "error" as const, error };
   };
   return new Proxy(tx, {
     get(target, prop, receiver) {
@@ -1822,6 +1857,10 @@ export class CellImpl<T extends FabricValue>
    * `awaitDurability: true` keeps the read demanded through the runtime-wide
    * commit-aware barrier, including producers installed by pending commits.
    *
+   * Rejects with a terminal connection or takeover error in any space the read
+   * reaches, including when its replica still holds a cached value. Authorization
+   * denials retain their absent-value semantics and per-space access report.
+   *
    * @returns The cell's reactive value after the selected readiness barrier.
    */
   pull(options: { awaitDurability?: boolean } = {}): Promise<Readonly<T>> {
@@ -1837,8 +1876,9 @@ export class CellImpl<T extends FabricValue>
       // a real network it does not, and pull() resolved from held,
       // not-yet-loaded state (measured: a same-id retry's receipt readback
       // returned undefined against a remote host while identical calls
-      // passed against a local toolshed). Failures are swallowed like
-      // link-resolution's kicks: the read still resolves from the replica.
+      // passed against a local toolshed). Load failures are swallowed like
+      // link-resolution's kicks. Ordinary load failures resolve from the
+      // replica; the terminal session check below rejects terminal failures.
       this.#runtime.storageManager.trackUntilSettled(
         this.#startLoad().catch(() => {}),
       );
@@ -1856,15 +1896,25 @@ export class CellImpl<T extends FabricValue>
         ? this.#runtime.scheduler.idleWithPendingCommits()
         : this.#runtime.scheduler.idle();
 
+    let readSpaces = new Set<MemorySpace>([this.space]);
     return new Promise((resolve, reject) => {
       const action: Action = (tx) => {
-        // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
+        try {
+          // Read the value inside the effect - this ensures dependencies are pulled
+          const value = validateAndTransform(this.#runtime, tx, this.#viewRef);
 
-        // If no schema or TrueSchema, traverse the result to register all
-        // nested values as read dependencies.
-        if (needsTraversal && value !== undefined && value !== null) {
-          deepTraverse(value);
+          // If no schema or TrueSchema, traverse the result to register all
+          // nested values as read dependencies.
+          if (needsTraversal && value !== undefined && value !== null) {
+            deepTraverse(value);
+          }
+        } finally {
+          // Schemaless traversal can add reads in other spaces. Each effect
+          // run replaces the set so obsolete dependencies do not fail the pull.
+          readSpaces = new Set<MemorySpace>([this.space]);
+          for (const { space } of getTransactionReadActivities(tx)) {
+            readSpaces.add(space);
+          }
         }
       };
       // Name the action for debugging
@@ -1924,6 +1974,15 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
+        for (const space of readSpaces) {
+          const sessionError = this.#runtime.storageManager.spaceSessionError?.(
+            space,
+          );
+          if (
+            sessionError !== undefined &&
+            sessionError.name !== "AuthorizationError"
+          ) throw sessionError;
+        }
         return validateAndTransform(this.#runtime, undefined, this.#viewRef);
       };
       ready().then(resolve, reject);
@@ -2301,7 +2360,10 @@ export class CellImpl<T extends FabricValue>
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event append refused: ${delivery.refused}`,
+                    new EventDeliveryError(
+                      "append-refused",
+                      delivery.refused,
+                    ),
                   ));
                   return;
                 }
@@ -2316,9 +2378,10 @@ export class CellImpl<T extends FabricValue>
                 ) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event handling ${consequence.kind}: ${
-                      consequence.reason ?? consequence.kind
-                    }`,
+                    new EventDeliveryError(
+                      consequence.kind,
+                      consequence.reason ?? consequence.kind,
+                    ),
                   ));
                   return;
                 }

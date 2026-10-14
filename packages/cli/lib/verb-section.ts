@@ -36,7 +36,7 @@
  */
 
 import { Command, ValidationError } from "@cliffy/command";
-import { listFlags, nearestName } from "./refusal.ts";
+import { listFlags, nearestName } from "@commonfabric/piece/refusal";
 
 /**
  * The flags that shape a result, in the order the commands declare them.

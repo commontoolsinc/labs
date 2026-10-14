@@ -2,6 +2,7 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   hashStringOf,
+  isDeepFrozen,
   isKeyableObjectOrArray,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
@@ -9,6 +10,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   verifySchemaDocument,
   walkSchemaDocumentClosure,
@@ -1206,6 +1208,123 @@ const compactDependencyGroup = <
   compact(root, observed, false);
 };
 
+/**
+ * The most reads one dependency group — one document at one basis — may
+ * carry on the wire. Past it, `coarsenCommitReads` replaces the group's
+ * reads with one recursive read at their common prefix, and a shallow read
+ * there beside it when the group held one.
+ *
+ * A commit names every path a transaction read (03-commit-model.md §3.4),
+ * one `ConfirmedRead` or `PendingRead` per path, and the server refuses a
+ * message past `MAX_UNTRUSTED_MESSAGE_SLOTS`. A pattern setup that runs
+ * inside its own commit — a source swap, `runSyncedWithCommit` — reads
+ * every document its program touches, and on a board of nine hundred
+ * members that was 58 paths on each member's document: 139,441 reads over
+ * 40,095 documents, a 17 MB message, refused. The lossless compaction
+ * (`compactCommitReads`) cannot fold those, since the members' container
+ * was not read in full.
+ *
+ * Applied to the OUTGOING message only. The replica keeps the lossless
+ * set for everything it decides locally — a pending layer's `read` flag,
+ * and `intendedSplicePaths`, which takes a recursive read at an array's
+ * ancestor as the transaction having read that array; a prefix read minted
+ * here would claim splices on arrays the transaction never read.
+ *
+ * The coarser set is a stronger precondition. The engine's
+ * `patchOverlapsRead` matches a touched leaf and a recursive read's path by
+ * prefix in either direction, so whatever overlapped a read under the
+ * prefix overlaps the prefix. A shallow read's rule is different — a
+ * touched path at or ABOVE the read, with a key add/remove injecting its
+ * parent, so an indexed removal at `list/0` is matched by a shallow read
+ * under `list/1` through the injected `list` — which a recursive read at
+ * `list/1` never sees; so a group that held any shallow read keeps a
+ * shallow read at the prefix beside the recursive one. The cost is
+ * conflicting with disjoint writes to the same document, and a retry.
+ */
+const MAX_READS_PER_DEPENDENCY_GROUP = 16;
+
+const commonDocumentPathPrefix = (
+  paths: readonly (readonly string[])[],
+): DocumentPath => {
+  let prefix: readonly string[] = paths[0] ?? [];
+  for (const path of paths) {
+    let length = 0;
+    while (
+      length < prefix.length && length < path.length &&
+      prefix[length] === path[length]
+    ) {
+      length++;
+    }
+    prefix = prefix.slice(0, length);
+    if (prefix.length === 0) break;
+  }
+  return toDocumentPath([...prefix]);
+};
+
+type WireRead =
+  | ClientCommit["reads"]["confirmed"][number]
+  | ClientCommit["reads"]["pending"][number];
+
+const commitReadDependencyKey = (read: WireRead): string =>
+  "seq" in read
+    ? `confirmed:${normalizeCellScope(read.scope)}:${read.id}:${read.seq}`
+    : `pending:${normalizeCellScope(read.scope)}:${read.id}:${
+      localSeqKey(read.localSeq)
+    }:${read.basisSeq}`;
+
+const coarsenWideReadGroup = <Read extends WireRead>(
+  group: readonly Read[],
+): Read[] => {
+  if (group.length <= MAX_READS_PER_DEPENDENCY_GROUP) return [...group];
+  const prefix = commonDocumentPathPrefix(group.map((read) => read.path));
+  const { nonRecursive: _shallow, ...statement } = group[0];
+  const coarsened: Read[] = [];
+  if (group.some((read) => read.nonRecursive === true)) {
+    coarsened.push({ ...statement, path: prefix, nonRecursive: true } as Read);
+  }
+  coarsened.push({ ...statement, path: prefix } as Read);
+  return coarsened;
+};
+
+/**
+ * The commit's reads as the wire carries them: each dependency group past
+ * `MAX_READS_PER_DEPENDENCY_GROUP` coarsened to its prefix. Returns the
+ * input itself when nothing coarsens, so a caller can tell.
+ */
+export const coarsenCommitReads = (
+  reads: ClientCommit["reads"],
+): ClientCommit["reads"] => {
+  const coarsen = <Read extends WireRead>(list: Read[]): Read[] => {
+    const grouped = new Map<string, Read[]>();
+    for (const read of list) {
+      const key = commitReadDependencyKey(read);
+      const group = grouped.get(key);
+      if (group === undefined) grouped.set(key, [read]);
+      else group.push(read);
+    }
+    if (
+      [...grouped.values()].every((g) =>
+        g.length <= MAX_READS_PER_DEPENDENCY_GROUP
+      )
+    ) {
+      return list;
+    }
+    return [...grouped.values()].flatMap((group) =>
+      coarsenWideReadGroup(group)
+    );
+  };
+  const confirmed = coarsen(reads.confirmed);
+  const pending = coarsen(reads.pending);
+  return confirmed === reads.confirmed && pending === reads.pending
+    ? reads
+    : { confirmed, pending };
+};
+
+const coarsenCommitForWire = (commit: ClientCommit): ClientCommit => {
+  const reads = coarsenCommitReads(commit.reads);
+  return reads === commit.reads ? commit : { ...commit, reads };
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -1322,6 +1441,12 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
+ * What `selectorSchemaForLink()` returned for each deep-frozen reader schema,
+ * by that schema's interned instance.
+ */
+const selectorSchemasForLinks = new WeakMap<object, JSONSchema>();
+
+/**
  * The selector schema a link target is asked for. Where the reader's schema
  * takes a handle at the link (`asCell` at its root, or at the root of an
  * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
@@ -1330,11 +1455,33 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
  * than as a reference it delivered once. Inner boundaries stay, as they do
  * on the handle's own schema, and a schema that takes no handle is asked for
  * as it is.
+ *
+ * A deep-frozen schema gets the interned result, the same one on every call
+ * and for every schema equal to it: each sync of a link's target normalizes a
+ * selector over the result, which interns it, and a schema built per sync
+ * would be hashed whole per sync. A schema that is not deep-frozen gets a
+ * schema of its own each time and is left as it was.
  */
-function selectorSchemaForLink(
+export function selectorSchemaForLink(
   schema: JSONSchema | undefined,
 ): JSONSchema | false {
   if (!isObjectOrArray(schema)) return schema ?? false;
+  if (!isDeepFrozen(schema)) return withoutOuterHandles(schema);
+  const interned = internSchema(schema);
+  let remembered = selectorSchemasForLinks.get(interned);
+  if (remembered === undefined) {
+    remembered = internSchema(withoutOuterHandles(interned));
+    selectorSchemasForLinks.set(interned, remembered);
+  }
+  return remembered;
+}
+
+/**
+ * Helper for `selectorSchemaForLink()`, which returns `schema` rebuilt
+ * without its outermost handle boundary, at its root and at the root of each
+ * `anyOf`/`oneOf` branch.
+ */
+function withoutOuterHandles(schema: JSONSchemaObj): JSONSchemaObj {
   const unwrapped = unwrapOuterHandle(schema);
   const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
     const list = unwrapped[key];
@@ -2465,6 +2612,11 @@ export class StorageManager implements IStorageManager {
   }
 
   /** @inheritDoc */
+  spaceSessionError(space: MemorySpace): Error | undefined {
+    return this.#providers.get(space)?.replica.sessionError();
+  }
+
+  /** @inheritDoc */
   spaceAccessError(space: MemorySpace): Error | undefined {
     return this.#spaceAccessErrors.get(space);
   }
@@ -2877,13 +3029,22 @@ export class StorageManager implements IStorageManager {
       id,
       ...(instance !== undefined ? { scopeKey: instance } : {}),
     });
+    // A cell declared a stream is loaded whole. Its document holds no value a
+    // read uses, so a selector carrying the event schema would ask the store
+    // to walk a shape that is never there, at the cost of a root carrying
+    // that schema per stream. A load of such a cell serves a meta write,
+    // which retries a conflict against the document's record, or the resume
+    // gate, which probes that record, and the whole document carries it.
+    const selectorSchema = ContextualFlowControl.declaresStream(schema)
+      ? false
+      : schema ?? false;
     let loadFailure: unknown;
     try {
       const result = await provider.sync(
         id,
         {
           path: cell.path.map((segment) => segment.toString()),
-          schema: schema ?? false,
+          schema: selectorSchema,
         },
         scope,
         instance,
@@ -5019,6 +5180,12 @@ export class SpaceReplica
     return undefined;
   }
 
+  /** The terminal error of the remote subscription supplying this replica. */
+  sessionError(): Error | undefined {
+    if (this.#storeReadThrough() !== undefined) return undefined;
+    return this.#sessionSession?.closeError;
+  }
+
   /**
    * Record the authorization status a watch refresh result implies. A permanent
    * (non-retriable) AuthorizationError becomes the sticky failure
@@ -6222,6 +6389,20 @@ export class SpaceReplica
     // returned SUCCESS carrying the pre-revocation value. Idempotent and
     // cheap — a bare boolean test when nothing is owed.
     this.#consumeOwedSessionRemount();
+
+    // A live replica's covered selector relies on its session for updates.
+    // Terminal session failures invalidate that promise even when the local
+    // document remains available; ordinary reconnects keep the session open.
+    // An authorization denial takes the refresh path below instead, which
+    // records a refused load for `repullRefused()` to make again once a
+    // retry is admitted.
+    const sessionError = this.sessionError();
+    if (
+      !this.#closed && sessionError !== undefined &&
+      sessionError.name !== "AuthorizationError"
+    ) {
+      return { error: toPullError(sessionError) };
+    }
 
     const normalizedEntries = normalizeSyncEntries(entries);
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
@@ -7593,7 +7774,7 @@ export class SpaceReplica
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
           const applied = await session.transact(
-            wireCommit,
+            coarsenCommitForWire(wireCommit),
             () => this.#markRouteWriteIssued(routeSources),
           );
           const settled = this.#settleAccept(
@@ -7625,7 +7806,7 @@ export class SpaceReplica
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
         const verdict = session.transact(
-          wireCommit,
+          coarsenCommitForWire(wireCommit),
           () => this.#markRouteWriteIssued(routeSources),
         );
         const outcome = await Promise.race([

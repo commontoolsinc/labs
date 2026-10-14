@@ -434,10 +434,11 @@ function findHomeRootCell(ctx: WishContext): Cell<any> | undefined {
  * and otherwise the space cell's empty `defaultPattern` slot itself. A wish
  * creates no root. A read through the empty slot finds nothing, and a write
  * through it is refused unless the root exists by then
- * (`SpaceRootMissingError`); a client runtime brings the root up ahead of a
- * handler whose state holds such a cell (`bringUpHomeRootForHandler`). A
- * headless wish hands out nothing over an empty slot, and throws
- * `NoHomeRootError`, so it resolves to nothing.
+ * (`SpaceRootMissingError`); on a client runtime, when a handler's write there
+ * is refused and the refusal escapes the handler, the root is brought up and
+ * the handler runs again (`bringUpHomeRootForRefusedWrite`). A headless wish
+ * hands out nothing over an empty slot, and throws `NoHomeRootError`, so it
+ * resolves to nothing.
  */
 function getHomeRootCell(ctx: WishContext): Cell<any> {
   const found = findHomeRootCell(ctx);
@@ -2453,11 +2454,12 @@ export function wish(
     // there, and that link persists a label entry under `[UI]/props/$cell`,
     // so on such a document `[UI]` is one of those paths.
     //
-    // The schema named is `true`, which is what the wish-state schema says
-    // at both paths. It declares nothing, so a stored claim at either path
-    // is not checked against this write; and a candidate declaring nothing
-    // is covered by whatever the document has stored, which keeps the report
-    // out of the schema merge.
+    // The schema named is `true`. The wish-state schema declares no value
+    // shape and no label at either path: `error` is `true` there, and `[UI]`
+    // is an opaque handle. `true` declares nothing, so a stored claim at
+    // either path is not checked against this write; and a candidate
+    // declaring nothing is covered by whatever the document has stored,
+    // which keeps the report out of the schema merge.
     //
     // The requirement is decided per document rather than per path. What
     // bounds the report is this transaction: it is created here, carries

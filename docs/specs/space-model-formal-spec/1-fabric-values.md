@@ -1907,6 +1907,33 @@ encoded subtree appears at each position it appeared at. Whether the decoded
 objects are `===` to each other is a further promise, which an engine states
 only if it makes it.
 
+**A cell write keeps shared references within that write, and no further.**
+The runtime's write path (`Cell.set()` and the collection operations) stores a
+plain JavaScript object or array that appears at two positions of one written
+value once: each later occurrence is stored as a link to the first. A plain
+object that occurs as an array element is the exception: it is stored in a
+document of its own, which every occurrence links to, including one written
+at an object key earlier in the write. The link is stored, so the sharing
+outlives the write and holds across sessions:
+
+- A write inside the shared value, such as a push or a `set()` at a path below
+  either position, is read at both positions.
+- Replacing a position whole with `set()` writes at that position. A position
+  that holds a link has the link replaced, and stops sharing. The first
+  occurrence, where the others link to it, takes the new value, and every link
+  to it reads that value. Where every occurrence links to the object's own
+  document, no position is the one named, so replacing any of them ends only
+  that position's sharing.
+
+What is shared is the stored value, not the JavaScript object written: the
+object itself is left as it was. The sharing reaches only as far as one write.
+The same plain object written by two writes (two `set()` calls, even in one
+transaction, two handlers, or two cells) is stored as two independent values.
+A reference is different, because the reference is what is written: a `Cell`
+or link written at two positions names its target at both, however many writes
+put it there, and a position holding a write-redirect link passes a `set()` on
+to its target rather than replacing the link.
+
 Cycles *across* documents are a separate matter, and are supported whatever an
 engine does within one. They are written as explicit links (`FabricInstance`s
 referencing other documents), so two cells may reference each other and form a

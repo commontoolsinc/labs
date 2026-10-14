@@ -114,18 +114,35 @@ export type CompactionReport = {
   revisions: { rowsDeleted: number; bytesDeleted: number };
   snapshots: { rowsDeleted: number; bytesDeleted: number };
   payloads: {
-    /** The newest commit's `created_at`, which the window is measured from. */
+    /**
+     * The newest client commit's `created_at`, which the window is measured
+     * from.
+     */
     newestCommitAt: string | null;
+
     /** Commits at or before this `created_at` are outside the window. */
     cutoffAt: string | null;
+
     commits: number;
+
+    /**
+     * Commits created after `cutoffAt`, other than the compaction commits
+     * `exemptCompaction` counts.
+     */
     insideWindow: number;
+
     exemptGenesis: number;
     exemptOpReferenced: number;
-    /** Earlier runs' compaction commits: their payload is the run's record. */
+
+    /**
+     * Earlier runs' compaction commits, on either side of `cutoffAt`: their
+     * payload is the run's record.
+     */
     exemptCompaction: number;
+
     /** Commits an earlier run already hollowed; a resumed run skips them. */
     alreadyHollowed: number;
+
     hollowed: {
       owningHead: { commits: number; bytes: number };
       headless: { commits: number; bytes: number };
@@ -467,7 +484,11 @@ export const planCompaction = (
   // The window is measured from the newest commit a client made: a compaction
   // commit from an earlier run is not an event the window should move for,
   // and excluding it is what lets a resumed run hollow the same rows the
-  // interrupted one planned to.
+  // interrupted one planned to. The count below sorts a compaction commit
+  // ahead of the window for the same reason. Such a commit keeps its payload
+  // on either side of the cutoff, and its `created_at` is the wall clock of
+  // the run that inserted it, which says nothing about the client commits the
+  // window is measured over.
   const newest = db.prepare(
     `SELECT MAX(created_at) AS at, MAX(seq) AS seq FROM "commit"
      WHERE session_id NOT LIKE ?`,
@@ -495,9 +516,9 @@ export const planCompaction = (
      )
      SELECT
        CASE
+         WHEN c.session_id LIKE ? THEN 'compaction'
          WHEN c.created_at > ? THEN 'inside'
          WHEN c.seq = 1 THEN 'genesis'
-         WHEN c.session_id LIKE ? THEN 'compaction'
          WHEN c.seq IN (SELECT seq FROM opref) THEN 'op'
          WHEN substr(c.original, 1, ?) = ? THEN 'hollowed'
          WHEN c.seq IN (SELECT seq FROM owners) THEN 'owning'
@@ -508,8 +529,8 @@ export const planCompaction = (
      FROM "commit" c
      GROUP BY kind`,
   ).all<{ kind: string; n: number; bytes: number }>(
-    cutoffAt,
     `${COMPACTION_SESSION_PREFIX}%`,
+    cutoffAt,
     HOLLOWED_MARKER_PREFIX.length,
     HOLLOWED_MARKER_PREFIX,
   );

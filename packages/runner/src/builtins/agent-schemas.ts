@@ -34,6 +34,8 @@ export const AGENT_TOOL_NAMES = [
   "loom_profile",
   "describe_handle",
   "run_pattern",
+  "call_verb",
+  "read_value",
   "web_fetch",
   "research",
 ] as const;

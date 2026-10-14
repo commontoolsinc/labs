@@ -1,9 +1,11 @@
 # Shared-space catalog
 
-The Home pattern owns the shared-space catalog: which shared spaces a person
-keeps in their collection. It exposes reactive `sharedSpaceCatalog` data and the
-`registerSharedSpace`, `changeSharedSpaceMembership`, and `removeSharedSpace`
-handlers. Authored patterns and host applications use these same operations.
+The Home pattern owns the shared-space catalog: which social spaces a person
+keeps in their collection. Its `sharedSpaces` surface separates private
+observations from command bindings. Authored patterns and host applications use
+the same operations. The flat `sharedSpaceCatalog`, `registerSharedSpace`,
+`changeSharedSpaceMembership`, and `removeSharedSpace` fields are aliases over
+the same storage and streams.
 Catalog types, validation, and transitions live in
 `packages/patterns/system/shared-space-catalog.ts`.
 
@@ -13,6 +15,97 @@ refuse an existing identity Home before stopping or unlinking it. Home source
 changes use in-place updates to retain its account data.
 The [integration plan](../plans/shared-space-catalog-pattern-access.md) lists
 the remaining deployment and consumer requirements.
+
+## Product interface
+
+Consumers discover the authenticated actor's Home through the ordinary Home
+root path, then select the role they need. The grouped surface is additive;
+its required outputs are produced by Home setup, and the backing catalog keeps
+its stable cause. Importing Home's full output type or binding the whole
+`sharedSpaces` object selects unrelated private observations.
+
+| Path below Home | Role |
+| --- | --- |
+| `sharedSpaces.commands.register` | Admit a target the caller has vetted |
+| `sharedSpaces.commands.changeMembership` | Archive or restore at the observed revision |
+| `sharedSpaces.view` | Validated collection observation and membership lists |
+| `sharedSpaces.receipts` | Validated offer-admission evidence |
+| `sharedSpaces.imports.remove` | An application's undo of its own import |
+
+Pattern consumers can wish for `#default/sharedSpaces/commands` with
+`scope: ["~"]` and the shallow `SharedSpaceCommands` role exported by
+`packages/patterns/system/shared-space-interface.ts`. A reader selects
+`#default/sharedSpaces/view` with `SharedSpaceCollectionView`, or a narrower
+local projection. The `~` scope is essential: an unscoped `#default` names the
+current social space's root. No catalog-specific wish builtin is required.
+
+Host projections are exported by `@commonfabric/home-schemas`:
+`sharedSpaceCommandsSchema`, `sharedSpaceCollectionViewSchema`,
+`sharedSpaceReceiptViewSchema`, and `sharedSpaceImportCommandsSchema`. Apply a
+projection to its individual role cell, for example
+`home.key("sharedSpaces").key("view").asSchema(sharedSpaceCollectionViewSchema)`.
+The host's materialized view type is `HomeSharedSpaceCollectionView`; the
+authored pattern observation type is `SharedSpaceCollectionView`.
+These schemas describe the interface; Home's authored validator and handlers
+own the catalog rules. Command projections retain every event field so an
+optional malformed value reaches that validator. Handler result receipts remain
+the operation completion mechanism.
+
+Retain the role's cell path across source updates, and resolve a command from
+that path when invoking it. Home publishes refreshed handler bindings when its
+source changes; a resolved stream endpoint is a snapshot of one binding. The
+Home root and the catalog backing cell retain their identity. The flat and
+grouped paths expose the same current streams.
+
+The flat command streams keep their named Home addresses; grouped commands
+alias them through Home's own result. Home exposes its collection browser as
+`socialSpaceCollection`, including its session-local controls. That result key
+names the browser's instance, so adding it does not consume an existing
+anonymous cause or move the flat catalog observation's computed document.
+
+The collection view is either `status: "ready"` or `status: "unavailable"`.
+An unavailable observation reports `loading` for an undefined value and
+`malformed` for a value the complete catalog validator refuses. A ready view has
+`entries`, keyed by space DID, and `saved`, `archived`, and `other` lists. It
+also has `byKind`, whose keys are the kinds actually present and whose values
+contain those three lists. An absent kind has no entry. For presentation, lists
+sort admission hints newest first, treating missing times as zero and breaking
+ties by space DID. This display order establishes no authoritative chronology
+or conflict precedence. Entries retain extension fields and opaque revisions;
+unfamiliar states appear under `other`. The receipts view has the same
+availability distinction and exposes `offers` when ready.
+
+Read availability establishes a valid initialized observation. It does not
+establish synchronized loading, producer-interface absence, or durable command
+completion. Native clients still retain their last confirmed projection and
+handle transport failure, denied access, optimistic rollback, and a settled
+incompatible Home as described below.
+
+Command bindings carry no collection data. A social-space handler may write its
+shared records and send a registration to Home without reading membership. Home
+handles that command in its own transaction; the two operations are separate
+commits, and completion of the social-space write does not confirm Home's
+registration. Reading the private view in the shared-record handler introduces
+private confidentiality into that handler's writes. Selecting commands avoids
+reading collection observations; it grants no additional access and declassifies
+no data. An application's rendered membership list reads the view privately and
+sends its observed revision to Home when the person chooses archive or restore.
+
+Structural role separation does not remove labels already declared on Home or
+manager documents. FabriChat sends through the flat wrapper-to-core manager link
+chain are covered under a root-private core. Manager-derived UI computations
+that persist in a room's shared space and direct bindings to a labeled manager
+remain separate limitations. Grouped command and observation roles alone do not
+establish that those reads are safe.
+
+Home's **Social spaces** tab browses the same validated collection. Search,
+kind, and membership filters are session-local. It lists saved and archived
+spaces independently of target-space availability, and preserves unfamiliar
+states in a separate view with no membership control. Archive and restore use
+the revision embedded in the rendered control's event, so a newer peer choice
+causes a conflict notice instead of being replaced. Opening uses ordinary shell
+space navigation and its configured routing; listing does not fetch target
+roots, add routing hints, grant access, or change the navigation list.
 
 ## Identity and routing
 
@@ -77,13 +170,29 @@ revision and names that one gives the check up, which is right only where the
 person's request is the choice whatever the entry's state. A new revision names
 the calling handler's event, so only a handler can call it.
 
-FabriChat's manager calls both from its own handlers, and lists the rooms the
-catalog keeps as saved. Creating a room, or accepting one a manager created,
-registers the room's space. Forgetting a room archives its entry, naming the
-revision the person's list showed. Finding a direct room again, or accepting a
-room, restores its entry if it was archived. Asking to open or accept the room
-is the person's choice to have it listed, so that restore names the revision the
-handler reads.
+FabriChat's manager in Home calls both from its own handlers. For standalone
+`fabrichat-room` spaces, the catalog's current state and revision govern the
+chat list, including when a saved container also declares that room. Creating a
+room, or accepting one a manager created, registers the room's space. Forgetting
+a standalone room archives its entry, naming the revision the person's list
+showed. Finding a direct room again, or accepting a room, restores its entry if
+it was archived. Asking to open or accept the room is the person's choice to
+have it listed, so that restore names the revision the handler reads. Catalog
+restoration supersedes a prior room tombstone; catalog archive or removal
+supersedes a saved room record.
+
+Other saved spaces expose conversations through their roots' explicit
+`chatRoom` declarations. FabriChat keeps choices about those individual rooms
+separately from the container's catalog entry. Forgetting such a conversation
+leaves its container saved and suppresses rediscovery through the declaration.
+See [FabriChatManager](../specs/fabrichat/FabriChatManager.md).
+
+FabriChat consumes the manager's flat fields through its room-specific schema.
+Shared-record handlers bind individual streams without materializing a manager
+selection. The manager's stored defaults and module are independent of the
+catalog interface; changing that module or its room dependency requires separate
+state-retention verification. New catalog consumers select Home's grouped roles
+rather than the manager's complete result or its stored catalog.
 
 New entries record `since`, the recipient's admission time in epoch
 milliseconds. Registration records it when admitting the entry; a migration may
