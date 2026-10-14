@@ -2850,8 +2850,12 @@ export function validateShrinkCoverage(
 /** A serialized path key with numeric segments normalized to `*`, so an
  * element access observed at one index matches the element position. */
 function contractPathKey(segments: readonly string[]): string {
-  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment)
-    .join("\x00");
+  return contractPathSegments(segments).join("\x00");
+}
+
+/** `segments` with each array index read as any index, `*`. */
+function contractPathSegments(segments: readonly string[]): string[] {
+  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment);
 }
 
 function addPrefixKeys(
@@ -2936,6 +2940,16 @@ interface ContractObservation {
    * the authored type is plain — `equals`-style comparison materializes
    * through a comparable cell, not through the value. */
   readonly exactComparableCell: ReadonlySet<string>;
+
+  /** Positions whose value escaped whole, a cell's handle among them, at
+   * and below which the body's uses are not recorded one by one. */
+  readonly escaped: readonly (readonly string[])[];
+
+  /** The prefixes of the body's wildcards, and of its reads through a key
+   * that can name any member, below which its uses are not recorded one by
+   * one. Its use of a prefix itself is: a `.get()` reads it, and a write
+   * through such a key writes it. */
+  readonly reachedBelow: readonly (readonly string[])[];
 }
 
 function contractObservationFrom(
@@ -2959,7 +2973,38 @@ function contractObservationFrom(
   for (const path of summary.identityCellPaths ?? []) {
     exactComparableCell.add(contractPathKey(path));
   }
-  return { write, read, comparable, exactComparableCell };
+  const escaped = (summary.escapedPaths ?? []).map(contractPathSegments);
+  const reachedBelow = (summary.wildcardPaths ?? []).map(
+    contractPathSegments,
+  );
+  return {
+    write,
+    read,
+    comparable,
+    exactComparableCell,
+    escaped,
+    reachedBelow,
+  };
+}
+
+/**
+ * Whether the body may use the position at `path` in a way the summary does
+ * not record: it lies at or below a value that escaped whole, or strictly
+ * below a wildcard's prefix (`ContractObservation`).
+ */
+function usedUntracked(
+  observation: ContractObservation,
+  path: readonly string[],
+): boolean {
+  const segments = contractPathSegments(path);
+  const startsWith = (prefix: readonly string[]) =>
+    prefix.every((segment, index) => segments[index] === segment);
+  return observation.escaped.some((prefix) =>
+    prefix.length <= segments.length && startsWith(prefix)
+  ) ||
+    observation.reachedBelow.some((prefix) =>
+      prefix.length < segments.length && startsWith(prefix)
+    );
 }
 
 function contractCapabilityAt(
@@ -2981,7 +3026,9 @@ function contractCapabilityAt(
  * writable where it writes, read-only where it reads, comparable where it
  * only compares, and OPAQUE where it never touches the position, so a
  * declared-but-unread reference confers no exercised authority while the
- * contract still names it.
+ * contract still names it. A position the body may use in a way its summary
+ * does not record (`usedUntracked()`) keeps the capability written for it,
+ * since no narrower one can be shown to suffice.
  *
  * A reference to a type alias is walked as the node the alias names
  * (`readAuthoredTypeNode()`), so a cell declared through an alias is rewritten
@@ -3117,6 +3164,9 @@ export function overlayContractCapabilities(
 
     if (namesCellWrapper(current, checker)) {
       if (preservedWrapperFor(current, currentType, checker)) return current;
+      // No capability narrower than the one written can be shown to suffice
+      // for a use the summary does not record.
+      if (usedUntracked(observation, path)) return current;
       const innerNode = current.typeArguments?.[0];
       if (!innerNode) return current;
       // The wrapper's capability is this position's to overlay; the target's
@@ -3248,6 +3298,9 @@ export function overlayContractCapabilities(
     unfold: () => ts.TypeNode | undefined,
   ): ts.TypeNode => {
     if (visiting.has(type)) return current;
+    // Every cell a use the summary does not record may reach keeps the
+    // capability written for it, so the node serves as written.
+    if (usedUntracked(observation, path)) return current;
     if (
       cutsExpansion(type, expansions, budget, checker, MAX_OVERLAY_NESTING) &&
       !usedWithin(path)

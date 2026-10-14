@@ -231,6 +231,14 @@ export type SpaceServerPolicy = {
    * reads SERVER_EXECUTION_FLUSH_DEADLINE_MS). */
   flushDeadlineMs?: number;
 
+  /**
+   * Injected wall clock for deterministic flush-deadline verification. A
+   * settle reads its deadline off this clock, and whether the deadline has
+   * passed. The timer that cuts a settle mid-await counts real time
+   * regardless.
+   */
+  flushDeadlineNow?: () => number;
+
   /** Phase 6 (serving-loop.md §5's per-space budgets; README §3.8):
    * cap on dispatched-but-unsettled NETWORK effects per space —
    * "outstanding LLM calls". Undefined = unbounded. */
@@ -847,8 +855,10 @@ export class SpaceServer implements TransactionSealDestination {
   /**
    * Re-armed roots whose retry follows frame application, each mapped to
    * the lowest seq of an input that may have re-armed it. The settle loop
-   * retries them before declaring their demanded derivations current, and
-   * until it does, W stays below that seq.
+   * starts the retry at the first frame barrier it completes, and until
+   * then W stays below that seq. From there the retry is a structure load
+   * like any other, which every settle awaits before it reads the scheduler
+   * as idle.
    */
   readonly #rearmedAwaitingSettle = new Map<string, number>();
 
@@ -1233,11 +1243,14 @@ export class SpaceServer implements TransactionSealDestination {
    * keeps arriving keeps the scheduler busy at every exit probe, so a
    * settle can reach the flush deadline without observing quiescence even
    * though the batch it drained was long done. Any later moment at which
-   * the scheduler is idle with no re-armed root pending proves this head
-   * covered, since whatever the scheduler ran after the barrier it ran to
-   * completion too; that moment may fall in a later cycle. A wave commit
-   * that aborts clears it, because the abort withdrew consequences the
-   * proof would otherwise count, and so does the end of the tenure.
+   * the scheduler is idle proves this head covered, since whatever the
+   * scheduler ran after the barrier it ran to completion too; that moment
+   * may fall in a later cycle. A re-armed root whose retry has not started
+   * holds the proof below the input that re-armed it and no lower, so input
+   * that keeps re-arming a root does not keep the head from being proven.
+   * A wave commit that aborts clears the head, because the abort withdrew
+   * consequences the proof would otherwise count, and so does the end of
+   * the tenure.
    */
   #barrierHead: number | undefined;
 
@@ -3704,8 +3717,11 @@ export class SpaceServer implements TransactionSealDestination {
       return;
     }
     if (this.#pendingStructureRetryWake) {
-      // A load that completed after its cycle's deadline left a retry.
-      // The next settle applies its input before attempting it again.
+      // A structure retry is owed a cycle: one a load left behind when it
+      // completed after its cycle's deadline, which the next settle
+      // attempts again once it has applied the retry's input, or one that
+      // started as its settle ended at the deadline, which the next settle
+      // joins.
       this.#pendingStructureRetryWake = false;
       return;
     }
@@ -5649,11 +5665,12 @@ export class SpaceServer implements TransactionSealDestination {
 
   /**
    * Helper for `#serveWave()`, which reports whether a terminal root that a
-   * commit re-armed still owes this settle its structure load: a settle
-   * does not end while one does. Frame application makes the re-arming
-   * metadata readable, so a root re-armed while the replica shadows foreign
-   * novelty waits for a later cycle, and `#visibleInputHead()` keeps W below
-   * the input that re-armed it meanwhile.
+   * commit re-armed has a retry to start at the settle's next completed
+   * frame barrier: a settle does not end quiescent while one does. Frame
+   * application makes the re-arming metadata readable, so a root re-armed
+   * while the replica shadows foreign novelty waits for a later cycle, and
+   * `#visibleInputHead()` keeps W below the input that re-armed it
+   * meanwhile.
    */
   #rearmPending(runtime: Runtime): boolean {
     return this.#rearmedAwaitingSettle.size > 0 &&
@@ -5670,6 +5687,14 @@ export class SpaceServer implements TransactionSealDestination {
     if (known === undefined || seq < known) {
       this.#rearmedAwaitingSettle.set(key, seq);
     }
+  }
+
+  /**
+   * Helper for `#serveWave()`, which reads the clock the flush deadline is
+   * measured on.
+   */
+  #flushDeadlineNow(): number {
+    return this.#options.policy?.flushDeadlineNow?.() ?? Date.now();
   }
 
   /**
@@ -6084,12 +6109,12 @@ export class SpaceServer implements TransactionSealDestination {
     // belong to the NEXT wave).
     const deadlineMs = this.#options.policy?.flushDeadlineMs ??
       DEFAULT_FLUSH_DEADLINE_MS;
-    const deadline = Date.now() + deadlineMs;
+    const deadline = this.#flushDeadlineNow() + deadlineMs;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const deadlinePromise = new Promise<"deadline">((resolve) => {
       deadlineTimer = setTimeout(
         () => resolve("deadline"),
-        Math.max(0, deadline - Date.now()),
+        Math.max(0, deadline - this.#flushDeadlineNow()),
       );
     });
     // The demanded-structure load pass runs UNDER the wave's flush
@@ -6158,11 +6183,11 @@ export class SpaceServer implements TransactionSealDestination {
             // The probe and the floors that clamp the proof are read in one
             // synchronous stretch, as the exit probe below and the floors the
             // advance reads are, so no shadow promotion falls between them.
+            // A re-armed root whose retry has not started clamps the proof
+            // below the input that re-armed it, as it clamps every advance;
+            // it does not withhold the proof for the inputs below that one.
             const barrierHead = this.#barrierHead;
-            if (
-              barrierHead !== undefined && runtime.scheduler.isIdle() &&
-              !this.#rearmPending(runtime)
-            ) {
+            if (barrierHead !== undefined && runtime.scheduler.isIdle()) {
               provenHead = Math.max(
                 provenHead ?? 0,
                 this.#visibleInputHead(runtime, barrierHead).visible,
@@ -6207,23 +6232,33 @@ export class SpaceServer implements TransactionSealDestination {
         // head, whatever the probes below find.
         this.#barrierHead = batchHead;
         if (this.#rearmPending(runtime)) {
-          if (Date.now() >= deadline) {
-            exhausted = true;
-            this.#purgeLt1Leftovers(runtime);
-            break;
-          }
-          // Frame application makes the re-arming metadata readable. Its
-          // structure load and derivations still belong to this settle.
+          // Read before the retry starts, so the decision is about the
+          // barrier and not about how long the pass took to get under way.
+          const pastDeadline = this.#flushDeadlineNow() >= deadline;
+          // Frame application makes the re-arming metadata readable, and
+          // that is all the retry waits for, so it starts here on either
+          // side of the deadline. On a host where every barrier completes
+          // behind the deadline, this is the only place it starts.
           for (const key of this.#rearmedAwaitingSettle.keys()) {
             this.#pendingStructureLoads.add(key);
           }
           this.#rearmedAwaitingSettle.clear();
-          this.#pendingStructureRetryWake = false;
           loadPass = joinLoadPass();
+          if (pastDeadline) {
+            // The pass outlives this settle and the next cycle joins it.
+            // The latch has that cycle run even with no input behind it.
+            this.#pendingStructureRetryWake = true;
+            exhausted = true;
+            this.#purgeLt1Leftovers(runtime);
+            break;
+          }
+          // The structure load and its derivations still belong to this
+          // settle.
+          this.#pendingStructureRetryWake = false;
           continue;
         }
         if (runtime.scheduler.isIdle()) break;
-        if (Date.now() >= deadline) {
+        if (this.#flushDeadlineNow() >= deadline) {
           exhausted = true;
           this.#purgeLt1Leftovers(runtime);
           break;

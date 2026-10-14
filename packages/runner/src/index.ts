@@ -133,6 +133,8 @@ export {
   cellTx,
   convertCellsToLinks,
   encodeSqliteParams,
+  EventDeliveryError,
+  type EventDeliveryFailure,
   exportCell,
   hostValueOf,
   isCell,

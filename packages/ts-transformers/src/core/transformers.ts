@@ -97,6 +97,15 @@ export type CapabilityParamSummary = {
   readonly wildcard: boolean;
 
   /**
+   * The static path prefixes below which the body reaches members this
+   * analysis does not name one by one: a wildcard's, and a read through a key
+   * that can name any member. `[]` is the whole parameter. A position below
+   * one may be used in any way the analysis did not record; the use of a
+   * prefix itself is recorded with the other paths.
+   */
+  readonly wildcardPaths?: readonly (readonly string[])[];
+
+  /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on
    * cell-like receivers, and by `set`/`send` calls carrying an onCommit

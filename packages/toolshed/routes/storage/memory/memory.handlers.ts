@@ -232,7 +232,13 @@ export const attachMemorySocketPipeline = (
         socket.send(frame);
       }
     },
-    () => {
+    (error) => {
+      // A close ends every session on the connection, mid-resume or not, and
+      // the client sees only the close; the cause is recorded here.
+      console.error(
+        "memory websocket: closing the connection after a frame failure",
+        error,
+      );
       safeSocketClose(1011, "Memory websocket message failure");
       closeConnection();
     },
@@ -309,7 +315,12 @@ export const attachMemorySocketPipeline = (
             // it is handed over, so the handling is not waited for: waiting
             // would hold every later frame behind this one, whichever
             // spaces they name.
-            connection.receive(payload).catch(() => {
+            connection.receive(payload).catch((error) => {
+              console.error(
+                `memory websocket: closing connection ${connection.id} ` +
+                  "after a frame its server could not handle",
+                error,
+              );
               safeSocketClose(1011, "Memory websocket message failure");
               closeConnection();
             });
@@ -318,6 +329,11 @@ export const attachMemorySocketPipeline = (
         },
         onClose: closeConnection,
         onError(error) {
+          console.error(
+            `memory websocket: closing connection ${connection.id} after ` +
+              "its socket failed",
+            error,
+          );
           safeSocketClose(
             error.message.startsWith("Memory websocket expects") ? 1003 : 1011,
             error.message,
@@ -325,7 +341,12 @@ export const attachMemorySocketPipeline = (
           closeConnection();
         },
       });
-    } catch {
+    } catch (error) {
+      console.error(
+        `memory websocket: closing connection ${connection.id} after its ` +
+          "first frame failed",
+        error,
+      );
       safeSocketClose(1011, "Memory websocket setup failure");
       closeConnection();
     }

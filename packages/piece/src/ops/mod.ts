@@ -83,6 +83,8 @@ export {
   type InboxAdoptionRefusal,
   inboxPieceLinkSchema,
   type PrivateInboxEnsure,
+  type PrivateInboxRequestOutcome,
+  requestPrivateInboxOf,
 } from "./private-inbox.ts";
 export {
   type JoinVisitDecision,
