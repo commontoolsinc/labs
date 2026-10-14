@@ -129,14 +129,17 @@ import { createRef } from "./create-ref.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
-  dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
+  portableSnapshotId,
+  portableSnapshotLinks,
+  resolveImmutableValueLinks,
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
+import { areLinksSame } from "./link-equality.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
-import { areNormalizedLinksSame } from "./link-types.ts";
+import { areNormalizedLinksSame, isPrimitiveCellLink } from "./link-types.ts";
 import {
-  areLinksSame,
   createSigilLinkFromParsedLink,
   declareStreamSchema,
   isCellLink,
@@ -1214,7 +1217,7 @@ export function encodeSqliteParams(
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
       }
-      return encodeCellToSigilString(cell);
+      return encodeCellToSigilString(cell, portableSnapshotId);
     }
     return encodeNested(value);
   };
@@ -2218,9 +2221,12 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
-      ) as AnyCellWrapping<T>;
+      // Local delivery retains immutable cell identity. Server execution
+      // persists events, so its echo and durable delivery use portable links.
+      const convertedEvent = convertCellsToLinks(newValue as CellLinkInput);
+      const event = (this.#runtime.experimental.serverExecution === true
+        ? portableSnapshotLinks(convertedEvent)
+        : convertedEvent) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
       const mintedKeys = mintedRuntimeInjectedEventKeys(
@@ -2356,7 +2362,9 @@ export class CellImpl<T extends FabricValue>
                     ? doneStatusTxView(echoTx)
                     : echoTx,
                 );
-                if (callerOnCommit === undefined) return;
+                if (callerOnCommit === undefined) {
+                  return;
+                }
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
@@ -2627,7 +2635,9 @@ export class CellImpl<T extends FabricValue>
           this.#cleanup?.();
           const [cancel, addCancel] = useCancelGroup();
           this.#cleanup = cancel;
-          this.#listeners.forEach((callback) => addCancel(callback(event)));
+          this.#listeners.forEach((callback) =>
+            addCancel(callback(event))
+          );
           return this as unknown as Cell<T>;
         }
       }
@@ -3804,7 +3814,7 @@ export class CellImpl<T extends FabricValue>
         );
       }
     }
-    link = maybeConvertArrayPathToDataURILink(readTx, link);
+    link = maybeConvertArrayPathToImmutableLink(readTx, link);
     return createCell(
       this.#runtime,
       link,
@@ -3837,7 +3847,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
-    return this.#link;
+    return pinImmutableCell(this.#link, this.#link.id);
   }
 
   /**
@@ -3911,13 +3921,12 @@ export class CellImpl<T extends FabricValue>
     const tx = this.#runtime.readTx(this.#tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
-      // A raw read still resolves links on the way to the target, and those
-      // crossings are content reads: the seam marks labeled hops.
-      resolveLink(this.#runtime, tx, this.#link, lastNode, {
-        markIfcCrossings: true,
-      }),
-      readOptions,
+    const resolved = resolveLink(this.#runtime, tx, this.#link, lastNode, {
+      markIfcCrossings: true,
+    });
+    const value = resolveImmutableValueLinks(
+      tx.readValueOrThrow(resolved, readOptions),
+      resolved.id,
     );
     // Deep-copy with desired frozenness, without unwrapping to JS form --
     // getRaw() and getRawUntyped() return fabric-layer values, not
@@ -4748,10 +4757,13 @@ function cellImplOf(value: unknown): CellImpl<FabricValue> | undefined {
  * it.
  */
 function frozenLink(link: NormalizedLink): NormalizedLink {
-  return Object.freeze(
-    Object.isFrozen(link.path)
-      ? link
-      : { ...link, path: Object.freeze([...link.path]) },
+  return pinImmutableCell(
+    Object.freeze(
+      Object.isFrozen(link.path)
+        ? link
+        : { ...link, path: Object.freeze([...link.path]) },
+    ),
+    link.id,
   );
 }
 
@@ -5107,7 +5119,7 @@ export function deepTraverse(
   }
 }
 
-function maybeConvertArrayPathToDataURILink(
+function maybeConvertArrayPathToImmutableLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): NormalizedFullLink {
@@ -5177,45 +5189,9 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: inlineElementSnapshotId(candidate.value, baseLink),
+    id: immutableCellsFor(tx).createElement(candidate.value, baseLink).id,
     path: candidate.remainingPath,
   };
-}
-
-/**
- * The snapshot ids minted for inline elements, by the element's value and
- * then by the link it was read through, which decides how its relative links
- * resolve. A stored value is a frozen object the replica holds until the
- * document changes, so one element resolved by every reader of the same
- * document version is encoded once rather than per reader: the renderer
- * resolves each element it shows several times over.
- */
-const inlineElementSnapshotIds = new WeakMap<object, Map<string, URI>>();
-
-function inlineElementSnapshotId(
-  value: FabricValue,
-  base: NormalizedFullLink,
-): URI {
-  if (!isObjectOrArray(value)) {
-    return dataUriFromValueWithResolvedLinks(value, base);
-  }
-  const baseKey = JSON.stringify([
-    base.space,
-    base.id,
-    normalizeCellScope(base.scope),
-    base.path,
-  ]);
-  let byBase = inlineElementSnapshotIds.get(value);
-  if (byBase === undefined) {
-    byBase = new Map();
-    inlineElementSnapshotIds.set(value, byBase);
-  }
-  let id = byBase.get(baseKey);
-  if (id === undefined) {
-    id = dataUriFromValueWithResolvedLinks(value, base);
-    byBase.set(baseKey, id);
-  }
-  return id;
 }
 
 /**
@@ -5746,7 +5722,7 @@ function convertOneToLinks(
     // filled by assignment costs about half again as much to structured-clone
     // as the same object built from entries, and every consumer of a converted
     // value pays that, the crossing to the client included.
-    return Object.freeze(Object.fromEntries(
+    const converted = Object.freeze(Object.fromEntries(
       Object.entries(container).map(([key, member]) => {
         stack.push(key);
 
@@ -5762,6 +5738,9 @@ function convertOneToLinks(
         return [key, converted];
       }),
     ));
+    return isPrimitiveCellLink(converted)
+      ? pinImmutableCell(converted, parseLink(converted).id)
+      : converted;
   } finally {
     // `popExpect()` instead of just `pop()`, as defense-in-depth against bugs
     // elsewhere in the code.
