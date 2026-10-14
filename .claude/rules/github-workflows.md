@@ -13,9 +13,19 @@ a job passes it only works once the matching infra change has landed and been
 deployed. `docs/development/deploying.md` describes which jobs deploy where and
 what the wrapper accepts.
 
-The staging deploy jobs trigger on pushes to `main`, so a change to one of them
-cannot be exercised on a branch. Reason it through before merging rather than
-after.
+Two workflows hold staging deploy jobs, and a repository variable says which
+pair runs ("Where staging is deployed from" in that document). The pair in
+`.github/workflows/main-green.yml` follows the CI workflow and acts on a run of
+`main` that passed, and GitHub runs a workflow of that kind from the copy on the
+default branch. The pair in `deno.yml` runs for a push to `main`. Either way a
+change to one of those jobs cannot be exercised on a branch. Reason it through
+before merging rather than after.
+
+In `main-green.yml`, `github.ref` and `github.sha` name the default branch and
+its tip, whichever commit the run that finished was testing. The commit to act
+on is the head of the `main-green` branch, which the workflow's first job moves,
+and `tasks/ci-workflow.test.ts` fails when the workflow reads either of the
+other two.
 
 ## Step names carry a phase marker
 
@@ -45,7 +55,9 @@ of anchors there. The deploy jobs are the exception and carry no bound, because
 a deploy's duration is set by a script in another repository.
 `tasks/ci-workflow.test.ts` names those and holds every other job to the shape:
 it fails when a bound is missing, when it is written as a number rather than an
-alias, or when a step's anchor is fewer than ten minutes below its job's.
+alias, or when a step's anchor is fewer than ten minutes below its job's. The
+deploy jobs in `.github/workflows/main-green.yml` carry no bound either, for the
+same reason.
 
 The `tests` job has a pair of its own, `*lane-work-timeout` and
 `*lane-job-timeout`: 60 minutes for the lane step and 70 for its job. Neither is

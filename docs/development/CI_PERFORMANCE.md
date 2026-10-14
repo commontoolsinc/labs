@@ -387,7 +387,8 @@ records to its spool as the batch ends, and the ship step runs whatever the lane
 step did. So a lane stopped by its step bound loses only the records of the
 batch it was running.
 
-The deploy jobs carry no bound at all. A deploy hands the work to a script that
+The deploy jobs carry no bound at all, here and in
+`.github/workflows/main-green.yml`. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this
 workflow has no way to size. `tasks/ci-workflow.test.ts` names those jobs and
 asks nothing of them.

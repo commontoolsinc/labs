@@ -228,9 +228,11 @@ test suite under it. When a test fails, the run fails. The run's checks on the
 commit are listed under "Tomorrow's order", apart from the checks of the
 commit's own run. When another workflow calls the CI workflow, it skips
 `Status`, which holds the coverage and topology checks. It also skips the build,
-attestation and deploy jobs. The records relay follows the workflow, and its
-records carry the seed they ran under, so [test selection](test-selection.md)
-keeps them apart from the commit's own runs.
+attestation and deploy jobs. `main-green.yml` deploys nothing from it either,
+because that workflow follows runs of the CI workflow and a called run is a run
+of its caller. The records relay follows the workflow, and its records carry the
+seed they ran under, so [test selection](test-selection.md) keeps them apart
+from the commit's own runs.
 
 The order a run takes depends on the set of test files as well as the seed:
 `deno test --shuffle` and the runners this repository owns permute the whole

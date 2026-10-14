@@ -340,14 +340,19 @@ A run the next day's test-order workflow calls runs no `Status`, since the
 commit's own run already covers it.
 
 On a push, the jobs that build the `toolshed` and `cf` binaries run beside the
-lanes. `attest-binaries` waits for both builds and for `tests`,
-`deploy-shell-staging` waits for `tests`, and `deploy-rapids` waits for
-`attest-binaries`, so nothing is attested or deployed until every test has
-passed. A pull request builds nothing there: the `binaries` suites compile each
-binary as a test that it still compiles. The servers the full run's lanes start
-are built by the lanes, from the same sources and the same build task, without
-the commit and the shell endpoints the release binaries carry; the jobs that
-build the release binaries check what those add.
+lanes. `attest-binaries` waits for both builds and for `tests`, so nothing is
+attested until every test has passed. Staging is deployed after that, by one of
+two routes that [Deploying a commit](deploying.md) describes.
+`.github/workflows/main-green.yml` follows this workflow, and deploys from the
+`main-green` branch once a run of a push to `main` has passed. While the
+repository variable `STAGING_DEPLOY_FROM_CI_RUN` is `true`, this workflow's own
+`deploy-rapids` and `deploy-shell-staging` jobs deploy instead: the first waits
+for `attest-binaries` and the second for `tests`. A pull request builds nothing
+there: the `binaries` suites compile each binary as a test that it still
+compiles. The servers the full run's lanes start are built by the lanes, from
+the same sources and the same build task, without the commit and the shell
+endpoints the release binaries carry; the jobs that build the release binaries
+check what those add.
 
 ## The coverage gate
 
