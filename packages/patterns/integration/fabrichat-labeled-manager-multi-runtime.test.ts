@@ -99,10 +99,17 @@ describe("fabrichat labeled manager across runtimes", () => {
       ADD_MEMBER_ACTION,
       { piece: room },
     );
-    await harness.settle();
     // Her manager is still asked how Bob was told, in an event that writes
     // nothing in the room, and with no profile of his to offer the room
-    // through, it notices him.
+    // through, it notices him. Its verdict lands after the add, in the
+    // manager's own event, which under server execution the serving loop runs
+    // on its own account.
+    await harness.settleUntil(async () =>
+      (await ada.read(
+        ["$VIEWS", "room", "addRequests", "add-bob", "delivery"],
+        { piece: room },
+      )) !== undefined
+    );
     expect(
       await ada.read(["$VIEWS", "room", "addRequests", "add-bob"], {
         piece: room,
