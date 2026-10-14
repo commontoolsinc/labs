@@ -13246,52 +13246,62 @@ export function* prepareBoundaryCommitSteps(
       deferredWriterRefusal !== undefined && !deferredPreservedOutput &&
       existing !== undefined && storedSchema !== undefined
     ) {
-      const newField = atOrBeneathNewField(
-        storedValuesAt(tx, { space, id, scope }),
-        storedSchema,
-        deferredWriterPaths,
-      );
-      const omitted = (path: readonly string[]) =>
-        governsNothingHere(path) || newField(path);
       const storedEntries = canonicalizeCfcMetadata(existing).labelMap.entries;
       const derivedEntries = canonicalizeCfcMetadata(metadata).labelMap.entries;
       const entriesAt = (
         entries: readonly LabelMapEntry[],
         path: readonly string[],
       ) => entries.filter((entry) => pathsOverlap(entry.path, path));
-      // The stored schema is the one kept, so the labels derived here must
-      // be the ones it declares. Equal claims can lay out differently — a
-      // rest claim is a label position only beside no named property — so
-      // the positions both schemas declare are compared whole, not at the
-      // deferred paths alone.
-      const declaredPositions = (schema: JSONSchema) =>
-        cfcSchemaEntries(schema).filter((entry) => !omitted(entry.path)).map((
-          entry,
-        ) => ({
-          path: encodePointer(entry.path),
-          ifc: withoutUndefinedMembers(
-            isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
-          ),
-        })).sort((left, right) => utf8Compare(left.path, right.path));
-      if (
-        cfcSchemaPoliciesEqual(storedSchema, schemaAndHash.schema, omitted) &&
-        deepEqual(
-          declaredPositions(storedSchema),
-          declaredPositions(schemaAndHash.schema),
-        ) &&
-        deferredWriterPaths.every((path) =>
-          deepEqual(
-            entriesAt(storedEntries, path),
-            entriesAt(derivedEntries, path),
-          )
-        )
-      ) {
-        deferredWriterRefusal = undefined;
-        keepsStoredSchema = cfcSchemaPoliciesEqual(
+      // Whether the envelope leaves the deferred paths as they were, the
+      // positions `omitted` names left out. The stored schema is the one
+      // kept where nothing but foreign positions is left out, so the labels
+      // derived here must be the ones it declares. Equal claims can lay out
+      // differently — a rest claim is a label position only beside no named
+      // property — so the positions both schemas declare are compared whole,
+      // not at the deferred paths alone.
+      const leavesDeferredPaths = (
+        omitted: (path: readonly string[]) => boolean,
+      ): boolean => {
+        const declaredPositions = (schema: JSONSchema) =>
+          cfcSchemaEntries(schema).filter((entry) => !omitted(entry.path))
+            .map((entry) => ({
+              path: encodePointer(entry.path),
+              ifc: withoutUndefinedMembers(
+                isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
+              ),
+            })).sort((left, right) => utf8Compare(left.path, right.path));
+        return cfcSchemaPoliciesEqual(
           storedSchema,
           schemaAndHash.schema,
-          governsNothingHere,
+          omitted,
+        ) &&
+          deepEqual(
+            declaredPositions(storedSchema),
+            declaredPositions(schemaAndHash.schema),
+          ) &&
+          deferredWriterPaths.every((path) =>
+            deepEqual(
+              entriesAt(storedEntries, path),
+              entriesAt(derivedEntries, path),
+            )
+          );
+      };
+      if (leavesDeferredPaths(governsNothingHere)) {
+        deferredWriterRefusal = undefined;
+        keepsStoredSchema = true;
+      } else {
+        const newField = atOrBeneathNewField(
+          storedValuesAt(tx, { space, id, scope }),
+          storedSchema,
+          deferredWriterPaths,
         );
+        if (
+          leavesDeferredPaths((path) =>
+            governsNothingHere(path) || newField(path)
+          )
+        ) {
+          deferredWriterRefusal = undefined;
+        }
       }
       if (keepsStoredSchema) {
         // The stored spelling is kept whole, its envelope version included;
