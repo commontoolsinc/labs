@@ -107,6 +107,7 @@ import {
   type ChatRoomLink,
   type ChatRoomPolicy,
   isPrincipalDID,
+  type MessageActOutcome,
   type ProfileCell,
   type SetTitleOutcome,
 } from "./schemas.tsx";
@@ -875,6 +876,12 @@ export interface ChatRoomView {
   addRequests: Record<string, AddMemberOutcome>;
 
   /**
+   * The outcome of each of this reader's message acts, by its `requestId`:
+   * sends, edits, deletions, obliterations, and reactions added or removed.
+   */
+  messageRequests: Record<string, MessageActOutcome>;
+
+  /**
    * Sets the room's title, which every member shares, from a trusted gesture
    * on the rendering's `ChatRetitleSurface`, or from a client's own control
    * through the sanctioned issuing path. Any member who can write in the room
@@ -1009,9 +1016,17 @@ export const FabriChatRoomCore = pattern<
   const canJoin = computed(() =>
     ownSpace && manager?.joinRoom !== undefined && self !== undefined
   );
+  // The sender's outcomes, which follow them, and only them, across sessions,
+  // and why the session's latest act was refused, which the composer shows.
+  const messageRequests = new Writable.perUser<
+    Record<string, MessageActOutcome>
+  >({});
+  const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
     composer,
+    outcomes: messageRequests,
+    refusal,
     messages,
     reactionLists,
     requests,
@@ -1160,6 +1175,11 @@ export const FabriChatRoomCore = pattern<
     (): ChatDisplay => (hasThread ? "flex" : "none"),
   );
   const isEmpty = computed(() => mainEntries.length === 0);
+  // Per session, so hidden by a prop rather than a branch (see
+  // `FabriChatMessageRow`).
+  const refusalDisplay = computed((): ChatDisplay =>
+    refusal.get() === "" ? "none" : "block"
+  );
   const threadShownIn = computed((): ShownIn =>
     alsoToMain.get() ? "both" : "thread"
   );
@@ -1223,6 +1243,7 @@ export const FabriChatRoomCore = pattern<
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
+    messageRequests,
     setTitle,
     titleRequests,
   };
@@ -1309,6 +1330,8 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
               self={self}
@@ -1343,6 +1366,14 @@ export const FabriChatRoomCore = pattern<
             onClick={composeSend}
           />
         </div>
+        <cf-text
+          id="fabrichat-act-refusal"
+          variant="caption"
+          hidden
+          style={{ display: refusalDisplay }}
+        >
+          {refusal}
+        </cf-text>
 
         <cf-vstack
           id="fabrichat-thread"
@@ -1376,6 +1407,8 @@ export const FabriChatRoomCore = pattern<
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
               joinRoom={manager?.joinRoom}
               self={self}
@@ -1528,6 +1561,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
+      messageRequests: room.messageRequests,
       setTitle: room.setTitle,
       titleRequests: room.titleRequests,
       [UI]: (
