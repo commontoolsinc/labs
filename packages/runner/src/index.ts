@@ -278,6 +278,12 @@ export {
   setPieceReconciliation,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "./runner.ts";
+export {
+  type RefusedArgumentSlot,
+  type RefusedArgumentSlots,
+  refusedArgumentSlotsCause,
+  refusedArgumentSlotsCell,
+} from "./refused-argument-slots.ts";
 
 // Builder functionality (migrated from @commonfabric/builder package)
 export { createBuilder, type CreateBuilderOptions } from "./builder/factory.ts";
