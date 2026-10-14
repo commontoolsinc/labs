@@ -33,9 +33,8 @@ import {
   type RequestMemo,
   type SentActivity,
   type UsedTime,
-  viewKeyOf,
 } from "./room-records.tsx";
-import { FabriChatRoomCore } from "./room.tsx";
+import { type ChatMessageRights, FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
@@ -131,9 +130,13 @@ const messageAt = (
 ): MessageRecord | undefined =>
   ((messages.get() ?? []) as MessageRecord[])[index];
 
-// The key the view's rights for the message at `index` are under.
-const keyAt = (messages: Cell<MessagesValue>, index: number): string =>
-  viewKeyOf(messages.key(index)) ?? "";
+// The view's rights for the message at `index` of `messages`.
+const rightsAt = (
+  rights: readonly ChatMessageRights[],
+  messages: Cell<MessagesValue>,
+  index: number,
+): ChatMessageRights | undefined =>
+  rights.find((entry) => equals(entry.message, messages.key(index)));
 
 // The OWNER, who sends first.
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
@@ -191,16 +194,17 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
           room[VIEWS].room.viewer.role === "OWNER"
         ),
       },
-      // As an OWNER she may delete and obliterate Bob's message, but edit
-      // only her own.
+      // As an OWNER of a group room she may obliterate Bob's message, but
+      // edit and delete only her own.
       {
         assertion: assert(() => {
           const rights = room[VIEWS].room.messageRights;
-          const hers = rights[keyAt(setup.records.messages, 0)];
-          const his = rights[keyAt(setup.records.messages, 1)];
-          return hers?.canEdit === true && hers?.canDelete === true &&
-            hers?.canObliterate === true && his?.canEdit === false &&
-            his?.canDelete === true && his?.canObliterate === true;
+          const hers = rightsAt(rights, setup.records.messages, 0);
+          const his = rightsAt(rights, setup.records.messages, 1);
+          return rights.length === 2 && hers?.canEdit === true &&
+            hers?.canDelete === true && hers?.canObliterate === true &&
+            his?.canEdit === false && his?.canDelete === false &&
+            his?.canObliterate === true;
         }),
       },
       { label: "alice-done" },
@@ -264,8 +268,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() => {
           const rights = room[VIEWS].room.messageRights;
-          const hers = rights[keyAt(setup.records.messages, 0)];
-          const his = rights[keyAt(setup.records.messages, 1)];
+          const hers = rightsAt(rights, setup.records.messages, 0);
+          const his = rightsAt(rights, setup.records.messages, 1);
           return hers?.canEdit === false && hers?.canDelete === false &&
             hers?.canObliterate === false && his?.canEdit === true &&
             his?.canDelete === true && his?.canObliterate === false;

@@ -88,9 +88,9 @@ import {
 const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
- * Every room's policy. Each setting is read by the handlers it governs, and
- * `about.policy` states it, so the two cannot disagree. `ownersMayObliterate`
- * states a rule rather than a setting, which `messageRightsOf()` keeps.
+ * The policy every room starts from, a group room's. Each setting is read by
+ * the handlers it governs, and `about.policy` states it, so the two cannot
+ * disagree. A room's own `ownersMayObliterate` is `ownersMayObliterateIn()`'s.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -102,6 +102,16 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
   maxWindowCount: 100,
   maxOpenWindows: 50,
 };
+
+/**
+ * Whether an OWNER of a room of `kind` may obliterate its messages: `given`,
+ * where the room is configured, and otherwise yes for a group room and no for
+ * a direct room.
+ */
+export const ownersMayObliterateIn = (
+  kind: ChatRoomKind,
+  given?: boolean,
+): boolean => given ?? kind !== "direct";
 
 /**
  * How long the room remembers a request it acted on: the greater of the
@@ -653,18 +663,22 @@ export const NO_MESSAGE_RIGHTS: MessageRights = {
 
 /**
  * What the person acting under `profile` may do to the message `record` in a
- * room of `kind`, given whether they hold OWNER in the room's space. The
- * message's author may edit and delete it, and in a direct room obliterate
- * it; an OWNER may delete and obliterate any message, whoever sent it. A
- * deleted message takes nothing further but obliteration, and an obliterated
- * one, which names no author, takes nothing. The room's handlers admit an act
- * by this, and the room's view and rendering offer one by it.
+ * room of `kind`, given whether they hold OWNER in the room's space and
+ * whether the room lets its OWNERs obliterate. Only the message's author may
+ * edit or delete it, and in a direct room they may obliterate it too. An OWNER
+ * may obliterate any message while `ownersMayObliterate` holds, and otherwise
+ * gains nothing over anyone else: never an edit or a deletion of someone
+ * else's message. A deleted message takes nothing further but obliteration,
+ * and an obliterated one, which names no author, takes nothing. The room's
+ * handlers admit an act by this, and the room's view and rendering offer one
+ * by it.
  */
 export const messageRightsOf = (
   record: MessageRecord | undefined,
   profile: ProfileCell | undefined,
   kind: ChatRoomKind,
   isOwner: boolean,
+  ownersMayObliterate: boolean,
 ): MessageRights => {
   const author = record?.authorProfile;
   const isAuthor = author !== undefined && profile !== undefined &&
@@ -672,11 +686,27 @@ export const messageRightsOf = (
   const live = !isDeleted(record);
   return {
     canEdit: live && isAuthor,
-    canDelete: live && (isAuthor || isOwner),
+    canDelete: live && isAuthor,
     canObliterate: author !== undefined &&
-      (isOwner || (kind === "direct" && isAuthor)),
+      ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
   };
 };
+
+/**
+ * Why an obliteration `messageRightsOf()` doesn't allow is refused, for a
+ * person to read.
+ */
+const obliterationRefusal = (
+  kind: ChatRoomKind,
+  ownersMayObliterate: boolean,
+): string =>
+  kind === "direct"
+    ? ownersMayObliterate
+      ? "Only an owner of this chat can remove someone else's message."
+      : "Only its author can remove a message in this chat."
+    : ownersMayObliterate
+    ? "Only an owner of this chat can remove a message."
+    : "Messages in this chat can't be removed.";
 
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose
@@ -863,6 +893,12 @@ export interface RoomActState {
    * itself to the manager by. Absent, it can't.
    */
   canJoin?: boolean;
+
+  /**
+   * Whether an OWNER of the room's space may obliterate its messages, as the
+   * room's policy says; absent, `ownersMayObliterateIn()` decides by `kind`.
+   */
+  ownersMayObliterate?: boolean;
 
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
@@ -1091,7 +1127,17 @@ const performMessageAct = (
     return;
   }
   const current = entry.record;
-  const rights = messageRightsOf(current, profile, kind, isOwnerOf(messages));
+  const ownersMayObliterate = ownersMayObliterateIn(
+    kind,
+    state.ownersMayObliterate,
+  );
+  const rights = messageRightsOf(
+    current,
+    profile,
+    kind,
+    isOwnerOf(messages),
+    ownersMayObliterate,
+  );
   const deletionObliterates = op === "delete" &&
     FABRICHAT_POLICY.deletionIsObliteration;
 
@@ -1108,10 +1154,8 @@ const performMessageAct = (
       refuse(
         "not-allowed",
         op === "delete"
-          ? "Only its author or an owner of this chat can delete a message."
-          : kind === "direct"
-          ? "Only an owner of this chat can remove someone else's message."
-          : "Only an owner of this chat can remove a message.",
+          ? "Only its author can delete a message."
+          : obliterationRefusal(kind, ownersMayObliterate),
       );
       return;
     }
@@ -1153,7 +1197,7 @@ const performMessageAct = (
     refuse(
       "not-allowed",
       op === "delete"
-        ? "Only its author or an owner of this chat can delete a message."
+        ? "Only its author can delete a message."
         : "Only its author can edit a message.",
     );
     return;

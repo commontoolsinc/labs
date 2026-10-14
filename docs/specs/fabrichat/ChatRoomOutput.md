@@ -48,11 +48,13 @@ interface ChatRoomOutput {
     role?: "OWNER" | "WRITE" | "READ" | "none";
   };
 
-  /** What this reader may do to each message, by the message's key. */
-  messageRights: Record<
-    string,
-    { canEdit: boolean; canDelete: boolean; canObliterate: boolean }
-  >;
+  /** What this reader may do to each message, oldest first. */
+  messageRights: {
+    message: Cell<ChatMessage>;
+    canEdit: boolean;
+    canDelete: boolean;
+    canObliterate: boolean;
+  }[];
 
   sendMessage: Stream<{
     requestId: string;
@@ -251,11 +253,11 @@ space.
   isn't known. Like `participantEntries`, the profile and the principal are
   claims, not proof of access.
 - **`messageRights`** says what the reader may do to each of the room's
-  messages, under the message's key: `t` followed by its `sentAt` in
-  nanoseconds, in decimal, which is unique in the room. Each entry holds
-  `canEdit`, `canDelete`, and `canObliterate`, decided by the rules the
-  streams below admit an event by, so a client offers exactly the acts the
-  room would take. Every entry is all `false` while `canSend` doesn't hold.
+  messages: one entry per message, oldest first, holding the `message`, as the
+  link `messages.latest` holds for it, and `canEdit`, `canDelete`, and
+  `canObliterate`, decided by the rules the streams below admit an event by, so
+  a client offers exactly the acts the room would take. Every entry is all
+  `false` while `canSend` doesn't hold.
 - **`canAdd`** says whether the reader can add someone to the room's space: the
   room is a group room in a space of its own, and their access is OWNER. It is
   false in a direct room, whose space keeps its two members, and in a space's
@@ -407,7 +409,7 @@ These rules hold for every stream:
 | --- | --- | --- |
 | [`sendMessage`](#sendmessagerequestid-string-version-chatmessageversion-replyto-chatreply) | `ChatSendSurface` | appends a message from the sender, once |
 | [`editMessage`](#editmessagerequestid-string-message-cellchatmessage-version-chatmessageversion) | `ChatEditSurface` | records a new version of the sender's message, once |
-| [`deleteMessage`](#deletemessagerequestid-string-message-cellchatmessage) | `ChatDeleteSurface` | records a message as deleted |
+| [`deleteMessage`](#deletemessagerequestid-string-message-cellchatmessage) | `ChatDeleteSurface` | records the sender's message as deleted |
 | [`obliterateMessage`](#obliteratemessagerequestid-string-message-cellchatmessage) | `ChatObliterateSurface` | removes a message and its history, leaving a tombstone |
 | [`sendReaction`](#sendreactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | adds the sender's reaction, if it isn't there |
 | [`deleteReaction`](#deletereactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | removes the sender's reaction, if it's there |
@@ -537,15 +539,13 @@ two versions.
 - `requestId: string` — Chosen by the sender, and unique among its requests. The
   room acts on a request at most once (see [streams](#streams)).
 - `message: Cell<ChatMessage>` — The message to delete. Must be a message in
-  this room, not already deleted, and sent by the sender unless the sender is
-  an OWNER.
+  this room, sent by the sender, and not already deleted.
 
-Records a message as deleted: one of the sender's own, or, from an OWNER,
-anyone's.
+Records one of the sender's messages as deleted.
 
-- **Admitted:** as a trusted gesture on `ChatDeleteSurface`, from the message's
-  sender, or from a member the room space's access list makes OWNER, in a
-  direct room as in a group room.
+- **Admitted:** as a trusted gesture on `ChatDeleteSurface`, and only from the
+  message's sender. No one deletes a message someone else sent, an OWNER
+  included, whatever the room's policy.
 - **Effect:** depends on whether the implementation makes deletion obliteration
   (see [implementation-defined behavior](#implementation-defined-behavior)):
   - If it does, the message is obliterated, exactly as `obliterateMessage` would
@@ -557,34 +557,38 @@ anyone's.
     keeps history (`keepsHistory`). Then the message's `body` becomes exactly
     `{ deleted: true }`, recorded at the handler clock as `editedAt`, made
     unique as [unique times](ChatMessage.md#unique-times) states, and its
-    reactions are removed. Its `authorProfile` and history stay, whoever
-    deleted it, so a room that keeps history keeps the deleted text in it. The
-    deletion is labeled `authored-by` the sender.
+    reactions are removed. Its `authorProfile` and history stay, so a room that
+    keeps history keeps the deleted text in it.
 
   Either way, no reaction outlives the deletion, and the message stays among the
   room's messages, so replies to it and threads rooted at it keep their links.
-- **Refused:** a `message` in another room or already deleted, or one someone
-  else sent, from a sender who isn't an OWNER.
+- **Refused:** a `message` in another room, sent by someone else, or already
+  deleted.
 
 ### `obliterateMessage(requestId: string, message: Cell<ChatMessage>)`
 
 - `requestId: string` — Chosen by the sender, and unique among its requests. The
   room acts on a request at most once (see [streams](#streams)).
 - `message: Cell<ChatMessage>` — The message to obliterate. Must be a message in
-  this room that the sender may obliterate: anyone's, if the sender is an
-  OWNER, and in a direct room, also one the sender sent.
+  this room that the sender may obliterate: anyone's, if the sender is an OWNER
+  and the room's policy lets OWNERs obliterate; and in a direct room, also one
+  the sender sent.
 
-Removes a message entirely, with its history. It is how an OWNER curates the
-conversation, in a direct room as in a group room, and an outward act when it
-removes someone else's words. In a direct room, it is also how either person
-removes their own words completely.
+Removes a message entirely, with its history. Where the room's policy allows
+it, it is how an OWNER curates the conversation, in a direct room as in a group
+room, and an outward act when it removes someone else's words. In a direct
+room, it is also how either person removes their own words completely.
 
-- **Admitted:** as a trusted gesture on `ChatObliterateSurface`, from a member
-  the room space's access list makes OWNER, for any message, whoever sent it;
-  and in a direct room, also from a message's own sender, whatever their
-  access. A member of a group room who isn't an OWNER takes back their own
-  message completely by deleting it, where the implementation makes deletion
-  obliteration.
+- **Admitted:** as a trusted gesture on `ChatObliterateSurface`: from a member
+  the room space's access list makes OWNER, for any message, whoever sent it,
+  where the room's `ownersMayObliterate` holds (see [implementation-defined
+  behavior](#implementation-defined-behavior)); and in a direct room, also from
+  a message's own sender, whatever their access and whatever the policy. Where
+  `ownersMayObliterate` doesn't hold, being an OWNER confers nothing here: an
+  OWNER obliterates only what anyone else may, and no more deletes someone
+  else's message than they could otherwise. A member of a group room who can't
+  obliterate takes back their own message completely by deleting it, where the
+  implementation makes deletion obliteration.
 - **Effect:** reduces the message to a tombstone (see [obliterated
   messages](ChatMessage.md#obliterated-messages)): its `body` becomes
   `{ deleted: true }`, its `editedAt` the handler clock, made unique as [unique
@@ -595,9 +599,10 @@ removes their own words completely.
   stay used, and a retry of the original send doesn't send the message again:
   the room still remembers the send's `requestId`, for as long as it remembers
   any.
-- **Refused:** a `message` in another room, or a sender who isn't an OWNER,
-  unless the room is a direct room and the message is the sender's own.
-  Obliterating a message that is already obliterated changes nothing.
+- **Refused:** a `message` in another room; and, unless the room is a direct
+  room and the message is the sender's own, a sender who isn't an OWNER, or any
+  sender where the room's `ownersMayObliterate` doesn't hold. Obliterating a
+  message that is already obliterated changes nothing.
 
 ### `sendReaction(requestId: string, message: Cell<ChatMessage>, emoji: string)`
 
@@ -756,6 +761,8 @@ these, and an implementation MUST state its choice for each in its rooms'
 - **Deletion as obliteration.** Whether a sender deleting their own message
   obliterates it, which is how a member of a group room takes back what they
   said completely.
+- **Obliteration by OWNERs.** Whether an OWNER may obliterate messages,
+  anyone's (`ownersMayObliterate`), in a direct room as in a group room.
 - **What an edit keeps** in a message's history.
 - **The limits on message windows**: how many messages a window holds
   (`maxWindowCount`), and how many a session can have open (`maxOpenWindows`).
@@ -770,10 +777,9 @@ does so is its own business (see
 
 `about.policy` links a [`ChatRoomPolicy`](ChatRoomPolicy.md), and an
 implementation MUST state it correctly: a client reads a room's choices there,
-and can rely on them. Two things are not choices: an OWNER of a room's space
-MUST be able to delete and obliterate any message in it, in a direct room as in
-a group room, and a direct room MUST let either person obliterate their own
-messages.
+and can rely on them. Two things are not choices: no one deletes a message
+someone else sent, and a direct room MUST let either person obliterate their
+own messages.
 
 ## Open questions
 

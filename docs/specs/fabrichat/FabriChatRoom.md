@@ -100,15 +100,17 @@ and without it a late redelivery of the original send would send the message
 again. The two bounds of its window for proposed times are constants of the
 pattern, documented beside it.
 
-`commitEdit` is admitted only for the message's own sender, and `commitDelete`
-for its sender or an OWNER of the room's space. `commitEdit` moves the current version into `earlierVersions` before recording
+`commitEdit` and `commitDelete` are admitted only for the message's own sender.
+`commitEdit` moves the current version into `earlierVersions` before recording
 the new one. `commitDelete` records the deletion and clears the reactions, or,
 when the room's `deletionIsObliteration` setting is on, does exactly what
 `commitObliterate` does. They have the same kind of write policy as
 `commitSend`.
 
-`commitObliterate` is admitted for an OWNER of the room's space, in any room,
-and for a message's own sender in a direct room. One function,
+`commitObliterate` is admitted for an OWNER of the room's space, in a direct
+room as in a group room or a space's own chat, when the room's
+`ownersMayObliterate` setting is on, and for a message's own sender in a
+direct room. One function,
 `messageRightsOf()`, states who may edit, delete, and obliterate a message:
 the three handlers admit an act by it, and `messageRights` and the rendering's
 controls offer one by it, so what a reader is offered is what the room takes.
@@ -165,6 +167,7 @@ built at first. The first build fixes each setting at an initial value:
 
 | Setting | `ChatRoomPolicy` key | Initial value |
 | --- | --- | --- |
+| OWNERs may obliterate messages, anyone's | `ownersMayObliterate` | yes in a group room or a space's own chat, no in a direct room |
 | An edit or a plain deletion keeps the version it replaces | `keepsHistory` | yes, every version |
 | A sender's deletion obliterates their message | `deletionIsObliteration` | no |
 | How far before the clock a proposed time is accepted | `proposedTimeMaxAgeNsec` | 10 minutes |
@@ -174,9 +177,13 @@ built at first. The first build fixes each setting at an initial value:
 | The most windows a session can have open | `maxOpenWindows` | 50 |
 
 These are the first build's values. Once the configuration exists, rooms can
-differ from them. A room states its settings in `about.policy`
-([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present, written when
-the room is created from the same settings the handlers read.
+differ from them. `ownersMayObliterate` is there for a group room with many
+OWNERs; a direct room is set up without it, and its two people each obliterate
+only their own messages. `FabriChatRoomCore` takes the setting as an input,
+which the room's own pattern leaves unset, and nothing in the room's rendering
+shows or changes it. A room states its settings in `about.policy`
+([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present, derived from
+the same settings the handlers read.
 
 ## Prerequisites
 

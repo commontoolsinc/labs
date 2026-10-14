@@ -167,9 +167,9 @@ provide, the document says so, under the heading "Prerequisites".
    membership beyond that list.
 3. **History is attested.** Messages and reactions are `AuthoredByCurrentUser`
    and `TrustedActionWrite`. A message's sender can
-   edit or delete it, each change recorded as a new version, and so can an
-   OWNER of the room's space delete it. A message can be obliterated, by an
-   OWNER curating the room or by either person in a direct room for their own
+   edit or delete it, each change recorded as a new version, and no one else
+   can. A message can be obliterated, by an OWNER curating the room where its
+   policy allows it, or by either person in a direct room for their own
    messages, leaving only an attested tombstone. A
    reaction is removed only by its own reactor, or with its message. Every
    recorded version has a time unique in its room.

@@ -1,10 +1,10 @@
 /**
  * A FabriChat group room, as its space's access list decides who may do what
- * in it: its OWNER deletes and obliterates anyone's messages; a member with
- * WRITE sends but can't delete or obliterate someone else's; a reader with
- * READ is offered no way to write; and someone the list leaves out sees a
- * placement of the room as not theirs. Who is in the space is the space's
- * business, not the room's.
+ * in it: its OWNER obliterates anyone's messages, as a group room's policy
+ * lets OWNERs, but deletes no one else's; a member with WRITE sends but can't
+ * delete or obliterate someone else's; a reader with READ is offered no way to
+ * write; and someone the list leaves out sees a placement of the room as not
+ * theirs. Who is in the space is the space's business, not the room's.
  *
  * The test lane doesn't enforce the list, so what this checks is what the room
  * decides from the level `spaceAccess()` reports, not what the memory server
@@ -164,10 +164,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     message: setup.records.messages.key(1),
     ...rowRecords,
   } as RowArg);
-  const onBobsSecond = FabriChatMessageRow({
-    message: setup.records.messages.key(2),
-    ...rowRecords,
-  } as RowArg);
 
   return {
     [TESTS]: [
@@ -185,21 +181,40 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
             "From Alice | From Bob | Bob again"
         ),
       },
-      // The OWNER may delete and obliterate anyone's message in a group room.
+      // An OWNER may not delete someone else's message.
       {
-        action: onBobs.deleteMessage,
-        event: {},
+        action: room.deleteMessage,
+        event: {
+          requestId: "d-bobs",
+          message: messageOf(setup.records.messages.key(1)),
+        },
         trustedUi: deleteGesture,
       },
       {
-        action: onBobsSecond.obliterateMessage,
+        assertion: assert(() => {
+          const outcome = room.messageRequests["d-bobs"];
+          return outcome?.status === "refused" &&
+            outcome.code === "not-allowed" &&
+            bodies(setup.records.messages) ===
+              "From Alice | From Bob | Bob again";
+        }),
+      },
+      // An OWNER may obliterate anyone's message in a group room, whose
+      // policy lets its OWNERs obliterate.
+      {
+        assertion: assert(() =>
+          room.about.policy.get()?.ownersMayObliterate === true
+        ),
+      },
+      {
+        action: onBobs.obliterateMessage,
         event: {},
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
           bodies(setup.records.messages) ===
-            "From Alice | <deleted> | <obliterated>"
+            "From Alice | <obliterated> | Bob again"
         ),
       },
       { assertion: assert(() => room.canSend === true) },
@@ -307,7 +322,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert(() => editorDisplay(onHis[UI]) === "block") },
       { label: "bob-tried" },
       { await: "alice-done" },
-      // Alice deleted it, so the editor no longer offers him an edit.
+      // Alice obliterated it, so the editor no longer offers him an edit.
       { assertion: assert(() => editorDisplay(onHis[UI]) === "none") },
     ],
   };

@@ -74,6 +74,7 @@ import {
   NO_ACTIVITY,
   NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
+  ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
@@ -808,6 +809,12 @@ const viewerProfileOf = (
 ): ProfileCell | undefined =>
   myProfile?.get() === undefined ? undefined : myProfile.resolveAsCell();
 
+/** What a room's reader may do to one of its messages. */
+export interface ChatMessageRights extends MessageRights {
+  /** The message, as `messages.latest` links it. */
+  message: MessageCell;
+}
+
 /** A room's data face, for hosts that draw it natively. */
 export interface ChatRoomView {
   /** What the room says about itself. */
@@ -867,10 +874,10 @@ export interface ChatRoomView {
   viewer: ChatRoomViewer;
 
   /**
-   * What this reader may do to each message, by the message's key: `t`, then
-   * its `sentAt` in nanoseconds. Nothing at all while `canSend` doesn't hold.
+   * What this reader may do to each of the room's messages, oldest first.
+   * Nothing at all while `canSend` doesn't hold.
    */
-  messageRights: Record<string, MessageRights>;
+  messageRights: ChatMessageRights[];
 
   /** Sends a message. */
   sendMessage: Stream<RoomStreamEvent>;
@@ -985,6 +992,13 @@ export interface FabriChatRoomCoreInput {
    * while the viewer has none, or theirs hasn't resolved.
    */
   manager?: RoomManager;
+
+  /**
+   * Whether an OWNER of the room's space may obliterate its messages; absent,
+   * as for every room the room's own pattern runs, yes for a group room and no
+   * for a direct room.
+   */
+  ownersMayObliterate?: boolean;
 }
 
 /**
@@ -1023,12 +1037,30 @@ export const FabriChatRoomCore = pattern<
     startDirect,
     self,
     manager,
+    ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
   const composer = new Writable.perSession<ComposerState>({});
   const kind = computed((): ChatRoomKind => about?.get()?.kind ?? "group");
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
   const ownSpace = computed(() => about?.get() !== undefined);
+  // Whether the room's OWNERs may obliterate, which the message acts read,
+  // and the policy that says so, a document of its own that `about` links:
+  // one for each answer, since the rest of a room's policy is the same.
+  const ownersMayObliterate = computed(() =>
+    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
+  );
+  const policyWithOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: true,
+  });
+  const policyWithoutOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: false,
+  });
+  const policy = computed((): Cell<ChatRoomPolicy> =>
+    ownersMayObliterate ? policyWithOwners : policyWithoutOwners
+  );
   // Read as a value, as `canOffer` is: a handler bound to a manager that
   // isn't there is bound to a stream that still reads as present.
   const canJoin = computed(() =>
@@ -1042,6 +1074,7 @@ export const FabriChatRoomCore = pattern<
   const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
+    ownersMayObliterate,
     composer,
     outcomes: messageRequests,
     refusal,
@@ -1131,19 +1164,21 @@ export const FabriChatRoomCore = pattern<
   });
   // Every message's rights for the reader, by the rule the handlers admit an
   // act by, derived once for the whole list as `places` is.
-  const messageRights = computed((): Record<string, MessageRights> => {
+  const messageRights = computed((): ChatMessageRights[] => {
     const profile = viewerProfileOf(myProfile);
-    return Object.fromEntries(
-      entries.map((entry) => [
-        entry.key,
-        canSend && profile !== undefined
-          ? messageRightsOf(entry.record, profile, kind, isOwner)
-          : NO_MESSAGE_RIGHTS,
-      ]),
-    );
+    return sortedEntries.map((entry) => ({
+      message: entry.cell,
+      ...(canSend && profile !== undefined
+        ? messageRightsOf(
+          entry.record,
+          profile,
+          kind,
+          isOwner,
+          ownersMayObliterate,
+        )
+        : NO_MESSAGE_RIGHTS),
+    }));
   });
-  // The policy is a document of its own, which `about` links.
-  const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
   const aboutView = {
     kind,
     title: computed(() => about?.get()?.title),
@@ -1313,6 +1348,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
@@ -1390,6 +1426,7 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}

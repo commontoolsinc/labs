@@ -37,6 +37,7 @@ import {
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
+  ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
@@ -142,6 +143,13 @@ export interface FabriChatMessageRowInput {
   /** Whether the viewer holds OWNER in the room's space. */
   isOwner: boolean;
 
+  /**
+   * Whether an OWNER of the room's space may obliterate its messages, as the
+   * room's policy says; absent, the room's kind decides, as
+   * `ownersMayObliterateIn()` does.
+   */
+  ownersMayObliterate?: boolean;
+
   /** The room's messages. */
   messages: MessagesCell;
 
@@ -229,6 +237,7 @@ export const FabriChatMessageRow = pattern<
     places,
     cannotWrite,
     isOwner,
+    ownersMayObliterate,
     messages,
     reactionLists,
     requests,
@@ -243,6 +252,7 @@ export const FabriChatMessageRow = pattern<
   } = input;
   const records = {
     kind,
+    ownersMayObliterate,
     composer,
     messages,
     reactionLists,
@@ -279,6 +289,7 @@ export const FabriChatMessageRow = pattern<
         myProfile.resolveAsCell(),
         kind,
         isOwner === true,
+        ownersMayObliterateIn(kind, ownersMayObliterate),
       )
   );
   const isEditing = computed(() => {
