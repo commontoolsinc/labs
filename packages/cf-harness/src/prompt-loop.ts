@@ -3724,8 +3724,9 @@ export class CfHarnessPromptLoop {
   /**
    * Tags a fresh root task with the kinds of work it calls for and records
    * them on the run, before the host assembles the prompt the tags shape.
-   * When the keyword rule has no answer, one call to the cheap research model
-   * decides; when that fails too, the task gets every tag. The tags gate the
+   * When the keyword rule has no answer, one bounded call to the cheap
+   * research model decides; when that fails or runs past its bound, the task
+   * gets every tag. The tags gate the
    * opening research pass and the parent's browser guidance here.
    */
   async classifyTask(
@@ -3740,7 +3741,7 @@ export class CfHarnessPromptLoop {
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
     }, {
-      askModel: async (prompt) => {
+      askModel: async (prompt, bound) => {
         const result = await this.modelClient.complete({
           model: researchModel(this.modelClient.providerId),
           transcript: [{ role: "user", content: prompt }],
@@ -3750,7 +3751,9 @@ export class CfHarnessPromptLoop {
           ...(this.#researchReasoningEffort !== undefined
             ? { reasoningEffort: this.#researchReasoningEffort }
             : {}),
-          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          signal: options.signal === undefined
+            ? bound
+            : AbortSignal.any([options.signal, bound]),
           onAttempt: (attempt) => {
             this.#classificationAttempts.push(attempt);
           },

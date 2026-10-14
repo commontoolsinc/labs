@@ -2034,9 +2034,11 @@ A fresh CLI run tags its task before assembling the prompt
 (`src/task-classification.ts`) with every kind of work it calls for: `respond`,
 `find`, `act`, `pieces`, `author`. A keyword rule reads the task and what the
 run holds (input cells, attached patterns, a browser); when no rule applies, one
-call to the cheap research model tags it, and when that fails the task gets
-every tag. The tags, the path that chose them (`rule`, `model`, `fallback`), and
-the classification's wall time are recorded as `taskClassification` in
+call to the cheap research model tags it, and when that fails, answers no tag,
+or has not answered within five seconds, the call is cancelled and the task gets
+every tag. The tags, the path that chose them (`rule`, `model`, `fallback`), a
+fallback's reason (`no-model`, `no-tag`, `model-error`, `timeout`), and the
+classification's wall time are recorded as `taskClassification` in
 `run-state.json` and `run-report.json`; a model call's attempts and tokens land
 in the run report and the run's total usage like research's. Only an `author`
 task gets the opening research pass. The parent's orientation follows the tags:
