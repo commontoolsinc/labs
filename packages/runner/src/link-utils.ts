@@ -272,10 +272,13 @@ function carriedValuesEqual(a: unknown, b: unknown): boolean {
   if (!isKeyableObjectOrArray(a) || !isKeyableObjectOrArray(b)) {
     return fabricAwareEqual(a, b);
   }
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+  }
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length &&
-    (!Array.isArray(a) || a.length === (b as unknown[]).length) &&
     keys.every((key) =>
       Object.hasOwn(b, key) && carriedValuesEqual(a[key], b[key])
     );
