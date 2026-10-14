@@ -13235,9 +13235,10 @@ export function* prepareBoundaryCommitSteps(
     // envelope that declares them is stored in place of the stored one.
     let keepsStoredSchema = false;
     // TODO(danfuzz): Like the restatement deferral this waiver discharges,
-    // leaving these positions out admits more than §8.15.4 permits, and runs
-    // by default by Dan's decision; the marker at that deferral names the
-    // specs ruling both wait on.
+    // leaving out the positions beneath links and those at new fields admits
+    // more than §8.15.4 permits, and runs by default ahead of the specs
+    // ruling by Dan's decision; the marker at that deferral names the ruling
+    // both wait on.
     const governsNothingHere = foreignPositions === undefined
       ? () => false
       : beneathForeignPosition(foreignPositions);
