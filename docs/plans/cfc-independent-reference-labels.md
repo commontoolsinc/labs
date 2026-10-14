@@ -460,10 +460,13 @@ specification does not require.
   through it are unchanged.
 - A link write to a document whose envelope the transaction cannot read no
   longer refuses with "missing link source metadata"; it needs the source only
-  when an assertion about linked content needs it. The retry disposition
-  around that refusal in `derivePersistedLinkLabel` goes with it. A list
-  whose elements require an integrity atom refuses an unendorsed element
-  through its floor instead, which reads the element's own evidence.
+  when an assertion about linked content needs it. A list whose elements
+  require an integrity atom refuses an unendorsed element through its floor
+  instead, which reads the element's own evidence. That refusal is retried,
+  where the retired one was final for a source whose root the transaction
+  could read: the floor reads the source's stored labels without the run
+  depending on them, so nothing would run the writer again after a final
+  refusal.
 - Under flow labels `persist`, a reference written by an attempt that read
   labeled data carries that join at its slot even when the reference has no
   declared or carried restriction, unless the container it sits in is
