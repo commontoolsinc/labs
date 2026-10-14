@@ -47,23 +47,25 @@ all, so there are no reasons and nothing to read.
 The write gate reports where prepare records its reasons, which is the point
 the decision is made: an enforcing transaction can no longer commit, whether or
 not it goes on to try. A refusal that only becomes one at commit is reported at
-commit. The write kinds say which decision it was:
+commit. The write kinds say which decision it was, and a kind follows from
+which pass recorded the reasons rather than from their text, since
+`invalidateCfc()` takes any string:
 
-- `write-policy-gate`: prepare evaluated the transaction and recorded reasons
-  it may not commit. Reasons an invalidation adds afterwards leave the kind as
-  it is, since a policy check did refuse.
+- `write-policy-gate`: prepare evaluated the transaction and refused it,
+  recording why. Reasons an invalidation adds afterwards leave the kind as it
+  is, since a policy check did refuse.
 - `write-prepare-crashed`: prepare threw before the gate decided.
 - `write-prepare-invalidated`: prepare passed the transaction, and a change to
   it afterwards — a read, a write, a decision input recorded, a dial set —
   invalidated the preparation where the change was made. No policy check
-  refused the commit, and the rejection is retryable. A reason tagged as a
-  verdict among the invalidation's reasons reports `write-policy-gate`
-  instead, so that this kind never names a terminal refusal.
+  refused the commit. The runtime records no invalidation as a verdict, so the
+  rejection is retryable.
 - `write-prepared-digest-mismatch`: prepare passed the transaction, and the
   recheck at commit found that its activity changed with nothing having
   invalidated the preparation.
-- `write-unprepared`: a CFC-relevant transaction reached commit unprepared,
-  with no reason recorded against it.
+- `write-unprepared`: a CFC-relevant transaction reached commit with no
+  preparation run, and so with no reasons but those a caller recorded through
+  `invalidateCfc()`.
 
 ## What may be said out loud
 

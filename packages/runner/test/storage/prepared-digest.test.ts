@@ -698,6 +698,7 @@ describe("prepared digest transaction binding", () => {
       // Under `observe` the refused preparation reports nothing, so the
       // commit, once enforcement is raised, is the first to report it, with
       // the preparation's verdict and the invalidation's reason both on it.
+
       const underlying = runtime.edit() as ExtendedStorageTransaction;
       const tx = new ExtendedStorageTransaction(underlying.tx);
       tx.writeValueOrThrow(address("output"), "one");
@@ -723,6 +724,7 @@ describe("prepared digest transaction binding", () => {
       // The seeded document carries a stored label, so a write to it with no
       // schema leaves the preparation without the write-policy input it
       // needs, which it records untagged.
+
       const schema = {
         type: "object",
         properties: {
@@ -753,15 +755,27 @@ describe("prepared digest transaction binding", () => {
       expect(denials).toEqual(["write-policy-gate"]);
     });
 
-    it("reports `write-policy-gate` for a verdict among the reasons that invalidate a successful preparation", async () => {
+    it("reports `write-prepare-invalidated` for an invalidation reason tagged as a verdict after a successful preparation", async () => {
+      // `invalidateCfc()` takes any string, so the tag says nothing about
+      // which pass recorded the reason.
+
       const tx = prepared(1);
       tx.invalidateCfc(verdictReason("a verdict recorded after preparing"));
+      const denials = await denialsDuring(() => tx.commit().settled);
+      expect(denials).toEqual(["write-prepare-invalidated"]);
+    });
+
+    it("reports `write-unprepared` for a commit whose only reasons a caller recorded before any preparation", async () => {
+      const tx = runtime.edit() as ExtendedStorageTransaction;
+      tx.writeValueOrThrow(address("output"), 1);
+      tx.markCfcRelevant("test");
+      tx.invalidateCfc("never prepared");
       let error: Error | undefined;
       const denials = await denialsDuring(async () => {
         ({ error } = await tx.commit().settled);
       });
-      expect(error?.name).toBe("CfcCommitRefusalError");
-      expect(denials).toEqual(["write-policy-gate"]);
+      expect(error?.message).toContain("never prepared");
+      expect(denials).toEqual(["write-unprepared"]);
     });
   });
 

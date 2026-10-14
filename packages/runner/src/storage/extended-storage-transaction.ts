@@ -100,11 +100,7 @@ import {
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
-import {
-  isTerminalRefusal,
-  isVerdictReason,
-  plainReason,
-} from "../cfc/verdict-reason.ts";
+import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -839,6 +835,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #preparedSnapshot: ActivitySnapshot | undefined;
 
   /**
+   * Whether the latest preparation refused the transaction. With neither this
+   * nor `#preparedSnapshot` set, no preparation has run since the transaction
+   * began or was aborted.
+   */
+  #preparationRefused = false;
+
+  /**
    * The last _negative_ flow-label probe verdict, with the activity epoch it
    * was taken at (stamped _after_ the probe, whose own metadata reads are
    * internal-verifier reads that never change the verdict but do move the
@@ -1011,37 +1014,31 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   /**
    * Helper for `commit()`, which returns the kind of denial, and its summary,
-   * for a commit refused because the transaction is not prepared, given the
-   * reasons recorded against it.
+   * for a commit refused because the transaction is not prepared.
    *
-   * A preparation that succeeded and was then invalidated reports
+   * The kind follows which pass recorded the reasons, never their text, since
+   * `invalidateCfc()` takes any string. A refused preparation reports
+   * `write-policy-gate`, whatever invalidations add to its reasons afterwards.
+   * A preparation that passed and was invalidated since reports
    * `write-prepare-invalidated`: no policy check refused, and the transaction
-   * changed after the check passed. That is the case while the transaction
-   * still holds the snapshot the preparation verified, which a refused
-   * preparation drops, and while no reason is a verdict. A refused preparation
-   * therefore reports `write-policy-gate` whatever invalidations add to its
-   * reasons afterwards, and a refusal the commit treats as terminal never
-   * reports as an invalidated preparation.
+   * changed after the check passed. With no preparation run, the commit
+   * reports `write-unprepared`, whatever reasons a caller recorded.
    */
-  #unpreparedCommitDenial(
-    reasons: readonly string[],
-  ): readonly [code: CfcDenialCode, summary: string] {
-    if (reasons.length === 0) {
-      return [
-        "write-unprepared",
-        "a CFC-relevant transaction reached commit without preparing",
-      ];
+  #unpreparedCommitDenial(): readonly [code: CfcDenialCode, summary: string] {
+    if (this.#preparationRefused) {
+      return ["write-policy-gate", "a policy check refused the commit"];
     }
-    if (
-      this.#preparedSnapshot !== undefined && !reasons.some(isVerdictReason)
-    ) {
+    if (this.#preparedSnapshot !== undefined) {
       return [
         "write-prepare-invalidated",
         "a change to the transaction after it prepared invalidated the " +
         "preparation",
       ];
     }
-    return ["write-policy-gate", "a policy check refused the commit"];
+    return [
+      "write-unprepared",
+      "a CFC-relevant transaction reached commit without preparing",
+    ];
   }
 
   getCfcState(): Readonly<CfcTxState> {
@@ -3368,6 +3365,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // hole, Codex P2 on #4070).
       this.markCfcRelevant("prepare-reasons");
       this.#preparedSnapshot = undefined;
+      this.#preparationRefused = true;
       this.#cfcState.prepare = {
         status: "invalidated",
         reasons,
@@ -3385,6 +3383,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // whenever it is read.
     const snapshot = this.#activitySnapshot();
     this.#preparedSnapshot = snapshot;
+    this.#preparationRefused = false;
     const digestOf = (snapshot: ActivitySnapshot) => this.#digestOf(snapshot);
     this.#cfcState.prepare = {
       status: "prepared",
@@ -3922,6 +3921,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.prepare = { status: "unprepared" };
     this.#activitySnapshotMemo = undefined;
     this.#preparedSnapshot = undefined;
+    this.#preparationRefused = false;
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
     this.#cfcState.assertedValueRoots = [];
@@ -4093,9 +4093,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         }
         // The step above prepares a relevant transaction, so reaching here
         // means prepare ran and either refused, recording why, or succeeded
-        // and was invalidated since, recording what invalidated it. The empty
-        // arm is the fail-closed backstop for a prepare state that step does
-        // not produce, and an unreasoned refusal is classified as retryable.
+        // and was invalidated since, recording what invalidated it. That step
+        // does not prepare a transaction a caller invalidated before any
+        // preparation, so that one arrives here with only the caller's
+        // reasons. The empty arm is the fail-closed backstop for a prepare
+        // state that step does not produce, and an unreasoned refusal is
+        // classified as retryable.
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
@@ -4114,7 +4117,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // both a reason prepare recorded and one a later invalidation added.
         if (!this.#cfcDenialReported) {
           this.#cfcDenialReported = true;
-          const [code, summary] = this.#unpreparedCommitDenial(reasons);
+          const [code, summary] = this.#unpreparedCommitDenial();
           reportCfcDenial(
             code,
             summary,
