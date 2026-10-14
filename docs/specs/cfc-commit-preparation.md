@@ -189,8 +189,11 @@ standing.
 `commit()` does not prepare an invalidated transaction again. In an enforcing
 mode the ladder refuses it as relevant and not prepared, and an invalidation
 is not a verdict on the transaction's data, so the rejection carries the
-retryable `StorageTransactionAborted` name. The verification from scratch
-happens in the fresh transaction a retrying caller opens.
+retryable `StorageTransactionAborted` name and reports the denial
+`write-prepare-invalidated`
+([cfc-denial-reporting.md](../features/cfc-denial-reporting.md)). The
+verification from scratch happens in the fresh transaction a retrying caller
+opens.
 
 Activity that advances the epoch without invalidating reaches the recheck
 instead, which decides by digest alone. A decision input recorded a second

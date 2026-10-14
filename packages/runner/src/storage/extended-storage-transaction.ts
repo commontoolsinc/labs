@@ -38,6 +38,7 @@ import {
   type CfcDeclaredMonotonicityMode,
   type CfcDeclaredWideningExemption,
   type CfcDecomposedEnvelopes,
+  type CfcDenialCode,
   type CfcDereferenceTrace,
   cfcDereferenceTracesEqual,
   type CfcEnforcementMode,
@@ -99,7 +100,11 @@ import {
   POST_COMMIT_RELEASE_REJECTED,
   runtimeWritePolicyAuthorized,
 } from "../cfc/types.ts";
-import { isTerminalRefusal, plainReason } from "../cfc/verdict-reason.ts";
+import {
+  isTerminalRefusal,
+  isVerdictReason,
+  plainReason,
+} from "../cfc/verdict-reason.ts";
 import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
@@ -1002,6 +1007,41 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       labelMetadataProtection: this.#cfcState.labelMetadataProtectionMode,
       declaredMonotonicity: this.#cfcState.declaredMonotonicityMode,
     };
+  }
+
+  /**
+   * Helper for `commit()`, which returns the kind of denial, and its summary,
+   * for a commit refused because the transaction is not prepared, given the
+   * reasons recorded against it.
+   *
+   * A preparation that succeeded and was then invalidated reports
+   * `write-prepare-invalidated`: no policy check refused, and the transaction
+   * changed after the check passed. That is the case while the transaction
+   * still holds the snapshot the preparation verified, which a refused
+   * preparation drops, and while no reason is a verdict. A refused preparation
+   * therefore reports `write-policy-gate` whatever invalidations add to its
+   * reasons afterwards, and a refusal the commit treats as terminal never
+   * reports as an invalidated preparation.
+   */
+  #unpreparedCommitDenial(
+    reasons: readonly string[],
+  ): readonly [code: CfcDenialCode, summary: string] {
+    if (reasons.length === 0) {
+      return [
+        "write-unprepared",
+        "a CFC-relevant transaction reached commit without preparing",
+      ];
+    }
+    if (
+      this.#preparedSnapshot !== undefined && !reasons.some(isVerdictReason)
+    ) {
+      return [
+        "write-prepare-invalidated",
+        "a change to the transaction after it prepared invalidated the " +
+        "preparation",
+      ];
+    }
+    return ["write-policy-gate", "a policy check refused the commit"];
   }
 
   getCfcState(): Readonly<CfcTxState> {
@@ -4052,9 +4092,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           });
         }
         // The step above prepares a relevant transaction, so reaching here
-        // means prepare ran and refused, recording why. The empty arm is the
-        // fail-closed backstop for a prepare state that step does not
-        // produce, and an unreasoned refusal is classified as retryable.
+        // means prepare ran and either refused, recording why, or succeeded
+        // and was invalidated since, recording what invalidated it. The empty
+        // arm is the fail-closed backstop for a prepare state that step does
+        // not produce, and an unreasoned refusal is classified as retryable.
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
@@ -4073,11 +4114,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // both a reason prepare recorded and one a later invalidation added.
         if (!this.#cfcDenialReported) {
           this.#cfcDenialReported = true;
+          const [code, summary] = this.#unpreparedCommitDenial(reasons);
           reportCfcDenial(
-            reasons.length > 0 ? "write-policy-gate" : "write-unprepared",
-            reasons.length > 0
-              ? "a policy check refused the commit"
-              : "a CFC-relevant transaction reached commit without preparing",
+            code,
+            summary,
             () => ({
               reasons: plainReasons,
               refusals,
