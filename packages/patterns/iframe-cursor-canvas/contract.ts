@@ -51,10 +51,10 @@ export interface IframeStateData {
 
 /** What one user chose to be shown as on every board session of theirs. */
 export interface IframeOutputData {
-  /** Display name, or the empty string until the user's first visit. */
+  /** Display name, or the empty string until the user picks one. */
   displayName: string;
 
-  /** Cursor and shape hue in degrees, or `null` until the first visit. */
+  /** Cursor and shape hue in degrees, or `null` until the user picks a name. */
   hue: number | null;
 }
 

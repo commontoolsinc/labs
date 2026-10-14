@@ -268,21 +268,27 @@ records and never reads a facet
 
 A host grants a room as a `presence` resource. `presenceResource()` builds one
 from a function that joins the room and a function that says what a guest is
-told when the room fails:
+told when the join is refused or the room fails, under the code that fits the
+cause:
 
 ```ts
 import {
   createFabricBridge,
+  IPC,
   presenceResource,
 } from "@commonfabric/iframe-sandbox";
 
 const bridge = createFabricBridge({
   cursors: presenceResource({
     join: () => runtime.joinPresenceRoom(canvasCell),
-    failure: () => ({
-      code: "presence-disconnected",
-      message: "Lost the room.",
-    }),
+    failure: (cause) =>
+      !(cause instanceof Error)
+        ? { code: IPC.BRIDGE_PRESENCE_DISCONNECTED, message: "Lost the room." }
+        : cause.name === "PresenceError"
+        ? { code: IPC.BRIDGE_PRESENCE_REFUSED, message: cause.message }
+        : cause.message.includes("does not support presence")
+        ? { code: IPC.BRIDGE_PRESENCE_UNSUPPORTED, message: "No relay." }
+        : { code: IPC.BRIDGE_PRESENCE_DISCONNECTED, message: "Lost the room." },
   }),
 });
 ```
@@ -339,12 +345,13 @@ using them, as for any value a stranger supplied.
 The relay bounds a record: a name of at most 80 code points, eight facets, a
 facet name of lowercase letters, digits, and hyphens starting with a letter and
 at most 32 characters long, and 8 KiB for the record as encoded. A room holds
-128 members. A publication past a bound, or a join of a full room, ends the room
-with a `failure` whose code is `presence-refused` and whose message is the
-relay's. The other codes are `presence-unsupported`, for a host with no relay,
-and `presence-disconnected`, for a room the host lost. Nothing follows a
-`failure`; a guest that still wants the room calls `join()` again. A guest whose
-host grants no resource of that name hears a `failure` with the code
+128 members. A publication past a bound ends the guest's room with a `failure`
+whose code is `presence-refused` and whose message is the relay's, and a join of
+a full room fails the same way; the members already there stay as they are. The
+other codes are `presence-unsupported`, for a host with no relay, and
+`presence-disconnected`, for a room the host lost. Nothing follows a `failure`;
+a guest that still wants the room calls `join()` again. A guest whose host
+grants no resource of that name hears a `failure` with the code
 `resource-not-found`.
 
 The publishing methods reject while the guest has not joined, and the room

@@ -13,7 +13,6 @@ import {
 import {
   type CanvasShape,
   DEFAULT_INPUT,
-  DEFAULT_OUTPUT,
   DEFAULT_STATE,
   type IframeInputData,
   type IframeOutputData,
@@ -582,11 +581,21 @@ document.addEventListener("keydown", (event) => {
 // Profile
 //
 
+/**
+ * The name and hue this page goes by until the user picks a name. Nothing
+ * stores them: viewing the board writes nothing of the user's.
+ */
+const visitorProfile: Profile = (() => {
+  const [nameSeed, hueSeed] = crypto.getRandomValues(new Uint32Array(2));
+  return { name: visitorName(nameSeed), hue: hueSeed % 360 };
+})();
+
+/** Takes the profile the user stored, or the visitor one where there is none. */
 function adoptProfile(value: Readonly<IframeOutputData> | undefined): void {
-  const hue = readHue(value?.hue);
-  if (!value?.displayName || hue === undefined) return;
-  const changed = profile?.name !== value.displayName || profile?.hue !== hue;
-  profile = { name: value.displayName, hue };
+  const name = value?.displayName || visitorProfile.name;
+  const hue = readHue(value?.hue) ?? visitorProfile.hue;
+  const changed = profile?.name !== name || profile?.hue !== hue;
+  profile = { name, hue };
   // A name being typed is a draft, and stays until it is committed.
   if (document.activeElement !== nameInput) nameInput.value = profile.name;
   if (changed) publishProfile();
@@ -597,7 +606,9 @@ nameInput.addEventListener("change", () => {
   const name = displayNameOf(nameInput.value, profile.name);
   nameInput.value = name;
   if (name === profile.name) return;
-  output.key("displayName").set(name).catch(showError);
+  // Picking a name stores it with the hue this page has gone by, so every
+  // later session of the user's reads both back.
+  output.set({ displayName: name, hue: profile.hue }).catch(showError);
 });
 
 nameInput.addEventListener("keydown", (event) => {
@@ -623,16 +634,6 @@ void (async () => {
   try {
     await Promise.all([input.pull(), state.pull(), output.pull()]);
     await state.initialize(DEFAULT_STATE);
-    const stored = await output.initialize(DEFAULT_OUTPUT);
-    if (!stored.displayName || readHue(stored.hue) === undefined) {
-      // A first visit gets a name and a hue, which every later session of
-      // this user reads back.
-      const [nameSeed, hueSeed] = crypto.getRandomValues(new Uint32Array(2));
-      await output.set({
-        displayName: stored.displayName || visitorName(nameSeed),
-        hue: readHue(stored.hue) ?? hueSeed % 360,
-      });
-    }
     await state.pull();
     hydrated = true;
     adoptProfile(output.get());
