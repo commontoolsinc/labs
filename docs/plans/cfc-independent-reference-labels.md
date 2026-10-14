@@ -462,11 +462,17 @@ specification does not require.
   longer refuses with "missing link source metadata"; it needs the source only
   when an assertion about linked content needs it. A list whose elements
   require an integrity atom refuses an unendorsed element through its floor
-  instead, which reads the element's own evidence. That refusal is retried,
-  where the retired one was final for a source whose root the transaction
-  could read: the floor reads the source's stored labels without the run
-  depending on them, so nothing would run the writer again after a final
-  refusal.
+  instead, which reads the element's own evidence. That refusal is not a
+  verdict, where the retired one was for a source whose root the transaction
+  could read: the floor cannot tell a source that lacks the atom from one
+  the transaction does not hold, and the run does not depend on the source's
+  stored labels. So a reactive writer takes its bounded retries, a client
+  that delivers its own events reports the refused commit after one attempt,
+  and a served event gets no error consequence sealed for it, which a
+  verdict's refusal does get. A floor's failure over a plain value is
+  disposed of the same way. A floor that refused with a verdict would need
+  its evidence to say whether every source it weighed was in hand, and a read
+  of the source's stored labels that reactivity sees.
 - Under flow labels `persist`, a reference written by an attempt that read
   labeled data carries that join at its slot even when the reference has no
   declared or carried restriction, unless the container it sits in is
