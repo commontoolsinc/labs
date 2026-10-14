@@ -374,7 +374,12 @@ These rules hold for every stream:
   so a room the sender reached by its link, or forgot, becomes one of their
   chats. The manager checks membership in its own Home-space event and leaves
   an already saved room unchanged. The room reads no private catalog and sends
-  nothing for a sender with no manager.
+  nothing for a sender with no manager. It sends `joinRoom` in an event of its
+  own, once the write has landed, so the write reads nothing of the manager. A
+  manager in a person's Home can carry a confidentiality label, such as their
+  `PersonalSpace`, that the room's space doesn't admit, and a write that read
+  it would be refused; such a manager can keep the join from happening, never
+  the write.
 - A refusal writes nothing to the room's shared record. The sender's outcome
   is recorded where only they read it: in `messageRequests` for a message
   act, and in `addRequests` for an add, each `refused` with a reason and a
@@ -656,7 +661,9 @@ with them.
   room's space, for a group room in a space of its own.
 - **Effect:** grants the principal OWNER on the room's space, so they too may
   add others. Granting someone the OWNER they already hold changes nothing.
-  Then, for a reader with a manager, the room sends the manager's
+  Then, in an event of its own, so that the add reads nothing of the manager,
+  for the reason a write that joins a room doesn't (see the rules every stream
+  holds to), for a reader with a manager the room sends the manager's
   [`offerRoom`](ChatManagerOutput.md#offerroomrequestid-string-room-cellchatroomoutput-member-string-profile-cellchatprofile),
   naming the person and the `profile` when the add has one, under a
   `requestId` composed of the room's space and the add's own. The manager
@@ -682,8 +689,8 @@ with them.
   whether it arrived; `noticed`, a notice in the manager's `outgoingNotices`
   for a client to deliver; or `access-only`, told nothing, so that the adder
   has to send them the room's link. An add with no manager to send to records
-  `access-only` at once: the reader has no manager, theirs hasn't resolved yet,
-  or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
+  `access-only` in that event: the reader has no manager, theirs hasn't
+  resolved yet, or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
   once a manager resolves, since nothing runs then to send it. Otherwise
   `delivery` is the manager's verdict, which `addRequests` reads from the
   manager's `requests` once it is recorded, and is absent until then. A
