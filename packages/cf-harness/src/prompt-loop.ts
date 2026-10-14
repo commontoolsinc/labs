@@ -3734,15 +3734,9 @@ export class CfHarnessPromptLoop {
   ): Promise<HarnessTaskClassification> {
     const runState = this.engine.getRunState();
     const classification = await classifyTask(task, {
-      ...(runState.patternRefs !== undefined
-        ? { patternRefs: runState.patternRefs }
-        : {}),
-      ...(runState.skillRegistry !== undefined
-        ? { skillRegistry: runState.skillRegistry }
-        : {}),
-      ...(runState.inputCells !== undefined
-        ? { inputCells: runState.inputCells }
-        : {}),
+      patternRefs: runState.patternRefs,
+      skillRegistry: runState.skillRegistry,
+      inputCells: runState.inputCells,
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
     }, {

@@ -1,7 +1,10 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { buildCfHarnessBaseSystemPrompt } from "../src/cli.ts";
+import {
+  buildCfHarnessBaseSystemPrompt,
+  buildCfHarnessOperatorSystemPrompt,
+} from "../src/cli.ts";
 import { PIECE_TARGETING_GUIDANCE } from "../src/piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import { orientContextMessages } from "../src/session-assembly.ts";
@@ -95,6 +98,17 @@ describe("orientation", () => {
       expect(prompt.length).toBeLessThan(
         buildCfHarnessBaseSystemPrompt({ patternIndex: true }).length,
       );
+    });
+
+    it("narrows the operator prompt by the task's tags", () => {
+      const config = { workspace: "/workspace", focusRoot: "/workspace" };
+
+      expect(buildCfHarnessOperatorSystemPrompt({
+        ...config,
+        taskTags: new Set(["respond"]),
+      })).not.toContain("When you delegate");
+      expect(buildCfHarnessOperatorSystemPrompt(config))
+        .toContain("When you delegate");
     });
 
     it("gives a pieces task the handle guidance and not the opening-research rule", () => {

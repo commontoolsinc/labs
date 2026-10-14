@@ -5,6 +5,7 @@ import type { HarnessPatternRef } from "../src/contracts/pattern-refs.ts";
 import { PLAYTEST_2026_10_13_TASKS } from "./task-classification-cases.ts";
 import {
   classifyTask,
+  classifyTaskByModel,
   classifyTaskByRule,
   HARNESS_TASK_TAGS,
   type HarnessTaskTag,
@@ -161,7 +162,26 @@ describe("task-classification", () => {
       expect(classification.path).toBe("model");
       expect(classification.tags).toEqual(["find", "pieces"]);
       expect(prompts[0]).toContain("the quarterly numbers for Q3 sales");
-      expect(prompts[0]).toContain("Budget");
+      expect(prompts[0]).toContain('The agent holds: piece "Budget".');
+    });
+
+    it("tells the model what the run holds, or that it holds nothing", async () => {
+      const prompts: string[] = [];
+      const ask = (prompt: string) => {
+        prompts.push(prompt);
+        return Promise.resolve("act");
+      };
+
+      await classifyTaskByModel("book it", {
+        patternRefs: [attachedPattern],
+        browserHost: true,
+      }, ask);
+      await classifyTaskByModel("book it", {}, ask);
+
+      expect(prompts[0]).toContain(
+        "The agent holds: 1 attached pattern(s), a web browser.",
+      );
+      expect(prompts[1]).toContain("The agent holds: nothing.");
     });
 
     it("falls back to every tag when the model answers no tag", async () => {

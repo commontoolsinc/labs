@@ -3165,7 +3165,9 @@ describe("CfHarnessPromptLoop opening research", () => {
 
     it("counts a model classification's tokens in the run's total usage", async () => {
       const task = "the quarterly numbers for Q3 sales";
+      const classificationRequests: HarnessModelTurnRequest[] = [];
       const loop = new CfHarnessPromptLoop({
+        researchReasoningEffort: "low",
         engine: new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-classified-by-model",
@@ -3173,8 +3175,11 @@ describe("CfHarnessPromptLoop opening research", () => {
         }),
         modelClient: {
           providerId: "test-provider",
-          complete: (request) =>
-            Promise.resolve(
+          complete: (request) => {
+            if (request.runId.endsWith(":task-classification")) {
+              classificationRequests.push(request);
+            }
+            return Promise.resolve(
               request.runId.endsWith(":task-classification")
                 ? {
                   assistant: { role: "assistant", content: "find" },
@@ -3184,11 +3189,14 @@ describe("CfHarnessPromptLoop opening research", () => {
                   assistant: { role: "assistant", content: "Done." },
                   usage: { totalTokens: 7 },
                 },
-            ),
+            );
+          },
         },
       });
 
-      const classification = await loop.classifyTask(task);
+      const classification = await loop.classifyTask(task, {
+        signal: new AbortController().signal,
+      });
       const result = await loop.runPrompt({
         prompt: task,
         openingResearchTask: task,
@@ -3198,6 +3206,9 @@ describe("CfHarnessPromptLoop opening research", () => {
       expect(classification).toMatchObject({ tags: ["find"], path: "model" });
       expect(result.usage?.totalTokens).toBe(7);
       expect(result.totalUsage?.totalTokens).toBe(12);
+      expect(classificationRequests).toHaveLength(1);
+      expect(classificationRequests[0].reasoningEffort).toBe("low");
+      expect(classificationRequests[0].signal).toBeDefined();
     });
 
     it("runs opening research for an author task", async () => {
