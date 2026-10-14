@@ -50,6 +50,7 @@ import {
   NAME,
   pattern,
   type PerSession,
+  type PerUser,
   principalOf,
   spaceAccess,
   spaceOf,
@@ -1169,6 +1170,10 @@ const performManagerAct = (
     // A member named by principal alone is offered the room through the
     // profiles `people` lists for them, so a person this user shares no room
     // with is offered nothing.
+    // TODO(danfuzz): A served run can't read the user's instance of `people`,
+    // and finds none listed, so under server execution such a member gets a
+    // notice. Offer through `people` there too, once a served handler can read
+    // a per-user instance of its user's.
     const profiles = named === undefined
       ? [...(state.people?.[member] ?? [])]
       : [named];
@@ -1744,16 +1749,13 @@ export const FabriChatManagerCore = pattern<
         )
         : [];
     });
-    // Each room found, and everything read from it, is stored in the scope
-    // this manager is created in, or in its user's where it is derived from a
-    // profile that `#profile` resolved for them. A room's space is read under
-    // the reader's own access, so a principal it refuses finds nothing there
-    // that the others find, and a value stored once for every reader, which
-    // readers derive differently, is one their runtimes overwrite without
-    // end. A home space admits its user alone, so a manager there is created
-    // in the space's scope, and a session reads what the one before it
-    // stored. A manager more than one principal reads is created with
-    // `asScope()` in a scope that keeps each principal's own.
+    // Each room found, and everything read from it, is stored per user. A
+    // room's space is read under the reader's own access, so a principal it
+    // refuses finds nothing there that the others find, and a value stored
+    // once for every reader, which readers derive differently, is one their
+    // runtimes overwrite without end. A home space admits its user alone, so
+    // there it is one instance, and a session reads what the one before it
+    // stored; a space more than one principal reads keeps each one's own.
     //
     // A Home that ran this pattern while it derived these per session holds
     // them as links to a session's own instances: under the names `found`,
@@ -1762,12 +1764,12 @@ export const FabriChatManagerCore = pattern<
     // created there under one of those is written per session still, so none
     // here is.
     const foundRooms = savedRooms.map((entry) =>
-      FoundRoom({ space: entry.space, kind: entry.kind })
+      FoundRoom.asScope("user")({ space: entry.space, kind: entry.kind })
     );
     // Each saved room once it resolves and reads as a room, newest first. The
     // room's own records are read here, beside the entry they belong to, so
     // they are read in the run that lists them.
-    const rooms = computed((): ChatIndexEntry[] => {
+    const rooms = computed((): PerUser<ChatIndexEntry[]> => {
       const self = principalOf(myProfile, "represents-principal");
       const stored = direct.get() ?? {};
       const catalogValue = sharedSpaceCatalog.get();
@@ -1831,7 +1833,7 @@ export const FabriChatManagerCore = pattern<
     // have, names no one to offer a room to, and this user's own are left
     // out.
     const peopleByPrincipal = computed(
-      (): Record<string, ManagerProfileCell[]> => {
+      (): PerUser<Record<string, ManagerProfileCell[]>> => {
         const self = principalOf(myProfile, "represents-principal");
         return rooms.reduce<Record<string, ManagerProfileCell[]>>(
           (found, entry) =>
@@ -1864,7 +1866,7 @@ export const FabriChatManagerCore = pattern<
     };
     // Stored where `rooms` is: a room's label is the title its room holds,
     // which a direct room has only once a member sets one.
-    const shownRooms = computed((): ShownEntry[] =>
+    const shownRooms = computed((): PerUser<ShownEntry[]> =>
       rooms.map((entry) => ({
         room: entry.room,
         ...(entry.revision === undefined ? {} : { revision: entry.revision }),

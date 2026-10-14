@@ -14,15 +14,22 @@ is a new session, so each load derived and committed all of it again.
 
 The manager lives in its user's home space, which admits that user alone, so
 every session there derives the same values. `FabriChatManagerCore` now derives
-them in the scope it is created in, and `FabriChatManagerOutput`'s `rooms` and
-`people` declare no scope. The session's group draft and the reason its latest
+them per user, which in a home space is one instance, and
+`FabriChatManagerOutput`'s `rooms` and `people` declare no scope. The session's group draft and the reason its latest
 start was refused stay per session, and so does the list of people the draft's
 form offers, which says whether the draft has picked each.
 
 A manager more than one principal reads is still a case: a room's space
-refuses some readers, and they derive different rooms and people. Such a
-manager is created with `asScope()`. The one fixture that places a manager in a
-space three principals read, `fabrichat-spaces`, creates it per user.
+refuses some readers, and they derive different rooms and people. Per user,
+each principal keeps its own. The core first derived these in the scope it was
+created in, with such a manager created through `asScope()`. With server
+execution on, at main's `560bcd9f20`, a core created with `asScope("user")` or
+`asScope("session")` let a reader the room's space refuses list the room, with
+the kind only a member can read (`fabrichat-manager-quiet-multi-runtime`, three
+runs of three, where main passed three of three); main's own manager failed the
+same way once its fixture created it with `asScope("user")`. The same scope
+declared on the derived cells inside the core passes, so the core declares it
+there.
 
 ## What the gate reports
 
@@ -75,11 +82,12 @@ The unchanged code is `6986fd8f47`.
   whether the Home holds no chats, six, or twelve. On the unchanged code a
   load writes 10 documents in 15 commits with no chats, 64 in 38 with six, and
   118 in 56 to 60 with twelve, about 81 KB and 160 to 172 KB.
-- **Where the values land.** The found rooms are stored in the space's scope.
-  The list of rooms, their labels, their rows, and the people are stored under
-  the user's own key, `user:<did>`, because they are derived from the user's
-  profile, which a `#profile` wish resolves per user. In a home space that is
-  one instance, as the space's scope is.
+- **Where the values land.** In the version measured, the found rooms were
+  stored in the space's scope, and the list of rooms, their labels, their
+  rows, and the people under the user's own key, `user:<did>`, because they
+  are derived from the user's profile, which a `#profile` wish resolves per
+  user. The version merged with main stores the found rooms per user as well.
+  In a home space either is one instance.
 - **A Home rolled forward in place.** Its root follows a `system:` origin and
   adopts the new source on its next load. A Home holding six chats, created
   on the unchanged code and loaded on this change's, lists the same six rooms
@@ -99,10 +107,12 @@ The unchanged code is `6986fd8f47`.
   `RoomManager.people` still declares `PerSession`, and reads the stored value.
 - **A served handler.** `offerRoom` reads `people` to offer a room to a member
   named by address alone. With server execution on, a served run of it found
-  no one listed while `people` was per session, and queued a notice. It now
-  reads the stored value and offers the room: `fabrichat-add-offer` across
-  runtimes and `fabrichat-join` in two browsers expect `offered` under either
-  posture, where they expected `noticed` with server execution on.
+  no one listed while `people` was per session, and queued a notice. Stored
+  once for the space, before the merge with main, it read the stored value and
+  offered the room under either posture. Stored per user, as merged, a served
+  run cannot read the user's instance either, and queues a notice as on main;
+  `fabrichat-add-offer` across runtimes and `fabrichat-join` in two browsers
+  keep main's expectations.
 - **Server execution on.** `fabrichat-manager-sessions` across runtimes counts
   the documents a later session of the same user writes in its own scope in
   the manager's space. On this change it is the same with one room and with

@@ -20,6 +20,7 @@ import { join } from "@std/path";
 import {
   MultiRuntimeHarness,
   type MultiRuntimeSession,
+  resolveServerExecution,
 } from "./multi-runtime-harness.ts";
 
 const PROGRAM_PATH = join(
@@ -29,6 +30,9 @@ const PROGRAM_PATH = join(
   "main.tsx",
 );
 const ROOT_PATH = join(import.meta.dirname!, "..");
+
+/** Whether this run's harness serves handlers from a serving loop. */
+const SERVER_EXECUTION = resolveServerExecution();
 
 // The reviewed actions a start and an add are admitted from, as
 // `../fabrichat/schemas.tsx` names them.
@@ -148,6 +152,11 @@ describe("fabrichat add offer across runtimes", () => {
 
     // Ada adds Grace by her address alone. Her manager offers Grace the room
     // through the profile it lists for her, and the room reads the verdict.
+    // A served handler can't read the manager's per-user `people`, so
+    // under server execution it finds no profile for her, and queues a
+    // notice instead.
+    // TODO(danfuzz): Expect `offered` under server execution too, once a
+    // served handler can read a per-user instance of its user's.
     await ada.send(
       "addMember",
       {
@@ -167,18 +176,23 @@ describe("fabrichat add offer across runtimes", () => {
       await ada.read(["$VIEWS", "room", "addRequests", "add-grace"], {
         piece: room,
       }),
-    ).toEqual({ status: "done", delivery: "offered" });
+    ).toEqual({
+      status: "done",
+      delivery: SERVER_EXECUTION ? "noticed" : "offered",
+    });
 
     // The offer reached the inbox Grace's profile points at, keyed by the room
     // and the add.
-    const inbox = await grace.link(["privateInbox", "piece"]);
-    await harness.settleUntil(async () =>
-      ((await grace.read(["offers"], { piece: inbox })) as
-        | { id: string }[]
-        | undefined ?? []).some(({ id }) =>
-          id === addMemberOfferId(room.space, "add-grace")
-        )
-    );
+    if (!SERVER_EXECUTION) {
+      const inbox = await grace.link(["privateInbox", "piece"]);
+      await harness.settleUntil(async () =>
+        ((await grace.read(["offers"], { piece: inbox })) as
+          | { id: string }[]
+          | undefined ?? []).some(({ id }) =>
+            id === addMemberOfferId(room.space, "add-grace")
+          )
+      );
+    }
 
     // Grace, a member of the room now, reads it, and none of Ada's adds.
     expect(await grace.read(["about", "title"], { piece: room })).toBe(

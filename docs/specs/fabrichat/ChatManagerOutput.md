@@ -141,22 +141,20 @@ Everything a manager stores is `PerSpace` in the user's home space (see
 user, so `PerSpace` there means one instance for that user, which is why nothing
 it stores needs to be `PerUser` or `PerSession`.
 
-`rooms`, which the manager derives rather than keeps, is stored once for that
-user too, and so is `people`, which is drawn from it. The contract declares no
-scope for either, and each is stored in the space's scope, or in the user's
-where it is derived from the user's profile, which `#profile` resolves per
-user. Every session of a home space is its user's, so each derives the same
-rooms and the same people, and a session starts from the ones the session
-before it stored.
+`rooms`, which the manager derives rather than keeps, is stored per user, and
+so is `people`, which is drawn from it. The contract declares no scope for
+either. Every session of a home space is its user's, so there each is one
+instance: each session derives the same rooms and the same people, and a
+session starts from the ones the session before it stored.
 
-That holds only where every reader is the same principal. Each room is read
-under the reader's own access, and a profile lives in its owner's own space,
-and attests no principal to a reader that space refuses, so two readers can
-list different rooms and key the same roster differently. Stored once for
-every reader, a value readers derive differently is one their runtimes
-overwrite without end. A manager more than one principal reads, as one outside
-a home space can be, is therefore created in a scope that keeps each
-principal's own, `user` or `session`, with the pattern factory's `asScope()`.
+Per user rather than once for the space, because each room is read under the
+reader's own access, and a profile lives in its owner's own space, and attests
+no principal to a reader that space refuses, so two principals can list
+different rooms and key the same roster differently. Stored once for every
+reader, a value readers derive differently is one their runtimes overwrite
+without end, so a manager more than one principal reads, as one outside a home
+space can be, keeps each principal's own.
+
 A stream reads neither `rooms` nor `people`, except `offerRoom`, which reads
 `people`: every other request names a room's members by principal or by
 profile itself.
