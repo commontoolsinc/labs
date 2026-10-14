@@ -66,9 +66,9 @@
     "$defs": {
       "CanvasShape": {
         "properties": {
-          "height": {
-            "description": "Height of the bounding box, in board pixels.",
-            "type": "number"
+          "box": {
+            "$ref": "#/$defs/ShapeBox",
+            "description": "The shape's bounding box."
           },
           "hue": {
             "description": "Fill hue, in degrees.",
@@ -85,25 +85,15 @@
               "ellipse"
             ]
           },
-          "position": {
-            "$ref": "#/$defs/Point",
-            "description": "Top-left corner of the shape's bounding box."
-          },
           "removed": {
             "description": "Whether the shape was removed. A removed shape stays in the list.",
             "type": "boolean"
-          },
-          "width": {
-            "description": "Width of the bounding box, in board pixels.",
-            "type": "number"
           }
         },
         "required": [
           "id",
           "kind",
-          "position",
-          "width",
-          "height",
+          "box",
           "hue",
           "removed"
         ],
@@ -162,6 +152,28 @@
         "required": [
           "x",
           "y"
+        ],
+        "type": "object"
+      },
+      "ShapeBox": {
+        "properties": {
+          "height": {
+            "description": "Height of the box, in board pixels.",
+            "type": "number"
+          },
+          "position": {
+            "$ref": "#/$defs/Point",
+            "description": "Top-left corner of the box."
+          },
+          "width": {
+            "description": "Width of the box, in board pixels.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "position",
+          "width",
+          "height"
         ],
         "type": "object"
       }

@@ -19,6 +19,7 @@ import {
   type IframeOutputData,
   type IframeStateData,
   type Point,
+  type ShapeBox,
 } from "./contract.ts";
 import {
   BOARD_HEIGHT,
@@ -34,7 +35,6 @@ import {
   readPeer,
   resizeBox,
   sameBox,
-  type ShapeBox,
   shapeIndex,
   USER_FACET,
   visitorName,
@@ -244,10 +244,11 @@ function shownBox(shape: CanvasShape): ShapeBox {
   const settled = settling.get(shape.id);
   if (settled) return settled;
   const held = holderOf(shape.id)?.drag;
+  if (!held) return shape.box;
   return {
-    position: held?.position ?? shape.position,
-    width: held?.size?.width ?? shape.width,
-    height: held?.size?.height ?? shape.height,
+    position: held.position,
+    width: held.size?.width ?? shape.box.width,
+    height: held.size?.height ?? shape.box.height,
   };
 }
 
@@ -585,24 +586,16 @@ function endDrag(event: PointerEvent, drop: boolean): void {
     render();
     return;
   }
-  const { box, from } = held;
+  const { box } = held;
   settling.set(held.id, box);
   render();
   void (async () => {
     try {
       const shape = await resolveShape(held.id);
-      // A move changes only the position, so it writes that field alone. A
-      // resize changes the box as a whole, so it lands in one write or none.
-      if (box.width === from.width && box.height === from.height) {
-        await shape.key("position").set(box.position);
-      } else {
-        await shape.update((current) => ({
-          ...current,
-          position: box.position,
-          width: box.width,
-          height: box.height,
-        }));
-      }
+      // The box is one field, so a move or a resize lands whole or not at
+      // all, and leaves the shape's other fields, `removed` among them, to
+      // whoever else writes them.
+      await shape.key("box").set(box);
       await state.pull();
     } catch (cause) {
       showError(cause);

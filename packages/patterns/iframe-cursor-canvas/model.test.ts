@@ -318,20 +318,18 @@ describe("model", () => {
       expect(createShape("ellipse", "shape-1", 40, 0)).toEqual({
         id: "shape-1",
         kind: "ellipse",
-        position: { x: 260, y: 140 },
-        width: 150,
-        height: 150,
+        box: { position: { x: 260, y: 140 }, width: 150, height: 150 },
         hue: 40,
         removed: false,
       });
     });
 
     it("returns a position a step further on for the next sequence number", () => {
-      expect(createShape("rectangle", "a", 0, 1).position).toEqual({
+      expect(createShape("rectangle", "a", 0, 1).box.position).toEqual({
         x: 288,
         y: 168,
       });
-      expect(createShape("rectangle", "a", 0, 10).position).toEqual({
+      expect(createShape("rectangle", "a", 0, 10).box.position).toEqual({
         x: 260,
         y: 140,
       });

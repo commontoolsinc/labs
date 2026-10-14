@@ -6,7 +6,7 @@
  */
 
 import { normalizePresenceParticipantName } from "../shared-note/participant-name.ts";
-import type { CanvasShape, Point } from "./contract.ts";
+import type { CanvasShape, Point, ShapeBox } from "./contract.ts";
 
 /** Width of the board, in board pixels. */
 export const BOARD_WIDTH = 1600;
@@ -28,18 +28,6 @@ export const MIN_SHAPE_SIZE = 24;
 
 /** A corner of a shape's bounding box, which a resize handle sits on. */
 export type Corner = "nw" | "ne" | "sw" | "se";
-
-/** Where a shape is drawn: its bounding box on the board. */
-export interface ShapeBox {
-  /** Top-left corner of the box. */
-  position: Point;
-
-  /** Width of the box, in board pixels. */
-  width: number;
-
-  /** Height of the box, in board pixels. */
-  height: number;
-}
 
 /** A shape a peer holds mid-drag or mid-resize, as the peer holds it. */
 export interface PeerDrag {
@@ -262,8 +250,10 @@ export function createShape(
   return {
     id,
     kind,
-    position: clampToBoard({ x: 260 + step, y: 140 + step }, size),
-    ...size,
+    box: {
+      position: clampToBoard({ x: 260 + step, y: 140 + step }, size),
+      ...size,
+    },
     hue,
     removed: false,
   };

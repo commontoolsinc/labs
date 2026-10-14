@@ -13,6 +13,21 @@ export interface Point {
   y: number;
 }
 
+/**
+ * Where a shape sits: its bounding box on the board. It is one field of the
+ * shape, so a move or a resize is one write that touches nothing else.
+ */
+export interface ShapeBox {
+  /** Top-left corner of the box. */
+  position: Point;
+
+  /** Width of the box, in board pixels. */
+  width: number;
+
+  /** Height of the box, in board pixels. */
+  height: number;
+}
+
 /** One shape on the board. */
 export interface CanvasShape {
   /** Stable id, minted by the guest that added the shape. */
@@ -21,14 +36,8 @@ export interface CanvasShape {
   /** Outline drawn inside the shape's bounding box. */
   kind: "rectangle" | "ellipse";
 
-  /** Top-left corner of the shape's bounding box. */
-  position: Point;
-
-  /** Width of the bounding box, in board pixels. */
-  width: number;
-
-  /** Height of the bounding box, in board pixels. */
-  height: number;
+  /** The shape's bounding box. */
+  box: ShapeBox;
 
   /** Fill hue, in degrees. */
   hue: number;
