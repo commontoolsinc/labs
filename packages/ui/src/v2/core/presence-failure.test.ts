@@ -19,6 +19,9 @@ describe("presenceFailureCategory()", () => {
     expect(presenceFailureCategory(new Error("memory session closed"))).toBe(
       "connection",
     );
+    const restoring = new Error("session restore was refused");
+    restoring.name = "ProtocolError";
+    expect(presenceFailureCategory(restoring)).toBe("connection");
     expect(presenceFailureCategory("nope")).toBe("connection");
   });
 });

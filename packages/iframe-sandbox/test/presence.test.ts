@@ -565,6 +565,61 @@ describe("presence", () => {
   });
 
   describe("RemotePresence", () => {
+    it("tells a listener nothing of a sink it let go of whose request fails after it joined again", async () => {
+      let sinks = 0;
+      const cursors: BridgeResource = {
+        kind: "presence",
+        sink: (listener) => {
+          if (sinks++ === 0) throw new Error("first sink refused");
+          listener({
+            kind: "snapshot",
+            participantId: "self",
+            participants: [],
+          });
+          return () => {};
+        },
+      };
+
+      await withGuest({ cursors }, async (client) => {
+        const events = queue<PresenceRoomEvent>();
+        const presence = client.presence("cursors");
+        presence.join(() => {})();
+        presence.join((event) => events.push(event));
+
+        expect(await events.next()).toEqual({
+          kind: "snapshot",
+          participantId: "self",
+          participants: [],
+        });
+        expect(presence.participantId).toBe("self");
+      });
+    });
+
+    it("hands out frozen participants, facets and their contents included", async () => {
+      const { room } = fakeRoom([{
+        participantId: "ada",
+        name: "Ada",
+        facets: { drag: { id: "shape", position: { x: 1, y: 2 } } },
+      }]);
+      const cursors = presenceResource({
+        join: () => Promise.resolve(room),
+        failure: () => ({ code: "unused", message: "unused" }),
+      });
+
+      await withGuest({ cursors }, async (client) => {
+        const events = queue<PresenceRoomEvent>();
+        const presence = client.presence("cursors");
+        presence.join((event) => events.push(event));
+        await events.next();
+
+        const [participant] = presence.participants;
+        expect(Object.isFrozen(participant)).toBe(true);
+        expect(Object.isFrozen(participant.facets)).toBe(true);
+        expect(Object.isFrozen(participant.facets.drag)).toBe(true);
+        expect(Object.isFrozen(participant.facets.drag.position)).toBe(true);
+      });
+    });
+
     it("ignores a delivery that is not a room event, and a participant whose facet is not a plain object", async () => {
       let deliver: (value: FabricValue | undefined) => void = () => {};
       const cursors: BridgeResource = {

@@ -87,9 +87,10 @@ resolved field, derived exactly as an editor's room is, and none of the cell's
 data. The guest chooses its own facets, such as a pointer position or a shape
 held mid-drag, and sets its own display name. What it is told of another
 member is that member's relay-assigned id, name, and facets; the DID the relay
-stamps on a record does not cross into the guest. A relay's refusal reaches
-the guest in the relay's words, since it concerns the guest's own publication,
-and any other failure reaches it as a category alone.
+stamps on a record does not cross into the guest. A relay's refusal of the
+guest's join or of its publication reaches the guest in the relay's words,
+since it concerns what the guest did, and any other failure reaches it as a
+category alone.
 [`../../packages/iframe-sandbox/README.md`](../../packages/iframe-sandbox/README.md)
 covers the guest API, and
 [`../common/ai/iframe-pattern-guide.md`](../common/ai/iframe-pattern-guide.md)

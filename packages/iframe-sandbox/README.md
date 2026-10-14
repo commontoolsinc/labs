@@ -350,10 +350,10 @@ host grants no resource of that name hears a `failure` with the code
 The publishing methods reject while the guest has not joined, and the room
 publishes nothing for a member with no name.
 
-The host handles a request of a `presence` resource as it arrives, outside the
-order the session's other operations wait in. A status update therefore does not
-wait for an earlier write's commit to be confirmed, and does not hold up a later
-one.
+The host handles the requests of a `presence` resource in the order they arrive,
+and apart from the order the session's other operations wait in. A status update
+therefore does not wait for an earlier write's commit to be confirmed, and does
+not hold up a later one.
 
 ## Protocol
 

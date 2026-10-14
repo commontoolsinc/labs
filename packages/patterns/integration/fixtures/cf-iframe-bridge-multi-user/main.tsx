@@ -171,6 +171,14 @@ const GUEST_HTML = `<!doctype html>
 
   const receiveRoomEvent = (event, error) => {
     if (error) {
+      // A failure ends the room: the guest holds nothing of it, and may join
+      // again.
+      if (room.subscription !== undefined) {
+        subscriptions.delete(room.subscription);
+      }
+      room.subscription = undefined;
+      room.participantId = undefined;
+      room.participants = new Map();
       reportRoom(error);
       return;
     }

@@ -374,8 +374,8 @@ to initial hydration; an ordinary mutation must not remount the application.
 A presence room is declared in the contract and read through
 `fabric.presence(name)`; its events arrive outside React, so hold what a
 component renders from them in state or an external store.
-[`iframe-pattern-guide.md`](./iframe-pattern-guide.md), "Optional presence",
-is the contract.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
 
 ### Reconcile asynchronous gestures by identity
 

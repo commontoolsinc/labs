@@ -706,6 +706,50 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("handles the requests of one `presence` resource in the order they arrive, behind an earlier one still settling", async () => {
+    const first = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const bridge = createFabricBridge({
+      cursors: {
+        kind: "presence",
+        methods: {
+          setName: async (name) => {
+            if (name === "first") await first.promise;
+            order.push(String(name));
+            return undefined;
+          },
+        },
+      },
+      other: {
+        kind: "presence",
+        methods: {
+          setName: () => {
+            order.push("other");
+            return undefined;
+          },
+        },
+      },
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(bridge, channel.port1);
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const one = client.call("cursors", "setName", "first");
+      const two = client.call("cursors", "setName", "second");
+      await client.call("other", "setName", "x");
+      expect(order).toEqual(["other"]);
+
+      first.resolve();
+      await Promise.all([one, two]);
+      expect(order).toEqual(["other", "first", "second"]);
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
   it("tells a sink a snapshot listener adds on a refusal of it alone, handing it no value", async () => {
     const bridge = createFabricBridge({
       secret: {

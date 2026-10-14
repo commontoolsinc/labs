@@ -266,8 +266,8 @@ travels through a presence room instead of a Cell. A room holds each member's
 latest record and stores nothing, so publishing from the render loop is what
 it is for. It orders nothing between members and keeps no history: whatever
 must be agreed on or must survive stays a Cell write.
-[`iframe-pattern-guide.md`](./iframe-pattern-guide.md), "Optional presence",
-is the contract.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
 
 The iframe CSP does not grant arbitrary network access. Prefer procedural
 geometry and materials in a self-contained guest. If a scene needs external

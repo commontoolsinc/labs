@@ -256,8 +256,8 @@ room instead of a Cell. A room holds each player's latest record and stores
 nothing, so publishing a position from the game loop is what it is for. It
 orders nothing between players and keeps no history: a score, a claim, or
 anything two players must agree on stays a Cell write.
-[`iframe-pattern-guide.md`](./iframe-pattern-guide.md), "Optional presence",
-is the contract.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
 
 Generate textures and simple audio locally when practical. The iframe CSP does
 not allow arbitrary network fetches, so do not load assets from a CDN. For

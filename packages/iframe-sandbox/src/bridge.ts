@@ -401,7 +401,13 @@ export class FabricBridgeHost {
    */
   readonly #refusedPaths = new Set<string>();
   #nextCellHandle = 0;
-  #operationTail: Promise<void> | undefined;
+  /**
+   * The last request of each queue the session's requests wait in, by queue
+   * name, while one is being handled: `#queueOf()` says which queue a
+   * request joins.
+   */
+  readonly #tails = new Map<string, Promise<void>>();
+
   #connected = true;
   #firstRequestReported = false;
 
@@ -495,42 +501,42 @@ export class FabricBridgeHost {
       this.disconnect();
       return;
     }
-    if (this.#namesPresence(decoded)) {
-      void this.#handle(decoded);
-      return;
-    }
-    const handling = this.#operationTail
-      ? this.#operationTail.then(() => {
+    const queue = this.#queueOf(decoded);
+    const previous = this.#tails.get(queue);
+    const handling = previous
+      ? previous.then(() => {
         if (!this.#connected) return undefined;
         return this.#handle(decoded);
       })
       : this.#handle(decoded);
     const tail = handling.catch(() => {});
-    this.#operationTail = tail;
+    this.#tails.set(queue, tail);
     void tail.then(() => {
-      if (this.#operationTail === tail) this.#operationTail = undefined;
+      if (this.#tails.get(queue) === tail) this.#tails.delete(queue);
     });
   };
 
   /**
-   * Whether `request` names a `presence` resource. Such a request is handled
-   * as it arrives, outside the order the session's other operations wait in:
-   * a room's operations take effect at once and touch no cell, so a
-   * participant's status neither waits on a write's commit nor delays one.
-   * Requests of one room are still handled in the order they arrive.
+   * Returns the name of the queue `request` waits in. A request naming a
+   * `presence` resource waits only behind earlier requests of that room: a
+   * room touches no cell, so a participant's status neither waits on a
+   * write's commit nor delays one. Every other request waits in the one
+   * queue the session's operations share.
    */
-  #namesPresence(request: BridgeRequest): boolean {
-    if (request.resource === undefined) return false;
+  #queueOf(request: BridgeRequest): string {
+    if (request.resource === undefined) return "";
     try {
       const resource = discoverResource(
         this.#bridge.resources,
         request.resource,
       );
       return resource !== undefined &&
-        resourceKind(request.resource, resource) === "presence";
+          resourceKind(request.resource, resource) === "presence"
+        ? `presence:${request.resource}`
+        : "";
     } catch {
-      // A malformed resource is reported to the guest by the ordered path.
-      return false;
+      // A malformed resource is reported to the guest by the shared queue.
+      return "";
     }
   }
 

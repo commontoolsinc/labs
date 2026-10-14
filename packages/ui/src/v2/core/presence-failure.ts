@@ -13,14 +13,14 @@ export type PresenceFailureCategory =
 /**
  * The category a component reports for a presence failure: a relay refusal
  * is `protocol`, a server or runtime without presence is `configuration`,
- * and anything else is the connection's.
+ * and anything else, another protocol failure among them, is the
+ * connection's. Only `configuration` says that joining again cannot help.
  */
 export function presenceFailureCategory(
   error: unknown,
 ): PresenceFailureCategory {
   if (!(error instanceof Error)) return "connection";
   if (error.name === "PresenceError") return "protocol";
-  if (error.name === "ProtocolError") return "configuration";
   if (error.message.includes("does not support presence")) {
     return "configuration";
   }

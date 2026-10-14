@@ -456,10 +456,14 @@ The rules that shape a guest:
   with a lowercase letter, continues with lowercase letters, digits, and
   hyphens, and is at most 32 characters long. A publication outside those
   bounds ends the room with a `presence-refused` failure.
-- A `failure` ends the room. `presence-unsupported` means the host has no
-  relay, and joining again will not help. For `presence-refused` and
-  `presence-disconnected`, call `join()` again when the user next acts, and
-  publish the name and facets again: a new membership starts empty.
+- A `failure` ends the room, and a new membership starts empty.
+  `presence-unsupported` means the host has no relay, and joining again will
+  not help. `presence-refused` means the relay refused the join or a
+  publication, and its message says which bound: correct what was published
+  before joining again, or the same publication ends the new room too, and a
+  full room may admit the guest later. After `presence-disconnected`, call
+  `join()` again when the user next acts and publish the name and facets as
+  they were.
 - Presence does not wait for the hydration barrier. Join at startup, and set
   the name once the Cell that holds it has been pulled.
 

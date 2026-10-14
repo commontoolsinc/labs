@@ -597,8 +597,24 @@ export type PresenceRoomEvent =
 type PresenceListener = (event: PresenceRoomEvent) => void;
 
 /**
+ * Freezes `value` and every plain object and array inside it, in place.
+ * Other values, special objects among them, are left as they are.
+ */
+function freezePlain(value: FabricValue | undefined): void {
+  if (Array.isArray(value)) {
+    for (const member of value) freezePlain(member);
+    Object.freeze(value);
+  } else if (isFabricPlainObject(value)) {
+    for (const member of Object.values(value)) freezePlain(member);
+    Object.freeze(value);
+  }
+}
+
+/**
  * Reads `value` as a participant, or returns `undefined` for any other
- * shape. Facet contents are a peer's, and are not read here.
+ * shape. Facet contents are a peer's, and are not read here. The
+ * participant is frozen, facets included, since every reader of the room
+ * shares it.
  */
 function presenceParticipant(
   value: FabricValue | undefined,
@@ -619,7 +635,12 @@ function presenceParticipant(
       writable: true,
     });
   }
-  return { participantId: value.participantId, name: value.name, facets };
+  freezePlain(facets);
+  return Object.freeze({
+    participantId: value.participantId,
+    name: value.name,
+    facets,
+  });
 }
 
 /**
@@ -707,11 +728,18 @@ export class RemotePresence {
     const entry = { listener };
     this.#listeners.add(entry);
     if (this.#leaveRemote === undefined) {
-      this.#leaveRemote = this.#client.sinkResource(
+      // A sink this room has let go of can still answer, its request
+      // failing after a newer join began, so each hears only its own.
+      const leave = this.#client.sinkResource(
         this.#name,
-        (value) => this.#receive(value),
-        (cause) => this.#fail(cause),
+        (value) => {
+          if (this.#leaveRemote === leave) this.#receive(value);
+        },
+        (cause) => {
+          if (this.#leaveRemote === leave) this.#fail(cause);
+        },
       );
+      this.#leaveRemote = leave;
     } else if (this.#participantId !== undefined) {
       try {
         listener({

@@ -197,6 +197,15 @@ function ink(hue: number): string {
   return `hsl(${hue} 70% 42%)`;
 }
 
+/**
+ * Returns the color a peer's cursor and name label are drawn in. At this
+ * lightness white text on it keeps a contrast of at least 4.5:1 for every
+ * hue, yellow being the least.
+ */
+function cursorInk(hue: number): string {
+  return `hsl(${hue} 70% 27%)`;
+}
+
 function showError(cause: unknown): void {
   alert.textContent = cause instanceof Error ? cause.message : String(cause);
 }
@@ -333,10 +342,10 @@ function renderPeers(): void {
     element.dataset.name = peer.name;
     element.style.transform =
       `translate(${peer.pointer.x}px, ${peer.pointer.y}px)`;
-    element.querySelector("path")!.setAttribute("fill", ink(peer.hue));
+    element.querySelector("path")!.setAttribute("fill", cursorInk(peer.hue));
     const label = element.querySelector("span")!;
     label.textContent = peer.name;
-    label.style.background = ink(peer.hue);
+    label.style.background = cursorInk(peer.hue);
   }
   roster.replaceChildren(...entries);
 }
