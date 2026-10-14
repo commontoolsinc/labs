@@ -1059,6 +1059,24 @@ describe("private inbox across runtimes", () => {
     };
     await harness.settleUntil(readsBack);
     expect(await readsBack()).toBe(true);
+
+    // What the sender reads is what the inbox holds, row for row. Under
+    // server execution the sender's runtime previews its own deliveries, and
+    // a preview is a row in a document of its own that the inbox's space
+    // never holds, so a sender still reading one has not read its delivery
+    // back. A preview stands until the consequence of the event behind it
+    // arrives, which is what the comparison waits for.
+    await sender.awaitEventConsequences();
+    const rows = async (from: MultiRuntimeSession): Promise<string[]> => {
+      const count =
+        ((await from.read(["offers"], { piece: inbox })) as unknown[]).length;
+      const ids: string[] = [];
+      for (let index = 0; index < count; index++) {
+        ids.push((await from.link(["offers", index], { piece: inbox })).id);
+      }
+      return ids;
+    };
+    expect(await rows(sender)).toEqual(await rows(owner));
   });
 
   it("refuses a stranger's served copy of the offers", {

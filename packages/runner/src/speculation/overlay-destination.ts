@@ -501,8 +501,9 @@ export class SpeculationOverlayDestination
    * reads as unarrived; a foreign write to a written doc landing in the
    * mark's own frame at or after the mark reads as arrived. Not counted
    * (unknown) when the parent dropped / erred / was refused — no cascade
-   * child is coming, the removal is final — or when the replica view is
-   * unavailable. */
+   * child is coming, the removal is final — when the replica view is
+   * unavailable, or when the echo sealed into a space other than the
+   * mark's, whose seqs the mark's seq does not order. */
   get cascadeEchoRetirementUnarrivedCount(): number {
     return this.#cascadeEchoRetirementsUnarrived;
   }
@@ -1630,6 +1631,11 @@ export class SpeculationOverlayDestination
    * The retired child's id joins the jobless set so a LATE grandchild
    * (sealing after this) drops at seal like a late child does.
    *
+   * `space` is the space the intent was fired in, where its mark
+   * arrives. Entries are retired in every space: an entry is filed
+   * under the space its run wrote, which for a handler that sends to a
+   * stream in another space is not `space`.
+   *
    * The known cost (W2.1, flagged — the reason the owner-level
    * alternative exists): when the server's LT1 child was PURGED at the
    * flush deadline (W3's α1) and the drain delivers it a wave later, the
@@ -1660,8 +1666,6 @@ export class SpeculationOverlayDestination
     eventId: string,
     witness?: { markSidecarId: string },
   ): void {
-    const entries = this.#entries.get(space);
-    if (entries === undefined) return;
     let view:
       | ((
         id: URI,
@@ -1674,81 +1678,94 @@ export class SpeculationOverlayDestination
      * 0 = unknown → the witness does not count. */
     let markSeq: number | undefined;
 
-    for (const entry of [...entries.values()]) {
-      const own = entry.eventId === eventId;
-      if (!own && !this.#cascadeReaches(entry, eventId)) continue;
-      entries.delete(entry.localSeq);
-      if (!own) {
-        // A cascade descendant: jobless by its ancestor's consequence.
-        this.#cascadeEchoRetirements += 1;
-        if (entry.eventId !== undefined) this.#noteJoblessIntent(entry.eventId);
-        logger.debug("cascade-echo-retired", () => [
-          `cascade echo ${entry.eventId} retired: its ancestor intent ` +
-          `${eventId} reached a terminal consequence (speculation.md §4 ` +
-          "step 2, the jobless-cascade consequence)",
-        ]);
-        if (witness !== undefined) {
-          if (view === undefined) {
-            try {
-              const replica = this.#runtime.storageManager.open(space).replica;
-              view = replica.speculationRetirementView?.bind(replica) ?? null;
-            } catch {
-              view = null;
-            }
+    // An entry is filed under the space it wrote, and a run writes wherever
+    // its handler reaches: a handler that sends to a stream in another space
+    // has its cascade child's echo seal there. An event id is minted per
+    // fire and names one event in every space, so the walk covers them all.
+    for (const [entrySpace, entries] of [...this.#entries]) {
+      for (const entry of [...entries.values()]) {
+        const own = entry.eventId === eventId;
+        if (!own && !this.#cascadeReaches(entry, eventId)) continue;
+        entries.delete(entry.localSeq);
+        if (!own) {
+          // A cascade descendant: jobless by its ancestor's consequence.
+          this.#cascadeEchoRetirements += 1;
+          if (entry.eventId !== undefined) {
+            this.#noteJoblessIntent(entry.eventId);
           }
-          if (markSeq === undefined) {
-            markSeq = 0;
-            if (view !== null) {
+          logger.debug("cascade-echo-retired", () => [
+            `cascade echo ${entry.eventId} retired: its ancestor intent ` +
+            `${eventId} reached a terminal consequence (speculation.md §4 ` +
+            "step 2, the jobless-cascade consequence)",
+          ]);
+          // The witness compares seqs, and a seq orders commits within one
+          // space, so it reads only an echo in the mark's own space.
+          if (witness !== undefined && entrySpace === space) {
+            if (view === undefined) {
               try {
-                markSeq = view(witness.markSidecarId as URI, "space")
-                  .confirmedSeq;
+                const replica = this.#runtime.storageManager.open(space)
+                  .replica;
+                view = replica.speculationRetirementView?.bind(replica) ?? null;
               } catch {
-                // a replica mid-teardown: no witness, not a failure
+                view = null;
               }
             }
-          }
-          // The flicker witness: did ANY doc this echo wrote land at or
-          // after the mark's frame (the server's cascade child rode the
-          // parent's wave)? Unknown (no view, no seq) → not counted.
-          if (view !== null && markSeq > 0 && entry.writtenDocs.length > 0) {
-            let arrived = false;
-            for (const doc of entry.writtenDocs) {
-              try {
-                if (view(doc.id, doc.scope).confirmedSeq >= markSeq) {
-                  arrived = true;
-                  break;
+            if (markSeq === undefined) {
+              markSeq = 0;
+              if (view !== null) {
+                try {
+                  markSeq = view(witness.markSidecarId as URI, "space")
+                    .confirmedSeq;
+                } catch {
+                  // a replica mid-teardown: no witness, not a failure
                 }
-              } catch {
-                // a replica mid-teardown: no witness, not a failure
               }
             }
-            if (!arrived) {
-              this.#cascadeEchoRetirementsUnarrived += 1;
-              logger.debug("cascade-echo-retired-unarrived", () => [
-                `cascade echo ${entry.eventId} retired before any doc it ` +
-                "wrote landed at the mark's frame — the server's cascade " +
-                "child has not landed here yet (the W2.1 flicker)",
-              ]);
+            // The flicker witness: did ANY doc this echo wrote land at or
+            // after the mark's frame (the server's cascade child rode the
+            // parent's wave)? Unknown (no view, no seq) → not counted.
+            if (
+              view !== null && markSeq > 0 && entry.writtenDocs.length > 0
+            ) {
+              let arrived = false;
+              for (const doc of entry.writtenDocs) {
+                try {
+                  if (view(doc.id, doc.scope).confirmedSeq >= markSeq) {
+                    arrived = true;
+                    break;
+                  }
+                } catch {
+                  // a replica mid-teardown: no witness, not a failure
+                }
+              }
+              if (!arrived) {
+                this.#cascadeEchoRetirementsUnarrived += 1;
+                logger.debug("cascade-echo-retired-unarrived", () => [
+                  `cascade echo ${entry.eventId} retired before any doc it ` +
+                  "wrote landed at the mark's frame — the server's cascade " +
+                  "child has not landed here yet (the W2.1 flicker)",
+                ]);
+              }
             }
           }
         }
+        entry.resolveVerdict({
+          withdrawn: {
+            message: own
+              ? "event echo retired: the authoritative consequences " +
+                "(or the dropped-event notice) arrived (speculation.md §4)"
+              : "cascade echo retired: its ancestor intent's authoritative " +
+                "consequences (or notice) arrived (speculation.md §4 step 2)",
+            superseded: true,
+          },
+        });
+        void entry.settled.then(() => {
+          if (this.#closed) return;
+          this.#sweep(entrySpace, this.#watermarks.get(entrySpace) ?? 0);
+        });
       }
-      entry.resolveVerdict({
-        withdrawn: {
-          message: own
-            ? "event echo retired: the authoritative consequences " +
-              "(or the dropped-event notice) arrived (speculation.md §4)"
-            : "cascade echo retired: its ancestor intent's authoritative " +
-              "consequences (or notice) arrived (speculation.md §4 step 2)",
-          superseded: true,
-        },
-      });
-      void entry.settled.then(() => {
-        if (this.#closed) return;
-        this.#sweep(space, this.#watermarks.get(space) ?? 0);
-      });
+      if (entries.size === 0) this.#entries.delete(entrySpace);
     }
-    if (entries.size === 0) this.#entries.delete(space);
   }
 
   /**

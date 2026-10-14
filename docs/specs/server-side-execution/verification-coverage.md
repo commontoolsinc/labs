@@ -3921,6 +3921,28 @@ created:
   authored and serving-runtime controls that still persist, and a pair
   covering the durable-read mark either side of the wait.
 
+Delta 2026-10-13 — an echo sealed into a space other than its intent's:
+
+- speculation §4 step 2's sentence that the space an entry sealed into
+  is no part of the retirement's scope ELABORATES the step's own rule,
+  "retire overlay entries whose `origin` is `intent(e)`", and the
+  jobless-cascade clarification under it; it adds no rule to §1's map.
+  An entry is filed under the space its run wrote and the mark arrives
+  in the space the intent was fired in, so the two differ whenever a
+  handler sends to a stream in another space, as a sender's offer to a
+  private inbox does. The retirement walks every space's entries. The
+  flicker count reads only a descendant in the mark's own space, since
+  it compares seqs and a seq orders commits within one space.
+- Instrument: `packages/runner/test/speculation-intent-listener.test.ts`
+  — the cases under "an echo sealed into a space other than its
+  intent's": a cascade child and a grandchild behind a write-less child
+  retire on the ancestor's mark, an intent's own echo retires in every
+  space it sealed into, another intent's cascade stands, and no echo in
+  another space counts as unarrived. End to end,
+  `packages/patterns/integration/private-inbox-multi-runtime.test.ts`
+  ("lets a sender read the offers back and find its own") holds the rows
+  a sender reads to be the documents the inbox's owner reads.
+
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
 
