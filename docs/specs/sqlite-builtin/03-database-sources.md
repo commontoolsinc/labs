@@ -165,9 +165,11 @@ is an empty cell, so `sqliteQuery` reports `pending: true`; when `cf` writes the
 link, the input cell changes, the query action re-runs, and it connects. (A
 populated-but-unreachable database surfaces `error` instead.)
 
-v1 behavior: the server attaches the registered file **read-only** (PRAGMA
-`query_only` for the synchronous attach→op→detach window) instead of the
-cell-derived db, and **skips migration** (the on-disk db owns its schema).
+v1 behavior: the server reads the registered file instead of the cell-derived
+db, on a **read-only** connection of a read worker, off the toolshed's main
+thread (Section
+[04](./04-server-execution-and-transactions.md#which-thread-runs-a-read)), and
+**skips migration** (the on-disk db owns its schema).
 **Writes are rejected:** a folded `sqlite` op against a registered injected
 source is refused before any attach — on-disk write/atomicity is gated on
 co-location (Q13/Q14), and `reactOn` for injected handles carries a cross-space

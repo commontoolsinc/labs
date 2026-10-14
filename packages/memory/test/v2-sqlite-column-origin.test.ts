@@ -10,10 +10,12 @@ import {
   columnOriginAvailable,
   columnOrigins,
   ensureColumnOriginAvailable,
+} from "../v2/sqlite/column-origin.ts";
+import {
   librarySource,
   openSource,
   SQLITE3_RELEASE_VERSION,
-} from "../v2/sqlite/column-origin.ts";
+} from "../v2/sqlite/native-symbols.ts";
 import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 
 // Bind @db/sqlite's column-origin symbols before the sync columnOrigins() calls
@@ -68,7 +70,7 @@ Deno.test("pinned libsqlite3 release matches the resolved @db/sqlite", () => {
     resolved.version,
     SQLITE3_RELEASE_VERSION,
     `deno.lock resolves @db/sqlite to ${resolved.version}, but ` +
-      `SQLITE3_RELEASE_VERSION in v2/sqlite/column-origin.ts pins the ` +
+      `SQLITE3_RELEASE_VERSION in v2/sqlite/native-symbols.ts pins the ` +
       `libsqlite3 release to ${SQLITE3_RELEASE_VERSION}. Set the pin to the ` +
       `resolved version so both open the same file.`,
   );
@@ -119,7 +121,7 @@ Deno.test("an override that cannot be opened reports, and binds nothing", async 
   try {
     const result = await openSource({ kind: "path", path });
     // Binding the prebuilt release here instead would be a second image.
-    assertEquals("lib" in result, false);
+    assertEquals("symbols" in result, false);
     assertStringIncludes(
       (result as { problem: string }).problem,
       "$DENO_SQLITE_PATH",
@@ -132,7 +134,7 @@ Deno.test("an override that cannot be opened reports, and binds nothing", async 
 
 Deno.test("a local @db/sqlite build reports rather than binding another file", async () => {
   const result = await openSource({ kind: "local" });
-  assertEquals("lib" in result, false);
+  assertEquals("symbols" in result, false);
   assertStringIncludes(
     (result as { problem: string }).problem,
     "DENO_SQLITE_LOCAL",

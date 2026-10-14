@@ -104,7 +104,7 @@ initialized images still hold separate allocators and mutexes while sharing
 handles. The invariant is one image, not two agreeing ones.
 
 `@db/sqlite` builds its download URL from its own package version, so the release
-version pinned in `column-origin.ts` has to equal the version resolved for
+version pinned in `native-symbols.ts` has to equal the version resolved for
 `@db/sqlite`. Plug's cache is keyed by URL, so different versions name different
 files. The [SQLite dependency guide](../../development/DEPENDENCIES.md#sqlite)
 owns the complete roll procedure. A test in `packages/memory` checks the code

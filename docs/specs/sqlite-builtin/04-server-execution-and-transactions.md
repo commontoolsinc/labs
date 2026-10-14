@@ -22,6 +22,9 @@ and `session.watch.*`.
   *and* injected on-disk — run on a separate **read-only pooled connection** for
   the file, never attached to the engine connection (see
   [Read path: a pooled read-only connection](#read-path-a-pooled-read-only-connection)).
+  A read of an injected source runs on a **read worker**, off the toolshed's
+  main thread; a read of a cell-derived db runs on the main thread, which also
+  writes that file (see [Which thread runs a read](#which-thread-runs-a-read)).
 
 ### Referenced databases and reader authorization
 
@@ -103,14 +106,15 @@ cell-derived and on-disk sources differently, with no per-read ATTACH +
 schema-cookie churn on the engine connection and no reliance on a connection-
 global `query_only` window for read-only enforcement.
 
-The only per-source difference is **path resolution**, not execution:
+Two things differ by source, the **path** and the **thread** the read runs on:
 
-- **cell-derived**: `#cellDbPath(engine, space, db.id)`.
+- **cell-derived**: `#cellDbPath(engine, space, db.id)`, read on the server's
+  main thread.
 - **on-disk (injected)**: the `DiskSourceRegistry` descriptor path for
-  `(space, db.id)`.
+  `(space, db.id)`, read on a read worker.
 
-Execution is identical: open/reuse a read-only connection for that path, apply
-the statement guard, run the `SELECT`, return rows.
+Otherwise execution is identical: open/reuse a read-only connection for that
+path, apply the statement guard, run the `SELECT`, return rows.
 
 ### The connection pool (`ReadConnectionPool`)
 
@@ -124,6 +128,59 @@ the statement guard, run the `SELECT`, return rows.
 - The statement guard still applies on every `query`, so a read can't use its
   connection to `ATTACH`/`PRAGMA` to another file.
 - Closed with the server (`Server.close()` → `#readPool.close()`).
+- Each read worker (below) keeps a pool of its own.
+
+### Which thread runs a read
+
+`@db/sqlite` steps a statement synchronously on the thread that calls it, so a
+read on the server's main thread holds every connection of every space for as
+long as it runs. A read of an injected source can run for seconds or minutes: a
+full scan of a multi-gigabyte file, or a wait on another process's write lock
+(the connection's `busy_timeout`). Those reads run on **read workers**
+([`packages/memory/v2/sqlite/read-worker-pool.ts`](../../../packages/memory/v2/sqlite/read-worker-pool.ts)):
+a few Deno workers, started on demand and kept until the server closes. Each
+runs the same guarded read on its own read-only connections, column origins
+included, so CFC labeling (Section [06](./06-cfc.md)) does not depend on where a
+read ran. The main thread binds the parameters and converts the rows to fabric
+values.
+
+**Sharing.** Reads from one memory connection run at most two at a time; a
+connection's further reads wait for one of its own to end, and do not hold back
+anyone else's. Among the reads that may run, the oldest goes first. The
+allowance is a heuristic for sharing the workers among clients, not a
+guarantee: it counts memory connections, not principals or sessions, so
+clients behind one connection share one allowance, and enough connections each
+running theirs still occupy every worker.
+
+**Cancellation is best effort.** A read is cancelled when its connection
+closes, and every read when the server closes. A cancelled read fails with an
+`AbortError` and returns no rows — never `[]` — unless it finished first, in
+which case it returns the rows it read. A read still waiting for a worker is
+dropped. How a running read is stopped belongs to the SQLite driver: with
+`@db/sqlite`, the pool calls `sqlite3_interrupt` on the worker's connection, the
+one SQLite call documented as safe on a connection another thread is using
+(terminating the worker would not stop a thread inside SQLite). SQLite does not
+consult an interrupt while a read waits for another connection's lock, so such
+a read stops when the wait ends, after at most its `busy_timeout`. A driver
+with no way to stop a running read leaves it to run to its end.
+
+Nothing else bounds a read on a worker: one that never finishes on a connection
+that stays open holds its worker until that connection closes. Its rows are
+still converted on the main thread, so a very large result costs the main
+thread in proportion to its size
+([08-open-questions.md](./08-open-questions.md) Q8).
+
+A read still holds its connection's turn for its space (the ordered frame queue
+of [memory-v2 §4](../memory-v2/04-protocol.md)), so that connection's later
+frames for the same space wait for it. Other spaces, and other connections, do
+not.
+
+Reads of **cell-derived** dbs run on the main thread. Those files use a rollback
+journal, and the engine connection writes them from the main thread: a worker
+holding a file's shared lock across a read would leave a commit to that file
+waiting in SQLite's busy handler on the main thread, which is the stall the
+read workers exist to prevent. Reading them on workers needs cell-db files in
+WAL mode first ([08-open-questions.md](./08-open-questions.md) Q8).
 
 ### Create-on-read semantics (cell-dbs)
 
@@ -223,8 +280,10 @@ Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 3. Resolve the db ref to its on-disk file **path**: an injected on-disk source's
    registered path (`DiskSourceRegistry`), else the cell-db path
    (`#cellDbPath(engine, space, db.id)`).
-4. Run the query on the **read pool** (`ReadConnectionPool.query(path, sql,
-   params)`) — a path-keyed, read-only connection (see below). Cell-db
+4. Run the query on a path-keyed, read-only connection: on a read worker
+   (`ReadWorkerPool.query(path, sql, params, options)`) for an injected source,
+   and on the main thread's `ReadConnectionPool` for a cell-derived db (see
+   [Which thread runs a read](#which-thread-runs-a-read)). Cell-db
    create-on-read semantics are preserved by the pool caller (`#readCellDb`):
    a missing file → `[]`, a "no such table" for a **declared** table → `[]`,
    anything else → surface the error.
@@ -360,11 +419,14 @@ Goal: transactions are **atomic across cells and the attached SQLite database**.
 ## Concurrency
 
 - `transact`-folded **writes** serialize on the single-threaded/synchronous
-  engine connection like all other engine work. **Reads no longer run on the
-  engine connection** — they run on the read pool's per-path read-only
-  connections (see [Read path](#read-path-a-pooled-read-only-connection)), so a
-  long query no longer blocks the space's writes. (A statement timeout remains a
-  worthwhile guard against a single runaway read.)
+  engine connection like all other engine work. **Reads do not run on the
+  engine connection** — they run on per-path read-only connections (see
+  [Read path](#read-path-a-pooled-read-only-connection)). A read of an injected
+  source runs on a read worker and holds neither the server's event loop nor
+  any other connection; a read of a cell-derived db runs on the main thread and
+  holds every connection while it runs (see
+  [Which thread runs a read](#which-thread-runs-a-read)). A read on a read
+  worker is stopped when its connection closes.
 - Multi-tab / multi-client coordination for the *write* side is inherited from
   the existing commit model (seq-based validation, optimistic local commit,
   server confirmation), so no new mutex is needed for writes. Concretely, because

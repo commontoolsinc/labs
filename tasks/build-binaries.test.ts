@@ -229,6 +229,10 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       join(root, "packages", "cli", "lib", "multi-user-test-worker.ts"),
     );
     assertEquals(config.fusePackagePath(), join(root, "packages", "fuse"));
+    assertEquals(
+      config.memorySqliteReadWorkerPath(),
+      join(root, "packages", "memory", "v2", "sqlite", "read-worker.ts"),
+    );
     assertEquals(config.distDir(), join(root, "dist"));
     assertEquals(config.distPath("cf"), join(root, "dist", "cf"));
     assertEquals(
