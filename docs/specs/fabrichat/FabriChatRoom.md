@@ -149,7 +149,8 @@ messages. Entries older than the window are dropped as new ones are appended.
 message's earlier entries.
 
 The message list keeps `windows` as a `PerSession` keyed collection, and
-fulfills `openWindow` and `closeWindow` by setting and removing entries in it. A
+fulfills `openWindow` and `closeWindow` by setting and removing entries in it.
+The room offers those same two streams at its top level as well. A
 window is a computed selection over the record, so it stays live as the messages
 in it change.
 
