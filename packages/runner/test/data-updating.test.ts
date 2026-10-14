@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
+import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
@@ -29,6 +30,7 @@ import {
 } from "../src/link-utils.ts";
 import { areLinksSame } from "../src/link-equality.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resolveSchema } from "../src/schema.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -1060,6 +1062,39 @@ describe("data-updating", () => {
       expect(long.recognitions / 200).toBeGreaterThan(0);
       expect(long.recognitions / 200).toBeLessThanOrEqual(17);
     });
+
+    for (const representation of ["inline", "reference"] as const) {
+      it(`expands snapshot defaults in a document link's ${representation} schema before writing`, () => {
+        const snapshot = runtime.getImmutableCell(space, { answer: 42 });
+        let schema: JSONSchemaObj = {
+          type: "object",
+          default: snapshot.getAsLink() as JSONValue,
+        };
+        if (representation === "reference") {
+          const decomposed = decomposeSchema(schema);
+          for (const [hash, document] of decomposed.documents) {
+            registerSchemaDocument(hash, document);
+          }
+          schema = { $ref: decomposed.rootRef };
+        }
+        const target = runtime.getCell(
+          space,
+          `snapshot schema default ${representation}`,
+          undefined,
+          tx,
+        );
+        const document = runtime.getCell(space, "schema default document");
+        const id = document.getAsNormalizedFullLink().id;
+        target.set(linkRefFrom({ id, schema }));
+
+        const stored = parseLink(target.getRaw());
+        expect(stored?.id).toBe(id);
+        expect(resolveSchema(stored?.schema)).toEqual({
+          type: "object",
+          default: { answer: 42 },
+        });
+      });
+    }
 
     it("replaces a stored link whose path does not parse with a write redirect", () => {
       const aliased = runtime.getCell<{ v: number }>(

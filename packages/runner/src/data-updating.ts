@@ -1568,24 +1568,27 @@ export function normalizeAndDiff(
     }
   }
 
+  // The incoming value's link, shared by every check below. Only a schema
+  // rewrite changes the value and requires a fresh parse.
+  let newValueLink = isPrimitiveCellLink(newValue)
+    ? parseLink(newValue, link)
+    : undefined;
+
   // Ordinary document links can carry immutable values in schema defaults.
   // Expand those before the writer decomposes their schemas into durable docs.
   if (
-    isPrimitiveCellLink(newValue) &&
-    !isInlineCellId(parseLink(newValue, link).id)
+    newValueLink?.schema !== undefined &&
+    !isInlineCellId(newValueLink.id)
   ) {
-    newValue = attachCfcLabelViewToSigilLink(
-      findAndInlineDataUriLinks(newValue),
-      cfcLabelViewForPrimitiveLink(newValue),
-    );
+    const inlined = findAndInlineDataUriLinks(newValue);
+    if (inlined !== newValue) {
+      newValue = attachCfcLabelViewToSigilLink(
+        inlined,
+        cfcLabelViewForPrimitiveLink(newValue),
+      );
+      newValueLink = parseLink(newValue, link);
+    }
   }
-
-  // The incoming value's link, parsed once for every check below that asks
-  // whether the value is a link or where it points, and `undefined` where it
-  // is not a sigil link.
-  const newValueLink = isPrimitiveCellLink(newValue)
-    ? parseLink(newValue, link)
-    : undefined;
 
   // Expand native snapshot and portable Fabric data-URI links by calling
   // normalizeAndDiff on the contents of the link. This re-entry REPLACES the
