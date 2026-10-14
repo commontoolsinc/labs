@@ -12,7 +12,7 @@ import {
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema } from "./builder/types.ts";
 import { type Cell, isCell } from "./cell.ts";
@@ -249,6 +249,48 @@ function topLevelSchema(
 }
 
 /**
+ * Helper for `viewStoredLinksAsHandles()`, which says whether `schema`
+ * declares a cell handle for a slot whose stored value is a link. A link is
+ * neither `undefined` nor `null`, so a branch of the slot's `anyOf` or `oneOf`
+ * that admits only those says nothing about it, and the slot declares a handle
+ * when its other branches do: one typed `Cell<T> | undefined` holds a handle as
+ * one typed `Cell<T>` does. The union is read where the slot's schema reaches
+ * it, through a `$ref` at its root as much as written in place, which is how a
+ * slot typed by a named alias of such a union arrives.
+ */
+function declaresHandleForLink(schema: JSONSchema): boolean {
+  if (ContextualFlowControl.declaredHandleKind(schema) !== undefined) {
+    return true;
+  }
+  if (!isObjectNotArray(schema)) return false;
+  const union = typeof schema.$ref === "string"
+    ? resolveCfcSchemaRefs(schema)
+    : schema;
+  if (!isObjectNotArray(union)) return false;
+  return (["anyOf", "oneOf"] as const).some((keyword) => {
+    const branches = union[keyword];
+    if (!Array.isArray(branches)) return false;
+    const linkable = branches.filter((branch) => !admitsOnlyAbsence(branch));
+    return linkable.length > 0 && linkable.length < branches.length &&
+      ContextualFlowControl.declaredHandleKind({
+          ...union,
+          [keyword]: linkable,
+        }) !== undefined;
+  });
+}
+
+/**
+ * Helper for `declaresHandleForLink()`, which says whether `branch` admits no
+ * value but `undefined` and `null`, by its `type` alone.
+ */
+function admitsOnlyAbsence(branch: unknown): boolean {
+  if (!isObjectNotArray(branch) || branch.asCell !== undefined) return false;
+  const types = Array.isArray(branch.type) ? branch.type : [branch.type];
+  return types.length > 0 &&
+    types.every((type) => type === "undefined" || type === "null");
+}
+
+/**
  * Helper for `materializeStoredValueForValidation()`, which views
  * `materialized`, read under `schema`, with its handle-typed stored links as
  * handles, leaving the position `keep` names materialized. Fields resolve on
@@ -296,7 +338,7 @@ function viewStoredLinksAsHandles(
         // Only the slot's own bytes are read here: a raw read resolves links
         // on the way to the slot and leaves the one stored in it unfollowed.
         const handle = !kept &&
-          ContextualFlowControl.declaredHandleKind(childSchema) !== undefined &&
+          declaresHandleForLink(childSchema) &&
           isCellLink(slot.getRaw({ meta: ignoreReadForScheduling })) &&
           reachedTopLevelFits(slot, childSchema, context.tx);
         if (handle) context.handles.add(slot);

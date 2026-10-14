@@ -67,6 +67,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { isDefaultLibrarySourceFile } from "../typescript/default-library.ts";
+import { CFC_POLICY_OF_BRAND } from "../typescript/value-annotation.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import {
   getScopeBrand,
@@ -111,8 +112,6 @@ const WRITER_POLICY_ALIAS_NAMES: ReadonlySet<string> = new Set([
 /** The property `AnyOf<X>` is as a type (`@commonfabric/api/cfc`). */
 const CFC_ANY_OF_BRAND = "__ct_cfc_any_of__";
 
-/** The property `PolicyOf<Rules>` is as a type (`@commonfabric/api/cfc`). */
-const CFC_POLICY_OF_BRAND = "__ct_cfc_policy_of__";
 /**
  * What the literal reader returns for syntax it does not evaluate, so that the
  * type paired with that syntax is read in its place. `undefined` is a value it
@@ -232,17 +231,19 @@ const isCellCapabilityKind = (kind: WrapperKind): boolean =>
   CELL_CAPABILITY_KIND_MAP[kind];
 
 /**
- * The scope wrapper `typeNode` names by its spelling, bare or qualified, with
- * the reference that names it.
+ * The scope wrapper `typeNode` names by its spelling, bare or qualified, read
+ * through parentheses as a wrapper is (`resolveWrapperNode()`), with the
+ * reference that names it.
  */
 export const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
 ): ResolvedScopeWrapper | undefined => {
-  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+  const node = typeNode && unwrapTypeParentheses(typeNode);
+  if (!node || !ts.isTypeReferenceNode(node)) {
     return undefined;
   }
-  const scope = scopeForWrapperName(entityNameRight(typeNode.typeName).text);
-  return scope === undefined ? undefined : { scope, node: typeNode };
+  const scope = scopeForWrapperName(entityNameRight(node.typeName).text);
+  return scope === undefined ? undefined : { scope, node };
 };
 
 const applyScopeToAsCellEntry = (

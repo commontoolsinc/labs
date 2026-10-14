@@ -1973,28 +1973,29 @@ Research is a private tool loop, not web search or a delegable child profile.
 Its `inspect_pattern` and `open_pattern_file` tools accept a bare pattern id or
 `cf:pattern:<id>`; index lookups and retained evidence use the bare id.
 
-Fresh CLI tasks and interactive sessions without retained research request an
-opening `orient` pass for open-ended tasks. A task already selecting an
-implementation skips that automatic pass only through attached `patternRefs` or
-explicit markers in the request: `pattern:<space>/<slug>`, `cf:pattern:<id>`, or
-`skill:<id>`. A skill id names a registered skill or an `owner/repository/skill`
-address. Bare ids, paths, and prose such as "use the named skill X" remain open
-unless X uses a marker. Recognition uses the existing address parsers; it does
-not resolve references, acquire skills, or grant authority. The ordinary tools
-do that. The parent can still call `research` for an unresolved question.
-Subsequent chat turns reuse the retained findings and let the parent request
-targeted answers; they do not repeat orientation. It runs through the ordinary
-policy, artifacts, provenance, cancellation, and usage path before the first
-parent turn. A host-supplied user message puts the result immediately before the
-task. The result's `purpose` limits what `complete` means: a complete
-orientation establishes a supported approach; it does not claim that the
-application has been built. Both purposes can inspect pattern source, describe
-handles, and return examples. Orientation's `leads` are host-observed metadata,
-usable as search references for delegation, and remain separate from inspected
-`patterns`. Orientation's `refinedTask` restates the request as the intersection
-of what was asked and what research verified is possible, each part bound to the
-grant or confirmed pattern that serves it, with the parts nothing serves left
-under `missing`; the parent works, and writes a delegation's goal, from it. An
+Fresh CLI tasks tagged `author` (see task classification below), and interactive
+sessions without retained research, request an opening `orient` pass for
+open-ended tasks. A task already selecting an implementation skips that
+automatic pass through attached `patternRefs` or explicit markers in the
+request: `pattern:<space>/<slug>`, `cf:pattern:<id>`, or `skill:<id>`. A skill
+id names a registered skill or an `owner/repository/skill` address. Bare ids,
+paths, and prose such as "use the named skill X" remain open unless X uses a
+marker. Recognition uses the existing address parsers; it does not resolve
+references, acquire skills, or grant authority. The ordinary tools do that. The
+parent can still call `research` for an unresolved question. Subsequent chat
+turns reuse the retained findings and let the parent request targeted answers;
+they do not repeat orientation. It runs through the ordinary policy, artifacts,
+provenance, cancellation, and usage path before the first parent turn. A
+host-supplied user message puts the result immediately before the task. The
+result's `purpose` limits what `complete` means: a complete orientation
+establishes a supported approach; it does not claim that the application has
+been built. Both purposes can inspect pattern source, describe handles, and
+return examples. Orientation's `leads` are host-observed metadata, usable as
+search references for delegation, and remain separate from inspected `patterns`.
+Orientation's `refinedTask` restates the request as the intersection of what was
+asked and what research verified is possible, each part bound to the grant or
+confirmed pattern that serves it, with the parts nothing serves left under
+`missing`; the parent works, and writes a delegation's goal, from it. An
 orientation that omits it is still admitted. The current user goal accompanies
 narrower research questions and delegated tasks so they retain the original
 context.
@@ -2028,6 +2029,24 @@ first read it, and counts as cited by its old id only where the bytes still
 match the digest — a source that changed is reported stale, its old id refused,
 and the fresh read left in the catalog under a new id. Attached pattern
 references are leads until inspected.
+
+A fresh CLI run tags its task before assembling the prompt
+(`src/task-classification.ts`) with every kind of work it calls for: `respond`,
+`find`, `act`, `pieces`, `author`. A keyword rule reads the task and what the
+run holds (input cells, attached patterns, a browser); when no rule applies, one
+call to the cheap research model tags it, and when that fails the task gets
+every tag. The tags, the path that chose them (`rule`, `model`, `fallback`), and
+the classification's wall time are recorded as `taskClassification` in
+`run-state.json` and `run-report.json`; a model call's attempts and tokens land
+in the run report and the run's total usage like research's. Only an `author`
+task gets the opening research pass. The parent's orientation follows the tags:
+`pieces` and `author` add the piece-targeting and revision-verification
+guidance, `pieces` and `find` the held-handle and grant guidance, `find` and
+`author` the findable and pattern-index guidance, `author` the opening-research
+rule, `act`, `pieces` and `author` delegation, `find` and `act` the Weaver
+command guidance, and `act` the browser guidance. The tool allow-list does not
+narrow, so a task given too few tags can still reach what it needs; a run with
+no classification carries all of the orientation.
 
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit

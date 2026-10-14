@@ -975,8 +975,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Tells the user's chat manager that the user has joined the FabriChat room
-   * whose space is `space`, when the space passes vetting as a FabriChat room
-   * the user can write to, whose root is the room. The manager makes the room
+   * declared by `space`: the writable standalone root or the writable
+   * container root's explicit `chatRoom`. The manager makes the room
    * one of the user's chats, lists a forgotten one again, and records nothing
    * for one their chats list already. Home is never created for it.
    *

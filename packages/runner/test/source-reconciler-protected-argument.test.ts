@@ -12,6 +12,8 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 
+import { loadStoredCfcEnvelope } from "../src/cfc/prepare.ts";
+import { cfcSchemaEntries } from "../src/cfc/schema-label-view.ts";
 import { markRendererTrustedEvent } from "../src/cfc/ui-contract.ts";
 import {
   type Cell,
@@ -292,6 +294,9 @@ interface Released {
 
   /** The identity of the release. */
   currentIdentity: string;
+
+  /** The runtime the room runs in. */
+  runtime: Runtime;
 }
 
 /** Sends `event` to the piece's `stream`, and waits for what it wrote. */
@@ -339,7 +344,7 @@ async function reconcileRelease(
   previous: string,
   current: string,
   prime: (runtime: Runtime, room: Cell<Room>) => Promise<void>,
-  probe: (released: Released) => void,
+  probe: (released: Released) => void | Promise<void>,
 ): Promise<void> {
   const signer = await Identity.fromPassphrase(`guarded argument ${name}`);
   const previousIdentity = await resolveEntryIdentity(
@@ -389,12 +394,13 @@ async function reconcileRelease(
     const outcome = await runtime.sourceReconciler.reconcile(room);
     await runtime.runner.idlePointerMaintenance();
     await room.pull();
-    probe({
+    await probe({
       outcome,
       room,
       recorded: getPieceReconciliation(room),
       previousIdentity,
       currentIdentity,
+      runtime,
     });
   } finally {
     await runtime.sourceReconciler.idle();
@@ -406,6 +412,44 @@ async function reconcileRelease(
 /** `source` one byte apart, which gives every handler in it a new identity. */
 const releaseBehind = (source: string): string =>
   `${source}\n// a release behind\n`;
+
+/** The claims the envelope the room's argument stores declares at `path`. */
+function storedClaimsAt(
+  runtime: Runtime,
+  room: Cell<Room>,
+  path: string,
+): unknown {
+  const tx = runtime.edit();
+  try {
+    const stored = loadStoredCfcEnvelope(
+      tx,
+      room.getArgumentCell<Room>()!.getAsNormalizedFullLink(),
+    );
+    expect(stored.status).toBe("loaded");
+    if (stored.status !== "loaded") return undefined;
+    const entry = cfcSchemaEntries(stored.schema).find((entry) =>
+      entry.path.join("/") === path
+    );
+    return (entry?.schema as { ifc?: unknown } | undefined)?.ifc;
+  } finally {
+    tx.abort();
+  }
+}
+
+/** The schema hash of the envelope the room's argument stores. */
+function storedSchemaHash(runtime: Runtime, room: Cell<Room>): string {
+  const tx = runtime.edit();
+  try {
+    const stored = loadStoredCfcEnvelope(
+      tx,
+      room.getArgumentCell<Room>()!.getAsNormalizedFullLink(),
+    );
+    expect(stored.status).toBe("loaded");
+    return stored.status === "loaded" ? String(stored.metadata.schemaHash) : "";
+  } finally {
+    tx.abort();
+  }
+}
 
 describe("source-reconciler-protected-argument", () => {
   describe("a field only its handler may write", () => {
@@ -600,6 +644,94 @@ describe("source-reconciler-protected-argument", () => {
       );
     });
 
+    it("keeps the stored envelope whole through a release that changes only the claims beneath the links", async () => {
+      // The release names no writer for each `Note`'s `tags`, so its
+      // envelope differs from the stored one beneath the links alone.
+      const current = LINKED_SOURCE.replace(
+        /tags\?: WritePolicyAnyOf<[^;]*;/,
+        "tags?: AuthoredByCurrentUser<string[]>;",
+      );
+      expect(current).toContain("tags?: AuthoredByCurrentUser<string[]>;");
+      let before = "";
+      await reconcileRelease(
+        "linked-claims-release",
+        LINKED_SOURCE,
+        current,
+        async (runtime, room) => {
+          await prime(runtime, room);
+          before = storedSchemaHash(runtime, room);
+        },
+        ({ outcome, room, runtime, currentIdentity }) => {
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(before).not.toBe("");
+          expect(storedSchemaHash(runtime, room)).toBe(before);
+        },
+      );
+    });
+
+    it("adopts a release that adds a guarded slot beside a change beneath the links, storing the slot's policy and the release's claims beneath the links", async () => {
+      // The release names no writer for each `Note`'s `tags` and adds
+      // `titles`, a list only `rename` may write. The envelope stored beside
+      // the new slot is the release's merged one, which re-describes what
+      // lies beneath the links, as a release's merged envelope does.
+      const current = LINKED_SOURCE
+        .replace(
+          /tags\?: WritePolicyAnyOf<[^;]*;/,
+          "tags?: AuthoredByCurrentUser<string[]>;",
+        )
+        .replace(
+          "interface Input {",
+          `const rename = handler<{ title: string }, { titles: TitlesCell }>(
+  ({ title }, { titles }) => {
+    const record = titles.elementById("title");
+    record.set({ title });
+    titles.addUnique(record);
+  },
+);
+
+type TitlesCell = Writable<
+  WriteAuthorizedBy<About, typeof rename>[] | Default<[]>
+>;
+
+interface Input {
+  titles?: TitlesCell;`,
+        )
+        .replace(
+          "({ about, roster, notes }) => ({",
+          "({ about, roster, notes, titles }) => ({\n  titles,\n  rename: rename({ titles }),",
+        );
+      expect(current).toContain("tags?: AuthoredByCurrentUser<string[]>;");
+      expect(current).toContain("rename: rename({ titles })");
+      await reconcileRelease(
+        "linked-added-slot-release",
+        LINKED_SOURCE,
+        current,
+        async (runtime, room) => {
+          await prime(runtime, room);
+          expect(storedClaimsAt(runtime, room, "notes/*/tags")).toMatchObject({
+            writePolicyAnyOf: expect.any(Array),
+          });
+        },
+        ({ outcome, room, runtime, recorded, currentIdentity }) => {
+          expect(recorded?.detail).toBeUndefined();
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(storedClaimsAt(runtime, room, "notes/*/tags")).toEqual({
+            addIntegrity: [{
+              kind: "authored-by",
+              subject: { __ctCurrentPrincipal: true },
+            }],
+          });
+          expect(storedClaimsAt(runtime, room, "titles/*")).toMatchObject({
+            writeAuthorizedBy: expect.anything(),
+          });
+          expect(room.get().titles).toEqual([]);
+          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+      );
+    });
+
     it("refuses a release that adds a policy beside the links, and keeps the field as it was", async () => {
       // `roster` holds no links, so a policy the release adds to
       // `Roster.items` governs this document, links or no links beside it.
@@ -640,6 +772,351 @@ describe("source-reconciler-protected-argument", () => {
           expect(recorded?.outcome).toBe("unreachable");
           expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
           expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
+        },
+      );
+    });
+  });
+
+  describe("a slot the release adds", () => {
+    // The stored document holds nothing at the slot, and the stored envelope
+    // declares nothing there, so the setup fills it with the release's
+    // default and the release's envelope, which declares the slot's policy,
+    // is stored.
+
+    const prime = async (runtime: Runtime, room: Cell<Room>) => {
+      await send(
+        runtime,
+        room,
+        "describeRoom",
+        trustedEvent("Describe", { title: "lunch" }),
+      );
+      await send(runtime, room, "join", { name: "ada" });
+      expect(room.get().about).toEqual({ title: "lunch" });
+      expect(room.get().roster).toEqual({ items: ["ada"] });
+    };
+
+    /**
+     * What the error of a commit writing `value` at `slot` of the room's
+     * argument says, through a cell with no schema, which only what the
+     * stored envelope declares there governs.
+     */
+    const refusalOfDirectWrite = async (
+      runtime: Runtime,
+      room: Cell<Room>,
+      slot: string,
+      value: unknown,
+    ): Promise<string | undefined> => {
+      const argument = room.getArgumentCell<Room>()!;
+      expect(argument.schema).toBeUndefined();
+      const tx = runtime.edit();
+      argument.withTx(tx).key(slot).set(value);
+      return (await tx.commit().settled).error?.message;
+    };
+
+    // `NAMED_SOURCE` with `titles` beside its fields: a list whose entries only
+    // `rename` may write, defaulting to `defaultTitles`, as a FabriChat room's
+    // `titles` is.
+    const withList = (defaultTitles = "[]"): string => {
+      const source = NAMED_SOURCE
+        .replace(
+          "interface Input {",
+          `const rename = handler<{ title: string }, { titles: TitlesCell }>(
+  ({ title }, { titles }) => {
+    const record = titles.elementById("title");
+    record.set({ title });
+    titles.addUnique(record);
+  },
+);
+
+type TitlesCell = Writable<
+  WriteAuthorizedBy<About, typeof rename>[] | Default<${defaultTitles}>
+>;
+
+interface Input {
+  titles?: TitlesCell;`,
+        )
+        .replace(
+          "  roster: Roster;\n",
+          "  roster: Roster;\n  titles: About[];\n",
+        )
+        .replace(
+          "({ about, roster }) => ({",
+          "({ about, roster, titles }) => ({\n  titles,\n  rename: rename({ titles }),",
+        )
+        .replace(
+          "  join: Stream<{ name: string }>;\n",
+          "  join: Stream<{ name: string }>;\n  rename: Stream<{ title: string }>;\n",
+        );
+      expect(source).toContain("titles?: TitlesCell;");
+      expect(source).toContain("titles: About[];");
+      expect(source).toContain("rename: rename({ titles })");
+      expect(source).toContain("rename: Stream<");
+      return source;
+    };
+
+    // `NAMED_SOURCE` with `label` beside its fields: a record only `relabel`
+    // may write, defaulting to an empty title.
+    const withRecord = (): string => {
+      const source = NAMED_SOURCE
+        .replace(
+          "interface Input {",
+          `const relabel = handler<{ title: string }, { label: Writable<About> }>(
+  ({ title }, { label }) => {
+    label.set({ title });
+  },
+);
+
+interface Input {
+  label?: Default<WriteAuthorizedBy<About, typeof relabel>, { title: "" }>;`,
+        )
+        .replace("  roster: Roster;\n", "  roster: Roster;\n  label: About;\n")
+        .replace(
+          "({ about, roster }) => ({",
+          "({ about, roster, label }) => ({\n  label,\n  relabel: relabel({ label }),",
+        )
+        .replace(
+          "  join: Stream<{ name: string }>;\n",
+          "  join: Stream<{ name: string }>;\n  relabel: Stream<{ title: string }>;\n",
+        );
+      expect(source).toContain("label?: Default<");
+      expect(source).toContain("label: About;");
+      expect(source).toContain("relabel: relabel({ label })");
+      expect(source).toContain("relabel: Stream<");
+      return source;
+    };
+
+    it("adopts a release that adds a list whose entries a writer guards, and keeps what the other fields hold", async () => {
+      await reconcileRelease(
+        "added-list-release",
+        NAMED_SOURCE,
+        withList(),
+        prime,
+        ({ outcome, room, recorded, currentIdentity }) => {
+          expect(recorded?.detail).toBeUndefined();
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().roster).toEqual({ items: ["ada"] });
+          expect(room.get().titles).toEqual([]);
+        },
+      );
+    });
+
+    it("stores the added list's policy, and its writers and the other fields' write after the release", async () => {
+      await reconcileRelease(
+        "added-list-writes",
+        NAMED_SOURCE,
+        withList(),
+        prime,
+        async ({ outcome, room, runtime }) => {
+          expect(outcome).toBe("updated");
+          expect(
+            await refusalOfDirectWrite(runtime, room, "titles", [{
+              title: "forged",
+            }]),
+          ).toContain("writeAuthorizedBy");
+          expect(
+            await refusalOfDirectWrite(runtime, room, "about", {
+              title: "forged",
+            }),
+          ).toContain("writeAuthorizedBy");
+          await send(runtime, room, "rename", { title: "tea" });
+          await send(runtime, room, "join", { name: "bo" });
+          await send(
+            runtime,
+            room,
+            "describeRoom",
+            trustedEvent("Describe", { title: "dinner" }),
+          );
+          expect(room.get().titles).toEqual([{ title: "tea" }]);
+          expect(room.get().roster).toEqual({ items: ["ada", "bo"] });
+          expect(room.get().about).toEqual({ title: "dinner" });
+        },
+      );
+    });
+
+    it("adopts a release that adds a record a writer guards, holding its default, and stores its policy", async () => {
+      await reconcileRelease(
+        "added-record-release",
+        NAMED_SOURCE,
+        withRecord(),
+        prime,
+        async ({ outcome, room, recorded, currentIdentity, runtime }) => {
+          expect(recorded?.detail).toBeUndefined();
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().roster).toEqual({ items: ["ada"] });
+          expect(room.get().label).toEqual({ title: "" });
+          expect(
+            await refusalOfDirectWrite(runtime, room, "label", {
+              title: "forged",
+            }),
+          ).toContain("writeAuthorizedBy");
+          await send(runtime, room, "relabel", { title: "tea" });
+          expect(room.get().label).toEqual({ title: "tea" });
+        },
+      );
+    });
+
+    it("refuses a release that adds a list whose default holds an entry, and keeps the fields as they were", async () => {
+      // An entry of the list is a value only `rename` may write, and no
+      // initialization reaches a list's entries.
+      await reconcileRelease(
+        "added-list-entry-release",
+        NAMED_SOURCE,
+        withList('[{ title: "first" }]'),
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(recorded?.detail).toContain(
+            "writeAuthorizedBy requires a trusted verified binding identity " +
+              "at /titles/*",
+          );
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+          expect(room.get().titles).toBeUndefined();
+        },
+      );
+    });
+
+    it("refuses a release that adds a slot and changes a guarded field, and keeps the field as it was", async () => {
+      // The release gives `About` a member with a default, which the setup
+      // fills into what `about` holds: a write there only `describeRoom` may
+      // make, whatever the release adds beside it.
+      const current = withList().replace(
+        "interface About {\n  title: string;\n}",
+        'interface About {\n  title: string;\n  color?: Default<string, "red">;\n}',
+      );
+      expect(current).toContain("color?: Default<string");
+      await reconcileRelease(
+        "added-list-changing-release",
+        NAMED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(recorded?.detail).toContain("at /about");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+        },
+      );
+    });
+
+    it("refuses a release that adds a guarded member to a guarded record, and keeps the record as it was", async () => {
+      // `about` holds no `note`, and the setup writes none, but the release
+      // changes what writing `about` requires, and the setup restates it.
+      const current = NAMED_SOURCE.replace(
+        "interface About {\n  title: string;\n}",
+        "interface About {\n  title: string;\n  note?: WriteAuthorizedBy<string, typeof describeRoom>;\n}",
+      );
+      expect(current).toContain("note?: WriteAuthorizedBy<string");
+      await reconcileRelease(
+        "added-member-release",
+        NAMED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(recorded?.detail).toContain("at /about");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+        },
+      );
+    });
+
+    it("refuses a release that adds a policy at a guarded slot the document does not hold yet, and keeps the fields as they were", async () => {
+      // The stored envelope already guards `label`, so a UI contract the
+      // release adds there joins a declared policy rather than a new field's.
+      const guarded = (policy: string) =>
+        withRecord()
+          .replace(
+            'label?: Default<WriteAuthorizedBy<About, typeof relabel>, { title: "" }>;',
+            `label?: ${policy};`,
+          )
+          .replace("  label: About;\n", "  label?: About;\n")
+          .replace(
+            "{ label: Writable<About> }",
+            "{ label: Writable<About | undefined> }",
+          );
+      const previous = guarded("WriteAuthorizedBy<About, typeof relabel>");
+      const current = guarded(
+        'TrustedActionWrite<About, typeof relabel, "Relabel", "GuardedRoom">',
+      );
+      expect(previous).toContain(
+        "label?: WriteAuthorizedBy<About, typeof relabel>;",
+      );
+      expect(current).toContain("label?: TrustedActionWrite<About");
+      expect(current).toContain("{ label: Writable<About | undefined> }");
+      await reconcileRelease(
+        "unheld-policy-release",
+        previous,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(room.get().label).toBeUndefined();
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+        },
+      );
+    });
+
+    it("refuses a release that adds a guarded list where the document holds `undefined`, and keeps the slot as it was", async () => {
+      // A slot holding `undefined` holds a value, which no initialization
+      // replaces and no new policy may adopt.
+      await reconcileRelease(
+        "undefined-slot-release",
+        NAMED_SOURCE,
+        withList(),
+        async (runtime, room) => {
+          await prime(runtime, room);
+          const argument = room.getArgumentCell<Room>()!;
+          const tx = runtime.edit();
+          argument.withTx(tx).key("titles").setRaw(undefined);
+          expect((await tx.commit().settled).error).toBeUndefined();
+          await argument.pull();
+          const stored = argument.getRaw() as Room;
+          expect(Object.hasOwn(stored, "titles")).toBe(true);
+          expect(stored.titles).toBeUndefined();
+        },
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          const stored = room.getArgumentCell<Room>()!.getRaw() as Room;
+          expect(Object.hasOwn(stored, "titles")).toBe(true);
+          expect(stored.titles).toBeUndefined();
+        },
+      );
+    });
+
+    it("refuses a release that guards a slot the document already holds, and keeps the slot as it was", async () => {
+      // Before the release, `titles` is a list anyone may write, and holds an
+      // entry; guarding it would adopt what it holds.
+      const previous = withList().replace(
+        "WriteAuthorizedBy<About, typeof rename>[]",
+        "About[]",
+      );
+      expect(previous).not.toContain("WriteAuthorizedBy<About");
+      await reconcileRelease(
+        "held-list-release",
+        previous,
+        withList(),
+        async (runtime, room) => {
+          await prime(runtime, room);
+          await send(runtime, room, "rename", { title: "tea" });
+          expect(room.get().titles).toEqual([{ title: "tea" }]);
+        },
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().titles).toEqual([{ title: "tea" }]);
         },
       );
     });

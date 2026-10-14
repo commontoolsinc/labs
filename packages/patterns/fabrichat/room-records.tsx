@@ -6,7 +6,8 @@
  *
  * Every stream that changes the room's record has a handler of its own, as
  * `FabriChatRoom.md` names them. `commitWindow` writes the sending session's
- * windows.
+ * windows, and `commitSetTitle` the title a member last set, a record of its
+ * own beside the one the room's creator wrote.
  *
  * A message is a record of its own in the room's messages, labeled
  * `authored-by` whoever last wrote it, and admitted only from the reviewed
@@ -56,12 +57,15 @@ import {
   CHAT_OBLITERATE_SURFACE,
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_ROOM_OFFER_KIND,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDeletedBody,
   type ChatMessageVersion,
   type ChatReaction,
@@ -77,6 +81,9 @@ import {
   type MessageActRefusalCode,
   nsecOf,
   type ProfileCell,
+  type SetTitleOutcome,
+  type SetTitleRefusalCode,
+  type TitleRecord,
   type WindowEvent,
 } from "./schemas.tsx";
 
@@ -88,8 +95,10 @@ import {
 const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
- * Every room's policy. Each setting is read by the handlers it governs, and
- * `about.policy` states it, so the two cannot disagree.
+ * The policy every room starts from, a group room's. Each setting is read by
+ * the handlers it governs, and `about.policy` states it, so the two cannot
+ * disagree. A room's `ownersMayObliterate` is `ownersMayObliterateIn()`'s,
+ * and the message acts read it from the room's stated policy.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -101,6 +110,18 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
   maxWindowCount: 100,
   maxOpenWindows: 50,
 };
+
+/**
+ * The `ownersMayObliterate` a room of `kind` states in its policy, which
+ * decides which policy document `about.policy` links: `given`, where the room
+ * is configured, and otherwise yes for a group room and no for a direct room.
+ * What the room enforces is what that document states
+ * (`ownersMayObliterateBy()`).
+ */
+export const ownersMayObliterateIn = (
+  kind: ChatRoomKind,
+  given?: boolean,
+): boolean => given ?? kind !== "direct";
 
 /**
  * How long the room remembers a request it acted on: the greater of the
@@ -391,6 +412,39 @@ export type StoredAbout = AuthoredByCurrentUser<
   >
 >;
 
+/**
+ * A room's title as a member last set it: written only by `commitSetTitle`,
+ * from a reviewed `ChatRetitle` on `ChatRetitleSurface`, and labeled
+ * `authored-by` that member. The creator's `about` record keeps the title the
+ * room was created with, and its own label.
+ */
+export type StoredTitle = AuthoredByCurrentUser<
+  TrustedActionWrite<
+    TitleRecord,
+    typeof commitSetTitle,
+    typeof CHAT_RETITLE_ACTION,
+    typeof CHAT_RETITLE_SURFACE
+  >
+>;
+
+/**
+ * The room's title as a member last set it, kept as one keyed record,
+ * `TITLE_KEY`, absent until a member sets one. The list around it defaults to
+ * empty, so nothing but `commitSetTitle` ever writes the record.
+ */
+export type TitlesCell = Writable<StoredTitle[] | Default<[]>>;
+
+/** The key of the one record of the title a member set. */
+export const TITLE_KEY = "title";
+
+/**
+ * The outcome of each of a sender's retitles, by its `requestId`: one
+ * instance per user, which no one else reads.
+ */
+export type TitleRequestsCell = Writable<
+  Record<string, SetTitleOutcome> | Default<Record<PropertyKey, never>>
+>;
+
 //
 // Helpers
 //
@@ -631,6 +685,80 @@ const SHOWN_IN: readonly ShownIn[] = ["main", "thread", "both"];
 export const isOwnerOf = (cell: Cell<unknown>): boolean =>
   spaceAccess(cell) === "OWNER";
 
+/** What one person may do to one message. */
+export interface MessageRights {
+  /** Whether they may record a new version of it. */
+  canEdit: boolean;
+
+  /** Whether they may delete it. */
+  canDelete: boolean;
+
+  /** Whether they may obliterate it. */
+  canObliterate: boolean;
+}
+
+/** The rights of someone who may do nothing to a message. */
+export const NO_MESSAGE_RIGHTS: MessageRights = {
+  canEdit: false,
+  canDelete: false,
+  canObliterate: false,
+};
+
+/**
+ * What the person acting under `profile` may do to the message `record` in a
+ * room of `kind`, given whether they hold OWNER in the room's space and
+ * whether the room lets its OWNERs obliterate. Only the message's author may
+ * edit or delete it, and in a direct room they may obliterate it too. An OWNER
+ * may obliterate any message while `ownersMayObliterate` holds, and otherwise
+ * gains nothing over anyone else: never an edit or a deletion of someone
+ * else's message. A deleted message takes nothing further but obliteration,
+ * and an obliterated one, which names no author, takes nothing. The room's
+ * handlers admit an act by this, and the room's view and rendering offer one
+ * by it.
+ */
+export const messageRightsOf = (
+  record: MessageRecord | undefined,
+  profile: ProfileCell | undefined,
+  kind: ChatRoomKind,
+  isOwner: boolean,
+  ownersMayObliterate: boolean,
+): MessageRights => {
+  const author = record?.authorProfile;
+  const isAuthor = author !== undefined && profile !== undefined &&
+    equals(author, profile);
+  const live = !isDeleted(record);
+  return {
+    canEdit: live && isAuthor,
+    canDelete: live && isAuthor,
+    canObliterate: author !== undefined &&
+      ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
+  };
+};
+
+/**
+ * Whether the room whose policy `policy` is lets its OWNERs obliterate, as
+ * the policy states it; a policy that is absent, or doesn't read yet, doesn't.
+ */
+export const ownersMayObliterateBy = (
+  policy: Cell<ChatRoomPolicy> | undefined,
+): boolean => policy?.get()?.ownersMayObliterate === true;
+
+/**
+ * Why an obliteration `messageRightsOf()` doesn't allow is refused, for a
+ * person to read.
+ */
+const obliterationRefusal = (
+  kind: ChatRoomKind,
+  ownersMayObliterate: boolean,
+): string =>
+  kind === "direct"
+    ? ownersMayObliterate
+      ? "Only an owner of this chat can remove someone else's message."
+      : "Only its author can remove a message in this chat."
+    : ownersMayObliterate
+    ? "Only an owner of this chat can remove a message."
+    : "Messages in this chat can't be removed.";
+
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose
  * messages are `messages`: their profile resolves, and the room's space grants
@@ -728,6 +856,9 @@ export type ActRefusalCell = Writable<string>;
 
 /** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
 export interface JoinRoomRequest {
+  /** The root explicitly declaring a room held inside a container. */
+  container?: Cell<ChatContainer>;
+
   /** The room the viewer has joined. */
   room: Cell<ChatRoomLink>;
 }
@@ -811,6 +942,12 @@ export interface RoomActState {
   closesPicker?: boolean;
 
   /**
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   */
+  policy?: Cell<ChatRoomPolicy>;
+
+  /**
    * Tells the viewer's manager the viewer has joined the room, as
    * `tellManagerJoined` does, in an event of its own; absent where nothing is
    * told. The act's own transaction reads nothing of the manager, which can
@@ -823,10 +960,13 @@ export interface RoomActState {
 export interface ManagerJoinState {
   /**
    * Whether the viewer's manager can take the viewer into the room: the
-   * viewer has a manager, and the room is its space's own, which it can name
-   * itself to the manager by. Absent, it can't.
+   * viewer has a manager and the room is standalone or its container's
+   * declared conversation. Absent, it can't.
    */
   canJoin?: boolean;
+
+  /** The container's declaration, for a room held inside another space. */
+  container?: Cell<ChatContainer>;
 
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
@@ -842,11 +982,11 @@ export interface ManagerJoinState {
  * it an event once they have recorded what the viewer wrote.
  */
 export const tellManagerJoined = handler<void, ManagerJoinState>(
-  (_event, { canJoin, joinRoom, self }) => {
+  (_event, { canJoin, container, joinRoom, self }) => {
     if (canJoin !== true || joinRoom === undefined || self === undefined) {
       return;
     }
-    joinRoom.send({ room: self });
+    joinRoom.send({ room: self, container });
   },
 );
 
@@ -1059,8 +1199,14 @@ const performMessageAct = (
     return;
   }
   const current = entry.record;
-  const isAuthor = current.authorProfile !== undefined &&
-    equals(current.authorProfile, profile);
+  const ownersMayObliterate = ownersMayObliterateBy(state.policy);
+  const rights = messageRightsOf(
+    current,
+    profile,
+    kind,
+    isOwnerOf(messages),
+    ownersMayObliterate,
+  );
   const deletionObliterates = op === "delete" &&
     FABRICHAT_POLICY.deletionIsObliteration;
 
@@ -1069,20 +1215,17 @@ const performMessageAct = (
       refuse("deleted-target", "That message was already removed.");
       return;
     }
-    const allowed = op === "delete" || kind === "direct"
-      ? isAuthor
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwnerOf(messages);
-    if (!allowed) {
+    if (op === "delete" && isDeleted(current)) {
+      refuse("deleted-target", "That message was already deleted.");
+      return;
+    }
+    if (!(op === "delete" ? rights.canDelete : rights.canObliterate)) {
       refuse(
         "not-allowed",
         op === "delete"
           ? "Only its author can delete a message."
-          : "Only an owner of this chat can remove a message.",
+          : obliterationRefusal(kind, ownersMayObliterate),
       );
-      return;
-    }
-    if (op === "delete" && isDeleted(current)) {
-      refuse("deleted-target", "That message was already deleted.");
       return;
     }
     const editedAt = claimTime(usedTimes, clock);
@@ -1115,17 +1258,17 @@ const performMessageAct = (
     return;
   }
 
-  if (!isAuthor) {
+  if (isDeleted(current)) {
+    refuse("deleted-target", "That message was deleted.");
+    return;
+  }
+  if (!(op === "delete" ? rights.canDelete : rights.canEdit)) {
     refuse(
       "not-allowed",
       op === "delete"
         ? "Only its author can delete a message."
         : "Only its author can edit a message.",
     );
-    return;
-  }
-  if (isDeleted(current)) {
-    refuse("deleted-target", "That message was deleted.");
     return;
   }
   const kept: ChatMessageVersion[] = FABRICHAT_POLICY.keepsHistory
@@ -1290,7 +1433,7 @@ export const commitEdit = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("edit", event, state),
 );
 
-/** Deletes the sender's message, from `ChatDeleteSurface`. */
+/** Deletes a message, from `ChatDeleteSurface`. */
 export const commitDelete = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performMessageAct("delete", event, state),
 );
@@ -1376,5 +1519,93 @@ export const commitWindow = handler<RoomWindowEvent, WindowActState>(
       hasOlder: slice.hasOlder,
       hasNewer: slice.hasNewer,
     });
+  },
+);
+
+/**
+ * An event on the room's `setTitle`. A rendered control sends the text it
+ * holds as `target.value`, and no request id, which the room then mints.
+ */
+export interface SetTitleEvent {
+  /**
+   * Chosen by the sender, and unique among its retitles. The outcome is
+   * recorded under it, and sending the same event again with it changes
+   * nothing.
+   */
+  requestId?: string;
+
+  /** The new title. */
+  title?: string;
+
+  /** A rendered control's text. */
+  readonly target?: { readonly value?: string };
+}
+
+/** What `commitSetTitle` is bound to. */
+export interface SetTitleState {
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
+
+  /**
+   * Whether the room is one a manager created in a space of its own. A
+   * space's own chat is shown by its space's name.
+   */
+  ownSpace: boolean;
+
+  /** The room's messages, which name the room's space. */
+  messages: MessagesCell;
+
+  /** The sender's retitles' outcomes. */
+  outcomes: TitleRequestsCell;
+
+  /**
+   * Why the session's latest retitle was refused, which the rendered control
+   * shows; empty once one takes effect.
+   */
+  refusal: Writable<string>;
+}
+
+/**
+ * Sets the room's title, which every member shares, from a trusted gesture on
+ * `ChatRetitleSurface`. Any member who can write in the room may, in a group
+ * room or a direct one. The outcome is recorded under the event's
+ * `requestId` in the sender's own outcomes, and a refusal leaves the title as
+ * it is.
+ */
+export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
+  (event, { titles, ownSpace, messages, outcomes, refusal }) => {
+    const requestId = event?.requestId ?? eventKey();
+    if (outcomes.key(requestId).get() !== undefined) return;
+    const refuse = (code: SetTitleRefusalCode, reason: string): void => {
+      outcomes.key(requestId).set({ status: "refused", reason, code });
+      refusal.set(reason);
+    };
+    if (!ownSpace || titles === undefined) {
+      refuse("fixed-title", "This chat is named by its space.");
+      return;
+    }
+    // A level not known yet is left to the space's own access list, which
+    // refuses the write where it doesn't admit it.
+    const level = spaceAccess(messages);
+    if (
+      currentPrincipal() === undefined || level === "none" || level === "READ"
+    ) {
+      refuse("not-member", "You can't write in this chat.");
+      return;
+    }
+    const proposed = event?.title ?? event?.target?.value;
+    const title = typeof proposed === "string" ? proposed.trim() : "";
+    if (title === "") {
+      refuse("invalid-title", "A chat's title needs some text.");
+      return;
+    }
+    const record = titles.elementById(TITLE_KEY);
+    record.set({ title } as StoredTitle);
+    titles.addUnique(record);
+    outcomes.key(requestId).set({ status: "done" });
+    refusal.set("");
   },
 );

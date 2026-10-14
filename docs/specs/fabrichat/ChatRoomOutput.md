@@ -45,6 +45,21 @@ interface ChatRoomOutput {
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
+  /** Who is reading the room: their profile, its principal, their access. */
+  viewer: {
+    profile?: Cell<ChatProfile>;
+    principal?: string;
+    role?: "OWNER" | "WRITE" | "READ" | "none";
+  };
+
+  /** What this reader may do to each message, oldest first. */
+  messageRights: {
+    message: Cell<ChatMessage>;
+    canEdit: boolean;
+    canDelete: boolean;
+    canObliterate: boolean;
+  }[];
+
   sendMessage: Stream<{
     requestId: string;
     version: ChatMessageVersion;
@@ -113,6 +128,20 @@ interface ChatRoomOutput {
         | "not-allowed";
     }
   >;
+
+  /** Sets the room's title, which every member shares. */
+  setTitle: Stream<{ requestId: string; title: string }>;
+
+  /** The outcome of each of this reader's retitles, by its `requestId`. */
+  titleRequests: Record<
+    string,
+    | { status: "done" }
+    | {
+      status: "refused";
+      reason: string;
+      code: "not-member" | "invalid-title" | "fixed-title";
+    }
+  >;
   [UI]: VNode;
   [VIEWS]: { room: object };
 }
@@ -176,8 +205,10 @@ space.
 
 ## Facts
 
-- **`about`** is a [`ChatRoomAbout`](ChatRoomAbout.md), set once when the room
-  is created.
+- **`about`** is a [`ChatRoomAbout`](ChatRoomAbout.md), set when the room is
+  created. Its `title` changes through
+  [`setTitle`](#settitlerequestid-string-title-string), and the rest of it
+  never does.
 - **Messages.** The room holds its [`ChatMessage`](ChatMessage.md)s, ordered by
   `sentAt`, which is unique in the room. A client reads the newest of them from
   `messages`, and the rest through windows (see
@@ -237,6 +268,23 @@ space.
   now: their access is WRITE or OWNER, and their profile resolves. It lets a
   client tell a READ member why their gestures would be refused before they
   make one.
+- **`viewer`** says who is reading the room. Its `profile` is the reader's
+  profile, absent until it resolves, as a link to the profile itself: the link
+  `sendMessage` records as a message's `authorProfile`, so a client tells the
+  reader's own messages from the rest by comparing the two links, and finds
+  the reader among `participants` the same way. Its `principal` is the
+  principal that profile's `represents-principal` label attests, absent where
+  it attests none or the label can't be read, as for `participantEntries`. Its
+  `role` is the reader's access to the room's space, as the space's access
+  list grants it (`OWNER`, `WRITE`, `READ`, or `none`), absent while that
+  isn't known. Like `participantEntries`, the profile and the principal are
+  claims, not proof of access.
+- **`messageRights`** says what the reader may do to each of the room's
+  messages: one entry per message, oldest first, holding the `message`, as the
+  link `messages.latest` holds for it, and `canEdit`, `canDelete`, and
+  `canObliterate`, decided by the rules the streams below admit an event by, so
+  a client offers exactly the acts the room would take. Every entry is all
+  `false` while `canSend` doesn't hold.
 - **`canAdd`** says whether the reader can add someone to the room's space: the
   room is a group room in a space of its own, and their access is OWNER. It is
   false in a direct room, whose space keeps its two members, and in a space's
@@ -269,6 +317,9 @@ space.
   A request the room has already acted on, sent again, keeps the outcome it
   has. A rendered control's act carries no `requestId`, and its outcome is
   recorded under the event's own key.
+- **`titleRequests`** holds the outcome of each of the reader's
+  [`setTitle`](#settitlerequestid-string-title-string) requests, by its
+  `requestId`. Like `addRequests`, it is the reader's alone.
 - **`recentActivity`** is a log of what the room recorded recently: each message
   sent, edited, deleted, or obliterated, and each reaction added or removed, as
   a [`ChatRoomActivity`](ChatRoomActivity.md), in `seq` order. A client follows
@@ -302,12 +353,13 @@ client:
   Passing the room's link to someone else never passes a session's windows:
   they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
-  That is only `addRequests` and `messageRequests`, the outcomes of the
-  reader's own adds and message acts. No one else reads them.
-- **Computed for each reader**: `canSend` and `canAdd`. Each is derived when
-  it's read, from the reader's own access and profile, so each reader sees
-  their own answer, through the room or through a placement, and it needs no
-  instance and no write.
+  That is only `addRequests`, `messageRequests`, and `titleRequests`, the
+  outcomes of the reader's own adds, message acts, and retitles. No one else
+  reads them.
+- **Computed for each reader**: `canSend`, `canAdd`, `viewer`, and
+  `messageRights`. Each is derived when it's read, from the reader's own access
+  and profile, so each reader sees their own answer, and it needs no instance
+  and no write. A placement carries `canSend` and `canAdd` as well.
 
 Some values are derived when they're read, and stored nowhere, so reading them
 needs no instance of anything: `participants` and `roster`, and in `messages`,
@@ -382,11 +434,12 @@ These rules hold for every stream:
   the write.
 - A refusal writes nothing to the room's shared record. The sender's outcome
   is recorded where only they read it: in `messageRequests` for a message
-  act, and in `addRequests` for an add, each `refused` with a reason and a
-  code. The room's own composer shows the session's latest refusal until an
-  act takes effect. A refused `openWindow` or `closeWindow` records no outcome.
-  A client still checks an event against the stream's rules before sending it
-  (see [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
+  act, in `addRequests` for an add, and in `titleRequests` for a retitle, each
+  `refused` with a reason and a code. The room's own composer shows the
+  session's latest refusal until an act takes effect. A refused `openWindow` or
+  `closeWindow` records no outcome. A client still checks an event against the
+  stream's rules before sending it (see
+  [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
 - A refused event is spent: it is not retried.
 
 | Stream | Reviewed surface | Effect |
@@ -528,7 +581,8 @@ two versions.
 Records one of the sender's messages as deleted.
 
 - **Admitted:** as a trusted gesture on `ChatDeleteSurface`, and only from the
-  message's sender.
+  message's sender. No one deletes a message someone else sent, an OWNER
+  included, whatever the room's policy.
 - **Effect:** depends on whether the implementation makes deletion obliteration
   (see [implementation-defined behavior](#implementation-defined-behavior)):
   - If it does, the message is obliterated, exactly as `obliterateMessage` would
@@ -553,21 +607,24 @@ Records one of the sender's messages as deleted.
 - `requestId: string` — Chosen by the sender, and unique among its requests. The
   room acts on a request at most once (see [streams](#streams)).
 - `message: Cell<ChatMessage>` — The message to obliterate. Must be a message in
-  this room that the sender may obliterate: in a direct room, one the sender
-  sent; elsewhere, anyone's, if the sender is an OWNER.
+  this room that the sender may obliterate: anyone's, if the sender is an OWNER
+  and the room's policy lets OWNERs obliterate; and in a direct room, also one
+  the sender sent.
 
-Removes a message entirely, with its history. In a group room, it is how an
-OWNER curates the conversation, and an outward act, since it removes someone
-else's words. In a direct room, it is how either person removes
-their own words completely.
+Removes a message entirely, with its history. Where the room's policy allows
+it, it is how an OWNER curates the conversation, in a direct room as in a group
+room, and an outward act when it removes someone else's words. In a direct
+room, it is also how either person removes their own words completely.
 
-- **Admitted:** as a trusted gesture on `ChatObliterateSurface`. In a direct
-  room, from either member, for their own messages only: being the room's
-  creator, and so its OWNER, doesn't extend to the other person's messages.
-  Elsewhere, only from a member the room space's access list makes OWNER, if the
-  implementation allows OWNERs to obliterate (see [implementation-defined
-  behavior](#implementation-defined-behavior)). A member who isn't an OWNER
-  takes back their own message completely by deleting it, where the
+- **Admitted:** as a trusted gesture on `ChatObliterateSurface`: from a member
+  the room space's access list makes OWNER, for any message, whoever sent it,
+  where the room's `ownersMayObliterate` holds (see [implementation-defined
+  behavior](#implementation-defined-behavior)); and in a direct room, also from
+  a message's own sender, whatever their access and whatever the policy. Where
+  `ownersMayObliterate` doesn't hold, being an OWNER confers nothing here: an
+  OWNER obliterates only what anyone else may, and no more deletes someone
+  else's message than they could otherwise. A member of a group room who can't
+  obliterate takes back their own message completely by deleting it, where the
   implementation makes deletion obliteration.
 - **Effect:** reduces the message to a tombstone (see [obliterated
   messages](ChatMessage.md#obliterated-messages)): its `body` becomes
@@ -579,10 +636,10 @@ their own words completely.
   stay used, and a retry of the original send doesn't send the message again:
   the room still remembers the send's `requestId`, for as long as it remembers
   any.
-- **Refused:** a `message` in another room, a direct room's message sent by the
-  other person, or, elsewhere, a sender who isn't an OWNER, or an OWNER the
-  implementation doesn't allow to obliterate. Obliterating a message that is
-  already obliterated changes nothing.
+- **Refused:** a `message` in another room; and, unless the room is a direct
+  room and the message is the sender's own, a sender who isn't an OWNER, or any
+  sender where the room's `ownersMayObliterate` doesn't hold. Obliterating a
+  message that is already obliterated changes nothing.
 
 ### `sendReaction(requestId: string, message: Cell<ChatMessage>, emoji: string)`
 
@@ -718,6 +775,41 @@ manager adds its user when it creates or accepts the room.
   already. The profile's document must carry a label, as a profile does; one
   that carries none is refused.
 
+### `setTitle(requestId: string, title: string)`
+
+- `requestId: string` — Chosen by the sender, and unique among its retitles.
+  The outcome is recorded under it in `titleRequests`, and sending the same
+  event again with it changes nothing. The rendered retitle control's click
+  carries none, and is given one of its own.
+- `title: string` — The new title, exactly as the person saw it when they set
+  it. It must have some text in it: a string, not empty or only whitespace.
+
+Sets the room's title, which every member shares: the `title` the room's
+`about` shows (see [`ChatRoomAbout`](ChatRoomAbout.md)), and the name a
+manager's list shows it by, read through the room's link (see
+[`ChatIndexEntry`](ChatIndexEntry.md#fields)). Like `addMember`, it takes a
+gesture of its own, records its outcome, and is in `[VIEWS]`.
+
+- **Admitted:** as a trusted gesture on `ChatRetitleSurface`, from the room's
+  rendered retitle control, or from a client's own control through the
+  sanctioned issuing path (see
+  [`clients.md`](clients.md#the-sanctioned-issuing-path)), from any member who
+  can write in the room, in a group room or a direct one.
+- **Effect:** records the title, trimmed of the whitespace around it, labeled
+  `authored-by` the sender, as the title a member last set. It replaces any
+  title set before, and outranks the one the room was created with, which
+  `about.record` keeps. Nothing else about the room changes, and nothing is
+  added to `recentActivity`, which logs messages and reactions: a client
+  follows the title by reading `about.title`.
+- **Refused:** a sender who can't write in the room, or isn't signed in
+  (`not-member`); a `title` with no text in it (`invalid-title`); and a room
+  that shares an existing space, a space's own chat, which is shown by its
+  space's name (`fixed-title`).
+- **Outcome:** recorded in `titleRequests`: `done`, or `refused` with a
+  `reason` for a person to read and a `code` a client acts on, which stays the
+  same whatever the `reason` says. A refusal changes nothing else. A retitle the
+  stream doesn't admit, as one without the gesture, records nothing.
+
 ## Renderings
 
 - **`[UI]`** is the room's own rendering, with its reviewed surfaces. An
@@ -725,10 +817,11 @@ manager adds its user when it creates or accepts the room.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
   that draw natively. It includes `messages`, through whose link a client
   reaches its own windows and their streams, `openWindow` and `closeWindow`,
-  the same streams at the group's top level, `canSend`, `messageRequests`, and
-  `addMember` with `canAdd` and `addRequests`. A client uses it to
-  show a room outside any container. Inside a container, it reads the
-  placement's `chat` group instead
+  the same streams at the group's top level, `canSend`, `viewer`,
+  `messageRights`, `messageRequests`, `addMember` with `canAdd` and
+  `addRequests`, and `setTitle` with `titleRequests`. A client uses it to show
+  a room outside any container. Inside a container, it reads the placement's
+  `chat` group instead
   ([`FabriChatPlacement.md`](FabriChatPlacement.md#outputs)).
 
 ## Implementation-defined behavior
@@ -743,7 +836,8 @@ these, and an implementation MUST state its choice for each in its rooms'
 - **Deletion as obliteration.** Whether a sender deleting their own message
   obliterates it, which is how a member of a group room takes back what they
   said completely.
-- **Obliteration at all.** Whether an OWNER may obliterate messages.
+- **Obliteration by OWNERs.** Whether an OWNER may obliterate messages,
+  anyone's (`ownersMayObliterate`), in a direct room as in a group room.
 - **What an edit keeps** in a message's history.
 - **The limits on message windows**: how many messages a window holds
   (`maxWindowCount`), and how many a session can have open (`maxOpenWindows`).
@@ -758,8 +852,9 @@ does so is its own business (see
 
 `about.policy` links a [`ChatRoomPolicy`](ChatRoomPolicy.md), and an
 implementation MUST state it correctly: a client reads a room's choices there,
-and can rely on them. One thing is not a choice: a direct room MUST let either
-person obliterate their own messages.
+and can rely on them. Two things are not choices: no one deletes a message
+someone else sent, and a direct room MUST let either person obliterate their
+own messages.
 
 ## Open questions
 
