@@ -201,7 +201,10 @@ list, resolves the source's current evidence through `linkedSourceEvidence`,
 as §8.2.6 requires, and persists none of it; in that evidence the source's
 stored integrity stands as stored, and only the link schema's integrity and
 a schema the transaction writes the source under are gated against
-runtime-minted atoms. A handle's carried view is still
+runtime-minted atoms. A refusal the floor reaches from documents the
+transaction holds is terminal, and the refused run then depends on what the
+floor read there, the source's envelope among it, so a writer runs again when
+that evidence changes. A handle's carried view is still
 built from the labels of the read that produced it, so its root restriction
 over-approximates the acquisition restriction of §8.2.3 where that read
 reached labeled content; `docs/plans/cfc-independent-reference-labels.md`

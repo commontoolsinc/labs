@@ -7,14 +7,18 @@
 // Re-running recomputes the identical refused write, so a verdict is terminal:
 // never retried, surfaced.
 //
-// A refusal for want of something stored state does not hold yet is not one,
-// even where reading again returns the same absence. Ending the retries on it
-// is sound only where the run DEPENDS on the state that would change the
-// answer, so that the value arriving there triggers the run again, as a fresh
-// trigger with a fresh budget rather than a retry. Prepare reads stored labels
-// invisibly to reactivity, so a producer has no such dependency to point at:
-// a write floor that finds a linked source's stored labels short of the floor
-// leaves its failure untagged.
+// A refusal for want of something stored state does not hold yet is one only
+// where the run DEPENDS on the state that would change the answer, so that the
+// value arriving there triggers the run again, as a fresh trigger with a fresh
+// budget rather than a retry. That reading again returns the same absence is
+// not enough. Prepare reads stored labels invisibly to reactivity, so a
+// producer that tags such a refusal makes that dependency itself. The write
+// floor does (`holdFloorEvidence` in `prepare.ts`): where every document whose
+// stored state decided a miss is one the transaction holds, it reads that
+// state again visibly to reactivity and tags the failure. A miss that rests on
+// a document the transaction does not hold stays untagged, since a document
+// the replica has not pulled reads the same as one that lacks the atom, and so
+// does one resting on the flow of external content, which no document holds.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not
@@ -43,7 +47,8 @@
 // every reason was a verdict unless marked. A producer audit found that false
 // in both directions — several families are mixed, and several DISCARD an
 // availability reason they received upstream (`verifyWriteFloor` drops
-// `linkedSourceEvidence`'s; the `maxConfidentiality` input gate reports
+// `linkedSourceEvidence`'s, and judges availability itself from the documents
+// it weighed; the `maxConfidentiality` input gate reports
 // its resolution failures and withholds the tag; the sink-ceiling gate tags
 // its refusal only when its enforce-mode rewrite resolved every module
 // policy, since an unresolved manifest might carry the discharge that admits
