@@ -14,11 +14,13 @@
 // not enough. Prepare reads stored labels invisibly to reactivity, so a
 // producer that tags such a refusal makes that dependency itself. The write
 // floor does (`holdFloorEvidence` in `prepare.ts`): where every document whose
-// stored state decided a miss is one the transaction holds, it reads that
-// state again visibly to reactivity and tags the failure. A miss that rests on
-// a document the transaction does not hold stays untagged, since a document
-// the replica has not pulled reads the same as one that lacks the atom, and so
-// does one resting on the flow of external content, which no document holds.
+// stored state decided its misses is one the transaction holds and could read,
+// it reads that state again visibly to reactivity and tags the failure. A miss
+// that rests on a document the transaction does not hold stays untagged, since
+// a document the replica has not pulled reads the same as one that lacks the
+// atom, and so does one resting on the flow of external content, which no
+// document holds, or on a schema document a source's stored labels name that
+// the transaction could not read.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not
