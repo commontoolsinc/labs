@@ -3967,6 +3967,7 @@ export class Runner {
       this.#runtime,
       tx,
       resultCell.getAsNormalizedFullLink(),
+      argumentLink,
       stored,
       dropped,
       identity,

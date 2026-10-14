@@ -229,7 +229,7 @@ both, the slots the caller does not name are carried over from the stored
 document with the bytes they hold, and the runtime records each such slot as a
 replay. The record permits nothing but leaving those bytes as they are. A slot
 the changed code's argument schema refuses is not carried over, and receives
-no record. Its bytes are copied into the piece's refused-slot store instead
+no record. Its value is copied into the piece's refused-slot store instead
 ([pattern updates](./pattern-imports/pattern-updates.md)), which the runtime
 names as a store it owns for the piece.
 

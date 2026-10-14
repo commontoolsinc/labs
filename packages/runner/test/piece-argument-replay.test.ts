@@ -203,7 +203,8 @@ const runChanged = async (
 const pieceNamedIn = (warning: string): PieceAddress => {
   const id = /on piece `([^`]+)`/.exec(warning)?.[1];
   expect(id).toBeDefined();
-  return { space, id: id as PieceAddress["id"] };
+  // The pieces these tests set up live at space scope.
+  return { space, id: id as PieceAddress["id"], scope: "space" };
 };
 
 /** The refused-slot store of `piece`, as stored. */
@@ -428,7 +429,7 @@ describe("piece argument replay", () => {
             pieceNamedIn(warnings[0]),
           );
           expect(Object.keys(record)).toEqual(["kept"]);
-          const entries = Object.values(record.kept);
+          const entries = Object.values(record.kept).flat();
           expect(entries.length).toBe(1);
           expect(entries[0].value).toEqual(["one", "two"]);
           expect(entries[0].reason).toContain("does not match type number");
@@ -531,7 +532,7 @@ describe("piece argument replay", () => {
           expect(cell.key("label").get()).toBe("mine");
           const piece = pieceNamedIn(warnings[0]);
           const record = await refusedSlotsOf(runtime, piece);
-          expect(Object.values(record.kept).map(({ value }) => value))
+          expect(Object.values(record.kept).flat().map(({ value }) => value))
             .toEqual([["one", "two"]]);
           const recordId = refusedArgumentSlotsCell(runtime, piece)
             .getAsNormalizedFullLink().id;
@@ -621,9 +622,10 @@ describe("piece argument replay", () => {
         expect(warnings[0]).toContain("its stored `kept`");
         expect(warnings[0]).toContain("the argument as a whole refuses it");
         const record = await refusedSlotsOf(runtime, pieceNamedIn(warnings[0]));
-        expect(Object.values(record.kept).map(({ value }) => value)).toEqual([
-          ["one"],
-        ]);
+        expect(Object.values(record.kept).flat().map(({ value }) => value))
+          .toEqual([
+            ["one"],
+          ]);
       });
     });
   });

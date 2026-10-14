@@ -363,13 +363,17 @@ longer fits therefore does not stop the parent from starting. A slot the parent
 supplied once and supplies no longer keeps the value it last held.
 
 Dropping a slot does not destroy what it held. In the same transaction as the
-write that fills it, setup copies the slot's stored bytes, links included, into
-the nested piece's refused-slot store: a document minted from the piece's result
-cell, which `refusedArgumentSlotsCell()` in `@commonfabric/runner` names from
-that cell alone. The store holds each dropped value by slot and then by the
-`identity#symbol` of the pattern whose setup dropped it, beside the mismatch, so
-setting the same pattern up again rewrites the same entry. The warning names the
-store. The runtime names the store as one it owns for the piece, so a value
+write that fills it, setup copies the slot's stored value into the nested piece's
+refused-slot store: a document minted from the piece's result cell, in its space
+and at its scope, which `refusedArgumentSlotsCell()` in `@commonfabric/runner`
+names from that cell alone, so each scoped instance of a piece keeps its own. A
+link in the value that leaves its document, space or scope to the document
+holding it is written naming the argument document's, so it points where it did.
+The store holds the dropped values by slot, then by the `identity#symbol` of the
+pattern whose setup dropped them (`keyless` for a pattern with no artifact
+identity), each beside its mismatch. A value already kept under the same slot
+and pattern is not kept again, and nothing kept is replaced. The warning names
+the store. The runtime names the store as one it owns for the piece, so a value
 copied out of a labeled argument keeps its confidentiality there.
 
 A refusal is a repair failure, not a silent one. The pointer has already moved
