@@ -865,6 +865,41 @@
         ],
         "type": "object"
       },
+      "CollectionChoiceEvent": {
+        "properties": {
+          "target": {
+            "properties": {
+              "dataset": {
+                "properties": {
+                  "revision": {
+                    "type": "string"
+                  },
+                  "space": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "space",
+                  "revision",
+                  "state"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "dataset"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
       "CreateProfileEvent": {
         "properties": {
           "detail": {
@@ -1727,6 +1762,119 @@
         "properties": {},
         "type": "object"
       },
+      "SharedSpaceCollectionOutput": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          "chooseMembership": {
+            "$ref": "#/$defs/CollectionChoiceEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "membership": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "search",
+          "kind",
+          "membership",
+          "chooseMembership",
+          "$NAME",
+          "$UI"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceCollectionView": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SharedSpaceUnavailable"
+          },
+          {
+            "properties": {
+              "archived": {
+                "items": {
+                  "$ref": "#/$defs/SharedSpaceEntry"
+                },
+                "type": "array"
+              },
+              "byKind": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/SharedSpaceKindView"
+                },
+                "properties": {},
+                "type": "object"
+              },
+              "entries": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/SharedSpaceEntry"
+                },
+                "properties": {},
+                "type": "object"
+              },
+              "other": {
+                "items": {
+                  "$ref": "#/$defs/SharedSpaceEntry"
+                },
+                "type": "array"
+              },
+              "saved": {
+                "items": {
+                  "$ref": "#/$defs/SharedSpaceEntry"
+                },
+                "type": "array"
+              },
+              "status": {
+                "enum": [
+                  "ready"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "entries",
+              "saved",
+              "archived",
+              "other",
+              "byKind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "SharedSpaceCommands": {
+        "properties": {
+          "changeMembership": {
+            "$ref": "#/$defs/SharedSpaceMembershipChange",
+            "asCell": [
+              "stream"
+            ]
+          },
+          "register": {
+            "$ref": "#/$defs/SharedSpaceRegistration",
+            "asCell": [
+              "stream"
+            ]
+          }
+        },
+        "required": [
+          "register",
+          "changeMembership"
+        ],
+        "type": "object"
+      },
       "SharedSpaceEntry": {
         "properties": {
           "from": {
@@ -1763,6 +1911,71 @@
           "kind",
           "state",
           "revision"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceImportCommands": {
+        "properties": {
+          "remove": {
+            "$ref": "#/$defs/SharedSpaceRemoval",
+            "asCell": [
+              "stream"
+            ]
+          }
+        },
+        "required": [
+          "remove"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceInterface": {
+        "properties": {
+          "commands": {
+            "$ref": "#/$defs/SharedSpaceCommands"
+          },
+          "imports": {
+            "$ref": "#/$defs/SharedSpaceImportCommands"
+          },
+          "receipts": {
+            "$ref": "#/$defs/SharedSpaceReceiptView"
+          },
+          "view": {
+            "$ref": "#/$defs/SharedSpaceCollectionView"
+          }
+        },
+        "required": [
+          "view",
+          "receipts",
+          "commands",
+          "imports"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceKindView": {
+        "properties": {
+          "archived": {
+            "items": {
+              "$ref": "#/$defs/SharedSpaceEntry"
+            },
+            "type": "array"
+          },
+          "other": {
+            "items": {
+              "$ref": "#/$defs/SharedSpaceEntry"
+            },
+            "type": "array"
+          },
+          "saved": {
+            "items": {
+              "$ref": "#/$defs/SharedSpaceEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "saved",
+          "archived",
+          "other"
         ],
         "type": "object"
       },
@@ -1822,6 +2035,35 @@
         ],
         "type": "object"
       },
+      "SharedSpaceReceiptView": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SharedSpaceUnavailable"
+          },
+          {
+            "properties": {
+              "offers": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/SharedSpaceOfferReceipt"
+                },
+                "properties": {},
+                "type": "object"
+              },
+              "status": {
+                "enum": [
+                  "ready"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "offers"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "SharedSpaceRegistration": {
         "properties": {
           "host": {
@@ -1877,6 +2119,27 @@
         "required": [
           "space",
           "expectedRevision"
+        ],
+        "type": "object"
+      },
+      "SharedSpaceUnavailable": {
+        "properties": {
+          "reason": {
+            "enum": [
+              "loading",
+              "malformed"
+            ]
+          },
+          "status": {
+            "enum": [
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason"
         ],
         "type": "object"
       },
@@ -2261,6 +2524,13 @@
       "sharedSpaceCatalog": {
         "$ref": "#/$defs/SharedSpaceCatalog"
       },
+      "sharedSpaces": {
+        "$ref": "#/$defs/SharedSpaceInterface"
+      },
+      "socialSpaceCollection": {
+        "$ref": "#/$defs/SharedSpaceCollectionOutput",
+        "description": "The collection browser's named instance and session-local controls."
+      },
       "spaces": {
         "default": [],
         "items": {
@@ -2270,6 +2540,7 @@
       }
     },
     "required": [
+      "socialSpaceCollection",
       "favorites",
       "journal",
       "spaces",
@@ -2282,6 +2553,7 @@
       "retainedPrivateInboxes",
       "privateInboxRefusal",
       "privateInboxReplacement",
+      "sharedSpaces",
       "sharedSpaceCatalog",
       "registerSharedSpace",
       "changeSharedSpaceMembership",
