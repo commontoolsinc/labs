@@ -1313,7 +1313,7 @@ export function addSchedulerEventHandler(state: {
 
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
-  readonly eventHandlers: readonly [NormalizedFullLink, EventHandler][];
+  readonly eventHandlers: EventHandlerRegistry;
   readonly eventQueue: QueuedEvent[];
 
   /** Holds `idle()` open until `work` settles (`Scheduler.trackBackgroundTask`). */
@@ -1752,8 +1752,8 @@ function isReplacedGraphHandler(
   state: Pick<SchedulerEventExecutionState, "runtime" | "eventHandlers">,
   handler: EventHandler,
 ): boolean {
-  if (state.eventHandlers.some(([, registered]) => registered === handler)) {
-    return false;
+  for (const [, registered] of state.eventHandlers) {
+    if (registered === handler) return false;
   }
   return piecesOf(handler).some((piece) =>
     state.runtime.runner.pieceGraphIsInstalled(
@@ -1774,7 +1774,7 @@ function followRegisteredHandler(
   state: Pick<SchedulerEventExecutionState, "eventHandlers">,
   queuedEvent: QueuedEvent,
 ): boolean {
-  const current = findEventHandler(state.eventHandlers, queuedEvent.eventLink);
+  const current = state.eventHandlers.get(queuedEvent.eventLink);
   if (current === undefined) return false;
   if (current !== queuedEvent.handler) {
     queuedEvent.handler = current;

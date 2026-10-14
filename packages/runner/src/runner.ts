@@ -78,6 +78,7 @@ import {
   cellRuntime,
   cellTx,
   createCell,
+  internCellLinkSchema,
   isCell,
   schemaCellScope,
   syncCellForIdentity,
@@ -475,27 +476,48 @@ type StartAttempt = {
 };
 
 /**
+ * What `schemaWithEventSlotAsStream()` returned for each deep-frozen handler
+ * argument schema, by that schema.
+ */
+const eventSlotAsStreamSchemas = new WeakMap<object, JSONSchema>();
+
+/**
  * `schema` with a handler's `$event` slot declared as a stream: what a
  * handler node's bound inputs are synced under at start, where the slot
  * holds the stream link rather than an event. Declared so, the slot's
  * document is not loaded under the event schema the link carries; the
  * stream is named whole beside the plan (`#cellsNodePlanReads`).
+ *
+ * The result is the interned schema, and one handler schema gets the same
+ * one on every call: each plan of a handler node attaches it to its inputs
+ * cell, which interns what it is given, and a schema built per plan would be
+ * hashed whole per plan. A schema declaring an `$event` slot is interned as a
+ * cell interns one (`internCellLinkSchema()`), which deep-freezes it in place
+ * unless it holds a value read out of a cell.
  */
-function schemaWithEventSlotAsStream(
+export function schemaWithEventSlotAsStream(
   schema: JSONSchema | undefined,
 ): JSONSchema | undefined {
   if (!isObjectOrArray(schema) || !isObjectOrArray(schema.properties)) {
     return schema;
   }
   if (!Object.hasOwn(schema.properties, "$event")) return schema;
+  // A result is kept only for a deep-frozen schema, which cannot change
+  // under it.
+  internCellLinkSchema(schema);
+  const keep = isDeepFrozen(schema);
+  const remembered = keep ? eventSlotAsStreamSchemas.get(schema) : undefined;
+  if (remembered !== undefined) return remembered;
   const required = Array.isArray(schema.required)
     ? schema.required.filter((key) => key !== "$event")
     : undefined;
-  return {
+  const declared = internCellLinkSchema({
     ...schema,
     properties: { ...schema.properties, $event: { asCell: ["stream"] } },
     ...(required !== undefined && { required }),
-  };
+  });
+  if (keep) eventSlotAsStreamSchemas.set(schema, declared);
+  return declared;
 }
 
 // The debug-name builders reuse the action's already-computed
