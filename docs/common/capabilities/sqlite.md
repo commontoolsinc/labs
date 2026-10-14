@@ -22,7 +22,9 @@ interface Input {
 }
 
 export default pattern<Input>(({ orders }) => ({
-  count: orders.query<{ n: number }>("SELECT count(*) AS n FROM orders"),
+  hasOrders: orders.query<{ present: number }>(
+    "SELECT EXISTS (SELECT 1 FROM orders) AS present",
+  ),
 }));
 ```
 
@@ -86,9 +88,17 @@ pattern reading an input database does not restate them. What it needs to know
 is which tables and columns are there — the shape of the contract it is
 querying against — and that is a property of the handle it was given.
 
-Where a pattern also writes to the database, pass `{ reactOn: db }` so the read
-re-runs after a committed write. An input a pattern only reads has nothing to
-react to.
+A read with no `reactOn` runs again only when its own inputs change — its
+statement or its params — and that is right for a database nothing else writes
+while the pattern runs. Where a pattern also writes to the database, pass
+`{ reactOn: db }` so the read re-runs after a committed write.
+
+A database written from outside the runtime is the other case. A connector
+store another process fills changes without any commit the runtime sees, so
+neither the handle nor anything else in the space moves when it does, and a
+read with no `reactOn` keeps the rows it read first. Such a store is refreshed
+through a freshness cell the writer's host updates after it writes: pass that
+cell as `reactOn`, and the read re-runs each time the host reports new data.
 
 ## A param is a value
 
@@ -116,13 +126,21 @@ export default pattern<{ ledger: SqliteDb; month?: string | Default<""> }>(
     const monthParam = computed(() => month);
 
     return ledger.query<{ id: number }>(
-      "SELECT id FROM rows_plaid_transaction WHERE substr(date, 1, 7) = " +
-        "COALESCE(NULLIF(?, ''), strftime('%Y-%m', 'now')) LIMIT 200",
+      "WITH month(first) AS (SELECT COALESCE(NULLIF(?, ''), " +
+        "strftime('%Y-%m', 'now')) || '-01') " +
+        "SELECT id FROM rows_plaid_transaction, month " +
+        "WHERE date >= first AND date < date(first, '+1 month') LIMIT 200",
       { params: [monthParam] },
     );
   },
 );
 ```
+
+The month is matched as a range over `date` — on or after its first day and
+before the next month's — rather than as `substr(date, 1, 7) = ?`. A range over
+a column is something an index on that column serves, so the database reads
+only the month's rows; a function of the column has to be evaluated on every
+row, so it reads the whole table whatever indexes it has.
 
 ## One statement, one database
 
@@ -205,6 +223,31 @@ export const newestOrders = (orders: SqliteDb, since: number) =>
   );
 ```
 
+One row back is not one row read. An aggregate reads every row it summarizes, so
+an exact `count(*)` walks the whole table — the narrowest index the table has,
+or the table itself where it has none, and a full-text table always — and a
+`WHERE` clause no index serves reads every row as well. Over a database the
+pattern owns, the walk is usually short. Over a connector store another process
+writes, which can run to gigabytes, it is seconds of reading every time the
+query runs. An exact count is worth that where the number is what the view
+shows; where the question is a smaller one, ask the smaller question:
+
+- Whether a table holds any row: `SELECT EXISTS (SELECT 1 FROM t) AS present`,
+  which stops at the first row it finds.
+- Whether a column is filled: count over a bounded sample of rows rather than
+  over the table.
+
+  ```sql
+  SELECT count(*) AS sampled, count(c) AS filled
+  FROM (SELECT c FROM t LIMIT 1000)
+  ```
+
+  The figures are the sample's — the first rows a scan yields, usually the
+  oldest — and not the table's, so a column empty in the sample may still be
+  filled further on. For a column of long text or blobs, count
+  `nullif(typeof(c), 'null')` in place of `c`, which SQLite answers from the
+  row header without loading the value.
+
 ## A connector store's tombstones, and a query that returns no rows
 
 A connector-backed database carries the conventions of the connector that fills
@@ -231,13 +274,15 @@ settles the way one matching everything does — `pending` false, `error` absent
 the view renders its empty state and nothing reports a problem. The run
 succeeded; the emptiness is data.
 
-That is what makes an empty source worth one check before it is believed. Count
-the table without the predicate you are least sure of — the one testing a
-sentinel — and compare the two: rows under the count and none under the
-predicate put the disagreement in the predicate rather than in the store. Where
-the emptiness is then reported onward, name the predicate that produced it, so a
-reader of the result learns which condition emptied the source rather than that
-the source was empty.
+That is what makes an empty source worth one check before it is believed. Ask
+whether the table holds rows at all without the predicate you are least sure of
+— the one testing a sentinel — and compare the two: rows in the table and none
+under the predicate put the disagreement in the predicate rather than in the
+store. `EXISTS` answers that from the first row it finds, where a count would
+walk the table to answer a question it needs one row for. Where the emptiness
+is then reported onward, name the predicate that produced it, so a reader of
+the result learns which condition emptied the source rather than that the
+source was empty.
 
 ```tsx
 // Shown at module scope.
@@ -246,7 +291,9 @@ export const liveOrders = (orders: SqliteDb) => ({
     "SELECT id, glaze FROM orders WHERE deleted = 0 " +
       "ORDER BY id DESC LIMIT 200",
   ),
-  total: orders.query<{ n: number }>("SELECT count(*) AS n FROM orders"),
+  present: orders.query<{ present: number }>(
+    "SELECT EXISTS (SELECT 1 FROM orders) AS present",
+  ),
 });
 ```
 
