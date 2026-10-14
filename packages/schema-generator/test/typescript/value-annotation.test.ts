@@ -366,17 +366,20 @@ describe("value-annotation", () => {
     });
 
     it("returns `false` where a binding does not resolve, given one type for both", async () => {
-      // A `typeof` built without positions names nothing the checker can find.
+      // A `typeof` built without positions names nothing the checker can find,
+      // written alone or inside a built reference.
       const { checker, members, memberType } = await program();
-      const built = ts.factory.createTypeQueryNode(
-        ts.factory.createIdentifier("rules"),
-      );
+      const query = () =>
+        ts.factory.createTypeQueryNode(ts.factory.createIdentifier("rules"));
+      const labelled = annotation(members, "labelled");
+      const type = () => memberType("labelled");
 
+      expect(spellSameValue(labelled, query(), checker, type)).toBe(false);
       expect(spellSameValue(
-        annotation(members, "labelled"),
-        built,
+        labelled,
+        ts.factory.createTypeReferenceNode("PolicyOf", [query()]),
         checker,
-        () => memberType("labelled"),
+        type,
       )).toBe(false);
     });
   });

@@ -154,6 +154,12 @@ function namedBindings(
     return symbol ? [resolveAliasedSymbol(symbol, checker)] : undefined;
   }
   const found: ts.Symbol[] = [];
+  let unresolved = false;
+  const collect = (part: ts.Node): void => {
+    const within = namedBindings(part, checker, seen);
+    if (within) found.push(...within);
+    else unresolved = true;
+  };
   if (ts.isTypeReferenceNode(node)) {
     const name = ts.isIdentifier(node.typeName)
       ? node.typeName
@@ -170,17 +176,10 @@ function namedBindings(
         seen.has(declaration)
       ) continue;
       seen.add(declaration);
-      const within = namedBindings(declaration, checker, seen);
-      if (!within) return undefined;
-      found.push(...within);
+      collect(declaration);
     }
   }
-  let unresolved = false;
-  ts.forEachChild(node, (child) => {
-    const within = namedBindings(child, checker, seen);
-    if (!within) unresolved = true;
-    else found.push(...within);
-  });
+  ts.forEachChild(node, collect);
   return unresolved ? undefined : found;
 }
 
