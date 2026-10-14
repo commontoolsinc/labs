@@ -50,6 +50,7 @@ const buildOpen = async (
     seenSeq?: number;
     sessionToken?: string;
     resumeKey?: string;
+    resumeAttempt?: number;
     genesisRoot?: FabricValue;
     spaceKind?: string;
   } = {},
@@ -238,6 +239,32 @@ describe("verifySessionOpenAuthorization", () => {
       Error,
       "authorization mismatch",
     );
+  });
+
+  it("rejects a resume attempt added, changed or dropped outside the signed invocation", async () => {
+    const resume = {
+      sessionId: "session:resume",
+      seenSeq: 7,
+      sessionToken: "token:signed",
+      resumeKey: "key:signed",
+    };
+    const numbered = await buildOpen(signedFields(), alice, {
+      ...resume,
+      resumeAttempt: 2,
+    });
+    expect(await verifySessionOpenAuthorization(numbered, verifyOptions()))
+      .toBe(alice.did());
+    for (const session of [{ ...resume, resumeAttempt: 3 }, resume]) {
+      await expect(verifySessionOpenAuthorization(
+        { ...numbered, session },
+        verifyOptions(),
+      )).rejects.toThrow("authorization mismatch");
+    }
+    const unnumbered = await buildOpen(signedFields(), alice, resume);
+    await expect(verifySessionOpenAuthorization(
+      { ...unnumbered, session: { ...resume, resumeAttempt: 3 } },
+      verifyOptions(),
+    )).rejects.toThrow("authorization mismatch");
   });
 
   //

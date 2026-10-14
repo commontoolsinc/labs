@@ -4,6 +4,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import { runInServingContext } from "../../src/executor/serving-context.ts";
 import {
   inServingContext,
   listenServingMemoryServer,
@@ -172,19 +173,22 @@ describe("serving-memory-server", () => {
     it("runs the serving loop's work in the serving context, and a client's frames outside it", async () => {
       // Each record is one crossing. The host activates the space when the
       // client's session opens it, and disposes its runtime when the test
-      // closes it. Each side integrates what the other committed from a
-      // server frame, which the memory server sends on a turn the committing
-      // side's request armed. The served derivation that reads the client's
-      // write makes the fetch.
+      // closes it. The serving replica integrates the client's writes from
+      // its admission feed; the client integrates server frames on a turn
+      // armed by the committing side's request. The served derivation that
+      // reads the client's write makes the fetch.
       const activations: boolean[] = [];
       const disposals: boolean[] = [];
       const servingIntegrations: boolean[] = [];
       const clientIntegrations: boolean[] = [];
       const fetches: boolean[] = [];
+      const servingStorageReady = Promise.withResolvers<StorageManager>();
+      const servingIntegrated = Promise.withResolvers<void>();
       const recordIntegrations = (into: boolean[]) => ({
         next: (notification: StorageNotification) => {
           if (notification.type === "integrate") {
             into.push(inServingContext());
+            if (into === servingIntegrations) servingIntegrated.resolve();
           }
           return undefined;
         },
@@ -194,6 +198,7 @@ describe("serving-memory-server", () => {
         prepareStorageManager: (manager) => {
           activations.push(inServingContext());
           manager.subscribe(recordIntegrations(servingIntegrations));
+          servingStorageReady.resolve(manager);
           return () => disposals.push(inServingContext());
         },
         fetch: () => {
@@ -230,6 +235,13 @@ describe("serving-memory-server", () => {
         client.run(start, pattern, { url: "" }, result);
         expect((await start.commit().settled).error).toBeUndefined();
         cancels.push(result.sink(() => {}));
+        // Hold the initial URL in the serving replica before the client
+        // changes it, so that change crosses the integration boundary.
+        const servingStorage = await servingStorageReady.promise;
+        await runInServingContext(
+          true,
+          () => servingStorage.syncCell(result.key("url")),
+        );
         const point = client.edit();
         result.withTx(point).key("url").set("https://example.test/v");
         expect((await point.commit().settled).error).toBeUndefined();
@@ -238,6 +250,7 @@ describe("serving-memory-server", () => {
           result,
           (value) => value?.v === 7,
         );
+        await servingIntegrated.promise;
         await serving.host.close();
 
         expect(activations.length).toBeGreaterThan(0);
