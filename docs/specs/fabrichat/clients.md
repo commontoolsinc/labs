@@ -63,7 +63,11 @@ room's newest messages from its `messages`
 through windows it opens there, and never asks for the whole conversation at
 once. Both are in `[VIEWS]` (see [views a host draws
 itself](../../common/components/COMPONENTS.md#views-a-host-draws-itself)). A
-client that renders VDOM shows the adapter's `[UI]`.
+thread is read the same way, through a window whose `root` is the thread's
+root. A client that sends only to a view's top-level streams sends to the
+room's own `openWindow` and `closeWindow`, which are the message list's (see
+[`ChatRoomOutput`](ChatRoomOutput.md#facts)). A client that renders VDOM shows
+the adapter's `[UI]`.
 
 A client that draws natively MUST:
 

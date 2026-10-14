@@ -946,6 +946,15 @@ export interface ChatRoomView {
   /** The room's messages. */
   messages: ChatMessageList;
 
+  /**
+   * The message list's `openWindow`, here as well for a client that sends only
+   * to a view's own streams, as it reads a thread through a window.
+   */
+  openWindow: Stream<RoomWindowEvent>;
+
+  /** The message list's `closeWindow`, here as well, as `openWindow` is. */
+  closeWindow: Stream<RoomWindowEvent>;
+
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
@@ -1363,6 +1372,8 @@ export const FabriChatRoomCore = pattern<
       ...records,
     }),
   };
+  const openWindow = commitWindow({ op: "open", messages, windows });
+  const closeWindow = commitWindow({ op: "close", messages, windows });
   const messageList = {
     count,
     oldestAt,
@@ -1370,8 +1381,8 @@ export const FabriChatRoomCore = pattern<
     latest,
     threads,
     windows,
-    openWindow: commitWindow({ op: "open", messages, windows }),
-    closeWindow: commitWindow({ op: "close", messages, windows }),
+    openWindow,
+    closeWindow,
   };
   const view = {
     about: aboutView,
@@ -1383,6 +1394,8 @@ export const FabriChatRoomCore = pattern<
     participantPrincipals,
     addParticipant: join,
     messages: messageList,
+    openWindow,
+    closeWindow,
     canSend,
     viewer,
     messageRights,
@@ -1663,6 +1676,8 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,
       messages: room.messages,
+      openWindow: room.openWindow,
+      closeWindow: room.closeWindow,
       canSend: room.canSend,
       viewer: room.viewer,
       messageRights: room.messageRights,
