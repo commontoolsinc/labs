@@ -13,6 +13,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
 import { loadStoredCfcEnvelope } from "../src/cfc/prepare.ts";
+import { cfcSchemaEntries } from "../src/cfc/schema-label-view.ts";
 import { markRendererTrustedEvent } from "../src/cfc/ui-contract.ts";
 import {
   type Cell,
@@ -412,6 +413,29 @@ async function reconcileRelease(
 const releaseBehind = (source: string): string =>
   `${source}\n// a release behind\n`;
 
+/** The claims the envelope the room's argument stores declares at `path`. */
+function storedClaimsAt(
+  runtime: Runtime,
+  room: Cell<Room>,
+  path: string,
+): unknown {
+  const tx = runtime.edit();
+  try {
+    const stored = loadStoredCfcEnvelope(
+      tx,
+      room.getArgumentCell<Room>()!.getAsNormalizedFullLink(),
+    );
+    expect(stored.status).toBe("loaded");
+    if (stored.status !== "loaded") return undefined;
+    const entry = cfcSchemaEntries(stored.schema).find((entry) =>
+      entry.path.join("/") === path
+    );
+    return (entry?.schema as { ifc?: unknown } | undefined)?.ifc;
+  } finally {
+    tx.abort();
+  }
+}
+
 /** The schema hash of the envelope the room's argument stores. */
 function storedSchemaHash(runtime: Runtime, room: Cell<Room>): string {
   const tx = runtime.edit();
@@ -642,6 +666,68 @@ describe("source-reconciler-protected-argument", () => {
           expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
           expect(before).not.toBe("");
           expect(storedSchemaHash(runtime, room)).toBe(before);
+        },
+      );
+    });
+
+    it("adopts a release that adds a guarded slot beside a change beneath the links, storing the slot's policy and the release's claims beneath the links", async () => {
+      // The release names no writer for each `Note`'s `tags` and adds
+      // `titles`, a list only `rename` may write. The envelope stored beside
+      // the new slot is the release's merged one, which re-describes what
+      // lies beneath the links, as a release's merged envelope does.
+      const current = LINKED_SOURCE
+        .replace(
+          /tags\?: WritePolicyAnyOf<[^;]*;/,
+          "tags?: AuthoredByCurrentUser<string[]>;",
+        )
+        .replace(
+          "interface Input {",
+          `const rename = handler<{ title: string }, { titles: TitlesCell }>(
+  ({ title }, { titles }) => {
+    const record = titles.elementById("title");
+    record.set({ title });
+    titles.addUnique(record);
+  },
+);
+
+type TitlesCell = Writable<
+  WriteAuthorizedBy<About, typeof rename>[] | Default<[]>
+>;
+
+interface Input {
+  titles?: TitlesCell;`,
+        )
+        .replace(
+          "({ about, roster, notes }) => ({",
+          "({ about, roster, notes, titles }) => ({\n  titles,\n  rename: rename({ titles }),",
+        );
+      expect(current).toContain("tags?: AuthoredByCurrentUser<string[]>;");
+      expect(current).toContain("rename: rename({ titles })");
+      await reconcileRelease(
+        "linked-added-slot-release",
+        LINKED_SOURCE,
+        current,
+        async (runtime, room) => {
+          await prime(runtime, room);
+          expect(storedClaimsAt(runtime, room, "notes/*/tags")).toMatchObject({
+            writePolicyAnyOf: expect.any(Array),
+          });
+        },
+        ({ outcome, room, runtime, recorded, currentIdentity }) => {
+          expect(recorded?.detail).toBeUndefined();
+          expect(outcome).toBe("updated");
+          expect(getPatternIdentityRef(room)?.identity).toBe(currentIdentity);
+          expect(storedClaimsAt(runtime, room, "notes/*/tags")).toEqual({
+            addIntegrity: [{
+              kind: "authored-by",
+              subject: { __ctCurrentPrincipal: true },
+            }],
+          });
+          expect(storedClaimsAt(runtime, room, "titles/*")).toMatchObject({
+            writeAuthorizedBy: expect.anything(),
+          });
+          expect(room.get().titles).toEqual([]);
+          expect(room.get().notes).toEqual([{ text: "hello", tags: ["new"] }]);
         },
       );
     });

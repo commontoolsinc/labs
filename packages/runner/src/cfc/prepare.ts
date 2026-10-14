@@ -13284,8 +13284,10 @@ export function* prepareBoundaryCommitSteps(
     // govern nothing in this document, so they are not compared.
     // Nor are the claims at a field the write adds beside those paths, which
     // the document held nothing at and the stored envelope declares nothing
-    // at or beneath: they govern a value the setup initializes, and the
-    // envelope that declares them is stored in place of the stored one.
+    // at or beneath: they govern a value the setup initializes. Where any are
+    // left out, the merged envelope, which declares them, is stored in place
+    // of the stored one; in a release it re-describes the claims beneath
+    // links too, as any release's merged envelope does.
     let keepsStoredSchema = false;
     // TODO(danfuzz): Leaving out the positions beneath links applies the
     // link-position rule of commonfabric/specs pull request 52, in its
