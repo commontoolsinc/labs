@@ -105,6 +105,7 @@ import {
   type ChatRoomKind,
   type ChatRoomLink,
   type ChatRoomPolicy,
+  epochNsec,
   isPrincipalDID,
   type MessageActOutcome,
   type ProfileCell,
@@ -749,6 +750,23 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
   },
 );
 
+/**
+ * A thread, as the main conversation shows it beside its root: how many
+ * replies it holds, and when the newest was sent. A deleted or obliterated
+ * reply stays in its thread, so it is counted, and its `sentAt` can be the
+ * newest.
+ */
+export interface ChatThreadSummary {
+  /** The thread's root, a message the main conversation shows. */
+  root: MessageCell;
+
+  /** How many messages the thread holds besides its root; never 0. */
+  replyCount: number;
+
+  /** The newest `sentAt` among those messages. */
+  latestReplyAt: FabricEpochNsec;
+}
+
 /** A room's messages: facts, the newest, and this session's windows. */
 export interface ChatMessageList {
   /** How many messages the room holds, obliterated tombstones included. */
@@ -768,6 +786,12 @@ export interface ChatMessageList {
     /** Whether the main conversation has older messages than these. */
     hasOlder: boolean;
   };
+
+  /**
+   * Every thread in the room that holds a reply, oldest root first. A message
+   * of the main conversation that roots none has no entry.
+   */
+  threads: ChatThreadSummary[];
 
   /** This session's open windows, by the `windowId` its client chose. */
   windows: PerSession<WindowsCell>;
@@ -1109,6 +1133,18 @@ export const FabriChatRoomCore = pattern<
     ) => entry.cell),
     hasOlder: mainEntries.length > FABRICHAT_POLICY.maxWindowCount,
   }));
+  // A thread's root is always in the main conversation, so its entries, in
+  // order, name every root.
+  const threads = computed((): ChatThreadSummary[] =>
+    mainEntries.flatMap((entry) => {
+      const place = places[entry.key];
+      return place?.latestReplyAt === undefined ? [] : [{
+        root: entry.cell,
+        replyCount: place.replies,
+        latestReplyAt: epochNsec(place.latestReplyAt),
+      }];
+    })
+  );
   const count = computed(() => entries.length);
   const sortedEntries = computed(() => [...entries].sort(compareEntries));
   const oldestAt = computed(() => sortedEntries[0]?.record.sentAt);
@@ -1275,6 +1311,7 @@ export const FabriChatRoomCore = pattern<
     oldestAt,
     newestAt,
     latest,
+    threads,
     windows,
     openWindow: commitWindow({ op: "open", messages, windows }),
     closeWindow: commitWindow({ op: "close", messages, windows }),
