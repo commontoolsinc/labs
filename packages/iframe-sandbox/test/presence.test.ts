@@ -424,6 +424,34 @@ describe("presence", () => {
       });
     });
 
+    it("keeps no listener that throws as it hears a joined room's snapshot, and leaves the room when the others leave", async () => {
+      const { room, calls } = fakeRoom([ada]);
+      const cursors = presenceResource({
+        join: () => Promise.resolve(room),
+        failure: () => ({ code: "unused", message: "unused" }),
+      });
+
+      await withGuest({ cursors }, async (client, fence) => {
+        const events = queue<PresenceRoomEvent>();
+        const presence = client.presence("cursors");
+        const leave = presence.join((event) => events.push(event));
+        await events.next();
+
+        let heard = 0;
+        expect(() =>
+          presence.join(() => {
+            heard++;
+            throw new Error("listener failed");
+          })
+        ).toThrow("listener failed");
+
+        leave();
+        await fence();
+        expect(calls).toEqual([["leave"]]);
+        expect(heard).toBe(1);
+      });
+    });
+
     it("ends the room for every listener with what the grant says of a rejected join", async () => {
       const causes: unknown[] = [];
       const cause = new Error("memory server does not support presence");

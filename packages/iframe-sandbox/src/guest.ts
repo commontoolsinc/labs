@@ -699,9 +699,9 @@ export class RemotePresence {
   /**
    * Joins the room and calls `listener` with each of its events, after the
    * event is applied to `.participants`. A listener added to a room already
-   * joined hears a `snapshot` of it at once. The room is left when the
-   * returned function has been called for every listener, and ends for all
-   * of them with a `failure`.
+   * joined hears a `snapshot` of it at once, and one that throws as it hears
+   * it is not added. The room is left when the returned function has been
+   * called for every listener, and ends for all of them with a `failure`.
    */
   join(listener: PresenceListener): () => void {
     const entry = { listener };
@@ -713,11 +713,18 @@ export class RemotePresence {
         (cause) => this.#fail(cause),
       );
     } else if (this.#participantId !== undefined) {
-      listener({
-        kind: "snapshot",
-        participantId: this.#participantId,
-        participants: [...this.#participants.values()],
-      });
+      try {
+        listener({
+          kind: "snapshot",
+          participantId: this.#participantId,
+          participants: [...this.#participants.values()],
+        });
+      } catch (error) {
+        // A listener that threw as it was added was never added: nothing
+        // calls it again, and its caller holds no function to remove it.
+        this.#listeners.delete(entry);
+        throw error;
+      }
     }
     return () => {
       if (!this.#listeners.delete(entry) || this.#listeners.size > 0) return;

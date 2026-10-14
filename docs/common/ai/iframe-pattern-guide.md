@@ -452,9 +452,10 @@ The rules that shape a guest:
   drawn, such as a background tab, publishes nothing until it is shown.
 - A facet is whatever another guest wrote. Check the type of every field
   before using it, as the example does, and ignore a facet that does not fit.
-- A record holds at most eight facets and 8 KiB, and a facet's name is
-  lowercase letters, digits, and hyphens. A publication outside those bounds
-  ends the room with a `presence-refused` failure.
+- A record holds at most eight facets and 8 KiB, and a facet's name starts
+  with a lowercase letter, continues with lowercase letters, digits, and
+  hyphens, and is at most 32 characters long. A publication outside those
+  bounds ends the room with a `presence-refused` failure.
 - A `failure` ends the room. `presence-unsupported` means the host has no
   relay, and joining again will not help. For `presence-refused` and
   `presence-disconnected`, call `join()` again when the user next acts, and

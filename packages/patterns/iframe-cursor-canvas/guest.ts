@@ -250,6 +250,12 @@ function renderShapes(): void {
   if (selectedId !== undefined && !present.has(selectedId)) {
     selectedId = undefined;
   }
+  // A shape removed while it is held took the element holding the pointer
+  // with it, so no pointer-up will end the drag.
+  if (drag !== undefined && !present.has(drag.id)) {
+    drag = undefined;
+    releaseDragFacet();
+  }
   for (const shape of shapes) {
     const element = shapeElement(shape.id);
     const position = shownPosition(shape);
