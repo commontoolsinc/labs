@@ -2387,6 +2387,252 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
+  // Stands up `BUMP_PATTERN` on a host whose delivery-failure clock the case
+  // drives, with a probe handler on the pattern's stream. For an event of kind
+  // `refused` the probe links the document named `names.source` into a list
+  // whose elements require `admin-approved`; for any other kind it writes
+  // nothing. While the serving runtime does not hold that document, the write
+  // floor refuses the link with a reason that is not a verdict
+  // (`verifyWriteFloor` in cfc/prepare.ts).
+  const standUpUntaggedRefusalProbe = async (
+    names: { arg: string; result: string; source: string },
+    clock: { now: number },
+  ) => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, names);
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost({
+      flushDeadlineMs: 5_000,
+      idleParkMs: 600_000,
+      deliveryFailureBudgetMs: 60_000,
+      deliveryFailureNow: () => clock.now,
+    });
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await awaitAdmitted(server, () => sidecarIdsIn(engine).length === 1);
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const sidecarValue = () =>
+      Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined;
+    const entryByKind = (kind: string) =>
+      (sidecarValue()?.entries ?? []).find((entry) =>
+        (entry.payload as { kind?: string } | undefined)?.kind === kind
+      );
+    await awaitAdmitted(
+      server,
+      () => entryByKind("warmup")?.consequenced === true,
+    );
+    await awaitActive();
+
+    const warmup = entryByKind("warmup")!;
+    const streamLink = {
+      space,
+      id: warmup.stream.id as never,
+      path: [...warmup.stream.path],
+      scope: (warmup.stream.scope ?? "space") as never,
+    };
+    const floorSchema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "string",
+            ifc: { requiredIntegrity: ["admin-approved"] },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    /** Every served run of the probe, by event kind, in the order they ran. */
+    const probeRuns = new ArrivalLog<string>();
+    /** The commit error of each run for `refused`, `undefined` once one lands. */
+    const refusedOutcomes = new ArrivalLog<
+      { name?: string; message?: string } | undefined
+    >();
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      (tx, event) => {
+        const kind = (event as { kind?: string }).kind ?? "unknown";
+        probeRuns.record(kind);
+        if (kind !== "refused") return;
+        tx.addCommitCallback((_tx, outcome) =>
+          refusedOutcomes.record(
+            outcome.error as { name?: string; message?: string } | undefined,
+          )
+        );
+        const source = servingRuntime!.getCell(
+          space,
+          names.source,
+          undefined,
+          tx,
+        );
+        servingRuntime!.getCell(
+          space,
+          `${names.source}-list`,
+          floorSchema,
+          tx,
+        ).set({ items: [source as unknown as string] });
+      },
+      streamLink,
+    );
+    const send = async (kind: string) => {
+      result.key("bump").send({ kind });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+    };
+    // A failed delivery is checkpointed on its entry, and the first failure
+    // earns one immediate clean retry; `failures` counts both.
+    const awaitFailures = (failures: number) =>
+      awaitAdmitted(
+        server,
+        () =>
+          (entryByKind("refused")?.deliveryDeferral?.failureCount ?? 0) >=
+            failures,
+      );
+    return {
+      sidecarValue,
+      entryByKind,
+      probeRuns,
+      refusedOutcomes,
+      send,
+      awaitFailures,
+      [Symbol.dispose]: () => {
+        cancelProbe();
+        cancelDemand();
+      },
+    };
+  };
+
+  it("defers a served event whose commit a CFC refusal that is not a verdict turns away, holds the events behind it, and delivers it once the document it lacked arrives", async () => {
+    // The linked document arrives with the atom the list requires, so a fresh
+    // attempt lands the write: the reason the refusal defers the entry rather
+    // than sealing it as an error.
+
+    const clock = { now: 10_000 };
+    using probe = await standUpUntaggedRefusalProbe({
+      arg: "untagged-defer-arg",
+      result: "untagged-defer-result",
+      source: "untagged-defer-source",
+    }, clock);
+
+    await probe.send("refused");
+    await probe.awaitFailures(2);
+    const deferred = probe.entryByKind("refused")!;
+    expect(deferred.consequenced).not.toBe(true);
+    expect(deferred.error).toBeUndefined();
+    expect(deferred.status).toBeUndefined();
+    expect(deferred.deliveryDeferral).toMatchObject({
+      phase: "commit-preparation",
+      failureClass: "unknown",
+      state: "failed",
+    });
+    const refusal = probe.refusedOutcomes.entries[0];
+    expect(refusal?.name).toBe("StorageTransactionAborted");
+    expect(refusal?.message).toContain("write floor failed at /items/0");
+
+    // A later append wakes one more attempt, which the floor refuses again,
+    // and the later event waits behind the failed head.
+    await probe.send("follower-1");
+    await probe.awaitFailures(3);
+    expect(probe.entryByKind("follower-1")?.consequenced).not.toBe(true);
+
+    // The document arrives with the atom, and the serving runtime holds it.
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.getCell(space, "untagged-defer-source", {
+        type: "string",
+        ifc: { addIntegrity: ["admin-approved"] },
+      }, tx).set("endorsed");
+      expect((await tx.commit().settled).error).toBeUndefined();
+    }
+    await clientRuntime.storageManager.synced();
+    await servingRuntime!.getCell(space, "untagged-defer-source").sync();
+
+    await probe.send("follower-2");
+    await awaitAdmitted(
+      server,
+      () => probe.entryByKind("follower-2")?.consequenced === true,
+    );
+    const delivered = probe.entryByKind("refused")!;
+    expect(delivered.consequenced).toBe(true);
+    expect(delivered.error).toBeUndefined();
+    expect(delivered.status).toBeUndefined();
+    expect(delivered.deliveryDeferral).toBeUndefined();
+    expect(probe.refusedOutcomes.entries.at(-1)).toBeUndefined();
+    expect(
+      probe.refusedOutcomes.entries.slice(0, -1).map((error) => error?.name),
+    ).toEqual(
+      probe.refusedOutcomes.entries.slice(0, -1).map(() =>
+        "StorageTransactionAborted"
+      ),
+    );
+    // Arrival order: neither later event ran before the head landed.
+    const order = probe.probeRuns.entries;
+    expect(order.indexOf("follower-1")).toBeGreaterThan(
+      order.lastIndexOf("refused"),
+    );
+    expect(order.indexOf("follower-2")).toBeGreaterThan(
+      order.indexOf("follower-1"),
+    );
+    expect(probe.entryByKind("follower-1")?.consequenced).toBe(true);
+    expect(probe.sidecarValue()?.eventWatermark).toBe(
+      probe.entryByKind("follower-2")!.seq,
+    );
+  });
+
+  it("covers a served event that a CFC refusal that is not a verdict keeps turning away with one needs-attention notice once its failed-state budget is spent, and delivers the events behind it", async () => {
+    const clock = { now: 10_000 };
+    using probe = await standUpUntaggedRefusalProbe({
+      arg: "untagged-attention-arg",
+      result: "untagged-attention-result",
+      source: "untagged-attention-source",
+    }, clock);
+
+    await probe.send("refused");
+    await probe.awaitFailures(2);
+
+    // Spend the failed-state budget, then let a later append wake the drain.
+    clock.now += 60_000;
+    await probe.send("follower");
+    await awaitAdmitted(server, () => {
+      const entry = probe.entryByKind("refused");
+      return entry?.consequenced === true &&
+        entry.status === "needs-attention" &&
+        entry.seq !== undefined &&
+        (probe.sidecarValue()?.eventWatermark ?? 0) >= entry.seq;
+    });
+    const covered = probe.entryByKind("refused")!;
+    expect(covered.error).toBeUndefined();
+    expect(covered.deliveryDeferral).toBeUndefined();
+    expect(covered.attention).toMatchObject({
+      phase: "commit-preparation",
+      failureClass: "unknown",
+      code: "delivery-failure-budget-exhausted",
+      recovery: "explicit-retry",
+    });
+    const refusedRuns = probe.probeRuns.count((kind) => kind === "refused");
+    await probe.probeRuns.matching((kind) => kind === "follower");
+    await awaitAdmitted(
+      server,
+      () => probe.entryByKind("follower")?.consequenced === true,
+    );
+    expect(probe.probeRuns.count((kind) => kind === "refused")).toBe(
+      refusedRuns,
+    );
+    expect(
+      probe.refusedOutcomes.entries.map((error) => error?.name),
+    ).toEqual(
+      probe.refusedOutcomes.entries.map(() => "StorageTransactionAborted"),
+    );
+    expect(host!.stats().events.needsAttention.byPhase["commit-preparation"])
+      .toBe(1);
+  });
+
   it("a served RetryImmediately retry remains settlement and never creates a delivery checkpoint", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);

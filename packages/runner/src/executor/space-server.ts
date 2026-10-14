@@ -4194,6 +4194,9 @@ export class SpaceServer implements TransactionSealDestination {
         const durableCheckpoint = this.#deliveryCheckpoints.get(
           entry.eventId,
         ) ?? entry.deliveryDeferral;
+        // Whether this entry is a head retried after a commit-preparation
+        // failure, which is the last entry its pass queues (below).
+        let retriedAfterCommitPreparation = false;
         if (
           this.#deliveryCheckpointWriteBlocked.has(entry.eventId) ||
           this.#attentionSealWriteBlocked.has(entry.eventId)
@@ -4292,6 +4295,8 @@ export class SpaceServer implements TransactionSealDestination {
           } else if (cleanRetry) {
             this.#deliveryCleanAttempts.add(entry.eventId);
           }
+          retriedAfterCommitPreparation =
+            checkpoint.phase === "commit-preparation";
         }
         // The in-flight guard (stage C tuning; #5969's (β), drain-own
         // copies only): an entry whose earlier drain copy is still
@@ -4551,6 +4556,13 @@ export class SpaceServer implements TransactionSealDestination {
           );
           queued += 1;
           this.#preQueueDeferralStreaks.delete(`queue\0${entry.eventId}`);
+          // A commit-preparation failure is known only once the run has
+          // committed or failed, and no sweep withdraws an event queued
+          // behind the head before then, so a retried head runs alone in its
+          // pass. The pass its outcome arms queues the events behind it, or
+          // holds them behind a head that failed again (events.md §2's
+          // arrival order).
+          if (retriedAfterCommitPreparation) break;
         } catch (drainError) {
           // Nothing was queued: release the guard (a throw between the
           // add and the queue must not strand the entry until park).
