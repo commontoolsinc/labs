@@ -1910,16 +1910,20 @@ only if it makes it.
 **A cell write keeps shared references within that write, and no further.**
 The runtime's write path (`Cell.set()` and the collection operations) stores a
 plain JavaScript object or array that appears at two positions of one written
-value once: each later occurrence is stored as a link to the first (a repeated
-array element is moved into a document of its own, which every occurrence
-links to). The link is stored, so the sharing outlives the write and holds
-across sessions:
+value once: each later occurrence is stored as a link to the first. A plain
+object that occurs as an array element is the exception: it is stored in a
+document of its own, which every occurrence links to, including one written
+at an object key earlier in the write. The link is stored, so the sharing
+outlives the write and holds across sessions:
 
 - A write inside the shared value, such as a push or a `set()` at a path below
   either position, is read at both positions.
 - Replacing a position whole with `set()` writes at that position. A position
-  that holds the link has the link replaced, and stops sharing. A position the
-  link names takes the new value, and every link to it reads that value.
+  that holds a link has the link replaced, and stops sharing. The first
+  occurrence, where the others link to it, takes the new value, and every link
+  to it reads that value. Where every occurrence links to the object's own
+  document, no position is the one named, so replacing any of them ends only
+  that position's sharing.
 
 What is shared is the stored value, not the JavaScript object written: the
 object itself is left as it was. The sharing reaches only as far as one write.
