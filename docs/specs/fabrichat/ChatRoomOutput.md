@@ -38,6 +38,10 @@ interface ChatRoomOutput {
   /** The room's messages: facts, the newest, and this session's windows. */
   messages: ChatMessageList;
 
+  /** `messages.openWindow` and `messages.closeWindow`, at the top level. */
+  openWindow: ChatMessageList["openWindow"];
+  closeWindow: ChatMessageList["closeWindow"];
+
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
 
@@ -239,6 +243,12 @@ space.
   reply time, which every member can read, a READ member included. It also
   holds the reading session's own windows onto the messages, and the streams
   that open and close them.
+- **`openWindow`** and **`closeWindow`** are `messages.openWindow` and
+  `messages.closeWindow` themselves, the same streams offered again at the
+  room's top level, for a client that sends only to a view's own streams. A
+  window either one opens is in `messages.windows`, so such a client reads a
+  thread, or pages the main conversation, through the room alone (see
+  [`ChatMessageList`](ChatMessageList.md#windows)).
 - **`canSend`** says whether the reader can send, edit, delete, and react right
   now: their access is WRITE or OWNER, and their profile resolves. It lets a
   client tell a READ member why their gestures would be refused before they
@@ -770,7 +780,8 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
   adapter's rendering embeds it, so a composer is always the room's own surface.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
   that draw natively. It includes `messages`, through whose link a client
-  reaches its own windows and their streams, `canSend`, `messageRequests`,
+  reaches its own windows and their streams, `openWindow` and `closeWindow`,
+  the same streams at the group's top level, `canSend`, `messageRequests`,
   `addMember` with `canAdd` and `addRequests`, and `setTitle` with
   `titleRequests`. A client uses it to show a room outside any container. Inside
   a container, it reads the placement's `chat` group instead
