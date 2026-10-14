@@ -3,6 +3,7 @@ import {
   namesOnlyPolicyBindings,
   readBindingAnnotation,
   readDeclaringSymbol,
+  spellSameValue,
 } from "@commonfabric/schema-generator/value-annotation";
 import type {
   CapabilityParamSummary,
@@ -22,6 +23,7 @@ import {
   unwrapOpaqueLikeType,
 } from "../../ast/mod.ts";
 import { analyzeFunctionCapabilities } from "../../policy/capability-analysis.ts";
+import { unwrapExpression } from "../../utils/expression.ts";
 import { registerLiftAppliedCallType } from "../../ast/type-inference.ts";
 import { applyShrinkAndWrap } from "../../transformers/type-shrinking.ts";
 import { getCellKind } from "../../transformers/cell-type.ts";
@@ -576,17 +578,23 @@ export function transformLiftAppliedCall(
         );
       if (spelledBy && namesOnlyPolicyBindings(spelledBy, checker)) {
         state.recordSchemaHint(resultTypeNode, { spelledBy });
-      } else if (returned && ts.isArrayLiteralExpression(returned)) {
-        // A callback returning an array literal of one binding's value is
-        // read at that binding's annotation in the print's element, by the
-        // same rule.
+      } else if (
+        returned && ts.isArrayLiteralExpression(unwrapExpression(returned))
+      ) {
+        // A callback returning an array literal of bindings' values declared
+        // with one annotation is read at that annotation in the print's
+        // element, by the same rule.
         const elementNode = printedArrayElementNode(resultTypeNode);
         const elementType = checker.getIndexTypeOfType(
           resultType,
           ts.IndexKind.Number,
         );
         const annotation = elementNode && elementType &&
-          returnedElementAnnotation(returned, elementType, checker);
+          returnedElementAnnotation(
+            unwrapExpression(returned) as ts.ArrayLiteralExpression,
+            elementType,
+            checker,
+          );
         if (annotation && namesOnlyPolicyBindings(annotation, checker)) {
           state.recordSchemaHint(elementNode, { spelledBy: annotation });
         }
@@ -713,28 +721,20 @@ function returnedValue(
 }
 
 /**
- * The node a print of an array type spells its element with: the element of
- * `T[]`, or the type argument of `Array<T>` and `ReadonlyArray<T>`.
+ * The node a print of an array type spells its element with, the element of
+ * `T[]`, which is how the printer writes an array.
  */
 export function printedArrayElementNode(
   printed: ts.TypeNode,
 ): ts.TypeNode | undefined {
-  if (ts.isArrayTypeNode(printed)) return printed.elementType;
-  if (
-    ts.isTypeReferenceNode(printed) && ts.isIdentifier(printed.typeName) &&
-    (printed.typeName.text === "Array" ||
-      printed.typeName.text === "ReadonlyArray")
-  ) {
-    return printed.typeArguments?.[0];
-  }
-  return undefined;
+  return ts.isArrayTypeNode(printed) ? printed.elementType : undefined;
 }
 
 /**
  * The annotation every element of `literal` is read at, where each element
- * reads a binding declared with the same annotation and that annotation
- * denotes `elementType`; `undefined` for a spread, a hole, an element that
- * reads no binding, or elements declared apart.
+ * reads a binding declared with an annotation spelling one value
+ * (`spellSameValue()`) that denotes `elementType`; `undefined` for a spread,
+ * a hole, an element that reads no binding, or elements declared apart.
  */
 function returnedElementAnnotation(
   literal: ts.ArrayLiteralExpression,
@@ -751,8 +751,10 @@ function returnedElementAnnotation(
       elementType,
       checker,
     );
-    if (!read || (annotation && read !== annotation)) return undefined;
-    annotation = read;
+    if (!read || (annotation && !spellSameValue(read, annotation, checker))) {
+      return undefined;
+    }
+    annotation ??= read;
   }
   return annotation;
 }

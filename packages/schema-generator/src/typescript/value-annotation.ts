@@ -110,6 +110,81 @@ export function namesOnlyPolicyBindings(
 }
 
 /**
+ * Whether `a` and `b`, two annotations, spell one value: the same node, or
+ * two nodes that denote one type and name the same value bindings in the
+ * same order, as two members each declared `Secret` do. The type alone does
+ * not settle it: `PolicyOf<typeof readers>` and `PolicyOf<typeof writers>`
+ * denote one type where the two rules share one. Bindings are read as
+ * `namesValueBinding()` reads them, through aliases declared in authored
+ * modules; a `typeof` whose binding does not resolve, as one in a node built
+ * without positions does not, leaves the two incomparable, so `false`.
+ * `typeOf` resolves a node's type, for a caller holding nodes the checker
+ * does not resolve on its own.
+ */
+export function spellSameValue(
+  a: ts.TypeNode,
+  b: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeOf: (node: ts.TypeNode) => ts.Type = (node) =>
+    checker.getTypeFromTypeNode(node),
+): boolean {
+  if (a === b) return true;
+  if (!denotesSameType(typeOf(a), typeOf(b))) return false;
+  const bound = namedBindings(a, checker);
+  const other = namedBindings(b, checker);
+  return bound !== undefined && other !== undefined &&
+    bound.length === other.length &&
+    bound.every((symbol, index) => symbol === other[index]);
+}
+
+/**
+ * The value bindings `node` names, in order, read as `namesValueBinding()`
+ * reads them, or `undefined` where one does not resolve.
+ */
+function namedBindings(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  seen = new Set<ts.Node>(),
+): ts.Symbol[] | undefined {
+  if (ts.isTypeQueryNode(node)) {
+    const name = ts.isIdentifier(node.exprName)
+      ? node.exprName
+      : node.exprName.right;
+    const symbol = checker.getSymbolAtLocation(name);
+    return symbol ? [resolveAliasedSymbol(symbol, checker)] : undefined;
+  }
+  const found: ts.Symbol[] = [];
+  if (ts.isTypeReferenceNode(node)) {
+    const name = ts.isIdentifier(node.typeName)
+      ? node.typeName
+      : node.typeName.right;
+    let symbol = checker.getSymbolAtLocation(name);
+    if (symbol && symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    for (const declaration of symbol?.declarations ?? []) {
+      if (
+        !(ts.isTypeAliasDeclaration(declaration) ||
+          ts.isInterfaceDeclaration(declaration)) ||
+        declaration.getSourceFile().isDeclarationFile ||
+        seen.has(declaration)
+      ) continue;
+      seen.add(declaration);
+      const within = namedBindings(declaration, checker, seen);
+      if (!within) return undefined;
+      found.push(...within);
+    }
+  }
+  let unresolved = false;
+  ts.forEachChild(node, (child) => {
+    const within = namedBindings(child, checker, seen);
+    if (!within) unresolved = true;
+    else found.push(...within);
+  });
+  return unresolved ? undefined : found;
+}
+
+/**
  * The symbol of the value `identifier` reads. Written as a shorthand property
  * (`{ x }`), the identifier's own symbol is the property of the object literal
  * it writes, which declares nothing about the value; the value's symbol is the

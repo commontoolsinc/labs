@@ -1,6 +1,9 @@
 import { isInternalMemberName } from "@commonfabric/schema-generator/property-name";
 import { unwrapTypeParentheses } from "@commonfabric/schema-generator/type-node";
-import { namesValueBinding } from "@commonfabric/schema-generator/value-annotation";
+import {
+  namesValueBinding,
+  spellSameValue,
+} from "@commonfabric/schema-generator/value-annotation";
 import {
   carriesWriterPolicy,
   holdsWriterPolicy,
@@ -2940,7 +2943,8 @@ function getExplicitValueTypeNode(
 
 /**
  * The array of its elements' authored type, for an array literal whose every
- * element has the same one and that spreads nothing. The array's own type is
+ * element has one spelling one value (`spellSameValue()`) and that spreads
+ * nothing; the first element's node stands for them. The array's own type is
  * registered by the caller, so the node reads the array at its type and each
  * element at the annotation its binding was declared with.
  */
@@ -2963,10 +2967,20 @@ function explicitArrayLiteralTypeNode(
       typeRegistry,
       state,
     );
-    if (!explicit || (element && explicit.typeNode !== element)) {
+    if (
+      !explicit ||
+      (element &&
+        !spellSameValue(
+          explicit.typeNode,
+          element,
+          checker,
+          (node) =>
+            getTypeFromTypeNodeWithFallback(node, checker, typeRegistry),
+        ))
+    ) {
       return undefined;
     }
-    element = explicit.typeNode;
+    element ??= explicit.typeNode;
   }
   return element && { typeNode: ts.factory.createArrayTypeNode(element) };
 }
