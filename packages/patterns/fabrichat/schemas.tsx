@@ -458,8 +458,9 @@ export interface ChatIndexEntry {
   since: FabricEpochNsec;
 
   /**
-   * The opaque revision of the listed membership or discovery source, which
-   * a request to forget the room names; absent from entries not yet listed.
+   * The opaque revision supplied by `rooms` for its membership or discovery
+   * source. A request to forget uses that view's revision; direct mappings
+   * and act outcomes may omit it.
    */
   revision?: string;
 }

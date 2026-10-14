@@ -32,7 +32,7 @@
             "description": "The room's kind, as its `about.kind` says."
           },
           "revision": {
-            "description": "The opaque revision of the listed membership or discovery source, which\na request to forget the room names; absent from entries not yet listed.",
+            "description": "The opaque revision supplied by `rooms` for its membership or discovery\nsource. A request to forget uses that view's revision; direct mappings\nand act outcomes may omit it.",
             "type": "string"
           },
           "room": {
@@ -418,7 +418,7 @@
             "description": "The room's kind, as its `about.kind` says."
           },
           "revision": {
-            "description": "The opaque revision of the listed membership or discovery source, which\na request to forget the room names; absent from entries not yet listed.",
+            "description": "The opaque revision supplied by `rooms` for its membership or discovery\nsource. A request to forget uses that view's revision; direct mappings\nand act outcomes may omit it.",
             "type": "string"
           },
           "room": {

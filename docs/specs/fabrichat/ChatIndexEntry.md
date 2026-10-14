@@ -52,8 +52,10 @@ interface ChatIndexEntry {
   from the corresponding handler's clock, at whatever resolution the system
   provides (see the [timing side-channel
   mitigations](../sandboxing/TIMING_SIDE_CHANNELS.md)).
-- **`revision`** is an opaque token for the room's individual membership or
-  its discovery source, which a request to [`forget`](ChatManagerOutput.md) the room
-  names, so that a choice made since by another client is not overridden.
+- **`revision`** is the opaque token supplied by the manager's `rooms` view
+  for the room's individual membership or discovery source. A request to
+  [`forget`](ChatManagerOutput.md) uses that listed entry's revision, so that a
+  choice made since by another client is not overridden. Direct mappings and
+  act outcomes may omit the revision even when the room is listed.
 
 An entry is private to its user, like everything in the home space.
