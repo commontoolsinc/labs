@@ -232,17 +232,19 @@ const isCellCapabilityKind = (kind: WrapperKind): boolean =>
   CELL_CAPABILITY_KIND_MAP[kind];
 
 /**
- * The scope wrapper `typeNode` names by its spelling, bare or qualified, with
- * the reference that names it.
+ * The scope wrapper `typeNode` names by its spelling, bare or qualified, read
+ * through parentheses as a wrapper is (`resolveWrapperNode()`), with the
+ * reference that names it.
  */
 export const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
 ): ResolvedScopeWrapper | undefined => {
-  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+  const node = typeNode && unwrapTypeParentheses(typeNode);
+  if (!node || !ts.isTypeReferenceNode(node)) {
     return undefined;
   }
-  const scope = scopeForWrapperName(entityNameRight(typeNode.typeName).text);
-  return scope === undefined ? undefined : { scope, node: typeNode };
+  const scope = scopeForWrapperName(entityNameRight(node.typeName).text);
+  return scope === undefined ? undefined : { scope, node };
 };
 
 const applyScopeToAsCellEntry = (

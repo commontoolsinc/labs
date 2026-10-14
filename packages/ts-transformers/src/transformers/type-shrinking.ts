@@ -2848,9 +2848,12 @@ export function validateShrinkCoverage(
 //
 
 /** A serialized path key with numeric segments normalized to `*`, so an
- * element access observed at one index matches the element position. */
+ * element access observed at one index matches the element position. Each
+ * segment opens with a separator, so the root, `[]`, keys apart from a
+ * property the empty string names, `[""]`. */
 function contractPathKey(segments: readonly string[]): string {
-  return contractPathSegments(segments).join("\x00");
+  return contractPathSegments(segments).map((segment) => "\x00" + segment)
+    .join("");
 }
 
 /** `segments` with each array index read as any index, `*`. */
@@ -2858,12 +2861,15 @@ function contractPathSegments(segments: readonly string[]): string[] {
   return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment);
 }
 
+/** Adds to `target` the key of every prefix of each of `paths`, the root
+ * among them, since a use at a path reaches every position above it, the
+ * event itself too, which a cell may be. */
 function addPrefixKeys(
   target: Set<string>,
   paths: readonly (readonly string[])[] | undefined,
 ): void {
   for (const path of paths ?? []) {
-    for (let i = 1; i <= path.length; i++) {
+    for (let i = 0; i <= path.length; i++) {
       target.add(contractPathKey(path.slice(0, i)));
     }
   }
@@ -2879,7 +2885,8 @@ function addPrefixKeys(
  */
 const MAX_OVERLAY_NESTING = 8;
 
-/** Whether any data position in `type`'s subtree may be cell-like — the test
+/** Whether any data position in `type`'s subtree may be cell-like, through
+ * its properties, its index signatures, and an array's element — the test
  * for whether a named reference must be expanded to overlay capabilities
  * inside it. Cycles end the search. A recursion that instantiates its
  * declaration without end is cut where `cutsExpansion()` finds it, read
@@ -2917,13 +2924,19 @@ function typeSubtreeContainsCellLike(
       const element = getArrayElementType(type, checker);
       return !!element && within(element);
     }
+    // A property a mapped type makes, as `Record<"a", Cell<T>>` does, has no
+    // declaration, and is read by its type alone.
     return checker.getPropertiesOfType(type).some((property) => {
       if ((property.flags & ts.SymbolFlags.Method) !== 0) return false;
       const declaration = property.valueDeclaration ??
         property.declarations?.[0];
-      return !!declaration &&
-        within(checker.getTypeOfSymbolAtLocation(property, declaration));
-    });
+      return within(
+        declaration
+          ? checker.getTypeOfSymbolAtLocation(property, declaration)
+          : checker.getTypeOfSymbol(property),
+      );
+    }) ||
+      checker.getIndexInfosOfType(type).some((index) => within(index.type));
   } finally {
     path.pop();
   }
@@ -2950,6 +2963,14 @@ interface ContractObservation {
    * one. Its use of a prefix itself is: a `.get()` reads it, and a write
    * through such a key writes it. */
   readonly reachedBelow: readonly (readonly string[])[];
+
+  /** Every path a use reaches, as the summary observed it: no prefix taken,
+   * and a numeric segment as the index it names. A path whose whole value left
+   * the function is one, since whatever received it may read anything
+   * beneath; so is a wildcard's prefix, below which the body reaches members
+   * the summary does not name, and the root where the body passes the value
+   * on whole. */
+  readonly used: readonly (readonly string[])[];
 }
 
 function contractObservationFrom(
@@ -2977,6 +2998,19 @@ function contractObservationFrom(
   const reachedBelow = (summary.wildcardPaths ?? []).map(
     contractPathSegments,
   );
+  const used = [
+    summary.writePaths,
+    summary.readPaths,
+    summary.fullShapePaths,
+    summary.opaquePaths,
+    summary.comparablePaths,
+    summary.comparableCellPaths,
+    summary.identityPaths,
+    summary.identityCellPaths,
+    summary.escapedPaths,
+    summary.wildcardPaths,
+    summary.passthrough ? [[]] : [],
+  ].flatMap((paths) => paths ?? []);
   return {
     write,
     read,
@@ -2984,6 +3018,7 @@ function contractObservationFrom(
     exactComparableCell,
     escaped,
     reachedBelow,
+    used,
   };
 }
 
@@ -3005,6 +3040,18 @@ function usedUntracked(
     observation.reachedBelow.some((prefix) =>
       prefix.length < segments.length && startsWith(prefix)
     );
+}
+
+/**
+ * Whether `a` and `b` lie on one path from the root, one a prefix of the
+ * other, a numeric segment matching any index as `contractPathKey()` reads it.
+ */
+function onOnePath(a: readonly string[], b: readonly string[]): boolean {
+  const shared = Math.min(a.length, b.length);
+  for (let i = 0; i < shared; i++) {
+    if (contractPathKey([a[i]!]) !== contractPathKey([b[i]!])) return false;
+  }
+  return true;
 }
 
 function contractCapabilityAt(
@@ -3040,8 +3087,9 @@ function contractCapabilityAt(
  * A named reference whose subtree holds no cell-like position passes through
  * untouched, keeping its `$defs` identity and its prose. One expands only
  * when a capability inside it must change, and a self-referential type ends
- * that expansion at the cycle with the node kept as authored — the accepted
- * residual, since a literal cannot spell its own recursion. A recursion that
+ * that expansion at the cycle, since a literal cannot spell its own
+ * recursion: the node past the cycle is kept as authored where a use reaches
+ * below it, and read with its cells opaque where none does. A recursion that
  * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
  * does, never meets itself. Its expansion is cut where `cutsExpansion()`
  * finds it (`MAX_OVERLAY_NESTING`), unless a use the body makes reaches below,
@@ -3049,14 +3097,23 @@ function contractCapabilityAt(
  * (`SchemaHint.cellsOpaque`): no use reaches those cells, so opaque is the
  * capability each would earn.
  *
- * A reference expands as the type it denotes, which for a generic declaration
- * is the declaration instantiated with the reference's arguments, built one
- * level deep (`unfoldReferencedType()`): an object as its properties, each
+ * A reference, and a node of a kind the walk does not read inside (a mapped
+ * type, a conditional, a tuple), expands as the type it denotes, which for a
+ * generic declaration is the declaration instantiated with the reference's
+ * arguments, built one level deep (`unfoldDenotedType()`): an object as its
+ * properties and index signatures, each
  * written as its declaration's annotation where that still denotes the
  * property's type and printed where an argument replaced what the annotation
  * names; a union, an array, or a cell as its printed parts. A tuple, and a
- * type that carries a scope, are kept as written, as a tuple written out is,
- * and as only a scope wrapper names its scope. A printed node is overlaid on
+ * type that carries a scope, are not unfolded, as only a scope wrapper names
+ * its scope; nor is a node whose syntax names a value binding, as a writer's
+ * `typeof` does, unless each property is written as its own annotation, as
+ * only that syntax names the writer. Such a node is kept as written where a
+ * use the body makes reaches inside it, and otherwise read as written with
+ * every cell in it opaque (`keptAsWritten()`), as is a cell an index signature
+ * types where no use
+ * reaches a key the literal does not declare: a cell kept at the capability
+ * its author wrote would confer authority no use exercises. A printed node is overlaid on
  * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
  * reference takes, cut where a recursion is, and only once a position the
  * body compares by identity alone has been wrapped `comparable`, as a
@@ -3089,6 +3146,29 @@ export function overlayContractCapabilities(
   };
 
   /**
+   * Whether a use the body makes reaches `path`: a use at it or below it, or
+   * one above it that reaches the whole value there, as a key the body
+   * computes, a wildcard, or a value it passes on whole does.
+   */
+  const reachedByUse = (path: readonly string[]): boolean =>
+    observation.used.some((used) => onOnePath(used, path));
+
+  /**
+   * Whether a use the body makes reaches a position below `path` that only an
+   * index signature types: one under a key that `declared`, the property
+   * names the object at `path` declares, does not hold, or one above or at
+   * `path` that reaches the whole value there.
+   */
+  const usedUndeclaredWithin = (
+    path: readonly string[],
+    declared: ReadonlySet<string>,
+  ): boolean =>
+    observation.used.some((used) =>
+      onOnePath(used, path) &&
+      (used.length <= path.length || !declared.has(used[path.length]!))
+    );
+
+  /**
    * `type`, the remainder of a recursion cut at `current`, as a node read at
    * its instantiation with every cell in it opaque; `current`, as written,
    * where there is no state to record that reading in.
@@ -3106,6 +3186,42 @@ export function overlayContractCapabilities(
     state.recordSchemaHint(printed, { cellsOpaque: true });
     return printed;
   };
+
+  /**
+   * `current`, a node standing for `type`, read as written with every cell in
+   * it opaque: a node of its own around it carries that reading, since
+   * `current` may be read elsewhere too, and its syntax, which alone names a
+   * writer a `typeof` query spells, stays; `current` itself where there is
+   * no state to record that reading in.
+   */
+  const opaqueAsWritten = (
+    current: ts.TypeNode,
+    type: ts.Type,
+  ): ts.TypeNode => {
+    if (!state) return current;
+    const reading = factory.createParenthesizedType(current);
+    typeRegistry?.set(reading, type);
+    state.recordSchemaHint(reading, { cellsOpaque: true });
+    return reading;
+  };
+
+  /**
+   * `current`, a node standing for `type` that the overlay keeps as written
+   * because it cannot read inside it, as the overlay serves it: read with
+   * every cell in it opaque (`opaqueAsWritten()`) where it holds a cell-like
+   * position and no use the body makes reaches it (`reachedByUse()`), since
+   * opaque is the capability each such cell would earn; `current`, as
+   * written, otherwise.
+   */
+  const keptAsWritten = (
+    current: ts.TypeNode,
+    type: ts.Type | undefined,
+    path: readonly string[],
+  ): ts.TypeNode =>
+    type && !reachedByUse(path) &&
+      typeSubtreeContainsCellLike(type, checker, new Set(), [], budget)
+      ? opaqueAsWritten(current, type)
+      : current;
 
   const walk = (
     current: ts.TypeNode,
@@ -3181,7 +3297,43 @@ export function overlayContractCapabilities(
 
     if (ts.isTypeLiteralNode(current)) {
       let changed = false;
+      const declared = new Set(
+        current.members.flatMap((member) => {
+          const name = member.name && getPropertyNameText(member.name);
+          return name === undefined ? [] : [name];
+        }),
+      );
       const members = current.members.map((member) => {
+        if (ts.isIndexSignatureDeclaration(member)) {
+          // A cell an index signature types reaches the body under a key the
+          // literal does not declare; where no use does, it is opaque.
+          if (usedUndeclaredWithin(path, declared)) return member;
+          const valueType = getTypeFromTypeNodeWithFallback(
+            member.type,
+            checker,
+            typeRegistry,
+          );
+          if (
+            !typeSubtreeContainsCellLike(
+              valueType,
+              checker,
+              new Set(),
+              [],
+              budget,
+            )
+          ) {
+            return member;
+          }
+          const opaque = opaqueAsWritten(member.type, valueType);
+          if (opaque === member.type) return member;
+          changed = true;
+          return factory.updateIndexSignature(
+            member,
+            member.modifiers,
+            member.parameters,
+            opaque,
+          );
+        }
         if (!ts.isPropertySignature(member) || !member.type) return member;
         const name = getPropertyNameText(member.name);
         if (name === undefined) return member;
@@ -3265,31 +3417,59 @@ export function overlayContractCapabilities(
       const resolvedType = currentType ??
         getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
       if (!resolvedType) return current;
+      // A reference whose syntax names a value binding unfolds only as far
+      // as its members' own annotations write it, as below.
+      const writtenOnly = namesValueBinding(current, checker);
       return expand(
         current,
         resolvedType,
         path,
         () =>
-          unfoldReferencedType(
+          unfoldDenotedType(
             resolvedType,
             checker,
             sourceFile,
             factory,
             typeRegistry,
             state,
+            writtenOnly,
           ),
       );
     }
 
-    return current;
+    // A node of a kind the walk does not read inside, as a mapped type, a
+    // conditional, or a tuple, is read by the type it denotes. Where its
+    // syntax names a value binding, as a writer's `typeof` does, it unfolds
+    // only as far as its members' own annotations write it: a part printed
+    // from its type would drop the binding.
+    const denoted = currentType ??
+      getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
+    const writtenOnly = namesValueBinding(current, checker);
+    return expand(
+      current,
+      denoted,
+      path,
+      () =>
+        unfoldDenotedType(
+          denoted,
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          state,
+          writtenOnly,
+        ),
+    );
   };
 
   /**
    * `current`, a node standing for `type`, overlaid on `unfold()`, the node
    * `type` unfolds to one level deep, which a reference and a print both
-   * reach: `current` itself where `type` is already being expanded, where it
-   * holds no cell-like position, or where nothing in the unfolding changes;
-   * the remainder read with its cells opaque where the expansion is cut.
+   * reach: `current` itself where `type` holds no cell-like position, or where
+   * nothing in the unfolding changes; the remainder read with its cells opaque
+   * where the expansion is cut; and, where `type` is already being expanded or
+   * does not unfold, `current` as the overlay keeps it as written
+   * (`keptAsWritten()`).
    */
   const expand = (
     current: ts.TypeNode,
@@ -3297,7 +3477,7 @@ export function overlayContractCapabilities(
     path: readonly string[],
     unfold: () => ts.TypeNode | undefined,
   ): ts.TypeNode => {
-    if (visiting.has(type)) return current;
+    if (visiting.has(type)) return keptAsWritten(current, type, path);
     // Every cell a use the summary does not record may reach keeps the
     // capability written for it, so the node serves as written.
     if (usedUntracked(observation, path)) return current;
@@ -3311,7 +3491,7 @@ export function overlayContractCapabilities(
       return current;
     }
     const unfolded = unfold();
-    if (!unfolded) return current;
+    if (!unfolded) return keptAsWritten(current, type, path);
     visiting.add(type);
     expansions.push(type);
     try {
@@ -4028,22 +4208,25 @@ function unfoldPrint(
 }
 
 /**
- * Returns a node standing for `type`, the type a reference denotes, built one
+ * Returns a node standing for `type`, the type a reference, or a node the
+ * overlay does not read inside, denotes, built one
  * level deep in the type's own structure (`unfoldTypeAs()`), with each property
  * of an object written as its declaration's annotation where that still
  * denotes the property's type at `type`. An annotation is written in its
  * declaration's type parameters, which `type` may have replaced with
  * arguments, as `Box<string>` replaces `T` in `v: T`; such a property is
  * printed from its type. Returns `undefined` for a tuple, for a type that
- * carries a scope, and for a type that says something only as a whole.
+ * carries a scope, and for a type that says something only as a whole; and,
+ * where `writtenOnly` is set, for one any part of which would be printed.
  */
-function unfoldReferencedType(
+function unfoldDenotedType(
   type: ts.Type,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
+  writtenOnly = false,
 ): ts.TypeNode | undefined {
   // Only a scope wrapper names its scope, so a node built from what it wraps
   // would drop it.
@@ -4068,6 +4251,7 @@ function unfoldReferencedType(
     typeRegistry,
     state,
     true,
+    writtenOnly,
   );
 }
 
@@ -4075,14 +4259,16 @@ function unfoldReferencedType(
 type UnfoldedShape = "object" | "union" | "array" | "readonly array" | "cell";
 
 /**
- * Helper for `unfoldPrint()` and `unfoldReferencedType()`, which returns a
+ * Helper for `unfoldPrint()` and `unfoldDenotedType()`, which returns a
  * node of `shape` standing for `type`, each type node below it printed from
  * its own type: an object's properties and index signatures, a union's
  * members, an array's element, or a cell's value. Where `annotated` is set, an
  * object's property is written instead as its declaration's annotation where
  * that denotes the property's type (`readMemberAnnotation()`). Returns
  * `undefined` where `type` says something only as a whole: a union with a
- * `Default` brand, or an object with a property keyed by a symbol.
+ * `Default` brand, or an object with a property keyed by a symbol; and, where
+ * `writtenOnly` is set, where any part would be printed rather than written
+ * as its annotation.
  */
 function unfoldTypeAs(
   shape: UnfoldedShape,
@@ -4093,7 +4279,9 @@ function unfoldTypeAs(
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
   annotated = false,
+  writtenOnly = false,
 ): ts.TypeNode | undefined {
+  if (writtenOnly && shape !== "object") return undefined;
   const print = (printable: ts.Type) =>
     typeToTypeNodeWithRegistry(
       printable,
@@ -4109,6 +4297,7 @@ function unfoldTypeAs(
         factory,
         print,
         annotated,
+        writtenOnly,
       );
     case "union": {
       if (!type.isUnion()) return undefined;
@@ -4160,7 +4349,8 @@ function unfoldTypeAs(
  * its declaration's annotation where that denotes the property's type
  * (`readMemberAnnotation()`). Methods are left out, as schema generation reads
  * none. Returns `undefined` for a type with a property keyed by a symbol,
- * which has no name to write it under.
+ * which has no name to write it under, and, where `writtenOnly` is set, for
+ * one with a property or an index signature that would be printed.
  */
 function unfoldObjectType(
   type: ts.Type,
@@ -4169,7 +4359,11 @@ function unfoldObjectType(
   factory: ts.NodeFactory,
   print: (printable: ts.Type) => ts.TypeNode,
   annotated: boolean,
+  writtenOnly = false,
 ): ts.TypeLiteralNode | undefined {
+  if (writtenOnly && checker.getIndexInfosOfType(type).length > 0) {
+    return undefined;
+  }
   const members: ts.TypeElement[] = [];
   for (const property of checker.getPropertiesOfType(type)) {
     if ((property.flags & ts.SymbolFlags.Method) !== 0) continue;
@@ -4184,6 +4378,7 @@ function unfoldObjectType(
     const annotation = annotated
       ? readMemberAnnotation(property, propertyType, checker)
       : undefined;
+    if (writtenOnly && !annotation) return undefined;
     // An optional property is written without the `undefined` its
     // optionality adds to its type, as the printer writes it.
     const written = optional && propertyType.isUnion()
