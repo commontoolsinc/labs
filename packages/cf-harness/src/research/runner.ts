@@ -523,7 +523,8 @@ const sourceCatalog = (state: ResearchState): string =>
     "A documentation source location includes its section-N reopen argument. Pass that sectionId to open_doc_section; never pass a documentation:* sourceId as sectionId.",
   ].join("\n");
 
-const researchModel = (providerId: string): string =>
+/** The cheap model a provider's private calls run on. */
+export const researchModel = (providerId: string): string =>
   providerId === "openai-codex" ? RESEARCH_CODEX_MODEL : RESEARCH_MODEL;
 
 const systemPrompt = (
