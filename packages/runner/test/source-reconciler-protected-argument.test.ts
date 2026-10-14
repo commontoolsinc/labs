@@ -877,6 +877,67 @@ interface Input {
       );
     });
 
+    it("refuses a release that adds a guarded member to a guarded record, and keeps the record as it was", async () => {
+      // `about` holds no `note`, and the setup writes none, but the release
+      // changes what writing `about` requires, and the setup restates it.
+      const current = NAMED_SOURCE.replace(
+        "interface About {\n  title: string;\n}",
+        "interface About {\n  title: string;\n  note?: WriteAuthorizedBy<string, typeof describeRoom>;\n}",
+      );
+      expect(current).toContain("note?: WriteAuthorizedBy<string");
+      await reconcileRelease(
+        "added-member-release",
+        NAMED_SOURCE,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(recorded?.detail).toContain("at /about");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+        },
+      );
+    });
+
+    it("refuses a release that changes the policy of a slot the document does not hold yet, and keeps the fields as they were", async () => {
+      // The stored envelope already guards `label`, so the release's policy
+      // there changes a declared one rather than adding one.
+      const guarded = (writer: string) =>
+        withRecord()
+          .replace(
+            'label?: Default<WriteAuthorizedBy<About, typeof relabel>, { title: "" }>;',
+            `label?: WriteAuthorizedBy<About, typeof ${writer}>;`,
+          )
+          .replace("  label: About;\n", "  label?: About;\n")
+          .replace(
+            "{ label: Writable<About> }",
+            "{ label: Writable<About | undefined> }",
+          );
+      const previous = guarded("relabel");
+      const current = guarded("describeRoom");
+      expect(previous).toContain(
+        "label?: WriteAuthorizedBy<About, typeof relabel>;",
+      );
+      expect(current).toContain(
+        "label?: WriteAuthorizedBy<About, typeof describeRoom>;",
+      );
+      expect(current).toContain("{ label: Writable<About | undefined> }");
+      await reconcileRelease(
+        "unheld-policy-release",
+        previous,
+        current,
+        prime,
+        ({ outcome, room, recorded, previousIdentity }) => {
+          expect(room.get().label).toBeUndefined();
+          expect(outcome).toBe("unavailable");
+          expect(recorded?.outcome).toBe("unreachable");
+          expect(getPatternIdentityRef(room)?.identity).toBe(previousIdentity);
+          expect(room.get().about).toEqual({ title: "lunch" });
+        },
+      );
+    });
+
     it("refuses a release that guards a slot the document already holds, and keeps the slot as it was", async () => {
       // Before the release, `titles` is a list anyone may write, and holds an
       // entry; guarding it would adopt what it holds.
