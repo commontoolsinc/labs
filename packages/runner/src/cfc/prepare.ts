@@ -10,6 +10,7 @@ import {
   emptySchemaObject,
   internSchema,
   internSchemaAsTaggedHashString,
+  type SchemaAndHash,
 } from "@commonfabric/data-model-schema";
 import { walkSchemaDocumentClosure } from "@commonfabric/data-model-schema/schema-closure";
 import {
@@ -9825,6 +9826,33 @@ const atOrBeneathNewField = (
 };
 
 /**
+ * The envelope `stored` and `candidate` merge to under `options`, with the
+ * stored claims kept beneath the positions where the stored document holds
+ * links, and passed through `bind`, as the persist loop binds a document's
+ * creator; or `undefined` where the merge or the binding refuses.
+ */
+const mergeKeepingStoredBeneathLinks = (
+  stored: JSONSchema,
+  candidate: JSONSchema,
+  options: MergeCfcSchemaEnvelopeOptions,
+  bind: (schema: JSONSchema) => JSONSchema,
+): SchemaAndHash | undefined => {
+  try {
+    return internSchema(
+      bind(
+        mergeStoredCfcEnvelope(stored, candidate, {
+          ...options,
+          keepsStoredBeneathStoredLink: true,
+        }),
+      ),
+      true,
+    );
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * The envelope a document stores after a write under `candidate`: the stored
  * envelope where the write leaves it unchanged, and the two merged otherwise.
  * Throws what {@link mergeCfcSchemaEnvelopes} throws.
@@ -11468,13 +11496,14 @@ export function* prepareBoundaryCommitSteps(
       : undefined;
     let storedSchema: JSONSchema | undefined;
     let mergedSchema = schema;
+    let mergeOptions: MergeCfcSchemaEnvelopeOptions = {};
     if (stored.status === "loaded" && undefinedCandidate) {
       storedSchema = stored.schema;
       mergedSchema = storedSchema;
     } else if (stored.status === "loaded") {
       storedSchema = stored.schema;
       try {
-        mergedSchema = mergeStoredCfcEnvelope(storedSchema, schema, {
+        mergeOptions = {
           generatedOutputPaths: generatedOutputPaths.get(key),
           ...mergeOptionsForWriters(
             foreignPositions !== undefined
@@ -11487,7 +11516,12 @@ export function* prepareBoundaryCommitSteps(
               : {},
             stampIsWriters(writeAuthorIdentities.get(key)?.values() ?? []),
           ),
-        });
+        };
+        mergedSchema = mergeStoredCfcEnvelope(
+          storedSchema,
+          schema,
+          mergeOptions,
+        );
       } catch (error) {
         // Tag the additive-required migration incompatibility with a stable
         // token so the default-root runnability backstop can key on THIS class
@@ -13205,7 +13239,8 @@ export function* prepareBoundaryCommitSteps(
     // asks for it and the schema decomposes to a bare root, the inline
     // form otherwise. Reading resolves references whenever the stored
     // root carries them, so both spellings are the same envelope.
-    const envelopeRoot = state.decomposedEnvelopes
+    let persistedSchema = schemaAndHash;
+    let envelopeRoot = state.decomposedEnvelopes
       ? decomposeEnvelopeRoot(schemaAndHash.schema)
       : undefined;
     // The flag decides the envelope VERSION the same way: version 2 names
@@ -13314,6 +13349,7 @@ export function* prepareBoundaryCommitSteps(
       // not at the deferred paths alone.
       const leavesDeferredPaths = (
         omitted: (path: readonly string[]) => boolean,
+        derived: JSONSchema = schemaAndHash.schema,
       ): boolean => {
         const declaredPositions = (schema: JSONSchema) =>
           cfcSchemaEntries(schema).filter((entry) => !omitted(entry.path))
@@ -13323,14 +13359,10 @@ export function* prepareBoundaryCommitSteps(
                 isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
               ),
             })).sort((left, right) => utf8Compare(left.path, right.path));
-        return cfcSchemaPoliciesEqual(
-          storedSchema,
-          schemaAndHash.schema,
-          omitted,
-        ) &&
+        return cfcSchemaPoliciesEqual(storedSchema, derived, omitted) &&
           deepEqual(
             declaredPositions(storedSchema),
-            declaredPositions(schemaAndHash.schema),
+            declaredPositions(derived),
           ) &&
           deferredWriterPaths.every((path) =>
             deepEqual(
@@ -13343,18 +13375,40 @@ export function* prepareBoundaryCommitSteps(
         deferredWriterRefusal = undefined;
         keepsStoredSchema = true;
       } else {
+        // The envelope stored beside a new field is the stored one with the
+        // new fields' claims added: the merge again, keeping the stored
+        // claims beneath links, which a release otherwise re-describes. It
+        // must differ from the stored envelope at the new fields alone, and
+        // no label it derives may lie beneath a link, where it would carry
+        // the release's claims.
         const newField = atOrBeneathNewField(
           tx,
           { space, id, scope },
           storedSchema,
           deferredWriterPaths,
         );
+        const linksKept = mergeKeepingStoredBeneathLinks(
+          storedSchema,
+          schema,
+          mergeOptions,
+          (merged) => bindCreator(merged, key),
+        );
         if (
-          leavesDeferredPaths((path) =>
-            governsNothingHere(path) || newField(path)
+          linksKept !== undefined &&
+          leavesDeferredPaths(newField, linksKept.schema) &&
+          !metadata.labelMap.entries.some((entry) =>
+            governsNothingHere(canonicalizeLogicalPath(entry.path))
           )
         ) {
           deferredWriterRefusal = undefined;
+          persistedSchema = linksKept;
+          envelopeRoot = state.decomposedEnvelopes
+            ? decomposeEnvelopeRoot(linksKept.schema)
+            : undefined;
+          metadata = {
+            ...metadata,
+            schemaHash: envelopeRoot?.rootHash ?? linksKept.taggedHashString,
+          };
         }
       }
       if (keepsStoredSchema) {
@@ -13392,8 +13446,8 @@ export function* prepareBoundaryCommitSteps(
       ensureSchemaDocument(
         tx,
         space,
-        schemaAndHash.taggedHashString,
-        schemaAndHash.schema,
+        persistedSchema.taggedHashString,
+        persistedSchema.schema,
       );
     } else {
       ensureSchemaDocument(
