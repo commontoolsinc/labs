@@ -432,18 +432,33 @@ describe("piece-render", () => {
 
       /**
        * A controller over `runtime` that starts holding loads once it has
-       * handed a piece over, which is where the render's own loads begin.
+       * handed a piece over, which is where the render's own loads begin. The
+       * render is handed `exposed` as the controller's runtime.
        */
-      function controllerHoldingLoads(): PiecesController {
+      function controllerHoldingLoads(
+        exposed: Runtime = runtime,
+      ): PiecesController {
         const pieces = new PiecesController({ as: signer, space }, runtime);
         return {
-          runtime,
+          runtime: exposed,
           get: async (...args: Parameters<PiecesController["get"]>) => {
             const got = await pieces.get(...args);
             holdingLoads = true;
             return got;
           },
         } as unknown as PiecesController;
+      }
+
+      /**
+       * `runtime` behind a storage manager that offers `synced()` and neither
+       * a count of its outstanding work nor a wait for that work alone.
+       */
+      function runtimeWithoutStorageProbes(): Runtime {
+        return {
+          scheduler: runtime.scheduler,
+          idle: () => runtime.idle(),
+          storageManager: { synced: () => storage.synced() },
+        } as unknown as Runtime;
       }
 
       beforeEach(async () => {
@@ -524,6 +539,28 @@ describe("piece-render", () => {
           { ...config, piece },
           { watch: true, onUpdate: (html) => first.resolve(html) },
           { loadPieces: () => Promise.resolve(controllerHoldingLoads()) },
+        ) as () => void;
+        try {
+          expect(await first.promise).toContain(LIST_ROWS);
+          // The order was the slow one only if the render started a load.
+          expect(heldLoads).toBeGreaterThan(0);
+        } finally {
+          cancel();
+        }
+      });
+
+      it("reports the list's rows first when storage offers no count of its outstanding work", async () => {
+        const first = Promise.withResolvers<string>();
+
+        const cancel = await renderPiece(
+          { ...config, piece },
+          { watch: true, onUpdate: (html) => first.resolve(html) },
+          {
+            loadPieces: () =>
+              Promise.resolve(
+                controllerHoldingLoads(runtimeWithoutStorageProbes()),
+              ),
+          },
         ) as () => void;
         try {
           expect(await first.promise).toContain(LIST_ROWS);

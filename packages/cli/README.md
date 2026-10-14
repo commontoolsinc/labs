@@ -1091,15 +1091,22 @@ described under [Cell references](#cell-references).
 
 Without `--watch` the command prints once and exits. It prints when three things
 hold at once: the piece has nothing left to compute, nothing it asked storage
-for is still loading, and the store has confirmed or refused every commit the
-render issued. The HTML is therefore the tree the piece settles to, including
-any list the piece builds only after its stored state has loaded.
+for is still loading, and no commit the render issued is still pending. The HTML
+is therefore the tree the piece settles to, including any list the piece builds
+only after its stored state has loaded.
 
-Starting a piece writes its derived state, so the first render of a piece no
-client has run can issue hundreds of commits. The command waits for the store to
-settle them because a commit still pending when the process exits may never be
-applied, and the next load of the piece then computes and commits the same
-values again.
+What ends a commit's pending state depends on where the commit went. One sent
+directly to the store is pending until the store confirms or refuses it. With
+[`serverExecution`](../../docs/development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+on, what a computation writes is sealed into the client's speculation overlay
+instead, and that commit is pending only until the seal accepts it; the command
+does not wait for what becomes of it afterwards.
+
+With `serverExecution` off, starting a piece writes its derived state from this
+process, so the first render of a piece no client has run can issue hundreds of
+commits. The command waits for them because a commit still in flight when the
+process exits may never be applied, and the next load of the piece then computes
+and commits the same values again.
 
 The command does not wait for builtin I/O still in flight, such as a fetch or a
 language-model call. A piece that renders a pending state for one is printed in
@@ -1107,9 +1114,9 @@ that state.
 
 With `--watch` the command stays connected and prints the HTML again each time
 the UI changes. Each print is the tree at a point where the piece has nothing
-left to compute and is waiting for nothing from storage. It does not wait for
-the store to settle commits, so a change that a commit's result causes is a
-later print.
+left to compute and is waiting for nothing from storage. A commit may still be
+pending at that point, so a change that a commit's result causes is a later
+print.
 
 ## Compacting a space store
 

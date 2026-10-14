@@ -113,40 +113,20 @@ export function renderVDomToHtml(
 }
 
 /**
- * Helper for `renderPiece()`, which waits until `runtime` has nothing left to
- * compute and no storage work outstanding that a computation is waiting for.
- *
- * A commit may still be pending when it resolves, and so may builtin I/O such
- * as a fetch or a language-model call, so a tree read after it can still
- * change.
- */
-async function idleWithNothingLoading(runtime: Runtime): Promise<void> {
-  const storage = runtime.storageManager;
-  await runtime.idle();
-  // The scheduler's idle does not cover work registered with the storage
-  // manager's settle barrier (`trackUntilSettled()`), and that work re-arms a
-  // computation once it settles: a resumed list waits there for its result
-  // container, and builds no row until it has it. The re-armed computation can
-  // register more, so we repeat until an idle leaves nothing registered.
-  //
-  // `crossSpaceSettled()` waits for that barrier alone. A storage manager
-  // without it is asked for a full sync, which takes the barrier in.
-  while ((storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0) {
-    await (storage.crossSpaceSettled?.() ?? storage.synced());
-    await runtime.idle();
-  }
-}
-
-/**
  * Helper for `renderPiece()`, which waits until all of these hold at once:
  * `runtime` has nothing left to compute, storage has nothing outstanding, and
- * the store has settled every commit the runtime issued, by confirming or
- * refusing it.
+ * no commit the runtime issued is pending.
  *
- * It does not wait for builtin I/O in flight, such as a fetch or a
- * language-model call.
+ * What ends a commit's pending state depends on where the commit went. One
+ * sent directly to the store is pending until the store confirms or refuses
+ * it. One sealed instead, into a serving runtime's wave or into a client's
+ * speculation overlay under server execution, is pending only until the seal
+ * accepts it, and what becomes of it afterwards is not waited for.
+ *
+ * Builtin I/O in flight, such as a fetch or a language-model call, is not
+ * waited for either.
  */
-async function idleWithStoreSettled(runtime: Runtime): Promise<void> {
+async function idleWithNothingPending(runtime: Runtime): Promise<void> {
   const { scheduler, storageManager } = runtime;
   // A settled commit can re-run its readers and a settled load can re-arm a
   // computation, so neither wait is final until both hold at once.
@@ -157,14 +137,46 @@ async function idleWithStoreSettled(runtime: Runtime): Promise<void> {
 }
 
 /**
+ * Helper for `renderPiece()`, which waits until `runtime` has nothing left to
+ * compute and no storage work outstanding that a computation is waiting for.
+ *
+ * A commit may still be pending when it resolves, and so may builtin I/O such
+ * as a fetch or a language-model call, so a tree read after it can still
+ * change.
+ */
+async function idleWithNothingLoading(runtime: Runtime): Promise<void> {
+  const storage = runtime.storageManager;
+  if (
+    storage.pendingCrossSpacePromiseCount === undefined ||
+    storage.crossSpaceSettled === undefined
+  ) {
+    // The wait below asks storage how much work is registered with its settle
+    // barrier, and waits for that work alone. A storage manager that offers
+    // neither gets the wider wait, which takes the barrier in.
+    await idleWithNothingPending(runtime);
+    return;
+  }
+  await runtime.idle();
+  // The scheduler's idle does not cover work registered with the storage
+  // manager's settle barrier (`trackUntilSettled()`), and that work re-arms a
+  // computation once it settles: a resumed list waits there for its result
+  // container, and builds no row until it has it. The re-armed computation can
+  // register more, so we repeat until an idle leaves nothing registered.
+  while (storage.pendingCrossSpacePromiseCount() > 0) {
+    await storage.crossSpaceSettled();
+    await runtime.idle();
+  }
+}
+
+/**
  * Resolves a piece reference and renders the piece's UI to HTML.
  *
  * Without `options.watch`, returns the HTML of the tree the runtime settles to
- * once the piece has loaded and computed and the store has settled every
- * commit that produced, so a caller may exit on the result without abandoning
- * a commit. With `options.watch`, the render stays mounted,
- * `options.onUpdate` receives the HTML each time the runtime goes idle with
- * nothing loading, and the return value is the function that unmounts.
+ * once the piece has loaded and computed and no commit that produced is
+ * pending, so a caller may exit on the result without abandoning a commit in
+ * flight. With `options.watch`, the render stays mounted, `options.onUpdate`
+ * receives the HTML each time the runtime goes idle with nothing loading, and
+ * the return value is the function that unmounts.
  *
  * Neither mode waits for builtin I/O in flight, such as a fetch or a
  * language-model call.
@@ -201,9 +213,9 @@ export async function renderPiece(
       (html) => options.onUpdate?.(html),
     );
   }
-  // The one-shot wait takes in the store settling every commit, because the
-  // result is what a caller exits on, and a commit still pending when its
+  // The one-shot wait takes in the runtime's pending commits, because the
+  // result is what a caller exits on, and a commit in flight when its
   // connection closes may never be applied. A watch stays connected, and
   // reports whatever a later commit result changes.
-  return renderVDomToHtml(cell.key(UI), () => idleWithStoreSettled(runtime));
+  return renderVDomToHtml(cell.key(UI), () => idleWithNothingPending(runtime));
 }
