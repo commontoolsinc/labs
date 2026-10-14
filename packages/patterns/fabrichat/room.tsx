@@ -77,6 +77,7 @@ import {
   type RoomWindowEvent,
   type SetTitleEvent,
   type StoredAbout,
+  tellManagerJoined,
   TITLE_KEY,
   type TitlesCell,
   type UsedTimesCell,
@@ -399,6 +400,24 @@ interface LatestAdd {
   refusal?: string;
 }
 
+/**
+ * What an add asks of the viewer's manager once it has admitted someone: the
+ * event of `offerAddedMember`.
+ */
+interface AddedMemberEvent {
+  /** The add's `requestId`. */
+  requestId: string;
+
+  /** The DID of the person the add admitted. */
+  member: string;
+
+  /** The person's profile, when the add named one. */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  profile?: Cell<ChatProfile>;
+}
+
 /** What adding a member is bound to. */
 interface AddMemberState {
   /** One of the room's records, which names the room's space. */
@@ -409,6 +428,32 @@ interface AddMemberState {
 
   /** The room's kind, which a direct room's space keeps to its two members. */
   kind: ChatRoomKind;
+
+  /** The viewer's adds' outcomes; absent where they aren't remembered. */
+  requests?: AddRequestsCell;
+
+  /** What the session's latest add came to, which the control shows. */
+  latest: Writable<LatestAdd | undefined>;
+
+  /**
+   * Has the viewer's manager tell the person admitted of the room, as
+   * `offerAddedMember` does, in an event of its own. The add's own
+   * transaction reads nothing of the manager, which can carry a label the
+   * room's space doesn't admit.
+   */
+  offer: Stream<AddedMemberEvent>;
+
+  /**
+   * A rendered picker's person, by their profile, which an event's own
+   * outranks.
+   */
+  picked?: Cell<ChatProfile>;
+}
+
+/** What `offerAddedMember` is bound to. */
+interface OfferAddedMemberState {
+  /** One of the room's records, which names the room's space. */
+  room: MessagesCell;
 
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   requests?: AddRequestsCell;
@@ -431,13 +476,40 @@ interface AddMemberState {
 
   /** The viewer's manager's `offerRoom`, when `canOffer` holds. */
   offerRoom?: Stream<OfferRoomRequest>;
-
-  /**
-   * A rendered picker's person, by their profile, which an event's own
-   * outranks.
-   */
-  picked?: Cell<ChatProfile>;
 }
+
+/**
+ * Has the viewer's manager offer the room to the person an add admitted, and
+ * decide how they were told, which it records and the room's `addRequests`
+ * then reads. With no manager to ask, because the viewer has none or theirs
+ * hasn't resolved, it records that the person was told nothing.
+ */
+const offerAddedMember = handler<AddedMemberEvent, OfferAddedMemberState>(
+  (event, state) => {
+    const { requestId, member, profile } = event;
+    const space = spaceOf(state.room);
+    // `offerRoom` is read only once `canOffer` holds, since reading it reads
+    // the manager.
+    if (
+      state.canOffer && state.self !== undefined && space !== undefined
+    ) {
+      state.offerRoom?.send({
+        requestId: addMemberOfferId(space, requestId),
+        room: state.self,
+        member,
+        ...(profile === undefined ? {} : { profile }),
+      });
+      return;
+    }
+    state.requests?.key(requestId).set({
+      status: "done",
+      delivery: "access-only",
+    });
+    if (state.latest.get()?.requestId === requestId) {
+      state.latest.set({ requestId, member, delivery: "access-only" });
+    }
+  },
+);
 
 /**
  * Admits a person to the room's space, with OWNER, so that they too may add
@@ -446,12 +518,10 @@ interface AddMemberState {
  * someone, only to a group room, and the session is shown what came of it.
  *
  * The person is named by chat address, or by a profile whose label names them,
- * or by both, which then have to agree. The viewer's manager offers them the
- * room through the profile's share inbox, or, given only their address,
- * through the profiles its people list for them, and decides how they were
- * told. An add with no manager to send to, because the viewer has none or
- * theirs hasn't resolved, admits them and tells them nothing, and records so
- * at once.
+ * or by both, which then have to agree. Once they are admitted and the add is
+ * recorded, `offer` has the viewer's manager offer them the room through the
+ * profile's share inbox, or, given only their address, through the profiles
+ * its people list for them, and decide how they were told.
  */
 const commitAddMember = handler<AddMemberEvent, AddMemberState>(
   (
@@ -462,9 +532,7 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       kind,
       requests,
       latest,
-      self,
-      canOffer,
-      offerRoom,
+      offer,
       picked,
     },
   ) => {
@@ -522,25 +590,13 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       );
       return;
     }
-    // The manager decides how the member was told, in an event of its own,
-    // and records it, which the room's `addRequests` then reads.
-    const space = spaceOf(room);
-    if (
-      canOffer && offerRoom !== undefined && self !== undefined &&
-      space !== undefined
-    ) {
-      offerRoom.send({
-        requestId: addMemberOfferId(space, requestId),
-        room: self,
-        member,
-        ...(profile === undefined ? {} : { profile }),
-      });
-      requests?.key(requestId).set({ status: "done" });
-      latest.set({ requestId, member });
-      return;
-    }
-    requests?.key(requestId).set({ status: "done", delivery: "access-only" });
-    latest.set({ requestId, member, delivery: "access-only" });
+    requests?.key(requestId).set({ status: "done" });
+    latest.set({ requestId, member });
+    offer.send({
+      requestId,
+      member,
+      ...(profile === undefined ? {} : { profile }),
+    });
   },
 );
 
@@ -628,16 +684,15 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
     const canOffer = computed(() =>
       manager?.offerRoom !== undefined && self !== undefined
     );
-    const bindings = {
+    const offer = offerAddedMember({
       room,
-      ownSpace,
-      kind,
       requests,
       latest,
       self,
       canOffer,
       offerRoom: manager?.offerRoom,
-    };
+    });
+    const bindings = { room, ownSpace, kind, requests, latest, offer };
     const add = commitAddMember(bindings);
     const canAdd = computed(() =>
       ownSpace && kind !== "direct" && spaceAccess(room) === "OWNER"
@@ -1057,9 +1112,11 @@ export const FabriChatRoomCore = pattern<
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom: manager?.joinRoom,
-    self,
+    joined: tellManagerJoined({
+      canJoin,
+      joinRoom: manager?.joinRoom,
+      self,
+    }),
   };
   const alsoToMain = new Writable.perSession(false);
   const windows = new Writable.perSession<WindowsValue>();
