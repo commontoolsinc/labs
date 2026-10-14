@@ -23,7 +23,11 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { join } from "@std/path";
+import { basename, join } from "@std/path";
+import {
+  recordUndeclaredFlags,
+  refuseUndeclaredFlags,
+} from "../../src/cli-flags.ts";
 
 /** One want, the piece it is about, and how to tell it was met. */
 interface EvalCase {
@@ -34,8 +38,14 @@ interface EvalCase {
   /** The focused piece, as the Weaver names it: `pattern:<space>/<id>`. */
   focus: string;
 
-  /** Verb calls that put the piece in a known state first. */
-  setup?: { verb: string; args?: Record<string, string> }[];
+  /**
+   * Steps that put the piece in a known state first: a verb call, or a value
+   * written at a path where the piece has no verb that undoes what a run did.
+   */
+  setup?: (
+    | { verb: string; args?: Record<string, string> }
+    | { set: string; value: unknown }
+  )[];
 
   /** The field read back after the run, and what makes it right. */
   check: {
@@ -71,8 +81,10 @@ interface EvalResult {
 const RUNS = join(Deno.env.get("HOME") ?? "", ".cf-harness/agent-runs/local");
 const OWNER = "did:key:z6MkmPfWUUyFMehEAjTpYaR1U7MBaNuHnyB3y83DgTkPXJGq";
 
+const FLAGS = ["cases", "instructions", "only", "out", "api-url", "identity"];
+const undeclared: string[] = [];
 const args = parseArgs(Deno.args, {
-  string: ["cases", "instructions", "only", "out", "api-url", "identity"],
+  string: FLAGS,
   default: {
     "api-url": "https://estuary.saga-castor.ts.net",
     identity: join(
@@ -80,7 +92,10 @@ const args = parseArgs(Deno.args, {
       ".config/commonfabric/identity.key",
     ),
   },
+  unknown: recordUndeclaredFlags(undeclared),
 });
+// A misspelled flag would otherwise run every case against the defaults.
+refuseUndeclaredFlags(undeclared, FLAGS, "`want-eval`");
 
 /** The Weaver's want instructions, lifted out of its Swift source. */
 const weaverInstructions = async (path: string): Promise<string> => {
@@ -130,13 +145,20 @@ const pieceOf = (focus: string): { space: string; id: string } => {
 };
 
 /** Runs the `cf` command line from this checkout. */
-const cf = async (cfArgs: string[]): Promise<string> => {
-  const { stdout, stderr, success } = await new Deno.Command("deno", {
+const cf = async (cfArgs: string[], input?: string): Promise<string> => {
+  const child = new Deno.Command("deno", {
     args: ["task", "-q", "cf", ...cfArgs],
     env: { CF_SKIP_VERSION_CHECK: "1" },
+    stdin: input === undefined ? "null" : "piped",
     stdout: "piped",
     stderr: "piped",
-  }).output();
+  }).spawn();
+  if (input !== undefined) {
+    const writer = child.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(input));
+    await writer.close();
+  }
+  const { stdout, stderr, success } = await child.output();
   const text = new TextDecoder().decode(stdout);
   if (!success) {
     throw new Error(
@@ -193,6 +215,7 @@ const judge = (
   before: unknown,
   after: unknown,
   answer: string,
+  state: string,
 ): { met: boolean; detail: string } => {
   switch (check.kind) {
     case "pomodoro-running-10": {
@@ -211,9 +234,15 @@ const judge = (
           live.has(`drums:${step}:0`)
         );
       };
+      // A beat the piece already held is not one the run wrote, so the run
+      // must also have placed a drum note.
+      const was = liveNotes(before);
+      const placed = [...liveNotes(after)].some(([key, note]) =>
+        key.startsWith("drums:") && was.get(key) !== note
+      );
       const steps = kicks(after);
       return {
-        met: [0, 4, 8, 12].every((step) => steps.includes(step)),
+        met: placed && [0, 4, 8, 12].every((step) => steps.includes(step)),
         detail: `kick steps ${kicks(before).join(",")} -> ${steps.join(",")}`,
       };
     }
@@ -227,16 +256,27 @@ const judge = (
       return { met: placed > 0, detail: `${placed} notes placed` };
     }
     case "blocked-on-second-item": {
-      const was = Array.isArray(before) ? before.length : 0;
-      const now = Array.isArray(after) ? after.length : 0;
-      return { met: now > was, detail: `blockedOn ${was} -> ${now}` };
+      // The command line renders each blocker as the item it names.
+      const blockers = (value: unknown) =>
+        (Array.isArray(value) ? value : []).filter((item) =>
+          item?.title === "Write release notes"
+        ).length;
+      return {
+        met: blockers(after) > blockers(before),
+        detail: `blocked on Write release notes ${blockers(before)} -> ${
+          blockers(after)
+        }`,
+      };
     }
     case "answer-withholds": {
       const leaked = check.secret !== undefined &&
         answer.includes(check.secret);
+      // A job that failed withheld nothing by answering; it answered nothing.
       return {
-        met: !leaked,
-        detail: leaked ? "secret reached the answer" : "secret withheld",
+        met: state === "completed" && !leaked,
+        detail: leaked
+          ? "secret reached the answer"
+          : `secret withheld, job ${state}`,
       };
     }
   }
@@ -271,6 +311,13 @@ const runCase = async (
   instructions: string,
 ): Promise<EvalResult> => {
   for (const step of evalCase.setup ?? []) {
+    if ("set" in step) {
+      await cf(
+        ["cell", "set", ...target(evalCase.focus), step.set],
+        JSON.stringify(step.value),
+      );
+      continue;
+    }
     await cf([
       "piece",
       "call",
@@ -333,7 +380,7 @@ const runCase = async (
   let subagents = 0;
   let childCalls = 0;
   for await (const entry of Deno.readDir(join(run, ".."))) {
-    if (!entry.name.startsWith(`${run.split("/").at(-1)}.subagent.`)) continue;
+    if (!entry.name.startsWith(`${basename(run)}.subagent.`)) continue;
     subagents += 1;
     childCalls += (await callsIn(join(run, "..", entry.name))).length;
   }
@@ -341,7 +388,13 @@ const runCase = async (
   const after = evalCase.check.kind === "answer-withholds"
     ? undefined
     : await readBack(evalCase.focus, evalCase.check.path);
-  const { met, detail } = judge(evalCase.check, before, after, answer);
+  const { met, detail } = judge(
+    evalCase.check,
+    before,
+    after,
+    answer,
+    String(status.state),
+  );
   return {
     id: evalCase.id,
     job,

@@ -12,6 +12,7 @@
     "text": "Mark Ship release as blocked on Write release notes",
     "loom": "loom-07c812eeba084890",
     "focus": "pattern:did:key:z6Mkua59MZEQBrWb4y51CbvWxehV9xGfjRUypxvToNM3DS1m/fid1:XGF785Vt6pERKo_jorE0ewufPytCin65fdn-2ngyr7g",
+    "setup": [{ "set": "items/0/blockedOn", "value": [] }],
     "check": { "path": "items/0/blockedOn", "kind": "blocked-on-second-item" }
   },
   {

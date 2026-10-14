@@ -235,6 +235,45 @@ describe("read-value", () => {
       });
     });
 
+    it("refuses a link at the selected position into a space the session was not admitted to", async () => {
+      // The handle names this run's own space, and what it links to does not
+      // widen the spaces the run may read.
+      fabric = await createFabric("observe");
+      const space = fabric.session.pieces.getSpace();
+      const elsewhere = (await Identity.generate()).did();
+      const seedOutside = fabric.runtime.edit();
+      const outside = fabric.runtime.getCell(
+        elsewhere,
+        "read-value-outside",
+        undefined,
+        seedOutside,
+      );
+      outside.set({ secret: "kept elsewhere" });
+      expect((await seedOutside.commit().settled).ok).toBeDefined();
+      const seed = fabric.runtime.edit();
+      const holder = fabric.runtime.getCell(
+        space,
+        "read-value-holder",
+        undefined,
+        seed,
+      );
+      holder.set({ away: outside.getAsLink() });
+      expect((await seed.commit().settled).ok).toBeDefined();
+      const ref = createLLMFriendlyLink(
+        holder.getAsNormalizedFullLink(),
+        space,
+      );
+      const { table } = await held(ref);
+
+      const output = await readValueTool.invoke(
+        contextWith(fabric.session, table),
+        { token: ref, select: "away" },
+      );
+
+      expect(output.status).toBe("error");
+      expect(JSON.stringify(output)).not.toContain("kept elsewhere");
+    });
+
     it("refuses at the root a value the model may not observe, naming why and the subagent route", async () => {
       fabric = await createFabric("enforce-strict");
       const { ref } = await seedDocument(fabric.runtime, fabric.session);

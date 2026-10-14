@@ -44,6 +44,12 @@ no more than those three values, whatever the data behind it turned out to be.
 Widening what crosses means widening a schema on purpose, in the open, rather
 than a value slipping through because nobody said it should not.
 
+`read_value` is the one deliberate exception: it returns the value behind a
+handle the run holds and has described, whatever its shape, measured against the
+run's release and read ceilings rather than a schema. Its label joins the run's
+model context, so a run that reads pays for it in what it may release
+afterwards.
+
 **Work happens by running patterns over those handles.** When an agent needs
 something computed, it does not fetch the data and compute in its own context;
 it writes a pattern, runs it in the space against references it holds, and
@@ -1411,15 +1417,16 @@ granted token, not a tool of its own, and `describe_handle` answers the
 registry's shape like any other reference.
 
 What the model receives is a token and fixed prose, never data. Reading anything
-behind the token means running a pattern over it, where the CFC boundary rules
-as it does for every other flow — in particular, a piece's `$NAME` is a value,
-and a name computed from labeled data taints a name-listing pattern's result,
-which strict enforcement refuses whole. A refused name read leaves the name
-unknown. For an explicit reference-listing task, a pattern can return entry
-references without reading values, with addresses returned as tokens through the
-ordinary outbound swap. This does not authorize crawling references to identify
-an unspecified edit target; the shared target-selection guidance applies to the
-registry announcement too.
+behind the token means running a pattern over it, or `read_value` once
+`describe_handle` has answered for it, where the CFC boundary rules as it does
+for every other flow — in particular, a piece's `$NAME` is a value, and a name
+computed from labeled data taints a name-listing pattern's result, which strict
+enforcement refuses whole. A refused name read leaves the name unknown. For an
+explicit reference-listing task, a pattern can return entry references without
+reading values, with addresses returned as tokens through the ordinary outbound
+swap. This does not authorize crawling references to identify an unspecified
+edit target; the shared target-selection guidance applies to the registry
+announcement too.
 
 The grants are recorded in run state (`wellKnownGrants`), replayed rather than
 re-minted on resume, and reported in the operator summary as `fabricGrants:`. A

@@ -186,6 +186,14 @@ export const readValueTool: HarnessToolDefinition<
       }).withTx(releaseTx);
       await selected.pull();
       const read = selected.resolveAsCell();
+      // Following the link widens nothing: the value it lands on must be in
+      // a space the run may read, as the handle's own space had to be.
+      const at = read.getAsNormalizedFullLink();
+      if (!admitsFabricReference(at.space, space, session.foreignSpaces)) {
+        return fail(
+          "read_value can only read this run's space or one the run was admitted to",
+        );
+      }
       await read.pull();
       const denied = runtime.storageManager.authorizationError?.(link.space);
       if (denied !== undefined) return fail(denied.message);
@@ -194,7 +202,6 @@ export const readValueTool: HarnessToolDefinition<
         return fail(`${entry.token} holds nothing at that path`);
       }
       value = asSerializableValue(raw);
-      const at = read.getAsNormalizedFullLink();
       for (const path of storedLinkPaths(raw)) {
         const target = runtime.getCellFromLink({
           ...at,
