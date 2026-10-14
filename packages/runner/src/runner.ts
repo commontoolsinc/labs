@@ -2440,6 +2440,13 @@ export class Runner {
   >();
 
   /**
+   * The patterns a handler's result is set up from. A child one of them
+   * instantiates was made by an event, not by its parent's program, so no
+   * release of the parent re-instantiates it, whichever space it is in.
+   */
+  #handlerResultPatterns = new WeakSet<Pattern>();
+
+  /**
    * Registrations a run installed in a transaction refused for a stale basis,
    * by result document. The run keeps such a registration, but its graph read
    * setup writes that never landed, and a winner's writes do not stand in for
@@ -11836,6 +11843,7 @@ export class Runner {
       undefined,
       resultSchema,
     );
+    this.#handlerResultPatterns.add(resultPattern);
     // navigateTo result patterns must start after the handler's transaction
     // commits so the navigation target is durable. Every other handler result
     // pattern runs into the canonical result/receipt cell in the handler's
@@ -14164,12 +14172,14 @@ export class Runner {
           rawMetaWriteAuthorization,
         );
       }
-      // Only a child in a space of its own claims one: an in-space nested
-      // node is part of its parent's graph and is re-instantiated from the
-      // parent's program on each release of the parent, so an origin of its
-      // own would be followed twice; a cross-space child outlives the
-      // program that made it and is what a release has to reach.
-      const sourceOrigin = crossSpace && !resumeExisting
+      // A nested node of the parent's own graph claims none: the parent's
+      // program re-instantiates it on each release of the parent, so an
+      // origin of its own would be followed twice. A child in a space of its
+      // own, or one a handler made, outlives the program that made it, and is
+      // what a release has to reach.
+      const outlivesParent = crossSpace ||
+        this.#handlerResultPatterns.has(pattern);
+      const sourceOrigin = outlivesParent && !resumeExisting
         ? this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl)
         : undefined;
       const options = {
