@@ -4139,6 +4139,16 @@ export class Runner {
               nextArgument,
             );
           }
+          // No caller names a slot, so every slot the document holds is
+          // staged again with the bytes it holds, as a setup replay stages
+          // the slots its caller leaves out. A default the merge adds where
+          // the document holds nothing is no replay, and gets no record.
+          recordReplayedArgumentSlots(
+            tx,
+            argumentLink,
+            undefined,
+            previousArgument,
+          );
 
           // Stage the exact Fabric-layer representation before validating
           // it. The untyped materialization inside resolves ordinary sigil
