@@ -13322,11 +13322,14 @@ export function* prepareBoundaryCommitSteps(
     // at or beneath: they govern a value the setup initializes, and the
     // envelope that declares them is stored in place of the stored one.
     let keepsStoredSchema = false;
-    // TODO(danfuzz): Like the restatement deferral this waiver discharges,
-    // leaving out the positions beneath links and those at new fields admits
-    // more than §8.15.4 permits, and runs by default ahead of the specs
-    // ruling by Dan's decision; the marker at that deferral names the ruling
-    // both wait on.
+    // TODO(danfuzz): Leaving out the positions beneath links applies the
+    // link-position rule of commonfabric/specs pull request 52, in its
+    // sections "Claims Beneath a Link Position" and "Release". The ruling
+    // this waits on is commonfabric/specs pull request 67, which depends on
+    // 52, through the marker at the restatement deferral this waiver
+    // discharges. Like that deferral, leaving out those positions and the
+    // ones at new fields admits more than §8.15.4 permits, and runs by
+    // default ahead of the ruling by Dan's decision.
     const governsNothingHere = foreignPositions === undefined
       ? () => false
       : beneathForeignPosition(foreignPositions);
