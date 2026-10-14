@@ -95,8 +95,9 @@ the moment its turn comes.
   remote WebSocket transports for messages where compression reduces wire size.
 - `v2/query.ts` — schema-aware graph queries that follow JSON Schema references
   across documents.
-- `v2/sqlite/` — the SQLite builtin: statement execution, column provenance, and
-  the guards around it.
+- `v2/sqlite/` — the SQLite builtin: statement execution, column provenance, the
+  guards around it, and the workers that read injected on-disk sources off the
+  server's main thread.
 - `v2/patch.ts` — applying a patch operation to a document.
 - `v2/dump.ts` — read-only, crash-consistent snapshots of a space's store, for
   offline inspection.

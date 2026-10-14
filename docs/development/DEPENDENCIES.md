@@ -550,11 +550,12 @@ the runner's UNIT lane does not import `@db/sqlite`: its disk-source test
 registers an empty temp file, whose contents never matter because the write it
 asserts on is refused before any attach. The memory package also repeats that
 version in `SQLITE3_RELEASE_VERSION` in
-`packages/memory/v2/sqlite/column-origin.ts`.
+`packages/memory/v2/sqlite/native-symbols.ts`.
 
 The second pin is a native-library identity requirement, not bookkeeping.
 `@db/sqlite` derives its libsqlite3 download URL from its package version, while
-the column-origin binding derives the same URL from
+the binding of the symbols it leaves unbound (column origins and
+`sqlite3_interrupt`) derives the same URL from
 `SQLITE3_RELEASE_VERSION`. Different versions name different files. Loading
 both files creates two independent libsqlite3 images, and passing a prepared
 statement between them can crash the process.

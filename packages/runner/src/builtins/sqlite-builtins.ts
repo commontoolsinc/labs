@@ -262,6 +262,7 @@ function readDbRef(value: unknown): SqliteDbRef {
       // query execution / on-disk filename derivation.
       scope: isCellScope(ref.scope) ? ref.scope : undefined,
       owner: typeof ref.owner === "string" ? ref.owner : undefined,
+      ...(ref.external === true ? { external: true } : {}),
     };
   }
   throw new TypeError("sqlite: invalid database handle");

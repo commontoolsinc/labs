@@ -1,7 +1,7 @@
 // The two column-origin binding failures that can only be reproduced with
 // process-level permissions or cache state a fully-permitted in-process test
 // cannot set up. Each runs a helper under `deno run` and inherits
-// DENO_COVERAGE_DIR, so the helper's coverage of column-origin.ts joins the
+// DENO_COVERAGE_DIR, so the helper's coverage of native-symbols.ts joins the
 // report.
 
 import { assertEquals, assertStringIncludes } from "@std/assert";

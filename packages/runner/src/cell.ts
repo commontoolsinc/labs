@@ -2022,7 +2022,7 @@ export class CellImpl<T extends FabricValue>
     // behind a link at its target) — getRaw's default `"top"` would stop at the
     // link object and miss `id`.
     const handle = this.getRaw({ lastNode: "value" }) as
-      | { id?: unknown; tables?: unknown; scope?: unknown }
+      | { id?: unknown; tables?: unknown; scope?: unknown; external?: unknown }
       | undefined;
     if (!handle || typeof handle.id !== "string") {
       throw new TypeError(
@@ -2119,6 +2119,9 @@ export class CellImpl<T extends FabricValue>
         // commit-time re-derivation (3.c) — same handle-stamped value the
         // gate above used.
         owner,
+        // A handle naming an injected source carries its mark to the server,
+        // which refuses the write whether or not it holds a registration.
+        ...(handle.external === true ? { external: true } : {}),
       },
       sql,
       params: encodeSqliteParams(sql, params),

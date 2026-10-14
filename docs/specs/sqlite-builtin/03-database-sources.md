@@ -145,8 +145,11 @@ action detects the scheme before its normal `parseLink`):
    its `value.id`, and the server registry key are the same string); the source
    descriptor (`{ disk: { path } }`) is **server-side registration state keyed by
    `(space, id)`** (`DiskSourceRegistry`), never the cell's readable value.
-   Create-if-absent is literal: a re-link leaves a handle that already carries
-   an `id` exactly as it stands, and reports on stderr how many tables it kept.
+   The handle carries `external: true`, which marks it as naming an injected
+   source (below). Create-if-absent is literal but for that mark: a re-link
+   leaves a handle that already carries an `id` exactly as it stands, except
+   that it adds `external: true` to one that lacks it as a write of that one
+   field, and reports on stderr how many tables it kept.
    `tables[].ifc` holds the per-column read labels, which are monotone (§8.12.1)
    — re-seeding the empty contract over a declared one would lower every
    column's label, and a contract-less query returns its rows unlabeled rather
@@ -154,22 +157,43 @@ action detects the scheme before its normal `parseLink`):
    `dbOwner()` row admission), `scope`, and `rev` are preserved with it.
 2. `cf` registers the source over the session
    (`sqlite.register-disk-source` → the server canonicalizes the path and
-   rejects any path inside the engine store directory), then writes a **normal
+   rejects any path inside the engine store directory). A file store keeps its
+   registrations in `disk-sources.json` in its store directory — beside the
+   space stores, never inside one, so a space copied to another host carries no
+   host path — and reads them back after a restart, checking each path again,
+   as registration does, before its first read. A memory store keeps them in
+   memory. Then `cf` writes a **normal
    sigil link** from the piece's `db` input field to the handle cell
    (`manager.link`). Because the id is deterministic, this is a genuine
    cell-to-cell link, and linking the same path twice resolves to the same
    handle, so multiple pieces share one handle cell.
+
+`cf` registers the source before it writes the handle, so a query the handle
+write re-issues finds the registration in place, and a registration that fails
+leaves the handle as it was.
 
 **Pending-until-connected** falls out of reactivity: an unpopulated `db` input
 is an empty cell, so `sqliteQuery` reports `pending: true`; when `cf` writes the
 link, the input cell changes, the query action re-runs, and it connects. (A
 populated-but-unreachable database surfaces `error` instead.)
 
-v1 behavior: the server attaches the registered file **read-only** (PRAGMA
-`query_only` for the synchronous attach→op→detach window) instead of the
-cell-derived db, and **skips migration** (the on-disk db owns its schema).
-**Writes are rejected:** a folded `sqlite` op against a registered injected
-source is refused before any attach — on-disk write/atomicity is gated on
+**Unavailable is not empty.** A read of a handle marked `external` that the
+server has no registration for, or whose registered file is missing or cannot
+be opened, fails with an error named `SqliteSourceUnavailable`. It never falls
+back to a cell-derived database, which for a never-written id would read as
+`[]` — the answer an empty store gives. A handle without the mark keeps that
+fallback. An unavailable result is an answer like any other: it settles under
+its request hash and stays until an input of the query changes.
+
+v1 behavior: the server reads the registered file instead of the cell-derived
+db, on a **read-only** connection of a read worker, off the toolshed's main
+thread (Section
+[04](./04-server-execution-and-transactions.md#which-thread-runs-a-read)), and
+**skips migration** (the on-disk db owns its schema).
+**Writes are rejected:** a folded `sqlite` op against a handle marked
+`external`, or against a registered injected source, is refused before any
+attach, whether or not the server holds a registration for it at the time —
+on-disk write/atomicity is gated on
 co-location (Q13/Q14), and `reactOn` for injected handles carries a cross-space
 dirty-signal wrinkle (Q12). Injected datasets are read-mostly, so this does not
 block v1. Authorization of the registration verb (operator vs. pattern) and

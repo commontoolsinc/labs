@@ -4,5 +4,5 @@
  * falls through to the release. Exercises readEnv's catch under real denial.
  */
 
-import { librarySource } from "../../v2/sqlite/column-origin.ts";
+import { librarySource } from "../../v2/sqlite/native-symbols.ts";
 console.log(JSON.stringify(librarySource()));

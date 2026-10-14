@@ -5,6 +5,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   deriveDiskHandleId,
   diskHandleSeed,
+  needsExternalMark,
   parseSqliteSource,
 } from "../lib/sqlite-source.ts";
 
@@ -56,7 +57,12 @@ Deno.test("deriveDiskHandleId differs by space", () => {
 const ID = "fid1:handle";
 
 Deno.test("diskHandleSeed seeds an empty contract on a first link", () => {
-  assertEquals(diskHandleSeed(ID, undefined), { id: ID, tables: {}, rev: 0 });
+  assertEquals(diskHandleSeed(ID, undefined), {
+    id: ID,
+    tables: {},
+    rev: 0,
+    external: true,
+  });
 });
 
 Deno.test("diskHandleSeed leaves a declared contract alone on a re-link", () => {
@@ -105,6 +111,7 @@ Deno.test("diskHandleSeed repairs a handle whose id is an empty string", () => {
     id: ID,
     tables: {},
     rev: 0,
+    external: true,
   });
 });
 
@@ -129,7 +136,7 @@ Deno.test("diskHandleSeed repairs an id that names a different source, carrying 
       scope: "user",
       rev: 7,
     }),
-    { id: ID, tables: declared, rev: 0 },
+    { id: ID, tables: declared, rev: 0, external: true },
   );
 });
 
@@ -155,6 +162,7 @@ Deno.test("diskHandleSeed keeps every field of a handle that lost its id", () =>
       owner: "did:key:z6MkOwner",
       scope: "user",
       rev: 7,
+      external: true,
     },
   );
 });
@@ -178,6 +186,18 @@ Deno.test("diskHandleSeed drops a malformed contract when it repairs", () => {
   // write back a value no query-side load can read.
   assertEquals(
     diskHandleSeed(ID, { id: "", tables: "not-a-contract" as never }),
-    { id: ID, tables: {}, rev: 0 },
+    { id: ID, tables: {}, rev: 0, external: true },
+  );
+});
+
+Deno.test("needsExternalMark is true only for a committed handle without the mark", () => {
+  // A link adds the mark to a handle committed before handles carried it, and
+  // to nothing else: no handle yet is seeded with it, and a marked handle is
+  // left as it stands.
+  assertEquals(needsExternalMark(undefined), false);
+  assertEquals(needsExternalMark({ id: ID, tables: {}, rev: 3 }), true);
+  assertEquals(
+    needsExternalMark({ id: ID, tables: {}, rev: 3, external: true }),
+    false,
   );
 });

@@ -9222,6 +9222,28 @@ describe("runtime-processor", () => {
       ]]);
     });
 
+    it("carries an injected handle's external mark to its storage provider", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-injected", tables: {}, external: true },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [] });
+        },
+      );
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      });
+      expect(calls[0]?.[0]).toEqual({
+        id: "db-injected",
+        tables: {},
+        external: true,
+      });
+    });
+
     it("waits for a scoped database factory commit before loading its handle", async () => {
       const calls: string[] = [];
       const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
@@ -9459,6 +9481,19 @@ describe("runtime-processor", () => {
         cell: ref,
         sql: "SELECT 1",
       })).rejects.toThrow("valid SqliteDb cell handle");
+    });
+
+    it("rejects a database reference whose external mark is not a boolean", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: {}, external: "yes" },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database external mark.");
     });
 
     it("rejects a database reference with an unknown scope", async () => {

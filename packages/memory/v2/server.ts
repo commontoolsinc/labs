@@ -212,8 +212,12 @@ import {
 } from "./sqlite/exec.ts";
 import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
+import { ReadWorkerPool } from "./sqlite/read-worker-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
-import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import {
+  resolveSpaceStoreDirUrl,
+  resolveSpaceStoreUrl,
+} from "./storage-path.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 import {
@@ -729,6 +733,27 @@ function hashToken(s: string): string {
   return `${(h >>> 0).toString(16).padStart(8, "0")}${s.length.toString(16)}`;
 }
 
+/**
+ * Returns the key the server's per-process bookkeeping uses for the injected
+ * source `id` in `space`.
+ */
+function diskSourceKey(space: string, id: string): string {
+  return `${space}\x00${id}`;
+}
+
+/**
+ * Returns the error a read of an injected source fails with when the source
+ * cannot be read, for the given `reason`. Its name, `SqliteSourceUnavailable`,
+ * is what tells a caller the source is missing rather than empty.
+ */
+function sqliteSourceUnavailable(reason: string): Error {
+  const error = new Error(
+    `sqlite: the database source is unavailable: ${reason}`,
+  );
+  error.name = "SqliteSourceUnavailable";
+  return error;
+}
+
 /** Extract the table name from a SQLite "no such table: <name>" error, or
  *  undefined if the error is not that shape. SQLite reports the *unquoted* name,
  *  which may itself contain spaces or dots (e.g. `CREATE TABLE "my notes"`), so
@@ -1096,6 +1121,9 @@ class Connection {
 
   #pendingReceives = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
+
+  /** Aborted when the connection closes, cancelling its SQLite reads. */
+  #closing = new AbortController();
 
   /**
    * The request ids a response has gone out for, each kept until its frame's
@@ -1982,7 +2010,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.#server.sqliteQuery(parsed);
+          const response = await this.#server.sqliteQuery(parsed, {
+            signal: this.#closing.signal,
+            requester: this.id,
+          });
           this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2245,6 +2276,7 @@ class Connection {
       return;
     }
     this.#closed = true;
+    this.#closing.abort(new Error("the memory connection closed"));
     for (const timer of this.#routedExpiries.values()) clearTimeout(timer);
     this.#routedExpiries.clear();
     this.#principals.clear();
@@ -2463,18 +2495,35 @@ export class Server {
 
   /**
    * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
-   * is attached read-only from its descriptor path instead of the cell-derived
-   * per-(space, id) file. In-memory only: a registration does not survive a
-   * restart.
+   * is read from its descriptor path, read-only and on a read worker, instead
+   * of the cell-derived per-(space, id) file. Kept in `disk-sources.json` in
+   * the store directory of a file store, so a registration survives a restart.
    */
-  #diskSources = new DiskSourceRegistry();
+  #diskSources: DiskSourceRegistry;
 
   /**
-   * Pooled read-only connections (keyed by canonical file path) for SQLite
-   * reads — injected on-disk sources and cell-derived dbs alike run here,
-   * unattached, instead of attach/detach-per-op on the engine connection.
+   * The path to read each injected source at, by `(space, id)` key, once this
+   * process has checked it as registration checks a path. A registration read
+   * back after a restart is checked again before its first read, since the
+   * file system may have moved on; the check's result stays here and is never
+   * written back to the registry.
+   */
+  #checkedDiskSourcePaths = new Map<string, string>();
+
+  /**
+   * Pooled read-only connections (keyed by canonical file path) for reads of
+   * cell-derived dbs, unattached, on this thread, which also writes those
+   * files (sqlite-builtin spec 04, "Which thread runs a read").
    */
   #readPool = new ReadConnectionPool();
+
+  /**
+   * Workers that read injected on-disk sources off this thread (sqlite-builtin
+   * spec 04, "Which thread runs a read"). `registerDiskSource` refuses the
+   * engine's own files, so none of these is a file this thread writes. Once a
+   * worker has started it keeps the process alive until `close()`.
+   */
+  #readWorkers = new ReadWorkerPool();
 
   /**
    * Schemas already created on the write path, keyed by `(space, id, schema)`.
@@ -2640,6 +2689,15 @@ export class Server {
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#diskSources = new DiskSourceRegistry(
+      undefined,
+      options.store?.protocol === "file:"
+        ? Path.join(
+          Path.fromFileUrl(resolveSpaceStoreDirUrl(options.store)),
+          "disk-sources.json",
+        )
+        : undefined,
+    );
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
     // Every document-cache bound is checked here, where it is configured,
@@ -3726,6 +3784,7 @@ export class Server {
     this.#resolvedEngines.clear();
     this.#connections.clear();
     this.#readPool.close();
+    await this.#readWorkers.close();
   }
 
   /**
@@ -3870,8 +3929,9 @@ export class Server {
 
   /**
    * Read a cell-derived database on a pooled read-only connection — unattached,
-   * like injected on-disk sources. (Writes still ATTACH to the engine connection
-   * in `#attachCommitSqliteDbs` for commit atomicity.)
+   * and on this thread, which writes the same file (see `#readPool`). (Writes
+   * still ATTACH to the engine connection in `#attachCommitSqliteDbs` for
+   * commit atomicity.)
    *
    * A cell-db file is created lazily by the first WRITE (its ATTACH), and that
    * write's `ensureTables` creates the declared tables. So a read can find:
@@ -3954,6 +4014,31 @@ export class Server {
     path: string,
     beforeRegister?: (engine: Engine.Engine) => void,
   ): Promise<void> {
+    const engine = await this.#openEngine(space);
+    const canonical = await this.#checkDiskSourcePath(engine, path);
+    // The RPC path uses this synchronous hook to re-authorize beside the
+    // registry mutation after the filesystem awaits above. Direct internal
+    // callers do not need to provide it.
+    beforeRegister?.(engine);
+    this.#diskSources.register(space, id, { path: canonical });
+    this.#checkedDiskSourcePaths.set(diskSourceKey(space, id), canonical);
+  }
+
+  /**
+   * Returns the canonical form of `path` if it may be registered as an
+   * injected source in `engine`'s space, and throws a `ProtocolError` saying
+   * why when it may not.
+   *
+   * The path arrives over the wire (untrusted): it must be absolute and must
+   * exist, and is `realpath`-canonicalized and then rejected if it resolves
+   * INSIDE the engine's store directory OR names an internal cell-db file —
+   * otherwise a caller could point a handle at another space's (or a
+   * cell-derived) `.sqlite` file and read it cross-tenant.
+   */
+  async #checkDiskSourcePath(
+    engine: Engine.Engine,
+    path: string,
+  ): Promise<string> {
     if (!Path.isAbsolute(path)) {
       throw new Engine.ProtocolError(
         `disk source path must be absolute: ${path}`,
@@ -3965,7 +4050,6 @@ export class Server {
     } catch {
       throw new Engine.ProtocolError(`disk source path not found: ${path}`);
     }
-    const engine = await this.#openEngine(space);
     if (engine.url.protocol === "file:") {
       // Canonicalize the store dir too (not just the source path): `canonical`
       // is realpath-resolved, so comparing it against a NON-canonical storeDir
@@ -3996,11 +4080,44 @@ export class Server {
         "disk source path may not be an internal cell-db file",
       );
     }
-    // The RPC path uses this synchronous hook to re-authorize beside the
-    // registry mutation after the filesystem awaits above. Direct internal
-    // callers do not need to provide it.
-    beforeRegister?.(engine);
-    this.#diskSources.register(space, id, { path: canonical });
+    return canonical;
+  }
+
+  /**
+   * Returns the path to read the injected source registered for `(space,
+   * id)`, checking a registration this process has not checked yet — one read
+   * back after a restart — as registration checks a path. Throws a
+   * `SqliteSourceUnavailable` error for a source that is not registered, that
+   * no longer passes, or whose registry cannot be read.
+   */
+  async #diskSourcePath(space: string, id: string): Promise<string> {
+    const key = diskSourceKey(space, id);
+    const checked = this.#checkedDiskSourcePaths.get(key);
+    if (checked !== undefined) return checked;
+    let disk: { path: string } | undefined;
+    try {
+      disk = this.#diskSources.get(space, id);
+    } catch {
+      throw sqliteSourceUnavailable("the server cannot read its registrations");
+    }
+    if (disk === undefined) {
+      throw sqliteSourceUnavailable("it is not registered on this server");
+    }
+    let canonical: string;
+    try {
+      canonical = await this.#checkDiskSourcePath(
+        await this.#openEngine(space),
+        disk.path,
+      );
+    } catch {
+      throw sqliteSourceUnavailable("its registered file cannot be read");
+    }
+    // A registration made while the check ran has been checked by
+    // registration itself, and wins.
+    if (!this.#checkedDiskSourcePaths.has(key)) {
+      this.#checkedDiskSourcePaths.set(key, canonical);
+    }
+    return this.#checkedDiskSourcePaths.get(key) ?? canonical;
   }
 
   /**
@@ -4114,8 +4231,10 @@ export class Server {
         throw new Engine.ProtocolError("sqlite db declares too many tables");
       }
       // Phase 7: injected on-disk sources are read-only in v1 — a folded write to
-      // one is rejected before it can join the commit (Q13/Q14).
-      if (this.#diskSources.has(space, id)) {
+      // one is rejected before it can join the commit (Q13/Q14). A handle marked
+      // external is refused whether or not it is registered, so the refusal
+      // rides on the handle rather than on what the server remembers.
+      if (op.db.external === true || this.#diskSources.has(space, id)) {
         throw new Engine.ProtocolError(
           "injected on-disk SQLite sources are read-only in v1 (db.exec rejected)",
         );
@@ -4578,8 +4697,15 @@ export class Server {
     return invalid === null ? { commit } : { refused: invalid.message };
   }
 
+  /**
+   * Runs the guarded read-only query `message` and returns its rows, or the
+   * error it failed with. A read of an injected on-disk source runs on a read
+   * worker: `signal` cancels it, and reads naming the same `requester` share
+   * that requester's allowance of workers.
+   */
   async sqliteQuery(
     message: SqliteQueryRequest,
+    { signal, requester }: { signal?: AbortSignal; requester?: string } = {},
   ): Promise<ResponseMessage<SqliteQueryWireResult>> {
     const queryParams = message.namedParams === undefined
       ? message.params
@@ -4634,16 +4760,16 @@ export class Server {
     }
     try {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
-      // real read-only, each file its own `main` namespace). The only
-      // per-source difference is path resolution: an injected on-disk source's
-      // registered path, else the cell-derived path (which the db's scope
+      // real read-only, each file its own `main` namespace). An injected
+      // on-disk source is read at its registered path on a read worker; a
+      // cell-derived db at its cell-derived path (which the db's scope
       // qualifies using the carried reader, or the session principal / id
-      // when no reader is carried).
+      // when no reader is carried) on this thread, which also writes it.
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
       // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located
-      // by TRUE origin, never output name). Unlabeled dbs — the common case,
-      // and all injected on-disk sources — pay nothing.
+      // by TRUE origin, never output name). Unlabeled dbs — the common case —
+      // pay nothing.
       const wantColumns = dbNeedsColumnProvenance(message.db.tables);
       // Bind @db/sqlite's column-origin symbols before a labeled read; fail
       // loudly if they can't be bound rather than mislabeling the result.
@@ -4659,17 +4785,18 @@ export class Server {
             "@db/sqlite's column-origin symbols could not be bound",
         );
       }
-      const disk = this.#diskSources.get(message.space, message.db.id);
-      const result = disk
-        ? (wantColumns
-          ? this.#readPool.queryWithOrigins(
-            disk.path,
-            message.sql,
-            queryParams,
-          )
-          : {
-            rows: this.#readPool.query(disk.path, message.sql, queryParams),
-          })
+      // A handle marked external names a source outside the store: with no
+      // registration it fails as unavailable rather than falling back to a
+      // cell-derived database that would read as empty.
+      const injected = message.db.external === true ||
+        this.#diskSources.has(message.space, message.db.id);
+      const result = injected
+        ? await this.#readWorkers.query(
+          await this.#diskSourcePath(message.space, message.db.id),
+          message.sql,
+          queryParams,
+          { labeled: wantColumns, signal, requester },
+        )
         : await this.#readCellDb(
           message.space,
           message.db,
@@ -4734,8 +4861,9 @@ export class Server {
   /**
    * Register an injected on-disk SQLite source (Phase 7, read-only v1). `cf piece
    * link <piece> <field> sqlite:<absPath>` issues this so subsequent reads for the
-   * handle id resolve against the on-disk file (attached read-only) instead of the
-   * cell-derived db. The descriptor is server-side state — never the cell value.
+   * handle id resolve against the on-disk file (read-only, on a read worker)
+   * instead of the cell-derived db. The descriptor is server-side state —
+   * never the cell value.
    */
   async sqliteRegisterDiskSource(
     message: SqliteRegisterDiskSourceRequest,
@@ -10222,6 +10350,8 @@ export const parseClientMessage = (
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
       parsed.db.scope === "user" || parsed.db.scope === "session") &&
+    (parsed.db.external === undefined ||
+      typeof parsed.db.external === "boolean") &&
     !(parsed.params !== undefined && parsed.namedParams !== undefined) &&
     (parsed.namedParams === undefined ||
       isSqliteNamedParamEntries(parsed.namedParams))
@@ -10232,6 +10362,7 @@ export const parseClientMessage = (
         ? parsed.db.tables
         : undefined,
       scope: parsed.db.scope as CellScope | undefined,
+      ...(parsed.db.external === true ? { external: true } : {}),
     };
     const params = isSqliteNamedParamEntries(parsed.namedParams)
       ? Object.fromEntries(parsed.namedParams)

@@ -18,7 +18,12 @@ import { ReadConnectionPool } from "../v2/sqlite/read-pool.ts";
 import { DiskSourceRegistry } from "../v2/sqlite/disk-source.ts";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
-import type { SqliteDbRef } from "../v2.ts";
+import type {
+  ResponseMessage,
+  SqliteDbRef,
+  SqliteQueryRequest,
+  SqliteQueryWireResult,
+} from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
@@ -98,6 +103,70 @@ describe("DiskSourceRegistry", () => {
     expect(() => reg.register(SPACE_A, "of:1", { path: "/a/1b.db" })).not
       .toThrow();
     expect(reg.get(SPACE_A, "of:1")).toEqual({ path: "/a/1b.db" });
+  });
+
+  describe("with a file", () => {
+    let dir: string;
+
+    beforeEach(() => {
+      dir = Deno.makeTempDirSync();
+    });
+
+    afterEach(() => {
+      Deno.removeSync(dir, { recursive: true });
+    });
+
+    it("returns a registration another registry made with the same file", () => {
+      const file = `${dir}/store/disk-sources.json`;
+      new DiskSourceRegistry(4096, file).register(SPACE_A, "of:x", {
+        path: "/abs/x.db",
+      });
+      const restarted = new DiskSourceRegistry(4096, file);
+      expect(restarted.get(SPACE_A, "of:x")).toEqual({ path: "/abs/x.db" });
+      expect(restarted.has(SPACE_B, "of:x")).toBe(false);
+    });
+
+    it("holds no registrations while the file does not exist", () => {
+      const reg = new DiskSourceRegistry(4096, `${dir}/disk-sources.json`);
+      expect(reg.has(SPACE_A, "of:x")).toBe(false);
+    });
+
+    it("refuses reads and registrations, and reports nothing registered, when the file does not hold a list of registrations", () => {
+      const file = `${dir}/disk-sources.json`;
+      Deno.writeTextFileSync(file, JSON.stringify([{ space: SPACE_A }]));
+      const reg = new DiskSourceRegistry(4096, file);
+      const logged = silenceConsoleError();
+      try {
+        expect(reg.has(SPACE_A, "of:x")).toBe(false);
+        expect(() => reg.get(SPACE_A, "of:x")).toThrow("cannot be read");
+        expect(() => reg.register(SPACE_A, "of:x", { path: "/abs/x.db" }))
+          .toThrow("cannot be read");
+        expect(logged.length).toBe(1);
+      } finally {
+        logged.restore();
+      }
+      // The file is left as it was for an operator to repair.
+      expect(JSON.parse(Deno.readTextFileSync(file))).toEqual([
+        { space: SPACE_A },
+      ]);
+    });
+
+    it("takes a registration effect only once its file is written", () => {
+      // A directory where the write's temporary file belongs makes the write
+      // fail for any user, root included, while the registry reads as empty.
+      const file = `${dir}/disk-sources.json`;
+      Deno.mkdirSync(`${file}.partial`);
+      const reg = new DiskSourceRegistry(4096, file);
+      expect(() => reg.register(SPACE_A, "of:x", { path: "/abs/x.db" }))
+        .toThrow();
+      expect(reg.has(SPACE_A, "of:x")).toBe(false);
+
+      Deno.removeSync(`${file}.partial`);
+      reg.register(SPACE_A, "of:x", { path: "/abs/x.db" });
+      expect(new DiskSourceRegistry(4096, file).get(SPACE_A, "of:x")).toEqual({
+        path: "/abs/x.db",
+      });
+    });
   });
 });
 
@@ -199,3 +268,295 @@ describe("server attaches a registered on-disk source (read-only v1)", () => {
     expect(r.rows).toEqual([]);
   });
 });
+
+/** What the first `sqliteQuery()` an {@link ObservedServer} ran was handed. */
+type ObservedQuery = {
+  /** The signal the connection passed with the read. */
+  signal: AbortSignal | undefined;
+
+  /** The response the server returned for the read. */
+  response: Promise<ResponseMessage<SqliteQueryWireResult>>;
+};
+
+/** A `Server` that reports the first `sqliteQuery()` it runs. */
+class ObservedServer extends Server {
+  firstQuery = Promise.withResolvers<ObservedQuery>();
+
+  override sqliteQuery(
+    message: SqliteQueryRequest,
+    options: { signal?: AbortSignal; requester?: string } = {},
+  ): Promise<ResponseMessage<SqliteQueryWireResult>> {
+    const response = super.sqliteQuery(message, options);
+    this.firstQuery.resolve({ signal: options.signal, response });
+    return response;
+  }
+}
+
+describe("server reads an injected source off its event loop", () => {
+  // The read here counts to fifty million in a recursive CTE, seconds of CPU
+  // against the milliseconds the other client's request takes, and the
+  // reading connection is closed once the other request has been answered.
+  // Every assertion that turns on the read still running is made after
+  // `firstQuery` reports that the server has begun it.
+
+  const LONG_READ =
+    "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c " +
+    "LIMIT 50000000) SELECT count(*) AS n FROM c";
+
+  let server: ObservedServer;
+  let client: Awaited<ReturnType<typeof connect>>;
+  let diskPath: string;
+  let handleId: string;
+
+  beforeEach(() => {
+    diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+    seedDiskDb(diskPath);
+    handleId = `of:disk-${crypto.randomUUID()}`;
+    server = new ObservedServer({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://sqlite-disk-source-off-loop-test"),
+    });
+  });
+
+  afterEach(async () => {
+    await client.close();
+    await server.close();
+    Deno.removeSync(diskPath);
+  });
+
+  it("answers another client while it reads an injected source", async () => {
+    client = await connect({ transport: loopback(server) });
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    await session.registerSqliteDiskSource(handleId, diskPath);
+    const other = await connect({ transport: loopback(server) });
+    try {
+      const otherSession = await other.mount(
+        "did:key:z6Mk-sqlite-disk-source-test-other",
+        {},
+        testSessionOpenAuthFactory,
+      );
+
+      let readSettled = false;
+      const readEnded = session.sqliteQuery({ id: handleId }, LONG_READ)
+        .then(() => "returned", () => "threw")
+        .finally(() => readSettled = true);
+      await server.firstQuery.promise;
+      const answer = await otherSession.sqliteQuery(
+        { id: "of:never-written" },
+        "SELECT 1 AS one",
+      );
+      expect(answer.rows).toEqual([]);
+      expect(readSettled).toBe(false);
+
+      await client.close();
+      expect(await readEnded).toBe("threw");
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("cancels the read when the reading connection closes", async () => {
+    client = await connect({ transport: loopback(server) });
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    await session.registerSqliteDiskSource(handleId, diskPath);
+    const readEnded = session.sqliteQuery({ id: handleId }, LONG_READ)
+      .then(() => "returned", () => "threw");
+    const { signal, response } = await server.firstQuery.promise;
+
+    await client.close();
+    expect(signal?.aborted).toBe(true);
+    const answered = await response;
+    expect(answered.ok).toBeUndefined();
+    expect(answered.error?.name).toBe("AbortError");
+    expect(await readEnded).toBe("threw");
+  });
+});
+
+describe("server keeps an injected source's state across a restart", () => {
+  // A file store keeps its registrations in the store directory, so a second
+  // server over the same store reads them back. A handle marked `external`
+  // names an injected source: a read with no registration behind it fails as
+  // unavailable, and a write to it is refused, registered or not.
+
+  let storeDir: string;
+  let diskPath: string;
+  let handleId: string;
+  const servers: Server[] = [];
+  const clients: Awaited<ReturnType<typeof connect>>[] = [];
+
+  /** Starts a server over the shared file store and mounts `SPACE` on it. */
+  async function start(store = new URL(`file://${storeDir}/`)) {
+    const server = new Server({ ...testSessionOpenServerOptions, store });
+    servers.push(server);
+    const client = await connect({ transport: loopback(server) });
+    clients.push(client);
+    return {
+      server,
+      session: await client.mount(SPACE, {}, testSessionOpenAuthFactory),
+    };
+  }
+
+  /** Closes every client and server `start()` opened. */
+  async function stopAll() {
+    for (const client of clients.splice(0)) await client.close();
+    for (const server of servers.splice(0)) await server.close();
+  }
+
+  beforeEach(() => {
+    storeDir = Deno.makeTempDirSync();
+    diskPath = Deno.makeTempFileSync({ suffix: ".sqlite" });
+    seedDiskDb(diskPath);
+    handleId = `of:disk-${crypto.randomUUID()}`;
+  });
+
+  afterEach(async () => {
+    await stopAll();
+    Deno.removeSync(storeDir, { recursive: true });
+    try {
+      Deno.removeSync(diskPath);
+    } catch { /* a case removed it */ }
+  });
+
+  it("reads a registered source after a restart without registering it again", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+
+    const { session } = await start();
+    const { rows } = await session.sqliteQuery(
+      { id: handleId, external: true },
+      "SELECT v FROM lookup ORDER BY k",
+    );
+    expect(rows).toEqual([{ v: "1" }, { v: "2" }]);
+  });
+
+  it("fails a read of a handle marked external that has no registration", async () => {
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("returns no rows for an unmarked handle whose cell-derived database was never written", async () => {
+    const { session } = await start();
+    const { rows } = await session.sqliteQuery({ id: handleId }, "SELECT 1");
+    expect(rows).toEqual([]);
+  });
+
+  it("fails a read of a registered source whose file is gone after a restart", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+    Deno.removeSync(diskPath);
+
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("refuses a write to a handle marked external, registered or not", async () => {
+    const { session } = await start();
+    await expect(
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "sqlite",
+          db: { id: handleId, external: true },
+          sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+        }],
+      }),
+    ).rejects.toThrow("read-only");
+  });
+
+  it("fails a read of a restored registration whose path now resolves inside the store directory", async () => {
+    // A registration read back after a restart is checked again, as
+    // registration checks a path, before its first read: a registry entry that
+    // names one of the store's own files is refused rather than opened.
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+    const engineDir = `${storeDir}/engine-v3`;
+    const storeFile = [...Deno.readDirSync(engineDir)]
+      .find((entry) => entry.name.endsWith(".sqlite"))?.name;
+    expect(storeFile).toBeDefined();
+    Deno.writeTextFileSync(
+      `${engineDir}/disk-sources.json`,
+      JSON.stringify([
+        { space: SPACE, id: handleId, path: `${engineDir}/${storeFile}` },
+      ]),
+    );
+
+    const { session } = await start();
+    const error = await rejectionOf(
+      session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+    );
+    expect(error.name).toBe("SqliteSourceUnavailable");
+  });
+
+  it("keeps cell-derived databases working when the registry cannot be read", async () => {
+    Deno.mkdirSync(`${storeDir}/engine-v3`, { recursive: true });
+    Deno.writeTextFileSync(`${storeDir}/engine-v3/disk-sources.json`, "{");
+    const logged = silenceConsoleError();
+    try {
+      const { session } = await start();
+      const cellDerived = await session.sqliteQuery(
+        { id: `of:cell-${crypto.randomUUID()}` },
+        "SELECT 1",
+      );
+      expect(cellDerived.rows).toEqual([]);
+      const error = await rejectionOf(
+        session.sqliteQuery({ id: handleId, external: true }, "SELECT 1"),
+      );
+      expect(error.name).toBe("SqliteSourceUnavailable");
+      expect(error.message).not.toContain(storeDir);
+    } finally {
+      logged.restore();
+    }
+  });
+
+  it("refuses a write to a registered source after a restart", async () => {
+    const first = await start();
+    await first.session.registerSqliteDiskSource(handleId, diskPath);
+    await stopAll();
+
+    const { session } = await start();
+    await expect(
+      session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "sqlite",
+          db: { id: handleId },
+          sql: "INSERT INTO lookup (k, v) VALUES ('c', '3')",
+        }],
+      }),
+    ).rejects.toThrow("read-only");
+  });
+});
+
+/** The error `promise` rejects with; fails the case when it resolves. */
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    if (error instanceof Error) return error;
+    throw new Error(`rejected with a non-error: ${String(error)}`);
+  }
+  throw new Error("resolved, where a rejection was expected");
+}
+
+/**
+ * Collects what `console.error` is given until `restore()` is called, so a
+ * case that expects the registry to report an unreadable file keeps the report
+ * out of the test output.
+ */
+function silenceConsoleError(): unknown[][] & { restore(): void } {
+  const original = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => logged.push(args);
+  return Object.assign(logged, { restore: () => console.error = original });
+}

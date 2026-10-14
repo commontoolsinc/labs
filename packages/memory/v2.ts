@@ -1833,8 +1833,10 @@ export type SqliteParamsWire =
  * the Fabric object codec. Mutually exclusive with `params` on a query. */
 export type SqliteNamedParamsWire = Array<[string, FabricValue]>;
 
-/** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
- *  entity id) plus the declared table schemas (for additive create/migrate).
+/** Reference to a SQLite database: an opaque id (the handle cell's entity id)
+ *  plus the declared table schemas (for additive create/migrate). The id names
+ *  a cell-derived database, or, for a handle marked `external`, an injected
+ *  source the server resolves through its registration.
  *
  *  `scope` is the SqliteDb cell's declared scope (space/user/session). The
  *  server folds it (with the request's principal / session id) into the on-disk
@@ -1849,6 +1851,14 @@ export type SqliteDbRef = {
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
+
+  /**
+   * Whether the handle names an injected source outside the store (§03.3):
+   * such a handle has no cell-derived database behind it, so a read of one the
+   * server has no registration for fails with `SqliteSourceUnavailable` and a
+   * write to it is refused. Names no file; the server's registration does.
+   */
+  external?: boolean;
 };
 
 /** Whether `value` is a SQLite db handle. The `id` is the whole of the test:
