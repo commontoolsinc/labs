@@ -539,6 +539,29 @@ describe("link-utils", () => {
       ).toBe(false);
     });
 
+    it("returns `false` where a link inside each value names a cell relative to a document in another space", () => {
+      // The link names its cell without a space, so it names a cell in the
+      // space of whichever document holds it.
+      const relative = {
+        ref: { "/": { [LINK_V1_TAG]: { id: "of:t", path: [] } } },
+      };
+      const inSpace = (inner: string) => ({
+        "/": {
+          [LINK_V1_TAG]: {
+            id: dataUriFromValue(relative),
+            space: inner,
+            scope: "space",
+            path: [],
+          },
+        },
+      });
+
+      expect(resolved(inSpace(space), inSpace(space))).toBe(true);
+      expect(resolved(inSpace(space), into({ entry: relative }, ["entry"])))
+        .toBe(true);
+      expect(resolved(inSpace(space), inSpace(otherSpace))).toBe(false);
+    });
+
     it("returns `false` for a position in a `data:` document and a stored cell holding the same value", () => {
       const stored = runtime.getCell(space, "stored-row", undefined, tx);
       stored.setRaw(row);

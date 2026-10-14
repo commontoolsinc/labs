@@ -254,20 +254,36 @@ function dataUriLinksCarrySameValue(
   }
   const value1 = tx.readValueOrThrow(link1);
   if (value1 === undefined) return false;
-  return carriedValuesEqual(value1, tx.readValueOrThrow(link2));
+  return carriedValuesEqual(
+    value1,
+    tx.readValueOrThrow(link2),
+    { ...link1, path: [] },
+    { ...link2, path: [] },
+  );
 }
 
 /**
  * Helper for `dataUriLinksCarrySameValue()`, which compares two values read
- * out of `data:` documents. Two links are equal when they name the same cell,
- * whatever schema each carries: the schema is how the cell is read, and one
- * link is written with it as a reference and inline at different points on
- * its way through the runtime. Everything else is compared by content.
+ * out of the `data:` documents `base1` and `base2` name. Two links are equal
+ * when they name the same cell, whatever schema each carries: the schema is
+ * how the cell is read, and one link is written with it as a reference and
+ * inline at different points on its way through the runtime. A link written
+ * without its space or its id names a cell relative to the document holding
+ * it, and is read against that document. Everything else is compared by
+ * content.
  */
-function carriedValuesEqual(a: unknown, b: unknown): boolean {
+function carriedValuesEqual(
+  a: unknown,
+  b: unknown,
+  base1: NormalizedFullLink,
+  base2: NormalizedFullLink,
+): boolean {
   if (isPrimitiveCellLink(a) || isPrimitiveCellLink(b)) {
     return isPrimitiveCellLink(a) && isPrimitiveCellLink(b) &&
-      areNormalizedLinksSame(parseLinkPrimitive(a), parseLinkPrimitive(b));
+      areNormalizedLinksSame(
+        parseLinkPrimitive(a, base1),
+        parseLinkPrimitive(b, base2),
+      );
   }
   if (!isKeyableObjectOrArray(a) || !isKeyableObjectOrArray(b)) {
     return fabricAwareEqual(a, b);
@@ -280,7 +296,8 @@ function carriedValuesEqual(a: unknown, b: unknown): boolean {
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length &&
     keys.every((key) =>
-      Object.hasOwn(b, key) && carriedValuesEqual(a[key], b[key])
+      Object.hasOwn(b, key) &&
+      carriedValuesEqual(a[key], b[key], base1, base2)
     );
 }
 

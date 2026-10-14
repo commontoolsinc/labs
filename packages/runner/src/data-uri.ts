@@ -378,10 +378,13 @@ function inlineDataUriLinks(
     // it back _untransformed_ -- the link surviving as a link, the walk's
     // purpose defeated for everything inside the wrapper.
     //
-    // Nothing reaches this today, de facto rather than by construction. A link
-    // ends up inside an error only if an author attaches a cell to one, which
-    // `fabricFromConvertibleJsValue()` would then convert, and nothing in the
-    // tree does that; the whole suite runs green with this throw in place.
+    // Two arrivals reach this: an instance handed over, and, where a caller
+    // asks with `refuseCarried`, one inside the value a `data:` link carries,
+    // such as an immutable cell holding a `FabricError` sent in an event.
+    // Nothing in the tree does either today, de facto rather than by
+    // construction. A `FabricError` is exposed to pattern authors, but
+    // nothing attaches a cell to one or sends one in an event; the whole
+    // suite runs green with this throw in place.
     //
     // It cannot be narrowed to instances that actually carry such a link, which
     // is the shape that would sound safer: deciding that means reading the

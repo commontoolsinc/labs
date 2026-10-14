@@ -187,10 +187,12 @@ positions inside `data:` documents to be the same when they hold the same
 value. Inside those values a link is the same as another naming the same
 cell, whatever schema each carries, because a link is written with its schema
 as a reference at one point and inline at another on its way through the
-runtime. A position that holds nothing is the same as nothing, and a position
-inside a `data:` document is never the same as a cell stored in a space,
-whatever the two hold. Without resolution, as `equalLinks()` compares, two
-links are the same only when their addresses are.
+runtime, and a link written without its space or its id is read against
+the document holding it. A position holding no value matches no other
+position, empty or not, and a position inside a `data:` document is never the
+same as a cell stored in a space, whatever the two hold. Without resolution,
+as `equalLinks()` compares, two links are the same only when their addresses
+are.
 
 ### Where the walk stops
 
