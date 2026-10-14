@@ -10972,12 +10972,12 @@ const verifyWriteFloor = function* (
             trust,
           )
         ) {
-          // Untagged, as the concrete branch's failure below is, so the
-          // refusal is retried rather than final. A later revision of the
-          // source can store the atom, and this pass reads the source's
-          // stored labels without the run depending on them: a verdict would
-          // end the retries with nothing left to run the writer again
-          // (cfc/verdict-reason.ts).
+          // Untagged, as the concrete branch's failure below is. The floor
+          // cannot tell a source that lacks the atom from one this
+          // transaction does not hold, since either reaches it as a label
+          // short of the floor, and the run does not depend on the source's
+          // stored labels, so a later revision that stores the atom would
+          // not run the writer again after a verdict (cfc/verdict-reason.ts).
           failures.push(
             `write floor failed at /${
               linkPath.join("/")
