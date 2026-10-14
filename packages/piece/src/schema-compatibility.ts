@@ -1145,7 +1145,9 @@ function additionalPropertiesOf(schema: SchemaObject): JSONSchema {
  * other alternative reads as that alternative.
  */
 function withoutUndefinedAlternative(schema: JSONSchema): JSONSchema {
-  if (!isObjectNotArray(schema)) return schema;
+  // Beside `asCell`, the alternatives are the cell's value, which may be
+  // `undefined`; the property itself holds the cell.
+  if (!isObjectNotArray(schema) || schema.asCell !== undefined) return schema;
   if (schema.type === "undefined") return false;
   if (Array.isArray(schema.type) && schema.type.includes("undefined")) {
     const types = schema.type.filter((type) => type !== "undefined");

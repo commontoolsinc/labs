@@ -5886,6 +5886,24 @@ describe("piece schema compatibility", () => {
       ).not.toThrow();
     });
 
+    it("still refuses a candidate argument whose cell no longer admits an `undefined` value", () => {
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(
+            objectWith({
+              anyOf: [{ type: "undefined" }, { type: "string" }],
+              asCell: ["cell"],
+            }),
+            { type: "object" },
+          ),
+          pattern(
+            objectWith({ type: "string", asCell: ["cell"] }),
+            { type: "object" },
+          ),
+        )
+      ).toThrow();
+    });
+
     it("reads a property whose only alternative is `undefined` as holding no value", () => {
       expect(() =>
         assertSchemaSubset(
