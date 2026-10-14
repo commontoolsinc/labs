@@ -146,7 +146,11 @@ values.
 
 **Sharing.** Reads from one memory connection run at most two at a time; a
 connection's further reads wait for one of its own to end, and do not hold back
-anyone else's. Among the reads that may run, the oldest goes first.
+anyone else's. Among the reads that may run, the oldest goes first. The
+allowance is a heuristic for sharing the workers among clients, not a
+guarantee: it counts memory connections, not principals or sessions, so
+clients behind one connection share one allowance, and enough connections each
+running theirs still occupy every worker.
 
 **Cancellation is best effort.** A read is cancelled when its connection
 closes, and every read when the server closes. A cancelled read fails with an
