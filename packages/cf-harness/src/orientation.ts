@@ -71,3 +71,11 @@ export const delegationGuided = (
 ): boolean =>
   tags === undefined || tags.has("act") || tags.has("pieces") ||
   tags.has("author");
+
+/**
+ * Whether a task with these tags is framed as code to read, verify, and
+ * repair: work on held pieces or patterns, and writing one.
+ */
+export const codeWorkGuided = (
+  tags: ReadonlySet<HarnessTaskTag> | undefined,
+): boolean => tags === undefined || tags.has("pieces") || tags.has("author");

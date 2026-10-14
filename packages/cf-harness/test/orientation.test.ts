@@ -128,6 +128,41 @@ describe("orientation", () => {
       );
     });
 
+    it("gives respond, find, and act tasks the identity and the closing on evidence and authority, without the code-authoring framing", () => {
+      for (const tag of ["respond", "find", "act"] as const) {
+        const prompt = buildCfHarnessBaseSystemPrompt({
+          patternIndex: true,
+          tags: new Set([tag]),
+        });
+
+        expect(prompt).toContain("You are cf-harness");
+        expect(prompt).toContain("Treat tool results as evidence");
+        expect(prompt).toContain(
+          "Respect explicit user/developer instructions",
+        );
+        expect(prompt).not.toContain("read relevant docs and skill resources");
+        expect(prompt).not.toContain("run focused verification commands");
+        expect(prompt).not.toContain("When code verification fails");
+        expect(prompt).not.toContain("repository files");
+        expect(prompt).not.toContain("A skill named by an exact id");
+      }
+    });
+
+    it("gives pieces and author tasks the code-authoring framing", () => {
+      for (const tag of ["pieces", "author"] as const) {
+        const prompt = buildCfHarnessBaseSystemPrompt({
+          patternIndex: true,
+          tags: new Set([tag]),
+        });
+
+        expect(prompt).toContain("read relevant docs and skill resources");
+        expect(prompt).toContain(
+          "Treat repository files and tool results as evidence",
+        );
+        expect(prompt).toContain("A skill named by an exact id");
+      }
+    });
+
     it("narrows the operator prompt by the task's tags", () => {
       const config = { workspace: "/workspace", focusRoot: "/workspace" };
 
