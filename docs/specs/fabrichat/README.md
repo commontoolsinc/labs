@@ -25,6 +25,8 @@ departs from this design.
   - [`ChatMessageList`](ChatMessageList.md): a room's messages: facts, the
     newest, and each session's windows.
   - [`ChatReply`](ChatReply.md): what a reply replies to, and where it's shown.
+  - [`ChatThreadSummary`](ChatThreadSummary.md): a thread's reply count and
+    latest reply time.
   - [`ChatMessageVersion`](ChatMessageVersion.md): an earlier version of a
     message.
   - [`ChatReaction`](ChatReaction.md)
@@ -113,6 +115,7 @@ provide, the document says so, under the heading "Prerequisites".
    [`ChatMessageList.md`](ChatMessageList.md),
    [`ChatMessageWindow.md`](ChatMessageWindow.md),
    [`ChatWindowAnchor.md`](ChatWindowAnchor.md), [`ChatReply.md`](ChatReply.md),
+   [`ChatThreadSummary.md`](ChatThreadSummary.md),
    [`ChatMessageVersion.md`](ChatMessageVersion.md),
    [`ChatReaction.md`](ChatReaction.md), [`ChatRoomAbout.md`](ChatRoomAbout.md),
    [`ChatRoomPolicy.md`](ChatRoomPolicy.md),
@@ -372,6 +375,11 @@ design, as below.
   own reactions, a document the send creates empty and only the reaction
   handlers write after that, until a deletion or an obliteration clears it and
   drops the link.
+- **Thread summaries.** `messages.threads` is derived in the pass that places
+  each message in the views, which walks each reply chain once for the whole
+  room. So the summaries together cost one walk of the messages rather than one
+  per message, and no stored counter can drift from the threads it counts. A
+  change to the messages derives them again, as it does `latest`.
 - **Windows.** A window holds links to its messages, which stay live;
   `hasOlder` and `hasNewer` are as of when the window was set. `commitWindow`
   writes the windows of the session that sent the event, wherever it runs; an
