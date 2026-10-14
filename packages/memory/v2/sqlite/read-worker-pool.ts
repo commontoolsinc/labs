@@ -40,10 +40,9 @@ import {
   nativeSymbols,
   nativeSymbolsUnavailableReason,
 } from "./native-symbols.ts";
-import {
-  CONNECTIONS_PER_WORKER,
-  type ReadWorkerReply,
-  type ReadWorkerRequest,
+import type {
+  ReadWorkerReply,
+  ReadWorkerRequest,
 } from "./read-worker-protocol.ts";
 
 /** How one read is run. */
@@ -57,12 +56,22 @@ export type ReadWorkerQueryOptions = {
 
   /** Cancels the read: a queued one is dropped, a running one interrupted. */
   signal?: AbortSignal;
+
+  /**
+   * Who asked for the read. Reads with the same requester run at most
+   * `maxReadsPerRequester` at once, so one requester's long reads leave
+   * workers for everyone else's; a read naming none is not capped.
+   */
+  requester?: string;
 };
 
 /** How a {@link ReadWorkerPool} runs its workers. */
 export type ReadWorkerPoolOptions = {
   /** The most reads run at once, one per worker. Four unless given. */
   maxWorkers?: number;
+
+  /** The most reads one requester runs at once. Two unless given. */
+  maxReadsPerRequester?: number;
 
   /**
    * The module each worker runs, `read-worker.ts` unless given; a test passes
@@ -91,6 +100,12 @@ type ReadJob = {
   /** Settles the read with an error. */
   reject: (error: Error) => void;
 
+  /** Who asked for the read, for `maxReadsPerRequester`. */
+  requester?: string;
+
+  /** Whether a worker has taken the read. */
+  running?: boolean;
+
   /** The connection the read runs on, once its worker reported `started`. */
   connection?: bigint;
 
@@ -101,11 +116,15 @@ type ReadJob = {
 /**
  * Runs guarded read-only queries on up to `maxWorkers` workers, starting each
  * worker the first time no idle one is free and keeping it until the pool
- * closes. A read waits in a queue while every worker is busy.
+ * closes. A read waits in a queue while every worker is busy, or while its
+ * requester already runs `maxReadsPerRequester` reads; the oldest read that
+ * may run goes first.
  */
 export class ReadWorkerPool {
   #maxWorkers: number;
+  #maxReadsPerRequester: number;
   #workerModule: URL;
+  #runningByRequester = new Map<string, number>();
   #workers = new Set<ReadWorker>();
   #queue: ReadJob[] = [];
   #nextId = 1;
@@ -117,6 +136,7 @@ export class ReadWorkerPool {
   constructor(options: ReadWorkerPoolOptions = {}) {
     const {
       maxWorkers = 4,
+      maxReadsPerRequester = 2,
       workerModule = new URL("./read-worker.ts", import.meta.url),
     } = options;
     if (!Number.isInteger(maxWorkers) || maxWorkers < 1) {
@@ -124,7 +144,14 @@ export class ReadWorkerPool {
         `sqlite: a read pool needs at least one worker, not ${maxWorkers}`,
       );
     }
+    if (!Number.isInteger(maxReadsPerRequester) || maxReadsPerRequester < 1) {
+      throw new RangeError(
+        "sqlite: a read pool runs at least one read per requester, not " +
+          `${maxReadsPerRequester}`,
+      );
+    }
     this.#maxWorkers = maxWorkers;
+    this.#maxReadsPerRequester = maxReadsPerRequester;
     this.#workerModule = workerModule;
   }
 
@@ -153,7 +180,7 @@ export class ReadWorkerPool {
       sql,
       args: bindArgs(params),
       labeled: options.labeled,
-    }, options.signal);
+    }, options);
     return options.labeled
       ? {
         rows: rowsFromNative<Row>(result),
@@ -178,7 +205,7 @@ export class ReadWorkerPool {
    */
   #enqueue(
     request: ReadJob["request"],
-    signal: AbortSignal | undefined,
+    { signal, requester }: ReadWorkerQueryOptions,
   ): Promise<NativeQueryResult> {
     if (this.#closing !== undefined) {
       return Promise.reject(new Error("sqlite: the read pool is closed"));
@@ -190,14 +217,19 @@ export class ReadWorkerPool {
     const onAbort = () => {
       if (signal !== undefined) this.#cancel(job, abortError(signal));
     };
+    const finish = () => {
+      signal?.removeEventListener("abort", onAbort);
+      if (job.running) this.#countRunning(job.requester, -1);
+    };
     const job: ReadJob = {
       request,
+      requester,
       resolve: (result) => {
-        signal?.removeEventListener("abort", onAbort);
+        finish();
         resolve(result);
       },
       reject: (error) => {
-        signal?.removeEventListener("abort", onAbort);
+        finish();
         reject(error);
       },
     };
@@ -208,43 +240,75 @@ export class ReadWorkerPool {
   }
 
   /**
-   * Hands queued reads to idle workers, preferring one that recently read the
-   * same file and so may still hold it open, and starts a worker when none is
-   * idle and the pool is below its size.
+   * Hands queued reads to idle workers, oldest first among the reads whose
+   * requester is under `maxReadsPerRequester`, and starts a worker when none
+   * is idle and the pool is below its size. A read held back by its
+   * requester's cap does not hold back anyone else's.
    */
   #dispatch(): void {
-    while (this.#queue.length > 0) {
-      const idle = [...this.#workers].filter((worker) => worker.idle);
-      if (idle.length === 0) {
-        const starting = [...this.#workers].filter((worker) => !worker.ready)
-          .length;
-        if (
-          this.#workers.size < this.#maxWorkers &&
-          starting < this.#queue.length
-        ) {
-          try {
-            this.#workers.add(this.#start());
-          } catch (error) {
-            // Dispatch runs in worker event handlers, so a worker that cannot
-            // even be constructed fails the reads waiting for one instead of
-            // escaping into them.
-            const failure = error instanceof Error
-              ? error
-              : new Error(String(error));
-            for (const job of this.#queue.splice(0)) job.reject(failure);
-          }
-        }
+    for (;;) {
+      const next = this.#queue.findIndex((job) => this.#mayRun(job));
+      if (next === -1) return;
+      const worker = [...this.#workers].find((candidate) => candidate.idle);
+      if (worker === undefined) {
+        this.#startIfWanted();
         return;
       }
-      const job = this.#queue.shift();
-      if (job === undefined) return;
-      const path = job.request.path;
-      const worker = idle.find((candidate) => candidate.hasRead(path)) ??
-        idle[0];
-      // A request the worker could not take was rejected, and the worker is
+      const [job] = this.#queue.splice(next, 1);
+      // A read the worker could not be sent was rejected, and the worker is
       // still idle for the next one.
-      worker.run(job);
+      if (worker.run(job)) {
+        job.running = true;
+        this.#countRunning(job.requester, 1);
+      }
     }
+  }
+
+  /**
+   * Helper for `#dispatch()`, which starts a worker when the reads that could
+   * run now outnumber the workers already starting.
+   */
+  #startIfWanted(): void {
+    if (this.#workers.size >= this.#maxWorkers) return;
+    const starting = [...this.#workers].filter((worker) => !worker.ready);
+    const allowance = new Map<string, number>();
+    let runnable = 0;
+    for (const job of this.#queue) {
+      if (job.requester === undefined) {
+        runnable++;
+        continue;
+      }
+      const left = allowance.get(job.requester) ??
+        this.#maxReadsPerRequester -
+          (this.#runningByRequester.get(job.requester) ?? 0);
+      if (left > 0) runnable++;
+      allowance.set(job.requester, left - 1);
+    }
+    if (starting.length >= runnable) return;
+    try {
+      this.#workers.add(this.#start());
+    } catch (error) {
+      // Dispatch runs in worker event handlers, so a worker that cannot even
+      // be constructed fails the reads waiting for one instead of escaping
+      // into them.
+      const failure = error instanceof Error ? error : new Error(String(error));
+      for (const job of this.#queue.splice(0)) job.reject(failure);
+    }
+  }
+
+  /** Whether `job`'s requester is under its cap. */
+  #mayRun(job: ReadJob): boolean {
+    return job.requester === undefined ||
+      (this.#runningByRequester.get(job.requester) ?? 0) <
+        this.#maxReadsPerRequester;
+  }
+
+  /** Adds `delta` to `requester`'s running reads. */
+  #countRunning(requester: string | undefined, delta: number): void {
+    if (requester === undefined) return;
+    const running = (this.#runningByRequester.get(requester) ?? 0) + delta;
+    if (running > 0) this.#runningByRequester.set(requester, running);
+    else this.#runningByRequester.delete(requester);
   }
 
   /** Helper for `#dispatch()`, which starts a worker. */
@@ -342,7 +406,6 @@ class ReadWorker {
   #symbols: Promise<void>;
   #events: ReadWorkerEvents;
   #lifetimeLock: string | undefined;
-  #recentPaths: string[] = [];
   #failed = false;
   #announced = Promise.withResolvers<void>();
   #settled: PromiseWithResolvers<void> | undefined;
@@ -384,11 +447,6 @@ class ReadWorker {
     return this.ready && this.job === undefined && this.#closed === undefined;
   }
 
-  /** Whether one of the worker's recent reads was of the file at `path`. */
-  hasRead(path: string): boolean {
-    return this.#recentPaths.includes(path);
-  }
-
   /**
    * Hands the idle worker `job`, and returns whether it took it. A request
    * that cannot be posted — a parameter structured cloning refuses, such as a
@@ -403,11 +461,6 @@ class ReadWorker {
     }
     this.job = job;
     this.#settled = Promise.withResolvers<void>();
-    const path = job.request.path;
-    this.#recentPaths = [
-      path,
-      ...this.#recentPaths.filter((recent) => recent !== path),
-    ].slice(0, CONNECTIONS_PER_WORKER);
     return true;
   }
 

@@ -128,8 +128,7 @@ path, apply the statement guard, run the `SELECT`, return rows.
 - The statement guard still applies on every `query`, so a read can't use its
   connection to `ATTACH`/`PRAGMA` to another file.
 - Closed with the server (`Server.close()` → `#readPool.close()`).
-- Each read worker (below) keeps a pool of its own, of at most eight
-  connections.
+- Each read worker (below) keeps a pool of its own.
 
 ### Which thread runs a read
 
@@ -139,27 +138,33 @@ long as it runs. A read of an injected source can run for seconds or minutes: a
 full scan of a multi-gigabyte file, or a wait on another process's write lock
 (the connection's `busy_timeout`). Those reads run on **read workers**
 ([`packages/memory/v2/sqlite/read-worker-pool.ts`](../../../packages/memory/v2/sqlite/read-worker-pool.ts)):
-at most four Deno workers, started on demand and kept until the server closes.
-Each runs the same guarded read on its own read-only connections, column
-origins included, so CFC labeling (Section [06](./06-cfc.md)) does not depend on
-where a read ran. The main thread binds the parameters and converts the rows to
-fabric values.
+a few Deno workers, started on demand and kept until the server closes. Each
+runs the same guarded read on its own read-only connections, column origins
+included, so CFC labeling (Section [06](./06-cfc.md)) does not depend on where a
+read ran. The main thread binds the parameters and converts the rows to fabric
+values.
 
-A read waiting for a worker is dropped when its connection closes, and a
-running one is stopped with `sqlite3_interrupt`, the one SQLite call documented
-as safe on a connection another thread is using; terminating the worker would
-not stop a thread inside SQLite. Closing the server stops every read and tears
-the workers down. A stopped read fails with an `AbortError` and returns no rows;
-one that finishes before the interrupt reaches it returns its rows. SQLite does
-not consult an interrupt while a read waits for another connection's lock, so
-such a read stops when the wait ends, after at most its `busy_timeout` of five
-seconds.
+**Sharing.** Reads from one memory connection run at most two at a time; a
+connection's further reads wait for one of its own to end, and do not hold back
+anyone else's. Among the reads that may run, the oldest goes first.
+
+**Cancellation is best effort.** A read is cancelled when its connection
+closes, and every read when the server closes. A cancelled read fails with an
+`AbortError` and returns no rows — never `[]` — unless it finished first, in
+which case it returns the rows it read. A read still waiting for a worker is
+dropped. How a running read is stopped belongs to the SQLite driver: with
+`@db/sqlite`, the pool calls `sqlite3_interrupt` on the worker's connection, the
+one SQLite call documented as safe on a connection another thread is using
+(terminating the worker would not stop a thread inside SQLite). SQLite does not
+consult an interrupt while a read waits for another connection's lock, so such
+a read stops when the wait ends, after at most its `busy_timeout`. A driver
+with no way to stop a running read leaves it to run to its end.
 
 Nothing else bounds a read on a worker: one that never finishes on a connection
-that stays open holds its worker until that connection closes, and four such
-reads leave every other injected read waiting. Its rows are still converted on
-the main thread, so a very large result costs the main thread in proportion to
-its size ([08-open-questions.md](./08-open-questions.md) Q8).
+that stays open holds its worker until that connection closes. Its rows are
+still converted on the main thread, so a very large result costs the main
+thread in proportion to its size
+([08-open-questions.md](./08-open-questions.md) Q8).
 
 A read still holds its connection's turn for its space (the ordered frame queue
 of [memory-v2 §4](../memory-v2/04-protocol.md)), so that connection's later

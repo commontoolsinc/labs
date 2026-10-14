@@ -80,10 +80,30 @@ describe("ReadWorkerPool", () => {
     Deno.removeSync(path);
   });
 
+  it("runs on a libsqlite3 built to be used from several threads", () => {
+    // Every worker loads the one libsqlite3 image the main thread loaded;
+    // `THREADSAFE=0` would leave connections on different threads sharing
+    // unguarded global state.
+
+    pool = new ReadWorkerPool();
+    const db = new Database(":memory:");
+    try {
+      const threadsafe = db.prepare("PRAGMA compile_options").values()
+        .map(([option]) => String(option))
+        .find((option) => option.startsWith("THREADSAFE="));
+      expect(["THREADSAFE=1", "THREADSAFE=2"]).toContain(threadsafe);
+    } finally {
+      db.close();
+    }
+  });
+
   describe("constructor()", () => {
     it("throws given fewer than one worker", () => {
       pool = new ReadWorkerPool();
       expect(() => new ReadWorkerPool({ maxWorkers: 0 })).toThrow(RangeError);
+      expect(() => new ReadWorkerPool({ maxReadsPerRequester: 0 })).toThrow(
+        RangeError,
+      );
     });
   });
 
@@ -214,6 +234,61 @@ describe("ReadWorkerPool", () => {
         expect(longSettled()).toBe(false);
         running.abort();
         await rejectionOf(long);
+      });
+
+      it("returns another requester's read while one requester's long reads fill its allowance", async () => {
+        // Requester `a` asks for three long reads with two allowed, so its
+        // third waits and the pool's third worker is free for `b`.
+
+        pool = new ReadWorkerPool({ maxWorkers: 3, maxReadsPerRequester: 2 });
+        const cancel = new AbortController();
+        const longs = [0, 1, 2].map(() =>
+          pool.query(path, LONG_READ, undefined, {
+            labeled: false,
+            signal: cancel.signal,
+            requester: "a",
+          })
+        );
+        const settled = longs.map(settledFlag);
+        const ended = longs.map(rejectionOf);
+        const { rows } = await pool.query(
+          path,
+          "SELECT k FROM t ORDER BY k",
+          undefined,
+          { labeled: false, requester: "b" },
+        );
+        expect(rows).toEqual([{ k: "a" }, { k: "b" }]);
+        expect(settled.map((isSettled) => isSettled())).toEqual([
+          false,
+          false,
+          false,
+        ]);
+        cancel.abort();
+        await Promise.all(ended);
+      });
+
+      it("returns a read its requester's allowance held back once one of that requester's reads ends", async () => {
+        // A requester whose count of running reads is left too high keeps its
+        // later reads waiting for ever, and this case never settles.
+
+        pool = new ReadWorkerPool({ maxWorkers: 1, maxReadsPerRequester: 1 });
+        // Once a read has returned, the pool's one worker is idle, so the long
+        // read below is running, not queued, when it is cancelled.
+        await pool.query(path, "SELECT 1", undefined, { labeled: false });
+        const cancel = new AbortController();
+        const long = pool.query(path, LONG_READ, undefined, {
+          labeled: false,
+          signal: cancel.signal,
+          requester: "a",
+        });
+        const longEnded = rejectionOf(long);
+        const held = pool.query(path, "SELECT k FROM t ORDER BY k", undefined, {
+          labeled: false,
+          requester: "a",
+        });
+        cancel.abort();
+        await longEnded;
+        expect((await held).rows).toEqual([{ k: "a" }, { k: "b" }]);
       });
 
       it("rejects with an `AbortError` given a signal already cancelled", async () => {

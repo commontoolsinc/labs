@@ -77,16 +77,16 @@ during design are marked **[resolved]** with the decision.
    engine; only writes use the engine connection (Section
    [04](./04-server-execution-and-transactions.md#read-path-a-pooled-read-only-connection)).
    A read of an injected source runs on a read worker, off the server's main
-   thread, and is interrupted when its connection closes. A read of a
+   thread, and is cancelled when its connection closes. A read of a
    cell-derived db still runs on the main thread, so a heavy one holds every
    connection of every space while it runs. Moving those reads to the workers
    needs cell-db files in WAL mode, so that a worker's read does not hold a
    lock a main-thread commit to the same file would wait on (Section
    [04](./04-server-execution-and-transactions.md#which-thread-runs-a-read)).
    Also open: what bounds a worker read that never finishes on a connection
-   that stays open, how reads competing for the four workers are shared among
-   spaces or connections, and the main-thread cost of converting a very large
-   result.
+   that stays open (each connection runs at most two at a time, but enough
+   connections can still occupy every worker), and the main-thread cost of
+   converting a very large result.
 8a. **[resolved — V1 cut] Attach limit & core-table shadowing (Option A).**
    - **Attach limit:** `@db/sqlite` exposes no `sqlite3_limit` binding, so
      `SQLITE_LIMIT_ATTACHED` is fixed at the compiled default (assume 10).

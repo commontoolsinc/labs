@@ -220,10 +220,10 @@ class ObservedServer extends Server {
 
   override sqliteQuery(
     message: SqliteQueryRequest,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; requester?: string } = {},
   ): Promise<ResponseMessage<SqliteQueryWireResult>> {
-    const response = super.sqliteQuery(message, signal);
-    this.firstQuery.resolve({ signal, response });
+    const response = super.sqliteQuery(message, options);
+    this.firstQuery.resolve({ signal: options.signal, response });
     return response;
   }
 }

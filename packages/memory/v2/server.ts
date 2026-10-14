@@ -1986,10 +1986,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.#server.sqliteQuery(
-            parsed,
-            this.#closing.signal,
-          );
+          const response = await this.#server.sqliteQuery(parsed, {
+            signal: this.#closing.signal,
+            requester: this.id,
+          });
           this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2479,17 +2479,14 @@ export class Server {
 
   /**
    * Pooled read-only connections (keyed by canonical file path) for reads of
-   * cell-derived dbs, unattached, instead of attach/detach-per-op on the engine
-   * connection. They run on this thread because the engine connection writes
-   * the same files from it: a read holding a file's lock on another thread
-   * would leave a commit to that file waiting in SQLite's busy handler here.
+   * cell-derived dbs, unattached, on this thread, which also writes those
+   * files (sqlite-builtin spec 04, "Which thread runs a read").
    */
   #readPool = new ReadConnectionPool();
 
   /**
-   * Workers that read injected on-disk sources off this thread: a read of a
-   * multi-gigabyte file, or one waiting on another process's write lock, holds
-   * a worker rather than every connection. `registerDiskSource` refuses the
+   * Workers that read injected on-disk sources off this thread (sqlite-builtin
+   * spec 04, "Which thread runs a read"). `registerDiskSource` refuses the
    * engine's own files, so none of these is a file this thread writes. Once a
    * worker has started it keeps the process alive until `close()`.
    */
@@ -4602,11 +4599,12 @@ export class Server {
   /**
    * Runs the guarded read-only query `message` and returns its rows, or the
    * error it failed with. A read of an injected on-disk source runs on a read
-   * worker, and `signal` cancels it.
+   * worker: `signal` cancels it, and reads naming the same `requester` share
+   * that requester's allowance of workers.
    */
   async sqliteQuery(
     message: SqliteQueryRequest,
-    signal?: AbortSignal,
+    { signal, requester }: { signal?: AbortSignal; requester?: string } = {},
   ): Promise<ResponseMessage<SqliteQueryWireResult>> {
     const queryParams = message.namedParams === undefined
       ? message.params
@@ -4691,6 +4689,7 @@ export class Server {
         ? await this.#readWorkers.query(disk.path, message.sql, queryParams, {
           labeled: wantColumns,
           signal,
+          requester,
         })
         : await this.#readCellDb(
           message.space,
