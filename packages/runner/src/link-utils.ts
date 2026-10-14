@@ -10,6 +10,7 @@ import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isNontrivialSchema,
+  toDeepFrozenSchema,
 } from "@commonfabric/data-model-schema";
 import {
   containsExternalSchemaRef,
@@ -597,7 +598,7 @@ export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
   keepAsCell: KeepAsCell = KeepAsCell.None,
 ): JSONSchema | undefined {
-  return sanitizeSchemaForLinksInternal(schema, keepAsCell, false);
+  return sanitizeSchemaForLinksInternal(schema, keepAsCell, "mutable");
 }
 
 /**
@@ -617,13 +618,59 @@ export function sanitizeAndInternSchemaForLinks(
   schema: JSONSchema | undefined,
   keepAsCell: KeepAsCell = KeepAsCell.None,
 ): JSONSchema | undefined {
-  return sanitizeSchemaForLinksInternal(schema, keepAsCell, true);
+  return sanitizeSchemaForLinksInternal(schema, keepAsCell, "canonical");
+}
+
+/**
+ * Like `sanitizeSchemaForLinks()`, except that the result is deep-frozen. Its
+ * root is still an object of its own, and `schema` is left as it was: a part
+ * of a mutable `schema` nested too deep for the strip to rebuild is copied
+ * into the result, where `sanitizeSchemaForLinks()` carries it by reference.
+ */
+export function sanitizeAndFreezeSchemaForLinks(
+  schema: JSONSchema,
+  keepAsCell?: KeepAsCell,
+): JSONSchema;
+export function sanitizeAndFreezeSchemaForLinks(
+  schema: JSONSchema | undefined,
+  keepAsCell?: KeepAsCell,
+): JSONSchema | undefined;
+export function sanitizeAndFreezeSchemaForLinks(
+  schema: JSONSchema | undefined,
+  keepAsCell: KeepAsCell = KeepAsCell.None,
+): JSONSchema | undefined {
+  return sanitizeSchemaForLinksInternal(schema, keepAsCell, "frozen");
+}
+
+/**
+ * The form `sanitizeSchemaForLinksInternal()` returns a strip in: a schema
+ * the caller may change, a deep-frozen schema with a root of its own, or the
+ * canonical interned instance.
+ */
+type SanitizedForm = "mutable" | "frozen" | "canonical";
+
+/**
+ * Helper for `sanitizeSchemaForLinksInternal()`, which returns the memoized
+ * deep-frozen strip `strip` in the form `form`.
+ */
+function memoizedStripAs(
+  strip: JSONSchema & object,
+  form: SanitizedForm,
+): JSONSchema {
+  switch (form) {
+    case "canonical":
+      return internSchema(strip);
+    case "frozen":
+      return deepFreeze({ ...strip });
+    case "mutable":
+      return { ...strip };
+  }
 }
 
 function sanitizeSchemaForLinksInternal(
   schema: JSONSchema | undefined,
   keepAsCell: KeepAsCell,
-  canonical: boolean,
+  form: SanitizedForm,
 ): JSONSchema | undefined {
   if (schema === undefined || typeof schema === "boolean") {
     return schema;
@@ -648,12 +695,16 @@ function sanitizeSchemaForLinksInternal(
   // result. The mutable API returns a fresh shallow clone because reactive
   // callers can depend on its top-level identity. Binding callers request the
   // canonical result and can reuse both its identity and its cached hash.
+  // The frozen form is that clone, frozen: its root stays an object of its
+  // own because `createRef()` hashes an object it reaches twice in one cause
+  // as `null`, so two positions of a graph sharing one schema object would
+  // derive other ids than two positions holding equal ones.
   // A missing external document can change the result when it arrives, so
   // only complete resolutions enter the cache.
   const memoizable = isDeepFrozen(schema);
   if (memoizable) {
     const hit = _sanitizeCache.get(schema)?.get(keepAsCell);
-    if (hit !== undefined) return canonical ? internSchema(hit) : { ...hit };
+    if (hit !== undefined) return memoizedStripAs(hit, form);
   }
 
   // Collect existing $defs names to avoid collisions
@@ -675,6 +726,7 @@ function sanitizeSchemaForLinksInternal(
     defCounter: 0,
     reservedNames: existingDefNames,
     keepAsCell,
+    copyBelowDepthCap: form === "frozen",
   };
 
   const stripped = recursiveStripAsCellFromSchema(schema, context, 0);
@@ -693,7 +745,7 @@ function sanitizeSchemaForLinksInternal(
       byMode = new Map();
       _sanitizeCache.set(schema, byMode);
     }
-    // Deep-freeze the cached result: both APIs share this sub-tree across
+    // Deep-freeze the cached result: every form shares this sub-tree across
     // callers, so a consumer mutating a nested node
     // would otherwise silently poison every later same-schema build — frozen,
     // such a mutation throws loudly instead. Freezing only touches objects this
@@ -701,10 +753,19 @@ function sanitizeSchemaForLinksInternal(
     // returns sub-trees of the input, which is deep-frozen on this path.
     const frozen = deepFreeze(output) as JSONSchema & object;
     byMode.set(keepAsCell, frozen);
-    return canonical ? internSchema(frozen) : { ...frozen };
+    return memoizedStripAs(frozen, form);
   }
 
-  return canonical ? deepFrozenCloneAndInternSchema(output) : output;
+  switch (form) {
+    case "canonical":
+      return deepFrozenCloneAndInternSchema(output);
+    case "frozen":
+      // Freezing in place reaches only what this call built: for this form
+      // the strip copies what lies below its depth cap.
+      return deepFreeze(output);
+    case "mutable":
+      return output;
+  }
 }
 
 /** Sanitizes and externalizes a link schema, memoizing frozen inputs. */
@@ -752,6 +813,9 @@ interface SanitizeContext {
   reservedNames: Set<string>;
   // Which asCell entries to preserve while stripping.
   keepAsCell: KeepAsCell;
+  // Whether a sub-tree below the depth cap is copied, deep-frozen, into the
+  // result. It is carried by reference otherwise.
+  copyBelowDepthCap: boolean;
 }
 
 /**
@@ -779,7 +843,9 @@ function recursiveStripAsCellFromSchema(
 
   // Prevent infinite recursion from proxy objects or very deep schemas
   // JSON Schema shouldn't need more than ~50 levels of nesting in practice
-  if (depth > 100) return schema;
+  if (depth > 100) {
+    return context.copyBelowDepthCap ? toDeepFrozenSchema(schema) : schema;
+  }
 
   // A NESTED reference-form schema stays a reference, but the strip must
   // reach THROUGH it: the referenced closure may carry `asCell`, and a
