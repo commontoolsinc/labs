@@ -219,7 +219,9 @@ import {
   setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
+  setHarnessTaskClassification,
 } from "./run-state.ts";
+import type { HarnessTaskClassification } from "./task-classification.ts";
 import {
   assertRunscCfcPolicyForMode,
   resolveRunscSandboxConfig,
@@ -258,6 +260,14 @@ import {
   type BrowserToolInput,
   type BrowserToolOutput,
 } from "./tools/browser.ts";
+import {
+  type CallVerbToolInput,
+  type CallVerbToolOutput,
+} from "./tools/call-verb.ts";
+import type {
+  ReadValueToolInput,
+  ReadValueToolOutput,
+} from "./tools/read-value.ts";
 import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
@@ -342,6 +352,8 @@ export interface BuiltinToolInputMap {
   run_pattern: RunPatternToolInput;
   read_piece_source: ReadPieceSourceToolInput;
   revise_piece: RevisePieceToolInput;
+  call_verb: CallVerbToolInput;
+  read_value: ReadValueToolInput;
   assign_slug: AssignSlugToolInput;
   resolve_piece: ResolvePieceToolInput;
   describe_handle: DescribeHandleToolInput;
@@ -382,6 +394,8 @@ export interface BuiltinToolOutputMap {
   run_pattern: RunPatternToolOutput;
   read_piece_source: ReadPieceSourceToolOutput;
   revise_piece: RevisePieceToolOutput;
+  call_verb: CallVerbToolOutput;
+  read_value: ReadValueToolOutput;
   assign_slug: AssignSlugToolOutput;
   resolve_piece: ResolvePieceToolOutput;
   describe_handle: DescribeHandleToolOutput;
@@ -1493,6 +1507,19 @@ export class CfHarnessEngine {
     this.#runState = setHarnessOpeningResearch(
       this.#runState,
       openingResearch,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
+  /** Persists the kinds of work the root task was classified with. */
+  async recordTaskClassification(
+    taskClassification: HarnessTaskClassification,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessTaskClassification(
+      this.#runState,
+      taskClassification,
       this.#now(),
     );
     await this.persistRunState();

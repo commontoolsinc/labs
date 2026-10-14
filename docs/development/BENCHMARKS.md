@@ -967,12 +967,17 @@ Construction, initial hashing for warm cases, validation, and abort are outside
 the timed interval. Policy names are distinct, so sorting does not repeatedly
 hash large records to break name ties.
 
-The five series measure the first digest, an unchanged second digest, a
-second digest after one additional write, direct hashing over warmed records
-in a fresh input wrapper, and preparation plus its unchanged recheck in one
-interval. The direct-hashing series bypasses the transaction epoch memo; the
-combined series measures the normal two-request shape. Diagnostics on stderr
-report the immutable-object hash-cache hits during the measured interval; an
+The six series measure the activity snapshot alone, the first digest read, an
+unchanged second read, a second read after one additional write, direct
+hashing over warmed records in a fresh input wrapper, and a first read plus
+its unchanged second read in one interval. The snapshot series is what a
+transaction pays toward a digest nothing reads, which is the scheduler's
+shape: `prepareForCommit()` seals the snapshot, and a commit whose activity
+epoch has not moved accepts it without hashing. The first-read series adds
+canonicalization and the hash, which a caller reading `prepareCfc()`'s result
+or the prepared state's `digest` pays. The direct-hashing series bypasses the
+transaction epoch memo. Diagnostics on stderr report the immutable-object
+hash-cache hits during the measured interval for the series that hash; an
 epoch-memo hit performs no hashing. Stdout remains the benchmark JSON report.
 
 ```sh
@@ -980,11 +985,14 @@ deno bench --no-lock -A --json packages/runner/test/cfc-prepared-digest.bench.ts
 ```
 
 Prepared digests are process-local equality tokens over canonical activity.
-The transaction reuses the complete token until its activity epoch changes;
-decision-input recorders and write paths advance that epoch. A changed snapshot
-is canonicalized and hashed in full. The token belongs to one transaction: a
-fresh transaction prepares independently even when its effective CFC label is
-unchanged.
+The transaction keeps one frozen snapshot of its activity per activity epoch,
+and computes that snapshot's token when something first reads it;
+decision-input recorders and write paths advance the epoch. A snapshot whose
+token is read is canonicalized and hashed in full, once. The token belongs to
+one transaction: a fresh transaction prepares independently even when its
+effective CFC label is unchanged.
+[CFC commit preparation](../specs/cfc-commit-preparation.md#the-prepared-digest-and-the-commit-time-recheck)
+describes the arrangement.
 
 Compare cache designs over preparation plus recheck as well as individual
 calls: a cold setup cost must be recovered within the requests a transaction
@@ -1627,9 +1635,11 @@ Add `--timing-measures-out /tmp/mapped-B.json` (a distinct path per run) for
 unrounded spans and `cf:runTestPattern/step/render_N/materialize#...` boundaries.
 Use the aggregation and attribution tools in
 [profiling](debugging/profiling.md) to locate the CFC work inside each interval.
-Nested timing totals overlap: `prepareCfc` includes its derivation and initial
-digest, while a commit recheck can hash again outside preparation. The spans
-measure elapsed time, not CPU attribution.
+Nested timing totals overlap: `prepareCfc` includes its derivation, and a
+digest only where `prepareCfc()` itself was called, which hashes the one it
+returns; `prepareForCommit()` hashes none, and a commit recheck whose
+activity moved hashes outside preparation. The spans measure elapsed time,
+not CPU attribution.
 
 This `cf test` probe runs on demand, outside the scheduled `deno bench` suite.
 Keep its source and step order stable across the optimizations it measures.

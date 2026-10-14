@@ -337,6 +337,11 @@ deno check packages/patterns/d3-shared-bars/guest.ts
 deno task cf check packages/patterns/d3-shared-bars/main.tsx --no-run
 ```
 
+Launch the pattern with the steps under
+[Verify](./iframe-pattern-guide.md#verify) in the plain DOM guide, substituting
+this pattern's path, a space label, and a slug. Those steps start local
+servers, create the space, and sign the browser in as its owner.
+
 In a real browser, verify all of the following:
 
 - loading controls remain disabled until all initial pulls complete;

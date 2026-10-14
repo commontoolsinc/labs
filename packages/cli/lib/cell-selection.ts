@@ -8,6 +8,15 @@
 import type { Cell } from "@commonfabric/api";
 import { containsExternalSchemaRef } from "@commonfabric/data-model-schema/schema-refs";
 import { mapSubschemas } from "@commonfabric/data-model-schema/schema-walk";
+import {
+  declaredFieldNames,
+  declaredFieldsAt,
+  isSchemaObject,
+  schemaIsArrayShaped,
+  schemaIsObjectShaped,
+} from "@commonfabric/piece/declared-fields";
+import { nearestName } from "@commonfabric/piece/refusal";
+import { LINK_MARKER_KEY } from "@commonfabric/piece/verb-input";
 import { ANNOTATION_KEYS } from "@commonfabric/piece/schema-compatibility";
 import {
   ContextualFlowControl,
@@ -43,14 +52,6 @@ import {
   isObjectOrArray,
 } from "@commonfabric/utils/types";
 import { runtimeErrorLog } from "./callable.ts";
-import {
-  declaredFieldNames,
-  declaredFieldsAt,
-  isSchemaObject,
-  schemaIsArrayShaped,
-  schemaIsObjectShaped,
-} from "./declared-fields.ts";
-import { nearestName } from "./refusal.ts";
 import { timeCliPhase } from "./trace-timing.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
@@ -83,9 +84,6 @@ export interface ParsedSelectionFilter {
   predicate: SelectionPredicate;
   paths: Array<Array<string | number>>;
 }
-
-/** The key a caller writes beside `properties` to ask for an address. */
-export const LINK_MARKER_KEY = "$link";
 
 /**
  * The character a concise field path ends a segment with to ask for the

@@ -220,8 +220,16 @@ next ensure. Home decides only when an ensure runs, so a pointer that moves is
 decided at the first bring-up of Home in the next runtime worker to start, once
 the current worker's ensure has succeeded. A loom daemon does the same in the
 other direction, adopting the inbox a profile advertises and never replacing a
-pointer to a different one. [The private inbox](../../features/private-inbox.md)
-describes the whole arrangement.
+pointer to a different one. A client that would otherwise create an inbox of its
+own, as a loom daemon does, asks Home for it through
+`defaultPattern.requestPrivateInbox`, naming the profile it finds the owner by:
+Home ensures its inbox with an event naming nothing, which keeps or creates
+Home's inbox and points the profiles that point at none but adopts nothing,
+and its handling's receipt links to Home's answer for that profile, which
+reads `ensured` once the profile points at Home's inbox, or a final status
+saying why it never will.
+[The private inbox](../../features/private-inbox.md) describes the whole
+arrangement, and the request's contract under "Requesting it".
 
 ## Spaces
 
@@ -282,13 +290,34 @@ A request made in a home space that holds no queue — its home pattern does not
 exist, or is a version without the field — ends `refused`. Where the home
 pattern is a version without the field, `wish({ query: "#agent_queue" })`
 resolves to nothing; where there is no home pattern yet, a headless wish
-resolves to nothing too, and any other resolves through the empty slot. A
-handler holding that cell on a client runtime brings the home pattern up before
-it runs; on a serving runtime, which creates none, a write through it is refused
-with a `SpaceRootMissingError`. [Built-in Targets](wish.md#built-in-targets)
-describes both.
+resolves to nothing too, and any other resolves through the empty slot. A write
+through that cell is refused with a `SpaceRootMissingError`. When the write is a
+handler's on a client runtime and the refusal escapes the handler, the home
+pattern is created and the handler runs again; a serving runtime creates none.
+[Built-in Targets](wish.md#built-in-targets) describes both.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
+
+## Social-space collection
+
+Home's `sharedSpaces` interface separates collection observations and offer
+receipts from registration and membership commands. Patterns discover individual
+roles through `#default/sharedSpaces/<role>` with `scope: ["~"]`; host consumers
+use the narrow projections in `@commonfabric/home-schemas`. The backing catalog
+keeps its stable identity, and the flat catalog fields remain aliases.
+
+The **Social spaces** tab lists saved and archived looms, chats, and other kinds
+without fetching their roots. Search and filters belong to the current session.
+Archive puts a space away and restore saves it again; both compare the revision
+the rendered control showed and leave space access unchanged. Unfamiliar states
+remain visible in **Other states**. An unavailable collection has an explicit
+notice rather than an empty list. Ordinary space navigation opens a listed
+space using the runtime's configured routing.
+
+This collection is independent of the navigation list, routing hints, favorites,
+and browser recents. See [the catalog interface](../../features/shared-space-catalog.md)
+for its command payloads, observation states, privacy boundary, and completion
+rules.
 
 ## Chat Manager
 
@@ -334,9 +363,10 @@ The home space's default pattern is the home experience itself — by default,
 `/api/patterns/system/home.tsx`. A Home is created once, by whichever comes
 first of: its user's first open; the home space's own server, which ensures the
 root once server execution activates the space and its owner resolves; and the
-first handler on a client runtime that holds a cell a wish handed out for a
-Home target, which brings the root up before it runs (see
-[Built-in Targets](wish.md#built-in-targets)). A wish's read never creates one.
+first write by a handler on a client runtime through a cell a wish handed out
+for a Home target, when the write's refusal escapes the handler (see
+[Built-in Targets](wish.md#built-in-targets)). A read never creates one, a
+wish's or a handler's.
 On a serving runtime such a write is refused until the root exists, so under
 server execution a user's first profile can be created only once their Home has
 a root. From then on it owns account

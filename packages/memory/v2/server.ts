@@ -1154,6 +1154,17 @@ class Connection {
     return this.#sessions.has(sessionKey(space, sessionId));
   }
 
+  /**
+   * Ends a session this connection holds: its handle and presence memberships
+   * leave the connection, and the registry detaches it for its resume grace
+   * period. Routed sessions release their retained interests immediately.
+   */
+  closeSession(space: string, sessionId: string): void {
+    this.#sessions.delete(sessionKey(space, sessionId));
+    this.#server.endPresenceForSession(space, sessionId, this.id);
+    this.#server.detachSession(space, sessionId, this.id);
+  }
+
   #shouldSuppressSessionSend(
     space: string,
     sessionId: string,
@@ -1266,6 +1277,11 @@ class Connection {
   releasePrincipal(principal: string): void {
     this.#principals.delete(principal);
     this.#server.forgetAdmissionWaits(this.id, principal);
+  }
+
+  /** Whether this connection has closed. */
+  get closed(): boolean {
+    return this.#closed;
   }
 
   /** Whether this connection is bound to a verified Mode A context. */
@@ -1396,12 +1412,15 @@ class Connection {
     this.#challenges.get(challenge.value)?.acceptedFor.add(issuer);
     this.#principals.set(principal, { leaseEnd });
     // The sessions opened as the principal take the renewed lease, and one
-    // whose lease had run out is evaluated again for whatever it missed.
+    // whose lease had run out is evaluated again for whatever it missed. An
+    // empty dirty batch schedules that pass: the lapsed session runs the
+    // full evaluation it is marked for, and every other session of the
+    // space evaluates as untouched.
     for (const handle of this.#sessions.values()) {
       if (handle.principal !== principal) continue;
       if (this.#leaseExpired(handle)) {
         this.#server.markSessionForFullResync(handle.space, handle.sessionId);
-        this.#server.markSpaceDirty(handle.space);
+        this.#server.markSpaceDirty(handle.space, []);
       }
       handle.leaseEnd = leaseEnd;
     }
@@ -1702,18 +1721,6 @@ class Connection {
     });
   }
 
-  /**
-   * Helper for `#receiveOrdered()`, which ends a session this connection
-   * holds the way closing the connection ends it: the session leaves the
-   * connection, its presence memberships end, and the registry keeps it
-   * detached, resumable until its grace runs out.
-   */
-  #closeSession(space: string, sessionId: string): void {
-    this.#sessions.delete(sessionKey(space, sessionId));
-    this.#server.endPresenceForSession(space, sessionId, this.id);
-    this.#server.detachSession(space, sessionId, this.id);
-  }
-
   #receiveImmediate(message: ImmediateClientMessage): void {
     if (this.#closed) return;
     if (!this.#ready) {
@@ -1853,13 +1860,6 @@ class Connection {
           return;
         }
         const response = await this.#server.openSession(parsed, this);
-        if (response.ok?.sessionId && !this.routed) {
-          this.addSession(
-            parsed.space,
-            response.ok.sessionId,
-            parsed.principal,
-          );
-        }
         this.#send(response);
         return;
       }
@@ -2090,7 +2090,7 @@ class Connection {
         ) {
           return;
         }
-        this.#closeSession(parsed.space, parsed.sessionId);
+        this.closeSession(parsed.space, parsed.sessionId);
         this.#send({ type: "response", requestId: parsed.requestId, ok: {} });
         return;
       case "event.attention.resolve":
@@ -4871,6 +4871,9 @@ export class Server {
     message: SessionOpenRequest,
     connection: Connection,
   ): Promise<ResponseMessage<SessionOpenResult>> {
+    let opened: ReturnType<SessionRegistry["open"]> | undefined;
+    let catchup: SessionEffectMessage | null = null;
+    let completed = false;
     try {
       if (
         this.options.ownsSpace !== undefined &&
@@ -5017,20 +5020,46 @@ export class Server {
           ),
         );
       }
+      // Admission awaited, and the connection may have closed meanwhile: its
+      // sessions were detached at the close, so one opened now would be held
+      // by a connection that is gone, and never expire.
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during admission"),
+        );
+      }
       const priorOwner = message.session.sessionId === undefined
         ? undefined
         : this.#sessions.get(message.space, message.session.sessionId)
           ?.ownerConnectionId;
-      const opened = this.#sessions.open(
-        message.space,
-        message.session,
-        Engine.serverSeq(engine),
-        connection.id,
-        principal,
-        actingPrincipal,
-        connection.routed,
-        connection.elidedVerdicts,
-      );
+      try {
+        opened = this.#sessions.open(
+          message.space,
+          message.session,
+          Engine.serverSeq(engine),
+          connection.id,
+          principal,
+          actingPrincipal,
+          connection.routed,
+          connection.elidedVerdicts,
+        );
+      } catch (error) {
+        // The client ends a session refused here as taken over, and logs
+        // nothing that says which resume was refused.
+        if (error instanceof Error && error.name === "SessionRevokedError") {
+          // Quoted: the id, the space and the message (which repeats the id)
+          // are the peer's text, and a line break in one would read as a log
+          // record of its own.
+          console.warn(
+            `[memory-session] refused to resume session ` +
+              `${JSON.stringify(message.session.sessionId)} on ` +
+              `${JSON.stringify(message.space)} for connection ` +
+              `${connection.id}: ${JSON.stringify(error.message)}`,
+          );
+        }
+        throw error;
+      }
       if (connection.routed) {
         if (priorOwner !== connection.id) {
           this.#sessions.clearRoutedInterests(message.space, opened.sessionId);
@@ -5038,9 +5067,19 @@ export class Server {
         connection.addSession(message.space, opened.sessionId, principal);
         const admitted = this.#sessions.get(message.space, opened.sessionId)!;
         admitted.routedAuthority = () =>
-          connection.allowsRoutedSession(message.space, opened.sessionId);
+          connection.allowsRoutedSession(message.space, admitted.id);
+      } else {
+        // Catch-up awaits below. The connection must already track its
+        // session so closing it detaches this owner during that wait.
+        connection.addSession(message.space, opened.sessionId, named);
       }
       if (opened.revokedConnectionId !== undefined) {
+        console.warn(
+          `[memory-session] session ${JSON.stringify(opened.sessionId)} on ` +
+            `${JSON.stringify(message.space)} moved from connection ` +
+            `${opened.revokedConnectionId} to ${connection.id}, which ` +
+            "revokes it there as taken over",
+        );
         this.#connections.get(opened.revokedConnectionId)?.revokeSession(
           message.space,
           opened.sessionId,
@@ -5079,18 +5118,22 @@ export class Server {
       // instances instead, KEYED (the session's wire vocabulary is
       // sticky), so the retraction names exactly them and never the
       // session's own instance.
-      const catchup = opened.resumed === true
+      catchup = opened.resumed === true
         ? await this.syncSessionForConnection(
           message.space,
           opened.sessionId,
         )
         : null;
+      if (connection.closed) {
+        return respondTypedError<SessionOpenResult>(
+          message.requestId,
+          toError("SessionError", "The connection closed during catch-up"),
+        );
+      }
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
-      // during that await, before Connection.#receiveOrdered has added its
-      // local handle. In active ACL modes, never return catch-up data or let
-      // the connection add a ghost handle unless this exact token is still
-      // owned by this connection. Off mode preserves the legacy session timing.
+      // during that await. In active ACL modes, only the connection that
+      // still owns this exact token may receive its catch-up data.
       const current = this.#sessions.get(message.space, opened.sessionId);
       if (
         (connection.routed &&
@@ -5114,6 +5157,7 @@ export class Server {
       // Activation trigger (serving-loop.md §1): session open makes the
       // space ACTIVE-eligible; notify the host after the open succeeded.
       this.#notifySessionOpened(message.space);
+      completed = true;
       return {
         type: "response",
         requestId: message.requestId,
@@ -5148,6 +5192,26 @@ export class Server {
         wireError.retriable = true;
       }
       return respondTypedError<SessionOpenResult>(message.requestId, wireError);
+    } finally {
+      if (!completed && opened !== undefined) {
+        const current = this.#sessions.get(message.space, opened.sessionId);
+        // A takeover rotates the token. Cleanup belongs to this exact open;
+        // an older catch-up must leave a newer owner's delivery state intact.
+        if (current === null || current.sessionToken === opened.sessionToken) {
+          if (current !== null) {
+            if (catchup !== null) {
+              this.rollbackUndeliveredSync(
+                message.space,
+                opened.sessionId,
+                catchup,
+              );
+            } else {
+              this.markSessionForFullResync(message.space, opened.sessionId);
+            }
+          }
+          connection.closeSession(message.space, opened.sessionId);
+        }
+      }
     }
   }
 
@@ -5805,9 +5869,11 @@ export class Server {
           } else {
             // Every operation elided: nothing was written, so no document
             // turns dirty — but the accept still owes this session its
-            // catch-up marker, and the marker rides the batched flush.
-            // Schedule the pass without dirtying anything.
-            this.markSpaceDirty(message.space);
+            // catch-up marker, and the marker rides the batched flush. An
+            // empty dirty batch schedules that pass: every session of the
+            // space evaluates as untouched, and the writer's otherwise-empty
+            // frame carries the marker.
+            this.markSpaceDirty(message.space, []);
           }
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded. An
@@ -8491,6 +8557,16 @@ export class Server {
     });
   }
 
+  /**
+   * Marks `space` for the next batched flush. `dirtyIds` names the dirty keys
+   * whose watchers that flush re-evaluates incrementally. An empty iterable
+   * schedules the pass with every session of the space evaluating as
+   * untouched, and a session then sends a frame only for what it is otherwise
+   * owed, such as a catch-up marker or a forced full resync. Leaving
+   * `dirtyIds` out has the flush evaluate every session of the space in full
+   * from its watch roots, which replaces each session's tracked graphs and is
+   * the costly path.
+   */
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
@@ -10039,6 +10115,12 @@ export const parseClientMessage = (
         sessionToken: typeof parsed.session.sessionToken === "string"
           ? parsed.session.sessionToken
           : undefined,
+        ...(typeof parsed.session.resumeKey === "string"
+          ? { resumeKey: parsed.session.resumeKey }
+          : {}),
+        ...(Number.isSafeInteger(parsed.session.resumeAttempt)
+          ? { resumeAttempt: parsed.session.resumeAttempt as number }
+          : {}),
         // The delegated READ binding (OW31): parsed as the LITERAL
         // marker only — any other string reaches openSession's
         // unknown-value refusal rather than being silently dropped.

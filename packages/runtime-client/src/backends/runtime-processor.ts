@@ -2796,8 +2796,8 @@ export class RuntimeProcessor {
 
   /**
    * Tells the user's chat manager that the user has joined the FabriChat room
-   * whose space `request` names, when the space passes vetting, as
-   * `PiecesController.joinVisitedRoom` says, and answers with what was
+   * declared by the space `request` names, when it passes vetting, as
+   * `PiecesController.joinVisitedRoom()` says, and returns what was
    * decided. A user with no Home gets nothing done and no decision: Home is
    * never created for it, and an existing Home is brought up as any other
    * bring-up does.

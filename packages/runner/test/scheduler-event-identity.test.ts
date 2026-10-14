@@ -10,6 +10,7 @@ import {
 } from "../src/scheduler/event-identity.ts";
 import {
   dropQueuedEvent,
+  EventHandlerRegistry,
   queueSchedulerEvent,
 } from "../src/scheduler/events.ts";
 import type { QueuedEvent } from "../src/scheduler/types.ts";
@@ -211,7 +212,7 @@ describe("scheduler event identity", () => {
 
     queueSchedulerEvent({
       runtime: {} as Runtime,
-      eventHandlers: [[eventLink, handler]],
+      eventHandlers: new EventHandlerRegistry([[eventLink, handler]]),
       eventQueue,
       backgroundTasks: new Set(),
       queueExecution: () => {},
@@ -299,7 +300,7 @@ describe("scheduler event identity", () => {
         edit: () => droppedTx,
         experimental: {},
       } as unknown as Runtime,
-      eventHandlers: [],
+      eventHandlers: new EventHandlerRegistry(),
       eventQueue,
       backgroundTasks,
       loadPieceForEvent: () => Promise.reject(new Error("start failed")),
@@ -340,7 +341,7 @@ describe("scheduler event identity", () => {
         edit: () => droppedTx,
         experimental: {},
       } as unknown as Runtime,
-      eventHandlers: [],
+      eventHandlers: new EventHandlerRegistry(),
       eventQueue,
       backgroundTasks,
       loadPieceForEvent: () => pieceLoad.promise,
@@ -410,11 +411,11 @@ describe("scheduler event identity", () => {
         } as unknown as Runtime,
         // No handler for the HEAD's link — it takes the piece-load path;
         // the three later arrivals are all ready-queued.
-        eventHandlers: [
+        eventHandlers: new EventHandlerRegistry([
           [followerLink, handler],
           [crossSpaceLink, handler],
           [lt1Link, handler],
-        ] as [NormalizedFullLink, typeof handler][],
+        ]),
         eventQueue,
         backgroundTasks,
         loadPieceForEvent: loadFailure,
