@@ -1,11 +1,14 @@
 import {
   debugStr,
   deepFreeze,
+  fabricAwareEqual,
   type FabricValue,
   isDeepFrozen,
+  isKeyableObjectOrArray,
   isWalkableObjectOrArray,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -223,7 +226,59 @@ export function areLinksSame(
   }
 
   // Compare normalized links
-  return areNormalizedLinksSame(link1, link2);
+  if (areNormalizedLinksSame(link1, link2)) return true;
+
+  return resolveBeforeComparing === true && txForResolving !== undefined &&
+    dataUriLinksCarrySameValue(txForResolving, link1, link2);
+}
+
+/**
+ * Helper for `areLinksSame()`, which returns whether two resolved links both
+ * name a position inside a `data:` document and those positions hold the same
+ * value. A `data:` document is its value and is stored nowhere, so a position
+ * inside one has no identity apart from the value there: a row read out of an
+ * array as a snapshot, and that row as a handler finds it inside the event it
+ * was sent in, are one value at two addresses. A position holding no value is
+ * the same as nothing.
+ */
+function dataUriLinksCarrySameValue(
+  tx: IExtendedStorageTransaction,
+  link1: NormalizedLink,
+  link2: NormalizedLink,
+): boolean {
+  if (
+    !isNormalizedFullLink(link1) || !isNormalizedFullLink(link2) ||
+    !isFabricDataUri(link1.id) || !isFabricDataUri(link2.id)
+  ) {
+    return false;
+  }
+  const value1 = tx.readValueOrThrow(link1);
+  if (value1 === undefined) return false;
+  return carriedValuesEqual(value1, tx.readValueOrThrow(link2));
+}
+
+/**
+ * Helper for `dataUriLinksCarrySameValue()`, which compares two values read
+ * out of `data:` documents. Two links are equal when they name the same cell,
+ * whatever schema each carries: the schema is how the cell is read, and one
+ * link is written with it as a reference and inline at different points on
+ * its way through the runtime. Everything else is compared by content.
+ */
+function carriedValuesEqual(a: unknown, b: unknown): boolean {
+  if (isPrimitiveCellLink(a) || isPrimitiveCellLink(b)) {
+    return isPrimitiveCellLink(a) && isPrimitiveCellLink(b) &&
+      areNormalizedLinksSame(parseLinkPrimitive(a), parseLinkPrimitive(b));
+  }
+  if (!isKeyableObjectOrArray(a) || !isKeyableObjectOrArray(b)) {
+    return fabricAwareEqual(a, b);
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length &&
+    (!Array.isArray(a) || a.length === (b as unknown[]).length) &&
+    keys.every((key) =>
+      Object.hasOwn(b, key) && carriedValuesEqual(a[key], b[key])
+    );
 }
 
 export function areMaybeLinkAndNormalizedLinkSame(

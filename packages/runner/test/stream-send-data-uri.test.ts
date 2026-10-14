@@ -136,6 +136,67 @@ describe("stream-send-data-uri", () => {
     expect(linkIdsIn(event)).toEqual([targetId]);
   });
 
+  it("hands a handler an inline array element that still names its row", async () => {
+    // A row read out of an array is a value, and the handler finds the row
+    // holding that value: `remove()` matches its argument against each
+    // element as `areLinksSame()` decides.
+    const itemsSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { label: { type: "string" } },
+      },
+    } as const;
+    const removeItem = handler(
+      {
+        type: "object",
+        properties: { item: { ...itemsSchema.items, asCell: ["cell"] } },
+        required: ["item"],
+      } as const,
+      {
+        type: "object",
+        properties: { items: { ...itemsSchema, asCell: ["cell"] } },
+        required: ["items"],
+      } as const,
+      (event, state) => state.items.remove(event.item),
+    );
+    const list = pattern<{ items: { label: string }[] }>(({ items }) => ({
+      items,
+      removeItem: removeItem({ items }),
+    }));
+    // Written raw, the rows are stored inline in the array, where a row
+    // written through a schema would get a document of its own.
+    const tx = runtime.edit();
+    const holder = runtime.getCell<{ items: { label: string }[] }>(
+      space,
+      "stream-send-data-uri-rows",
+      undefined,
+      tx,
+    );
+    holder.setRaw({
+      items: [{ label: "one" }, { label: "two" }, { label: "three" }],
+    });
+    const result = runtime.getCell<
+      { items: { label: string }[]; removeItem: unknown }
+    >(space, "stream-send-data-uri-list", undefined, tx);
+    runtime.run(tx, list, { items: holder.key("items") }, result);
+    await tx.commit().settled;
+    await runtime.idle();
+
+    const second = result.key("items").key(1).resolveAsCell();
+    expect(hasDataUriScheme(second.getAsNormalizedFullLink().id)).toBe(true);
+
+    await new Promise<void>((resolve) => {
+      sendEvent(result.key("removeItem"), { item: second }, () => resolve());
+    });
+    await runtime.idle();
+
+    expect(result.key("items").get().map((item) => item.label)).toEqual([
+      "one",
+      "three",
+    ]);
+  });
+
   it("throws for an immutable cell holding a `FabricError`", () => {
     // An event admits no `FabricInstance`: one written into the event itself
     // is refused where its cells become links, and one inside the value a

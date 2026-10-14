@@ -1,7 +1,12 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model";
+import {
+  deepFreeze,
+  type FabricValue,
+  isDeepFrozen,
+} from "@commonfabric/data-model";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -459,6 +464,85 @@ describe("link-utils", () => {
       expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
         "Cannot parse value as link",
       );
+    });
+  });
+
+  describe("areLinksSame() between positions inside `data:` documents", () => {
+    // Each identifier is minted by the codec alone, so a link inside a value
+    // keeps the schema it was written with.
+
+    /** A link to `path` inside a `data:` document holding `value`. */
+    const into = (value: FabricValue, path: string[] = []) => ({
+      "/": {
+        [LINK_V1_TAG]: {
+          id: dataUriFromValue(value),
+          space,
+          scope: "space",
+          path,
+        },
+      },
+    });
+
+    /** A link to the cell `id`, carrying `schema`. */
+    const linkTo = (id: string, schema: JSONSchema) => ({
+      "/": { [LINK_V1_TAG]: { id, space, path: [], schema } },
+    });
+
+    const resolved = (a: unknown, b: unknown) =>
+      areLinksSame(a, b, undefined, true, tx, runtime);
+
+    const row = { label: "Hotel", amount: 420 };
+
+    it("returns `true` for two positions holding the same value, once resolved", () => {
+      const snapshot = into(row);
+      const inEvent = into({ entry: row, other: 1 }, ["entry"]);
+      expect(resolved(snapshot, inEvent)).toBe(true);
+      expect(resolved(inEvent, snapshot)).toBe(true);
+      expect(areLinksSame(snapshot, inEvent)).toBe(false);
+    });
+
+    it("returns `false` for two positions holding different values", () => {
+      expect(
+        resolved(
+          into(row),
+          into({ entry: { ...row, amount: 421 } }, ["entry"]),
+        ),
+      ).toBe(false);
+      expect(
+        resolved(into(row), into({ entry: { ...row, extra: 1 } }, ["entry"])),
+      ).toBe(false);
+      expect(resolved(into([row]), into({ 0: row }))).toBe(false);
+    });
+
+    it("returns `false` for two positions holding nothing", () => {
+      expect(resolved(into({}, ["gone"]), into({ a: 1 }, ["missing"]))).toBe(
+        false,
+      );
+    });
+
+    it("returns `true` where a link inside each value names the same cell under a different schema", () => {
+      const document = { type: "object", title: "carried row target" } as const;
+      const hash = internSchemaAsTaggedHashString(document);
+      registerSchemaDocument(hash, document);
+      const byReference = {
+        ref: linkTo("of:row-target", { $ref: `cid:${hash}` }),
+      };
+      const inline = { ref: linkTo("of:row-target", document) };
+      const elsewhere = { ref: linkTo("of:another-target", document) };
+
+      expect(resolved(into(byReference), into({ entry: inline }, ["entry"])))
+        .toBe(true);
+      expect(resolved(into(byReference), into({ entry: elsewhere }, ["entry"])))
+        .toBe(false);
+      expect(
+        resolved(into(byReference), into({ entry: { ref: 1 } }, ["entry"])),
+      ).toBe(false);
+    });
+
+    it("returns `false` for a position in a `data:` document and a stored cell holding the same value", () => {
+      const stored = runtime.getCell(space, "stored-row", undefined, tx);
+      stored.setRaw(row);
+      expect(resolved(into(row), stored)).toBe(false);
     });
   });
 

@@ -172,6 +172,28 @@ it already holds: its replica received them with the stored document the
 snapshot was taken from, and its schema-document registry registered them as
 they arrived or were written.
 
+### A dissolved cell keeps what it names
+
+A cell with a `data:` identifier names a value, and a handler can hold one
+for exactly that: a row read out of an array and sent in an event, which the
+handler then finds among the array's rows with `equals()` or removes with
+`remove()`. Dissolved into the event, the row sits at a path inside the
+event's own `data:` document, a different identifier from the one a read of
+the array gives the same row.
+
+So the comparison those two share, `areLinksSame()` in
+`packages/runner/src/link-utils.ts` when it resolves its operands, takes two
+positions inside `data:` documents to be the same when they hold the same
+value. Inside those values a link is the same as another naming the same
+cell, whatever schema each carries, because a link is written with its schema
+as a reference at one point and inline at another on its way through the
+runtime. A position that holds nothing is the same as nothing, and a position
+inside a `data:` document is never the same as a cell stored in a space,
+whatever the two hold. Without resolution, as `equalLinks()` compares, two
+links are the same only when their addresses are.
+
+### Where the walk stops
+
 One position is out of the walk's reach. A `FabricInstance` keeps its state
 behind its codec, so an identifier held there is not dissolved. The two
 routes treat an instance as each treats one written directly: a send refuses
