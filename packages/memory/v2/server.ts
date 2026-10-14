@@ -1412,12 +1412,15 @@ class Connection {
     this.#challenges.get(challenge.value)?.acceptedFor.add(issuer);
     this.#principals.set(principal, { leaseEnd });
     // The sessions opened as the principal take the renewed lease, and one
-    // whose lease had run out is evaluated again for whatever it missed.
+    // whose lease had run out is evaluated again for whatever it missed. An
+    // empty dirty batch schedules that pass: the lapsed session runs the
+    // full evaluation it is marked for, and every other session of the
+    // space evaluates as untouched.
     for (const handle of this.#sessions.values()) {
       if (handle.principal !== principal) continue;
       if (this.#leaseExpired(handle)) {
         this.#server.markSessionForFullResync(handle.space, handle.sessionId);
-        this.#server.markSpaceDirty(handle.space);
+        this.#server.markSpaceDirty(handle.space, []);
       }
       handle.leaseEnd = leaseEnd;
     }
@@ -5866,9 +5869,11 @@ export class Server {
           } else {
             // Every operation elided: nothing was written, so no document
             // turns dirty — but the accept still owes this session its
-            // catch-up marker, and the marker rides the batched flush.
-            // Schedule the pass without dirtying anything.
-            this.markSpaceDirty(message.space);
+            // catch-up marker, and the marker rides the batched flush. An
+            // empty dirty batch schedules that pass: every session of the
+            // space evaluates as untouched, and the writer's otherwise-empty
+            // frame carries the marker.
+            this.markSpaceDirty(message.space, []);
           }
           // Plane (b): the admission-side activation hook — synchronous
           // with the dirty marking, observer errors shielded. An
@@ -8552,6 +8557,16 @@ export class Server {
     });
   }
 
+  /**
+   * Marks `space` for the next batched flush. `dirtyIds` names the dirty keys
+   * whose watchers that flush re-evaluates incrementally. An empty iterable
+   * schedules the pass with every session of the space evaluating as
+   * untouched, and a session then sends a frame only for what it is otherwise
+   * owed, such as a catch-up marker or a forced full resync. Leaving
+   * `dirtyIds` out has the flush evaluate every session of the space in full
+   * from its watch roots, which replaces each session's tracked graphs and is
+   * the costly path.
+   */
   markSpaceDirty(
     space: string,
     dirtyIds?: Iterable<string>,
