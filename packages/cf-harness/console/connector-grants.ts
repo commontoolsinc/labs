@@ -35,6 +35,7 @@ import {
   checkConnectorGrantSpec,
   connectorGrantName,
   isConnectorObservationTimestamp,
+  isConnectorTablePresence,
 } from "../src/well-known-grants.ts";
 
 /** The CFC atom type whose `class` names what a column holds. */
@@ -191,7 +192,7 @@ const handleKey = (
 /** Descriptive metadata published on one source receipt. */
 type ConnectorReceiptMetadata = Pick<
   HarnessConnectorGrantSpec,
-  "rowCount" | "viewer" | "observation"
+  "rowCount" | "tableHasRows" | "viewer" | "observation"
 >;
 
 /** Keeps agreed metadata and marks disagreements without choosing one receipt. */
@@ -200,6 +201,9 @@ const mergeReceiptMetadata = (
   candidate: ConnectorReceiptMetadata,
 ): void => {
   if (target.rowCount !== candidate.rowCount) delete target.rowCount;
+  if (!deepEqual(target.tableHasRows, candidate.tableHasRows)) {
+    delete target.tableHasRows;
+  }
   if (!deepEqual(target.viewer, candidate.viewer)) {
     target.viewer = { identity: "conflicting" };
   }
@@ -228,11 +232,20 @@ const sourceReceiptMetadata = (
         typeof count === "number" && Number.isSafeInteger(count) && count >= 0
       ? count
       : undefined;
+    // Which tables held a row, `null` for one the receipt could not read. A
+    // record of any other shape says nothing this can repeat to a model, so
+    // it leaves presence unknown rather than withholding the handle.
+    const presence = source?.table_has_rows;
+    const tableHasRows =
+      source?.state === "linked" && isConnectorTablePresence(presence)
+        ? presence
+        : undefined;
     const key = handleKey(piece, connection, companion ?? "");
     const viewer = receiptViewer(source?.viewer);
     const observation = receiptObservation(source);
     const metadata = {
       ...(rowCount === undefined ? {} : { rowCount }),
+      ...(tableHasRows === undefined ? {} : { tableHasRows }),
       ...(viewer === undefined ? {} : { viewer }),
       ...(observation === undefined ? {} : { observation }),
     };
@@ -608,6 +621,7 @@ export const parseConnectorGrants = (
     const piece = asNonEmptyString(source?.piece);
     const cfcClass = asNonEmptyString(record?.cfcClass);
     const companionKey = asNonEmptyString(source?.companionKey);
+    const tableHasRows = record?.tableHasRows;
     if (
       name === undefined || ref === undefined || connection === undefined ||
       piece === undefined
@@ -625,6 +639,13 @@ export const parseConnectorGrants = (
         "`CF_HARNESS_CONNECTOR_GRANTS` cfcClass and companionKey must be nonempty strings when present",
       );
     }
+    if (
+      tableHasRows !== undefined && !isConnectorTablePresence(tableHasRows)
+    ) {
+      throw new Error(
+        "`CF_HARNESS_CONNECTOR_GRANTS` tableHasRows must map table names to true, false, or null",
+      );
+    }
     const grant = {
       name,
       ref,
@@ -635,6 +656,7 @@ export const parseConnectorGrants = (
       ...(record?.rowCount === undefined
         ? {}
         : { rowCount: record.rowCount as number }),
+      ...(tableHasRows === undefined ? {} : { tableHasRows }),
       ...(record?.viewer === undefined
         ? {}
         : { viewer: record.viewer as HarnessConnectorGrantSpec["viewer"] }),

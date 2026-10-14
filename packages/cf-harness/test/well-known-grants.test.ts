@@ -129,6 +129,21 @@ describe("well-known-grants", () => {
     );
   });
 
+  it("rejects malformed table presence when restoring a named store", () => {
+    const grant = JSON.parse(
+      JSON.stringify({
+        ...MAIL_GRANT,
+        name: "gmail-work",
+        cfcClasses: ["email"],
+        tableHasRows: { messages: "yes" },
+        token: "cfh:a:abcdefgh",
+      }),
+    );
+    expect(() => checkRecordedWellKnownGrant(grant)).toThrow(
+      "connector table presence must map table names",
+    );
+  });
+
   describe("resolveWellKnownGrantRefs()", () => {
     it("resolves the piece registry to its canonical in-space reference", async () => {
       const refs = await resolveWellKnownGrantRefs(stubSession());
