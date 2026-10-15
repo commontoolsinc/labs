@@ -8988,7 +8988,9 @@ export class Runner {
    * both, a setup re-staging the argument under another pattern's schema
    * reads each linked document to judge the slot holding the link, and the
    * gate that decides whether a run over a stored piece must name its family
-   * first probes them. `argumentCell` is local already.
+   * first probes them. `argumentCell` is local already. The argument and each
+   * linked document are read, and named, as `identity`, so a scoped argument
+   * is read in the instance that identity's setup reads.
    */
   async #syncStoredArgumentLinkTargets(
     argumentCell: Cell<unknown>,
@@ -9012,7 +9014,7 @@ export class Runner {
       seen.add(value);
       for (const key in value) collect(value[key]);
     };
-    collect(argumentCell.getRawUntyped());
+    collect(argumentCell.withTx(this.#familyReadTx(identity)).getRawUntyped());
     const syncNamed = (cells: readonly Cell<unknown>[]): Promise<void> =>
       Promise.all(
         cells.map((cell) =>
@@ -9026,8 +9028,9 @@ export class Runner {
       ).then(() => {});
     await syncNamed(targets);
     const owners: Cell<unknown>[] = [];
+    const ownerTx = this.#familyReadTx(identity);
     for (const target of targets) {
-      const owner = getMetaLink(target, "result");
+      const owner = getMetaLink(target.withTx(ownerTx), "result");
       if (owner !== undefined) {
         owners.push(
           this.#runtime.getCellFromLink({ ...owner, schema: undefined }),
