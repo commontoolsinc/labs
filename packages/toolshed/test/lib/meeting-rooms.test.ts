@@ -210,6 +210,47 @@ describe("meeting-rooms", () => {
       await expect(rooms().ensure(alice.did(), request))
         .rejects.toThrow(MeetingRoomError);
       expect(allocations()).toHaveLength(1);
+      expect(candidates).toHaveLength(1);
+    });
+
+    it("rejects a request that changes occurrence even when the target already has a room", async () => {
+      const first = proposal();
+      await rooms().ensure(alice.did(), first);
+      const second = proposal();
+      second.key.occurrence_key = "c".repeat(64);
+      await rooms().ensure(bob.did(), second);
+      const changed = { ...first, key: second.key };
+      await expect(rooms().ensure(alice.did(), changed))
+        .rejects.toThrow(MeetingRoomError);
+      expect(candidates).toHaveLength(2);
+      expect(allocations()).toHaveLength(2);
+    });
+
+    it("gives every association-store connection a bounded native lock wait", async () => {
+      const execute = Database.prototype.exec;
+      const waits: number[] = [];
+      const configured = stub(
+        Database.prototype,
+        "exec",
+        function (this: Database, sql: string) {
+          execute.call(this, sql);
+          if (this.path === path) {
+            waits.push(
+              Number(this.prepare("PRAGMA busy_timeout").get()?.timeout),
+            );
+          }
+        },
+      );
+      try {
+        await rooms().ensure(alice.did(), proposal());
+      } finally {
+        configured.restore();
+      }
+      expect(waits.length).toBeGreaterThan(0);
+      for (const wait of waits) {
+        expect(wait).toBeGreaterThan(0);
+        expect(wait).toBeLessThanOrEqual(5000);
+      }
     });
 
     it("retains an existing legacy room only for its explicit owner", async () => {

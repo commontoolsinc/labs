@@ -114,7 +114,7 @@ export class MeetingRooms {
       parsed.key.item_key,
       parsed.key.occurrence_key,
     ]);
-    const existing = this.#read(key);
+    const existing = this.#read(key, principal, parsed.requestId);
     const row = existing ?? await this.#allocate(principal, parsed, key);
     const result: MeetingRoomAllocation = {
       space: row.space,
@@ -131,6 +131,7 @@ export class MeetingRooms {
     const db = new Database(this.#path);
     try {
       db.exec(`
+        PRAGMA busy_timeout = 5000;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = FULL;
         CREATE TABLE IF NOT EXISTS meeting_rooms (
@@ -150,14 +151,34 @@ export class MeetingRooms {
   }
 
   /** Reads an association without converting storage failures to absence. */
-  #read(key: string): AllocationRow | undefined {
+  #read(
+    key: string,
+    principal: DID,
+    requestId: string,
+  ): AllocationRow | undefined {
     const db = this.#open();
     try {
+      this.#checkRequest(db, principal, requestId, key);
       const row = db.prepare("SELECT * FROM meeting_rooms WHERE key = ?")
         .get(key);
       return row === undefined ? undefined : rowSchema.parse(row);
     } finally {
       db.close();
+    }
+  }
+
+  /** Refuses a request already retained for another occurrence. */
+  #checkRequest(
+    db: Database,
+    principal: DID,
+    requestId: string,
+    key: string,
+  ): void {
+    const prior = db.prepare(
+      "SELECT key FROM meeting_rooms WHERE creator = ? AND request_id = ?",
+    ).get(principal, requestId);
+    if (prior !== undefined && prior.key !== key) {
+      throw new MeetingRoomError("request-conflict");
     }
   }
 
@@ -185,12 +206,7 @@ export class MeetingRooms {
     const db = this.#open();
     try {
       return db.transaction(() => {
-        const prior = db.prepare(
-          "SELECT key FROM meeting_rooms WHERE creator = ? AND request_id = ?",
-        ).get(principal, request.requestId);
-        if (prior !== undefined && prior.key !== key) {
-          throw new MeetingRoomError("request-conflict");
-        }
+        this.#checkRequest(db, principal, request.requestId, key);
         db.prepare(`
           INSERT INTO meeting_rooms
             (key, space, creator, request_id, root)

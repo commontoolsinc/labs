@@ -46,6 +46,26 @@ describe("v2-flush-space", () => {
     }
   });
 
+  it("rejects a missing space without creating an empty store", async () => {
+    const missing = (await Identity.generate()).did();
+    const missingPath = fromFileUrl(resolveSpaceStoreUrl(
+      toFileUrl(directory + "/"),
+      missing,
+    ));
+    await expect(server.flushSpace(missing)).rejects.toThrow(
+      "Cannot flush an unavailable space",
+    );
+    await expect(Deno.stat(missingPath)).rejects.toThrow(Deno.errors.NotFound);
+  });
+
+  it("rejects an existing store with no committed history", async () => {
+    const empty = (await Identity.generate()).did();
+    expect(await server.readDocument(empty, "of:checkpoint-probe")).toBeNull();
+    await expect(server.flushSpace(empty)).rejects.toThrow(
+      "Cannot flush a space without history",
+    );
+  });
+
   it("throws while a reader prevents the full checkpoint and succeeds once it releases", async () => {
     const reader = new Database(path, { readonly: true });
     try {

@@ -3798,10 +3798,14 @@ export class Server {
 
   /**
    * Flushes a space's WAL before a separate durable store records completion.
-   * Throws when a reader prevents the full checkpoint.
+   * Refuses a missing store without creating one. Throws when a reader
+   * prevents the full checkpoint.
    */
   async flushSpace(space: string): Promise<void> {
     await this.#withSpacePublicationLock(space, async () => {
+      if (!(await this.#spaceStoreExists(space))) {
+        throw new Error("Cannot flush an unavailable space");
+      }
       const engine = await this.#openEngine(space);
       if (Engine.serverSeq(engine) === 0) {
         throw new Error("Cannot flush a space without history");
