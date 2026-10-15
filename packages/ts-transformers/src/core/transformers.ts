@@ -55,6 +55,14 @@ export type SchemaHint = {
    * defining a document (`SchemaGenerationOptions.definesDocument`).
    */
   readonly definesDocument?: true;
+
+  /**
+   * Set on the node a verb's authored event is generated from: the handler
+   * body's capability summary of the event, which narrows each cell of the
+   * generated schema to the capability the body earns at its data path
+   * (`narrowEventCapabilities()`).
+   */
+  readonly contractCapabilities?: CapabilityParamSummary;
 };
 
 export type ReactiveCapability =
@@ -86,6 +94,15 @@ export type CapabilityParamSummary = {
   readonly escapedPaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
+  /**
+   * The static path prefixes below which the body reaches members this
+   * analysis does not name one by one: a wildcard's, and a read through a key
+   * that can name any member. `[]` is the whole parameter. A position below
+   * one may be used in any way the analysis did not record; the use of a
+   * prefix itself is recorded with the other paths.
+   */
+  readonly wildcardPaths?: readonly (readonly string[])[];
 
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`

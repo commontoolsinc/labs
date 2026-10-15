@@ -32,6 +32,7 @@ import { listInstanceCoordinator } from "./list-instance-coordinator.ts";
 import {
   LIST_OP_CAPTURED_ARGUMENT_FIELDS,
   LIST_OP_REFERENCED_ARGUMENT_FIELDS,
+  unusedListOpArgumentFields,
 } from "./list-op-argument-usage.ts";
 import { resumeContainerWait } from "./list-result-container-seed.ts";
 import { issueResultContainerSetup } from "./list-result-container.ts";
@@ -66,9 +67,12 @@ const logger = getLogger("runner.map", { enabled: true, level: "warn" });
  * Implementation of built-in map module. Unlike regular modules, this will be
  * called once at setup and thus sets up its own actions for the scheduler.
  *
- * This supports both legacy map calls and closure-transformed map calls:
- * - Legacy mode (params === undefined): Passes { element, index, array } to pattern
- * - Closure mode (params !== undefined): Passes { element, index, array, params } to pattern
+ * Each element runs the op pattern over the arguments its argument schema
+ * names, of `element`, `index`, `array` and `params`: the transformer names
+ * the parameters a callback declares, with `params` holding the bindings it
+ * captures. A slot the schema does not name is not passed, and a stored
+ * argument that holds one from an earlier run loses it when the element is
+ * set up again. An op with no argument schema receives all four.
  *
  * The goal is to keep the output array current without recomputing too much.
  *
@@ -307,6 +311,7 @@ function createMapInstance(
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
 
+    const droppedArgumentFields = unusedListOpArgumentFields(argumentUsage);
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -430,6 +435,7 @@ function createMapInstance(
               parentPieceRootId,
               referencedArgumentFields: LIST_OP_REFERENCED_ARGUMENT_FIELDS,
               capturedArgumentFields: LIST_OP_CAPTURED_ARGUMENT_FIELDS,
+              droppedArgumentFields,
             },
           );
           // The whole setup, every time, because issuing it takes the debt for
@@ -467,6 +473,7 @@ function createMapInstance(
             parentPieceRootId,
             referencedArgumentFields: LIST_OP_REFERENCED_ARGUMENT_FIELDS,
             capturedArgumentFields: LIST_OP_CAPTURED_ARGUMENT_FIELDS,
+            droppedArgumentFields,
           },
         );
         linkElementCell(boundResultCell);

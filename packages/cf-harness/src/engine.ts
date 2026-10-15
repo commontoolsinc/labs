@@ -143,6 +143,7 @@ import {
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  type HarnessFailureKind,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
@@ -219,7 +220,9 @@ import {
   setHarnessOpeningResearch,
   setHarnessRunStatus,
   setHarnessSubagentRun,
+  setHarnessTaskClassification,
 } from "./run-state.ts";
+import type { HarnessTaskClassification } from "./task-classification.ts";
 import {
   assertRunscCfcPolicyForMode,
   resolveRunscSandboxConfig,
@@ -258,6 +261,14 @@ import {
   type BrowserToolInput,
   type BrowserToolOutput,
 } from "./tools/browser.ts";
+import {
+  type CallVerbToolInput,
+  type CallVerbToolOutput,
+} from "./tools/call-verb.ts";
+import type {
+  ReadValueToolInput,
+  ReadValueToolOutput,
+} from "./tools/read-value.ts";
 import {
   type DescribeHandleToolInput,
   type DescribeHandleToolOutput,
@@ -342,6 +353,8 @@ export interface BuiltinToolInputMap {
   run_pattern: RunPatternToolInput;
   read_piece_source: ReadPieceSourceToolInput;
   revise_piece: RevisePieceToolInput;
+  call_verb: CallVerbToolInput;
+  read_value: ReadValueToolInput;
   assign_slug: AssignSlugToolInput;
   resolve_piece: ResolvePieceToolInput;
   describe_handle: DescribeHandleToolInput;
@@ -382,6 +395,8 @@ export interface BuiltinToolOutputMap {
   run_pattern: RunPatternToolOutput;
   read_piece_source: ReadPieceSourceToolOutput;
   revise_piece: RevisePieceToolOutput;
+  call_verb: CallVerbToolOutput;
+  read_value: ReadValueToolOutput;
   assign_slug: AssignSlugToolOutput;
   resolve_piece: ResolvePieceToolOutput;
   describe_handle: DescribeHandleToolOutput;
@@ -1499,6 +1514,19 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /** Persists the kinds of work the root task was classified with. */
+  async recordTaskClassification(
+    taskClassification: HarnessTaskClassification,
+  ): Promise<HarnessRunState> {
+    this.#runState = setHarnessTaskClassification(
+      this.#runState,
+      taskClassification,
+      this.#now(),
+    );
+    await this.persistRunState();
+    return this.getRunState();
+  }
+
   /** Whether this run can acquire a pinned external skill. */
   get skillsShAcquisitionAvailable(): boolean {
     return this.#skillsShAcquisitionClientFactory !== undefined;
@@ -1713,8 +1741,13 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Records a policy event, and a denial among the run's failures, as
+   * `failureKind` when given.
+   */
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
+    options: { failureKind?: HarnessFailureKind } = {},
   ): Promise<HarnessRunState> {
     const now = this.#now();
     const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
@@ -1724,7 +1757,10 @@ export class CfHarnessEngine {
       policyEvent,
       now,
     );
-    const failure = classifyHarnessPolicyEventFailure(policyEvent);
+    const failure = classifyHarnessPolicyEventFailure(
+      policyEvent,
+      options.failureKind,
+    );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(this.#runState, failure, now);
     }

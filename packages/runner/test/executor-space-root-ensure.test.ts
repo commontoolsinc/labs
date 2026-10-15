@@ -677,6 +677,28 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     }
   });
 
+  it("hands the root's deferred start the resolved OWNER's trust snapshot, never the service's", async () => {
+    // The root's start runs in a transaction of its own once the creation
+    // commits, and initializes on the creation's behalf; what it initializes
+    // is the owner's, as what the creation does is.
+
+    await seedAcl({ [aliceSigner.did()]: "OWNER" });
+    const created = newSpaceServer();
+    expect(await created.activate()).toBe(true);
+    await resolveRootAfterEnsure(clientRuntime(readerSigner));
+
+    const starts = mintedTxs.filter((tx) =>
+      waveRunContextOf(tx)?.actionId?.startsWith("piece-start/") === true &&
+      tx.getCfcState().attributedInitialization
+    );
+    expect(starts.length).toBeGreaterThan(0);
+    for (const tx of starts) {
+      expect(tx.getCfcState().trustSnapshot?.actingPrincipal).toBe(
+        aliceSigner.did(),
+      );
+    }
+  });
+
   it("activation before the genesis ACL: the fail-closed skip RE-ARMS on the ACL commit and the ensure runs in the SAME tenure", async () => {
     // The measured live boot order (stage-1 measurement r01): the host
     // activates on SESSION-OPEN, before the client's genesis ACL commit

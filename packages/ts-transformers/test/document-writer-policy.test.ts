@@ -207,6 +207,59 @@ export default pattern<${input}>((input) => ({ input }));`);
         );
       });
     }
+
+    it("refuses a writer a number index signature holds beside a string one whose values recur through three instantiations", async () => {
+      const result = await transform(
+        `interface Cycle<A, B, C> { value: A; next?: Cycle<B, C, A> }
+type Value = Cycle<1, 2, 3>;
+interface In {
+  [key: string]: Value;
+  [index: number]: WriteAuthorizedBy<Value, typeof setName>;
+}
+export default pattern<In>((input) => ({ input }));`,
+      );
+
+      expect(outcome(result, [inputSchema(result.root)])).toBe("refused");
+    });
+
+    const unprotected: readonly (readonly [string, string, string])[] = [
+      [
+        "a mapped type over a nested payload",
+        "type DeepReadonly<T> = { readonly [K in keyof T]: DeepReadonly<T[K]> };",
+        "DeepReadonly<{ a: { b: { c: string } } }>",
+      ],
+      [
+        "arrays of objects holding arrays",
+        "",
+        "{ rows: { cells: { tags: { name: string }[] }[] }[] }",
+      ],
+      [
+        "a generic whose arguments shrink toward its end, nested more than eight deep",
+        `interface Chain<N extends unknown[]> {
+  value: string;
+  next?: N extends [unknown, ...infer R] ? Chain<R> : null;
+}`,
+        `Chain<[${Array(12).fill(1).join(", ")}]>`,
+      ],
+      [
+        "records of objects holding records",
+        "",
+        "{ a: Record<string, { b: Record<string, { c: Record<string, 1> }> }> }",
+      ],
+    ];
+
+    for (const [shape, declarations, value] of unprotected) {
+      it(`reports nothing for a number index signature beside a string one whose values are ${shape} holding no policy`, async () => {
+        const { diagnostics } = await transform(`${declarations}
+interface In {
+  [key: string]: unknown;
+  [index: number]: ${value};
+}
+export default pattern<In>((input) => ({ input }));`);
+
+        expect(diagnostics.filter(isUnreadWriter)).toEqual([]);
+      });
+    }
   });
 
   describe("a schema the author wrote with `toSchema`", () => {
@@ -932,6 +985,50 @@ export default pattern<{ value: Owned<string, typeof setName> }>((input) => {
 
       expect(result.diagnostics.filter(isUnreadWriter)).toEqual([]);
     });
+
+    for (
+      const [what, list, defines] of [
+        [
+          "does not define its document where fresh data an inferred result returns holds a stream linking to a type with a writer policy",
+          "ITEMS.map((n) => ({ target: stream, n }))",
+          false,
+        ],
+        [
+          "does not define its document where fresh data an inferred result returns holds a cell linking to a type with a writer policy",
+          "ITEMS.map((n) => ({ target: cell, n }))",
+          false,
+        ],
+        [
+          "defines its document where fresh data an inferred result returns holds a writer policy itself",
+          'ITEMS.map((n) => ({ entry: { value: "" } as Entry, n }))',
+          true,
+        ],
+      ] as const
+    ) {
+      it(what, async () => {
+        // A plain call's result is read from its type. A stream or a cell in
+        // it is a link: the policy inside the type it links to is that
+        // document's, so the result holds no policy of its own there and is
+        // not rebuilt as defining its document. Plain data holding the policy
+        // is.
+        const result = await transform(
+          `import type { Stream } from "commonfabric";
+interface Entry { value: ${POLICY} }
+const ITEMS = [1, 2];
+export default pattern<{ stream: Stream<Entry>; cell: Writable<Entry> }>(({ stream, cell }) => ({
+  list: ${list},
+}));`,
+        );
+        const definitions = Object.keys(
+          (patternSchemas(result.root).output as { $defs?: object }).$defs ??
+            {},
+        );
+
+        expect(result.diagnostics.filter(isUnreadWriter)).toEqual([]);
+        expect(definitions.some((name) => name.endsWith(":document")))
+          .toBe(defines);
+      });
+    }
 
     it("reports nothing for an inferred result that returns a protected value through a generic alias", async () => {
       const result = await transform(`type Box<T> = { value: T };

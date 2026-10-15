@@ -3,14 +3,16 @@
  * links the record its creator's manager wrote, labeled `authored-by` the
  * creator, and the accepting manager takes the counterpart from that label: it
  * refuses an event naming someone else, and with no counterpart named, records
- * the creator. The room offers its other member the control that asks their
- * manager to list it, until the manager does, and accepting the room lists
- * them among its participants, while a manager whose user's profile hasn't
+ * the creator. Accepting the room lists it, and lists its other member among
+ * its participants, while a manager whose user's profile hasn't
  * resolved accepts it without joining them. A room a host registered and
  * accepted on the user's behalf, as its share intake does, is found by a start
  * with its creator, again once it is forgotten, and an acceptance that keeps
  * an archived entry archived leaves it so. A later room accepted with the same
- * creator leaves the one `direct` holds in place.
+ * creator leaves the one `direct` holds in place. Joining a room the user's
+ * chats list changes nothing, and records nothing unless it names a request;
+ * joining a direct room the user created, which they can't accept, lists it
+ * again once they forget it, even when the join asks to keep it archived.
  */
 import {
   action,
@@ -27,7 +29,6 @@ import {
   spaceOf,
   type Stream,
   TESTS,
-  UI,
   Writable,
 } from "commonfabric";
 import {
@@ -35,14 +36,7 @@ import {
   registerSharedSpace,
   type SharedSpaceCatalogStorage,
 } from "../system/shared-space-catalog.ts";
-import {
-  clickButton,
-  findNodeById,
-  propValue,
-  readValue,
-} from "../test/vnode-helpers.ts";
 import { FabriChatManagerCore, type ManagerStreamEvent } from "./manager.tsx";
-import { AddToChats } from "./room.tsx";
 import {
   CHAT_ROOM_OFFER_KIND,
   CHAT_START_ACTION,
@@ -63,7 +57,6 @@ type TestProfile = AddIntegrity<
   ChatProfile,
   readonly ["fabrichat-test-profile"]
 >;
-type AddArg = Parameters<typeof AddToChats>[0];
 
 /** The gesture a start takes, as a client's start control makes it. */
 const startGesture = { surface: CHAT_START_SURFACE, action: CHAT_START_ACTION };
@@ -112,21 +105,13 @@ const introduce = handler<unknown, IntroduceState>((_event, { me }) => {
   me.set(currentPrincipal() ?? "");
 });
 
-// How a room's control adding it to the viewer's chats is displayed.
-const addDisplay = (root: unknown): unknown =>
-  readValue(
-    (propValue(findNodeById(root, "fabrichat-add-to-chats"), "style") as {
-      display?: unknown;
-    })?.display,
-  );
-
 /** An empty shared-space catalog, as a manager lists its rooms from. */
 const emptyCatalog = () =>
   Writable.of<SharedSpaceCatalogStorage>({ entries: {}, offers: {} });
 
 /** Why the request `id` was refused, or its status if it wasn't. */
 const reasonOf = (
-  requests: Writable<Record<string, ChatRequestOutcome>>,
+  requests: Cell<Record<string, ChatRequestOutcome>>,
   id: string,
 ): string => {
   const outcome = requests.get()?.[id];
@@ -165,6 +150,33 @@ const acceptAsHost = handler<unknown, AcceptAsHostState>((
   });
 });
 
+/** What `joinHeld` is bound to. */
+interface JoinHeldState {
+  /** The manager's `joinRoom`. */
+  joinRoom: Stream<ManagerStreamEvent>;
+
+  /** The room to join. */
+  held: Writable<{ room?: Cell<HeldRoom> }>;
+
+  /** The request's id; empty, the join names none. */
+  requestId: string;
+
+  /** Whether the join asks to leave an archived entry archived. */
+  keepArchived: boolean;
+}
+
+/** Joins the held room, as a room does once its viewer writes in it. */
+const joinHeld = handler<unknown, JoinHeldState>((
+  _event,
+  { joinRoom, held, requestId, keepArchived },
+) => {
+  joinRoom.send({
+    room: held.key("room").resolveAsCell(),
+    ...(requestId === "" ? {} : { requestId }),
+    ...(keepArchived ? { keepArchived } : {}),
+  });
+});
+
 /** What `forgetListed` is bound to. */
 interface ForgetListedState {
   /** The manager's `forget`. */
@@ -195,19 +207,21 @@ const forgetListed = handler<unknown, ForgetListedState>((
 
 /** The state of `catalog`'s entry for the held room. */
 const stateOf = (
-  catalog: Writable<SharedSpaceCatalogStorage>,
-  held: Writable<{ room?: Cell<HeldRoom> }>,
+  catalog: Cell<SharedSpaceCatalogStorage>,
+  held: Cell<{ room?: Cell<HeldRoom> }>,
 ): string | undefined =>
   readSharedSpaceCatalog(catalog).entries[spaceOf(held.key("room")) ?? ""]
     ?.state;
 
 // Creates a direct room with Bob, and hands it to him through the setup, and
-// then a second one, from another manager.
+// then a second one, from another manager. Joins her own room, which can't be
+// accepted, and which a join lists again once she forgets it.
 export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const requests = Writable.of<Record<string, ChatRequestOutcome>>({});
+  const catalog = emptyCatalog();
   const manager = FabriChatManagerCore({
     myProfile: Writable.of<TestProfile>({ name: "Alice" }),
-    sharedSpaceCatalog: emptyCatalog(),
+    sharedSpaceCatalog: catalog,
     direct: Writable.of<Record<string, ChatIndexEntry>>({}),
     requests,
     outgoingNotices: Writable.of<ChatManagerNotice[]>([]),
@@ -230,6 +244,42 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       againRequests.key("d-2").key("entry").key("room").resolveAsCell(),
     )
   );
+  const action_join_unnamed = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "",
+    keepArchived: false,
+  });
+  const action_join_named = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "j-listed",
+    keepArchived: false,
+  });
+  const action_join_keeping = joinHeld({
+    joinRoom: manager.joinRoom,
+    held: setup.held,
+    requestId: "",
+    keepArchived: true,
+  });
+  const action_accept_own = acceptAsHost({
+    accept: manager.accept,
+    held: setup.held,
+    requestId: "a-own",
+    keepArchived: false,
+  });
+  const action_forget_own = forgetListed({
+    forget: manager.forget,
+    held: setup.held,
+    catalog,
+    requestId: "forget-own",
+  });
+  const action_forget_own_again = forgetListed({
+    forget: manager.forget,
+    held: setup.held,
+    catalog,
+    requestId: "forget-own-again",
+  });
 
   return {
     [TESTS]: [
@@ -251,6 +301,52 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { action: action_hand_over_again },
       { assertion: assert(() => again.rooms.length === 1) },
+      // Joining a room her chats list already changes nothing, and, naming no
+      // request, records nothing; naming one, it records the room's entry.
+      { action: action_join_unnamed },
+      {
+        assertion: assert(() =>
+          Object.keys(requests.get()).length === 1 &&
+          stateOf(catalog, setup.held) === "saved"
+        ),
+      },
+      { action: action_join_named },
+      {
+        assertion: assert(() => {
+          const outcome = requests.get()["j-listed"];
+          return outcome?.status === "done" &&
+            spaceOf(outcome.entry?.room) === spaceOf(setup.held.key("room"));
+        }),
+      },
+      // A room she created isn't hers to accept, but once she forgets it,
+      // joining it lists it again, and leaves the room `direct` holds for Bob.
+      { action: action_accept_own },
+      {
+        assertion: assert(() =>
+          reasonOf(requests, "a-own") === "The room was created by this user."
+        ),
+      },
+      { action: action_forget_own },
+      {
+        assertion: assert(() =>
+          stateOf(catalog, setup.held) === "archived" &&
+          manager.rooms.length === 0
+        ),
+      },
+      { action: action_join_unnamed },
+      {
+        assertion: assert(() =>
+          stateOf(catalog, setup.held) === "saved" &&
+          manager.rooms.length === 1 &&
+          manager.rooms[0]?.counterpart === setup.bobDid.get()
+        ),
+      },
+      // A join is always the user's own, so it lists a forgotten room again
+      // even when it asks to keep it archived.
+      { action: action_forget_own_again },
+      { assertion: assert(() => stateOf(catalog, setup.held) === "archived") },
+      { action: action_join_keeping },
+      { assertion: assert(() => stateOf(catalog, setup.held) === "saved") },
       { label: "alice-created" },
       { await: "bob-done" },
     ],
@@ -277,13 +373,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       counterpart: CAROL,
     })
   );
-  // The room's own control, which sends `accept` with the room alone.
-  const adder = AddToChats({
-    room: setup.held.key("room"),
-    catalog: manager.sharedSpaceCatalog,
+  // An acceptance with the room alone, naming no counterpart.
+  const action_accept = acceptAsHost({
     accept: manager.accept,
-  } as AddArg);
-  const action_add = action(() => clickButton(adder[UI], "Add to my chats"));
+    held: setup.held,
+    requestId: "a-2",
+    keepArchived: false,
+  });
 
   // A manager whose user's profile hasn't resolved.
   const profilelessDirect = Writable.of<Record<string, ChatIndexEntry>>({});
@@ -407,22 +503,21 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         ),
       },
       { action: action_accept_naming_carol },
-      // The room isn't listed, so the room offers to add it.
       {
         assertion: assert(() =>
           reasonOf(requests, "a-1") ===
             "The counterpart is not the room's creator." &&
           manager.rooms.length === 0 &&
-          Object.keys(readSharedSpaceCatalog(catalog).entries).length === 0 &&
-          addDisplay(adder[UI]) === "flex"
+          Object.keys(readSharedSpaceCatalog(catalog).entries).length === 0
         ),
       },
-      { action: action_add },
+      // With no counterpart named, the acceptance records the room's creator.
+      { action: action_accept },
       {
         assertion: assert(() =>
+          requests.get()["a-2"]?.status === "done" &&
           manager.rooms.length === 1 &&
-          manager.rooms[0]?.counterpart === setup.aliceDid.get() &&
-          addDisplay(adder[UI]) === "none"
+          manager.rooms[0]?.counterpart === setup.aliceDid.get()
         ),
       },
       // Accepting it registers its space in Bob's catalog, as a saved

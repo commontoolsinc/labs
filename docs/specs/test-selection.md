@@ -481,7 +481,10 @@ which is the cost this whole section exists to avoid paying.
 An invocation is excused only when it accounted for every identity it was
 asked to run that the tree holds, since one that recorded a withheld
 failure and then stopped has run almost nothing while satisfying any
-weaker test. A stand-in for a unit the store has never seen is accounted
+weaker test. An identity that holds others is also accounted for by a
+record of anything it holds, since it ran for that record to exist, and a
+name its report gave to several cases is not recorded for itself
+([the record spec](test-records.md#ci-movement)). A stand-in for a unit the store has never seen is accounted
 for by that unit recording anything at all, because no record can carry a
 stand-in's name: a record is named for a test and a stand-in for a file.
 And a unit that recorded nothing recorded nothing under any name, which
@@ -662,6 +665,15 @@ suite it holds:
   takes, added together, since a pass does not finish before its longest
   unit does. The second is the one that binds for a suite whose runner
   runs its units side by side.
+
+A unit's tests are the identities the lane holds in it, and every test the
+manifest holds around one of them in that unit: the `describe` blocks
+enclosing a leaf, whose `beforeAll` and `afterAll` hooks run on every run of
+the unit that runs anything inside them. A `describe`'s own cost is the time
+it spent outside the cases directly inside it, so a chain of them is counted
+level by level without overlap. Each is counted once per run of its unit,
+whichever lane holds its own identity, and once only where the lane holds
+both it and a test inside it.
 
 A suite with no fit is charged no overhead, nothing per unit, and a
 correction of one. A runner that runs units side by side starts the

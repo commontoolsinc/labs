@@ -40,6 +40,7 @@ import {
   externalizeSchema,
   getStableInternalPathSegment,
   KeepAsCell,
+  sanitizeAndFreezeSchemaForLinks,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
 import {
@@ -59,6 +60,7 @@ import {
   SUBPATTERN_ARGUMENT_BUILTIN_REFS,
 } from "./builtin-replayability.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
+import { instanceNameOf, instancePartialCause } from "./instance-name.ts";
 import {
   pushOntoFrameStack,
   pushOntoRootFrameStack,
@@ -251,7 +253,8 @@ export function patternFromFrame<T, R>(
  *
  * That key marks the causes the pattern builder mints itself
  * (`{ $generated: N }`, plus `$kind` on streams and `name` on duplicate-name
- * wraps): a user cause like `Cell.for({ $generated: 0 })` would deliberately
+ * wraps, and `{ $generated: "instance", name }` for a named sub-pattern
+ * instance): a user cause like `Cell.for({ $generated: 0 })` would deliberately
  * mimic that namespace, and keeping the namespaces disjoint is what lets the
  * partial-cause assignment in `factoryFromPattern` skip collision checks for
  * generated causes entirely. `$generated` alone suffices — every builder-minted
@@ -390,8 +393,9 @@ function factoryFromPattern<T, R>(
   // collision handling: `.for()` rejects reserved keys at intake
   // (`assertNoReservedCauseKeys`), so no user-supplied cause carries
   // `$generated` — which makes every cause minted by
-  // `nextAnonymousPartialCause` (per-build-unique counter) and every
-  // `{name, $generated}` disambiguation wrap collision-free by construction:
+  // `nextAnonymousPartialCause` (per-build-unique counter), every
+  // `{name, $generated}` disambiguation wrap, and every instance cause (an
+  // instance name given to exactly one root) collision-free by construction:
   // no check, no set entry. A candidate name's collision test is an O(1) `Set`
   // lookup on `hashStringOf` — the canonical value hash, which is exactly
   // `deepEqual`'s comparison on the JSON values causes are made of: records
@@ -404,6 +408,29 @@ function factoryFromPattern<T, R>(
     const generated = { $generated: anonymousPartialCauseCount++ };
     return isStream ? { ...generated, $kind: "stream" } : generated;
   };
+  // A stream root never takes an instance name, so a name given to one does
+  // not keep another root from taking it.
+  const isNameableInternalRoot = (cell: ICell<unknown>): boolean => {
+    const { path, name, external, kind } = exportCell(cell);
+    return !external && path.length === 0 && name === undefined &&
+      kind !== "stream" && cellNameForCell(cell) === undefined;
+  };
+  // An instance name given to more than one root names none of them: each
+  // stays positional, as it would be with no name at all.
+  const instanceRootsByName = new Map<string, Set<OpaqueCell<any>>>();
+  allCells.forEach((cell) => {
+    if (!isNameableInternalRoot(cell)) return;
+    const top = exportCell(cell).cell;
+    const instanceName = instanceNameOf(top);
+    if (instanceName === undefined) return;
+    const roots = instanceRootsByName.get(instanceName) ?? new Set();
+    roots.add(top);
+    instanceRootsByName.set(instanceName, roots);
+  });
+  // The positional cause each named instance takes the place of. It still
+  // consumes its number, so every other anonymous root keeps the number it
+  // has without instance names.
+  const legacyPartialCauses = new Map<OpaqueCell<any>, JSONValue>();
   allCells.forEach((cell) => {
     const { cell: top, path, kind, name, external } = exportCell(cell);
     if (
@@ -417,6 +444,14 @@ function factoryFromPattern<T, R>(
     let partialCause: JSONValue;
     if (name === undefined) {
       partialCause = nextAnonymousPartialCause(isStream);
+      const instanceName = instanceNameOf(top);
+      if (
+        !isStream && instanceName !== undefined &&
+        instanceRootsByName.get(instanceName)?.size === 1
+      ) {
+        legacyPartialCauses.set(top, partialCause);
+        partialCause = instancePartialCause(instanceName);
+      }
     } else {
       // `.for()` already rejected reserved keys; re-assert at the assignment
       // site because the no-collision-check reasoning above relies on it (a
@@ -508,8 +543,10 @@ function factoryFromPattern<T, R>(
         ? declareStreamSchema(schema)
         : schema;
       derivedInternalPartialCausesByRoot.set(top, partialCause);
+      const legacyPartialCause = legacyPartialCauses.get(top);
       derivedInternalCells.push({
         partialCause,
+        ...(legacyPartialCause !== undefined && { legacyPartialCause }),
         ...(scope !== undefined &&
           (scope !== "space" || schemaCellScope(schema) !== undefined) &&
           { scope }),
@@ -639,8 +676,17 @@ function factoryFromPattern<T, R>(
   });
 
   const pattern: Pattern & toEncodableForm & toJSON = {
-    argumentSchema: sanitizeSchemaForLinks(argumentSchema, KeepAsCell.All),
-    resultSchema: sanitizeSchemaForLinks(resultSchema, KeepAsCell.OnlyStream),
+    // Deep-frozen, each with a root of its own. Binding a node narrows the
+    // argument schema at every slot it binds, and `schemaAtPath()` keeps a
+    // narrowing only for a deep-frozen schema.
+    argumentSchema: sanitizeAndFreezeSchemaForLinks(
+      argumentSchema,
+      KeepAsCell.All,
+    ),
+    resultSchema: sanitizeAndFreezeSchemaForLinks(
+      resultSchema,
+      KeepAsCell.OnlyStream,
+    ),
     ...(derivedInternalCells.length > 0 ? { derivedInternalCells } : {}),
     result,
     nodes: serializedNodes,

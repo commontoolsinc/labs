@@ -18,6 +18,9 @@
  *   realm, in a Deno Worker, or in a subprocess. Its session opens are
  *   verified signatures, as toolshed's are.
  *
+ * The loop's work runs in the serving context, so a test hosting its clients
+ * in the same realm tells their output apart with {@link inServingContext}.
+ *
  * Neither publishes a posture on `/api/meta`, so a client that adopts its
  * server's flags resolves the posture from its own environment and default;
  * a test pairs one of these with clients resolving ON. The host is a process
@@ -37,6 +40,8 @@ import {
   servingRuntimeFactory,
   type ServingRuntimeFactoryOptions,
 } from "./serving-runtime.ts";
+
+export { inServingContext } from "./serving-context.ts";
 
 /** A memory server with a serving loop attached, for one test to own. */
 export interface ServingMemoryServer extends AsyncDisposable {
@@ -85,6 +90,16 @@ export type ServingMemoryServerOptions =
     prepareStorageManager?: ServingRuntimeFactoryOptions[
       "prepareStorageManager"
     ];
+
+    /**
+     * The serving runtimes' outbound `fetch`, as `servingRuntimeFactory()`
+     * takes it. A test that stubs its own runtime's `fetch` passes the same
+     * stub here, since a served handler's fetches go through this one.
+     */
+    fetch?: ServingRuntimeFactoryOptions["fetch"];
+
+    /** As `servingRuntimeFactory()` takes it. */
+    moduleByteCache?: ServingRuntimeFactoryOptions["moduleByteCache"];
 
     /**
      * Whether each served space gets its default pattern on activation.
@@ -201,6 +216,8 @@ function attachServingLoop(params: {
     serviceIdentity: _serviceIdentity,
     experimental,
     prepareStorageManager,
+    fetch,
+    moduleByteCache,
     ensureSpaceRoots = false,
     ...hostOptions
   } = params.options;
@@ -215,6 +232,8 @@ function attachServingLoop(params: {
       apiUrl: params.apiUrl,
       experimental,
       prepareStorageManager,
+      ...(fetch !== undefined ? { fetch } : {}),
+      ...(moduleByteCache !== undefined ? { moduleByteCache } : {}),
     }),
   });
   let closed: Promise<void> | undefined;

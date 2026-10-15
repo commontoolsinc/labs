@@ -224,10 +224,13 @@ import {
   type GetTriggerTraceRequest,
   type GetWriteStackTraceRequest,
   GraphSnapshotResponse,
+  type HomePatternResponse,
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
   isCellRef,
+  type JoinVisitedRoomRequest,
+  type JoinVisitedRoomResponse,
   type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -1111,8 +1114,9 @@ export class RuntimeProcessor {
    * The runtime and home context this processor was built over, the tables
    * it keeps by space, by client, and by session, the disposed flag, the
    * render policy and ceiling a mount inherits, the boot-time health check's
-   * verdict and whether `initialize()` waited for it, the private inbox ensure
-   * in flight, and the per-space context step, which a test drives directly.
+   * verdict and whether `initialize()` waited for it, the adoption, private
+   * inbox ensure and share intake the worker's housekeeping over Home
+   * started, and the per-space context step, which a test drives directly.
    */
   get accessForTestingOnly(): {
     runtime: Runtime;
@@ -1142,8 +1146,9 @@ export class RuntimeProcessor {
     readonly renderDeclassificationPolicy: RenderDeclassificationPolicy;
     readonly health: Promise<boolean>;
     readonly awaitedHealth: boolean;
-    readonly privateInboxEnsured: Promise<void> | undefined;
-    readonly shareIntake: Promise<ShareIntake | undefined> | undefined;
+    legacySpacesAdopted: Promise<void> | undefined;
+    privateInboxEnsured: Promise<void> | undefined;
+    shareIntake: Promise<ShareIntake | undefined> | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
     // deno-lint-ignore no-this-alias
@@ -1161,11 +1166,23 @@ export class RuntimeProcessor {
       get awaitedHealth() {
         return outerThis.#awaitedHealth;
       },
+      get legacySpacesAdopted() {
+        return outerThis.#legacySpacesAdopted;
+      },
+      set legacySpacesAdopted(value) {
+        outerThis.#legacySpacesAdopted = value;
+      },
       get privateInboxEnsured() {
         return outerThis.#privateInboxEnsured;
       },
+      set privateInboxEnsured(value) {
+        outerThis.#privateInboxEnsured = value;
+      },
       get shareIntake() {
         return outerThis.#shareIntake;
+      },
+      set shareIntake(value) {
+        outerThis.#shareIntake = value;
       },
       cc: this.#cc,
       spaces: this.#spaces,
@@ -1621,7 +1638,10 @@ export class RuntimeProcessor {
     const gate = this.#hostReadGate;
     let cell = getCell(this.#runtime, request.cell);
     if (request.meta !== undefined) {
-      const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
+      // The document root, which the keyed ancestor's schema does not
+      // describe.
+      const { keyedFrom: _keyedFrom, ...address } = request.cell;
+      const rootCell = getCell(this.#runtime, { ...address, path: [] });
       if (request.meta !== "argument" && request.meta !== "result") {
         // A metadata field that is not a link returns the raw data.
         return gate.readMetadata(rootCell, request.meta);
@@ -2308,16 +2328,19 @@ export class RuntimeProcessor {
       includeCfcLabel: request.includeCfcLabel,
     }, (value) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
-      // These are the call sites that need real schemas added.
-      const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
-      if (!hasSchema && isCellResult(value)) {
+      // These are the call sites that need real schemas added. The schema
+      // checked is the one the cell reads under, which for a ref keyed from
+      // an ancestor is the one the worker narrowed to.
+      if (!isCellResult(value)) return;
+      const schema = cell.getAsNormalizedFullLink().schema;
+      if (!hasExplicitSubscriptionSchema(schema)) {
         console.error(
           `[handleCellSubscribe] EMPTY SCHEMA SUBSCRIPTION producing ` +
             `CellResult proxy. Add a schema to this subscription site!\n` +
             `  cell: ${request.cell.id}\n` +
             `  path: ${JSON.stringify(request.cell.path)}\n` +
             `  space: ${request.cell.space}\n` +
-            `  schema: ${JSON.stringify(request.cell.schema)}`,
+            `  schema: ${JSON.stringify(schema)}`,
         );
       }
     }, (update) =>
@@ -2578,7 +2601,7 @@ export class RuntimeProcessor {
   ): CfcLabelViewResponse {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
-    const { schema: _schema, ...cellRef } = request.cell;
+    const { schema: _schema, keyedFrom: _keyedFrom, ...cellRef } = request.cell;
     const cell = getCell(this.#runtime, cellRef);
     // This reads the label with `cfcLabelViewForResolvedCell()`, which reads
     // what the store holds now, following a link the path crosses part way
@@ -2755,13 +2778,18 @@ export class RuntimeProcessor {
   /**
    * Ensure the home space's default pattern is running and return a CellRef to it.
    * This is needed for favorites operations which require the pattern to be active.
-   * Creates the home pattern if it doesn't exist yet.
+   * Creates the home pattern if it doesn't exist yet, unless the request is
+   * `existingOnly`: then a Home whose root records no pattern it runs, as one
+   * still being created does not, is left alone, and the response holds no
+   * cell. Either way, bringing Home up starts the worker's housekeeping over
+   * it, as `#startHomeHousekeeping()` says.
    */
   async handleEnsureHomePatternRunning(
-    _request: EnsureHomePatternRunningRequest,
-  ): Promise<CellResponse> {
+    request: EnsureHomePatternRunningRequest,
+  ): Promise<HomePatternResponse> {
     const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
+    if (request.existingOnly && !(await this.#homeExists())) return {};
 
     // Always the PiecesController path: ensureDefaultPattern() follows the
     // root's origin and carries the cold-start setup repair that heals an aged
@@ -2773,21 +2801,53 @@ export class RuntimeProcessor {
   }
 
   /**
-   * Ensures the user's Home pattern is running and returns its result cell.
-   * The first time in this worker, it also adopts the Home space list's
-   * name-only entries (see `PiecesController.adoptLegacySpaces`), and starts
-   * Home's ensure of the user's private inbox (see
-   * `PiecesController.ensurePrivateInbox`) and the share intake over Home's
-   * inboxes (see `PiecesController.startShareIntake`) without waiting for
-   * either.
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * declared by the space `request` names, when it passes vetting, as
+   * `PiecesController.joinVisitedRoom()` says, and returns what was
+   * decided. A user with no Home gets nothing done and no decision: Home is
+   * never created for it, and an existing Home is brought up as any other
+   * bring-up does.
+   */
+  async handleJoinVisitedRoom(
+    request: JoinVisitedRoomRequest,
+  ): Promise<JoinVisitedRoomResponse> {
+    if (!(await this.#homeExists())) return {};
+    await this.#ensureHomePattern();
+    const decision = await this.#homeController().joinVisitedRoom(
+      request.space,
+    );
+    return { decision };
+  }
+
+  /**
+   * Ensures the user's Home pattern is running and returns its result cell,
+   * once the worker's housekeeping over Home has adopted the Home space
+   * list's name-only entries, as `#startHomeHousekeeping()` says.
    */
   async #ensureHomePattern(): Promise<Cell<unknown>> {
     const homeCC = this.#homeController();
     await homeCC.synced();
     const home = (await homeCC.ensureDefaultPattern()).getCell();
+    await this.#startHomeHousekeeping(homeCC);
+    return home;
+  }
+
+  /**
+   * Helper for bringing up the user's Home pattern, which the first time in
+   * this worker adopts the Home space list's name-only entries (see
+   * `PiecesController.adoptLegacySpaces`), and then starts Home's ensure of
+   * the user's private inbox (see `PiecesController.ensurePrivateInbox`) and
+   * the share intake over Home's inboxes (see
+   * `PiecesController.startShareIntake`) without waiting for either. A later
+   * bring-up shares the run already made, and repeats only a step that
+   * failed. `homeCC` is a controller over the identity's Home space.
+   *
+   * Resolves once the adoption has settled, and never rejects.
+   */
+  async #startHomeHousekeeping(homeCC: PiecesController): Promise<void> {
     // Adoption is housekeeping over the Home pattern the user already has; a
-    // failure is reported and tried again on the next ensure, and never keeps
-    // Home from opening.
+    // failure is reported and tried again at the next bring-up of Home, and
+    // never keeps Home from opening.
     this.#legacySpacesAdopted ??= homeCC.adoptLegacySpaces().catch((error) => {
       this.#legacySpacesAdopted = undefined;
       console.warn("[RuntimeProcessor] Adopting legacy Home spaces:", error);
@@ -2796,7 +2856,7 @@ export class RuntimeProcessor {
     // The ensure reads every profile's pointer and loads inbox documents in
     // other spaces, so Home opens without waiting for it. A failure is
     // reported unless the processor has been disposed, as `dispose()` says,
-    // and the next ensure of Home in this worker starts it again.
+    // and the next bring-up of Home in this worker starts it again.
     this.#privateInboxEnsured ??= homeCC.ensurePrivateInbox(
       this.#disposal.signal,
     ).catch(
@@ -2808,7 +2868,7 @@ export class RuntimeProcessor {
     );
     // The intake follows Home's inboxes until disposal aborts its signal. A
     // failure to start it is reported unless the processor has been disposed,
-    // and the next ensure of Home in this worker starts it again.
+    // and the next bring-up of Home in this worker starts it again.
     this.#shareIntake ??= homeCC.startShareIntake(this.#disposal.signal).catch(
       (error) => {
         this.#shareIntake = undefined;
@@ -2818,7 +2878,17 @@ export class RuntimeProcessor {
         return undefined;
       },
     );
-    return home;
+  }
+
+  /**
+   * Whether the user's Home exists: its space links a root, and that root
+   * records the pattern it runs. A root another writer is still creating can
+   * be linked before it records its pattern, and starting it then fails, so
+   * it does not count.
+   */
+  async #homeExists(): Promise<boolean> {
+    const root = await this.#homeController().getDefaultPattern(false);
+    return root !== undefined && getPatternIdentityRef(root) !== undefined;
   }
 
   /** A controller over the user's Home space. */
@@ -2838,7 +2908,40 @@ export class RuntimeProcessor {
     // the storage manager, covering event handlers, direct cell IPC writes,
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
-    await this.#runtime.scheduler.idleWithPendingCommits();
+    //
+    // It also takes in the housekeeping a bring-up of Home has started, which
+    // goes on loading and sending to Home after the bring-up has answered.
+    // That work issues scheduler work, and scheduler work can hand the share
+    // intake more to take up, so the two are awaited until both hold at once.
+    for (;;) {
+      const intake = await this.#homeHousekeepingIdle();
+      await this.#runtime.scheduler.idleWithPendingCommits();
+      if (
+        (intake === undefined || intake.isIdle()) &&
+        this.#runtime.scheduler.isIdleWithPendingCommits()
+      ) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Helper for `handleIdle()`, which waits for the housekeeping over Home that
+   * `#startHomeHousekeeping()` has started in this worker: the adoption of the
+   * Home space list's name-only entries, the private inbox ensure, the start
+   * of the share intake, and the intake taking up every change it has been
+   * told of. Returns the intake, when one is running. Never rejects: each step
+   * is held as a promise that does not, and a failure of the intake's own wait
+   * is reported rather than passed on.
+   */
+  async #homeHousekeepingIdle(): Promise<ShareIntake | undefined> {
+    await this.#legacySpacesAdopted;
+    await this.#privateInboxEnsured;
+    const intake = await this.#shareIntake;
+    await intake?.idle().catch((error) => {
+      console.warn("[RuntimeProcessor] Waiting for the share intake:", error);
+    });
+    return intake;
   }
 
   async handleListEventAttention(
@@ -2986,7 +3089,11 @@ export class RuntimeProcessor {
    * no root unless the request opens it (`start` true) and this runtime's
    * identity owns the space, in which case the root is created. A read never
    * writes, and a principal other than the owner never puts a root in
-   * someone else's space.
+   * someone else's space. Opening the root of this runtime's identity's own
+   * Home also starts the worker's housekeeping over Home, as
+   * `handleEnsureHomePatternRunning()` does: the adoption of legacy space
+   * entries, the private inbox ensure and the share intake, each once per
+   * worker. It returns without waiting for any of them.
    *
    * @throws The server's refusal when this runtime's identity may not read
    *   the space, whether or not a root is still held from before.
@@ -3021,6 +3128,12 @@ export class RuntimeProcessor {
       return {};
     }
     const piece = await cc.ensureDefaultPattern();
+    if (request.space === this.#runtime.userIdentityDID) {
+      // Starting Home's root brings Home up, so it starts the worker's
+      // housekeeping over Home as any other bring-up does, and the root is
+      // returned without waiting for any of it.
+      void this.#startHomeHousekeeping(cc);
+    }
     return {
       piece: createPieceRef(piece.getCell()),
     };
@@ -3855,6 +3968,8 @@ export class RuntimeProcessor {
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:
         return await this.handleEnsureHomePatternRunning(request);
+      case RequestType.JoinVisitedRoom:
+        return await this.handleJoinVisitedRoom(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.ListEventAttention:

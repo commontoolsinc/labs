@@ -332,5 +332,84 @@ describe("Schema: Record and mapped types", () => {
       expect(schema.$defs?.MaybeRecord).toBeUndefined();
       expect(schema.$defs?.Record).toBeUndefined();
     });
+
+    it("reads an object with a numeric index signature as a map, not an array", async () => {
+      const { type, checker, typeNode } = await getTypeFromCode(
+        `interface Config {
+          byIndex: { [index: number]: string };
+          numbered: { 0: number; [index: number]: number };
+        }`,
+        "Config",
+      );
+      const schema = asObjectSchema(
+        transformer.generateSchema(type, checker, typeNode),
+      );
+
+      expect(schema.properties?.byIndex).toEqual({
+        type: "object",
+        properties: {},
+        additionalProperties: { type: "string" },
+      });
+      expect(schema.properties?.numbered).toEqual({
+        type: "object",
+        properties: { 0: { type: "number" } },
+        additionalProperties: { type: "number" },
+        required: ["0"],
+      });
+    });
+
+    for (
+      const [shape, declaration] of [
+        ["a tuple", "type Value = [number, number];"],
+        ["a `readonly` array", "type Value = readonly number[];"],
+        ["an `ArrayLike`", "type Value = ArrayLike<number>;"],
+        [
+          "an interface that extends `Array`",
+          "interface Value extends Array<number> { extra: number }",
+        ],
+      ] as const
+    ) {
+      it(`reads ${shape} as an array`, async () => {
+        const { type, checker, typeNode } = await getTypeFromCode(
+          `${declaration}
+           interface Config { value: Value }`,
+          "Config",
+        );
+        const schema = asObjectSchema(
+          transformer.generateSchema(type, checker, typeNode),
+        );
+        const value = schema.properties!.value as { $ref?: string };
+        const resolved = value.$ref
+          ? schema.$defs![value.$ref.slice("#/$defs/".length)]
+          : value;
+
+        expect(resolved).toEqual({ type: "array", items: { type: "number" } });
+      });
+    }
+
+    for (
+      const [mapping, mapped] of [
+        ["`Pick`", `Pick<Window, "from">`],
+        ["`Omit`", `Omit<Window, "id">`],
+        ["`Partial`", "Partial<Window>"],
+      ] as const
+    ) {
+      it(`reads a member ${mapping} maps as its declaration reads it`, async () => {
+        const { type, checker, typeNode } = await getTypeFromCode(
+          `type Anchor = { before: string } | { after: string };
+           interface Window { id: string; from?: Anchor }
+           interface Config { window: Window; mapped: ${mapped} }`,
+          "Config",
+        );
+        const schema = asObjectSchema(
+          transformer.generateSchema(type, checker, typeNode),
+        );
+        const mappedSchema = asObjectSchema(schema.properties!.mapped!);
+
+        expect(mappedSchema.properties?.from).toEqual({
+          $ref: "#/$defs/Anchor",
+        });
+      });
+    }
   });
 });

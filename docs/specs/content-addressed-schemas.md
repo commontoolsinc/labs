@@ -29,7 +29,7 @@ stores each module's text as one, and its records link to them.
 
 ## Last Updated
 
-2026-09-25
+2026-10-12
 
 ## Motivation
 
@@ -547,6 +547,24 @@ self-contained schema. Path narrowing, target queries, and derived Cell
 handles therefore do not require B to hold A's schema documents. A schema
 declared by a link inside B resolves in B when that next link is followed.
 
+An immutable document (`snapshot:` or portable `data:`) is stored in no
+space, and nothing writes it. A native snapshot retains its frozen value
+and relative-link origin; a portable identifier encodes its value. A link inside one resolves its schema's `cid:` references
+in the space carried by the address that names the document, by the same
+rule and through the same gates as a link inside a stored document. Two
+kinds of immutable document differ in what that space holds:
+
+- A snapshot of a value read out of a stored document — an array element
+  read by value — is addressed in that document's space and keeps each
+  link's schema in the form the stored value held it. A reference among them
+  names a closure the write-side guarantee below put in that space, with the
+  write that stored the link.
+- A document minted from a value no space has stored
+  (`Runtime.getImmutableCell()`) has no such write behind it, so it carries
+  each link's schema in the inline form, recomposed through the realm
+  registry when the document is minted. A reference the registry cannot
+  recompose stays a reference, and the gates decide the read.
+
 A schema document's value is space-free: content addressing makes the
 bytes identical wherever they are stored, so the realm-wide registry
 shares one verified object across spaces, and using a shared value can
@@ -558,6 +576,15 @@ documents available alongside their declarations:
   with a reference created the obligation, so it discharges it: the
   decomposed closure is written into the space that will hold the
   reference, in the same transaction as the reference itself. A
+  transaction stamps the reference itself on an inline link schema it
+  writes into an ordinary document — a value copied out of an immutable
+  document minted from unstored data carries its link schemas inline, and
+  would otherwise store and send every closure in full. Three kinds of
+  inline schema stay as written:
+  a trivial one, one that decomposition refuses, and one that takes no more
+  wire bytes than the reference that would replace it, a bare handle stamp
+  such as `{ asCell: ["stream"] }` among them; an immutable document is never
+  written, and a `cid:` document is not link-scanned. A
   transaction commits against one space's session, so the closure reaches
   whichever server handles that space by construction. An event append is
   committed outside any transaction, and carries the closure behind its

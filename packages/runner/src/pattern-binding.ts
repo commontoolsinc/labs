@@ -101,6 +101,12 @@ type UnwrapOneLevelOptions = {
 };
 
 /**
+ * What `foldDeclaredScopeIntoLinkSchema()` folded each emitted link schema
+ * to, by that schema, which is interned, and then by the scope folded in.
+ */
+const scopeFoldedSchemas = new WeakMap<object, Map<CellScope, JSONSchema>>();
+
+/**
  * Folds the source slot's declared cell scope into the serialized alias link's
  * schema, making the stored link self-describing.
  *
@@ -153,13 +159,23 @@ const foldDeclaredScopeIntoLinkSchema = (
   ) {
     return link;
   }
-  return {
-    ...link,
-    schema: deepFrozenCloneAndInternSchema({
+  // Every node binding one slot folds the same scope into the same emitted
+  // schema, and a schema built per binding would be cloned and hashed whole
+  // per binding.
+  let byScope = scopeFoldedSchemas.get(emittedSchema);
+  if (byScope === undefined) {
+    byScope = new Map();
+    scopeFoldedSchemas.set(emittedSchema, byScope);
+  }
+  let folded = byScope.get(declaredCap);
+  if (folded === undefined) {
+    folded = deepFrozenCloneAndInternSchema({
       ...emittedSchema,
       scope: declaredCap,
-    }),
-  };
+    });
+    byScope.set(declaredCap, folded);
+  }
+  return { ...link, schema: folded };
 };
 
 /** The narrower of the follow caps `schema` declares on a value or handle. */

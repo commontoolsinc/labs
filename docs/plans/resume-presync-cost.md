@@ -38,12 +38,13 @@ few recurring across the rows that received them.
 **A plan's inputs cell recomposes every schema.** `#bindNodeIO` hands the
 bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
-the `data:` id. The rewrite stays: a traversal accepts a reference-form
+the `snapshot:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
-and nothing writes a `data:` document, so a link inside one carries its
-schema inline (`packages/runner/src/link-utils.ts`). What costs is that
-recomposition built a fresh object graph per call, so the interned-schema
-cache never hit and every call deep-froze and hashed the same closure again.
+and no write has stored the links a plan binds, so a link inside the inputs
+cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
+costs is that recomposition built a fresh object graph per call, so the
+interned-schema cache never hit and every call deep-froze and hashed the
+same closure again.
 
 **The cross-space pass materializes to discover.** `#syncCrossSpaceReads`
 does a full schema-validated `get()` of every plan's inputs, in every round,
@@ -89,7 +90,7 @@ stage 0 is what every later stage reports against.
 
 Exit: a number per stage that a pull request can quote.
 
-### Stage 1. A `data:` document's inline schemas come from a memo
+### Stage 1. An immutable cell's inline schemas come from a memo
 
 - [x] `inlineExternalSchemaRefsInValue()` keeps the inline form each
       reference recomposed to, by reference, for the registry epoch
@@ -98,10 +99,9 @@ Exit: a number per stage that a pull request can quote.
       hashed the same few schemas again; a reference names one content, so
       the form it recomposed to once is the form it has.
 - [x] Tests: the inline form is the same object on a second call for the
-      same reference (`packages/runner/test/link-utils.test.ts`); a `data:`
-      cell carries each link's schema inline and a read through it resolves
-      the linked value (`packages/runner/test/runtime.test.ts`,
-      `packages/runner/test/data-uri-inlining.test.ts`).
+      same reference (`packages/runner/test/link-utils.test.ts`); an
+      immutable cell carries each link's schema inline and a read through it
+      resolves the linked value (`packages/runner/test/runtime.test.ts`).
 
 Exit: a schema is recomposed once per reference per registry epoch.
 
@@ -213,6 +213,242 @@ Exit: a load's watch responses are read as they arrive.
       documents carrying schemas inline, and stays silent; the comment at
       `packages/runner/src/link-utils.ts` that did is gone with stage 1.
 
+### Stage 6. The first run and the render
+
+Measured on rooms of thirty and of a hundred and twenty message rows seeded
+on a local toolshed
+([`../history/development/performance/2026-10-11-fabrichat-room-load-local.md`](../history/development/performance/2026-10-11-fabrichat-room-load-local.md)),
+where the pre-sync was no longer the whole cost.
+
+- [x] The scheduler's topological sort indexes the work set's readers by
+      the document they read, so a writer's ordering edges cost the readers
+      of what it writes rather than the whole set
+      (`packages/runner/src/scheduler/topology.ts`).
+- [x] The sort's cycle break chooses from a heap of candidates kept under
+      the break's preference, so a break does not rank the unplaced actions
+      again (`packages/runner/src/scheduler/topology.ts`).
+- [x] No computation of the room or of a message row is a declared writer
+      of the room's `messages`, so none orders against another through the
+      list. The room derives what a row shows of the list as a whole once,
+      each row reads its own message's part, and the helpers a computation
+      hands the list take it as a `Cell`, which declares no write
+      (`packages/patterns/fabrichat/room.tsx`, `message-row.tsx`,
+      `room-records.tsx`).
+- [x] The sort breaks a cycle at one of its own members: a member of a
+      strongly connected component of the unplaced actions that no unplaced
+      action outside it feeds, so an action that only reads from a cycle is
+      placed after what it reads (`../specs/scheduler-v2/README.md` §7.4,
+      `packages/runner/src/scheduler/topology.ts`). The thirty-row room's
+      counts are in
+      [`../history/development/performance/2026-10-12-cycle-break-room-counts.md`](../history/development/performance/2026-10-12-cycle-break-room-counts.md).
+- [x] CFC commit preparation indexes a transaction's write-policy inputs by
+      the document they name, once per transaction, so every check a
+      written path makes reads the inputs about its document
+      (`packages/runner/src/cfc/prepare.ts`).
+- [x] A boundary pass holds one view of the transaction's reads, the
+      stored envelope behind each and the labeled set a protected entry
+      quantifies over, built once and reused across the pass's targets
+      while the transaction's input records, and the metadata object each
+      carries, are the ones it was copied from and the resolved envelopes
+      stand; the reactivity log stands across a read under the sealed
+      verifier metadata, which it never lists; and a deep-frozen document's
+      schema entries are kept by the document, unless the walk lacked a
+      schema document a reference names. On the thirty-row room's reload,
+      preparation fell from 15.5% of the load to 4.4%, and its mean from 52
+      to 12 ms per commit, on a pair of runs at the same machine load.
+- [x] A pattern holds its argument and result schemas deep-frozen from the
+      time the builder makes it, and so does each copy of its graph that the
+      builder puts into a pattern nesting it. `schemaAtPath` keeps a
+      narrowing only for a deep-frozen schema, and binding a pattern's nodes
+      narrows the pattern's argument schema for every argument alias it
+      binds, so every such narrowing is one `schemaAtPath` keeps.
+      `factoryFromPattern` takes the two schemas deep-frozen from the
+      sanitizer (`sanitizeAndFreezeSchemaForLinks`,
+      `packages/runner/src/link-utils.ts`), and the builder's binding walk
+      freezes the schemas of each pattern graph it rebuilds
+      (`packages/runner/src/builder/to-encodable-form.ts`). Each schema
+      stays an object of its own and is not the interned instance:
+      `createRef()` hashes an object it reaches twice in one cause as
+      `null`, so two positions of a graph sharing one schema object derive
+      other ids than two positions holding equal ones. The thirty-row
+      room's counts and profile shares are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md),
+      and the shares once the pre-sync held a node's bindings, when the
+      binding walk fell from 2.1–3.6% of the samples to 0.9–1.2%, are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md).
+- [x] A schema derived for a sync or a binding is derived once per schema
+      it is derived from, and interned, so `internSchema()` is given an
+      object it has seen: it hashes the whole of any other, whether or not
+      the content is already interned. The read schema a handler plan's
+      inputs are synced under is kept per handler schema, which is frozen in
+      place when first read (`schemaWithEventSlotAsStream`,
+      `packages/runner/src/runner.ts`); the selector schema a link's target
+      is asked for, per deep-frozen reader schema (`selectorSchemaForLink`,
+      `packages/runner/src/storage/v2.ts`); the reference and the inline
+      form a selector goes to the wire in, per decomposition
+      (`externalizeSyncSelector`, `packages/runner/src/storage/v2-watch.ts`);
+      and a binding's schema with its slot's declared scope folded in, per
+      emitted schema (`packages/runner/src/pattern-binding.ts`). Two results
+      are keyed by content, because each document holding a link carries
+      the link's schema as an object of its own: a shaped reader crossing a
+      link that declares a default keys the schema it continues with by its
+      own schema and that default (`combineSchemaForLink`,
+      `packages/runner/src/traverse.ts`), and `schemaHasIfc` judges a
+      deep-frozen schema as the interned instance of its content
+      (`packages/runner/src/schema-ifc.ts`). No two positions of a pattern
+      graph share a schema object for it. On the thirty-row room's reload,
+      86,407 of 1.25 million `internSchema()` calls had missed the identity
+      cache and hashed 150 million characters of schema JSON; 35,101 miss
+      and hash 45 million, and interning is 2.8 to 4.8% of the profile's
+      samples where it was 5.7 to 9.1% in the render paired with each. The
+      counts per caller are in
+      [`../history/development/performance/2026-10-13-schema-interning-on-reload.md`](../history/development/performance/2026-10-13-schema-interning-on-reload.md).
+- [ ] Of the 35,101 schemas a reload still interns as new objects, 13,749
+      arrive deep-frozen, most of them a link schema read out of a document:
+      a true reader's crossing (`mergeSchemaFlags`), the link-target
+      selector and the crossing's `schemaHasIfc` each intern such a schema
+      once per object. A plan's inputs document is decoded apart from the
+      value it was minted from, once for its sync and again for its reads,
+      so each decoding holds new objects; the last item of this stage is
+      where that ends. Link serialization interns the stripped schema it
+      builds and a reference it builds per call, 5,839 times a reload
+      (`externalizeLinkSchema`, `packages/runner/src/link-utils.ts`).
+- [x] A preparation seals a frozen snapshot of the transaction's activity
+      and computes its digest only when something reads it. A commit whose
+      activity epoch stands where the preparation left it accepts the
+      snapshot by identity; one whose epoch moved snapshots again, hashes
+      both and compares (`docs/specs/cfc-commit-preparation.md`, "The
+      prepared digest and the commit-time recheck"). The snapshot's records
+      are frozen without entering the deep-frozen cache. On the thirty-row
+      room's reload each of the 1,223 prepared commits had hashed a digest
+      and none does; the digest fell from 3.2–4.2% of the load's profiler
+      samples to 0.5–0.6%, and preparation from 6.1–7.8% to 3.5–4.4%, over
+      three base and two changed runs interleaved on one machine at a load
+      average between 250 and 500. The shares count samples: at that load
+      most of the time between two samples is time descheduled.
+- [ ] Of a reload's 1,223 prepared commits, 746 attempt only writes the
+      transaction elides as equal to what is stored, and read 345 documents
+      each on average. An elided write is still an attempt the gates answer
+      to (the Contextual Flow Control specification's §8.10.2.1), so such a
+      commit cannot skip preparation without changing what is refused. What
+      it still pays toward a digest is the snapshot, one record per read,
+      which is taken where the preparation ends: taken any later, it would
+      rest on every activity site reporting itself before the journal
+      changes. The flow join is the next cut.
+- [x] The storage manager keeps each data URI's hash and decoded value in a
+      weight-bounded memo, and does not sync a link that declares a stream:
+      its document holds no value a read uses, and the sync had sent one
+      root carrying the stream's event schema per stream to receive an
+      absence record (`packages/runner/src/storage/v2.ts`).
+- [x] An inline array element's snapshot id is kept by the value's identity
+      and the link it was read through, so resolving the element as a cell
+      encodes it once per document version rather than once per resolve
+      (`packages/runner/src/cell.ts`).
+- [x] Measured: the thirty-row room's first load from 71 to 30 s to the
+      messages and its second load from 42 to 16 s, on the same machine
+      within the hour.
+- [x] A handler plan's `$event` slot is read as a stream, the inputs walk
+      skips a position the reader declares a stream, and the owned-cells
+      wave syncs a stream cell whole: three paths had loaded each handler's
+      stream under its event schema, one root carrying that schema per
+      stream, for an absence record. A reload of the thirty-row room sends
+      6.1 MB of watch frames instead of 10 MB.
+- [x] A fourth path had survived those three: setup writes each derived
+      internal cell's `result` pointer, and that meta write starts a load of
+      the cell's document under the cell's link schema, which for a
+      handler's stream is its event schema. One root carrying that schema
+      per stream, 4.5 KB each, about 25 per message row and 848 per load of
+      the thirty-row room, at the resume wave and again after the settle,
+      each answered with an absence record. The storage manager now loads
+      every cell declared a stream as the whole document
+      (`StorageManager.syncCell`), the rule the owned-cells wave had
+      applied for itself; the roots stay, at 26 bytes each. On a
+      three-row room the watch frames of a reload went from 1.5 MB to
+      1.1 MB, and the stream-event selector is gone from the frame log.
+- [x] A link schema written into an ordinary document is stored as a
+      reference when the reference is the shorter wire form; a trivial
+      schema, one decomposition refuses, and a bare handle stamp stay
+      inline (`docs/specs/content-addressed-schemas.md`). A nested
+      instance's argument document had carried one inline closure per
+      captured input, 27 KB of a 64 KB operation per message row in the
+      first-run commit, which is now 40 KB.
+- [x] The server's oversized-message refusal is a terminal rejection, so a
+      commit refused for its size is not sent again unchanged.
+- [x] A message row's argument document carried two label entries per
+      message in the room, 60 of its 85: the row received a link to the
+      whole list at `array`, which its callback never declared, because the
+      list built-ins read an unnamed key of an object schema as declared,
+      and the link write persisted the list's label view under the slot.
+      The built-ins now pass a row only the arguments its schema names and
+      drop a stored slot the schema leaves unused on replay, so the label
+      maps grow with the message count once, not twice.
+- [ ] The remaining label map of a row is its 25 fixed entries, about
+      9 KB, of which the `LinkReference` atoms are the largest share: each
+      spells its source and its target in full, and on an in-place link
+      entry both restate the link stored beside it. Shrinking that is a
+      change to the atom's registered shape, which the Contextual Flow
+      Control specification owns.
+- [ ] A load of a materialized room still commits for a fifth of its time,
+      writing a reader's own instance of every session-scoped derivation
+      in a commit of its own: 429 commits of about 400 bytes on the
+      thirty-row room.
+- [ ] The first-run commit of a hundred-row room is one transaction, and
+      at 24.7 MB it stood for more slots than the server admits.
+- [x] A node's bindings, and the inputs document minted from them, are
+      computed by the pre-sync and taken by the node's instantiation
+      (`NodeBindingMemo`, `packages/runner/src/node-binding-memo.ts`).
+      Binding reads nothing through a transaction, so the held part is keyed
+      by what it is computed from: the node, its pattern, the result cell's
+      link, the argument link, and the kind of module the node resolved to
+      with, for a pattern node, the pattern that module holds. What the
+      bound outputs redirect to is still read through the planning
+      transaction on every plan, so an action's transaction records the
+      reads it did before and an instantiation writes what it did before.
+      Measured at `1384591508`, when the room built two rows a message, a
+      reload of the thirty-message room made 9,528 plans and computed 9,528
+      bindings; it now computes 3,111, none of them at instantiation, and
+      holds 69 MB of bindings at its peak and none once the tree is
+      running. The 1,823 further calls the planner made to itself for nodes
+      whose module is a registry reference bound nothing, and are gone with
+      the loop that resolves the reference first.
+- [x] A runtime keeps the ids of the derived internal cells it has hashed
+      most recently, 65,536 of them (`DerivedInternalCellIds`,
+      `packages/runner/src/derived-internal-cell-ids.ts`). Every action
+      whose scheduler summary is complete lists its pattern's derived cells,
+      so a row of 49 nodes hashed each of its cells' ids once per such
+      action: the reload hashed 114,694 ids for 3,167 cells.
+- [x] The scheduler holds event handlers by the address of their stream
+      (`EventHandlerRegistry`, `packages/runner/src/scheduler/events.ts`),
+      where a registration and a dispatch each compared the link of every
+      handler registered. The reload registers 1,154.
+- [x] Measured as process CPU time on a Deno reload of that room, main at
+      `1384591508` against the three changes above, two runs of each side
+      by side:
+      the two `messages.map` actions from 8.4 to 5.0 s, node plans at
+      instantiation from 3.1 to 0.4 s and in the pre-sync from 13.8 to
+      6.2 s, derived cell ids from 2.1 to 0.4 s, handler registration from
+      0.18 to 0.01 s, and the whole render from 75.8 to 66.8 s.
+- [ ] Every plan still resolves its outputs' redirect chains: 9,528
+      resolutions on the reload for 3,100 nodes. The 3,100 an instantiation
+      makes belong in the action's transaction. The pre-sync makes the other
+      6,428 in read-only transactions it discards, across three passes over
+      the same nodes, and could make each once.
+- [ ] Past the bound on held bindings the pre-sync's earliest bindings are
+      dropped before their instantiation asks for them. The bound is 256 MB
+      of inputs documents and the thirty-row room holds 69 MB, so a room of
+      about a hundred rows is at it: an inputs document carries the schema
+      of every link it holds inline, and averages 22 KB on that room.
+- [ ] A plan's inputs document is decoded apart from the value it was
+      minted from: once for its sync (`valueFromDataUri` under
+      `#syncDataURICell`, `packages/runner/src/storage/v2.ts`) and again for
+      its reads. The sync's decode was 4.1 to 7.5% of the profile's samples
+      on the thirty-row room's reload, measured before the pre-sync held a
+      node's bindings. A document decoded there is one this process minted,
+      so keeping the minted value by its URI would spare the decode, and
+      with it the link schemas a decode makes new objects of.
+
+Exit: a room of a hundred rows opens in the browser.
+
 ## Out of scope, noted
 
 The 3.2 MB watch frame is mostly two 5 KB selectors repeated 296 times. A
@@ -220,3 +456,7 @@ selector table per frame — each distinct selector once, roots naming it by
 hash, as the frame log already records them — would cut the bytes out by an
 order of magnitude. It is a protocol change under
 `docs/specs/memory-v2/04-protocol.md` and a separate plan.
+
+The compiled program is 1.7 MB per cold worker and evaluates in 0.9 s, with
+no cache in the browser; shrinking the compiled output and caching compiled
+closures in the browser are each their own work.

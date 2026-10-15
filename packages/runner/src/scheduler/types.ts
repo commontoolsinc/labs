@@ -337,6 +337,19 @@ export type ServedEventDispatch = {
   onFailure?: (outcome: ServedEventFailureOutcome) => void;
 };
 
+/**
+ * What ends the wait of a client event whose piece could not be started yet
+ * (`queueSchedulerEvent()`): a commit touching a document the start read, a
+ * handler registering for the event's stream, the event settling by some other
+ * path, the end of the retry window, or the scheduler being disposed.
+ */
+export type PieceStartWake =
+  | "documents-changed"
+  | "handler-registered"
+  | "settled"
+  | "window-spent"
+  | "disposed";
+
 export type QueuedEvent = {
   /** Durable event id minted at send (spec §7.5). */
   readonly id: string;
@@ -412,6 +425,32 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+
+  /**
+   * Ends the wait of a loading head whose piece could not be started yet.
+   * Present only while that wait is in progress, and called with what ended
+   * it, one of the causes {@link PieceStartWake} lists.
+   */
+  endPieceStartWait?: (cause: PieceStartWake) => void;
+
+  /**
+   * The FIFO slot is held while the piece the handler belongs to, or a piece
+   * that instantiated it, changes pattern (`Runner.pendingPatternChangeFor`).
+   * The head parks the queue as it does for a loading handler. The wait ends
+   * when the change settles, when the piece stops, when the event is dropped,
+   * or when the scheduler is disposed. The event then takes the handler
+   * registered for its stream, or keeps the one it was queued with when none
+   * is, and the flag clears; an event whose handler belongs to a graph its
+   * still-running piece replaced, with none registered, is dropped instead.
+   */
+  patternChangePending?: boolean;
+
+  /**
+   * Ends the wait of a head held for its piece's pattern change. Set when the
+   * wait begins and removed once the wait's end has been handled, a microtask
+   * after it is called.
+   */
+  endPatternChangeWait?: () => void;
 
   /**
    * The FIFO slot is held while the stale-basis retry that requeued this

@@ -910,8 +910,10 @@ Three things read them:
   `tasks/test-selection/baselines.ts` is where that happens.
 - The dashboard's coverage debt tile
   (`packages/dashboard/coverage-debt-history.ts`) takes the `workspace`
-  figure of one `main` run a day, the newest of the day's runs that has one
-  and was not measured on a cold compile cache, and charts the run of them.
+  figure of one `main` run attempt a day, the newest of the day's attempts
+  that has one, was not measured on a cold compile cache, and passed, and
+  charts the run of them. The record store does not say whether an attempt
+  passed, so the tile asks GitHub.
 - The report a `main` run posts on the pull request behind it
   (`tasks/post-main-report.ts`) reads the figures out of the newest coverage
   artifact of the run and of the run before it, and compares the two. A run

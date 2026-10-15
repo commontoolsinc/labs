@@ -43,7 +43,7 @@ during that implementation are archived at
 
 ## Last Updated
 
-2026-08-27
+2026-10-12
 
 ## Motivation
 
@@ -98,7 +98,7 @@ during that implementation are archived at
 | **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts` (enabled unless `doNotUpdateOnPatternChange`) | Applies a pointer move when the piece is already running; a piece that is not running has the new pattern staged over its document by the transition itself |
 | `SourceReconciler` | `packages/runner/src/source-reconciler.ts` | Origin resolution, identity lookup, verified closure compile, and the guarded transition — one path for every piece |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/ops/pieces-controller.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
-| `ensureDefaultPattern` (resolve → follow the origin → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The root's open path and its repair ladder, and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
+| `ensureDefaultPattern` (resolve → follow the origin → start; with `reconcile: false`, resolve → start, following the origin only if the held pattern cannot load) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The root's open path and its repair ladder, and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/runner/src/harness/patterns-route.deno.ts` defines the route; `packages/toolshed/routes/patterns/patterns-server.ts` and `patterns.routes.ts` name this deployment's directories and wire it into the server | Where the current system source + its identity come from |
 | Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `Runtime.mappedHostFor` / `registerSpaceHost` in `packages/runner/src/runtime.ts`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Identity computation: `transformInjectHelperModule` + `computeModuleIdentities` | `harness/pretransform.ts`, `sandbox/module-record-compiler.ts` | What toolshed runs to answer `?identity` |
@@ -342,7 +342,40 @@ rather than refused: a slot whose stored value is a link that cannot be
 dereferenced in that transaction (a nested piece's argument lives in its host's
 document, and "not yet synced" is not "invalid"), and a root carrying no
 completion marker at all, which gets one unvalidated setup because absence
-cannot be distinguished from a pending apply.
+cannot be distinguished from a pending apply. A link stored in a slot the new
+schema types as a cell handle (`Writable`, `Cell`, `Stream`) is judged as a
+handle, as it is in a slot typed as a handle or `undefined` (or `null`), since
+a link is neither: validation reads only the top level of what it reaches,
+without descending, and holds it to the type the slot's schema allows. What lies
+below is checked by the reactive reads that follow the handle, and leaving it
+unread keeps its labels out of the transaction that writes the piece's own
+stores. A write to a piece's input validates the input it lands in the same way.
+
+A nested piece is set up again the same way when its code changes, over its
+existing argument document, with the argument its parent's expression supplies
+written over the slots that document holds. The slots the parent does not
+supply are the nested piece's own state, and they are carried over, except
+that a stored slot the new argument schema refuses is dropped, with a warning
+naming the pattern, the piece, the slot and the mismatch, and its default fills
+it where it has one. Where the argument still fails the schema as a whole, as
+a union at its root can once the parent's slots pick a branch, every stored
+slot the parent does not supply is dropped the same way. A stored slot that no
+longer fits therefore does not stop the parent from starting. A slot the parent
+supplied once and supplies no longer keeps the value it last held.
+
+Dropping a slot does not destroy what it held. In the same transaction as the
+write that fills it, setup copies the slot's stored value into the nested piece's
+refused-slot store: a document minted from the piece's result cell, in its space
+and at its scope, which `refusedArgumentSlotsCell()` in `@commonfabric/runner`
+names from that cell alone, so each scoped instance of a piece keeps its own. A
+link in the value that leaves its document, space or scope to the document
+holding it is written naming the argument document's, so it points where it did.
+The store holds the dropped values by slot, then by the `identity#symbol` of the
+pattern whose setup dropped them (`keyless` for a pattern with no artifact
+identity), each beside its mismatch. A value already kept under the same slot
+and pattern is not kept again, and nothing kept is replaced. The warning names
+the store. The runtime names the store as one it owns for the piece, so a value
+copied out of a labeled argument keeps its confidentiality there.
 
 A refusal is a repair failure, not a silent one. The pointer has already moved
 by the time setup runs, so re-running the same identity refuses identically;
@@ -360,7 +393,22 @@ before its first start. This lets an obsolete pattern that cannot load be
 replaced before bootstrap without reading unsynchronized owned cells as their
 schema defaults. If the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
-the **same result cell**.
+the **same result cell**. The watcher reads from storage before it does: the
+writer authority the new pattern inherits, and any document the new pattern
+reads that the replica lacks. `ensureDefaultPattern` waits for that
+re-instantiation, through the runner's `patternPointerFollowed()`, so the root
+it returns runs the new pattern whether or not the root was running when it
+was opened. A runtime that seals its writes into a serving wave is the
+exception. There the watcher re-instantiates once the wave carrying the new
+pattern's setup has settled, so that a withdrawn setup leaves the old graph in
+place, and a wave settles after the cycle that sealed into it has ended. A call
+made within that cycle cannot wait for the settlement, so on such a runtime
+`ensureDefaultPattern` returns with the old pattern's graph still running.
+On a client runtime the watcher re-instantiates only once the setup it stages
+for the new pattern has committed, and a refused setup leaves the old pattern
+running under the moved pointer. Until the piece settles on one of the two, an
+event for its streams waits, and then runs the handler of the pattern it
+settled on.
 
 - **Survives**: the result cell's entity and inbound links. State remains
   reachable when the new pattern reads it through the same stable keys and
@@ -370,6 +418,29 @@ the **same result cell**.
   must exercise representative prior state and verify that the proposed source
   still reads and preserves it. The deployment runtime does not try to infer
   stable-key or stable-cause compatibility.
+
+Opening any other piece that is already running waits the same way, through
+the same `patternPointerFollowed()`, for two kinds of pointer move. `openPiece`,
+and a `getPieceCell` that reconciles, wait for the move their own reconcile
+made, and for any earlier move the piece's watcher has already observed. They
+wait after the reconcile, and again after the start where the open starts the
+piece, since a start that was in flight before the pointer moved can
+instantiate the outgoing pattern.
+
+The watcher observes a move in a scheduler pass. An open whose reconcile moved
+the pointer therefore waits for the runtime to go idle first. An open that
+moved nothing does not, because that wait lasts until every piece in the
+runtime is quiescent. Such an open does not wait for a move committed
+elsewhere that the watcher has yet to observe.
+
+The wait is for the opened piece's watcher alone, and lasts as long as that
+watcher takes. For a pointer another replica moved to a pattern this runtime
+has not compiled, that includes loading the pattern, which starting the same
+piece would wait for if it were not running. A re-instantiation that fails is
+logged and leaves the piece on the pattern it was running, and the open
+resolves all the same. On a runtime that seals its writes into a serving wave
+the re-instantiation follows the wave's settlement, which the wait does not
+cover.
 
 An automatic update from a `system:` origin runs no structural comparison,
 because the release gate below is a better check than the runtime could make

@@ -611,9 +611,11 @@ The strict-only delta is:
     is a claim about whose write it is, and a forger supplies the write.
   - **Which document it names.** The runner derives every address from the
     piece's result cell — the result cell itself, the argument address that
-    cell's cause mints, and each derived internal cell's — and never reads
-    one back out of stored metadata, where an `argument` or manifest link can
-    name another document (a nested piece's argument lives in its HOST's).
+    cell's cause mints, each derived internal cell's, and the refused-slot
+    store a nested piece's setup copies a dropped argument slot into — and
+    never reads one back out of stored metadata, where an `argument` or
+    manifest link can name another document (a nested piece's argument lives
+    in its HOST's).
     A builtin names only the stores it mints from its own node's cause. In
     every case the address must name a whole document rather than a path
     inside one, and must lie in the owner's own space: a store elsewhere

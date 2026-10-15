@@ -1092,7 +1092,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     //
     // These baselines also report the scope the manager's `rooms` now
     // declares, which `fabrichat-view-scopes-break.md` records, so the
-    // entry names that path beside its own.
+    // entry names that path beside its own. They now report the `delivery`
+    // a request outcome gained, under the manager's views, where the proof
+    // reported `rooms`: it reports one issue per role. The entry names that
+    // path too, which `fabrichat-add-member-offer-break.md` records.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261008T225324Z-Oj3DbCTq-94tEYN3",
@@ -1103,6 +1106,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     paths: [
       "argument.requests.*",
       "result.$VIEWS.chats.rooms",
+      "result.$VIEWS.chats.requests.*",
     ],
     reason:
       "a manager's room link now types the room's `roster`, which the recorded link left open; every stored room link is to a room output with no `roster` or with a list of profile links, which the new type admits",
@@ -1149,6 +1153,11 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // computeds deriving them already had. This is the one baseline that has
     // `people`; the baselines the entries above name report `rooms` beside
     // their own paths.
+    //
+    // This baseline also reports the `delivery` and the refusal `code` a
+    // stored request outcome gained, which
+    // `fabrichat-add-member-offer-break.md` records, so the entry names that
+    // path beside its own.
     pattern: "fabrichat/manager.tsx",
     baselines: [
       "20261011T013628Z-pqvm47igo4Famzxe",
@@ -1156,6 +1165,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     paths: [
       "result.$VIEWS.chats.rooms",
       "result.$VIEWS.chats.people",
+      "argument.requests.*",
     ],
     reason:
       "a manager's rooms and people declare the per-session scope they are derived in; nothing is stored at either path for a reader to refuse",
@@ -1183,11 +1193,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261008T164451Z-n7gF99zc-4syFWet",
       "20261008T210117Z-UFEwl2NpHQpxqXsF",
       "20261008T214130Z-p3Zx6MHfQub4Jhqr",
-      "20261008T225325Z-PhnyFM45uYaav17c",
       "20261008T231303Z-40_BirmSRf8AZ9Su",
-      "20261009T161814Z-Oyyi7wIUz7AJ5r33",
-      "20261009T210117Z-3GKaIZwG8Yel9N7f",
-      "20261010T055011Z-kPOS_bsln0EOlG9e",
     ],
     paths: [
       "result.chatManager.$VIEWS.chats.rooms",
@@ -1247,6 +1253,76 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       on: "2026-10-10",
       reason:
         'choosing to declare the scope once the measurements were in: "it looks like (b) is more correct to me", then "(a) sounds good"',
+    },
+  },
+  {
+    // A request outcome gained `delivery`, which says how `offerRoom` told a
+    // member added to a room of it, and a refused one the `shared-inbox`
+    // code. The recorded outcomes left extra fields open and typed `code` as
+    // `space-own-chat` alone, so a stored outcome admitted either of any
+    // type; the candidate types them.
+    pattern: "fabrichat/manager.tsx",
+    baselines: [
+      "20261011T170652Z-2XdZAneyCTt2Teex",
+    ],
+    paths: [
+      "argument.requests.*",
+      "result.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "a manager's request outcome now types `delivery`, and a refused one the `shared-inbox` code, which the recorded outcomes left open; no stored request outcome holds either",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
+  },
+  {
+    // Home types its `chatManager` as the manager's output, so the `delivery`
+    // and the refusal code a manager's request outcome gained reach home's
+    // contract too. These baselines also report the scope the manager's
+    // `rooms` declares, which `fabrichat-view-scopes-break.md` records under
+    // the same ruling it carries there, and the proof now blames `requests`
+    // in its place: it reports one issue per role. The entry names both
+    // paths. Home is a required pattern, so it carries the ruling that lets
+    // it name one.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261008T225325Z-PhnyFM45uYaav17c",
+      "20261009T161814Z-Oyyi7wIUz7AJ5r33",
+      "20261009T210117Z-3GKaIZwG8Yel9N7f",
+      "20261010T055011Z-kPOS_bsln0EOlG9e",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.rooms",
+      "result.chatManager.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "home's chat manager's request outcomes now type `delivery`, and a refused one the `shared-inbox` code, and its rooms declare the per-session scope they are derived in; a home rolled forward still delivers both",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-11",
+      reason:
+        "taking home's part of the break once its roll-forward was measured: \"assuming the contract breakage can be automatically handled the way the previous one was, then that's okay\"",
+    },
+  },
+  {
+    // The same ruling, against the home baselines recorded with the scope
+    // the manager's views declare, and with the action that replaces a
+    // refused private inbox.
+    pattern: "system/home.tsx",
+    baselines: [
+      "20261011T170655Z-AJPqLNiOact-MHN0",
+      "20261011T215215Z-wYgeQ3_Ossuzky4g",
+    ],
+    paths: [
+      "result.chatManager.$VIEWS.chats.requests.*",
+    ],
+    reason:
+      "home's chat manager's request outcomes now type `delivery`, and a refused one the `shared-inbox` code, which the recorded outcomes left open; a home rolled forward still delivers them",
+    record: "docs/history/fabrichat-add-member-offer-break.md",
+    requiredPatternOverride: {
+      rulingBy: "Dan",
+      on: "2026-10-11",
+      reason:
+        "taking home's part of the break once its roll-forward was measured: \"assuming the contract breakage can be automatically handled the way the previous one was, then that's okay\"",
     },
   },
 ];

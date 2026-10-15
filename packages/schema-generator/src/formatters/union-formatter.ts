@@ -1303,20 +1303,23 @@ export class UnionFormatter implements TypeFormatter {
     } else if (
       isCurPrimitive && cur.enum === undefined && cur.type !== undefined
     ) {
-      // If cur is a primitive non-enum with a known type, we can merge with any existing non-enum primitive
+      // If cur is a primitive non-enum with a known type, we can merge with any
+      // existing non-enum primitive that has one too. `{}` has none: it
+      // accepts any value, and a type merged into it would narrow it to that
+      // type.
       const matchingNonEnumIdx = anyOf.findIndex((option) =>
         isObjectOrArray(option) &&
         PRIMITIVE_SCHEMA_KEY_SET.isSupersetOf(new Set(Object.keys(option))) &&
-        option.enum === undefined
+        option.enum === undefined && option.type !== undefined
       );
       const matchingNonEnum = matchingNonEnumIdx !== -1
         ? anyOf[matchingNonEnumIdx]
         : undefined;
-      if (isObjectOrArray(matchingNonEnum) && matchingNonEnumIdx !== -1) {
+      if (
+        isObjectOrArray(matchingNonEnum) && matchingNonEnum.type !== undefined
+      ) {
         const curTypes = Array.isArray(cur.type) ? cur.type : [cur.type];
-        const matchingNonEnumTypes = matchingNonEnum.type === undefined
-          ? []
-          : Array.isArray(matchingNonEnum.type)
+        const matchingNonEnumTypes = Array.isArray(matchingNonEnum.type)
           ? matchingNonEnum.type
           : [matchingNonEnum.type];
         anyOf[matchingNonEnumIdx] = {

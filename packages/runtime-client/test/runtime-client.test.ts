@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { Identity } from "@commonfabric/identity";
+import { type DID, Identity } from "@commonfabric/identity";
 
 import { attachOptionsFrom, RuntimeClient } from "@/runtime-client.ts";
 import { findKeyMaterial } from "@/shared/key-material.ts";
@@ -368,6 +368,86 @@ describe("RuntimeClient", () => {
 
       await expect(client.getPiece("fid1:gone", space as never)).resolves
         .toBeNull();
+    });
+  });
+
+  /** A client whose worker answers every request with `response`. */
+  function clientAnswering(response: unknown): {
+    client: RuntimeClient;
+    requests: unknown[];
+  } {
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve(response);
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, undefined);
+    return { client, requests };
+  }
+
+  describe("ensureHomePatternRunning()", () => {
+    const home: CellRef = {
+      id: "of:fid1:home" as CellRef["id"],
+      space: "did:key:z6Mk-runtime-client-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    it("asks the worker for Home, creating it where missing, and returns its cell", async () => {
+      const { client, requests } = clientAnswering({ cell: home });
+
+      const cell = await client.ensureHomePatternRunning();
+
+      expect(requests).toEqual([{
+        type: RequestType.EnsureHomePatternRunning,
+      }]);
+      expect(cell.ref()).toEqual(home);
+    });
+
+    it("asks for an existing Home only, and returns `undefined` where the worker brought none up", async () => {
+      const { client, requests } = clientAnswering({});
+
+      const cell = await client.ensureHomePatternRunning({
+        existingOnly: true,
+      });
+
+      expect(requests).toEqual([{
+        type: RequestType.EnsureHomePatternRunning,
+        existingOnly: true,
+      }]);
+      expect(cell).toBeUndefined();
+    });
+
+    it("throws where the worker returns no cell for a request that may create Home", async () => {
+      const { client } = clientAnswering({});
+
+      await expect(client.ensureHomePatternRunning()).rejects.toThrow(
+        "Home's root is missing",
+      );
+    });
+  });
+
+  describe("joinVisitedRoom()", () => {
+    const space = "did:key:z6Mk-runtime-client-visited" as DID;
+
+    it("asks the worker to join the room in the space, and returns its decision", async () => {
+      const { client, requests } = clientAnswering({ decision: "sent" });
+
+      const decision = await client.joinVisitedRoom(space);
+
+      expect(requests).toEqual([{ type: RequestType.JoinVisitedRoom, space }]);
+      expect(decision).toBe("sent");
+    });
+
+    it("returns `undefined` where the worker decided nothing, as for a user with no Home", async () => {
+      const { client } = clientAnswering({});
+
+      expect(await client.joinVisitedRoom(space)).toBeUndefined();
     });
   });
 

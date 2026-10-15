@@ -73,6 +73,12 @@ export const CHAT_ADD_MEMBER_SURFACE = "ChatAddMemberSurface";
 /** The reviewed action adding a member is, on `CHAT_ADD_MEMBER_SURFACE`. */
 export const CHAT_ADD_MEMBER_ACTION = "ChatAddMember";
 
+/** The reviewed surface a room is retitled from. */
+export const CHAT_RETITLE_SURFACE = "ChatRetitleSurface";
+
+/** The reviewed action retitling a room is, on `CHAT_RETITLE_SURFACE`. */
+export const CHAT_RETITLE_ACTION = "ChatRetitle";
+
 //
 // Principals
 //
@@ -272,19 +278,32 @@ export interface AboutRecord {
   /** How the room was created. */
   kind: ChatRoomKind;
 
-  /** A group room's title. */
+  /** The title a group room was created with. */
   title?: string;
 
   /** When the room was created. */
   createdAt?: FabricEpochNsec;
 }
 
-/** What a room says about itself, set once when it is created. */
+/**
+ * A room's title as a member last set it, through `setTitle`. The room stores
+ * it labeled `authored-by` that member.
+ */
+export interface TitleRecord {
+  /** The title. */
+  title: string;
+}
+
+/** What a room says about itself. */
 export interface ChatRoomAbout {
   /** `"direct"` if created as a direct room; `"group"` otherwise. */
   kind: ChatRoomKind;
 
-  /** A group room's title. A direct room, and a space's own chat, have none. */
+  /**
+   * The room's title, which every member shares: the one a member last set,
+   * or else the one the room was created with. A direct room has none until a
+   * member sets one, and a space's own chat has none.
+   */
   title?: string;
 
   /** When the room was created; absent for a space's own chat. */
@@ -437,6 +456,12 @@ export interface ChatRoomLink {
   roster?: ManagerProfileCell[];
 }
 
+/** A container's explicit declaration of the conversation it holds. */
+export interface ChatContainer {
+  /** The declared conversation, wherever its room lives. */
+  chatRoom?: Cell<ChatRoomLink>;
+}
+
 /** One room in a user's chat manager. */
 export interface ChatIndexEntry {
   /** The room. */
@@ -448,13 +473,13 @@ export interface ChatIndexEntry {
   /** A direct room's other member, by principal. */
   counterpart?: string;
 
-  /** When this user's catalog admitted it. */
+  /** When first listed for this user, using catalog admission for discovery. */
   since: FabricEpochNsec;
 
   /**
-   * The revision of the room's entry in the user's catalog, as listed, which a
-   * request to forget the room names; absent where the entry is not one the
-   * catalog keeps revisions of.
+   * The opaque revision supplied by `rooms` for its membership or discovery
+   * source. A request to forget uses that view's revision; direct mappings
+   * and act outcomes may omit it.
    */
   revision?: string;
 }
@@ -469,8 +494,11 @@ export type ChatRequestOutcome =
     /** The request finished. */
     status: "done";
 
-    /** The entry it produced; absent for `forget`. */
+    /** The entry it produced; absent for `forget` and `offerRoom`. */
     entry?: ChatIndexEntry;
+
+    /** How `offerRoom` told the member of the room; absent for the others. */
+    delivery?: ChatOfferDelivery;
   }
   | {
     /** The request was refused. */
@@ -488,16 +516,45 @@ export type ChatRequestOutcome =
 
 /**
  * A refusal a client can act on, which stays the same whatever its `reason`
- * says. `space-own-chat`: `accept` named a social space's own chat, which a
- * user's chats don't list, since the catalog lists rooms by their own spaces.
+ * says. `space-own-chat`: `accept` or `joinRoom` named a container's chat
+ * without supplying the matching root `chatRoom` declaration it needs.
+ * `shared-inbox`: `createGroup` named profiles of two people that point at
+ * the same share inbox, so an offer meant for one would reach the other.
  */
-export type ChatRefusalCode = "space-own-chat";
+export type ChatRefusalCode = "space-own-chat" | "shared-inbox";
+
+/**
+ * How a manager told a member of a room it offered them: `offered`, sent to
+ * at least one share inbox a profile of theirs points at, which says nothing
+ * of whether it arrived; `noticed`, queued as a notice for a client to
+ * deliver, since no profile of theirs it knows points at an inbox.
+ */
+export type ChatOfferDelivery = "offered" | "noticed";
+
+/**
+ * How an added member was told of the room: as their adder's manager told
+ * them, or `access-only`, not told at all, because the adder had no manager to
+ * tell them when they added them, or theirs refused to.
+ */
+export type AddMemberDelivery = ChatOfferDelivery | "access-only";
 
 /** The outcome of an add to a room's space, by its `requestId`. */
 export type AddMemberOutcome =
   | {
     /** The person was admitted, or held the access already. */
     status: "done";
+
+    /**
+     * How they were told of the room; absent until the adder's manager has
+     * decided.
+     */
+    delivery?: AddMemberDelivery;
+
+    /**
+     * Why the adder's manager refused to tell them of the room, where it did,
+     * which makes `delivery` `access-only`.
+     */
+    deliveryRefusal?: string;
   }
   | {
     /** The add was refused, and nothing was granted. */
@@ -519,6 +576,88 @@ export type AddMemberOutcome =
  * its two members.
  */
 export type AddMemberRefusalCode = "direct-room";
+
+/** The outcome of a retitle of a room, by its `requestId`. */
+export type SetTitleOutcome =
+  | {
+    /** The request set the room's title. */
+    status: "done";
+  }
+  | {
+    /** The retitle was refused, and the title is as it was. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /** Which refusal it is, for a client to act on. */
+    code: SetTitleRefusalCode;
+  };
+
+/**
+ * Why a room refused a retitle, which stays the same whatever its `reason`
+ * says. `not-member`: the sender can't write in the room, or isn't signed in.
+ * `invalid-title`: the title is not a string with some text in it.
+ * `fixed-title`: the room's title is not one its members set, as for a
+ * space's own chat, which is shown by its space's name.
+ */
+export type SetTitleRefusalCode =
+  | "not-member"
+  | "invalid-title"
+  | "fixed-title";
+
+/**
+ * Why a room refused one of a sender's message acts: a send, an edit, a
+ * deletion, an obliteration, or a reaction added or removed.
+ * - `no-profile`: the sender's profile hasn't resolved, so the act can't name
+ *   them.
+ * - `not-member`: the sender can't write in the room, or isn't signed in.
+ * - `invalid-body`: a message with no text, or a reaction that isn't a single
+ *   emoji.
+ * - `out-of-window`: the act's time is outside the room's window.
+ * - `bad-reply`: a reply to a message not in the room, or shown where its
+ *   target can't be.
+ * - `deleted-target`: the message acted on, or replied to, is deleted.
+ * - `unknown-target`: the message acted on isn't in the room.
+ * - `not-allowed`: the act is one only the message's author, or an owner, may
+ *   make.
+ */
+export type MessageActRefusalCode =
+  | "no-profile"
+  | "not-member"
+  | "invalid-body"
+  | "out-of-window"
+  | "bad-reply"
+  | "deleted-target"
+  | "unknown-target"
+  | "not-allowed";
+
+/** The outcome of one of a sender's message acts, by its `requestId`. */
+export type MessageActOutcome =
+  | {
+    /** The act took effect, or had nothing left to change. */
+    status: "done";
+  }
+  | {
+    /** The act was refused, and wrote nothing to the room. */
+    status: "refused";
+
+    /** Why, for a person to read. */
+    reason: string;
+
+    /** Which refusal it is, for a client to act on. */
+    code: MessageActRefusalCode;
+  };
+
+/**
+ * The `requestId` under which an add to the room in `space` asks the adder's
+ * manager to offer the room, given the add's own `requestId`, which the offer
+ * carries as its `id`. It names the room as well as the add, so adds to two
+ * rooms under one `requestId` neither share an outcome in the manager nor
+ * replace each other's offer in a share inbox.
+ */
+export const addMemberOfferId = (space: string, requestId: string): string =>
+  JSON.stringify(["addMember", space, requestId]);
 
 /**
  * The `kind` of a room's own space, as the space declares it, and as an offer

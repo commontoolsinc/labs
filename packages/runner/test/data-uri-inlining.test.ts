@@ -6,13 +6,17 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/data-model";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
 import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import type { JSONSchema } from "../src/builder/types.ts";
 import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
@@ -22,6 +26,7 @@ import { Runtime } from "../src/runtime.ts";
 import { externalRefTo, resolvedSchema } from "./schema-ref-helpers.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { inlineCellValue } from "../src/immutable-cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -54,6 +59,25 @@ describe("data URI inlining", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  for (const method of ["set", "setRaw"] as const) {
+    it(`expands immutable defaults before ${method} stores an ordinary link schema`, async () => {
+      const snapshot = runtime.getImmutableCell(space, { answer: 42 });
+      const holder = runtime.getCell(space, `schema-default-${method}`);
+      holder.withTx(tx)[method]({
+        ref: linkRefFrom({
+          id: "of:target",
+          space,
+          schema: { default: snapshot.getAsLink() },
+        }),
+      });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      const stored = holder.getRaw() as { ref: ReturnType<typeof linkRefFrom> };
+      const schema = parseLink(stored.ref)!.schema!;
+      expect(resolvedSchema(schema)).toEqual({ default: { answer: 42 } });
+      tx = runtime.edit();
+    });
+  }
 
   describe("findAndInlineDataUriLinks", () => {
     it("returns a link-free array holding NaN by reference", () => {
@@ -879,7 +903,7 @@ describe("data URI inlining", () => {
   });
 
   describe("dataUriFromValueWithResolvedLinks", () => {
-    it("carries a link's schema inline in the id", () => {
+    it("keeps a link's schema as the reference it was given", () => {
       const target = runtime.getCell(space, "ref-target", {
         type: "object",
         properties: { name: { type: "string" } },
@@ -895,7 +919,82 @@ describe("data URI inlining", () => {
       const stored = valueFromDataUri(
         dataUriFromValueWithResolvedLinks({ ref: link }),
       );
-      expect(parseLink(stored.ref)!.schema).toEqual(resolvedSchema(carried));
+      expect(parseLink(stored.ref)!.schema).toEqual(carried);
+    });
+  });
+
+  describe("a reference-form link schema inside a `data:` document", () => {
+    // A reader that takes a handle at the link declares nothing else there,
+    // so the handle's schema is the link's own, resolved from its reference.
+
+    const linkSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const satisfies JSONSchema;
+    const readerSchema = {
+      type: "object",
+      properties: { ref: { asCell: ["cell"] } },
+      required: ["ref"],
+    } as const satisfies JSONSchema;
+
+    /**
+     * A link under `linkSchema`, stored in an array element in `space` so
+     * that the space holds the closure the link's reference names.
+     */
+    const storedLink = () => {
+      const target = runtime.getCell(space, "snapshot-target", linkSchema, tx);
+      target.set({ name: "x" });
+      const link = target.getAsLink({ includeSchema: true });
+      runtime.getCell(space, "snapshot-holder", undefined, tx).setRaw({
+        items: [{ ref: link }],
+      });
+      return link;
+    };
+
+    /** The schema of the link at `ref` in the document `id` addresses. */
+    const schemaInside = (id: `${string}:${string}`) =>
+      parseLink((inlineCellValue(id) as { ref: unknown }).ref)!.schema;
+
+    it("resolves on a read of a stored array element", () => {
+      storedLink();
+      const holder = runtime.getCell(space, "snapshot-holder", {
+        type: "object",
+        properties: { items: { type: "array", items: readerSchema } },
+        required: ["items"],
+      }, tx);
+      const element = holder.key("items").key(0).resolveAsCell();
+      expect(schemaInside(element.getAsNormalizedFullLink().id)).toEqual(
+        externalRefTo(linkSchema),
+      );
+
+      const handle = holder.get().items[0].ref;
+      expect(resolvedSchema(handle.schema)).toEqual(linkSchema);
+      expect(handle.get()).toEqual({ name: "x" });
+    });
+
+    it("narrows to the rest of a path that continues past the link", () => {
+      const id = dataUriFromValueWithResolvedLinks({ ref: storedLink() });
+      expect(schemaInside(id)).toEqual(externalRefTo(linkSchema));
+
+      const result = findAndInlineDataUriLinks({
+        "/": { [LINK_V1_TAG]: { id, path: ["ref", "name"] } },
+      });
+      const narrowed = parseLink(result)!;
+      expect(narrowed.path).toEqual(["name"]);
+      expect(resolvedSchema(narrowed.schema)).toEqual({ type: "string" });
+    });
+
+    it("resolves on a read through the document's own address", () => {
+      const id = dataUriFromValueWithResolvedLinks({ ref: storedLink() });
+      expect(schemaInside(id)).toEqual(externalRefTo(linkSchema));
+
+      const handle = runtime.getCellFromLink(
+        { space, id, path: [] },
+        readerSchema,
+        tx,
+      ).get().ref;
+      expect(resolvedSchema(handle.schema)).toEqual(linkSchema);
+      expect(handle.get()).toEqual({ name: "x" });
     });
   });
 });

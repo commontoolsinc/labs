@@ -25,6 +25,8 @@ departs from this design.
   - [`ChatMessageList`](ChatMessageList.md): a room's messages: facts, the
     newest, and each session's windows.
   - [`ChatReply`](ChatReply.md): what a reply replies to, and where it's shown.
+  - [`ChatThreadSummary`](ChatThreadSummary.md): a thread's reply count and
+    latest reply time.
   - [`ChatMessageVersion`](ChatMessageVersion.md): an earlier version of a
     message.
   - [`ChatReaction`](ChatReaction.md)
@@ -113,6 +115,7 @@ provide, the document says so, under the heading "Prerequisites".
    [`ChatMessageList.md`](ChatMessageList.md),
    [`ChatMessageWindow.md`](ChatMessageWindow.md),
    [`ChatWindowAnchor.md`](ChatWindowAnchor.md), [`ChatReply.md`](ChatReply.md),
+   [`ChatThreadSummary.md`](ChatThreadSummary.md),
    [`ChatMessageVersion.md`](ChatMessageVersion.md),
    [`ChatReaction.md`](ChatReaction.md), [`ChatRoomAbout.md`](ChatRoomAbout.md),
    [`ChatRoomPolicy.md`](ChatRoomPolicy.md),
@@ -167,9 +170,10 @@ provide, the document says so, under the heading "Prerequisites".
    membership beyond that list.
 3. **History is attested.** Messages and reactions are `AuthoredByCurrentUser`
    and `TrustedActionWrite`. A message's sender can
-   edit or delete it, each change recorded as a new version, and a message can
-   be obliterated, by an OWNER curating a group room or by either person in a
-   direct room for their own messages, leaving only an attested tombstone. A
+   edit or delete it, each change recorded as a new version, and no one else
+   can. A message can be obliterated, by an OWNER curating the room where its
+   policy allows it, or by either person in a direct room for their own
+   messages, leaving only an attested tombstone. A
    reaction is removed only by its own reactor, or with its message. Every
    recorded version has a time unique in its room.
 4. **Each user has one manager, in their home space**, found with a well-known
@@ -229,12 +233,11 @@ With a member set:
 
 ## Known quirks, accepted for now
 
-- **Refusals are invisible.** A room refuses a bad event silently, so a sender
-  learns of a refusal only by the absence of its effect. Streams are one-way,
-  and a room's record is shared by every member, so outcomes kept there would
-  tell everyone about each member's refused requests. The manager can keep
-  outcomes because it's private to its user (see
-  [`ChatRoomOutput`](ChatRoomOutput.md#streams)).
+- **Window requests are refused silently.** A room records the outcome of
+  each message act and each add where only its sender reads it
+  (`messageRequests` and `addRequests`), but a refused `openWindow` or
+  `closeWindow` leaves no outcome: a session learns of it only by the window's
+  absence (see [`ChatRoomOutput`](ChatRoomOutput.md#streams)).
 - **Crossing creations.** Two managers each keep their own index. If two people
   each start a direct room with the other at the same moment, there are two
   rooms. Each manager records the one it saw first. A tie-break rule is future
@@ -373,6 +376,11 @@ design, as below.
   own reactions, a document the send creates empty and only the reaction
   handlers write after that, until a deletion or an obliteration clears it and
   drops the link.
+- **Thread summaries.** `messages.threads` is derived in the pass that places
+  each message in the views, which walks each reply chain once for the whole
+  room. So the summaries together cost one walk of the messages rather than one
+  per message, and no stored counter can drift from the threads it counts. A
+  change to the messages derives them again, as it does `latest`.
 - **Windows.** A window holds links to its messages, which stay live;
   `hasOlder` and `hasNewer` are as of when the window was set. `commitWindow`
   writes the windows of the session that sent the event, wherever it runs; an
@@ -395,25 +403,21 @@ design, as below.
   Nothing delivers a notice yet (see
   [first contact](FabriChatManager.md#first-contact)), so the manager's
   rendering shows each queued notice with a link to its room, for the room's
-  creator to send on. And a room shows a viewer whose manager doesn't list it a
-  control that asks the manager to `accept` it, so whoever opens the room's link
-  can add it to their chats.
-- **The index is the catalog's.** The manager's `rooms` lists the
-  `fabrichat-room` entries the user's Home shared-space catalog keeps as saved,
-  each room found as its space's root. Creating a room registers its space in
-  the user's Home shared-space catalog
-  ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), in the
-  creating transaction once the space's name has resolved, and so does accepting
-  a room a manager created. Each room registered is registered under the
-  manager's own host, since a pattern can't read which host serves a space.
-  Finding a direct room again, or accepting a room, restores its entry if it was
-  archived, and forgetting a room archives its entry, at the revision the
-  request names. A direct room's counterpart is the one `direct` holds the room
-  under, or else the room's labeled creator, and `openDirect` finds only a room
-  `direct` holds. A room tells whether the viewer's chats list it from the
-  catalog itself, which the manager offers as `sharedSpaceCatalog`. Accepting a
-  space's own chat is refused, since the catalog lists rooms by their own
-  spaces.
+  creator to send on. Whoever opens the room's link, and whoever forgot the
+  room, joins it by writing in it: the room sends the writer's manager
+  `joinRoom`, which lists the room, or lists a forgotten one again.
+- **The index discovers rooms and keeps individual choices.** The manager
+  lists saved standalone rooms from Home's shared-space catalog, and finds
+  declared conversations through other saved spaces' root `chatRoom` links.
+  Explicit per-room membership records keep joins and forgotten conversations
+  independently of their containers. Resolved room identity deduplicates every
+  discovery path. A room added to a saved container appears reactively;
+  forgetting it leaves the container saved. Accepting or joining a declared
+  room supplies its container's declaration, and restores an archived room
+  unless an acceptance sets `keepArchived`. A successful message or reaction
+  sends this declaration to `joinRoom`. The host can also join the declared
+  conversation when the user visits a container
+  ([visiting rooms](../../features/private-inbox.md#joining-a-room-the-user-visits)).
 - **Request ids.** A rendered control sends no `requestId`, and the room and
   the manager use the event's own key (`eventKey()`), which is the same on
   every run of that event.

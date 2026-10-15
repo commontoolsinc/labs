@@ -8,6 +8,7 @@ import {
   action,
   type AddIntegrity,
   assert,
+  type Cell,
   pattern,
   TESTS,
   Writable,
@@ -69,7 +70,7 @@ const talliesText = (tallies: readonly ReactionTally[]): string =>
   ).join(", ");
 
 const reactionsOn = (
-  messages: Writable<MessagesValue>,
+  messages: Cell<MessagesValue>,
   index: number,
 ): ChatReaction[] => {
   const message = (messages.get() as MessageRecord[])[index];
@@ -78,7 +79,7 @@ const reactionsOn = (
 
 // How many reactions a held reaction list holds.
 const heldCount = (
-  holder: Writable<{ list?: Writable<ReactionList> }>,
+  holder: Cell<{ list?: Writable<ReactionList> }>,
 ): number => ((holder.get()?.list?.get() ?? []) as unknown[]).length;
 
 export default pattern(() => {
@@ -119,6 +120,10 @@ export default pattern(() => {
     inThread: false,
     kind: "group" as const,
     composer: Writable.of<ComposerState>({}),
+    // Stand-ins for what the room derives; a row's streams read none of it.
+    places: {},
+    cannotWrite: false,
+    isOwner: false,
     ...records,
   };
   const aliceOnFirst = FabriChatMessageRow({

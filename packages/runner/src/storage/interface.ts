@@ -348,6 +348,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   setSharedMemoryConnection?(enabled: boolean): void;
 
   /**
+   * Keeps session-scoped documents in the local replica when enabled.
+   * Repeated configuration must agree across runtimes sharing this manager.
+   * @throws If a different policy has already been configured.
+   */
+  setLocalSessionDocuments?(enabled: boolean): void;
+
+  /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
    * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
@@ -496,6 +503,12 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * managers may omit it.
    */
   authorizationError?(space: MemorySpace): Error | undefined;
+
+  /**
+   * The terminal error of a space's remote subscription. Ordinary reconnects
+   * and reads supplied by an authoritative local store return `undefined`.
+   */
+  spaceSessionError?(space: MemorySpace): Error | undefined;
 
   /** The latest authoritative access loss for a space, cleared on reopening. */
   spaceAccessError?(space: MemorySpace): Error | undefined;
@@ -1929,6 +1942,15 @@ export interface TransactionSealDestination {
   ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt;
 
   /**
+   * Whether `seal` would drop `tx`'s writes rather than accept them, were
+   * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
+   * pass for a transaction this returns `true` for: writes that reach no
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   */
+  discards?(tx: IExtendedStorageTransaction): boolean;
+
+  /**
    * The HOME space of the wave this destination seals into (the space
    * the serving loop serves). The send site's LT1-vs-outbox decision
    * reads it: an emission targeting THIS space rides the wave's own
@@ -2209,6 +2231,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;
@@ -2356,8 +2385,8 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 
   /**
    * Settles whether this transaction is CFC-relevant — the flow-label
-   * relevance probe, then the sink-request ceiling probe — and runs
-   * `prepareCfc()` when it is.
+   * relevance probe, then the sink-request ceiling probe — and runs the
+   * verification `prepareCfc()` runs when it is, without reading the digest.
    *
    * `commit()` runs this itself, so the enforcement ladder always decides on
    * a settled verdict. `Runtime.prepareTxForCommit` runs it earlier for
@@ -2377,11 +2406,12 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   prepareForCommitCooperatively(signal: AbortSignal): Promise<void>;
 
   /**
-   * Runs CFC boundary verification for this transaction and records the
-   * prepared digest. Takes no caller-supplied input: the commit-time digest
-   * recheck only confirms the prepared input matches real activity, so an
-   * external input override would let a caller skip verification while still
-   * passing the recheck (audit S2).
+   * Runs CFC boundary verification for this transaction, seals the activity
+   * it verified as the prepared input, and returns that input's digest, or
+   * the empty string when verification refused. Takes no caller-supplied
+   * input: the commit-time digest recheck only confirms the prepared input
+   * matches real activity, so an external input override would let a caller
+   * skip verification while still passing the recheck (audit S2).
    */
   prepareCfc(): string;
 
@@ -3292,6 +3322,31 @@ export interface ISpaceReplica extends ISpace {
     identity?: ScopeKeyIdentity,
   ): EntityDocument | undefined;
 
+  /**
+   * The commit sequence through which every document this replica watches
+   * holds every change, or `undefined` when it cannot say: before the first
+   * server push applies; after a frame failed to apply or was applied with
+   * entries quarantined, until the replica resets; and while the session's
+   * server runs server execution or does not say whether it does, since its
+   * executor commits waves outside the publication turn a push is complete
+   * under. A document a watch mutation delivered may hold a later state than
+   * this sequence.
+   */
+  completeThroughSeq?(): number | undefined;
+
+  /**
+   * Whether the replica's state for the document is confirmed: the document
+   * is watched and delivered, no local write to it is pending, and its value
+   * is neither a refused write folded locally nor an own write promoted past
+   * what a push has covered. An absent document a push delivered is
+   * confirmed.
+   */
+  isConfirmedDocument?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): boolean;
+
   commitNative?(
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
@@ -3728,7 +3783,7 @@ export interface IStorageTransactionWriteIsolationError extends IStorageError {
 }
 
 /**
- * Error returned when attempting to write to a read-only address (data: URI).
+ * Error returned when attempting to write to a read-only address (`snapshot:` or `data:` URI).
  */
 export interface IReadOnlyAddressError extends IStorageError {
   readonly name: "ReadOnlyAddressError";

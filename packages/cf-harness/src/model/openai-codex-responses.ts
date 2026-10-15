@@ -749,6 +749,18 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       reading.terminal,
       reading.streamedItems,
     );
+    const answered = {
+      ...completed,
+      ...(typeof terminal.status === "string"
+        ? { terminalStatus: terminal.status }
+        : {}),
+      outputItemTypes: (Array.isArray(terminal.output) ? terminal.output : [])
+        .map((item) =>
+          isObjectNotArray(item) && typeof item.type === "string"
+            ? item.type
+            : "untyped"
+        ),
+    };
     const terminalFailure = describeTerminalFailure(
       terminal,
       OPENAI_CODEX_RESPONSES_LABEL,
@@ -761,13 +773,13 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       return await failed(
         terminal.status === "failed" ? transientKind(providerError) : undefined,
         {
-          ...completed,
+          ...answered,
           ...(providerError !== undefined ? { providerError } : {}),
         },
         providerUnavailable(redact(terminalFailure)),
       );
     }
-    await emitAttempt(request.onAttempt, { ...attemptBase, ...completed });
+    await emitAttempt(request.onAttempt, { ...attemptBase, ...answered });
     // Emitting the attempt is the last await the stream's own abort handling
     // does not cover, so an abort landing during it would otherwise surface as
     // a completed turn.

@@ -451,6 +451,32 @@ export function getGlobalLogFloor(): LogLevel | undefined {
 }
 
 /**
+ * Function told of each call a logger counts, with the logger's module name
+ * (`undefined` for the unnamed global {@link log}), the message key, and the
+ * level. It runs synchronously inside the logging call, so it can read the
+ * caller's async context.
+ */
+export type LoggerCountObserver = (
+  moduleName: string | undefined,
+  key: string,
+  level: ActiveLogLevel,
+) => void;
+
+/** The process's one {@link LoggerCountObserver}, if one is set. */
+let _countObserver: LoggerCountObserver | undefined;
+
+/**
+ * Sets the process's one {@link LoggerCountObserver}, replacing any earlier
+ * one. Pass `undefined` to remove it. A count taken under the reserved key
+ * `total`, which the loggers refuse, is not reported.
+ */
+export function setLoggerCountObserver(
+  observer: LoggerCountObserver | undefined,
+): void {
+  _countObserver = observer;
+}
+
+/**
  * Returns the log level named by the `CF_LOG_LEVEL` environment variable, or
  * `undefined` when it is unset, is not a valid level, or cannot be read.
  * Always `undefined` outside Deno.
@@ -520,9 +546,9 @@ export function willEmitTimingMeasure(): boolean {
  * What marks a measure as this logger's.
  *
  * The performance timeline is shared with whatever else the host instruments,
- * so emitted entries carry a prefix for two reasons: clearing can then remove
- * only what this emitted rather than destroying a page's own measures, and a
- * human scanning a timeline can tell logger spans from application ones.
+ * so emitted entries carry a prefix for two reasons: a drain can then tell
+ * what this emitted from a page's own measures, which it keeps, and a human
+ * scanning a timeline can tell logger spans from application ones.
  */
 export const TIMING_MEASURE_PREFIX = "cf:";
 
@@ -673,23 +699,65 @@ export function getTimingMeasuresState(): {
 }
 
 /**
- * Drop every emitted measure and give the budget back.
+ * Drops every emitted measure and gives the budget back.
  *
  * A consumer that has read the entries should call this: the entries are the
  * only copy, so draining is what keeps a long run from growing without bound.
+ *
+ * The cost is proportional to the size of the timeline. A measure this did
+ * not emit stays on the timeline, as a new entry with the name, start,
+ * duration, and detail of the one it replaces, so whatever observes the
+ * timeline is handed that measure a second time. One the host refuses to
+ * record again is dropped, and the others are kept. A timeline holding no
+ * emitted measure is not touched.
  */
 export function clearTimingMeasures(): void {
   try {
-    // By name rather than wholesale: the timeline belongs to the host, and a
-    // page or worker that instruments itself would otherwise lose its own
-    // measures to a call that claims only to drain this feature's.
+    const others: PerformanceMeasure[] = [];
+    let holdsEmitted = false;
     for (const entry of performance.getEntriesByType("measure")) {
       if (entry.name.startsWith(TIMING_MEASURE_PREFIX)) {
-        performance.clearMeasures(entry.name);
+        holdsEmitted = true;
+      } else if (entry instanceof PerformanceMeasure) {
+        // Every entry of this type is one; the check is what gives the
+        // recording below a typed `.detail` to read.
+        others.push(entry);
+      }
+    }
+    if (holdsEmitted) {
+      // One call removes every measure, and the others are then recorded
+      // again. The only narrower removal the timeline has is by name, which
+      // costs a host that keeps its timeline as a list a read of all of it,
+      // and every emitted measure has a name of its own: that is a read of
+      // the timeline per measure. Recording the others again is what keeps a
+      // page or worker that instruments itself from losing its measures to a
+      // call that claims only to drain this feature's.
+      performance.clearMeasures();
+      for (const entry of others) {
+        recordAgain(entry);
       }
     }
   } catch { /* not every host implements it */ }
   resetTimingMeasureBudget();
+}
+
+/**
+ * Helper for `clearTimingMeasures()`, which records a measure that the drain
+ * removed along with the emitted ones.
+ *
+ * Never throws: a host refusing this measure costs this measure alone, and
+ * the caller goes on to record the ones after it.
+ */
+function recordAgain(entry: PerformanceMeasure): void {
+  try {
+    performance.measure(entry.name, {
+      start: entry.startTime,
+      // The end and not the duration: a measure may end before it starts, and
+      // a host admits that end while refusing the negative duration it makes.
+      end: entry.startTime + entry.duration,
+      detail: entry.detail,
+    });
+  } catch { /* the host refused this one */ }
 }
 
 /**
@@ -1243,6 +1311,7 @@ export class Logger {
       this.#countsByKey[key] = { debug: 0, info: 0, warn: 0, error: 0 };
     }
     this.#countsByKey[key][level]++;
+    _countObserver?.(this.#moduleName, key, level);
   }
 
   /**

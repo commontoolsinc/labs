@@ -46,9 +46,11 @@ type CfcStamp<T, Meta> = {
   readonly of?: T;
 };
 
-type Cfc<T, Meta> = T & {
-  readonly __ct_cfc__?: CfcStamp<T, Meta>;
-};
+type CfcTag<T, Meta, Stamp = CfcStamp<T, Meta>> = [T] extends [unknown]
+  ? { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>
+  : { readonly __ct_cfc__?: Stamp } | Extract<T, null | undefined>;
+
+type Cfc<T, Meta> = T & CfcTag<T, Meta>;
 ```
 
 `Cfc<T, Meta>` must preserve the runtime/schema shape of `T` and only add to
@@ -56,6 +58,22 @@ the emitted `ifc` metadata. The stamp records the payload `T` beside the
 metadata. TypeScript merges the carrier into whatever the value is merged
 into, and the recorded payload is what tells the schema generator which part
 of the merged value the policy names (mapping spec §11).
+
+The tag leaves `null` and `undefined` beside the stamp, since an intersection
+with the stamp alone would reduce them to `never`, and the intersection
+distributes over `T`'s members. So `Confidential<string | null, L>` is
+`(string & carrier) | null`, holds `null`, and keeps the alias name a reader of
+its type finds the declaration by. While `T` holds a type parameter the tag is
+a conditional the checker defers, so `Cfc<T, Meta>` around a bare type
+parameter is one intersection, whose members are read through it; around
+`T | null` it is a union, as around any other union. The conditional checks
+`[T]`, and both its branches are the same type, so a value of the payload's
+type is assignable to `Cfc<T, Meta>` while `T` is a type parameter whose
+constraint excludes `null` and `undefined`, as it is once `T` is known:
+`function label<T extends {}>(value: T): Confidential<T, L>` may return
+`value`. An unconstrained `T` may be `null` or `undefined`, which the stamp is
+not assignable from, so the same function with `<T>` does not type-check.
+Every member's stamp records the whole payload `T`.
 
 ### Path-Bearing Helpers
 
@@ -268,7 +286,9 @@ Normative behavior:
    returns under a writer policy — a literal, an object or array literal, a
    spread, a constant, a plain call's result: any value that is not a reactive
    reference — is the exception: the result document holds that data itself,
-   so its schema defines the document there. A view reads a
+   so its schema defines the document there. A cell or a stream within it is
+   still a link, and a writer policy inside the type it links to is the
+   linked document's. A view reads a
    writer policy whole or not at all: where its writer cannot be read, the
    principal claims that need a writer, an `ownerPrincipal` and integrity
    naming the current principal, are left out with it, since either alone
