@@ -721,9 +721,15 @@ export function themeProperties(theme: CFTheme): Record<string, string> {
   return properties;
 }
 
-/** The name of every style property `themeProperties` returns for a theme. */
-function themePropertyNames(): string[] {
-  return Object.keys(themeProperties(defaultTheme));
+let propertyNames: readonly string[] | undefined;
+
+/**
+ * The name of every style property `themeProperties` returns, which is the
+ * same set for every theme: the `--cf-theme-*` tokens and `font-family`.
+ */
+export function themePropertyNames(): readonly string[] {
+  propertyNames ??= Object.keys(themeProperties(defaultTheme));
+  return propertyNames;
 }
 
 /**
