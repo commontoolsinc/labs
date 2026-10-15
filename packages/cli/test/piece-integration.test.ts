@@ -379,7 +379,9 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     const listed = await listPieces(spaceConfig);
     const listedPiece = listed.find((piece) => piece.id === pieceId);
     const identity = listedPiece?.patternRef?.identity;
-    expect(identity).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(identity, JSON.stringify(listedPiece)).toMatch(
+      /^[A-Za-z0-9_-]{43}$/,
+    );
     expect(listedPiece?.patternRef?.source).toEqual({
       ref: `cf:pattern:${identity}`,
       repository: REPOSITORY,

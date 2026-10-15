@@ -420,6 +420,26 @@ describe("Engine in SES mode", () => {
     );
   });
 
+  it("evaluates a module exporting a function whose name begins with `new`", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: [
+            "export function newThing(n: number) {",
+            "  return n + 1;",
+            "}",
+          ].join("\n"),
+        },
+      ],
+    };
+
+    const { main } = await engine.compileAndEvaluateModules(program);
+
+    expect(main?.newThing(1)).toBe(2);
+  });
+
   it("allows top-level template literal snapshots", async () => {
     const program: RuntimeProgram = {
       main: "/main.ts",
