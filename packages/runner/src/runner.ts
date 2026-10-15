@@ -8477,8 +8477,10 @@ export class Runner {
    *   naming no pattern is not a receipt.
    *
    * @throws PatternSetupPostCommitError when the transaction commits and the
-   * work that refreshes the running piece then fails. Its `.commit` is the
-   * accepted transaction's receipt and its `.cause` the later failure.
+   * work that refreshes the running piece then fails, the commit of the setup
+   * writes of a graph the call starts included (see `startWithCommit()`). Its
+   * `.commit` is the accepted transaction's receipt and its `.cause` the
+   * later failure.
    */
   async runSyncedWithCommit(
     resultCell: Cell<any>,
