@@ -232,10 +232,19 @@ function presentedDocument(html, presentation) {
     "\\u003c",
   );
   const bootstrap = `(${guestPresentation.toString()})(...${payload});`;
+  // Activate every authored head policy before the bootstrap can insert a
+  // stylesheet or start a fetch. Meta CSP does not cover preceding content.
+  const policies = Array.from(doc.head.querySelectorAll("meta[http-equiv]"))
+    .filter((meta) =>
+      meta.getAttribute("http-equiv")?.toLowerCase() ===
+        "content-security-policy"
+    )
+    .map((meta) => meta.outerHTML)
+    .join("");
   const doctype = doc.doctype
     ? new XMLSerializer().serializeToString(doc.doctype)
     : "";
   // A leading script creates the head; the original html/head tags merge into
   // that document. Keep the original markup so the guest's parser owns it.
-  return doctype + "<script>" + bootstrap + "</scr" + "ipt>" + html;
+  return doctype + policies + "<script>" + bootstrap + "</scr" + "ipt>" + html;
 }

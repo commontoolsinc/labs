@@ -116,3 +116,40 @@ for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
     }
   });
 }
+
+for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
+  Deno.test(`iframe presentation honors guest meta CSP in ${outerFrameUrl ?? "srcdoc"}`, async () => {
+    const id = crypto.randomUUID();
+    const element = new CommonIframeSandboxElement();
+    element.outerFrameUrl = outerFrameUrl;
+    const stylesheet = new URL("/presentation.css", location.href).href;
+    element.presentation = {
+      css: ":root { --blocked-ink: injected; }",
+      attributes: {},
+      stylesheets: [stylesheet],
+    };
+    element.src = `<!doctype html><html><head>
+      <meta http-equiv="Content-Security-Policy" content="style-src 'none'; font-src 'none'">
+      </head><body><script>
+      addEventListener('load', () => {
+        const style = getComputedStyle(document.documentElement);
+        top.postMessage({fixture: ${JSON.stringify(id)},
+          inline: style.getPropertyValue('--blocked-ink').trim(),
+          external: style.getPropertyValue('--example-font').trim(),
+          requests: String(performance.getEntriesByName(${
+      JSON.stringify(stylesheet)
+    }).length),
+        }, '*');
+      });
+      </script></body></html>`;
+    const loaded = report(id);
+    document.body.append(element);
+    try {
+      const value = await loaded;
+      expect(value.inline).toBe("");
+      expect(value.external).toBe("");
+    } finally {
+      element.remove();
+    }
+  });
+}
