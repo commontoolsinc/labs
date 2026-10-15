@@ -3724,8 +3724,9 @@ export class CfHarnessPromptLoop {
   /**
    * Tags a fresh root task with the kinds of work it calls for and records
    * them on the run, before the host assembles the prompt the tags shape.
-   * When the keyword rule has no answer, one call to the cheap research model
-   * decides; when that fails too, the task gets every tag. The tags gate the
+   * When the keyword rule has no answer, one bounded call to the cheap
+   * research model decides; when that fails or runs past its bound, the task
+   * gets every tag. The tags gate the
    * opening research pass and the parent's browser guidance here.
    */
   async classifyTask(
@@ -3740,7 +3741,7 @@ export class CfHarnessPromptLoop {
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
     }, {
-      askModel: async (prompt) => {
+      askModel: async (prompt, bound) => {
         const result = await this.modelClient.complete({
           model: researchModel(this.modelClient.providerId),
           transcript: [{ role: "user", content: prompt }],
@@ -3750,12 +3751,16 @@ export class CfHarnessPromptLoop {
           ...(this.#researchReasoningEffort !== undefined
             ? { reasoningEffort: this.#researchReasoningEffort }
             : {}),
-          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          signal: options.signal === undefined
+            ? bound
+            : AbortSignal.any([options.signal, bound]),
+          // A call past its bound no longer belongs to this run's accounting,
+          // which may already have been flushed into the run's records.
           onAttempt: (attempt) => {
-            this.#classificationAttempts.push(attempt);
+            if (!bound.aborted) this.#classificationAttempts.push(attempt);
           },
         });
-        this.#classificationUsage = result.usage;
+        if (!bound.aborted) this.#classificationUsage = result.usage;
         return result.assistant.content;
       },
     });
@@ -4116,6 +4121,7 @@ export class CfHarnessPromptLoop {
         const toolRun = {
           cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
           browserHost: this.engine.browserHost !== undefined,
+          subagentProfiles: [...this.#allowedSubagentProfiles],
         };
         try {
           response = await this.modelClient.complete({
@@ -4853,10 +4859,10 @@ export class CfHarnessPromptLoop {
         : {}),
     });
     const recordPolicyEvent = async (
-      event: Parameters<CfHarnessEngine["recordPolicyEvent"]>[0],
+      ...args: Parameters<CfHarnessEngine["recordPolicyEvent"]>
     ): Promise<void> => {
       const index = this.engine.getRunState().policyEvents.length;
-      await this.engine.recordPolicyEvent(event);
+      await this.engine.recordPolicyEvent(...args);
       policyEventIndexes.push(index);
     };
     if (!this.#allowedToolIds.has(toolId)) {
@@ -5093,7 +5099,7 @@ export class CfHarnessPromptLoop {
           toolInputSummary,
           detail,
           observationDenied: denial,
-        });
+        }, { failureKind: "subagent_profile_not_allowed" });
         recordActivity({
           type: "cf-harness.tool-activity",
           ...baseActivity("denied", "not-run"),
