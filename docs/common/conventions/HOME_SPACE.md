@@ -123,9 +123,14 @@ links the profile there, and a host holding only the profile space's DID
 reaches the profile as it reaches any space's root.
 
 A profile space whose genesis reserved no root, which is every profile space
-created before the create passed `root: true`, can get its profile as its root
-from `cf profile repair-root`, run by an operator across a store or by the
-person over their own Home's profiles (the
+created before the create passed `root: true`, gets its profile as its root when
+its owner next brings Home up. A runtime worker's bring-up of Home repairs each
+profile that Home lists and that the worker's identity owns, once per worker, as
+part of the housekeeping it starts beside the private inbox ensure
+(`PiecesController.repairProfileRoots()`). Home opens without waiting for the
+repair, and a failure is logged and tried again at the worker's next bring-up of
+Home. `cf profile repair-root` makes the same repair, run by an operator across a
+store or by the person over their own Home's profiles (the
 [CLI README](../../../packages/cli/README.md) describes running it). The repair
 links the existing profile as the space cell's `defaultPattern` where the space
 has no root, and where its root is one a space-root ensure created and nothing

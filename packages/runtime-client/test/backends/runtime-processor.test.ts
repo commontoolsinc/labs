@@ -4028,7 +4028,7 @@ describe("runtime-processor", () => {
     });
 
     /**
-     * Stands in for the three steps of the housekeeping, recording each
+     * Stands in for the four steps of the housekeeping, recording each
      * call, so that a case can say none was started even of a step that
      * fails at once.
      */
@@ -4042,6 +4042,11 @@ describe("runtime-processor", () => {
         stub(
           PiecesController.prototype,
           "ensurePrivateInbox",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "repairProfileRoots",
           () => Promise.resolve(),
         ),
         stub(
@@ -4067,11 +4072,12 @@ describe("runtime-processor", () => {
      * handler records the event and runs `onEnsurePrivateInbox`, so a throw
      * from that is a failure of Home's handling, which the host's ensure
      * waits for and reports. Each
-     * read the inbox ensure makes of Home waits for `inboxReadable`. The share
-     * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
-     * each is made, a throw from it being a throw from the subscription. Every
-     * space reads as having that stand-in stored as its root, which records a
-     * pattern, until `storeRoot()` stores another.
+     * read the inbox ensure makes of Home waits for `inboxReadable`. Home
+     * lists no profiles, so the profile root repair has none to repair. The
+     * share intake's subscriptions to Home are recorded, and `onSubscribe` runs
+     * as each is made, a throw from it being a throw from the subscription.
+     * Every space reads as having that stand-in stored as its root, which
+     * records a pattern, until `storeRoot()` stores another.
      */
     async function homeWorker(
       rows: readonly unknown[] | (() => unknown),
@@ -4123,13 +4129,16 @@ describe("runtime-processor", () => {
             ? ensurePrivateInbox
             : {
               getRaw: () => ({ $stream: true }),
-              // Home's `privateInbox` and `profiles`, as the inbox ensure
-              // reads them: no inbox held, and no profile advertising one.
+              // Home's `privateInbox` and `profiles`, as the inbox ensure and
+              // the profile root repair read them: no inbox held, and no
+              // profile listed.
               asSchema: () => ({
                 pull: async () => {
                   await inboxReadable;
                   return undefined;
                 },
+                sync: () => Promise.resolve(),
+                get: () => undefined,
                 sink: () => {
                   onSubscribe();
                   subscribed.push(name);
@@ -4437,6 +4446,111 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("repairs the user's profile roots once per worker", async () => {
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => Promise.resolve(),
+      );
+
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+
+      expect(repair.calls.length).toBe(1);
+    });
+
+    it("opens Home when repairing profile roots fails, and repairs them again on the next ensure", async () => {
+      let attempts = 0;
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () =>
+          attempts++ === 0
+            ? Promise.reject(new Error("transient repair failure"))
+            : Promise.resolve(),
+      );
+      using warn = stub(console, "warn", () => {});
+
+      const first = await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      expect(first.cell).toBeDefined();
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      expect(worker.processor.accessForTestingOnly.profileRootsRepaired)
+        .toBeUndefined();
+
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+
+      expect(repair.calls.length).toBe(2);
+      expect(warn.calls.map(({ args }) => args[0])).toEqual([
+        "[RuntimeProcessor] Repairing profile roots:",
+      ]);
+    });
+
+    it("opens Home while the profile root repair is still running", async () => {
+      // A bring-up that waited for the repair would never return here, since
+      // the repair finishes only on a release that comes after it.
+
+      const release = Promise.withResolvers<void>();
+      await using worker = await homeWorker([]);
+      using _repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => release.promise,
+      );
+
+      const opened = await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+
+      expect(opened.cell).toBeDefined();
+      const repaired = worker.processor.accessForTestingOnly
+        .profileRootsRepaired;
+      expect(repaired).toBeDefined();
+      release.resolve();
+      await repaired;
+    });
+
+    it("aborts the profile root repair's signal when disposed, and reports nothing when the repair then fails", async () => {
+      const release = Promise.withResolvers<void>();
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => release.promise,
+      );
+      using warn = stub(console, "warn", () => {});
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      const repaired = worker.processor.accessForTestingOnly
+        .profileRootsRepaired;
+      const signal = repair.calls[0].args[0] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+
+      await worker.processor.dispose();
+      release.reject(new Error("runtime disposed"));
+      await repaired;
+
+      expect(signal.aborted).toBe(true);
+      expect(warn.calls.length).toBe(0);
+    });
+
     it("starts Home's share intake once per worker, following the inbox Home holds and the ones it retains", async () => {
       await using worker = await homeWorker([]);
 
@@ -4637,7 +4751,7 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("starts no housekeeping when the root started is another space's", async () => {
@@ -4651,7 +4765,7 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
     });
 
@@ -4687,7 +4801,7 @@ describe("runtime-processor", () => {
 
         expect(response).toStrictEqual({});
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("treats a root that records no pattern yet as no Home", async () => {
@@ -4715,7 +4829,7 @@ describe("runtime-processor", () => {
         expect(root.getRaw()).toEqual({ name: "Home" });
         expect(response).toStrictEqual({});
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("creates Home where it has no root when not asked for an existing Home only", async () => {
@@ -4774,7 +4888,7 @@ describe("runtime-processor", () => {
         expect(response).toStrictEqual({});
         expect(join.calls.length).toBe(0);
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
     });
   });
@@ -4796,6 +4910,7 @@ describe("runtime-processor", () => {
           // The housekeeping that starting Home's root starts.
           adoptLegacySpaces: () => Promise.resolve(),
           ensurePrivateInbox: () => Promise.resolve(),
+          repairProfileRoots: () => Promise.resolve(),
           startShareIntake: () => Promise.resolve(undefined),
         };
         // The space is the identity's Home, which is the identity's own.
@@ -8085,6 +8200,7 @@ describe("runtime-processor", () => {
         const step of [
           "legacySpacesAdopted",
           "privateInboxEnsured",
+          "profileRootsRepaired",
         ] as const
       ) {
         it(`resolves only once the \`${step}\` step of Home's housekeeping has settled`, async () => {

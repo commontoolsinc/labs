@@ -122,6 +122,7 @@ import {
 } from "./join-visited-room.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
+import { repairProfileRootsOf } from "./profile-space-root.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
 import { compileProgram } from "./utils.ts";
 export {
@@ -2454,6 +2455,30 @@ export class PiecesController<T = unknown> {
       this.runtime,
       home,
       this.runtime.userIdentityDID,
+      signal,
+    );
+  }
+
+  /**
+   * Makes each of the identity's profiles that Home lists its space's root,
+   * where the space has no root or one only a space-root ensure created, as
+   * `repairProfileRootsOf()` does, through a controller over each profile's
+   * space on this controller's runtime. This controller must be over the
+   * identity's Home space.
+   *
+   * Resolves once every listed profile has been tried. Rejects when Home
+   * cannot be brought up or its list cannot be read, and, once every profile
+   * has been tried, when any one's inspection or repair failed. Once `signal`
+   * aborts, or the runtime begins disposal, it repairs nothing more.
+   */
+  async repairProfileRoots(signal?: AbortSignal): Promise<void> {
+    this.#assertHomeSpace("repair its profiles' roots");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    await repairProfileRootsOf(
+      home,
+      this.runtime.userIdentityDID,
+      (space) =>
+        new PiecesController({ as: this.#session.as, space }, this.runtime),
       signal,
     );
   }
