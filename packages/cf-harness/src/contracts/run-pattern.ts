@@ -34,7 +34,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
     sourceText: {
       type: "string",
       description:
-        "Pattern source (TypeScript/TSX), at most 256 KiB. Return a durable result object directly; a whole-result derived wrapper is a known smell, not a failure: after the run the harness checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
+        "Pattern source (TypeScript/TSX), at most 256 KiB. Return a durable result object directly; a whole-result derived wrapper is a known smell, not a deterministic failure: after the run the harness checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
     },
     patternId: {
       type: "string",
@@ -64,7 +64,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
         { type: "object", additionalProperties: true },
       ],
       description:
-        'Pass it to read computed values such as counts or rows; without it value is omitted. resultRef always returns, with pending/hasError when the release fit admits them. Only fields the schema models return: an inert one (number, boolean, enum or const string) as itself, anything else as a reference token to that position for describe_handle or a later run_pattern. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. $NAME, $UI and other rendering keys need not be declared. When policy refuses the release, value is withheld, valueError names why and the input carrying the refused label, and resultRef can still be passed on by reference.',
+        'Pass it to read computed values such as counts or rows; without it value is omitted. A successful run returns resultRef, with pending/hasError when the release fit admits them. Only fields the schema models return: an inert one (number, boolean, enum or const string) as itself, anything else as a reference token to that position for describe_handle or a later run_pattern. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. $NAME, $UI and other rendering keys need not be declared. When policy refuses the release, value is withheld, valueError names why and the input carrying the refused label, and resultRef can still be passed on by reference.',
     },
   },
   // Exactly one of `sourceText` and `patternId` is required, which is a

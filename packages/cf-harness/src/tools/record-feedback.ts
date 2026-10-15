@@ -50,7 +50,8 @@ export const recordFeedbackToolDescriptor: HarnessToolDescriptor = {
       verdict: {
         type: "string",
         enum: ["up", "down"],
-        description: "Judge the pattern, not the request that led to it.",
+        description:
+          "up when the pattern did the job, down when it did not; judge the pattern, not the request.",
       },
       note: {
         type: "string",
