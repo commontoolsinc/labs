@@ -24,6 +24,7 @@ import {
   defaultTheme,
   getSemanticSpacing,
   mergeWithDefaultTheme,
+  tokenAround,
 } from "../theme-context.ts";
 
 // TODO(v2-token-migration): Migrate this component to component-level tokens,
@@ -216,8 +217,12 @@ export class CFChat extends BaseElement {
       "padding-bubble": getSemanticSpacing(density, "lg", "normal"),
       "padding-bubble-horizontal": getSemanticSpacing(density, "xl", "normal"),
     };
+    // A host that sets one of these by CSS keeps it: a token written here
+    // would hide the host's.
     for (const [name, value] of Object.entries(spacing)) {
-      this.style.setProperty(`--cf-theme-spacing-${name}`, value);
+      const token = `--cf-theme-spacing-${name}`;
+      if (tokenAround(this, token)) this.style.removeProperty(token);
+      else this.style.setProperty(token, value);
     }
   }
 

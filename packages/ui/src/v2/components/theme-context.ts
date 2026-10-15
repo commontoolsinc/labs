@@ -779,6 +779,20 @@ export function applyThemeToElement(
 }
 
 /**
+ * The value of the custom property `name` in effect around `element`, which is
+ * what the element would inherit, or `""` when nothing sets it. A host that
+ * themes by CSS alone is visible only this way.
+ */
+export function tokenAround(element: Element, name: string): string {
+  const root = element.getRootNode();
+  const parent = element.parentElement ??
+    (root instanceof ShadowRoot ? root.host : null);
+  return parent
+    ? globalThis.getComputedStyle(parent).getPropertyValue(name).trim()
+    : "";
+}
+
+/**
  * Copy the theme in effect at `from`, resolved, onto `to`: for an element
  * mounted outside `from`'s subtree, such as an overlay on the document body,
  * which inheritance cannot reach.

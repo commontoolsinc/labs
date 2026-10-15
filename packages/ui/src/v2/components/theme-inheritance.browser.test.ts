@@ -200,6 +200,32 @@ Deno.test("the tools chip's open overlay follows a theme preference change", asy
   }
 });
 
+Deno.test("the chat's spacing tokens give way to a host's", async () => {
+  const host = themedHost();
+  host.style.setProperty("--cf-theme-spacing-message-bottom", "33px");
+  try {
+    const chat = await mountIn(host, "cf-chat");
+
+    expect(token(chat, "--cf-theme-spacing-message-bottom")).toBe("33px");
+    expect(chat.style.getPropertyValue("--cf-theme-spacing-message-bottom"))
+      .toBe("");
+    expect(chat.style.getPropertyValue("--cf-theme-spacing-padding-bubble"))
+      .not.toBe("");
+  } finally {
+    host.remove();
+  }
+});
+
+Deno.test("the chat sets its spacing tokens when no host has any", async () => {
+  const chat = await mountIn(document.body, "cf-chat");
+  try {
+    expect(chat.style.getPropertyValue("--cf-theme-spacing-message-bottom"))
+      .not.toBe("");
+  } finally {
+    chat.remove();
+  }
+});
+
 Deno.test("a primary button with no theme anywhere above it still draws its fill", async () => {
   const button = await mountIn(document.body, "cf-button");
   try {

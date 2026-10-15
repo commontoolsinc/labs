@@ -11,6 +11,7 @@ import {
   cfThemeContext,
   defaultTheme,
   mergeWithDefaultTheme,
+  tokenAround,
 } from "../theme-context.ts";
 
 export function unwrapThemeCellValues(
@@ -168,25 +169,12 @@ export class CFThemeProvider extends BaseElement {
     }
   }
 
-  /**
-   * Whether a host has put `--cf-theme-*` tokens in effect around this
-   * element by CSS alone, with no `cf-theme` above to say so through context.
-   */
-  #hostThemed(): boolean {
-    const root = this.getRootNode();
-    const parent = this.parentElement ??
-      (root instanceof ShadowRoot ? root.host : null);
-    return !!parent &&
-      globalThis.getComputedStyle(parent)
-          .getPropertyValue("--cf-theme-color-text").trim() !== "";
-  }
-
   private _recomputeAndApply() {
     // Under a host's tokens an outermost instance is a tint: it writes what
     // its partial changes from the defaults, and the host's values stand
     // wherever the partial is silent.
     const around = this.#enclosing ??
-      (this.#hostThemed() ? defaultTheme : undefined);
+      (tokenAround(this, "--cf-theme-color-text") ? defaultTheme : undefined);
     const computed = mergeWithDefaultTheme(
       unwrapThemeCellValues(this.theme),
       this.#enclosing,
