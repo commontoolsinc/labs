@@ -216,10 +216,12 @@ the space at the same time as you.
 
 It still does not show:
 
-- **Production's commit.** Rapids runs main on every push; the production host
-  runs whatever ref was last dispatched to it. A copy from production is being
-  served by a *different* build than the one that produced it — usually the
-  point, and always worth stating when reporting what the copy showed.
+- **Production's commit.** Rapids follows `main`, deployed as its commits pass
+  CI ([`deploying.md`](deploying.md) says which commit that leaves it on); the
+  production host runs whatever ref was last dispatched to it. A copy
+  from production is being served by a *different* build than the one that
+  produced it — usually the point, and always worth stating when reporting what
+  the copy showed.
 - **Production's configuration.** The vaulted env differs per host, and a
   behavior that turns on a flag is a property of the host, not of the data.
 - **Cross-space links.** A memory server creates space stores on demand, so a

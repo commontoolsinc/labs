@@ -1,0 +1,331 @@
+# What follows a green run of the CI workflow on main: the `main-green` branch
+# is moved to that commit, the commit is deployed to staging, and loom's pin
+# workflow is started.
+#
+# The CI workflow tests a commit and publishes the binaries built from it.
+# This workflow starts when one of its runs finishes, and acts on a run of a
+# push to main that passed. `main-green` is the newest commit of main whose run
+# passed, and every job after `advance` works from the branch rather than from
+# the run that started the workflow. docs/development/deploying.md has the
+# rules: which runs move the branch, how deploys wait for each other, and what
+# to do when one fails.
+#
+# The deploy jobs here are skipped while the repository variable
+# STAGING_DEPLOY_FROM_CI_RUN is `true`. The CI workflow's own deploy jobs run
+# then, each run deploying its own commit, and this workflow still moves the
+# branch and starts loom's workflow.
+#
+# A workflow_run payload describes the run it names, so `advance` reads the
+# triggering run's own facts from `github.event.workflow_run`. `github.ref` and
+# `github.sha` name the default branch and its tip, whichever commit the run
+# that finished was testing, and nothing here reads them.
+
+name: Main Green
+
+# The commit `advance` acts on, since every run's own commit is main's tip.
+run-name: Main Green for ${{ github.event.workflow_run.head_sha }}
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    # Keeps a pull request's run from starting a run here in which every job
+    # would be skipped. A pull request from a fork's own `main` passes this
+    # filter, and the first job's condition excludes it by its event.
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Every step name must begin with a phase-marker emoji (setup / work /
+# shutdown). See the "Step phase markers" table in
+# docs/development/CI_PERFORMANCE.md for the vocabulary.
+#
+# A step that calls GitHub carries a bound of its own, below its job's, so that
+# a call that hangs fails the job where the job's bound would cancel it.
+jobs:
+  # The one job holding a token that can write to the repository. It checks out
+  # nothing and runs no code from the tree.
+  advance:
+    name: "Advance main-green"
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      is-newest: ${{ steps.advance.outputs.is-newest }}
+      # Whether this run deploys to staging: the branch moved to its commit,
+      # and the variable does not select the CI workflow's deploy jobs.
+      deploys-staging: >-
+        ${{ steps.advance.outputs.is-newest == 'true' &&
+        vars.STAGING_DEPLOY_FROM_CI_RUN != 'true' }}
+    steps:
+      - name: 🚀 Advance main-green to the commit whose run passed
+        id: advance
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+
+          # GitHub refuses this update unless it moves the branch forward, so
+          # when two runs finish together the update itself decides which of
+          # their commits the branch ends on.
+          if gh api --method PATCH "$repo/git/refs/heads/main-green" \
+            -f sha="$SHA" -F force=false > /dev/null; then
+            echo "main-green is at $SHA."
+            echo "is-newest=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The update was refused. A branch that does not exist yet lists as
+          # empty here, and a listing that fails ends the step.
+          current=$(gh api "$repo/git/matching-refs/heads/main-green" \
+            --jq '.[] | select(.ref == "refs/heads/main-green") | .object.sha')
+          if [ -z "$current" ]; then
+            gh api --method POST "$repo/git/refs" \
+              -f ref=refs/heads/main-green -f sha="$SHA" > /dev/null
+            echo "main-green created at $SHA."
+            echo "is-newest=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          status=$(gh api "$repo/compare/$current...$SHA" --jq .status)
+          case "$status" in
+            identical)
+              echo "main-green is already at $SHA."
+              echo "is-newest=true" >> "$GITHUB_OUTPUT"
+              ;;
+            behind)
+              echo "main-green stays at $current: the run of $SHA finished after the run of a newer commit."
+              echo "is-newest=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              # `ahead` is an update that should have gone through, and
+              # `diverged` is a branch holding a commit that is not on main.
+              # This workflow repairs neither.
+              echo "::error::main-green is at $current and was not moved to $SHA, which compares to it as '$status'."
+              exit 1
+              ;;
+          esac
+
+  # The deploy jobs carry no bound. Their work runs outside this repository, in
+  # a script on the bastion and an upload to Cloud Storage, and nothing here
+  # can say how long that takes.
+  deploy-rapids:
+    name: "Deploy to Rapids (Staging)"
+    needs: advance
+    if: needs.advance.outputs.deploys-staging == 'true'
+    # The group makes a deploy wait for the one before it. GitHub does not say
+    # whether a skipped job joins its group, so the group is named from the
+    # result that decides whether this job runs: a run that stopped at
+    # `advance` gets a group of its own, and cannot cancel a waiting deploy.
+    concurrency:
+      group: >-
+        ${{ needs.advance.outputs.deploys-staging == 'true' && 'deploy-rapids'
+        || format('deploy-rapids-{0}', github.run_id) }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    # The bastion's credentials are defined on this environment.
+    environment: toolshed
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      # This job may have waited behind another deploy. A later run may have
+      # moved the branch in that time and then been cancelled while it waited,
+      # so the commit is read here rather than taken from the run. Anyone who
+      # can write to the repository can move the branch, so what it names is
+      # deployed only if it is a commit of main.
+      - name: 🔍 Resolve main-green
+        id: resolve
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo="repos/$GITHUB_REPOSITORY"
+          sha=$(gh api "$repo/git/ref/heads/main-green" --jq .object.sha)
+          main=$(gh api "$repo/compare/$sha...main" --jq .status)
+          case "$main" in
+            ahead | identical) ;;
+            *)
+              echo "::error::main-green names $sha, which is not a commit of main."
+              exit 1
+              ;;
+          esac
+          echo "main-green is at $sha."
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: 🚀 Deploy application to Rapids (Staging)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: /opt/cf/deploy.sh rapids ${{ steps.resolve.outputs.sha }}
+
+  # The staging shell is a static site that calls the API on rapids, so it is
+  # built from the commit just deployed to rapids and published after that
+  # deploy.
+  deploy-shell-staging:
+    name: "Deploy Shell to Staging"
+    needs: deploy-rapids
+    # Two uploads at once would leave the bucket holding files from both
+    # builds. As above, a run with nothing to publish stays out of the group.
+    concurrency:
+      group: >-
+        ${{ needs.deploy-rapids.result == 'success' && 'deploy-shell-staging'
+        || format('deploy-shell-staging-{0}', github.run_id) }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    environment: ci
+    env:
+      DEPLOYED_SHA: ${{ needs.deploy-rapids.outputs.sha }}
+    steps:
+      - name: 📥 Checkout the deployed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.deploy-rapids.outputs.sha }}
+          persist-credentials: false
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # STAGING_SHELL_API_URL names the API host this shell talks to, which is
+      # the host the deploy-rapids job above keeps current. It is a variable
+      # rather than a secret because it is served in plaintext inside the
+      # bundle, and because the checks below can then name it when they fail.
+      - name: 🔎 Validate staging shell endpoints
+        env:
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+        run: |
+          # An empty API_URL builds a shell that falls back to its own origin,
+          # which serves static assets and no API. Require a value up front, so
+          # the build never runs with nothing to point at.
+          if [ -z "$API_URL" ]; then
+            echo "::error::API_URL is empty: the STAGING_SHELL_API_URL variable is unset."
+            exit 1
+          fi
+
+      - name: 🏗️ Build shell with staging API URL
+        working-directory: packages/shell
+        run: |
+          deno task production
+
+          # The build substitutes API_URL into the bundle in place of the
+          # `$API_URL` token. Confirm it landed before anything is uploaded.
+          if ! grep -rqF -e "$API_URL" dist/scripts; then
+            echo "::error::The built shell does not reference $API_URL."
+            exit 1
+          fi
+        env:
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+          COMMIT_SHA: ${{ needs.deploy-rapids.outputs.sha }}
+
+      # This job's commit comes from the deploy it followed. By the time the
+      # build is done a later deploy may have put a newer commit on rapids, and
+      # re-running this job alone long afterwards makes that certain. An upload
+      # then would put an older shell back, so the build is published only
+      # while `main-green` still names its commit.
+      - name: 🔍 Check main-green still names the built commit
+        id: current
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main-green" \
+            --jq .object.sha)
+          if [ "$sha" = "$DEPLOYED_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main-green has moved from $DEPLOYED_SHA to $sha, so this build is not published. The run that deploys $sha publishes its own."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 🔑 Authenticate to Google Cloud
+        if: steps.current.outputs.publish == 'true'
+        uses: google-github-actions/auth@3a3c4c57d294ef65efaaee4ff17b22fa88dd3c69 # v1.3.0
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: ⚙️ Setup Google Cloud SDK
+        if: steps.current.outputs.publish == 'true'
+        uses: google-github-actions/setup-gcloud@e30db14379863a8c79331b04a9969f4c1e225e0b # v1.1.1
+
+      - name: 📤 Upload shell assets to Staging GCS
+        if: steps.current.outputs.publish == 'true'
+        run: |
+          # Retain the complete immutable module graph for long-lived pages.
+          gsutil -m rsync -r packages/shell/dist "gs://staging-commontools-dev/builds/$DEPLOYED_SHA/"
+
+          # Upload to bucket root as "latest" (-d removes orphaned files)
+          gsutil -m rsync -r -d packages/shell/dist gs://staging-commontools-dev/
+
+          echo "📦 Staging Shell deployed"
+          echo "https://staging.commontools.dev/"
+
+      - name: 🔎 Verify the published shell targets the staging API
+        if: steps.current.outputs.publish == 'true'
+        env:
+          API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+        run: |
+          # Read the scripts back out of the bucket, so this checks the uploaded
+          # objects rather than the local build directory. Going to the bucket
+          # rather than to the site's own URL also bypasses the CDN, which may
+          # still be serving the previous build.
+          gsutil cat "gs://staging-commontools-dev/scripts/*.js" > published-scripts.js
+          if ! grep -qF -e "$API_URL" published-scripts.js; then
+            echo "::error::The published shell does not reference $API_URL."
+            exit 1
+          fi
+          echo "Published shell targets $API_URL"
+
+  # Loom vendors this repository at a pinned commit, and its `bump-labs-pin.yml`
+  # workflow moves that pin to `main-green`. This job only starts that
+  # workflow. It does not wait for the deploy jobs, because loom's pin does not
+  # depend on what staging runs.
+  #
+  # The token comes from a GitHub App installed on loom, because a workflow's
+  # own token reaches only the repository the workflow runs in. The variable
+  # naming the app gates the job, so that where no app is provisioned the job
+  # is skipped rather than failed.
+  start-loom-pin:
+    name: "Start Loom's Pin Workflow"
+    needs: advance
+    if: >-
+      needs.advance.outputs.is-newest == 'true' &&
+      vars.LOOM_DISPATCH_APP_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The app's private key is defined on this environment.
+    environment: loom
+    steps:
+      - name: 🔑 Create loom dispatch token
+        id: token
+        timeout-minutes: 5
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.LOOM_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.LOOM_DISPATCH_APP_PRIVATE_KEY }}
+          owner: commonfabric
+          repositories: loom
+          permission-actions: write
+
+      - name: 🚀 Start loom's pin workflow
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          gh api --method POST \
+            repos/commonfabric/loom/actions/workflows/bump-labs-pin.yml/dispatches \
+            --field ref=main
+          echo "Started loom's bump-labs-pin.yml workflow."

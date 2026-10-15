@@ -419,6 +419,7 @@ interface Job {
   environment?: string;
   "timeout-minutes"?: unknown;
   permissions?: Record<string, string>;
+  concurrency?: { group: string; "cancel-in-progress": boolean };
   env?: Record<string, string>;
   outputs?: Record<string, string>;
   strategy?: { "fail-fast"?: boolean; matrix?: Record<string, unknown> };
@@ -797,10 +798,17 @@ Deno.test("a lane uploads what Status and a reader of a failure need", async () 
 Deno.test("Status waits for every job that runs a test", async () => {
   const ci = await parsedWorkflow("deno.yml");
   const status = ci.jobs.status;
+  // The jobs that run only for a push to main. A condition that goes on to
+  // require something more is still one of them.
+  const pushToMain =
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'";
   const release = Object.keys(ci.jobs).filter((id) =>
-    ci.jobs[id].if ===
-      "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    ci.jobs[id].if === pushToMain ||
+    ci.jobs[id].if?.startsWith(`${pushToMain} && `)
   );
+  for (const id of ["attest-binaries", "deploy-rapids"]) {
+    assert(release.includes(id), `${id} is not read as a release job`);
+  }
   assertEquals(
     needsOf(status).sort(),
     Object.keys(ci.jobs).filter((id) =>
@@ -1341,8 +1349,16 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   // The revision has to expand to a full SHA, which is a property of what the
   // expression reads rather than of the expression itself. `github.ref_name`
   // would look just as much like a revision here and fail on the bastion, so
-  // the expressions whose value is a full SHA are named.
-  const revisions = ["${{ github.sha }}", "${{ steps.resolve.outputs.sha }}"];
+  // the expressions whose value is a full SHA are named. `github.sha` is a
+  // full SHA everywhere, and the commit to deploy in one caller only: the CI
+  // workflow, whose run of a push is a run at the pushed commit. A manual
+  // dispatch runs at the ref it was dispatched from, and a workflow that
+  // follows another runs at the default branch's tip, so each of those reads
+  // its commit in a step.
+  const revisionsOf = (name: string) =>
+    name === "deno.yml"
+      ? ["${{ github.sha }}"]
+      : ["${{ steps.resolve.outputs.sha }}"];
 
   const callers: string[] = [];
   for (const name of await workflowNames()) {
@@ -1369,19 +1385,558 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
         `${name}: unknown environment in \`${invocation}\``,
       );
       assert(
-        revisions.includes(args[1]),
-        `${name}: \`${args[1]}\` is not known to be a full SHA, in ` +
-          `\`${invocation}\``,
+        revisionsOf(name).includes(args[1]),
+        `${name}: \`${args[1]}\` is not known to be the full SHA of the ` +
+          `commit to deploy, in \`${invocation}\``,
       );
     }
   }
 
   // Every workflow that calls the script is checked, so a new one is covered
-  // without being listed. The two that call it today are named to catch the
+  // without being listed. The three that call it today are named to catch the
   // case where the search comes back empty and the loop above does nothing.
-  for (const name of ["deno.yml", "deploy-production.yml"]) {
+  for (const name of ["deno.yml", "main-green.yml", "deploy-production.yml"]) {
     assert(callers.includes(name), `${name}: no deploy.sh call found`);
   }
+});
+
+Deno.test("Main Green follows the CI workflow by name", async () => {
+  const name = (await workflow("deno.yml")).match(/^name: (.+)$/m);
+  assert(name, "workflow name not found");
+
+  const green = await parsedWorkflow("main-green.yml");
+  assertEquals(green.on.workflow_run, {
+    workflows: [name[1]],
+    types: ["completed"],
+    branches: ["main"],
+  });
+});
+
+Deno.test("Main Green acts only on a passing run of a push to main", async () => {
+  // Every other job waits on `advance`, directly or through another job, and
+  // a job is skipped along with a job it waits on unless its condition calls
+  // `always()`, `failure()` or `cancelled()`. So the one condition on
+  // `advance` decides for all of them, as long as none of them calls one.
+
+  const green = await parsedWorkflow("main-green.yml");
+  assertEquals(
+    green.jobs.advance.if,
+    "github.event.workflow_run.event == 'push' && " +
+      "github.event.workflow_run.head_branch == 'main' && " +
+      "github.event.workflow_run.conclusion == 'success'",
+  );
+
+  const waitsOnAdvance = (id: string): boolean =>
+    needsOf(green.jobs[id]).some((need) =>
+      need === "advance" || waitsOnAdvance(need)
+    );
+  const others = Object.keys(green.jobs).filter((id) => id !== "advance");
+  assert(others.length >= 3, "the jobs went unread");
+  for (const id of others) {
+    assert(waitsOnAdvance(id), `${id} does not wait on advance`);
+    assertEquals(
+      /\b(always|failure|cancelled)\(\)/.test(green.jobs[id].if ?? ""),
+      false,
+      `${id} can run when a job it waits on did not`,
+    );
+  }
+});
+
+Deno.test("a Main Green run is named for the commit its CI run tested", async () => {
+  // Every run of a workflow that follows another is recorded against the
+  // default branch's tip, so the name is where a reader finds which commit a
+  // run acted on.
+
+  const text = await workflow("main-green.yml");
+  assertStringIncludes(
+    text,
+    "\nrun-name: Main Green for ${{ github.event.workflow_run.head_sha }}\n",
+  );
+});
+
+Deno.test("the job that moves `main-green` holds the only write token and runs no code from the tree", async () => {
+  const green = await parsedWorkflow("main-green.yml");
+  assertEquals(
+    (parseYaml(await workflow("main-green.yml")) as {
+      permissions?: Record<string, string>;
+    }).permissions,
+    { contents: "read" },
+  );
+  for (const [id, job] of Object.entries(green.jobs)) {
+    assertEquals(
+      job.permissions,
+      id === "advance" ? { contents: "write" } : undefined,
+      `${id}: permissions`,
+    );
+  }
+  // A checkout would put the tree's code in reach of the write token, and any
+  // other action would run someone else's.
+  const steps = green.jobs.advance.steps ?? [];
+  assertEquals(steps.map((step) => step.uses), [undefined]);
+  assertEquals(steps[0].env, {
+    GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+    SHA: "${{ github.event.workflow_run.head_sha }}",
+  });
+});
+
+/**
+ * Runs the step that moves `main-green` against a stand-in `gh`. The stand-in
+ * reports each request to stderr, accepts an update or a creation when `PATCH`
+ * or `POST` is `ok`, lists the branch at `CURRENT` or lists nothing when that
+ * is empty, and compares as `STATUS`. `LIST=fail` makes the listing itself
+ * fail.
+ */
+async function runAdvance(
+  env: Record<string, string>,
+): Promise<StepRun> {
+  const green = await parsedWorkflow("main-green.yml");
+  const step = namedStep(
+    green.jobs.advance,
+    "🚀 Advance main-green to the commit whose run passed",
+  );
+  assertEquals(step.id, "advance");
+  assert(step.run, "the step runs no script");
+  return await runStep(
+    step.run,
+    { GITHUB_REPOSITORY: "commonfabric/labs", ...env },
+    {
+      gh: [
+        'echo "gh $*" >&2',
+        'case "$*" in',
+        '  *"--method PATCH"*) [ "$PATCH" = ok ] ;;',
+        '  *"--method POST"*) [ "$POST" = ok ] ;;',
+        '  *matching-refs*) [ "$LIST" != fail ] && printf "%s" "$CURRENT" ;;',
+        '  *compare*) echo "$STATUS" ;;',
+        "  *) exit 9 ;;",
+        "esac",
+      ].join("\n"),
+    },
+  );
+}
+
+Deno.test("`main-green` moves forward to a commit whose run passed, and nowhere else", async () => {
+  // GitHub refuses an update that does not move a branch forward, so the
+  // update is tried first and the branch is examined only when it is refused.
+  // A run of an older commit finishing late is the ordinary refusal, and
+  // leaves the branch where it is. Every outcome the step does not recognize
+  // fails it, having written nothing for the jobs after it to act on.
+
+  const older = "a".repeat(40);
+  const newer = "b".repeat(40);
+  const ref = "repos/commonfabric/labs/git/refs/heads/main-green";
+
+  const moved = await runAdvance({ SHA: newer, PATCH: "ok" });
+  assertStepCode(moved, 0, "an accepted update failed the step");
+  assertEquals(moved.output, "is-newest=true\n");
+  assertEquals(
+    moved.stderr,
+    `gh api --method PATCH ${ref} -f sha=${newer} -F force=false\n`,
+  );
+
+  const late = await runAdvance({
+    SHA: older,
+    CURRENT: newer,
+    STATUS: "behind",
+  });
+  assertStepCode(late, 0, "an older run finishing late failed the step");
+  assertEquals(late.output, "is-newest=false\n");
+  assertStringIncludes(
+    late.stderr,
+    `gh api repos/commonfabric/labs/compare/${newer}...${older} --jq .status\n`,
+  );
+  assertEquals(late.stderr.includes("--method POST"), false);
+
+  const same = await runAdvance({
+    SHA: newer,
+    CURRENT: newer,
+    STATUS: "identical",
+  });
+  assertStepCode(same, 0, "a branch already at the commit failed the step");
+  assertEquals(same.output, "is-newest=true\n");
+
+  const created = await runAdvance({ SHA: newer, CURRENT: "", POST: "ok" });
+  assertStepCode(created, 0, "creating the branch failed the step");
+  assertEquals(created.output, "is-newest=true\n");
+  assertStringIncludes(
+    created.stderr,
+    "gh api --method POST repos/commonfabric/labs/git/refs " +
+      `-f ref=refs/heads/main-green -f sha=${newer}\n`,
+  );
+
+  const refused: Record<string, Record<string, string>> = {
+    "an update refused although the commit is ahead": {
+      CURRENT: older,
+      STATUS: "ahead",
+    },
+    "a branch holding a commit that is not on main": {
+      CURRENT: older,
+      STATUS: "diverged",
+    },
+    "a branch that could not be listed": { LIST: "fail" },
+    "a branch that could not be created": { CURRENT: "" },
+  };
+  for (const [what, env] of Object.entries(refused)) {
+    const run = await runAdvance({ SHA: newer, ...env });
+    assertStepFailed(run, `${what} passed the step`);
+    assertEquals(run.output, "", what);
+  }
+});
+
+Deno.test("staging is deployed by Main Green or by the CI run, and one variable says which", async () => {
+  // Two workflows hold jobs that deploy to staging. Both sets running would
+  // deploy each commit twice and in no order, and neither running would leave
+  // staging where it was. One repository variable decides, and each set's
+  // condition is the other's negation, so every value of the variable selects
+  // exactly one of them: `true` selects the CI workflow's jobs, and anything
+  // else, an unset variable included, selects Main Green's.
+
+  const ci = await parsedWorkflow("deno.yml");
+  const green = await parsedWorkflow("main-green.yml");
+
+  const fromCiRun = "vars.STAGING_DEPLOY_FROM_CI_RUN == 'true'";
+  for (const id of ["deploy-rapids", "deploy-shell-staging"]) {
+    assertEquals(
+      ci.jobs[id].if,
+      "github.event_name == 'push' && github.ref == 'refs/heads/main' && " +
+        fromCiRun,
+      `deno.yml ${id}`,
+    );
+  }
+  assertEquals(
+    green.jobs.advance.outputs?.["deploys-staging"],
+    "${{ steps.advance.outputs.is-newest == 'true' && " +
+      "vars.STAGING_DEPLOY_FROM_CI_RUN != 'true' }}",
+  );
+  // Main Green's shell job has no condition of its own. It is skipped with
+  // the job it waits on.
+  assertEquals(
+    green.jobs["deploy-rapids"].if,
+    "needs.advance.outputs.deploys-staging == 'true'",
+  );
+  assertEquals(needsOf(green.jobs["deploy-shell-staging"]), ["deploy-rapids"]);
+  assertEquals(green.jobs["deploy-shell-staging"].if, undefined);
+
+  // Those four are every job that reaches staging, so no deploy runs outside
+  // the two conditions above.
+  const reachesStaging = /deploy\.sh rapids|gs:\/\/staging-commontools-dev/;
+  for (const name of await workflowNames()) {
+    const text = withoutComments(await workflow(name));
+    const reaching = jobIds(text).filter((id) =>
+      reachesStaging.test(jobBlock(text, id))
+    );
+    assertEquals(
+      reaching.sort(),
+      name === "deno.yml" || name === "main-green.yml"
+        ? ["deploy-rapids", "deploy-shell-staging"]
+        : [],
+      `${name}: jobs that reach staging`,
+    );
+  }
+});
+
+Deno.test("the two staging shell jobs share their steps", async () => {
+  // The CI workflow's shell job is skipped unless the variable selects it, so
+  // nothing would show that a change made to Main Green's copy had not been
+  // made to it until the day it was needed. The steps the two jobs share are
+  // therefore held equal, apart from where each gets its commit and the
+  // condition Main Green puts on publishing.
+
+  const ci = (await parsedWorkflow("deno.yml")).jobs["deploy-shell-staging"];
+  const green =
+    (await parsedWorkflow("main-green.yml")).jobs["deploy-shell-staging"];
+  assertEquals(ci.environment, green.environment);
+
+  const comparable = (step: Step) =>
+    JSON.stringify({ ...step, if: undefined })
+      .replaceAll("${{ github.sha }}", "<commit>")
+      .replaceAll("${{ needs.deploy-rapids.outputs.sha }}", "<commit>")
+      .replaceAll(
+        '\\"gs://staging-commontools-dev/builds/$DEPLOYED_SHA/\\"',
+        "gs://staging-commontools-dev/builds/<commit>/",
+      );
+  const byName = (job: Job) =>
+    new Map((job.steps ?? []).map((step) => [step.name, comparable(step)]));
+  const inCi = byName(ci);
+  const inGreen = byName(green);
+  const shared = [...inCi.keys()].filter((name) => inGreen.has(name));
+  assertEquals(shared, [
+    "🦕 Setup Deno",
+    "🔍 Verify lock file & install dependencies",
+    "🔎 Validate staging shell endpoints",
+    "🏗️ Build shell with staging API URL",
+    "🔑 Authenticate to Google Cloud",
+    "⚙️ Setup Google Cloud SDK",
+    "📤 Upload shell assets to Staging GCS",
+    "🔎 Verify the published shell targets the staging API",
+  ]);
+  for (const name of shared) {
+    assertEquals(inCi.get(name), inGreen.get(name), name);
+  }
+});
+
+Deno.test("a deploy that fails is a job that fails, and no deploy is cancelled under way", async () => {
+  // A job or step that continued past an error would report a deploy that
+  // failed as one that passed, and the jobs after it would act on that. A
+  // group over the whole of Main Green would let a new run cancel the run
+  // that is deploying.
+
+  for (const name of ["deno.yml", "main-green.yml"]) {
+    const jobs = (await parsedWorkflow(name)).jobs;
+    for (const id of ["deploy-rapids", "deploy-shell-staging"]) {
+      const text = JSON.stringify(jobs[id]);
+      assertEquals(
+        text.includes("continue-on-error"),
+        false,
+        `${name} ${id} continues past an error`,
+      );
+    }
+  }
+  const green = parseYaml(await workflow("main-green.yml")) as {
+    concurrency?: unknown;
+  };
+  assertEquals(green.concurrency, undefined);
+});
+
+Deno.test("a run whose commit `main-green` did not move to stops at `advance`", async () => {
+  const green = await parsedWorkflow("main-green.yml");
+  const isNewest = "needs.advance.outputs.is-newest == 'true'";
+  const outputs = green.jobs.advance.outputs ?? {};
+  assertEquals(Object.keys(outputs), ["is-newest", "deploys-staging"]);
+  assertEquals(outputs["is-newest"], "${{ steps.advance.outputs.is-newest }}");
+  // The deploy jobs run on `deploys-staging`, which the test of the two
+  // deploy routes holds to its whole expression. It is true only when
+  // `is-newest` is, so a run whose commit the branch did not move to deploys
+  // nothing.
+  assert(
+    outputs["deploys-staging"].startsWith(
+      "${{ steps.advance.outputs.is-newest == 'true' && ",
+    ),
+    "a run can deploy a commit the branch did not move to",
+  );
+  assertEquals(
+    green.jobs["start-loom-pin"].if,
+    `${isNewest} && vars.LOOM_DISPATCH_APP_ID != ''`,
+  );
+});
+
+Deno.test("one staging deploy runs at a time, and a run with nothing to deploy stays out of the group", async () => {
+  // A job waiting on a group is cancelled when another job joins that group,
+  // and GitHub does not say whether a skipped job joins. Each group is
+  // therefore named from the result that decides whether its job runs, and is
+  // the shared name only when it does.
+
+  const green = await parsedWorkflow("main-green.yml");
+  assertEquals(green.jobs["deploy-rapids"].concurrency, {
+    group:
+      "${{ needs.advance.outputs.deploys-staging == 'true' && 'deploy-rapids' " +
+      "|| format('deploy-rapids-{0}', github.run_id) }}",
+    "cancel-in-progress": false,
+  });
+  assertEquals(green.jobs["deploy-shell-staging"].concurrency, {
+    group:
+      "${{ needs.deploy-rapids.result == 'success' && 'deploy-shell-staging' " +
+      "|| format('deploy-shell-staging-{0}', github.run_id) }}",
+    "cancel-in-progress": false,
+  });
+});
+
+Deno.test("the deploy to rapids uses the commit `main-green` names when it starts, and only a commit of main", async () => {
+  // A deploy job may have waited behind another, so the commit it deploys is
+  // the one the branch names after the wait. Anyone who can write to the
+  // repository can move the branch, so the commit is deployed only when main
+  // contains it. `github.ref` and `github.sha` are the default branch and its
+  // tip here, whichever commit the run that finished tested, so nothing reads
+  // them.
+
+  const text = withoutComments(await workflow("main-green.yml"));
+  for (const tip of ["github.sha", "github.ref"]) {
+    assertEquals(text.includes(tip), false, `the workflow reads ${tip}`);
+  }
+
+  const green = await parsedWorkflow("main-green.yml");
+  const rapids = green.jobs["deploy-rapids"];
+  const steps = (rapids.steps ?? []).map((step) => step.name);
+  const resolved = steps.indexOf("🔍 Resolve main-green");
+  const deployed = steps.indexOf("🚀 Deploy application to Rapids (Staging)");
+  assert(
+    resolved >= 0 && deployed > resolved,
+    "the deploy does not follow the step that reads its commit",
+  );
+  assertEquals(rapids.outputs, { sha: "${{ steps.resolve.outputs.sha }}" });
+
+  const resolve = namedStep(rapids, "🔍 Resolve main-green");
+  assertEquals(resolve.id, "resolve");
+  const script = resolve.run;
+  assert(script, "the step runs no script");
+  const sha = "c".repeat(40);
+  // The stand-in returns the branch's commit, and compares main with it as
+  // `ON_MAIN` says.
+  const read = (onMain: string) =>
+    runStep(
+      script,
+      { GITHUB_REPOSITORY: "commonfabric/labs", ON_MAIN: onMain },
+      {
+        gh: [
+          'echo "gh $*" >&2',
+          'case "$*" in',
+          `  *git/ref/heads/main-green*) echo ${sha} ;;`,
+          '  *compare*) [ -n "$ON_MAIN" ] && echo "$ON_MAIN" ;;',
+          "  *) exit 9 ;;",
+          "esac",
+        ].join("\n"),
+      },
+    );
+
+  for (const onMain of ["ahead", "identical"]) {
+    const run = await read(onMain);
+    assertStepCode(run, 0, `a branch main is ${onMain} of failed the step`);
+    assertEquals(run.output, `sha=${sha}\n`);
+    assertEquals(
+      run.stderr,
+      "gh api repos/commonfabric/labs/git/ref/heads/main-green " +
+        "--jq .object.sha\n" +
+        `gh api repos/commonfabric/labs/compare/${sha}...main --jq .status\n`,
+    );
+  }
+  for (const onMain of ["behind", "diverged", ""]) {
+    const run = await read(onMain);
+    assertStepFailed(run, `a branch main is "${onMain}" of passed the step`);
+    assertEquals(run.output, "");
+  }
+  const unread = await runStep(script, {}, { gh: "exit 1" });
+  assertStepFailed(unread, "a branch that could not be read passed the step");
+  assertEquals(unread.output, "");
+});
+
+Deno.test("the staging shell is built from the deployed commit, and published only while `main-green` still names it", async () => {
+  // The shell job's commit comes from the deploy it followed, and the outputs
+  // of that deploy are what a re-run of this job alone would reuse. Publishing
+  // then would put an older shell back over a newer one.
+
+  const green = await parsedWorkflow("main-green.yml");
+  const deployedSha = "${{ needs.deploy-rapids.outputs.sha }}";
+  const shell = green.jobs["deploy-shell-staging"];
+  assertEquals(
+    namedStep(shell, "📥 Checkout the deployed commit").with?.ref,
+    deployedSha,
+  );
+  assertEquals(
+    namedStep(shell, "🏗️ Build shell with staging API URL").env?.COMMIT_SHA,
+    deployedSha,
+  );
+  assertEquals(shell.env?.DEPLOYED_SHA, deployedSha);
+  assertStringIncludes(
+    namedStep(shell, "📤 Upload shell assets to Staging GCS").run ?? "",
+    '"gs://staging-commontools-dev/builds/$DEPLOYED_SHA/"',
+  );
+
+  const check = namedStep(
+    shell,
+    "🔍 Check main-green still names the built commit",
+  );
+  assertEquals(check.id, "current");
+  assert(check.run, "the step runs no script");
+  const built = "d".repeat(40);
+  const still = await runStep(check.run, { DEPLOYED_SHA: built }, {
+    gh: `echo ${built}`,
+  });
+  assertStepCode(still, 0, "an unmoved branch failed the step");
+  assertEquals(still.output, "publish=true\n");
+  const moved = await runStep(check.run, { DEPLOYED_SHA: built }, {
+    gh: `echo ${"e".repeat(40)}`,
+  });
+  assertStepCode(moved, 0, "a branch that moved on failed the step");
+  assertEquals(moved.output, "publish=false\n");
+  const unread = await runStep(check.run, { DEPLOYED_SHA: built }, {
+    gh: "exit 1",
+  });
+  assertStepFailed(unread, "a branch that could not be read passed the step");
+  assertEquals(unread.output, "");
+
+  // Everything after the check that reaches the bucket waits on its result.
+  const names = (shell.steps ?? []).map((step) => step.name);
+  const after = (shell.steps ?? []).slice(names.indexOf(check.name) + 1);
+  assert(
+    after.some((step) => step.name === "📤 Upload shell assets to Staging GCS"),
+    "the upload does not follow the check",
+  );
+  for (const step of after) {
+    assertEquals(
+      step.if,
+      "steps.current.outputs.publish == 'true'",
+      `${step.name} runs whatever the check found`,
+    );
+  }
+  for (const step of (shell.steps ?? []).slice(0, names.indexOf(check.name))) {
+    assertEquals(
+      /GCP_SA_KEY|gsutil/.test(JSON.stringify(step)),
+      false,
+      `${step.name} reaches the bucket before the check`,
+    );
+  }
+});
+
+Deno.test("loom's pin workflow is started with a token limited to Actions on loom, beside the deploys", async () => {
+  const green = await parsedWorkflow("main-green.yml");
+  const job = green.jobs["start-loom-pin"];
+  // Loom's pin does not depend on what staging runs, so the job waits on
+  // `advance` alone.
+  assertEquals(needsOf(job), ["advance"]);
+  // The app's private key is defined on an environment, as every other
+  // credential here is.
+  assertEquals(job.environment, "loom");
+  assertEquals(namedStep(job, "🔑 Create loom dispatch token").with, {
+    "app-id": "${{ vars.LOOM_DISPATCH_APP_ID }}",
+    "private-key": "${{ secrets.LOOM_DISPATCH_APP_PRIVATE_KEY }}",
+    owner: "commonfabric",
+    repositories: "loom",
+    "permission-actions": "write",
+  });
+
+  const start = namedStep(job, "🚀 Start loom's pin workflow");
+  assertEquals(start.env, { GH_TOKEN: "${{ steps.token.outputs.token }}" });
+  assert(start.run, "the step runs no script");
+  // The stand-in writes each argument it was given on a line of its own.
+  const run = await runStep(start.run, {}, {
+    gh: 'printf "%s\\n" "$@" > "$GITHUB_OUTPUT"',
+  });
+  assertStepCode(run, 0, "the step failed");
+  assertEquals(run.output.trimEnd().split("\n"), [
+    "api",
+    "--method",
+    "POST",
+    "repos/commonfabric/loom/actions/workflows/bump-labs-pin.yml/dispatches",
+    "--field",
+    "ref=main",
+  ]);
+});
+
+Deno.test("a call to GitHub in Main Green fails its step before its job is cancelled", async () => {
+  // GitHub ends a job that runs past its bound by cancelling it, and a
+  // cancelled run of this workflow is otherwise one a later run replaced. A
+  // step that reaches its own bound fails instead, so each step that calls
+  // GitHub is bounded below its job, where the job has a bound at all.
+
+  const green = await parsedWorkflow("main-green.yml");
+  let calls = 0;
+  for (const [id, job] of Object.entries(green.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (!/\bgh api\b/.test(step.run ?? "")) continue;
+      calls++;
+      const bound = step["timeout-minutes"];
+      assert(
+        typeof bound === "number",
+        `${id}: "${step.name}" calls GitHub with no bound`,
+      );
+      const jobBound = job["timeout-minutes"];
+      assert(
+        jobBound === undefined ||
+          (typeof jobBound === "number" && jobBound - bound >= 10),
+        `${id}: "${step.name}" is not bounded ten minutes below its job`,
+      );
+    }
+  }
+  assertEquals(calls, 4);
 });
 
 Deno.test("every test-records artifact name is store-safe and unique", async () => {
@@ -1505,10 +2060,16 @@ Deno.test("the run in tomorrow's order runs the CI suites and ships nothing", as
     "deploy-rapids",
     "deploy-shell-staging",
   ]);
+  const pushToMain =
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'";
   for (const id of shipping) {
+    // The deploy jobs are further limited to when the variable selects them,
+    // which narrows the condition and cannot widen it.
     assertEquals(
       ci.jobs[id].if,
-      "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+      id === "attest-binaries"
+        ? pushToMain
+        : `${pushToMain} && vars.STAGING_DEPLOY_FROM_CI_RUN == 'true'`,
       `${id} can run in a called run`,
     );
   }

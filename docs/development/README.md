@@ -71,9 +71,12 @@ mapped in [`../README.md`](../README.md).
   tell you which threads are still open, which automated reviewers post here,
   and why `gh pr view` returns none of it
 - [`deploying.md`](deploying.md) — how a commit reaches a host: which jobs
-  deploy where, and the contract the bastion's deploy wrapper enforces on what
-  they pass it. Read this before editing a deploy step, because that wrapper
-  lives in the infra repository rather than this one
+  deploy where, which commit staging gets when several pass close together,
+  what to do when a deploy fails, the variable that selects which workflow
+  deploys staging, how loom's pin workflow is started, and the contract the
+  bastion's deploy wrapper enforces on what the jobs pass it. Read this before
+  editing a deploy step, because that wrapper lives in the infra repository
+  rather than this one
 - [`staging-space-copy.md`](staging-space-copy.md) — how a *space* reaches a
   host: snapshotting one space's store and serving the copy from rapids, what
   installing it commits you to, and the questions a local clone answers more

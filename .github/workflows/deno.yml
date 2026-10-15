@@ -26,12 +26,13 @@ on:
 # Runs of a pull request are grouped by the pull request, and a new push to the
 # branch cancels the run already going. Runs of a push to main are grouped by
 # the commit that was pushed, and a push run is never cancelled: it may be
-# part-way through deploying that commit to staging. Main can receive the same
-# head commit twice, which starts two runs of one commit, and the commit as the
-# group makes the second of them wait for the first. Each run publishes a
-# release artifact named after the commit, and two runs publishing at once
-# leave one run's tarball beside the other run's checksum. See "One commit, one
-# set of artifacts" in docs/development/deploying.md.
+# part-way through publishing that commit's release artifact, or through
+# deploying it to staging. Main can receive the same head commit twice, which
+# starts two runs of one commit, and the commit as the group makes the second
+# of them wait for the first. Each run publishes a release artifact named after
+# the commit, and two runs publishing at once leave one run's tarball beside
+# the other run's checksum. See "One commit, one set of artifacts" in
+# docs/development/deploying.md.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -73,9 +74,6 @@ env:
 # limit when several sequential steps take unusually long.
 # tasks/ci-workflow.test.ts holds every work step here to that shape, and
 # refuses a bound written as anything but an alias.
-#
-# The deploy jobs at the end carry no bound. Each hands the work to a script
-# that lives elsewhere, and how long that takes is not this workflow's to say.
 jobs:
   # ---------------------------------------------------------------------------
   # The tests. Every test the repository has is declared in the test topology
@@ -444,9 +442,13 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # The release. A push to main builds the binaries it ships while the lanes
-  # run, and attests and deploys them only once every test has passed. A pull
+  # run, and attests and publishes them only once every test has passed. A pull
   # request builds nothing here: the `binaries` suites compile each binary the
   # way this does, as a test that it still compiles.
+  #
+  # Staging is deployed from the published commit, either by
+  # .github/workflows/main-green.yml, which follows this workflow, or by the
+  # two jobs at the end of this file. The comment above those jobs says which.
   # ---------------------------------------------------------------------------
 
   build-toolshed:
@@ -514,8 +516,8 @@ jobs:
     # A release artifact must not outlive a failing test, the
     # `pattern-compat`, `pattern-vintage` and `deployed-topology` suites among
     # them.
-    # Production deploys consume this artifact without rerunning anything, so
-    # this waits for the whole of the full run as well as for the builds.
+    # A deploy consumes this artifact without rerunning anything, so this waits
+    # for the whole of the full run as well as for the builds.
     # The full run's servers are built by the lanes from the same sources and
     # the same build task, without the commit and the shell endpoints this
     # job's binaries carry; what these binaries add is checked by the steps
@@ -708,10 +710,24 @@ jobs:
           fi
           echo "::endgroup::"
 
-  # Automatic deployment to staging (rapids)
+  # ---------------------------------------------------------------------------
+  # The deploys to staging, for when .github/workflows/main-green.yml is not
+  # the one deploying. Staging is deployed from one place or the other, and
+  # the repository variable STAGING_DEPLOY_FROM_CI_RUN says which. Unset,
+  # these two jobs are skipped and Main Green deploys whatever `main-green`
+  # names. Set to `true`, each passing run of a push to main deploys its own
+  # commit here, and Main Green deploys nothing. "Where staging is deployed
+  # from" in docs/development/deploying.md has the difference between the two.
+  #
+  # Neither job carries a bound. Each hands the work to a script that lives
+  # elsewhere, and how long that takes is not this workflow's to say.
+  # ---------------------------------------------------------------------------
+
   deploy-rapids:
     name: "Deploy to Rapids (Staging)"
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      vars.STAGING_DEPLOY_FROM_CI_RUN == 'true'
     needs: ["attest-binaries"]
     runs-on: ubuntu-latest
     environment: toolshed
@@ -732,10 +748,11 @@ jobs:
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/cf/deploy.sh rapids ${{ github.sha }}
 
-  # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
     name: "Deploy Shell to Staging"
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      vars.STAGING_DEPLOY_FROM_CI_RUN == 'true'
     needs: ["tests"]
     runs-on: ubuntu-latest
     environment: ci
