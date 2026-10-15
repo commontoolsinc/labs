@@ -467,10 +467,14 @@ for `items`, which matches any index the body uses, and the same path for each
 member of `anyOf`, `oneOf` and `allOf`. A use at a path reaches every position
 above it, the event itself among them, so an event that is a cell earns the
 capability of every use the body makes. A cell's value is not read: its
-capabilities are its own reads'. An identity-only comparison of a plain
-position adds the `comparable` marker the runtime materializes it through, and
-a position whose schema is `true`, which admits any value, becomes a
-`comparable` cell. A cell the body uses in a way its summary does not record
+capabilities are its own reads'. A plain position the body only compares by
+identity, using nothing at or below it otherwise, takes the `comparable` marker
+the runtime materializes it through, and such a position whose schema is
+`true`, which admits any value, becomes a `comparable` cell. A position where
+uses meet, as an index signature's is for every key it types, gathers them all,
+so comparing one key and reading or writing below another leaves it as
+written. Uses are kept apart by their whole paths, so a key holding any
+character is never taken for two segments. A cell the body uses in a way its summary does not record
 one path at a time keeps the capability written for it, since no narrower one
 can be shown to suffice: one at or below a value that escaped whole
 (`escapedPaths`), a cell's handle passed to a helper with no summary among

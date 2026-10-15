@@ -82,6 +82,21 @@ class ContractUses {
     return this.exactComparable.some((path) => path.length === 0);
   }
 
+  /**
+   * Whether comparing the value here by identity is all the body does at or
+   * below this position, so a comparable cell here hides nothing it uses. A
+   * position several keys meet at, as a map's `additionalProperties` is,
+   * gathers the uses of every key, and a read, a write, an escape or a
+   * comparison below any of them needs the structure a cell would hide.
+   */
+  get onlyComparedHere(): boolean {
+    const here = (paths: Paths) => paths.every((path) => path.length === 0);
+    return this.comparedHere && !this.untrackedHere &&
+      this.write.length === 0 && this.read.length === 0 &&
+      this.escaped.length === 0 && this.wildcard.length === 0 &&
+      here(this.comparable) && here(this.exactComparable);
+  }
+
   /** The kind the body's uses at or below this position earn. */
   earned(): CellKind {
     if (this.write.length > 0) return "cell";
@@ -109,9 +124,11 @@ class ContractUses {
   }
 
   /** A key two equal sets of uses share, for specializing a definition:
-   * each path as the summary records it, as the uses are matched. */
+   * each path as the summary records it, as the uses are matched, written
+   * whole, so no key a segment holds can stand for a boundary between two. */
   key(): string {
-    const paths = (list: Paths) => list.map((path) => path.join("\x00")).sort();
+    const paths = (list: Paths) =>
+      list.map((path) => JSON.stringify(path)).sort();
     return JSON.stringify([
       paths(this.write),
       paths(this.read),
@@ -257,9 +274,7 @@ export function narrowEventCapabilities(
     if (Array.isArray(node.asCell) && node.asCell.length > 0) {
       return narrowCell(node, uses);
     }
-    if (uses.comparedHere && !uses.untrackedHere) {
-      return { ...node, asCell: ["comparable"] };
-    }
+    if (uses.onlyComparedHere) return { ...node, asCell: ["comparable"] };
     let result: Schema = node;
     const set = (key: string, value: unknown) => {
       if (value === result[key]) return;
@@ -371,7 +386,7 @@ type Specialization =
  * cell; `false` admits nothing and stays as it is.
  */
 function comparedAny(node: unknown, uses: ContractUses): unknown {
-  return node === true && uses.comparedHere && !uses.untrackedHere
+  return node === true && uses.onlyComparedHere
     ? { asCell: ["comparable"] }
     : node;
 }

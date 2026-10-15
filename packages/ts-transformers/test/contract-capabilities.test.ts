@@ -367,6 +367,89 @@ export default pattern<{ c: Writable<number> }>(({ c }) => ({ h: h({ c }) }));`,
       ).toEqual({ asCell: ["comparable"] });
     });
 
+    it("leaves a compared position as written where the body also reads or writes below it", () => {
+      // Comparing one entry of a map and writing a cell in another meet at
+      // the map's `additionalProperties`; a comparable cell there would hide
+      // the entry the write reaches.
+
+      const entries = event({ c: cell("cell") });
+      const map = { type: "object", additionalProperties: entries };
+      expect(
+        narrowEventCapabilities(
+          event({ map }),
+          summaryOf({
+            identityCellPaths: [["map", "a"]],
+            writePaths: [["map", "b", "c"]],
+          }),
+        ),
+      ).toEqual(event({ map }));
+      expect(
+        narrowEventCapabilities(
+          event({ v: event({ c: cell("cell") }) }),
+          summaryOf({ identityCellPaths: [["v"]], readPaths: [["v", "c"]] }),
+        ),
+      ).toEqual(event({ v: event({ c: cell("readonly") }) }));
+    });
+
+    it("leaves a position whose schema admits any value as written where the body also reads below it", () => {
+      const map = { type: "object", additionalProperties: true };
+
+      expect(
+        narrowEventCapabilities(
+          event({ map }),
+          summaryOf({
+            identityCellPaths: [["map", "a"]],
+            readPaths: [["map", "b", "x"]],
+          }),
+        ),
+      ).toEqual(event({ map }));
+    });
+
+    it("narrows a definition apart for uses whose paths differ only in where a key's segments break", () => {
+      const box = event({
+        "a\x00b": cell("cell"),
+        a: event({ b: cell("cell") }),
+      });
+      expect(
+        narrowEventCapabilities(
+          {
+            ...event({
+              first: { $ref: "#/$defs/Box" },
+              second: { $ref: "#/$defs/Box" },
+            }),
+            $defs: { Box: box },
+          },
+          summaryOf({ readPaths: [["first", "a\x00b"], ["second", "a", "b"]] }),
+        ),
+      ).toEqual(event({
+        first: event({
+          "a\x00b": cell("readonly"),
+          a: event({ b: cell("opaque") }),
+        }),
+        second: event({
+          "a\x00b": cell("opaque"),
+          a: event({ b: cell("readonly") }),
+        }),
+      }));
+
+      const blank = event({ "": cell("cell") });
+      expect(
+        narrowEventCapabilities(
+          {
+            ...event({
+              x: { $ref: "#/$defs/Blank" },
+              y: { $ref: "#/$defs/Blank" },
+            }),
+            $defs: { Blank: blank },
+          },
+          summaryOf({ readPaths: [["x"], ["y", ""]] }),
+        ),
+      ).toEqual(event({
+        x: event({ "": cell("opaque") }),
+        y: event({ "": cell("readonly") }),
+      }));
+    });
+
     it("leaves a `$ref` inside a definition's data as written when it renames the definition", () => {
       const marker = { $ref: "#/$defs/Tree_narrowed" };
       const narrowed = narrowEventCapabilities(
@@ -1589,6 +1672,38 @@ type Ev = { v: any };`,
       );
 
       expect(schema).toEqual({ asCell: ["comparable"] });
+    });
+
+    it("keeps the entries of a map the body compares one entry of and writes another as written", async () => {
+      const { event: schema, reported } = await eventSchema(
+        `import { equals } from "commonfabric";
+type Ev = { map: Record<string, { c: Writable<number> }> };`,
+        "Ev",
+        "(e) => { if (equals(e.map.a, e.map.a)) e.map.b!.c.set(1); }",
+      );
+
+      expect(reported).toEqual([]);
+      const map = (schema.properties as Record<string, Record<string, unknown>>)
+        .map!;
+      const entry = map.additionalProperties as Record<string, unknown>;
+      expect(entry.asCell).toBeUndefined();
+      expect(
+        (entry.properties as Record<string, Record<string, unknown>>).c!.asCell,
+      ).toEqual(["cell"]);
+    });
+
+    it("gives two references to one declaration their own capabilities where a key holds what would separate a path", async () => {
+      const { event: schema, reported } = await eventSchema(
+        `type Box = { "a\\x00b": Writable<number>; a: { b: Writable<number> } };
+type Ev = { first: Box; second: Box };`,
+        "Ev",
+        '(e, { c }) => { c.set(e.first["a\\x00b"].get() + e.second.a.b.get()); }',
+      );
+
+      expect(reported).toEqual([]);
+      const props = schema.properties as Record<string, unknown>;
+      expect(capabilitiesOf(props.first)).toEqual([["readonly"], ["opaque"]]);
+      expect(capabilitiesOf(props.second)).toEqual([["opaque"], ["readonly"]]);
     });
 
     it("keeps a recursion's default data as written when it renames the recursion", async () => {
