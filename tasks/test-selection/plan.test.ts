@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
 import {
+  aroundIn,
   crowdingLine,
   fixedCharges,
   foldWholeUnits,
@@ -640,6 +641,71 @@ describe("plan", () => {
       expect(
         strangers.filter((s) => chosen.get(s.test.n) === "density").length,
       ).toBe(1);
+    });
+
+    it("moves a leaf up once its lane runs the `describe` around it", () => {
+      // Every candidate is in the opened file. The two leaves sit inside a
+      // `describe` whose hooks take eight seconds and which no lane is
+      // given. The first leaf costs the lane nine, for itself and the
+      // hooks, and is worth enough to go ahead of the strangers at four.
+      // Once it is in, the second costs one, which is denser than any
+      // stranger. That leaves room for three of the four strangers.
+      const leaf = (name: string, score: number) =>
+        test(`hooks > ${name}`, "open.test.ts", { score });
+      const strangers = [1, 2, 3, 4].map((i) =>
+        test(`stranger ${i}`, "open.test.ts", { cost: 4 })
+      );
+      const chosen = reasons(packed([
+        test("hooks", "open.test.ts", { cost: 8, flakeRate: 0.5 }),
+        leaf("first", 0.12),
+        leaf("second", 0.05),
+        ...strangers,
+      ]));
+      expect(chosen.get("hooks > first")).toBe("density");
+      expect(chosen.get("hooks > second")).toBe("density");
+      expect(
+        strangers.filter((s) => chosen.get(s.test.n) === "density").length,
+      ).toBe(3);
+    });
+
+    it("moves a leaf up as its lane's share of the suite grows, by what the `describe` around it adds", () => {
+      // The pattern unit suite runs its tests side by side, and its lane is
+      // charged the 100 seconds its longest unit takes. The leaf takes one
+      // second of its own and 45 with the hooks of the `describe` around
+      // it, and costs the lane 16; the stranger takes 50 and costs 20. The
+      // test growing the longest unit to 150 is the densest there is, and
+      // once it is in, the leaf costs 6 and the stranger 10. There is room
+      // left for one of the two, and the leaf is now the denser.
+      const pattern = (
+        name: string,
+        unit: string,
+        fields: Partial<ManifestEntry>,
+      ) => test(name, `${unit}.test.tsx`, { suite: "pattern-unit", ...fields });
+      const longest = pattern("longest", "longest", { cost: 100 });
+      const chosen = reasons(run(
+        sampleManifest({
+          entries: [
+            longest,
+            test("proven", "proven.test.ts", { cost: 135.4, score: 0.9 }),
+            pattern("grows", "longest", { cost: 50, score: 0.5 }),
+            pattern("hooks", "hooks", { cost: 44, flakeRate: 0.5 }),
+            pattern("hooks > runs a leaf", "hooks", { score: 0.06 }),
+            pattern("stranger", "stranger", { cost: 50, score: 0.06 }),
+          ],
+          calibration: perFile,
+        }),
+        {
+          lanes: 1,
+          budgetSeconds: 344,
+          mandatory: new Map([[
+            testIdentityKey(longest.test),
+            "changed" as const,
+          ]]),
+        },
+      ));
+      expect(chosen.get("grows")).toBe("density");
+      expect(chosen.get("hooks > runs a leaf")).toBe("density");
+      expect(chosen.get("stranger")).not.toBe("density");
     });
 
     it("moves a suite's shorter tests up once its lane holds a longer one", () => {
@@ -1484,7 +1550,7 @@ describe("plan", () => {
         expect(suiteLoad(manifest, "workspace-unit", lane.selections))
           .toBeCloseTo(190, 6);
         expect(lane.projectedSeconds).toBeCloseTo(190, 6);
-        expect(testsOf(lane.selections)).toEqual({
+        expect(testsOf(lane.selections, aroundIn(manifest.entries))).toEqual({
           ran: 100 + 120 + 90,
           longest: [100, 60, 30],
           opened: 6,
@@ -1492,16 +1558,134 @@ describe("plan", () => {
       });
     });
 
+    describe("a test inside a `describe`", () => {
+      // A runner running a leaf runs the `beforeAll` and `afterAll` of
+      // every `describe` around it, on every run of the unit, whichever
+      // lane the manifest's entry for that `describe` went to. That entry's
+      // cost is the time the `describe` spent outside the cases directly
+      // inside it, which is what its hooks take.
+
+      /**
+       * A test of one file, named for its whole `describe` chain. One too
+       * flaky to judge a change by stands for a `describe` no lane is
+       * given, whose hooks run all the same around any leaf inside it.
+       */
+      function named(
+        n: string,
+        cost: number,
+        fields: Partial<ManifestEntry> = {},
+      ): ManifestEntry {
+        return sampleEntry({ k: "unit", s: "memory", n }, {
+          unit: "packages/memory/test/hooks.test.ts",
+          cost,
+          ...fields,
+        });
+      }
+
+      const UNPLACED = { flakeRate: 0.5 };
+
+      /** The one lane of a plan that must run `chosen`. */
+      function laneRunning(
+        corpus: ManifestEntry[],
+        chosen: ManifestEntry[],
+      ) {
+        return run(sampleManifest({ entries: corpus }), {
+          lanes: 1,
+          budgetSeconds: 1000,
+          mandatory: new Map(
+            chosen.map((entry) => [
+              testIdentityKey(entry.test),
+              "changed" as const,
+            ]),
+          ),
+        }).lanes[0]!;
+      }
+
+      it("charges a lane holding only a leaf the `describe` around it, once for each run of the unit", () => {
+        const leaf = named("hooks > runs a leaf", 1, { repeats: 3 });
+        const lane = laneRunning(
+          [named("hooks", 100, UNPLACED), leaf],
+          [leaf],
+        );
+        expect(lane.selections.map(({ entry }) => entry.test.n))
+          .toEqual(["hooks > runs a leaf"]);
+        expect(lane.projectedSeconds).toBeCloseTo(3 * (1 + 100), 6);
+      });
+
+      it("charges a `describe` once for each run however many of its leaves the lane holds", () => {
+        const leaves = [
+          named("hooks > runs one leaf", 1),
+          named("hooks > runs another", 2),
+        ];
+        const lane = laneRunning(
+          [named("hooks", 100, UNPLACED), ...leaves],
+          leaves,
+        );
+        expect(lane.projectedSeconds).toBeCloseTo(1 + 2 + 100, 6);
+      });
+
+      it("charges a `describe` the lane holds beside a leaf inside it once", () => {
+        const corpus = [named("hooks", 100), named("hooks > runs a leaf", 1)];
+        const lane = laneRunning(corpus, corpus);
+        expect(lane.selections.length).toBe(2);
+        expect(lane.projectedSeconds).toBeCloseTo(100 + 1, 6);
+      });
+
+      it("charges every `describe` around a leaf, and none it is not inside", () => {
+        const leaf = named("outer > inner > runs a leaf", 1, { repeats: 2 });
+        const lane = laneRunning(
+          [
+            named("outer", 50, UNPLACED),
+            named("outer > inner", 20, UNPLACED),
+            leaf,
+            named("outer > beside", 30, UNPLACED),
+            named("outer > beside > runs elsewhere", 4, UNPLACED),
+          ],
+          [leaf],
+        );
+        expect(lane.projectedSeconds).toBeCloseTo(2 * (1 + 20 + 50), 6);
+      });
+
+      it("charges the lane a leaf goes to without its `describe` for the `describe`, as `suiteCharge()` reads it", () => {
+        // The two lanes hold 102 seconds each. The first leaf placed costs
+        // 101 with its `describe`, and the next one 1 beside it, so the
+        // third goes to the second lane, which pays for the `describe` as
+        // well.
+        const manifest = sampleManifest({
+          entries: [
+            named("hooks", 100),
+            named("hooks > runs one leaf", 1),
+            named("hooks > runs another", 1),
+            named("hooks > runs a third", 1),
+          ],
+        });
+        const result = run(manifest, {
+          policy: "everything",
+          lanes: 2,
+          budgetSeconds: 102,
+        });
+        expect(result.lanes.map((lane) => lane.projectedSeconds))
+          .toEqual([102, 101]);
+        for (const lane of result.lanes) {
+          expect(suiteCharge(manifest, "workspace-unit", lane.selections))
+            .toBeCloseTo(lane.projectedSeconds, 6);
+        }
+      });
+    });
+
     describe("testsOf()", () => {
       it("returns the same figures whatever order the selections are listed in", () => {
         // Added in this order, 0.1, 0.2 and 0.3 come to 0.6000000000000001,
         // and in the other to 0.6.
-        const selections = entries(3, (i) => ({
+        const corpus = entries(3, (i) => ({
           cost: [0.1, 0.2, 0.3][i]!,
           unit: "packages/memory/test/one.test.ts",
-        })).map((entry) => ({ entry, repeats: 1 }));
-        expect(testsOf(selections.toReversed())).toEqual(testsOf(selections));
-        expect(testsOf(selections).ran).toBe(0.6000000000000001);
+        }));
+        const around = aroundIn(corpus);
+        const selections = corpus.map((entry) => ({ entry, repeats: 1 }));
+        expect(testsOf(selections.toReversed(), around))
+          .toEqual(testsOf(selections, around));
+        expect(testsOf(selections, around).ran).toBe(0.6000000000000001);
       });
     });
 

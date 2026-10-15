@@ -3392,8 +3392,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
-      dropEvent: (queuedEvent, reason) => {
-        this.#dropEvent(queuedEvent, reason);
+      dropEvent: (queuedEvent, reason, options) => {
+        this.#dropEvent(queuedEvent, reason, options);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.recordEvent(originTx, queuedEvent);
