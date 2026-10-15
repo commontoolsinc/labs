@@ -12,8 +12,9 @@ On 2026-10-14 FabriChat felt slow on Estuary. The toolshed instance on port
 (`did:key:z6MkuLBVWMjUc3p8bEDLExBLaXPuFsBGbrWWW8FtGUTG29Vo`, root
 `system:loom/main.tsx`), in which the whole team met. This is what the host
 said, what the space's history said, and what the mechanism turned out to
-be. The runtime change that ends the loop is described at the end; it is
-live code and this record does not describe it beyond naming it.
+be. The runtime change that ends the loop is named at the end, with what
+it changes and nothing of how; it is live code, and the code is its own
+description.
 
 ## The host
 
@@ -26,8 +27,9 @@ One space-scoped document in that space,
 `of:fid1:0npAB-ANgDSGHwZRIEIm-_0FuZVFg3QojnXi9bjawug`, held 4,622 revisions
 written by ten principals, every one by the same action, `raw:wish:…`. Its
 first revision carried only the `result` metadata link a piece's setup writes
-on each internal cell it mints. Every later revision held a link, at user
-scope, to one of two documents:
+on each internal cell it mints. The later revisions held a link, at user
+scope, to one of two documents. Of the last 200 revisions, 191 were grouped
+by the document they named; the other nine were not examined:
 
 | Target | Of the last 200 revisions |
 | --- | ---: |
