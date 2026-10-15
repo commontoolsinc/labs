@@ -3508,6 +3508,23 @@ export interface ISpaceReplica extends ISpace {
   };
 
   /**
+   * Resolves once every client speculation layer standing over the document
+   * now (entries sealed `speculative: true` — speculation.md §1) has settled,
+   * by retirement or withdrawal; `undefined` when none stands. A layer sealed
+   * after the call is not waited for.
+   *
+   * A layer masks the document's durable state, so a change to that state
+   * beneath it changes nothing visible and notifies nothing, and neither does
+   * its retirement over a durable value equal to its own. A reader of the
+   * durable view waits on this to learn of either.
+   */
+  whenSpeculationSettled?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined;
+
+  /**
    * The store seq a local commit's accept committed at (speculation.md
    * §4's "acked AND W ≥ that commit's seq" retirement floor), or
    * undefined while unsettled / rejected / pruned from the bounded
