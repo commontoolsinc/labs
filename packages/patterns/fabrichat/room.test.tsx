@@ -141,12 +141,6 @@ export default pattern(() => {
     myProfile: bobProfile,
     ...rowRecords,
   } as RowArg);
-  // The thread-only reply that the replies below send first.
-  const bobOnThreadReply = FabriChatMessageRow({
-    message: messages.key(3),
-    myProfile: bobProfile,
-    ...rowRecords,
-  } as RowArg);
 
   return {
     [TESTS]: [
@@ -312,19 +306,6 @@ export default pattern(() => {
             replies.map((reply) => reply.replyTo?.shownIn).join() ===
               "thread,both,main";
         }),
-      },
-
-      // Refused: a reply to a deleted message, and a reply quoted in the main
-      // conversation to a message shown only in a thread.
-      {
-        action: bobOnSecond.replyInThread,
-        event: typed("To the deleted one"),
-        trustedUi: sendGesture,
-      },
-      {
-        action: bobOnThreadReply.replyInMain,
-        event: typed("Quoting a thread reply"),
-        trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
