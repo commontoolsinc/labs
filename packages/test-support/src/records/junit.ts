@@ -327,7 +327,7 @@ const SOURCE_SUFFIX = /\.(ts|tsx|js|jsx|mts|mjs)$/;
  */
 export function isRelativeSourcePath(classname: string): boolean {
   if (classname.includes("://") || classname.startsWith("ext:")) return false;
-  if (classname.includes("\\") || !isRepositoryPath(classname)) return false;
+  if (!isRepositoryPath(classname)) return false;
   const segments = classname.split("/");
   for (let i = 0; i < segments.length; i++) {
     if (segments[i] === "." && i > 0) return false;

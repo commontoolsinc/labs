@@ -174,13 +174,16 @@ function isOptionalString(value: unknown): value is string | undefined {
 }
 
 /**
- * Whether a forward-slashed path can name a file of the repository: one
- * relative to its root that never climbs above it. An absolute path, or
- * one that climbs out, names a file outside the repository, and nothing
- * there is a test of it.
+ * Whether a path can name a file of the repository: one relative to its
+ * root, forward-slashed, that never climbs above it. An absolute path,
+ * whether rooted at `/` or at a drive letter, or one that climbs out,
+ * names a file outside the repository, and nothing there is a test of it.
+ * A backslash is refused as well, since a repository path is written with
+ * forward slashes and a backslash can hide either of the other two.
  */
 export function isRepositoryPath(path: string): boolean {
-  return !path.startsWith("/") && !path.split("/").includes("..");
+  return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) &&
+    !path.includes("\\") && !path.split("/").includes("..");
 }
 
 /** Whether a value is a seed `deno test --shuffle` would take. */

@@ -127,6 +127,15 @@ describe("schema", () => {
       it("returns undefined for a pattern test named by an absolute path", () => {
         expect(parseRecordLine(pattern("/tmp/root_1/main.test.tsx")))
           .toBeUndefined();
+        expect(parseRecordLine(pattern("C:/tmp/root_1/main.test.tsx")))
+          .toBeUndefined();
+        expect(parseRecordLine(pattern("C:\\tmp\\root_1\\main.test.tsx")))
+          .toBeUndefined();
+      });
+
+      it("returns undefined for a pattern test named with backslashes", () => {
+        expect(parseRecordLine(pattern("..\\tmp\\main.test.tsx")))
+          .toBeUndefined();
       });
 
       it("keeps a unit test whose name reads like an absolute path", () => {
