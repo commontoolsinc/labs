@@ -34,7 +34,7 @@ describe("XAppView named-space loading", () => {
   it("tells the render it opened the active piece, and not a view at a path inside it", async () => {
     // A path inside the piece may lead to another piece, which the shell did
     // not open; the render opens that one.
-    const restore = installBrowserGlobals();
+    const restore = installBrowserGlobals(PAGE_HREF);
     try {
       const { XBodyView } = await import("../src/views/BodyView.ts");
       const nested = { ref: () => ({ path: ["detail"] }) };
