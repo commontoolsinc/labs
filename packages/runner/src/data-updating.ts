@@ -625,9 +625,11 @@ export function diffAndAppend(
   existing.forEach((element, i) => {
     combined[i] = element;
   });
-  flattened.forEach((element, i) => {
-    combined[existing.length + i] = element;
-  });
+  // Indexed rather than `forEach`, so a hole among the appended values is
+  // stored as an explicit `undefined`, as any other written element is.
+  for (let i = 0; i < flattened.length; i++) {
+    combined[existing.length + i] = flattened[i];
+  }
   return writeWalked(
     runtime,
     tx,

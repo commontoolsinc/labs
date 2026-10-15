@@ -2474,6 +2474,25 @@ describe("data-updating", () => {
       expect(1 in value).toBe(false);
       expect(value[3]).toBe(4);
     });
+
+    it("writes a hole among the appended values as an explicit undefined", async () => {
+      // deno-lint-ignore no-explicit-any
+      const appended: any[] = new Array(2);
+      appended[1] = "c";
+      const { written, value } = await appendTo(
+        "append fills appended holes",
+        ["a"],
+        appended,
+      );
+
+      expect(written.toSorted()).toEqual([
+        "value/1",
+        "value/2",
+        "value/length",
+      ]);
+      expect(value).toHaveLength(3);
+      expect(value[2]).toBe("c");
+    });
   });
 });
 
