@@ -145,7 +145,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-hover-reveal` | Content whose `actions` slot appears on hover or focus (see [cf-hover-reveal](#cf-hover-reveal)) | |
 | `cf-hscroll` | Horizontal scroll container | |
 | `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
-| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, or service capabilities | |
+| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, service, or presence-room capabilities | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
 | `cf-input-otp` | One-time-password input with individual digit fields | |
