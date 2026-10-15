@@ -8,10 +8,10 @@ function report(id: string) {
   return new Promise<string>((resolve) => {
     const receive = (event: MessageEvent) => {
       if (event.data?.id !== id) return;
-      window.removeEventListener("message", receive);
+      globalThis.removeEventListener("message", receive);
       resolve(event.data.ink);
     };
-    window.addEventListener("message", receive);
+    globalThis.addEventListener("message", receive);
   });
 }
 
@@ -34,7 +34,7 @@ Deno.test("cf-iframe inherits live presentation across a shadow root and support
           ink: getComputedStyle(document.documentElement).getPropertyValue('--example-ink').trim()
         }, '*');
       }
-      window.addEventListener('load', report);
+      globalThis.addEventListener('load', report);
       document.addEventListener('common-iframe-presentation', report);
     </script>`;
   shadow.append(element);

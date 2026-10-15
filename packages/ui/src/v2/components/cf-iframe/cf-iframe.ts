@@ -1,10 +1,13 @@
+/** Sandboxed pattern content and its inherited host presentation. */
+
 import {
   CommonIframeSandboxElement as _,
   type FabricBridge,
+  type IframePresentation,
   IPC,
 } from "@commonfabric/iframe-sandbox";
 import { isCellHandle, type RuntimeClient } from "@commonfabric/runtime-client";
-import { ContextConsumer } from "@lit/context";
+import { ContextConsumer, createContext } from "@lit/context";
 import { css, html } from "lit";
 import type { PropertyValues } from "lit";
 
@@ -15,6 +18,13 @@ import {
   createCellContextBridge,
   resolveCellContextBridge,
 } from "./cell-bridge.ts";
+
+/** Host presentation inherited by `cf-iframe` descendants. */
+export const iframePresentationContext = createContext<
+  IframePresentation | null
+>(
+  "cf-iframe-presentation",
+);
 
 /**
  * CFIframe - An iframe to execute arbitrary scripts
@@ -43,6 +53,7 @@ export class CFIframe extends BaseElement {
     context: { type: Object },
     bridge: { type: Object },
     resourceKinds: { attribute: false },
+    presentation: { attribute: false },
     _errorDetails: { state: true },
   };
 
@@ -53,6 +64,12 @@ export class CFIframe extends BaseElement {
     | Readonly<Record<string, CellContextResourceKind>>
     | null;
   declare _errorDetails: IPC.GuestError | null;
+  #presentation: IframePresentation | null | undefined;
+  readonly #presentationConsumer = new ContextConsumer(this, {
+    context: iframePresentationContext,
+    subscribe: true,
+  });
+
   private _contextBridge: FabricBridge = { resources: {} };
   private _contextReady = true;
   private _contextGeneration = 0;
@@ -82,6 +99,17 @@ export class CFIframe extends BaseElement {
     this.bridge = null;
     this.resourceKinds = null;
     this._errorDetails = null;
+  }
+
+  /** Explicit presentation; `undefined` inherits and `null` opts out. */
+  get presentation(): IframePresentation | null | undefined {
+    return this.#presentation;
+  }
+
+  set presentation(value: IframePresentation | null | undefined) {
+    const previous = this.#presentation;
+    this.#presentation = value;
+    this.requestUpdate("presentation", previous);
   }
 
   static override styles = [
@@ -289,6 +317,9 @@ export class CFIframe extends BaseElement {
         .bridge="${bridge}"
         .src="${source}"
         .outerFrameUrl="${this.#outerFrameUrl}"
+        .presentation="${this.presentation === undefined
+          ? this.#presentationConsumer.value ?? null
+          : this.presentation}"
         height="100%"
         width="100%"
         style="border: none;"

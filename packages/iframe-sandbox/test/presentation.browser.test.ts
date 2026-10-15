@@ -7,10 +7,10 @@ function report(id: string) {
   return new Promise<Record<string, string>>((resolve) => {
     const receive = (event: MessageEvent) => {
       if (event.data?.fixture !== id) return;
-      window.removeEventListener("message", receive);
+      globalThis.removeEventListener("message", receive);
       resolve(event.data);
     };
-    window.addEventListener("message", receive);
+    globalThis.addEventListener("message", receive);
   });
 }
 
@@ -21,18 +21,20 @@ function guest(id: string) {
     <input value="initial"><script>
     const input = document.querySelector('input');
     const incarnation = Math.random().toString();
+    const startupInk = getComputedStyle(document.documentElement).getPropertyValue('--example-ink').trim();
     function report() {
       top.postMessage({fixture: ${JSON.stringify(id)},
         color: getComputedStyle(document.body).color,
         skin: document.documentElement.getAttribute('data-skin'),
         caption: document.documentElement.getAttribute('data-caption'),
-        mode: document.compatMode, input: input.value, incarnation,
+        mode: document.compatMode, input: input.value, incarnation, startupInk,
+        fontToken: getComputedStyle(document.documentElement).getPropertyValue('--example-font').trim(),
         fonts: document.querySelector('link[rel="stylesheet"]')?.getAttribute('href') ?? ''
       }, '*');
     }
-    window.addEventListener('load', () => { report(); input.value = 'edited'; });
+    globalThis.addEventListener('load', () => { report(); input.value = 'edited'; });
     document.addEventListener('common-iframe-presentation', report);
-    window.addEventListener('message', event => {
+    globalThis.addEventListener('message', event => {
       if (event.data === 'presentation-test-probe') report();
     });
     </script></body></html>`;
@@ -43,13 +45,14 @@ for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
     const id = crypto.randomUUID();
     const element = new CommonIframeSandboxElement();
     element.outerFrameUrl = outerFrameUrl;
+    const fontURL = new URL("/presentation.css", location.href).href;
     element.presentation = {
       css: ":root { --example-ink: rgb(12, 34, 56); }",
       attributes: {
         "data-skin": "host",
         "data-caption": "</script><b>text</b>",
       },
-      stylesheets: [],
+      stylesheets: [fontURL],
     };
     element.src = guest(id);
     const first = report(id);
@@ -57,9 +60,12 @@ for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
     try {
       const initial = await first;
       expect(initial.color).toBe("rgb(12, 34, 56)");
+      expect(initial.startupInk).toBe("rgb(12, 34, 56)");
       expect(initial.skin).toBe("host");
       expect(initial.caption).toBe("</script><b>text</b>");
       expect(initial.mode).toBe("CSS1Compat");
+      expect(initial.fonts).toBe(fontURL);
+      expect(initial.fontToken).toBe("fixture");
       const changed = report(id);
       element.presentation = {
         css: ":root { --example-ink: rgb(65, 43, 21); }",
@@ -69,6 +75,8 @@ for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
       const next = await changed;
       expect(next.color).toBe("rgb(65, 43, 21)");
       expect(next.skin).toBe("next");
+      expect(next.fonts).toBe("");
+      expect(next.fontToken).toBe("");
       expect(next.input).toBe("edited");
       expect(next.incarnation).toBe(initial.incarnation);
       const guestWindow = element.accessForTestingOnly.iframeRef.value
