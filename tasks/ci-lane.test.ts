@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { exists } from "@std/fs";
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { fromFileUrl } from "@std/path";
+import { dirname, fromFileUrl } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { shuffleNotice } from "@commonfabric/test-support/shuffle";
 import {
@@ -110,7 +110,7 @@ import { duration } from "./test-selection/duration.ts";
  * own directory: a package's tests run with that package as the working
  * directory, and the paths the topology reads are the repository's.
  */
-const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const REPOSITORY = dirname(dirname(fromFileUrl(import.meta.url)));
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
   return {
@@ -211,7 +211,7 @@ describe("reading the lane's command line", () => {
     // which before it reads anything, so a log that stops early still
     // names the order its tests would have run in.
     const result = await runDenoCommandWithTemporaryLock({
-      root: fromFileUrl(new URL("..", import.meta.url)),
+      root: REPOSITORY,
       args: (lock) => [
         "run",
         `--lock=${lock}`,

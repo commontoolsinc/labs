@@ -22,7 +22,7 @@ import { MEASURED_BATCH_SUFFIX } from "./lane-measurement.ts";
 import { serverExecutionCiLane } from "./server-execution-ci.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 
-const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const root = path.dirname(path.dirname(path.fromFileUrl(import.meta.url)));
 const suites = await loadTopology(root);
 
 /** The Deno subcommands a suite's runner is allowed to be. */

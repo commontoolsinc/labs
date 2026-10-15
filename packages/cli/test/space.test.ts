@@ -517,7 +517,7 @@ describe("cf space", () => {
       // MEMORY_DIR is how the CLI learns what the local server is serving.
       const result = await cf(
         `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
-        { env: { MEMORY_DIR: `file://${live}/` } },
+        { env: { MEMORY_DIR: toFileUrl(`${live}/`).href } },
       );
       expect(result.code).not.toBe(0);
       expect(text(result.stderr)).toContain(
