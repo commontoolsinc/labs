@@ -3826,44 +3826,36 @@ export class Scheduler {
   }
 
   /**
-   * The head event's required replica load FAILED.
+   * Settles the head event whose required replica load failed, the park's
+   * other ending beside `#releaseHeadEventLoadPark()`.
    *
    * events.md §5's T3 drop predicate is "no runnable handler", never
-   * "the run raced" — and a load failure is the second: the doc the
-   * closure reads EXISTS durably, only the read path failed. The live
-   * shape (verification-coverage.md's OW45 residue member, store-proven
-   * on CI run 32929764230) is a serving session revoked by the genesis
-   * ACL landing after activation — `unauthorized` on a cross-space read
-   * of a doc the server itself wrote one second earlier. Sealing §5's
-   * dropped-event notice for that DISCHARGED at-least-once on a healthy
-   * trusted user action and advanced the watermark past it, so nothing
-   * ever re-ran it: the click was silently lost.
-   *
-   * CORRECTED 2026-08-26. This docstring used to add "healing by design
-   * on the next mount", and that was FALSE: nothing remounted. Run
-   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
-   * over 5m47s off one revoked session, zero successful loads — the
-   * deferral below waiting for a heal that did not exist, exactly as
-   * `storage/rejection.ts`'s SessionError note had said ("the
-   * convergence argument is sound, only the remount is missing"). The
-   * remount now exists: an admitted commit touching the space's ACL doc
-   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
-   * triggered by executor/host.ts), so the deferral's convergence
-   * argument holds. What has NOT changed is the persistent-failure
-   * posture spelled out below: a load whose ACL never changes — or whose
-   * re-open is denied — defers indefinitely, which is OW54's territory.
+   * "the run raced" — and a load failure is the second: the document the
+   * closure reads exists durably, only the read path failed. The live
+   * shape (verification-coverage.md's OW45 residue member) is a serving
+   * session revoked by the genesis ACL landing after activation —
+   * `unauthorized` on a cross-space read of a document the server itself
+   * wrote a moment earlier. Sealing §5's dropped-event notice for that
+   * discharges at-least-once on a healthy trusted user action and
+   * advances the watermark past it, so nothing ever re-runs it: the click
+   * is silently lost.
    *
    * A SERVED event therefore DEFERS — no consequence written, the
    * durable entry left pending and UNCONSEQUENCED, a later drain
-   * re-delivering it. The deferral carries the drain's arrival-order
-   * BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
-   * arm): every later-arrived durable served entry behind it IN THE
-   * SAME SPACE defers too, or a later arrival's consequence lands ahead
-   * of an earlier one. Two exclusions, both deliberate: cross-space
-   * queue neighbours (§2's order is per-space) and LT1 in-process
-   * copies (`served` with no `streamEntry`), which have no durable
-   * entry to re-drain and are a running event's same-wave cascade
-   * children rather than later arrivals.
+   * re-delivering it. What makes the deferral converge is the session
+   * remount: an admitted commit touching the space's ACL document re-arms
+   * the session (storage/v2.ts `consumeOwedSessionRemount`, triggered by
+   * executor/host.ts). A load whose ACL never changes, or whose re-open
+   * is denied, defers indefinitely, which is OW54's territory. The
+   * deferral carries the drain's arrival-order BARRIER with it (events.md
+   * §2, mirroring the sidecar-sync-failure arm): every later-arrived
+   * durable served entry behind it IN THE SAME SPACE defers too, or a
+   * later arrival's consequence lands ahead of an earlier one. Two
+   * exclusions, both deliberate: cross-space queue neighbors (§2's order
+   * is per-space) and LT1 in-process copies (`served` with no
+   * `streamEntry`), which have no durable entry to re-drain and are a
+   * running event's same-wave cascade children rather than later
+   * arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
    * a failed load drops the event — the same split events.ts makes for a
