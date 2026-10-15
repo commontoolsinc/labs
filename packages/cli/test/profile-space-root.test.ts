@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
-import { join } from "@std/path";
+import { join, toFileUrl } from "@std/path";
 
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -69,7 +69,7 @@ describe("profileSpaceRoot()", () => {
 
   const serve = () => {
     server = new MemoryV2Server.Server({
-      store: new URL(`file://${storeDir}/`),
+      store: toFileUrl(`${storeDir}/`),
       authorizeSessionOpen: authorizeLoopbackSessionOpen,
       sessionOpenAuth: { audience: "did:key:z6Mk-profile-repair-root" },
       acl: { mode: "enforce" },

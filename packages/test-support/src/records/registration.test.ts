@@ -376,6 +376,28 @@ describe("registration", () => {
   });
 
   describe("readRegistrations()", () => {
+    it("leaves out a file any map marked as interrupted names", async () => {
+      // An error can stop a module part way through loading, after some
+      // of its tests registered and their names were written unmarked.
+      const dir = await Deno.makeTempDir();
+      try {
+        await writeNameMap(dir, "01", { early: "packages/a/one.test.ts" });
+        await Deno.writeTextFile(
+          join(dir, `${NAME_MAP_PREFIX}02${NAME_MAP_SUFFIX}`),
+          JSON.stringify({
+            names: { early: "packages/a/one.test.ts" },
+            interrupted: true,
+          }),
+        );
+        await writeNameMap(dir, "03", { whole: "packages/b/two.test.ts" });
+        expect(await readRegistrations(dir)).toEqual(
+          new Map([["packages/b/two.test.ts", new Set(["whole"])]]),
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("returns each file's names from every map a spool holds", async () => {
       // Every execution of a unit writes a map of its own, and what the
       // file registered is all of them together.
@@ -540,6 +562,50 @@ describe("registration", () => {
         built.capture.flush();
         const names = await readNameMaps(spool);
         expect(names.get("written out")).toMatch(/registration\.test\.ts$/);
+      } finally {
+        await Deno.remove(spool, { recursive: true });
+      }
+    });
+
+    it("writes every name it noted again, marked, once interrupted", async () => {
+      // The names written before the interruption were written unmarked,
+      // and the file they came from may hold more than they say.
+      const spool = await Deno.makeTempDir();
+      try {
+        const { registrar } = recorder();
+        const built = buildCapture({ registrar, spool });
+        built.registrar("before", () => {});
+        built.capture.flush();
+        expect((await readRegistrations(spool)).size).toBe(1);
+        built.registrar("during", () => {});
+        built.capture.interrupt();
+        built.registrar("after", () => {});
+        built.capture.flush();
+        expect(await readRegistrations(spool)).toEqual(new Map());
+        // Each name still says which file it came from.
+        const files = await readNameMaps(spool);
+        for (const name of ["before", "during", "after"]) {
+          expect(files.get(name)).toMatch(/registration\.test\.ts$/);
+        }
+      } finally {
+        await Deno.remove(spool, { recursive: true });
+      }
+    });
+
+    it("notes no interruption once the module has finished loading", async () => {
+      // An error once the file's hooks and tests begin leaves what its
+      // module registered whole.
+      const spool = await Deno.makeTempDir();
+      try {
+        const { registrar } = recorder();
+        const built = buildCapture({ registrar, spool });
+        built.registrar("runs", () => {});
+        built.capture.begin();
+        built.capture.interrupt();
+        built.capture.flush();
+        expect([...(await readRegistrations(spool)).values()]).toEqual([
+          new Set(["runs"]),
+        ]);
       } finally {
         await Deno.remove(spool, { recursive: true });
       }
