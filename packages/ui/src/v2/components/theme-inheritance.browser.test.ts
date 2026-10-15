@@ -146,3 +146,22 @@ Deno.test("a primary button with no theme anywhere above it still draws its fill
     button.remove();
   }
 });
+
+for (const tag of ["cf-checkbox", "cf-radio"]) {
+  Deno.test(`${tag} draws its box in the host's theme colors`, async () => {
+    const host = themedHost();
+    host.style.setProperty("--cf-theme-color-primary", "rgb(1, 2, 3)");
+    host.style.setProperty("--cf-theme-color-surface", "rgb(4, 5, 6)");
+    host.style.setProperty("--cf-theme-color-border", "rgb(7, 8, 9)");
+    try {
+      const control = await mountIn(host, tag);
+
+      expect(token(control, "--primary")).toBe("rgb(1, 2, 3)");
+      expect(token(control, "--background")).toBe("rgb(4, 5, 6)");
+      expect(token(control, "--foreground")).toBe(HOST_TEXT);
+      expect(token(control, "--border")).toBe("rgb(7, 8, 9)");
+    } finally {
+      host.remove();
+    }
+  });
+}
