@@ -163,12 +163,20 @@ export class CFVScroll extends BaseElement {
   /**
    * Watches the container and every slotted element, so any growth of the
    * content (a message added, text streaming in, an image laying out, a
-   * hidden panel shown) can snap. It reports sizes on `observe()` too, which
+   * hidden panel shown) changes a box it sees. It reports sizes on `observe()` too, which
    * covers content that is already slotted when the element connects: a
    * renderer builds a subtree before inserting it, so a history whose
    * messages are ready on first render arrives whole.
    */
   private _resizeObserver = new ResizeObserver(() => this.snapIfFollowing());
+  /**
+   * Watches the slotted subtree for growth that changes no observed box: items
+   * added inside a `display: contents` wrapper (how the renderer slots an
+   * array), or text streaming into a text node.
+   */
+  private _mutationObserver = new MutationObserver(() =>
+    this.snapIfFollowing()
+  );
   /**
    * Whether new content should snap: true until the reader scrolls up, and
    * true again once they reach the bottom. Only a scroll toward the top clears
@@ -222,6 +230,7 @@ export class CFVScroll extends BaseElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     this._resizeObserver.disconnect();
+    this._mutationObserver.disconnect();
     this.removeEventListener("cf-chat-updated", this._handleChatUpdate);
   }
 
@@ -238,6 +247,11 @@ export class CFVScroll extends BaseElement {
     for (const element of slot.assignedElements()) {
       this._resizeObserver.observe(element);
     }
+    this._mutationObserver.observe(this, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
   };
 
   /**
@@ -253,9 +267,6 @@ export class CFVScroll extends BaseElement {
     const distance = scrollHeight - clientHeight - scrollTop;
     if (distance <= 0) return;
     this.scrollToBottom(distance <= clientHeight);
-    // Measure the reader's next scroll from here: a jump has landed, and a
-    // smooth scroll only moves down from where it starts.
-    this._lastScrollTop = container.scrollTop;
   }
 
   private handleScroll = () => {
