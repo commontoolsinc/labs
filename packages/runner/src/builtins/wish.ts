@@ -15,7 +15,7 @@ import { type DID, isDID } from "@commonfabric/identity/did";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { h } from "../builder/h.ts";
 // The sidecar instantiation observes its wave settlement (a serving-wave
@@ -38,7 +38,7 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
-import type { RawBuiltinResult } from "../module.ts";
+import type { RawBuiltinResult, RawNodeCause } from "../module.ts";
 import { systemPatternSource } from "../pattern-source-scheme.ts";
 import {
   homeHasDefaultProfileSlot,
@@ -2082,6 +2082,35 @@ function wishOutputScope(
 }
 
 /**
+ * The cause a wish's state document is minted from: the node's owning piece
+ * and its output spot, the way `ownedResultCause()` keys a branching builtin's
+ * store, with the node's inputs document left out. That document is
+ * content-addressed over the node's serialized inputs, the schema generated
+ * for the wish's type parameter among them, so two compilations of one
+ * pattern can bind one node to two inputs documents, and two sessions holding
+ * one each then run that node against one output slot. The piece and the
+ * spot are what every compilation shares, and a run re-derives the whole
+ * state, so no earlier run's write is needed. A cause carrying no output
+ * spot, as a hand-built one in a test, is used as it is.
+ */
+function wishStateCause(cause: unknown): unknown {
+  if (!isNodeCauseWithOutputSpot(cause)) return { wish: { state: cause } };
+  return {
+    wish: { state: { parents: cause.parents, outputSpot: cause.outputSpot } },
+  };
+}
+
+/** Whether `cause` is a node cause whose output binding reached a redirect. */
+function isNodeCauseWithOutputSpot(
+  cause: unknown,
+): cause is RawNodeCause & {
+  outputSpot: NonNullable<RawNodeCause["outputSpot"]>;
+} {
+  return isObjectNotArray(cause) && cause.parents !== undefined &&
+    cause.outputSpot !== undefined;
+}
+
+/**
  * Whether a settled wish-state commit failure deserves the error surface
  * (verification-coverage OW50, seat S-J). Excluded, because re-running
  * converges them and a red surface would race the converged state:
@@ -2323,7 +2352,7 @@ export function wish(
   ): void {
     const baseCell = runtime.getCell(
       parentCell.space,
-      { wish: { state: cause } },
+      wishStateCause(cause),
       wishStateSchemaForResult(schema),
       tx,
     );
