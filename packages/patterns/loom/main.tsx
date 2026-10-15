@@ -874,7 +874,7 @@ export default pattern<LoomInput, LoomOutput>(
         </cf-theme>
       ),
       title,
-      style: computed(() => normalizedStyle(style.get())),
+      style: normalizedStyle(style.get()),
       panels,
       presentation,
       pieceRegistry,
