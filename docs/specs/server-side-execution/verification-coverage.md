@@ -7341,15 +7341,21 @@ supply; OW29/OW32/OW34 closed):
     never named or one it loaded before anything was written there, so a
     catch-up that loads them repairs the commit with no serving side, and
     a catch-up that cannot load one fails the start with the load's
-    reason. The start's pre-sync is meant to name everything a start
-    reads; this retry is what keeps a document it misses from costing more
-    than a round trip. A refusal that names any read at a later seq is a
-    stale read over a revision another writer moved past, and stays
+    reason. A retry can follow a link in a document the catch-up loaded
+    to one its loads never brought in, so the instantiation takes a round
+    per such layer, up to `PIECE_RUN_START_MAX_RETRIES` rounds, and each
+    round has to name a document no earlier round loaded; a refusal that
+    claims absent only documents an earlier round loaded is terminal. The
+    start's pre-sync is meant to name everything a start reads; these
+    rounds are what keep a document it misses from costing more than a
+    round trip per layer. A refusal that names any read at a later seq is
+    a stale read over a revision another writer moved past, and stays
     terminal with the flag off. With the flag off, a named piece's run
     start, which runs in a transaction of its own, runs again for either
-    exception within its `PIECE_RUN_START_MAX_RETRIES` budget; with it
-    on, the deferred start's catch-up-and-start takes every stale read
-    first. Explicit wave
+    exception within its `PIECE_RUN_START_MAX_RETRIES` budget, and fails
+    with the load's reason when the catch-up cannot load a document it
+    named; with the flag on, the deferred start's catch-up-and-start takes
+    every stale read first. Explicit wave
     abandon is classified separately and warned without incrementing the
     serving runtime's structure-load-failure observer. A recoverable failure
     is warned on the same terms while its one retry is outstanding, and is
@@ -7371,9 +7377,13 @@ supply; OW29/OW32/OW34 closed):
     bring in the document a nested instance's setup reads through a slot
     its stored argument carries, with a catch-up that cannot load that
     document failing the start with the load's reason; the flag-OFF
-    terminal companion refuses a read at seq 1. The named piece's run
-    start is pinned in `cfc-policy-manifest-shared-install.test.ts`, by a
-    refusal claiming absence that runs the start again beside a read at a
+    terminal companion refuses a read at seq 1. The rounds are pinned in
+    `executor-wave.test.ts`: one per layer of documents claimed absent, a
+    refusal repeating a document an earlier round loaded torn down, and
+    the rounds bounded. The named piece's run start is pinned in
+    `cfc-policy-manifest-shared-install.test.ts`, by a refusal claiming
+    absence that runs the start again, a catch-up that cannot load the
+    document failing the start with the load's reason, and a read at a
     later seq that stays terminal. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because

@@ -176,7 +176,7 @@ import {
   type PreparedSourceUpdate,
 } from "./pattern-manager.ts";
 import { isCellResultForDereferencing } from "./query-result-proxy.ts";
-import type { Runtime } from "./runtime.ts";
+import type { CommitRetryPullFailure, Runtime } from "./runtime.ts";
 import {
   type Action,
   type EventHandler,
@@ -359,8 +359,11 @@ const NAMING_PROBE_BUDGET = 256;
 /**
  * How many times a named piece's run starts again after its start transaction
  * is refused retryably, matching the bound `Runtime.editWithRetry()` puts on
- * any other retrying writer. Each attempt waits for the refusal's catch-up
- * first, so the bound caps a basis that keeps moving rather than a spin.
+ * any other retrying writer, and how many times a piece's instantiation runs
+ * again over successive layers of documents its commit claimed absent. Each
+ * attempt waits for the refusal's catch-up first, so the bound caps a basis
+ * that keeps moving, or a chain of links each reaching a document not yet
+ * loaded, rather than a spin.
  */
 const PIECE_RUN_START_MAX_RETRIES = 5;
 
@@ -425,6 +428,53 @@ const refusalClaimsOnlyAbsence = (error: CommitError): boolean => {
   }
   const conflicts = error.conflicts ?? [];
   return conflicts.length > 0 && conflicts.every(({ seq }) => seq === 0);
+};
+
+/**
+ * The documents a commit refusal names, each keyed by its scope and id, so
+ * that a later refusal claiming absent only documents an earlier catch-up
+ * loaded can be told from one that reached documents not yet loaded.
+ */
+const conflictKeys = (error: CommitError): string[] =>
+  error.name === "ConflictError"
+    ? (error.conflicts ?? []).map(({ of, scope }) =>
+      `${scope ?? "space"} ${of}`
+    )
+    : [];
+
+/**
+ * The failure a piece start reports when the catch-up of a refusal it would
+ * otherwise retry could not load documents the retry reads. `refused` says
+ * which start was refused and how, and the cause is the reason each load
+ * gave.
+ */
+const catchUpLoadFailure = (
+  refused: string,
+  unloaded: readonly CommitRetryPullFailure[],
+): Error =>
+  new Error(
+    `${refused}, and its catch-up could not load ` +
+      unloaded.map(({ id }) => id).join(", "),
+    {
+      cause: unloaded.length === 1
+        ? unloaded[0].error
+        : new AggregateError(unloaded.map(({ error }) => error)),
+    },
+  );
+
+/**
+ * What a piece's instantiation may still recover once an earlier attempt's
+ * refused commit was recovered: another refusal claiming documents absent
+ * ({@link refusalClaimsOnlyAbsence}), while rounds remain and only when it
+ * names a document no earlier round's catch-up loaded. Any other refusal is
+ * terminal.
+ */
+type InstantiationRetry = {
+  /** Rounds over documents claimed absent that the retry may still take. */
+  readonly absenceRoundsLeft: number;
+
+  /** The documents earlier rounds loaded, as {@link conflictKeys} names. */
+  readonly loaded: ReadonlySet<string>;
 };
 
 /**
@@ -5263,7 +5313,7 @@ export class Runner {
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
-      recoverOnce = true,
+      retry?: InstantiationRetry,
     ) => {
       if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
       // Create new cancel group for nodes
@@ -5448,19 +5498,20 @@ export class Runner {
             currentPatternKey === patternKeyAtInstantiation;
           // `refusal` is how the commit was lost: its basis to the serving
           // side, a policy manifest install to another participant, an
-          // absence claim over documents the store holds, or none of these,
-          // which is terminal. One retry is enough for a lost install: a
-          // manifest never changes once present, so once the catch-up has
-          // loaded it the install reads it as present and writes nothing, and
-          // the same refusal cannot recur. It is enough for an absence claim
-          // as well, since the retry reads each named document at the
-          // revision the catch-up loaded instead of claiming it absent. A
-          // named piece's run start takes up to `PIECE_RUN_START_MAX_RETRIES`
-          // instead, because its refusal may also name the piece's own
-          // documents, whose basis other writers can keep moving.
-          const recoverInstantiationOnce = async (
+          // absence claim over the documents `absent` names that the store
+          // holds, or none of these, which is terminal. One retry is enough
+          // for a lost install: a manifest never changes once present, so
+          // once the catch-up has loaded it the install reads it as present
+          // and writes nothing, and the same refusal cannot recur. An absence
+          // claim can take a round per layer of documents instead: the retry
+          // reads each named document at the revision the catch-up loaded,
+          // and may follow a link in one to a document not yet loaded. The
+          // rounds are bounded by `PIECE_RUN_START_MAX_RETRIES`, and each has
+          // to name a document no earlier round loaded.
+          const recoverInstantiation = async (
             error: unknown,
             refusal: "absence" | "basis" | "manifest" | "terminal",
+            absent: readonly string[] = [],
           ) => {
             if (!exactNodesAreCurrent()) {
               // A stop, a runtime cycle, or a newer instantiation retired
@@ -5473,10 +5524,16 @@ export class Runner {
               ]);
               return;
             }
-            if (!recoverOnce || refusal === "terminal") {
-              // Either the one retry lost the same way, or this failure was
-              // never the recoverable class. The graph's setup does not
-              // become durable and the load has genuinely failed.
+            const recoverable = refusal !== "terminal" &&
+              (retry === undefined ||
+                (refusal === "absence" && retry.absenceRoundsLeft > 0 &&
+                  absent.some((key) => !retry.loaded.has(key))));
+            if (!recoverable) {
+              // Either this failure was never the recoverable class, or an
+              // earlier recovery leaves it none: the one retry lost the same
+              // way, or a round over documents claimed absent reached none
+              // not yet loaded, or the rounds are spent. The graph's setup
+              // does not become durable and the load has genuinely failed.
               this.#reportPieceStartCommitFailure(instantiateActionId, error);
               teardownRegistrationIfCurrent();
               return;
@@ -5515,8 +5572,9 @@ export class Runner {
 
             // A stop aborts the readiness/pull work above; a runtime cycle,
             // pointer change, or newer instantiation during the wait owns the
-            // key now. Otherwise retry exactly once; a second recoverable
-            // failure tears the registration down instead of spinning.
+            // key now. Otherwise retry, handing the retry what it may still
+            // recover, so that a failure it may not tears the registration
+            // down instead of spinning.
             if (
               retryReadinessTeardown.signal.aborted || !active ||
               startLifecycleEpoch !== this.#lifecycleEpoch ||
@@ -5536,27 +5594,29 @@ export class Runner {
             ) {
               this.#reportPieceStartCommitFailure(
                 instantiateActionId,
-                new Error(
+                catchUpLoadFailure(
                   `piece-start commit ${instantiateActionId} ` +
                     (refusal === "manifest"
                       ? "lost a policy manifest install"
-                      : "claimed documents absent that the store holds") +
-                    ", and its catch-up could not load " +
-                    unloaded.map(({ id }) => id).join(", "),
-                  {
-                    cause: unloaded.length === 1
-                      ? unloaded[0].error
-                      : new AggregateError(
-                        unloaded.map(({ error }) => error),
-                      ),
-                  },
+                      : "claimed documents absent that the store holds"),
+                  unloaded,
                 ),
               );
               teardownRegistrationIfCurrent();
               return;
             }
             try {
-              instantiatePattern(pattern, undefined, false);
+              instantiatePattern(
+                pattern,
+                undefined,
+                refusal === "absence"
+                  ? {
+                    absenceRoundsLeft: (retry?.absenceRoundsLeft ??
+                      PIECE_RUN_START_MAX_RETRIES) - 1,
+                    loaded: new Set([...(retry?.loaded ?? []), ...absent]),
+                  }
+                  : { absenceRoundsLeft: 0, loaded: new Set() },
+              );
             } catch (retryError) {
               this.#reportPieceStartCommitFailure(
                 instantiateActionId,
@@ -5571,13 +5631,17 @@ export class Runner {
                 // A lost manifest install recovers in every posture, for the
                 // reason `refusalNamesOnlyPolicyManifests` gives.
                 if (refusalNamesOnlyPolicyManifests(error)) {
-                  await recoverInstantiationOnce(error, "manifest");
+                  await recoverInstantiation(error, "manifest");
                   return;
                 }
                 // So does a claim of absence over documents the store holds,
                 // for the reason `refusalClaimsOnlyAbsence` gives.
                 if (refusalClaimsOnlyAbsence(error)) {
-                  await recoverInstantiationOnce(error, "absence");
+                  await recoverInstantiation(
+                    error,
+                    "absence",
+                    conflictKeys(error),
+                  );
                   return;
                 }
                 // Any other stale read recovers only where a serving side
@@ -5586,7 +5650,7 @@ export class Runner {
                   this.#runtime.experimental.serverExecution === true &&
                   isStaleReadConflict(error)
                 ) {
-                  await recoverInstantiationOnce(error, "basis");
+                  await recoverInstantiation(error, "basis");
                   return;
                 }
                 this.#reportPieceStartCommitFailure(instantiateActionId, error);
@@ -5617,7 +5681,7 @@ export class Runner {
               // contribution stands, so there is no rolled-back view to
               // re-instantiate against, and it takes the same terminal arm a
               // second failure takes.
-              await recoverInstantiationOnce(
+              await recoverInstantiation(
                 settled.error,
                 waveWithdrawalCause === "contribution-dropped"
                   ? "basis"
@@ -7600,14 +7664,14 @@ export class Runner {
             ownership,
             started.installedCancel,
           )
-          : "terminal";
+          : { failure: error };
         if (retry === "retry") {
           retriesLeft--;
           continue;
         }
         if (retry === "settled") return;
         ownership.cancel();
-        this.#reportPieceStartCommitFailure(actionId, error);
+        this.#reportPieceStartCommitFailure(actionId, retry.failure);
         return;
       }
     })();
@@ -7620,9 +7684,11 @@ export class Runner {
    * transaction was refused over a policy manifest another participant
    * installed first, or over documents it claimed absent that the store
    * holds. Resolves `"retry"` when the caller should run it again,
-   * `"terminal"` when the caller's failure arm should run as it does for any
-   * other refusal, and `"settled"` when the start was stopped or the runtime
-   * torn down during the wait, so there is nothing left to report.
+   * `"settled"` when the start was stopped or the runtime torn down during
+   * the wait, so there is nothing left to report, and otherwise the failure
+   * the caller's failure arm reports, as it does for any other refusal: the
+   * refusal itself, or the reason the catch-up could not load a document the
+   * run reads, since a run that reads it as absent again is refused again.
    *
    * The run is this participant's own setup of a piece set up elsewhere, and
    * when its argument carries a PolicyOf label that setup installs the policy
@@ -7653,7 +7719,7 @@ export class Runner {
     scheduledLifecycleEpoch: number,
     ownership: DeferredCancelOwnership,
     installedRegistration: Cancel | undefined,
-  ): Promise<"retry" | "terminal" | "settled"> {
+  ): Promise<"retry" | "settled" | { readonly failure: unknown }> {
     // A stop, a release, or `stopAll()` since the install removed it from
     // the registry, so the registration check also covers a canceled token
     // and a newer lifecycle epoch.
@@ -7664,7 +7730,7 @@ export class Runner {
       installedRegistration === undefined ||
       this.#cancels.get(key) !== installedRegistration
     ) {
-      return "terminal";
+      return { failure: error };
     }
     this.stop(resultCell);
     ownership.markInstalled(undefined);
@@ -7680,7 +7746,10 @@ export class Runner {
       error,
     );
     const teardown = this.#runtime.writeTeardownSignal;
-    await this.#runtime.awaitCommitRetryReadiness(error, teardown);
+    const unloaded = await this.#runtime.awaitCommitRetryReadiness(
+      error,
+      teardown,
+    );
     if (
       ownership.isCancelled() || teardown.aborted ||
       scheduledLifecycleEpoch !== this.#lifecycleEpoch
@@ -7688,7 +7757,18 @@ export class Runner {
       ownership.cancel();
       return "settled";
     }
-    if (this.#cancels.has(key)) return "terminal";
+    if (this.#cancels.has(key)) return { failure: error };
+    if (unloaded.length > 0) {
+      return {
+        failure: catchUpLoadFailure(
+          `piece-run start of ${resultCell.getAsNormalizedFullLink().id} ` +
+            (manifest
+              ? "lost a policy manifest install"
+              : "claimed documents absent that the store holds"),
+          unloaded,
+        ),
+      };
+    }
     return "retry";
   }
 

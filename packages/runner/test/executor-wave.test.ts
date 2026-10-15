@@ -4681,6 +4681,115 @@ describe("stage D seal-into-wave", () => {
     expect(witness.instantiations()).toBe(4);
   });
 
+  // A refusal claiming `id` absent: a confirmed read of it at seq 0, as the
+  // engine names one.
+  const absenceOf = (id: string) => ({
+    name: "ConflictError" as const,
+    message: `stale confirmed read: ${id} at seq 0 conflicted with seq 1`,
+    conflict: { space, the: "application/json", of: id, seq: 0 },
+    conflicts: [{ space, the: "application/json", of: id, seq: 0 }],
+    readyToRetry: () => Promise.resolve(),
+  });
+
+  // Refuses the piece's instantiation commits with what `refusal` returns
+  // for each attempt, counting from 1, and commits the rest. Resolves with
+  // the number of attempts and the start failures reported.
+  const startRefusingInstantiations = async (
+    witness: Awaited<ReturnType<typeof stoppedWitnessPiece>>,
+    refusal: (attempt: number) => unknown,
+  ) => {
+    let attempts = 0;
+    const failures: unknown[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ error }) => {
+      failures.push(error);
+    };
+    runtime.installSealDestination({
+      seal: (tx) => {
+        if (
+          !waveRunContextOf(tx)?.actionId.startsWith("piece-instantiate/")
+        ) {
+          return tx.tx.commit().settled;
+        }
+        attempts += 1;
+        const error = refusal(attempts);
+        if (error !== undefined) {
+          return Promise.resolve({ error: error as never });
+        }
+        return tx.tx.commit().settled;
+      },
+    }, {
+      runStamper: (tx, info) =>
+        stampWaveRunContext(tx, {
+          actionId: info.actionId,
+          kind: info.kind,
+        }),
+    });
+    expect(await runtime.start(witness.cell)).toBe(true);
+    await runtime.idle();
+    await runtime.runner.idlePieceInstantiationSettlements();
+    return { attempts, failures };
+  };
+
+  it("reinstantiates a piece once per layer of documents its refusals claim absent", async () => {
+    // A retry can read documents that only the previous round's catch-up
+    // made readable, and find behind them documents it has not loaded. Each
+    // refusal naming a document no earlier round loaded earns another
+    // round.
+
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-absence-layers",
+    );
+    const layers = [
+      witness.cell.getAsNormalizedFullLink().id,
+      "of:wave-piece-instantiate-absence-second-layer",
+    ];
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) =>
+        attempt <= layers.length ? absenceOf(layers[attempt - 1]) : undefined,
+    );
+
+    expect(failures).toEqual([]);
+    expect(attempts).toBe(3);
+    expect(witness.instantiations()).toBe(4);
+    expect(witness.lastRunInstantiation()).toBe(4);
+  });
+
+  it("tears down when a refusal claims absent a document an earlier round loaded", async () => {
+    // The first round's catch-up loaded the document, so a retry claiming
+    // it absent again has reached no further layer, and another round would
+    // read it the same way.
+
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-absence-repeated",
+    );
+    const repeated = absenceOf(witness.cell.getAsNormalizedFullLink().id);
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) => attempt <= 2 ? repeated : undefined,
+    );
+
+    expect(attempts).toBe(2);
+    expect(failures).toEqual([repeated]);
+    expect(witness.instantiations()).toBe(3);
+  });
+
+  it("tears down once its rounds over documents claimed absent are spent", async () => {
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-absence-unbounded",
+    );
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) => absenceOf(`of:wave-piece-instantiate-absence-${attempt}`),
+    );
+
+    expect(attempts).toBe(6);
+    expect(failures).toHaveLength(1);
+  });
+
   it("declines a stale-read refusal the stopped piece no longer owns", async () => {
     const witness = await stoppedWitnessPiece(
       "wave-piece-instantiate-stale-read-stopped",

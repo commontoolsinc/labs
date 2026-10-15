@@ -372,6 +372,34 @@ describe("cfc-policy-manifest-shared-install", () => {
       expect(failures).toEqual([]);
     });
 
+    it("reports a refusal claiming a document absent that its catch-up could not load, with the load's reason", async () => {
+      await setUpByFirstParticipant();
+      const failures = observeStartFailures();
+      const absent = "of:not-a-manifest";
+      const unreachable = new Error("the memory server is unreachable");
+      const provider = rtB.storageManager.open(space);
+      const sync = provider.sync.bind(provider);
+      using _syncs = stub(
+        provider,
+        "sync",
+        (id, selector, scope, instance) =>
+          id === absent
+            ? Promise.resolve({ error: unreachable })
+            : sync(id, selector, scope, instance),
+      );
+      const attempts = refuseStarts(() => staleReadAtSeq(absent, 0));
+
+      await runShared(rtB, "b-piece secret");
+      await rtB.idle();
+
+      expect(attempts.count).toBe(1);
+      expect(failures).toHaveLength(1);
+      expect(failures[0]).toMatchObject({
+        message: expect.stringContaining(absent),
+        cause: unreachable,
+      });
+    });
+
     it("reports a start still refused over the manifest once its retries are spent", async () => {
       await setUpByFirstParticipant();
       const failures = observeStartFailures();
