@@ -70,7 +70,6 @@ import {
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
-  ownersMayObliterateBy,
   ownersMayObliterateIn,
   type RoomStreamEvent,
   type SetTitleEvent,
@@ -972,13 +971,6 @@ export interface ChatRoomView {
   addRequests: Record<string, AddMemberOutcome>;
 
   /**
-   * Why the reading session's latest message act was refused, for the
-   * session to show; empty once an act takes effect. A refusal writes nothing
-   * else, so a client that draws the room itself reads it from here.
-   */
-  messageRefusal: PerSession<string>;
-
-  /**
    * Sets the room's title, which every member shares, from a trusted gesture
    * on the rendering's `ChatRetitleSurface`, or from a client's own control
    * through the sanctioned issuing path. Any member who can write in the room
@@ -1105,10 +1097,12 @@ export const FabriChatRoomCore = pattern<
     ...FABRICHAT_POLICY,
     ownersMayObliterate: false,
   });
+  const ownersMayObliterate = ownersMayObliterateIn(
+    kind,
+    ownersMayObliterateGiven,
+  );
   const policy = computed((): Cell<ChatRoomPolicy> =>
-    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
-      ? policyWithOwners
-      : policyWithoutOwners
+    ownersMayObliterate ? policyWithOwners : policyWithoutOwners
   );
   // Whether the room is one a manager can take the viewer into. It reads
   // nothing of the manager, whose label the room's space may not admit:
@@ -1118,8 +1112,6 @@ export const FabriChatRoomCore = pattern<
       equals(container?.key("chatRoom").get(), self))) &&
     self !== undefined
   );
-  // Why the session's latest act was refused, which the composer shows.
-  const refusal = new Writable.perSession<string>("");
   const tellJoined = tellManagerJoined({
     canJoin,
     container: ownSpace ? undefined : container,
@@ -1220,7 +1212,7 @@ export const FabriChatRoomCore = pattern<
           profile,
           kind,
           isOwner,
-          ownersMayObliterateBy(policy),
+          ownersMayObliterate,
         )
         : NO_MESSAGE_RIGHTS),
     }));
@@ -1298,25 +1290,16 @@ export const FabriChatRoomCore = pattern<
   const isEmpty = computed(() => mainEntries.length === 0);
   // Per session, so hidden by a prop rather than a branch (see
   // `FabriChatMessageRow`).
-  const refusalDisplay = computed((): ChatDisplay =>
-    refusal.get() === "" ? "none" : "block"
-  );
   const threadShownIn = computed((): ShownIn =>
     alsoToMain.get() ? "both" : "thread"
   );
 
   // Each handler is bound to the cells it uses and no others.
-  const sendMessage = commitSend({
-    myProfile,
-    messages,
-    refusal,
-    joined: tellJoined,
-  });
+  const sendMessage = commitSend({ myProfile, messages, joined: tellJoined });
   const composeSend = commitComposerSend({
     myProfile,
     messages,
     composer,
-    refusal,
     joined: tellJoined,
   });
   const sendThreadReply = commitThreadSend({
@@ -1324,31 +1307,19 @@ export const FabriChatRoomCore = pattern<
     messages,
     composer,
     shownIn: threadShownIn,
-    refusal,
     joined: tellJoined,
   });
   const streams = {
     sendMessage,
-    editMessage: commitEdit({ myProfile, room: messages, composer, refusal }),
-    deleteMessage: commitDelete({ myProfile, room: messages, refusal }),
+    editMessage: commitEdit({ myProfile, composer }),
+    deleteMessage: commitDelete({ myProfile }),
     obliterateMessage: commitObliterate({
       myProfile,
-      room: messages,
       kind,
-      policy,
-      refusal,
+      ownersMayObliterate,
     }),
-    sendReaction: commitSendReaction({
-      myProfile,
-      room: messages,
-      refusal,
-      joined: tellJoined,
-    }),
-    deleteReaction: commitDeleteReaction({
-      myProfile,
-      room: messages,
-      refusal,
-    }),
+    sendReaction: commitSendReaction({ myProfile, joined: tellJoined }),
+    deleteReaction: commitDeleteReaction({ myProfile }),
   };
   const messageList = {
     count,
@@ -1372,7 +1343,6 @@ export const FabriChatRoomCore = pattern<
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
-    messageRefusal: refusal,
     setTitle,
     titleRequests,
   };
@@ -1452,9 +1422,8 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              policy={policy}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
-              refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
               manager={manager}
@@ -1490,14 +1459,6 @@ export const FabriChatRoomCore = pattern<
             onClick={composeSend}
           />
         </div>
-        <cf-text
-          id="fabrichat-act-refusal"
-          variant="caption"
-          hidden
-          style={{ display: refusalDisplay }}
-        >
-          {refusal}
-        </cf-text>
 
         <cf-vstack
           id="fabrichat-thread"
@@ -1525,9 +1486,8 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
-              policy={policy}
+              ownersMayObliterate={ownersMayObliterate}
               messages={messages}
-              refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
               manager={manager}
@@ -1656,7 +1616,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
-      messageRefusal: room.messageRefusal,
       setTitle: room.setTitle,
       titleRequests: room.titleRequests,
       [UI]: (

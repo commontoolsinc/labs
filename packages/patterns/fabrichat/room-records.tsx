@@ -35,8 +35,6 @@ import {
   getEntityId,
   handler,
   spaceAccess,
-  type SpaceAccessLevel,
-  spaceOf,
   type Stream,
   type TrustedActionWrite,
   Writable,
@@ -488,30 +486,6 @@ export const ownersMayObliterateBy = (
 ): boolean => policy?.get()?.ownersMayObliterate === true;
 
 /**
- * Why an obliteration `messageRightsOf()` doesn't allow is refused, for a
- * person to read.
- */
-const obliterationRefusal = (
-  kind: ChatRoomKind,
-  ownersMayObliterate: boolean,
-): string =>
-  kind === "direct"
-    ? ownersMayObliterate
-      ? "Only an owner of this chat can remove someone else's message."
-      : "Only its author can remove a message in this chat."
-    : ownersMayObliterate
-    ? "Only an owner of this chat can remove a message."
-    : "Messages in this chat can't be removed.";
-
-/**
- * Whether a sender whose access to the room's space is `level` may write
- * there. A level not known yet is left to the space's own access list, which
- * refuses the write where it doesn't admit it.
- */
-const mayWriteAt = (level: SpaceAccessLevel | undefined): boolean =>
-  level !== "none" && level !== "READ";
-
-/**
  * Whether the viewer can send, edit, delete, and react in the room whose
  * messages are `messages`: their profile resolves, and the room's space grants
  * them WRITE or OWNER. A level not known yet (`undefined`) is not a grant.
@@ -546,6 +520,9 @@ export interface RoomStreamEvent {
   /** The message acted on. */
   message?: MessageCell;
 
+  /** The reaction removed, one of the message's. */
+  reaction?: Cell<ChatReaction>;
+
   /** A single emoji. */
   emoji?: string;
 
@@ -569,12 +546,6 @@ export interface ComposerState {
 export type ComposerCell = Writable<
   ComposerState | Default<Record<PropertyKey, never>>
 >;
-
-/**
- * The cell holding why the session's latest message act was refused, which
- * the room's composer shows; empty once an act takes effect.
- */
-export type ActRefusalCell = Writable<string>;
 
 /** What a room asks of its viewer's manager's `joinRoom`: the room itself. */
 export interface JoinRoomRequest {
@@ -602,12 +573,6 @@ export const listsRoomIn = (
 export interface ActState {
   /** The viewer's profile, which holds no value until it resolves. */
   myProfile: ProfileCell | undefined;
-
-  /**
-   * Why the session's latest act was refused, which the composer shows;
-   * absent where nothing shows it.
-   */
-  refusal?: ActRefusalCell;
 }
 
 /** What every send is bound to. */
@@ -647,12 +612,6 @@ export interface ReplyState extends SendState {
 
 /** What an act on one of the room's messages is bound to. */
 export interface MessageActState extends ActState {
-  /**
-   * One of the room's records, which names the room's space: an act takes a
-   * message of that space and no other, and reads nothing of the record.
-   */
-  room: Cell<unknown>;
-
   /** A rendered control's message, the one acted on. */
   message?: MessageCell;
 }
@@ -669,16 +628,22 @@ export interface ObliterateState extends MessageActState {
   kind: ChatRoomKind;
 
   /**
-   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
-   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   * Whether the room lets an OWNER of its space obliterate any message;
+   * absent, it doesn't.
    */
-  policy?: Cell<ChatRoomPolicy>;
+  ownersMayObliterate?: boolean;
 }
 
 /** What `commitDeleteReaction` is bound to, and `commitSendReaction` too. */
 export interface ReactionState extends MessageActState {
   /** A rendered control's emoji. */
   emoji?: string;
+}
+
+/** What `commitDeleteReaction` is bound to. */
+export interface DeleteReactionState extends MessageActState {
+  /** A rendered tally's reaction of the viewer's, the one removed. */
+  reaction?: Cell<ChatReaction>;
 }
 
 /** What `commitSendReaction` is bound to. */
@@ -745,22 +710,6 @@ export const tellManagerJoined = handler<void, ManagerJoinState>(
   },
 );
 
-/** Why an act whose sender's profile hasn't resolved is refused. */
-const NO_PROFILE =
-  "Acting in a chat needs a profile, and yours hasn't resolved.";
-
-/** Why an act by someone the room's space doesn't let write is refused. */
-const NOT_MEMBER = "You can't write in this chat.";
-
-/** Why a send or an edit with no text is refused. */
-const NO_TEXT = "A message needs some text.";
-
-/** Why an act on a message that isn't one of the room's is refused. */
-const NOT_IN_ROOM = "That message isn't in this chat.";
-
-/** Why an act on a deleted message is refused. */
-const DELETED = "That message was deleted.";
-
 /**
  * The profile `myProfile` resolves to, once it holds a value; `undefined`
  * until it does.
@@ -786,17 +735,6 @@ const emojiOf = (event: RoomStreamEvent, bound: string | undefined): unknown =>
   event?.emoji ?? bound ?? event?.target?.value?.trim();
 
 /**
- * Whether `current`, read from `message`, is one of the room's messages: a
- * message, of the space `room`, any of the room's records, lives in.
- */
-const isMessageIn = (
-  room: Cell<unknown>,
-  message: Cell<unknown>,
-  current: RepliedMessage | undefined,
-): current is RepliedMessage =>
-  current?.sentAt !== undefined && spaceOf(message) === spaceOf(room);
-
-/**
  * Leaves a tombstone of the message at `target`: its time and what it replies
  * to stay, its body becomes the deleted marker, its reactions go, and so does
  * its author unless `keepsAuthor`. The whole message is written, where an
@@ -818,53 +756,28 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
 };
 
 /**
- * Records a send: the text `event` carries, from `myProfile`, as a reply to
- * `reply` where that names a message, shown `shownIn`. A send that breaks the
- * rules `ChatRoomOutput` states for `sendMessage` is refused, which writes the
- * reason to `refusal` and nothing else. Otherwise the message is pushed onto
- * `messages`, with a reaction list of its own, and `joined` is told. Returns
- * whether the message was recorded.
+ * Pushes a send onto `messages`: the text `event` carries, from `myProfile`,
+ * as a reply to `reply` where that names a message, shown `shownIn`, with a
+ * reaction list of its own; then `joined` is told. A send with no text, or
+ * before the profile resolves, pushes nothing. Returns whether it pushed.
+ *
+ * Every handler here takes the event a rendered control of the room sends,
+ * and the controls offer only acts the viewer may take, so a handler checks
+ * what the element's write policy does not — whose message it is — and drops
+ * anything else without a word.
  */
-const recordSend = (
+const sendInto = (
   event: RoomStreamEvent,
   myProfile: ProfileCell | undefined,
   messages: MessagesCell,
   reply: Cell<RepliedMessage> | undefined,
   shownIn: ShownIn,
-  refusal: ActRefusalCell | undefined,
   joined: Stream<void> | undefined,
 ): boolean => {
-  const refuse = (reason: string): false => {
-    refusal?.set(reason);
-    return false;
-  };
   const profile = resolvedProfile(myProfile);
-  if (profile === undefined) return refuse(NO_PROFILE);
-  if (
-    currentPrincipal() === undefined || !mayWriteAt(spaceAccess(messages))
-  ) {
-    return refuse(NOT_MEMBER);
-  }
   const body = textOf(event);
-  if (body === "") return refuse(NO_TEXT);
+  if (profile === undefined || body === "") return false;
   const target = reply?.resolveAsCell();
-  if (target !== undefined) {
-    const replied = target.get();
-    if (!isMessageIn(messages, target, replied)) {
-      return refuse("The message replied to isn't in this chat.");
-    }
-    if (isDeleted(replied)) {
-      return refuse("The message replied to was deleted.");
-    }
-    if (!SHOWN_IN.includes(shownIn)) {
-      return refuse("A reply is shown in the main chat or a thread.");
-    }
-    if (shownIn === "main" && replied.replyTo?.shownIn === "thread") {
-      return refuse(
-        "A message shown only in a thread takes its replies there.",
-      );
-    }
-  }
   // A message may link only a list that exists, so the list is made before
   // the message links it.
   const reactions = new Writable<ReactionsValue>([] as ReactionsValue);
@@ -875,7 +788,6 @@ const recordSend = (
     ...(target === undefined ? {} : { replyTo: { message: target, shownIn } }),
     reactions,
   } as SentMessage);
-  refusal?.set("");
   joined?.send();
   return true;
 };
@@ -885,14 +797,13 @@ const recordSend = (
  * event's `replyTo` where it carries one.
  */
 export const commitSend = handler<RoomStreamEvent, SendState>(
-  (event, { myProfile, messages, refusal, joined }) => {
-    recordSend(
+  (event, { myProfile, messages, joined }) => {
+    sendInto(
       event,
       myProfile,
       messages,
       event?.replyTo?.message,
       event?.replyTo?.shownIn ?? "main",
-      refusal,
       joined,
     );
   },
@@ -900,15 +811,16 @@ export const commitSend = handler<RoomStreamEvent, SendState>(
 
 /**
  * Sends a rendered composer's text, from `ChatSendSurface`, replying in the
- * main conversation to the reply being composed, which a sent message ends.
+ * main conversation to the message the composer holds, if any, and ending
+ * that reply.
  */
 export const commitComposerSend = handler<RoomStreamEvent, ComposerSendState>(
-  (event, { myProfile, messages, composer, refusal, joined }) => {
+  (event, { myProfile, messages, composer, joined }) => {
     // A cleared link still reads back as a cell, holding nothing.
     const link = composer.get()?.replyTo;
     const reply = link?.get() === undefined ? undefined : link;
     if (
-      recordSend(event, myProfile, messages, reply, "main", refusal, joined) &&
+      sendInto(event, myProfile, messages, reply, "main", joined) &&
       reply !== undefined
     ) {
       composer.key("replyTo").set(undefined);
@@ -921,20 +833,20 @@ export const commitComposerSend = handler<RoomStreamEvent, ComposerSendState>(
  * the open thread.
  */
 export const commitThreadSend = handler<RoomStreamEvent, ThreadSendState>(
-  (event, { myProfile, messages, composer, shownIn, refusal, joined }) => {
+  (event, { myProfile, messages, composer, shownIn, joined }) => {
     const link = composer.get()?.thread;
     const reply = link?.get() === undefined ? undefined : link;
-    recordSend(event, myProfile, messages, reply, shownIn, refusal, joined);
+    sendInto(event, myProfile, messages, reply, shownIn, joined);
   },
 );
 
 /**
- * Sends a rendered message's reply, from `ChatSendSurface`, replying to that
- * message.
+ * Sends a rendered message's reply, from `ChatSendSurface`, shown where the
+ * control is bound to show it.
  */
 export const commitReply = handler<RoomStreamEvent, ReplyState>(
-  (event, { myProfile, messages, message, shownIn, refusal, joined }) => {
-    recordSend(event, myProfile, messages, message, shownIn, refusal, joined);
+  (event, { myProfile, messages, message, shownIn, joined }) => {
+    sendInto(event, myProfile, messages, message, shownIn, joined);
   },
 );
 
@@ -944,29 +856,18 @@ export const commitReply = handler<RoomStreamEvent, ReplyState>(
  * session's composer is editing ends that edit.
  */
 export const commitEdit = handler<RoomStreamEvent, EditState>(
-  (event, { myProfile, room, message, composer, refusal }) => {
-    const refuse = (reason: string): void => {
-      refusal?.set(reason);
-    };
-    const profile = resolvedProfile(myProfile);
-    if (profile === undefined) return refuse(NO_PROFILE);
-    if (currentPrincipal() === undefined || !mayWriteAt(spaceAccess(room))) {
-      return refuse(NOT_MEMBER);
-    }
+  (event, { myProfile, message, composer }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
     const current = target?.get();
-    if (target === undefined || !isMessageIn(room, target, current)) {
-      return refuse(NOT_IN_ROOM);
-    }
-    if (isDeleted(current)) return refuse(DELETED);
-    if (!isAuthorOf(current, profile)) {
-      return refuse("Only its author can edit a message.");
-    }
     const body = textOf(event);
-    if (body === "") return refuse(NO_TEXT);
+    if (
+      target === undefined || isDeleted(current) ||
+      !isAuthorOf(current, resolvedProfile(myProfile)) || body === ""
+    ) {
+      return;
+    }
     target.key("body").set(body);
     target.key("editedAt").set(now());
-    refusal?.set("");
     const editing = composer.get()?.editing;
     if (editing !== undefined && equals(editing, target)) {
       composer.key("editing").set(undefined);
@@ -980,64 +881,37 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
  * room's policy makes deletion obliteration, under no author.
  */
 export const commitDelete = handler<RoomStreamEvent, MessageActState>(
-  (event, { myProfile, room, message, refusal }) => {
-    const refuse = (reason: string): void => {
-      refusal?.set(reason);
-    };
-    const profile = resolvedProfile(myProfile);
-    if (profile === undefined) return refuse(NO_PROFILE);
-    if (currentPrincipal() === undefined || !mayWriteAt(spaceAccess(room))) {
-      return refuse(NOT_MEMBER);
-    }
+  (event, { myProfile, message }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
     const current = target?.get();
-    if (target === undefined || !isMessageIn(room, target, current)) {
-      return refuse(NOT_IN_ROOM);
-    }
-    if (isDeleted(current)) return refuse(DELETED);
-    if (!isAuthorOf(current, profile)) {
-      return refuse("Only its author can delete a message.");
+    if (
+      target === undefined || isDeleted(current) ||
+      !isAuthorOf(current, resolvedProfile(myProfile))
+    ) {
+      return;
     }
     leaveTombstone(target, !FABRICHAT_POLICY.deletionIsObliteration);
-    refusal?.set("");
   },
 );
 
 /**
- * Obliterates a message, from `ChatObliterateSurface`: what is left is a
- * tombstone under no author, labeled with whoever obliterated it.
+ * Obliterates a message, from `ChatObliterateSurface`, where
+ * `messageRightsOf()` lets the sender: what is left is a tombstone under no
+ * author, labeled with whoever obliterated it.
  */
 export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
-  (event, { myProfile, room, message, kind, policy, refusal }) => {
-    const refuse = (reason: string): void => {
-      refusal?.set(reason);
-    };
-    const profile = resolvedProfile(myProfile);
-    if (profile === undefined) return refuse(NO_PROFILE);
-    if (currentPrincipal() === undefined || !mayWriteAt(spaceAccess(room))) {
-      return refuse(NOT_MEMBER);
-    }
+  (event, { myProfile, message, kind, ownersMayObliterate }) => {
     const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
-    if (target === undefined || !isMessageIn(room, target, current)) {
-      return refuse(NOT_IN_ROOM);
-    }
-    if (current.authorProfile === undefined) {
-      return refuse("That message was already removed.");
-    }
-    const ownersMayObliterate = ownersMayObliterateBy(policy);
+    if (target === undefined) return;
     const rights = messageRightsOf(
-      current,
-      profile,
+      target.get(),
+      resolvedProfile(myProfile),
       kind,
-      isOwnerOf(room),
-      ownersMayObliterate,
+      isOwnerOf(target),
+      ownersMayObliterate === true,
     );
-    if (!rights.canObliterate) {
-      return refuse(obliterationRefusal(kind, ownersMayObliterate));
-    }
+    if (!rights.canObliterate) return;
     leaveTombstone(target, false);
-    refusal?.set("");
   },
 );
 
@@ -1050,34 +924,18 @@ export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
 export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
   (
     event,
-    {
-      myProfile,
-      room,
-      message,
-      emoji: bound,
-      pickerOpen,
-      closesPicker,
-      refusal,
-      joined,
-    },
+    { myProfile, message, emoji: bound, pickerOpen, closesPicker, joined },
   ) => {
-    const refuse = (reason: string): void => {
-      refusal?.set(reason);
-    };
     const profile = resolvedProfile(myProfile);
-    if (profile === undefined) return refuse(NO_PROFILE);
-    if (currentPrincipal() === undefined || !mayWriteAt(spaceAccess(room))) {
-      return refuse(NOT_MEMBER);
-    }
     const emoji = emojiOf(event, bound);
-    if (!isSingleEmoji(emoji)) return refuse("A reaction is a single emoji.");
-    const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
-    if (target === undefined || !isMessageIn(room, target, current)) {
-      return refuse(NOT_IN_ROOM);
+    const current = (event?.message ?? message)?.resolveAsCell().get();
+    const list = current?.reactions;
+    if (
+      profile === undefined || !isSingleEmoji(emoji) || isDeleted(current) ||
+      list === undefined
+    ) {
+      return;
     }
-    const list = current.reactions;
-    if (isDeleted(current) || list === undefined) return refuse(DELETED);
     if (closesPicker === true) pickerOpen?.set(false);
     const reactions = (list.get() ?? []) as ChatReaction[];
     const present = reactions.some((reaction) =>
@@ -1088,45 +946,32 @@ export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
         { reactorProfile: profile, emoji, sentAt: now() } as SentReaction,
       );
     }
-    refusal?.set("");
     joined?.send();
   },
 );
 
 /**
- * Removes the sender's reaction to a message, from `ChatReactSurface`: every
- * one of theirs with the event's emoji, or the one its control is bound to,
- * since two sessions of theirs reacting at once can each have added one.
- * Removing a reaction that isn't there changes nothing, and the act is done.
+ * Removes the sender's reaction, from `ChatReactSurface`: the reaction the
+ * event or the binding names, by its cell, from the reactions of the message
+ * the event or the binding names. One no longer on the message removes
+ * nothing.
  */
-export const commitDeleteReaction = handler<RoomStreamEvent, ReactionState>(
-  (event, { myProfile, room, message, emoji: bound, refusal }) => {
-    const refuse = (reason: string): void => {
-      refusal?.set(reason);
-    };
+export const commitDeleteReaction = handler<
+  RoomStreamEvent,
+  DeleteReactionState
+>(
+  (event, { myProfile, message, reaction }) => {
     const profile = resolvedProfile(myProfile);
-    if (profile === undefined) return refuse(NO_PROFILE);
-    if (currentPrincipal() === undefined || !mayWriteAt(spaceAccess(room))) {
-      return refuse(NOT_MEMBER);
+    const list = (event?.message ?? message)?.resolveAsCell().get()?.reactions;
+    const removed = (event?.reaction ?? reaction)?.resolveAsCell();
+    const record = removed?.get();
+    if (
+      profile === undefined || list === undefined || removed === undefined ||
+      record === undefined || !equals(record.reactorProfile, profile)
+    ) {
+      return;
     }
-    const emoji = emojiOf(event, bound);
-    if (!isSingleEmoji(emoji)) return refuse("A reaction is a single emoji.");
-    const target = (event?.message ?? message)?.resolveAsCell();
-    const current = target?.get();
-    if (target === undefined || !isMessageIn(room, target, current)) {
-      return refuse(NOT_IN_ROOM);
-    }
-    const list = current.reactions;
-    if (isDeleted(current) || list === undefined) return refuse(DELETED);
-    const reactions = (list.get() ?? []) as ChatReaction[];
-    reactions.forEach((reaction, index) => {
-      if (
-        reaction?.emoji === emoji && equals(reaction.reactorProfile, profile)
-      ) {
-        list.removeByValue(list.key(index));
-      }
-    });
-    refusal?.set("");
+    list.removeByValue(removed);
   },
 );
 

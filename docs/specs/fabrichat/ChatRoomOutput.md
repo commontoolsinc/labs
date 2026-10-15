@@ -55,10 +55,7 @@ interface ChatRoomOutput {
   deleteMessage: Stream<{ message: Cell<ChatMessage> }>;
   obliterateMessage: Stream<{ message: Cell<ChatMessage> }>;
   sendReaction: Stream<{ message: Cell<ChatMessage>; emoji: string }>;
-  deleteReaction: Stream<{ message: Cell<ChatMessage>; emoji: string }>;
-
-  /** Why this session's latest message act was refused; empty once one takes effect. */
-  messageRefusal: PerSession<string>;
+  deleteReaction: Stream<{ message: Cell<ChatMessage>; reaction: Cell<ChatReaction> }>;
 
   /**
    * Admits someone to the room's space, from a trusted gesture, and has the
@@ -241,17 +238,6 @@ space.
   added was told of the room, once that is decided. It reads the verdicts from
   the reader's own manager, so it is the reader's alone, like the outcomes it
   holds.
-- **`messageRefusal`** is why the reading session's latest message act
-  (`sendMessage`, `editMessage`, `deleteMessage`, `obliterateMessage`,
-  `sendReaction`, or `deleteReaction`) was refused, for a person to read, and
-  empty once an act of the session's takes effect or has nothing left to
-  change. It is the session's alone. The reasons: the reader's profile hasn't
-  resolved, as where their Home lists no profile; the reader can't write in
-  the room, or isn't signed in; a message with no text, or a reaction that
-  isn't a single emoji; a reply to a message not in the room, or shown where
-  its target can't be; the message acted on, or replied to, is deleted; the
-  message acted on isn't in the room; or an act only the message's author, or
-  an owner, may make.
 - **`titleRequests`** holds the outcome of each of the reader's
   [`setTitle`](#settitlerequestid-string-title-string) requests, by its
   `requestId`. Like `addRequests`, it is the reader's alone.
@@ -272,9 +258,8 @@ client:
   the room.
 - **`PerSession`**: one instance per memory session in the room's space. That is
   `participantEntries` and `participantPrincipals`, which each session derives
-  under its own access, and `messageRefusal`, why the session's latest message
-  act was refused. Passing the room's link to someone else passes none of
-  them: they read their own.
+  under its own access. Passing the room's link to someone else passes neither:
+  they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
   That is only `addRequests` and `titleRequests`, the outcomes of the reader's
   own adds and retitles. No one else reads them.
@@ -346,14 +331,14 @@ These rules hold for every stream:
   says only whether the room is one a manager can take the sender into, and
   only the join's own event, which writes nothing in the room's space, reads
   whether the sender has a manager: such a manager is still told of the join.
-- A refusal writes nothing to the room's shared record. Why a message act was
-  refused is recorded where only the sending session reads it, in
-  `messageRefusal`, which the room's own composer shows until an act takes
-  effect. An add's outcome is recorded in `addRequests`, and a retitle's in
-  `titleRequests`, each `refused` with a reason and a code. A client still checks an event against the
-  stream's rules before sending it (see
+- A message act the room drops writes nothing and says nothing: the room's
+  rendering offers only acts the viewer can take, so an event outside the
+  rules is a client's own mistake, and the client sees it by the absence of
+  its effect from `messages`. An add's outcome is recorded in `addRequests`,
+  and a retitle's in `titleRequests`, each `refused` with a reason and a code.
+  A client checks an event against the stream's rules before sending it (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
-- A refused event is spent: it is not retried.
+- A dropped event is spent: it is not retried.
 
 | Stream | Reviewed surface | Effect |
 | --- | --- | --- |
@@ -362,7 +347,7 @@ These rules hold for every stream:
 | [`deleteMessage`](#deletemessagerequestid-string-message-cellchatmessage) | `ChatDeleteSurface` | records the sender's message as deleted |
 | [`obliterateMessage`](#obliteratemessagerequestid-string-message-cellchatmessage) | `ChatObliterateSurface` | removes a message and its history, leaving a tombstone |
 | [`sendReaction`](#sendreactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | adds the sender's reaction, if it isn't there |
-| [`deleteReaction`](#deletereactionrequestid-string-message-cellchatmessage-emoji-string) | `ChatReactSurface` | removes the sender's reaction, if it's there |
+| [`deleteReaction`](#deletereactionmessage-cellchatmessage-reaction-cellchatreaction) | `ChatReactSurface` | removes the sender's reaction, the one named |
 
 ### `sendMessage(body: string, replyTo?: ChatReply)`
 
@@ -380,10 +365,10 @@ Sends a message from the sender.
 - **Effect:** appends a [`ChatMessage`](ChatMessage.md) to the room's messages,
   with the sender's profile as `authorProfile`, `body` as `body`, the handler
   clock as `sentAt` (see [times](ChatMessage.md#times)), and no reactions.
-- **Refused:** a `body` that isn't a non-empty string, a `replyTo` whose
-  `message` is in another room, a `shownIn` other than `"main"`, `"thread"`, or
-  `"both"`, a `"main"` reply to a message shown only in a thread, or a reply to
-  a deleted message.
+- **Dropped:** a `body` that isn't a non-empty string, or a sender whose
+  profile hasn't resolved. The room takes `replyTo` as sent: a client sends a
+  reply only to a message of the room that is not deleted, with a `shownIn`
+  its target allows (see [`ChatReply`](ChatReply.md)).
 
 Two messages with the same text are two sends, so sending "YES!" three times
 makes three messages.
@@ -402,8 +387,8 @@ Records new text for one of the sender's messages.
 - **Effect:** makes `body` the message's text, and the handler clock its
   `editedAt`. The text it replaces is gone. `authorProfile`, `sentAt`,
   `replyTo`, and the reactions don't change.
-- **Refused:** a `message` in another room, sent by someone else, or deleted,
-  or a `body` that isn't a non-empty string.
+- **Dropped:** a `message` sent by someone else or deleted, or a `body` that
+  isn't a non-empty string.
 
 ### `deleteMessage(message: Cell<ChatMessage>)`
 
@@ -427,8 +412,7 @@ Records one of the sender's messages as deleted.
 
   Either way, no reaction outlives the deletion, and the message stays among the
   room's messages, so replies to it and threads rooted at it keep their links.
-- **Refused:** a `message` in another room, sent by someone else, or already
-  deleted.
+- **Dropped:** a `message` sent by someone else, or already deleted.
 
 ### `obliterateMessage(message: Cell<ChatMessage>)`
 
@@ -457,10 +441,10 @@ room, it is also how either person removes their own words completely.
   `{ deleted: true }`, its `editedAt` the handler clock, and its
   `authorProfile` and `reactions` are removed. `sentAt` and `replyTo` stay.
   The tombstone is labeled `authored-by` the sender, whoever obliterated it.
-- **Refused:** a `message` in another room; and, unless the room is a direct
-  room and the message is the sender's own, a sender who isn't an OWNER, or any
-  sender where the room's `ownersMayObliterate` doesn't hold. Obliterating a
-  message that is already obliterated changes nothing.
+- **Dropped:** unless the room is a direct room and the message is the
+  sender's own, a sender who isn't an OWNER, or any sender where the room's
+  `ownersMayObliterate` doesn't hold. Obliterating a message that is already
+  obliterated changes nothing.
 
 ### `sendReaction(message: Cell<ChatMessage>, emoji: string)`
 
@@ -480,30 +464,27 @@ Adds the sender's reaction to a message.
   the handler clock as its `sentAt`. If they already have one, nothing
   changes, and it keeps its `sentAt`. No one else's reaction changes, and
   neither does the message itself.
-- **Refused:** a `message` in another room or deleted, or an `emoji` that isn't
-  a single emoji.
+- **Dropped:** a deleted `message`, or an `emoji` that isn't a single emoji.
 
 Adding a reaction that's already there changes nothing, and so does removing
 one that isn't.
 
-### `deleteReaction(message: Cell<ChatMessage>, emoji: string)`
+### `deleteReaction(message: Cell<ChatMessage>, reaction: Cell<ChatReaction>)`
 
 - `message: Cell<ChatMessage>` — The message whose reaction to remove. Must be a
   message in this room.
-- `emoji: string` — A single emoji: exactly one emoji sequence that [Unicode
-  Technical Standard #51](https://www.unicode.org/reports/tr51/) recommends for
-  general interchange (`RGI_Emoji`). It may be more than one code point, as with
-  a skin-tone modifier or a ZWJ-joined sequence, but it is one emoji. Not text,
-  and not two emoji together.
+- `reaction: Cell<ChatReaction>` — The reaction to remove, one of the
+  message's `reactions`, by its cell. A client takes it from the message's
+  `reactions` as it read them; it never describes the reaction by its emoji.
 
-Removes the sender's reaction to a message.
+Removes the sender's reaction from a message.
 
 - **Admitted:** as a trusted gesture on `ChatReactSurface`.
-- **Effect:** if the sender has a reaction with `emoji` on `message`, removes
-  it. If they don't, nothing changes. No one else's reaction changes, and
-  neither does the message itself.
-- **Refused:** a `message` in another room or deleted, or an `emoji` that isn't
-  a single emoji.
+- **Effect:** removes `reaction` from `message`'s reactions. One that is no
+  longer there removes nothing. No one else's reaction changes, and neither
+  does the message itself.
+- **Dropped:** a deleted `message`, a `reaction` that reads as no reaction, or
+  one that isn't the sender's.
 
 A client never toggles: it sends whichever of the two the person asked for, so a
 repeated or delayed event can't undo what the person meant.
@@ -635,7 +616,7 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
   adapter's rendering embeds it, so a composer is always the room's own surface.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
   that draw natively. It includes `messages`, `canSend`, `viewer`,
-  `messageRights`, `messageRefusal`, `addMember` with `canAdd` and
+  `messageRights`, `addMember` with `canAdd` and
   `addRequests`, and `setTitle` with `titleRequests`. A client uses it to show
   a room outside any container. Inside a container, it reads the placement's
   `chat` group instead

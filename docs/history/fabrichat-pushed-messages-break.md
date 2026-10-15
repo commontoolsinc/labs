@@ -24,7 +24,7 @@ identified by its cell. The room keeps no memory of the events it has acted
 on, since the runtime delivers each durable stream entry to its handler once
 (`docs/specs/server-side-execution/events.md`, "One entry, one COMPLETED
 delivery" and §4), and no activity log, since nothing read it. The plan is
-`docs/plans/fabrichat-messages-as-pushed-elements.md`.
+`docs/history/plans/fabrichat-messages-as-pushed-elements.md`.
 
 ## What the gate reports
 

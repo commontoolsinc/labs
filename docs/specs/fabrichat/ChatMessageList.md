@@ -27,8 +27,9 @@ interface ChatMessageList {
 
 - **`count`** is how many messages the room holds, obliterated tombstones
   included.
-- **`oldestAt`** and **`newestAt`** are the oldest and newest messages'
-  `sentAt`, and are absent while the room has no messages.
+- **`oldestAt`** and **`newestAt`** are the first and last messages' `sentAt`,
+  in the order the room recorded them, and are absent while the room has no
+  messages.
 - **`latest`** holds the newest messages of the main conversation (see
   [`ChatReply`](ChatReply.md#the-two-views)), up to the room's `maxWindowCount`
   (see [`ChatRoomPolicy`](ChatRoomPolicy.md)), oldest first, and `hasOlder` says

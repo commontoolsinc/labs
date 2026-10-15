@@ -156,10 +156,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       },
       {
         assertion: assert(() => {
-          return room.messageRefusal ===
-              "Only its author can delete a message." &&
-            bodies(setup.records.messages) ===
-              "From Alice | From Bob | Bob again";
+          return bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again";
         }),
       },
       // An OWNER may obliterate anyone's message in a group room, whose
@@ -266,12 +264,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         assertion: assert(() =>
           bodies(setup.records.messages) ===
             "From Alice | From Bob | Bob again"
-        ),
-      },
-      // The room tells his session the deletion isn't his to make.
-      {
-        assertion: assert(() =>
-          room.messageRefusal === "Only its author can delete a message."
         ),
       },
       // He opens the editor on his own message.

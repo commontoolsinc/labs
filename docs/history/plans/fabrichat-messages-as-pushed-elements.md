@@ -1,7 +1,14 @@
+---
+status: historical
+created: 2026-10-14
+archived: 2026-10-15
+reason: "Executed plan: a FabriChat room's messages and reactions became objects pushed onto lists, identified by their cells, with the request memory, used times, activity log, keyed records, and paging windows retired; all four stages landed in commonfabric/labs#8931."
+---
+
 # FabriChat messages as pushed elements
 
-**Status:** stages 1 to 3 built, in commonfabric/labs#8931; stage 4's
-rewrites landed with the stages that changed each behavior.
+**Status:** done; all four stages landed in commonfabric/labs#8931, stage
+4's rewrites with the stages that changed each behavior.
 Written against `main` at `67143bae62` (2026-10-14). The two spikes it rests
 on became `labels.test.tsx`, which drives the real handlers; their findings
 are recorded below. Paths are under `packages/patterns/fabrichat/` unless they

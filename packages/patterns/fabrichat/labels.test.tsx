@@ -241,7 +241,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       // Alice's message outside it.
       {
         action: onFirst.deleteReaction,
-        event: { emoji: "👍" },
+        event: { reaction: setup.messages.key(0).key("reactions").key(0) },
         trustedUi: unreactGesture,
       },
       { assertion: assert(() => reactionsOnFirst(setup.messages) === 0) },

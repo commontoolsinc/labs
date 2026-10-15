@@ -42,8 +42,8 @@ owner's own space, so a reader that space refuses reads no principal from it.
 Both are derived per session, so each session reads instances of its own,
 derived under its own access.
 
-The `PerSession` values in the contract are `participantEntries`,
-`participantPrincipals`, and `messageRefusal`.
+The `PerSession` values in the contract are `participantEntries` and
+`participantPrincipals`.
 
 The room's `[UI]` keeps its composer's state, the draft and the reply being
 composed, as a `PerSession` value of its own, so two placements of the same room
@@ -106,8 +106,11 @@ deduplicated at its event id
 ([events](../server-side-execution/events.md), "One entry, one COMPLETED
 delivery" and §4). So two sends of the same text are two messages.
 
-An act on a message, and a reply, takes the message by its cell, reads it, and
-takes no other: a link to a message outside the room's space is refused.
+An act on a message, and a reply, takes the message by its cell and reads it
+alone. A handler checks what the element's write policy does not — whose
+message or reaction it is, and the obliteration rights — and drops anything
+else without a word: the room's rendering offers only acts the viewer can
+take, so no event outside the rules comes from it.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` records the new text in place, with the time as `editedAt`.

@@ -178,15 +178,16 @@ export default pattern(() => {
         trustedUi: reactGesture,
       },
       { assertion: assert(() => reactionsOn(messages, 0).length === 3) },
-      // Removing is never a toggle: removing twice leaves it removed.
+      // Removing is by the reaction's cell, and never a toggle: removing the
+      // same cell twice leaves it removed, the second time removing nothing.
       {
         action: bobOnFirst.deleteReaction,
-        event: { emoji: "🎉" },
+        event: { reaction: messages.key(0).key("reactions").key(2) },
         trustedUi: unreactGesture,
       },
       {
         action: bobOnFirst.deleteReaction,
-        event: { emoji: "🎉" },
+        event: { reaction: messages.key(0).key("reactions").key(2) },
         trustedUi: unreactGesture,
       },
       {

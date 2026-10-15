@@ -18,8 +18,9 @@
  * seconds and more, after which the runtime dropped the message, and the
  * burst never agreed; at six sending three, a send outlasted the harness's
  * two-minute call limit. And memory grows with the members: twelve peaked at
- * 13.75GB resident. A pushed message collides with nothing, so a larger size
- * may complete now; the size stays until it is measured again.
+ * 13.75GB resident. A pushed message is a mergeable append, though a burst
+ * still costs retries elsewhere in a send, so a larger size may complete now;
+ * the size stays until it is measured again.
  *
  * Each iteration writes into a room of its own. A send adds a message, so a
  * burst into one room would leave the next iteration a room eight messages

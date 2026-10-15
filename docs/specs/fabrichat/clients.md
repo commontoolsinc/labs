@@ -170,12 +170,12 @@ direct one, but not a space's own chat, which is shown by its space's name.
 A client sends to the room's own streams, never through a placement or an
 adapter.
 
-A room records why it refused a message act in the sending session's
-`messageRefusal`, where a client shows it to the person, but a client still
-MUST check each event against its stream's rules before sending it: a non-empty body, a reply whose target is
-in the same room and allowed for its `shownIn`, a single emoji (see
-[`ChatRoomOutput`](ChatRoomOutput.md#streams)). A client uses the room's
-`canSend` to tell the person when they can't send at all.
+A room drops a message act outside its stream's rules without a word, so a
+client MUST check each event against those rules before sending it: a
+non-empty body, a reply whose target is in the room, not deleted, and allowed
+for its `shownIn`, a single emoji (see
+[`ChatRoomOutput`](ChatRoomOutput.md#streams)), and it offers an act only
+where `messageRights` and `canSend` allow it.
 
 A client never sends an event again on its own. It can't re-issue a trusted
 gesture from its code (rule 2 below), so an event it sent again would be
@@ -183,9 +183,8 @@ refused, and getting an event to the room is its runtime's job: a runtime
 re-submits an event it can't tell was appended, with its trusted mark and the
 same event id, which the room's runtime deduplicates, and runs an appended
 event once. A client sees a send take effect when the message appears in the
-room's `messages`, and a send that is refused in `messageRefusal`; nothing
-else is owed, and a client offers no retry of its own, since a person who
-sends again sends another message.
+room's `messages`; nothing else is owed, and a client offers no retry of its
+own, since a person who sends again sends another message.
 
 A client that resumes an interrupted `createGroup` MUST resend it with its
 original `requestId`, and SHOULD do the same for `openDirect` (see

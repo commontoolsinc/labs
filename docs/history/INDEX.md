@@ -230,6 +230,7 @@ One line per archived document; [`README.md`](README.md) has the rules for this 
 
 - [Lazy cell materialization](plans/lazy-cell-materialization.md) — Completed schema-observing lazy view and transaction-mode implementation; current semantics are maintained in the feature contract.
 - [Lazy materialization fast-follow](plans/lazy-materialization-fast-follow.md) — Completed default-on measurement and guidance plan, retaining the explicit handler deferral and independent rollout-switch decision.
+- [plans/fabrichat-messages-as-pushed-elements.md](plans/fabrichat-messages-as-pushed-elements.md) — executed plan (2026-10-15): a FabriChat room's messages and reactions as objects pushed onto lists, identified by their cells, with the request memory, used times, activity log, keyed records, and paging windows retired; its spike findings and the gate route it took; landed in commonfabric/labs#8931
 
 ## Shipped or superseded designs and decision records
 

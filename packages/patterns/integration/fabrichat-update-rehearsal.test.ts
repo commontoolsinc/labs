@@ -418,7 +418,7 @@ describe("FabriChat update rehearsal", () => {
         "ChatReact",
       ),
     );
-    // An act the room refuses, which it tells the sending session of.
+    // An act the room drops: a reaction that is not a single emoji.
     await send(
       room,
       "sendReaction",
@@ -427,9 +427,6 @@ describe("FabriChat update rehearsal", () => {
         "ChatReactSurface",
         "ChatReact",
       ),
-    );
-    expect(await room.key("messageRefusal").pull()).toBe(
-      "A reaction is a single emoji.",
     );
     await send(
       room,
@@ -546,11 +543,14 @@ describe("FabriChat update rehearsal", () => {
         "ChatEdit",
       ),
     );
+    const firstReaction = first.key("reactions").asSchema<Cell<unknown>[]>(
+      asCells,
+    ).key(0);
     await send(
       room,
       "deleteReaction",
       trusted(
-        { message: first, emoji: "👍" },
+        { message: first, reaction: firstReaction },
         "ChatReactSurface",
         "ChatUnreact",
       ),
@@ -564,10 +564,6 @@ describe("FabriChat update rehearsal", () => {
         "ChatReact",
       ),
     );
-    expect(
-      await room.key("messageRefusal").pull(),
-      "A write to a seeded message after the update was refused",
-    ).toBe("");
     expect(await second.key("body").pull()).toBe("Second, edited after");
     const emoji = await first.key("reactions").asSchema<{ emoji: string }[]>({
       type: "array",

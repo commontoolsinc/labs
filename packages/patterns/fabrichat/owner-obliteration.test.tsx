@@ -175,8 +175,6 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          bobInGroup.messageRefusal ===
-            "Messages in this chat can't be removed." &&
           bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
@@ -208,11 +206,7 @@ export default pattern(() => {
         trustedUi: deleteGesture,
       },
       {
-        assertion: assert(() =>
-          bobInDirect.messageRefusal ===
-            "Only its author can delete a message." &&
-          bodies(directMessages) === "Alice in private"
-        ),
+        assertion: assert(() => bodies(directMessages) === "Alice in private"),
       },
       {
         action: bobInDirect.obliterateMessage,
@@ -222,10 +216,7 @@ export default pattern(() => {
         trustedUi: obliterateGesture,
       },
       {
-        assertion: assert(() =>
-          bobInDirect.messageRefusal === "" &&
-          bodies(directMessages) === "<obliterated>"
-        ),
+        assertion: assert(() => bodies(directMessages) === "<obliterated>"),
       },
 
       // An act bound to no policy lets no OWNER obliterate, though the room's

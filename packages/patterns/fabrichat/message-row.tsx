@@ -18,7 +18,6 @@ import {
 } from "commonfabric";
 import type { ViewPlace } from "./logic.ts";
 import {
-  type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -33,7 +32,7 @@ import {
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
-  ownersMayObliterateBy,
+  type ReactionsValue,
   type RepliedMessage,
   type RoomStreamEvent,
   tellManagerJoined,
@@ -55,7 +54,6 @@ import {
   type ChatReactionTally,
   type ChatRoomKind,
   type ChatRoomLink,
-  type ChatRoomPolicy,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -77,21 +75,39 @@ export interface ReactionTally extends ChatReactionTally {
    * name the card as its description.
    */
   cardId: string;
+
+  /**
+   * The viewer's reaction with this emoji, the one `deleteReaction` removes;
+   * absent where `mine` is false.
+   */
+  own?: Cell<ChatReaction>;
 }
 
 /**
- * `reactions` tallied as `reactionTalliesOf()` does, each tally with a card id
- * made from `cardIdPrefix`.
+ * The reactions `list` holds, tallied as `reactionTalliesOf()` does, each
+ * tally with a card id made from `cardIdPrefix` and, where the viewer is
+ * among its reactors, the viewer's reaction by its cell.
  */
 export const reactionTallies = (
-  reactions: readonly ChatReaction[],
+  list: Cell<ReactionsValue> | undefined,
   viewer: ProfileCell | undefined,
   cardIdPrefix: string,
-): ReactionTally[] =>
-  reactionTalliesOf(reactions, viewer).map((tally, index) => ({
-    ...tally,
-    cardId: `${cardIdPrefix}-${index}`,
-  }));
+): ReactionTally[] => {
+  const reactions = (list?.get() ?? []) as ChatReaction[];
+  return reactionTalliesOf(reactions, viewer).map((tally, index) => {
+    const own = viewer === undefined
+      ? -1
+      : reactions.findIndex((reaction) =>
+        reaction?.emoji === tally.emoji &&
+        equals(reaction.reactorProfile, viewer)
+      );
+    return {
+      ...tally,
+      cardId: `${cardIdPrefix}-${index}`,
+      ...(own < 0 || list === undefined ? {} : { own: list.key(own) }),
+    };
+  });
+};
 
 /** How a message's body reads, for a quote or a deleted message. */
 export const bodyText = (record: RepliedMessage | undefined): string =>
@@ -141,19 +157,13 @@ export interface FabriChatMessageRowInput {
   isOwner: boolean;
 
   /**
-   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
-   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   * Whether the room lets an OWNER of its space obliterate any message;
+   * absent, it doesn't.
    */
-  policy?: Cell<ChatRoomPolicy>;
+  ownersMayObliterate?: boolean;
 
   /** The room's messages, which a reply is pushed onto. */
   messages: MessagesCell;
-
-  /**
-   * Why the session's latest act was refused, which the composer shows;
-   * absent where nothing shows it.
-   */
-  refusal?: ActRefusalCell;
 
   /** Whether the room is one the viewer's manager can take them into. */
   canJoin?: boolean;
@@ -182,7 +192,7 @@ export interface FabriChatMessageRowOutput {
   /** Adds the viewer's reaction: `emoji`, or the text typed in. */
   sendReaction: Stream<RoomStreamEvent>;
 
-  /** Removes the viewer's reaction: `emoji`. */
+  /** Removes the viewer's reaction: the one `reaction` names. */
   deleteReaction: Stream<RoomStreamEvent>;
 
   /** Records a new version of the message, from the text typed in. */
@@ -221,9 +231,8 @@ export const FabriChatMessageRow = pattern<
     places,
     cannotWrite,
     isOwner,
-    policy,
+    ownersMayObliterate,
     messages,
-    refusal,
     canJoin,
     container,
     manager,
@@ -233,11 +242,9 @@ export const FabriChatMessageRow = pattern<
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
   const tallies = computed(() => {
-    const record = message.get();
-    const reactions = (record?.reactions?.get() ?? []) as ChatReaction[];
     const key = entityKeyOf(message.resolveAsCell()) ?? "unsaved";
     return reactionTallies(
-      reactions,
+      message.get()?.reactions,
       myProfile?.get() === undefined ? undefined : myProfile,
       `fabrichat-reactors-${key}`,
     );
@@ -253,7 +260,7 @@ export const FabriChatMessageRow = pattern<
         myProfile.resolveAsCell(),
         kind,
         isOwner === true,
-        ownersMayObliterateBy(policy),
+        ownersMayObliterate === true,
       )
   );
   const isEditing = computed(() => {
@@ -322,49 +329,38 @@ export const FabriChatMessageRow = pattern<
   const stopEdit = action(() => composer.key("editing").set(undefined));
 
   // Each handler is bound to the cells it uses and no others; `messages`
-  // names the room's space to the acts, and takes the replies.
+  // takes the replies.
   const sendReaction = commitSendReaction({
     myProfile,
-    room: messages,
     message,
     pickerOpen,
     closesPicker: true,
-    refusal,
     joined,
   });
   const deleteReaction = commitDeleteReaction({
     myProfile,
-    room: messages,
     message,
-    refusal,
   });
   const editMessage = commitEdit({
     myProfile,
-    room: messages,
     message,
     composer,
-    refusal,
   });
   const deleteMessage = commitDelete({
     myProfile,
-    room: messages,
     message,
-    refusal,
   });
   const obliterateMessage = commitObliterate({
     myProfile,
-    room: messages,
     message,
     kind,
-    policy,
-    refusal,
+    ownersMayObliterate,
   });
   const replyInThread = commitReply({
     myProfile,
     messages,
     message,
     shownIn: "thread",
-    refusal,
     joined,
   });
   const replyInBoth = commitReply({
@@ -372,7 +368,6 @@ export const FabriChatMessageRow = pattern<
     messages,
     message,
     shownIn: "both",
-    refusal,
     joined,
   });
   const replyInMain = commitReply({
@@ -380,7 +375,6 @@ export const FabriChatMessageRow = pattern<
     messages,
     message,
     shownIn: "main",
-    refusal,
     joined,
   });
 
@@ -478,10 +472,8 @@ export const FabriChatMessageRow = pattern<
                       disabled={cannotWrite}
                       onClick={commitSendReaction({
                         myProfile,
-                        room: messages,
                         message,
                         emoji: tally.emoji,
-                        refusal,
                         joined,
                       })}
                     >
@@ -501,10 +493,8 @@ export const FabriChatMessageRow = pattern<
                       style={{ display: tally.mine ? "inline-flex" : "none" }}
                       onClick={commitDeleteReaction({
                         myProfile,
-                        room: messages,
                         message,
-                        emoji: tally.emoji,
-                        refusal,
+                        reaction: tally.own,
                       })}
                     >
                       ✕
@@ -551,12 +541,10 @@ export const FabriChatMessageRow = pattern<
                   disabled={cannotWrite}
                   onClick={commitSendReaction({
                     myProfile,
-                    room: messages,
                     message,
                     emoji,
                     pickerOpen,
                     closesPicker: true,
-                    refusal,
                     joined,
                   })}
                 >
