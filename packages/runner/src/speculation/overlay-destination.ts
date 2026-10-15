@@ -579,8 +579,13 @@ export class SpeculationOverlayDestination
   /**
    * Whether a seal of `tx` now would drop its writes: a speculative run on a
    * closed overlay, and an event-handler run that the late-echo rule finds
-   * jobless by its ancestry. The seal makes the same checks again when it
-   * runs, so a run that turns jobless after this was asked is dropped there.
+   * jobless by its ancestry. Asking records nothing; the seal makes the same
+   * checks again when it runs and records what it drops, so a run that turns
+   * jobless after this was asked is dropped there. The answer can also turn
+   * from `true` to `false`: the jobless set is bounded and pruned oldest
+   * first, so an intent found terminal here may be gone from it by the time
+   * the seal looks. A caller acts on the answer only in the same synchronous
+   * stretch as the seal, which the commit does by asking right before it.
    */
   discards(tx: IExtendedStorageTransaction): boolean {
     const context = speculationRunContextOf(tx);
