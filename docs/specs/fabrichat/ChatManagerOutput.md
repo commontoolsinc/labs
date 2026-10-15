@@ -275,7 +275,8 @@ outward act when it creates a room, or offers one it finds.
   there is one, and `profile` is added to the room's participants, as for a new
   room, and the notice is removed. A room whose roster already lists a profile
   attesting `counterpart` is one they have joined, and is offered nothing; so is
-  one whose notice has been delivered.
+  one whose notice has been delivered. Nor is a room offered, and its notice
+  stays, when `requestId` is longer than an offer's `id` may be.
   Otherwise, if a creation for the same `counterpart` is still pending under
   another `requestId`, the manager MUST resume that creation rather than start
   another, and records its outcome under both ids. Otherwise, creates a direct
