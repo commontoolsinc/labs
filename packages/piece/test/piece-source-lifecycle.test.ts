@@ -23,7 +23,10 @@ import {
   readPieceSourceState,
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
-import { PieceController } from "../src/ops/piece-controller.ts";
+import {
+  PieceController,
+  PieceSourceChangedError,
+} from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
@@ -250,6 +253,23 @@ describe("piece source lifecycle", () => {
     if (error !== undefined) throw error;
   }
 
+  /**
+   * Empties `piece`'s source log, leaving it as a piece made by a path that
+   * records no creation revision.
+   */
+  async function clearSourceLog(
+    piece: Awaited<ReturnType<PiecesController["create"]>>,
+  ): Promise<void> {
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw(
+        "pieceSourceHistory",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
+    });
+    if (error !== undefined) throw error;
+  }
+
   it("preloads source verification before creating a piece", async () => {
     const result = await fixtureOutcome<{
       history?: string[];
@@ -430,6 +450,107 @@ describe("piece source lifecycle", () => {
       kind: "system",
       recorded: "system:entered.tsx",
     });
+  });
+
+  it("repoints a piece still on the pattern and empty source log it is pinned to", async () => {
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await clearSourceLog(piece);
+    const pattern = getPatternIdentityRef(piece.getCell())!;
+
+    expect(
+      await piece.changeSource(
+        { kind: "repoint", url: "system:entered.tsx" },
+        { expectedPattern: pattern, expectedRevision: null },
+      ),
+    ).toEqual({ status: "applied" });
+
+    expect(getPatternSource(piece.getCell())).toBe("system:entered.tsx");
+    expect(await piece.result.get(["version"])).toBe("entered-v1");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.map((revision) => revision.operation)).toEqual([
+      "baseline",
+      "repoint",
+    ]);
+  });
+
+  it("throws `PieceSourceChangedError` for an empty-log pin on a piece with a revision", async () => {
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+
+    await expect(
+      piece.changeSource(
+        { kind: "repoint", url: "system:entered.tsx" },
+        { expectedRevision: null },
+      ),
+    ).rejects.toThrow(PieceSourceChangedError);
+
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    expect(await piece.result.get(["version"])).toBe("v1");
+  });
+
+  it("throws `PieceSourceChangedError` for a revision pin a same-pattern detach moved past", async () => {
+    // The detach keeps the pattern, so a pattern pin alone would let the
+    // repoint below undo it; the revision pin is what refuses.
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    const pattern = getPatternIdentityRef(piece.getCell())!;
+    const proved = getPieceSourceSnapshot(piece.getCell())!.revisionId;
+    await stampOrigin(piece, "system:pattern.tsx");
+    expect(await piece.changeSource({ kind: "detach" })).toEqual({
+      status: "applied",
+    });
+    expect(getPatternIdentityRef(piece.getCell())).toEqual(pattern);
+
+    await expect(
+      piece.changeSource(
+        { kind: "repoint", url: "system:entered.tsx" },
+        { expectedPattern: pattern, expectedRevision: proved },
+      ),
+    ).rejects.toThrow(
+      /ends at revision .*, but this change was proved against one that ends at revision/,
+    );
+
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    expect(await piece.result.get(["version"])).toBe("v1");
+  });
+
+  it("throws `PieceSourceChangedError` for a pinned repoint the piece moves under while it is prepared", async () => {
+    // The move lands after the pin check has read the piece and before the
+    // transition's baseline reads it again: the first `await` past the read.
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    const pattern = getPatternIdentityRef(piece.getCell())!;
+    const proved = getPieceSourceSnapshot(piece.getCell())!.revisionId;
+    const runner = runtime.runner;
+    const pointerFor = runner.sessionPatternPointerFor.bind(runner);
+    let moved = false;
+    runner.sessionPatternPointerFor = (cell) => {
+      if (!moved) {
+        moved = true;
+        queueMicrotask(() => {
+          const tx = runtime.edit();
+          setPatternSource(piece.getCell(), tx, "system:pattern.tsx");
+          tx.commit();
+        });
+      }
+      return pointerFor(cell);
+    };
+
+    try {
+      await expect(
+        piece.changeSource(
+          { kind: "repoint", url: "system:entered.tsx" },
+          { expectedPattern: pattern, expectedRevision: proved },
+        ),
+      ).rejects.toThrow(PieceSourceChangedError);
+    } finally {
+      runner.sessionPatternPointerFor = pointerFor;
+    }
+
+    expect(moved).toBe(true);
+    expect(getPatternSource(piece.getCell())).toBe("system:pattern.tsx");
+    expect(await piece.result.get(["version"])).toBe("v1");
   });
 
   it("points a piece at a fabric piece it has never followed", async () => {
