@@ -197,6 +197,21 @@ export interface CDFPoint {
   y: number;
 }
 
+/** One of the slowest measurements recorded on a key. */
+export interface SlowTiming {
+  /** How long it took, in milliseconds. */
+  elapsed: number;
+
+  /** When it ended, on the `performance.now()` clock. */
+  at: number;
+
+  /** When it ended, in milliseconds since the epoch. */
+  epochMs: number;
+
+  /** What the caller named this one measurement with, when it named it. */
+  detail?: string;
+}
+
 /** Statistics for timing measurements. */
 export interface TimingStats {
   /** Total number of measurements. */
@@ -235,6 +250,13 @@ export interface TimingStats {
   /** When the most recent measurement was recorded. */
   lastTimestamp: number;
 
+  /**
+   * The slowest measurements, longest first, at most `TIMING_SLOWEST_SIZE` of
+   * them. Where `max` says how slow the worst one was, these say when each of
+   * the worst few ended and, when the caller named them, what they were.
+   */
+  slowest: SlowTiming[];
+
   /** CDF over every sample taken. */
   cdf: CDFPoint[];
 
@@ -247,6 +269,13 @@ export interface TimingStats {
  * 1000 samples provides good percentile accuracy with bounded memory.
  */
 const TIMING_RESERVOIR_SIZE = 1000;
+
+/**
+ * How many of the slowest measurements a key keeps: enough to tell one
+ * outlier from the head of a tail, few enough that keeping them costs a
+ * handful of comparisons per measurement.
+ */
+const TIMING_SLOWEST_SIZE = 5;
 
 /**
  * Internal class for storing timing data with reservoir sampling.
@@ -266,16 +295,19 @@ class TimingDataStore {
   #baselineTotalTime = 0;
   #deltaSamples: number[] = []; // Reservoir for samples since baseline
   #deltaCount = 0; // Count of samples since baseline
+  #slowest: SlowTiming[] = [];
 
   /**
-   * Records a timing measurement.
-   * @param elapsed - The elapsed time in milliseconds
+   * Records a timing measurement of `elapsed` milliseconds. `detail` names
+   * this one measurement; given as a function, it is called only when the
+   * measurement is among the slowest this store keeps.
    */
-  record(elapsed: number): void {
+  record(elapsed: number, detail?: string | (() => string)): void {
     this.#count++;
     this.#totalTime += elapsed;
     this.#lastTime = elapsed;
     this.#lastTimestamp = performance.now();
+    this.#recordSlowest(elapsed, detail);
 
     if (elapsed < this.#min) this.#min = elapsed;
     if (elapsed > this.#max) this.#max = elapsed;
@@ -332,6 +364,7 @@ class TimingDataStore {
         p95: 0,
         lastTime: 0,
         lastTimestamp: 0,
+        slowest: [],
         cdf: [],
         cdfSinceBaseline: null,
       };
@@ -376,6 +409,7 @@ class TimingDataStore {
       p95: sorted[p95Index] ?? sorted[sorted.length - 1] ?? 0,
       lastTime: this.#lastTime,
       lastTimestamp: this.#lastTimestamp,
+      slowest: this.#slowest.map((entry) => ({ ...entry })),
       cdf,
       cdfSinceBaseline,
     };
@@ -390,6 +424,35 @@ class TimingDataStore {
     this.#lastTime = 0;
     this.#lastTimestamp = 0;
     this.#samples = [];
+    this.#slowest = [];
+  }
+
+  /**
+   * Keeps a measurement of `elapsed` milliseconds among the slowest when it
+   * is one, building its detail only then.
+   */
+  #recordSlowest(
+    elapsed: number,
+    detail: string | (() => string) | undefined,
+  ): void {
+    const slowest = this.#slowest;
+    const shortest = slowest[slowest.length - 1];
+    if (
+      shortest !== undefined && slowest.length === TIMING_SLOWEST_SIZE &&
+      elapsed <= shortest.elapsed
+    ) {
+      return;
+    }
+    const entry: SlowTiming = {
+      elapsed,
+      at: this.#lastTimestamp,
+      epochMs: Date.now(),
+    };
+    const named = typeof detail === "function" ? detail() : detail;
+    if (named !== undefined) entry.detail = named;
+    const index = slowest.findIndex((kept) => kept.elapsed < elapsed);
+    slowest.splice(index === -1 ? slowest.length : index, 0, entry);
+    if (slowest.length > TIMING_SLOWEST_SIZE) slowest.pop();
   }
 
   /**
@@ -556,8 +619,9 @@ export const TIMING_MEASURE_PREFIX = "cf:";
  * What separates a span's key from the detail naming that one instance.
  *
  * A detail identifies which of many spans on a key this one was — which action
- * ran, which document was read — and it belongs to the emitted measure alone.
- * Putting it in the key instead would multiply the statistics by every value it
+ * ran, which document was read — and it reaches the emitted measure and the
+ * slowest measurements the statistics keep, never the key itself. Putting it
+ * in the key instead would multiply the statistics by every value it
  * takes, which is the cost the keys are deliberately shaped to avoid: a key is
  * a place in the code, not an occurrence.
  */
@@ -850,6 +914,13 @@ export type LoggerBreakdown = {
 };
 
 /** Logger, which handles both basic and tagged logging. */
+/** `detail` as a function that builds it once, however often it is read. */
+function detailOnce(detail: string | (() => string)): () => string {
+  if (typeof detail === "string") return () => detail;
+  let built: string | undefined;
+  return () => built ??= detail();
+}
+
 export class Logger {
   #moduleName: string | undefined;
   #disabled: boolean;
@@ -1123,11 +1194,15 @@ export class Logger {
   }
 
   /**
-   * Ends a timer as `timeEnd()` does, and names this one span on the timeline.
+   * Ends a timer as `timeEnd()` does, and names this one span with `detail`.
    *
-   * The detail reaches the emitted measure and nothing else: the statistics
-   * stay keyed by the path alone, so a caller can identify an occurrence
-   * without multiplying the rows by every value the detail takes.
+   * The detail reaches the emitted measure and the slowest measurements the
+   * statistics keep for the path, and nothing else: the statistics stay keyed
+   * by the path alone, so a caller can identify an occurrence without
+   * multiplying the rows by every value the detail takes. A caller whose
+   * detail costs anything to produce passes a function, which is called only
+   * when something keeps the detail: when the span is among the slowest, or
+   * when it reaches the timeline.
    */
   timeEndDetailed(
     detail: string | (() => string),
@@ -1138,16 +1213,7 @@ export class Logger {
     if (startTime === undefined) return undefined;
     this.#activeTimers.delete(keyPath);
     const elapsed = performance.now() - startTime;
-    // Resolved only when it will be used. A caller whose detail costs anything
-    // to produce passes a function, and pays nothing on the ordinary path
-    // where emission is off — which is every production run — nor once the cap
-    // has stopped emission partway through one.
-    const resolved = !willEmitTimingMeasure()
-      ? undefined
-      : typeof detail === "function"
-      ? detail()
-      : detail;
-    this.#recordTime(elapsed, keys, startTime, resolved);
+    this.#recordTime(elapsed, keys, startTime, detail);
     return elapsed;
   }
 
@@ -1169,23 +1235,20 @@ export class Logger {
    * @returns The elapsed time in milliseconds
    */
   time(startTime: number, ...rest: (string | number)[]): number {
-    let endTime: number;
-    let keys: string[];
+    return this.#time(startTime, rest, undefined);
+  }
 
-    // Determine if second argument is endTime or first key
-    if (rest.length > 0 && typeof rest[0] === "number") {
-      endTime = rest[0] as number;
-      keys = rest.slice(1) as string[];
-    } else {
-      endTime = performance.now();
-      keys = rest as string[];
-    }
-
-    const elapsed = endTime - startTime;
-    if (keys.length > 0) {
-      this.#recordTime(elapsed, keys, startTime);
-    }
-    return elapsed;
+  /**
+   * Records a timing measurement directly, as `time()` does with the same
+   * `startTime` and `rest`, and names this one measurement with `detail`, as
+   * `timeEndDetailed()` does.
+   */
+  timeDetailed(
+    detail: string | (() => string),
+    startTime: number,
+    ...rest: (string | number)[]
+  ): number {
+    return this.#time(startTime, rest, detail);
   }
 
   /**
@@ -1363,14 +1426,43 @@ export class Logger {
   }
 
   /**
+   * Helper for `time()` and `timeDetailed()`: `rest` is an end time followed
+   * by the key path, or the key path alone, in which case the measurement
+   * ends now.
+   */
+  #time(
+    startTime: number,
+    rest: (string | number)[],
+    detail: string | (() => string) | undefined,
+  ): number {
+    let endTime: number;
+    let keys: string[];
+
+    if (rest.length > 0 && typeof rest[0] === "number") {
+      endTime = rest[0] as number;
+      keys = rest.slice(1) as string[];
+    } else {
+      endTime = performance.now();
+      keys = rest as string[];
+    }
+
+    const elapsed = endTime - startTime;
+    if (keys.length > 0) {
+      this.#recordTime(elapsed, keys, startTime, detail);
+    }
+    return elapsed;
+  }
+
+  /**
    * Records timing against the full key path only, with no rollup to the
-   * shorter paths.
+   * shorter paths. A `detail` given as a function is built at most once,
+   * and only for a measurement something keeps the detail of.
    */
   #recordTime(
     elapsed: number,
     keys: string[],
     startTime?: number,
-    detail?: string,
+    detail?: string | (() => string),
   ): void {
     const path = keys.join("/");
     let store = this.#timingsByKey.get(path);
@@ -1381,9 +1473,15 @@ export class Logger {
       }
       this.#timingsByKey.set(path, store);
     }
-    store.record(elapsed);
+    const named = detail === undefined ? undefined : detailOnce(detail);
+    store.record(elapsed, named);
     if (_emitTimingMeasures && startTime !== undefined) {
-      this.#emitMeasure(path, startTime, elapsed, detail);
+      this.#emitMeasure(
+        path,
+        startTime,
+        elapsed,
+        named !== undefined && willEmitTimingMeasure() ? named() : undefined,
+      );
     }
   }
 

@@ -1665,6 +1665,86 @@ describe("logger", () => {
       });
     });
 
+    describe("slowest measurements", () => {
+      it("keeps the longest five, longest first, with their details", () => {
+        const logger = getLogger("timing-test-slowest");
+
+        for (const elapsed of [30, 10, 50, 20, 60, 40, 5]) {
+          logger.timeDetailed(`run-${elapsed}`, 0, elapsed, "op");
+        }
+
+        const slowest = logger.getTimeStats("op")?.slowest ?? [];
+        expect(slowest.map((entry) => entry.elapsed)).toEqual([
+          60,
+          50,
+          40,
+          30,
+          20,
+        ]);
+        expect(slowest.map((entry) => entry.detail)).toEqual([
+          "run-60",
+          "run-50",
+          "run-40",
+          "run-30",
+          "run-20",
+        ]);
+      });
+
+      it("records when each of the slowest ended on both clocks", () => {
+        const logger = getLogger("timing-test-slowest-when");
+        const beforeNow = performance.now();
+        const beforeEpoch = Date.now();
+
+        logger.time(0, 25, "op");
+
+        const [entry] = logger.getTimeStats("op")?.slowest ?? [];
+        expect(entry?.at).toBeGreaterThanOrEqual(beforeNow);
+        expect(entry?.at).toBe(logger.getTimeStats("op")?.lastTimestamp);
+        expect(entry?.epochMs).toBeGreaterThanOrEqual(beforeEpoch);
+        expect(entry?.detail).toBeUndefined();
+      });
+
+      it("builds a detail only for a measurement among the slowest", () => {
+        const logger = getLogger("timing-test-slowest-lazy");
+        let built = 0;
+        const detail = () => {
+          built++;
+          return "built";
+        };
+
+        for (let i = 0; i < 5; i++) logger.timeDetailed(detail, 0, 100, "op");
+        expect(built).toBe(5);
+
+        logger.timeDetailed(detail, 0, 1, "op");
+        expect(built).toBe(5);
+
+        logger.timeDetailed(detail, 0, 200, "op");
+        expect(built).toBe(6);
+        expect(logger.getTimeStats("op")?.slowest[0]?.elapsed).toBe(200);
+      });
+
+      it("names a timer's span through `timeEndDetailed()` too", () => {
+        const logger = getLogger("timing-test-slowest-timer");
+
+        logger.timeStart("phase");
+        logger.timeEndDetailed("the-one", "phase");
+
+        expect(logger.getTimeStats("phase")?.slowest[0]?.detail).toBe(
+          "the-one",
+        );
+      });
+
+      it("reports none for a key with no measurements", () => {
+        const logger = getLogger("timing-test-slowest-empty");
+
+        logger.time(0, 10, "op");
+        logger.resetTimeStats();
+        logger.time(0, 10, "op");
+
+        expect(logger.getTimeStats("op")?.slowest).toHaveLength(1);
+      });
+    });
+
     describe("resetTimeStats()", () => {
       it("clears every recorded timing", () => {
         const logger = getLogger("timing-test-reset");
@@ -2455,6 +2535,9 @@ describe("logger", () => {
     it("does not build a detail that will not be emitted", () => {
       setTimingMeasuresEnabled(false);
       const logger = getLogger("measure-detail-lazy");
+      // Five long spans fill the key's slowest entries, so the short spans
+      // below are kept nowhere but the timeline.
+      for (let i = 0; i < 5; i++) logger.time(0, 1_000_000, "phase", "lazy");
       let built = 0;
       logger.timeStart("phase", "lazy");
       logger.timeEndDetailed(
@@ -2468,7 +2551,7 @@ describe("logger", () => {
       // Emission is off on every production run, and a caller whose detail
       // costs anything to produce must not pay for it there.
       expect(built).toBe(0);
-      expect(logger.getTimeStats("phase", "lazy")?.count).toBe(1);
+      expect(logger.getTimeStats("phase", "lazy")?.count).toBe(6);
 
       setTimingMeasuresEnabled(true);
       logger.timeStart("phase", "lazy");
@@ -2484,8 +2567,11 @@ describe("logger", () => {
     });
 
     it("stops building details once the cap has stopped emission", () => {
-      setTimingMeasuresEnabled(true, { cap: 2 });
       const logger = getLogger("measure-detail-capped");
+      // Five long spans fill the key's slowest entries, so the short spans
+      // below are kept nowhere but the timeline.
+      for (let i = 0; i < 5; i++) logger.time(0, 1_000_000, "phase", "capped");
+      setTimingMeasuresEnabled(true, { cap: 2 });
       let built = 0;
       for (let i = 0; i < 6; i++) {
         logger.timeStart("phase", "capped");
@@ -2502,7 +2588,7 @@ describe("logger", () => {
       // cap nothing reaches the timeline, so nothing should be built for it —
       // and that is the longest run, where it would cost the most.
       expect(built).toBe(2);
-      expect(logger.getTimeStats("phase", "capped")?.count).toBe(6);
+      expect(logger.getTimeStats("phase", "capped")?.count).toBe(11);
     });
 
     it("reports no detail for a span that was not named", () => {
