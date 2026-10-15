@@ -29,7 +29,6 @@ import {
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
-  forgetExpired,
   isDeleted,
   type JoinRoomRequest,
   type MessageCell,
@@ -258,7 +257,19 @@ export const FabriChatMessageRow = pattern<
     self,
   } = input;
   const joined = tellManagerJoined({ canJoin, container, joinRoom, self });
-  const expire = forgetExpired({ requests, usedTimes, activity, counters });
+  // Drops what the room no longer keeps, after each act.
+  const expire = commitSend({
+    myProfile,
+    kind,
+    composer,
+    messages,
+    reactionLists,
+    requests,
+    usedTimes,
+    activity,
+    counters,
+    forgets: true,
+  });
   const records = {
     kind,
     policy,

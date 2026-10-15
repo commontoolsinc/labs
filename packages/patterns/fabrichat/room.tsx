@@ -49,7 +49,6 @@ import {
 import { isInMain, type ShownIn, viewPlaces } from "./logic.ts";
 import {
   type ActivityCell,
-  type ActivityCounters,
   type ActivityCountersCell,
   canActIn,
   commitDelete,
@@ -64,7 +63,6 @@ import {
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
-  forgetExpired,
   isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
@@ -1205,7 +1203,19 @@ export const FabriChatRoomCore = pattern<
     requests,
     usedTimes,
     activity,
-    expire: forgetExpired({ requests, usedTimes, activity, counters }),
+    // Drops what the room no longer keeps, after each act.
+    expire: commitSend({
+      myProfile,
+      kind,
+      composer,
+      messages,
+      reactionLists,
+      requests,
+      usedTimes,
+      activity,
+      counters,
+      forgets: true,
+    }),
     joined: tellManagerJoined({
       canJoin,
       container: ownSpace ? undefined : container,

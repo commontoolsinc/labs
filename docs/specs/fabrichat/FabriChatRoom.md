@@ -101,10 +101,12 @@ and `requestId` against a keyed collection of the requests the room has acted
 on, and does nothing for one it finds. It records the request there in the same
 transaction as its effect, and the collection drops a request once it was
 recorded longer ago than the greater of `proposedTimeMaxAgeNsec` plus
-`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The dropping is
-`forgetExpired`'s, a handler each of those handlers sends an event to once it
-has recorded its act, which drops expired used times and activity entries as
-well. So an act reads none of the room's lists whole, and two acts at once, by
+`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The dropping
+happens in an event of its own, which each of those handlers sends once it has
+recorded its act, to a binding of `commitSend` that drops what the room no
+longer keeps rather than sending: expired requests, used times, and activity
+entries. Those records' write policies name the act handlers, which is why a
+binding of one of them does it. So an act reads none of the room's lists whole, and two acts at once, by
 different members, read nothing either of them writes: each writes documents of
 its own, keyed by its request or its time, and adds them to the room's lists by
 mergeable additions, which commute. The collection keeps
@@ -182,7 +184,7 @@ store appends entries in the order their transactions commit, and
 `recentActivity` numbers them from the `seq` after the last entry dropped from
 the front. `commitObliterate`, and `commitDelete` when it obliterates, clear the
 message's earlier entries where they stand, so no other entry's place moves.
-`forgetExpired` clears entries older than the window the same way, and drops
+The dropping event clears entries older than the window the same way, and drops
 the run of cleared entries at the front of the list, advancing the `seq` the
 numbering starts from past them.
 

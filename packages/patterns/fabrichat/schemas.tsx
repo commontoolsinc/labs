@@ -335,9 +335,10 @@ export interface ChatRoomActivity {
 
   /**
    * The entry as the room stored it, labeled `authored-by` the principal
-   * whose event it records.
+   * whose event it records. Every `FabriChatRoom` links it; it is optional so
+   * that a reader holding a room that doesn't still accepts that room.
    */
-  record: Cell<ChatRoomActivityRecord>;
+  record?: Cell<ChatRoomActivityRecord>;
 }
 
 /**

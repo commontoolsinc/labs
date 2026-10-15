@@ -20,7 +20,7 @@ interface ChatRoomActivity {
   what: Cell<ChatMessage>;
 
   /** The entry as the room stored it, which carries its label. */
-  record: Cell<ChatRoomActivityRecord>;
+  record?: Cell<ChatRoomActivityRecord>;
 }
 ```
 

@@ -147,7 +147,11 @@ describe("fabrichat: members sending at once", () => {
     const holdsLists = new Map<string, boolean>();
     const isRoomArgument = async (id: string): Promise<boolean> => {
       if (!holdsLists.has(id)) {
-        const held = await starter.rawRead({ id, space: room.space });
+        const held = await starter.rawRead({
+          id,
+          space: room.space,
+          path: ["value"],
+        });
         const value = held.value as Record<string, unknown> | undefined;
         holdsLists.set(
           id,
