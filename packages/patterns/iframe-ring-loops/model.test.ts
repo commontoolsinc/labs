@@ -19,9 +19,11 @@ import {
   checkedVolume,
   defaultColor,
   FALLBACK_TEMPO_BPM,
+  followingClock,
   freshPresses,
   HAND_FACET,
   handTurn,
+  isClockJump,
   keyForPad,
   laneLabel,
   laneMidi,
@@ -653,6 +655,34 @@ describe("model", () => {
 
     it("counts a negative step, as during a start delay, from 0", () => {
       expect(peerHandPosition({ ...hand, step: -0.4 }, 5_000)).toBe(0);
+    });
+  });
+
+  describe("followingClock()", () => {
+    const hand = { step: 10, at: 5_000, bpm: 120 };
+
+    it("holds the hand's position at the delayed moment, on this audio clock", () => {
+      const clock = followingClock(hand, 6_000, 40, 0.5);
+      expect(positionAt(clock, 40.5)).toBe(22);
+    });
+
+    it("advances at the hand's tempo", () => {
+      const clock = followingClock(hand, 6_000, 40, 0.5);
+      expect(positionAt(clock, 41.5)).toBe(30);
+    });
+  });
+
+  describe("isClockJump()", () => {
+    const current = { anchorStep: 0, anchorTime: 10, tempoBpm: 120 };
+
+    it("returns `false` for a shift under half a step", () => {
+      const next = { ...current, anchorStep: 0.3 };
+      expect(isClockJump(current, next, 12)).toBe(false);
+    });
+
+    it("returns `true` for a peer restarting from the top", () => {
+      const next = { anchorStep: 0, anchorTime: 12, tempoBpm: 120 };
+      expect(isClockJump(current, next, 12)).toBe(true);
     });
   });
 

@@ -28,9 +28,11 @@ import {
   defaultColor,
   type DrumSound,
   drumSound,
+  followingClock,
   freshPresses,
   HAND_FACET,
   handTurn,
+  isClockJump,
   JAM_ROOM,
   keyForPad,
   laneLabel,
@@ -48,6 +50,7 @@ import {
   padForKey,
   type PadPress,
   type Peer,
+  type PeerHand,
   peerHandPosition,
   POINTER_FACET,
   positionAt,
@@ -152,6 +155,11 @@ let ownPresses: PadPress[] = [];
 let nextPressId = 0;
 let publishedName: string | undefined;
 let publishedColor: string | undefined;
+// Membership of the peer this browser's playback follows, if any.
+let following: string | undefined;
+// Signature of what the people list last showed, so that a peer's pointer
+// moving does not rebuild it, and its buttons stay under the user's click.
+let shownPeople = "";
 // The jam pads, by ring index and lane.
 const padButtons = new Map<string, HTMLButtonElement>();
 
@@ -656,7 +664,7 @@ function applySettings(): void {
     now,
     0.05,
   );
-  if (transport && transport.tempoBpm !== tempo) {
+  if (transport && following === undefined && transport.tempoBpm !== tempo) {
     transport = retimed(transport, now, tempo);
     publishHand();
   }
@@ -1076,51 +1084,101 @@ function rebuildPads(): void {
   }
 }
 
-/** Lists this viewer and everyone else in the room, and how the room stands. */
+/**
+ * Lists this viewer and everyone else in the room, with a button to follow
+ * each other person's playback, and says how the room stands.
+ */
 function renderPeople(): void {
+  const others = [...peers.values()];
+  const self = {
+    name: `${viewerName() || "Guest"} (you)`,
+    color: hydrated ? effectiveColor() : "#8b93a7",
+    playing: transport !== undefined,
+    jammed: lastJammed.get(SELF),
+  };
+  const shown = JSON.stringify([
+    self,
+    others.map((peer) => [
+      peer.id,
+      peer.name,
+      peer.color,
+      peer.hand !== undefined,
+      lastJammed.get(peer.id),
+    ]),
+    following,
+    roomStatus,
+    ready(),
+  ]);
+  if (shown === shownPeople) return;
+  shownPeople = shown;
+
   const row = (
-    name: string,
-    color: string,
-    playing: boolean,
+    person: { name: string; color: string; playing: boolean },
     jammed: string | undefined,
+    follow: HTMLButtonElement | undefined,
   ) => {
     const item = document.createElement("li");
     item.className = "person";
     const dot = document.createElement("span");
     dot.className = "author-dot";
-    dot.style.background = color;
+    dot.style.background = person.color;
     const label = document.createElement("span");
     label.className = "author-name";
-    label.textContent = name;
+    label.textContent = person.name;
     const activity = document.createElement("span");
     activity.className = "author-count";
     activity.textContent = [
-      playing ? "playing" : "",
+      person.playing ? "playing" : "",
       jammed ? `jammed ${jammed}` : "",
     ].filter(Boolean).join(" · ");
     item.append(dot, label, activity);
+    if (follow) item.append(follow);
     return item;
   };
-  const others = [...peers.values()];
+  const followButton = (peer: Peer) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "follow";
+    button.dataset.testid = "follow";
+    const isFollowed = following === peer.id;
+    button.textContent = isFollowed ? "Following" : "Follow";
+    button.setAttribute("aria-pressed", String(isFollowed));
+    button.setAttribute(
+      "aria-label",
+      isFollowed
+        ? `Stop following ${peer.name}`
+        : `Play in step with ${peer.name}`,
+    );
+    button.disabled = !ready();
+    button.addEventListener("click", () => {
+      clearError();
+      if (following === peer.id) {
+        unfollow();
+      } else {
+        void follow(peer.id).catch(showError);
+      }
+    }, { signal });
+    return button;
+  };
   peopleList.replaceChildren(
-    row(
-      `${viewerName() || "Guest"} (you)`,
-      hydrated ? effectiveColor() : "#8b93a7",
-      transport !== undefined,
-      lastJammed.get(SELF),
-    ),
+    row(self, self.jammed, undefined),
     ...others.map((peer) =>
       row(
-        peer.name,
-        peer.color,
-        peer.hand !== undefined,
+        {
+          name: peer.name,
+          color: peer.color,
+          playing: peer.hand !== undefined,
+        },
         lastJammed.get(peer.id),
+        followButton(peer),
       )
     ),
   );
   roomLine.textContent = roomStatus === "live"
     ? others.length === 0
       ? "Nobody else is here right now."
+      : following !== undefined && peers.has(following)
+      ? `Playing in step with ${peers.get(following)?.name}.`
       : `${others.length} ${others.length === 1 ? "other" : "others"} here.`
     : roomStatus === "joining"
     ? "Joining the room…"
@@ -1378,16 +1436,22 @@ function onRoomEvent(event: PresenceRoomEvent): void {
       break;
     case "upsert": {
       const peer = readPeer(event.participant);
+      const before = peers.get(peer.id)?.hand;
       if (peers.has(peer.id)) hearPeer(peer);
       else meetPeer(peer);
+      if (peer.id === following && !sameHand(before, peer.hand)) {
+        syncToFollowed();
+      }
       break;
     }
     case "remove":
+      if (event.participantId === following) following = undefined;
       peers.delete(event.participantId);
       pressesHeard.delete(event.participantId);
       lastJammed.delete(event.participantId);
       break;
     case "failure":
+      following = undefined;
       leaveRoom = undefined;
       peers.clear();
       pressesHeard.clear();
@@ -1415,6 +1479,71 @@ function hearPeer(peer: Peer): void {
   }
   pressesHeard.set(peer.id, lastPressId(peer.presses) ?? heard ?? -1);
   peers.set(peer.id, peer);
+}
+
+/** Returns whether two hand facets say the same thing. */
+function sameHand(a: PeerHand | undefined, b: PeerHand | undefined): boolean {
+  return a?.step === b?.step && a?.at === b?.at && a?.bpm === b?.bpm;
+}
+
+/**
+ * Follows a peer's playback: starts the audio, as the click that calls this is
+ * the gesture a browser needs, and plays in step with the peer from then on,
+ * stopping and starting as they do.
+ *
+ * @throws {Error} When the browser leaves the audio context suspended.
+ */
+async function follow(peerId: string): Promise<void> {
+  if (!ready()) return;
+  audio ??= createAudioEngine();
+  await audio.context.resume();
+  if (disposed) return;
+  if (audio.context.state !== "running") {
+    throw new Error("The browser has not started audio. Try again.");
+  }
+  following = peerId;
+  syncToFollowed();
+}
+
+/** Stops following, and leaves this browser's playback running on its own. */
+function unfollow(): void {
+  following = undefined;
+  applySettings();
+  renderControls();
+}
+
+/**
+ * Brings this browser's clock in step with the followed peer's hand, or stops
+ * it while the peer is stopped. A shift smaller than half a step keeps the
+ * notes already queued, so that clock jitter neither repeats nor drops one.
+ */
+function syncToFollowed(): void {
+  if (following === undefined || !audio || disposed) return;
+  const peer = peers.get(following);
+  if (!peer) {
+    following = undefined;
+  } else if (!peer.hand) {
+    if (transport) {
+      transport = undefined;
+      flashes.clear();
+      publishHand();
+    }
+  } else {
+    const now = audio.context.currentTime;
+    const next = followingClock(
+      peer.hand,
+      Date.now(),
+      now,
+      START_DELAY_SECONDS,
+    );
+    if (!transport || isClockJump(transport, next, now)) {
+      scheduledThrough = positionAt(next, now);
+    }
+    transport = next;
+    publishHand();
+  }
+  renderControls();
+  requestFrame();
 }
 
 /** Plays a jam pad here, and tells the room so that everyone else hears it. */
@@ -1555,6 +1684,7 @@ canvas.addEventListener("click", (event) => {
 playButton.addEventListener("click", () => {
   clearError();
   rejoinIfLost();
+  following = undefined;
   if (transport) {
     stopPlayback();
   } else {

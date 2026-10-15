@@ -330,10 +330,20 @@
 
     .person {
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto 1fr auto auto;
       gap: 0.55rem;
       align-items: center;
       font-size: 0.88rem;
+    }
+
+    .follow {
+      padding: 0.2rem 0.6rem;
+      font-size: 0.76rem;
+    }
+
+    .follow[aria-pressed="true"] {
+      border-color: #ffd43b;
+      color: #ffd43b;
     }
 
     .clear {

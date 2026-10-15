@@ -840,6 +840,41 @@ export function peerHandPosition(hand: PeerHand, nowMs: number): number {
 }
 
 /**
+ * Returns a step clock that plays in step with `hand`: at audio time
+ * `audioNow + delaySeconds` it holds the position `hand` reaches at wall-clock
+ * time `nowMs` plus the same delay, and it advances at the hand's tempo. It is
+ * only as close to the peer's as the two machines' wall clocks are to each
+ * other.
+ */
+export function followingClock(
+  hand: PeerHand,
+  nowMs: number,
+  audioNow: number,
+  delaySeconds: number,
+): Transport {
+  return {
+    anchorStep: peerHandPosition(hand, nowMs + delaySeconds * 1000),
+    anchorTime: audioNow + delaySeconds,
+    tempoBpm: hand.bpm,
+  };
+}
+
+/**
+ * Returns whether moving from `current` to `next` at audio time `audioNow`
+ * shifts the playing position by half a step or more, as a peer restarting
+ * does. A smaller shift is clock jitter, under which the steps already queued
+ * stand.
+ */
+export function isClockJump(
+  current: Transport,
+  next: Transport,
+  audioNow: number,
+): boolean {
+  return Math.abs(positionAt(next, audioNow) - positionAt(current, audioNow)) >=
+    0.5;
+}
+
+/**
  * Returns the presses in `presses` numbered above `lastSeen`, oldest first.
  * With no `lastSeen`, as for a participant just met, it returns none, so that
  * joining a room does not replay what was played before.
