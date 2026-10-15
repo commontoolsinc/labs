@@ -235,7 +235,11 @@ export interface Suite {
   /** Whether a record belongs to one of this suite's units, or to it. */
   locate(record: LocatableRecord): Location | undefined;
 
-  /** The commands that run exactly these units, and their reports. */
+  /**
+   * The commands that run exactly these units, and their reports. Each
+   * unit goes to one command, so that what a command recorded is the
+   * whole of what was recorded of the units it ran.
+   */
   command(
     units: readonly UnitRequest[],
     context: CommandContext,
