@@ -1311,9 +1311,18 @@ describe("plan", () => {
               overhead: 9,
               correction: 0.8,
               unitOverhead: 2,
+              unitHooks: {
+                "packages/workspace-unit/0.test.ts": 6,
+                "packages/workspace-unit/4.test.ts": 2.5,
+              },
             },
             "runner-unit": { overhead: 4, correction: 0.4, unitOverhead: 1 },
-            "cli-core": { overhead: 21, correction: 1.2, unitOverhead: 0 },
+            "cli-core": {
+              overhead: 21,
+              correction: 1.2,
+              unitOverhead: 0,
+              unitHooks: { "packages/cli-core/3.test.ts": 11 },
+            },
           },
           prologue: 0,
         },
@@ -1341,6 +1350,65 @@ describe("plan", () => {
       }
       expect(result.lanes.some((lane) => lane.selections.length > 0))
         .toBe(true);
+    });
+
+    it("charges a unit's hooks through the correction each time a pass opens it", () => {
+      // Three units of one test each, the first of them run twice: four
+      // openings at the per-unit charge, the first unit's hooks twice and
+      // the second's once, through a correction of two, and four seconds
+      // of tests through it too.
+      const manifest = sampleManifest({
+        entries: entries(3, (i) => ({
+          cost: 1,
+          unit: `packages/memory/test/${i}.test.ts`,
+        })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": {
+              overhead: 0,
+              correction: 2,
+              unitOverhead: 1,
+              unitHooks: {
+                "packages/memory/test/0.test.ts": 4,
+                "packages/memory/test/1.test.ts": 3,
+              },
+            },
+          },
+          prologue: 0,
+        },
+      });
+      const held = manifest.entries.map((entry, i) => ({
+        entry,
+        repeats: i === 0 ? 2 : 1,
+      }));
+      expect(suiteCharge(manifest, "workspace-unit", held))
+        .toBeCloseTo(4 * 1 + 2 * (2 * 4 + 3) + 2 * 4, 6);
+    });
+
+    it("leaves a unit's hooks out of what a lane pays before it runs anything", () => {
+      // They are time of the kind a unit's tests take, and a suite's
+      // fixed charge would otherwise be the hooks of whichever unit the
+      // manifest happened to list first.
+      const manifest = sampleManifest({
+        entries: entries(2, () => ({ suite: "workspace-unit" })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": {
+              overhead: 9,
+              correction: 1,
+              unitOverhead: 2,
+              unitHooks: Object.fromEntries(
+                entries(2, () => ({})).map((entry) => [entry.unit, 300]),
+              ),
+            },
+          },
+          prologue: 0,
+        },
+      });
+      expect(fixedCharges({ manifest, capabilities: new Map() }))
+        .toEqual({ "workspace-unit": 11 });
     });
 
     it("charges nothing for a suite a lane holds nothing of", () => {

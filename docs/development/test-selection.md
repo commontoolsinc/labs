@@ -532,9 +532,11 @@ identical in a source file, and somebody who tries to tune a derived value
 is editing a line that is not there.
 
 More numbers come from measurement, and they are not in the table
-because they are not in `policy.ts`: `setupCost` for each capability, and
-for each suite `overhead`, `correction` and `unitOverhead`. The setups
-are read off the lanes' own timing records, the rest are fitted to them,
+because they are not in `policy.ts`: `setupCost` for each capability, for
+each suite `overhead`, `correction` and `unitOverhead`, and for each unit
+lanes have measured hooks for, what those hooks take, in the suite's
+`unitHooks`. The setups and the hooks are read off the lanes' own timing
+records, the rest are fitted to them,
 and all of them are published in the manifest, one set per publisher run,
 which is where to read them.
 Nothing hand-edits them, and a manifest carrying a strange one is a
@@ -1103,17 +1105,20 @@ Left out of everything scored, they are not discarded. The publisher keeps
 them in its rolling aggregate over `COST_WINDOW_DAYS`, the same window it
 measures a test's cost over, and reads `setupCost` and each suite's fit from
 them for the next manifest. A lane writes one record per capability it opens
-and five per batch: what the batch spent, what the tests of its units took
-between them, how many times its passes opened a unit, and how many passes it
-made, and a fifth that the fit does not read: what the packer charged the lane
-for the batch, which [When the cost model
+and five per batch: what the batch spent, what the tests of its units and
+their hooks took between them, how many times its passes opened a unit, and
+how many passes it made, and a fifth that the fit does not read: what the
+packer charged the lane for the batch, which [When the cost model
 breaks](#when-the-cost-model-breaks) reads with the three a lane writes once
 about its work as a whole. None of the first four can be recovered from the
 records the batch produced: a reader of a report cannot tell which of its
 records came from which batch. The second, third and fourth are what the
 correction, the per-unit charge and the per-pass charge are fitted to, and a
 batch missing any of them is not read. [What a lane is
-charged](../specs/test-selection.md#what-a-lane-is-charged) says how.
+charged](../specs/test-selection.md#what-a-lane-is-charged) says how. A lane
+also writes one record for each time a pass opened a unit whose hooks its
+report timed, `ci-lane hooks <suite> in <unit>`, which is where each unit's
+hooks are read from.
 
 The second counts the records the suite places in one of its units, which are
 the identities a manifest holds and the packer charges by. A record the suite
@@ -1124,6 +1129,22 @@ that several units of a script share, or one off the suite's surfaces. What a
 batch spends on those is part of what it spent beyond its units' tests, which
 the per-pass and per-unit charges carry: a wrapper's run once for each pass,
 and a shared phase once for each unit that runs it.
+
+A unit's hooks are the setup and teardown its `describe`s declare around
+their tests, such as a `beforeAll` that deploys a pattern and opens a page.
+Deno's JUnit report times them only inside the case it writes for each
+`describe`, and that case holds every test beneath it a second time, so
+ingestion records it only where it failed on its own account or the manifest
+already knows it, and then with the time it spent outside the cases directly
+inside it. What the lane reads is the time each outermost such case took that
+no record holds, which is the hooks of the `describe`s nested in it too, and
+for a `Deno.test` whose leaves are steps, what its own body took around them,
+less whatever a recorded container among them holds. The second figure
+counts that, since the packer charges a unit's hooks through the same
+correction as its tests, and the publisher keeps what each unit's hooks took,
+counted by bucket as a test's durations are. They differ from unit to unit far more than a figure
+for the whole suite could carry: one file's hooks can take a minute where
+another's take nothing.
 
 What its tests took, rather than what the packer expected them to take.
 The two differ by however wrong the manifest's costs are, and a unit
@@ -1212,14 +1233,20 @@ opens the capability: read at the slowest, one slow runner would set what every
 lane pays. The percentile is the observation at its rank rather than a value
 between two, so over nine or fewer openings it is the slowest of them.
 
+A unit's hooks are charged at the ninetieth percentile of what they took each
+time a pass opened the unit in the window, which is the percentile a test is
+read at, and are published in the suite's fit as `unitHooks`. A unit with no
+entry there is charged nothing for its hooks.
+
 A suite's three figures are fitted to what its batches spent by least squares:
 `overhead` for each pass, `unitOverhead` for each time a pass opened a unit, and
-`correction` for each second of its units' tests, none of them below zero. The
-correction is fitted only from at least `MIN_CORRECTION_SAMPLES` batches whose
-tests' times span at least `MIN_CORRECTION_SPAN_SECONDS`, and only where it
-comes out above zero; otherwise it is one, and the other two are fitted to what
-the batches spent beyond their tests. The fit is what a batch of its shape
-spends on average. The packer charges a batch the fit, except that it charges
+`correction` for each second of its units' tests and their hooks, none of them
+below zero. The correction is fitted only from at least `MIN_CORRECTION_SAMPLES`
+batches whose tests and hooks took times spanning at least
+`MIN_CORRECTION_SPAN_SECONDS`, and only where it comes out above zero; otherwise
+it is one, and the other two are fitted to what the batches spent beyond their
+tests and hooks. The fit is what a batch of its
+shape spends on average. The packer charges a batch the fit, except that it charges
 the batch's tests no less than what the longest unit of each pass takes, added
 together, since a pass does not finish before its longest unit does. So a lane
 is charged about what the batches it holds spend between them on average. Lanes spend
@@ -1466,24 +1493,26 @@ rerun recorded, and which tests' units did not fit. A pull request's lanes
 rerun nothing, unless the pull request is labelled `ci: full`, which runs its
 lanes as the full run.
 
-A lane decides all of this from the records its batches gathered rather
-than from what a command exited with. A runner that failed only on
-identities a flake rate excuses has told the run nothing it should stop
-for, and a runner that exited zero having run none of its unit has. So a
-unit that recorded nothing fails the lane, and an excusal holds only for
-an invocation that accounted for every identity it was asked to run that
-the tree holds. The lane reads what the tree holds from the name maps the
-registration preload leaves in the spool. An identity a unit's processes
-did not register, nor any test inside it, is absent where everything the
-map holds that encloses it is a `describe`, known as one by a leaf the
-map holds inside it. Such an identity is one the manifest carries from a
-rename or from a branch, and the lane's job summary lists it apart from
-the identities that withdraw an excusal. A registered test records the
-steps its body names as it runs, which no map holds, so an identity
-beneath a registered test shows nothing; so does one beneath a
-`describe` the map holds no leaf inside, and any identity of a unit whose
-processes left no name map. An identity any of those leaves unrecorded
-withdraws the excusal.
+A lane decides all of this from the records its batches gathered rather than
+from what a command exited with. A runner that failed only on identities a flake
+rate excuses has told the run nothing it should stop for, and a runner that
+exited zero having run none of its unit has. So a unit that recorded nothing
+fails the lane, and an excusal holds only for an invocation that accounted for
+every identity it was asked to run that the tree holds. The lane reads what the
+tree holds from the name maps the registration preload leaves in the spool. An
+identity a unit's processes did not register, nor any test inside it, is absent
+where everything the map holds that encloses it is a `describe`, known as one by
+a leaf the map holds inside it. Such an identity is one the manifest carries
+from a rename or from a branch, and the lane's job summary lists it apart from
+the identities that withdraw an excusal. A registered test records the steps its
+body names as it runs, which no map holds, so an identity beneath a registered
+test shows nothing; so does one beneath a `describe` the map holds no leaf
+inside, and any identity of a unit whose processes left no name map. A name map
+the preload marked as interrupted, because an `error` or `unhandledrejection`
+event reached its file before the file's hooks and tests began, shows nothing
+either. An identity any of those leaves unrecorded withdraws the excusal. A
+package's browser tests, which run as one unit, are read from the mark the
+browser test runner leaves once it has loaded every file and run every test.
 
 ## What the dashboard shows
 

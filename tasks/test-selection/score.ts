@@ -1066,20 +1066,21 @@ export function readCostsForward(state: IdentityState): void {
       continue;
     }
     if (held.counts === undefined) days[day] = readSlowest(held);
-    else if (!isCounted(held)) days[day] = emptySamples();
+    else if (!isDaySamples(held)) days[day] = emptySamples();
   }
 }
 
 /**
- * Whether a day stored by bucket holds figures this can count with: a
- * bucket index and a count per bucket, each a whole number and none
- * negative. A day that does not is read as a day with nothing in it,
- * for the reason a day that is not a record is.
+ * Whether a stored day is one counted by bucket that holds figures this can
+ * count with: a bucket index and a count per bucket, each a whole number
+ * and none negative. A day that does not is read as a day with nothing in
+ * it, for the reason a day that is not a record is.
  */
-function isCounted(held: DaySamples): boolean {
-  const whole = (value: number) => Number.isInteger(value) && value >= 0;
-  return whole(held.lowest) && Array.isArray(held.counts) &&
-    held.counts.every(whole);
+export function isDaySamples(held: unknown): held is DaySamples {
+  const whole = (value: unknown) =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return isObjectOrArray(held) && whole(held.lowest) &&
+    Array.isArray(held.counts) && held.counts.every(whole);
 }
 
 /**

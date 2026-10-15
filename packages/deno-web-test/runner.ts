@@ -3,6 +3,7 @@ import { basename } from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
 import {
   FragmentWriter,
+  markWholeRun,
   repositoryRelativePath,
 } from "@commonfabric/test-support/records";
 import {
@@ -75,6 +76,11 @@ export class Runner {
     const seed = shuffleSeed();
     console.log(shuffleNotice(seed));
 
+    // How many tests the files registered. A run that loaded every file
+    // and has a result for every test each registered names those tests
+    // in the spool, and a run that does not says nothing.
+    let registered = 0;
+
     try {
       for (const tsTestPath of shuffledPaths(this.manifest.tests, seed)) {
         const results: TestFileResults = {
@@ -113,6 +119,25 @@ export class Runner {
           });
         }
         this.reporter.onFileEnd(tsTestPath);
+        // Counted again once the file's tests have run, so that a test the
+        // page registered after the first count counts too.
+        registered += await this.browser.getTestCount();
+      }
+      const ran = this.results.reduce(
+        (total, file) => total + file.tests.length,
+        0,
+      );
+      if (ran === registered) {
+        markWholeRun({
+          kind: "browser",
+          scope,
+          tests: Object.fromEntries(
+            this.results.map((file) => [
+              repositoryRelativePath(file.fileName),
+              file.tests.map((test) => test.name),
+            ]),
+          ),
+        });
       }
 
       const summary = summarize(this.results);

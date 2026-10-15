@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { exists } from "@std/fs";
 import { afterEach, describe, it } from "@std/testing/bdd";
-import { fromFileUrl } from "@std/path";
+import { dirname, fromFileUrl } from "@std/path";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { shuffleNotice } from "@commonfabric/test-support/shuffle";
 import {
@@ -64,6 +64,7 @@ import {
   batchMeasurement,
   batchMeasurementName,
   excusedMeasurement,
+  hooksMeasurementName,
   type LaneMeasurementKind,
   laneMeasurementName,
   MEASURED_BATCH_SUFFIX,
@@ -110,7 +111,7 @@ import { duration } from "./test-selection/duration.ts";
  * own directory: a package's tests run with that package as the working
  * directory, and the paths the topology reads are the repository's.
  */
-const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const REPOSITORY = dirname(dirname(fromFileUrl(import.meta.url)));
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
   return {
@@ -211,7 +212,7 @@ describe("reading the lane's command line", () => {
     // which before it reads anything, so a log that stops early still
     // names the order its tests would have run in.
     const result = await runDenoCommandWithTemporaryLock({
-      root: fromFileUrl(new URL("..", import.meta.url)),
+      root: REPOSITORY,
       args: (lock) => [
         "run",
         `--lock=${lock}`,
@@ -3119,6 +3120,89 @@ describe("what a lane records about itself", () => {
     }
   });
 
+  it("counts what each unit's hooks took with its tests, and writes it for the unit", async () => {
+    // The describe took five seconds and its one test a second and a half,
+    // so its hooks took the other three and a half. The packer charges
+    // them with the unit's tests, so the batch's tests-took figure holds
+    // them, and the publisher reads them by unit from a record of their own.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-hooks-" });
+    const spool = await Deno.makeTempDir({ prefix: "lane-spool-" });
+    const report = `<testsuites>
+  <testsuite name="./oven.test.ts">
+    <testcase name="oven" classname="./oven.test.ts" time="5.000"/>
+  </testsuite>
+  <testsuite name="ext:cli/40_test.js">
+    <testcase name="oven &gt; bakes" classname="ext:cli/40_test.js" time="1.500"/>
+  </testsuite>
+</testsuites>`;
+    try {
+      await runBatch(
+        {
+          suite: suite({
+            id: "pattern-integration",
+            units: ["packages/bakery/oven.test.ts"],
+            recordSurfaces: [{ kind: "integration", scope: "bakery" }],
+            locate: (record) =>
+              record.file === undefined
+                ? undefined
+                : { level: "unit", unit: record.file },
+            command: (_units, context) =>
+              Promise.resolve([{
+                command: [
+                  Deno.execPath(),
+                  "eval",
+                  `Deno.writeTextFileSync(
+                    ${JSON.stringify(`${context.outputDir}/report.xml`)},
+                    ${JSON.stringify(report)},
+                  )`,
+                ],
+                cwd: context.root,
+                junit: [{
+                  path: `${context.outputDir}/report.xml`,
+                  kind: "integration",
+                  scope: "bakery",
+                  filePrefix: "packages/bakery",
+                }],
+              }]),
+          }),
+          units: [{ unit: "packages/bakery/oven.test.ts", skip: [] }],
+          runs: new Map([["packages/bakery/oven.test.ts", 1]]),
+          projected: 0,
+        },
+        lane,
+        workDir,
+        spool,
+        {},
+      );
+      const written: string[] = [];
+      for await (const entry of Deno.readDir(spool)) {
+        if (entry.isFile) {
+          written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+        }
+      }
+      const spooled = written.join("").trim().split("\n").map((line) =>
+        JSON.parse(line)
+      );
+      const took = (name: string) =>
+        spooled.find((record) => record.test?.n === name)?.durationMs;
+      expect(took("ci-lane ran batch pattern-integration")).toBe(5000);
+      expect(
+        took(
+          hooksMeasurementName(
+            "pattern-integration",
+            false,
+            "packages/bakery/oven.test.ts",
+          ),
+        ),
+      ).toBe(3500);
+      // What the hooks took is not a test, so no record names the describe.
+      expect(took("oven")).toBeUndefined();
+    } finally {
+      await Deno.remove(workDir, { recursive: true });
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
   it("writes the units its passes opened and the passes it made", async () => {
     // `slow` runs once and `quick` three times, so the first pass opens
     // both units and the other two open `quick`, and the tests take six
@@ -4011,6 +4095,97 @@ describe("glaze", () => {
         await Deno.remove(dir, { recursive: true });
       }
     });
+  });
+});
+
+describe("what a batch reads of what a whole run registered", () => {
+  const UNIT = "packages/bakery#browser-test";
+
+  /**
+   * Runs a batch of one unit that holds every file of a package's browser
+   * tests, whose process leaves the mark `run` describes.
+   */
+  async function registeredBy(run: Record<string, unknown>) {
+    const dir = await Deno.makeTempDir({ prefix: "lane-whole-run-" });
+    const mark = JSON.stringify(run);
+    const batch = {
+      suite: suite({
+        id: "workspace-unit",
+        units: [UNIT],
+        locate: (record) =>
+          record.test.k === "browser" && record.test.s === "bakery"
+            ? { level: "unit" as const, unit: UNIT }
+            : undefined,
+        command: (_units, context) =>
+          Promise.resolve([{
+            command: [
+              Deno.execPath(),
+              "eval",
+              `const dir = Deno.env.get("CF_TEST_RECORDS_DIR");
+               Deno.mkdirSync(dir, { recursive: true });
+               Deno.writeTextFileSync(\`\${dir}/whole-run-fixture.json\`, ${
+                JSON.stringify(mark)
+              });`,
+            ],
+            cwd: context.root,
+          }]),
+      }),
+      units: [{ unit: UNIT, skip: [] }],
+      runs: new Map([[UNIT, 1]]),
+      projected: 0,
+    };
+    const log = console.log;
+    console.log = () => {};
+    try {
+      return (await runBatch(
+        batch,
+        { root: REPOSITORY } as LaneOptions,
+        dir,
+        undefined,
+        {},
+      )).registered;
+    } finally {
+      console.log = log;
+      await Deno.remove(dir, { recursive: true });
+    }
+  }
+
+  it("gives the unit its records belong to every name the mark holds", async () => {
+    // One process runs every file of the unit, so its mark says what the
+    // whole unit registered.
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "bakery",
+        tests: {
+          "packages/bakery/a.browser.test.ts": ["renders"],
+          "packages/bakery/b.browser.test.ts": ["clicks"],
+        },
+      }),
+    ).toEqual(new Map([[UNIT, new Set(["renders", "clicks"])]]));
+  });
+
+  it("gives the unit an empty set where its files registered nothing", async () => {
+    // A run that registered no test at all still says its unit holds none,
+    // so every name the manifest lists for it reads as one the tree does
+    // not hold.
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "bakery",
+        tests: { "packages/bakery/a.browser.test.ts": [] },
+      }),
+    ).toEqual(new Map([[UNIT, new Set()]]));
+  });
+
+  it("gives no unit a mark whose records would belong to none", async () => {
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "pantry",
+        tests: { "packages/pantry/a.browser.test.ts": ["renders"] },
+      }),
+    ).toEqual(new Map());
   });
 });
 

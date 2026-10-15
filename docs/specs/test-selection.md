@@ -527,6 +527,14 @@ absent. A process that died before it could say what it registered shows
 nothing, and an identity it left unrecorded withdraws the excusal like any
 other.
 
+A test file that an `error` or `unhandledrejection` event reached before any of
+its hooks or tests began shows nothing either. Either can stop a module part way
+through loading, after it registered some of its tests and before it registered
+the rest. A unit of several files that one process runs, such as a package's
+browser tests, is shown only by a mark its runner leaves after loading every
+file and running every test, since a file that never loaded registered nothing.
+[The record spec](test-records.md) says what each writes.
+
 The rule is per invocation and not per set of them. A consumer that runs
 an identity several times, or that reaches one unit through several
 commands, has several invocations whose records arrive in one place, and
@@ -681,11 +689,11 @@ suite it holds:
   so a batch whose identities run three times takes three passes;
 - the suite's `unitOverhead` for each time a pass opens a unit;
 - what its tests take, which is the larger of two figures. One is the
-  suite's `correction` times the tests' own costs, each counted once for
-  each time its unit runs. The other is what the longest unit of each pass
-  takes, added together, since a pass does not finish before its longest
-  unit does. The second is the one that binds for a suite whose runner
-  runs its units side by side.
+  suite's `correction` times the tests' own costs and their units' hooks,
+  each counted once for each time its unit runs. The other is what the
+  longest unit of each pass takes, hooks included, added together, since a
+  pass does not finish before its longest unit does. The second is the one
+  that binds for a suite whose runner runs its units side by side.
 
 A unit's tests are the identities the lane holds in it, and every test the
 manifest holds around one of them in that unit: the `describe` blocks
@@ -696,24 +704,41 @@ level by level without overlap. Each is counted once per run of its unit,
 whichever lane holds its own identity, and once only where the lane holds
 both it and a test inside it.
 
-A suite with no fit is charged no overhead, nothing per unit, and a
-correction of one. A runner that runs units side by side starts the
+A unit's hooks are the time its outermost tests took that no record
+holds: chiefly the `beforeAll` and `afterAll` hooks of the `describe`s the
+manifest holds no identity for, such as one that deploys a pattern. They
+are the unit's rather than the suite's, since one file's hooks can take a
+minute where another's take nothing, and they are counted once per run of
+the unit. A unit the fit names no hooks for takes nothing for them.
+
+A suite with no fit is charged no overhead, nothing per unit, no hooks,
+and a correction of one. A runner that runs units side by side starts the
 costliest first, by the cost the lane hands it with each unit, since the
 second figure assumes nothing long starts last.
 
 A capability's setup is charged at the ninetieth percentile of its
-openings over the cost window. A suite's three figures are fitted to what
-the lanes' own batches of it spent, by least squares with none of them
-below zero: what each batch spent against `overhead` times its passes,
-`unitOverhead` times the units it opened, and `correction` times what the
-tests of its units took. The fit takes no account of the longest-unit
-figure. So a batch is charged what a batch of its shape spends on
+openings over the cost window. A unit's hooks are charged at the ninetieth
+percentile of what they took each time a pass opened the unit over the
+cost window, which is the percentile a test's own cost is read at. They
+are read apart for batches run with coverage on, as a suite's figures are.
+A suite's three figures are fitted to what the lanes' own batches of it
+spent, by least squares with none of them below zero: what each batch
+spent against `overhead` times its passes, `unitOverhead` times the units
+it opened, and `correction` times what the tests of its units and their
+hooks took. The fit takes no account of the longest-unit figure. So a batch is charged what a batch of its shape spends on
 average, and the safety margin `LANE_SAFETY_SECONDS` absorbs a lane that
 spends more than its batches' average.
 
 - What a batch's tests took counts only the records its suite places in
   a unit. A record placed in no unit, such as one a wrapper writes for a
   whole invocation, is part of what the batch spent beyond its tests.
+- What a unit's hooks took is read from the unit's JUnit report: the time
+  each outermost test took that no record holds, which is what the hooks
+  of its `describe`s took, and for a `Deno.test` whose leaves are steps,
+  what its own body took around them, less what a recorded container
+  among them holds. A unit whose report holds no such test, such as one a
+  runner other than `deno test` reports, has no hooks, and what it spends
+  beyond its tests is in the per-unit charge.
 - The correction is fitted only over at least `MIN_CORRECTION_SAMPLES`
   batches whose tests' times span at least `MIN_CORRECTION_SPAN_SECONDS`,
   and only where it comes out above zero. Otherwise the correction is

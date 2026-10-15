@@ -47,6 +47,7 @@ import {
   FragmentWriter,
   NAME_SEPARATOR,
   readRegistrations,
+  readWholeRuns,
   recordsDir,
   type TestIdentity,
   testIdentityKey,
@@ -130,6 +131,7 @@ import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   batchMeasurementName,
   excusedMeasurementName,
+  hooksMeasurementName,
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
   laneMeasurementName,
@@ -940,16 +942,23 @@ export async function runBatch(
 
   /**
    * The names this batch's test processes registered over every execution,
-   * by the repository-relative file that registered them, as
-   * `readRegistrations()` reads them. That file is the unit for a suite
-   * whose units are files. A file whose processes left no name map is not
-   * here.
+   * by unit. A unit that is one file is here by the names
+   * `readRegistrations()` reads for that file. A unit of several files that
+   * one process runs, such as a package's browser tests, is here by the
+   * mark its runner leaves on running every test of every file. A unit
+   * whose processes said neither is not here.
    */
   registered: Map<string, Set<string>>;
 }> {
   const records: TestRecord[] = [];
   const passedOver: TestRecord[] = [];
   const registered = new Map<string, Set<string>>();
+  /** Adds `names` to what `unit` registered. */
+  const register = (unit: string, names: Iterable<string>): void => {
+    const known = registered.get(unit);
+    if (known === undefined) registered.set(unit, new Set(names));
+    else for (const name of names) known.add(name);
+  };
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
@@ -971,8 +980,11 @@ export async function runBatch(
   let unexplained = 0;
   // How many times a pass opened a unit, over every pass.
   let opened = 0;
-  // Seconds the records the suite places in a unit took, over every pass.
+  // Seconds the records the suite places in a unit took, and what the
+  // units' hooks took, over every pass.
   let ran = 0;
+  // What each unit's hooks took, once for each pass that opened it.
+  const hooks: { unit: string; seconds: number }[] = [];
   for (let run = 1; run <= batchRepeats(batch); run++) {
     if (stop.signal !== undefined) break;
     console.log(
@@ -997,6 +1009,8 @@ export async function runBatch(
     // The units this execution recorded anything at all for, gathered
     // across whatever invocations the suite splits it into.
     const heard = new Set<string>();
+    // What this pass's units' hooks took, summed over their reports.
+    const hooked = new Map<string, number>();
     const invocations = await batch.suite.command(asked, {
       root: options.root,
       outputDir,
@@ -1073,15 +1087,37 @@ export async function runBatch(
       }
       for (const conflict of collected.conflicts) conflicts.push(conflict);
       for (const [file, names] of await readRegistrations(batchSpool)) {
-        const known = registered.get(file);
-        if (known === undefined) registered.set(file, names);
-        else for (const name of names) known.add(name);
+        register(file, names);
+      }
+      for (const marked of await readWholeRuns(batchSpool)) {
+        for (const [file, names] of Object.entries(marked.tests)) {
+          // A file is placed by the kind and scope its tests record under
+          // and the file itself, so one that registered no test still says
+          // its unit holds none.
+          const location = batch.suite.locate({
+            test: { k: marked.kind, s: marked.scope, n: names[0] ?? file },
+            file,
+          });
+          if (location?.level === "unit") register(location.unit, names);
+        }
+      }
+      for (const record of collected.hooks) {
+        const location = batch.suite.locate(record);
+        if (location?.level !== "unit") continue;
+        hooked.set(
+          location.unit,
+          (hooked.get(location.unit) ?? 0) + record.durationMs / 1000,
+        );
       }
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
     }
     for (const request of asked) {
       if (!heard.has(request.unit)) silent.add(request.unit);
+    }
+    for (const [unit, seconds] of hooked) {
+      ran += seconds;
+      hooks.push({ unit, seconds });
     }
   }
   // A batch that stopped part way measured only the part it ran, and the
@@ -1103,7 +1139,10 @@ export async function runBatch(
       // suite places in a unit, which are the ones a manifest can hold and
       // the packer charges by. A record the suite places in no unit, such
       // as one a wrapper writes for its whole invocation, is part of what
-      // the batch spent beyond its units' tests.
+      // the batch spent beyond its units' tests. What each unit's hooks
+      // took is in it as well, since the packer charges that through the
+      // same correction, and it is also written for each unit each time a
+      // pass opened it, which is what the publisher reads it from.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
@@ -1144,6 +1183,13 @@ export async function runBatch(
         ),
         batch.projected,
         ok,
+      ),
+      ...hooks.map(({ unit, seconds }) =>
+        timingRecord(
+          hooksMeasurementName(batch.suite.id, coverage !== undefined, unit),
+          seconds,
+          ok,
+        )
       ),
     ]);
   }
