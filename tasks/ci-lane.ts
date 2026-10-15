@@ -84,6 +84,7 @@ import {
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
+  type FullLaneCount,
   fullLaneCount,
   type Plan,
   plan,
@@ -129,6 +130,7 @@ import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   batchMeasurementName,
   excusedMeasurementName,
+  hooksMeasurementName,
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
   laneMeasurementName,
@@ -970,8 +972,11 @@ export async function runBatch(
   let unexplained = 0;
   // How many times a pass opened a unit, over every pass.
   let opened = 0;
-  // Seconds the records the suite places in a unit took, over every pass.
+  // Seconds the records the suite places in a unit took, and what the
+  // units' hooks took, over every pass.
   let ran = 0;
+  // What each unit's hooks took, once for each pass that opened it.
+  const hooks: { unit: string; seconds: number }[] = [];
   for (let run = 1; run <= batchRepeats(batch); run++) {
     if (stop.signal !== undefined) break;
     console.log(
@@ -996,6 +1001,8 @@ export async function runBatch(
     // The units this execution recorded anything at all for, gathered
     // across whatever invocations the suite splits it into.
     const heard = new Set<string>();
+    // What this pass's units' hooks took, summed over their reports.
+    const hooked = new Map<string, number>();
     const invocations = await batch.suite.command(asked, {
       root: options.root,
       outputDir,
@@ -1076,11 +1083,23 @@ export async function runBatch(
         if (known === undefined) registered.set(file, names);
         else for (const name of names) known.add(name);
       }
+      for (const record of collected.hooks) {
+        const location = batch.suite.locate(record);
+        if (location?.level !== "unit") continue;
+        hooked.set(
+          location.unit,
+          (hooked.get(location.unit) ?? 0) + record.durationMs / 1000,
+        );
+      }
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
     }
     for (const request of asked) {
       if (!heard.has(request.unit)) silent.add(request.unit);
+    }
+    for (const [unit, seconds] of hooked) {
+      ran += seconds;
+      hooks.push({ unit, seconds });
     }
   }
   // A batch that stopped part way measured only the part it ran, and the
@@ -1102,7 +1121,10 @@ export async function runBatch(
       // suite places in a unit, which are the ones a manifest can hold and
       // the packer charges by. A record the suite places in no unit, such
       // as one a wrapper writes for its whole invocation, is part of what
-      // the batch spent beyond its units' tests.
+      // the batch spent beyond its units' tests. What each unit's hooks
+      // took is in it as well, since the packer charges that through the
+      // same correction, and it is also written for each unit each time a
+      // pass opened it, which is what the publisher reads it from.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
@@ -1143,6 +1165,13 @@ export async function runBatch(
         ),
         batch.projected,
         ok,
+      ),
+      ...hooks.map(({ unit, seconds }) =>
+        timingRecord(
+          hooksMeasurementName(batch.suite.id, coverage !== undefined, unit),
+          seconds,
+          ok,
+        )
       ),
     ]);
   }
@@ -2066,13 +2095,17 @@ export async function fullLanes(
 ): Promise<number> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
   const { manifest, changed } = await read(options, deps);
-  const needed = fullLanesNeeded(suites, manifest, changed, options.full);
-  const lanes = Math.min(needed, FULL_LANES_MAX);
-  if (needed > lanes) {
+  const { lanes, capped } = fullLanesNeeded(
+    suites,
+    manifest,
+    changed,
+    options.full,
+  );
+  if (capped) {
     console.error(
-      `ci-lane: the full run needs ${needed} lanes and takes ` +
-        `${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane may ` +
-        `run past its budget`,
+      `ci-lane: the full run needs more than ${FULL_LANES_MAX} lanes and ` +
+        `takes ${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane ` +
+        `may run past its budget`,
     );
   }
   const { laid } = planOver({
@@ -2122,13 +2155,13 @@ export function describeFullLanes(laid: Plan, prologue: number): void {
   ], console.error);
 }
 
-/** How many lanes the full run would take with no cap on them. */
+/** How many lanes the full run takes, up to `FULL_LANES_MAX`. */
 function fullLanesNeeded(
   suites: readonly Suite[],
   manifest: Manifest | undefined,
   changed: ReadonlySet<string>,
   full: boolean,
-): number {
+): FullLaneCount {
   const seen = pricedOver({ suites, manifest, changed, full });
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
@@ -2161,14 +2194,17 @@ function fullLanesNeeded(
       capabilities: capabilitiesBySuite(suites),
       wholeUnits: wholeUnits(suites),
     });
-    const lanes = Math.max(1, running.length, byCost);
+    const wanted = Math.max(1, running.length, byCost.lanes);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
-        `count is ${lanes} — ${running.length} suites with anything to ` +
-        `run, and ${byCost} from packing the stand-ins — rather than a ` +
-        `projection from costs nobody has measured`,
+        `count is ${wanted} — ${running.length} suites with anything to ` +
+        `run, and ${byCost.lanes} from packing the stand-ins — rather ` +
+        `than a projection from costs nobody has measured`,
     );
-    return lanes;
+    return {
+      lanes: Math.min(wanted, FULL_LANES_MAX),
+      capped: byCost.capped || wanted > FULL_LANES_MAX,
+    };
   }
   return fullLaneCount({
     manifest: seen.manifest,

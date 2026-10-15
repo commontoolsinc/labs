@@ -16,9 +16,9 @@
  * much those tests would have covered, which can be thousands of lines. A run
  * whose compile byte cache missed covers branches that only a cold compile
  * reaches, which lowers its debt by around a tenth of a percent — the same
- * size as a week's real movement. A run that is not a push to `main` measured
- * code `main` does not carry. And a run that recorded no repository-wide
- * figure measured nothing this can use.
+ * size as a week's real movement. A run that is not a run of the head of
+ * `main` measured code `main` does not carry. And a run that recorded no
+ * repository-wide figure measured nothing this can use.
  *
  * The store does not say whether a run passed, so that comes from GitHub, one
  * request per attempt opened. A day held on disk with a measurement that
@@ -38,7 +38,7 @@ import {
   coverageArtifactAttempt,
   coverageFiguresOf,
   datePartition,
-  isMainPush,
+  isMainRun,
   listObjects,
   readObject,
   RECORD_SCHEMA_VERSION,
@@ -191,11 +191,11 @@ export function daysEndingAt(now: number, count: number): string[] {
 
 /**
  * The repository-wide uncovered-line count one stored report records, or
- * `undefined` where it is not a push to `main`, carries no such figure, or was
+ * `undefined` where it is not a run of `main`, carries no such figure, or was
  * measured on a cold compile cache.
  */
 export function workspaceDebtOf(report: StoredReportGroup): number | undefined {
-  if (report.context === undefined || !isMainPush(report.context)) {
+  if (report.context === undefined || !isMainRun(report.context)) {
     return undefined;
   }
   const figures = coverageFiguresOf(report.records);

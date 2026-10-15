@@ -5,6 +5,45 @@ import { keyboardRouterContext } from "../keyboard-context.ts";
 import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
 
 /**
+ * What a `cf-keybind` event carries: the matched key and modifiers, as plain
+ * data.
+ *
+ * A pattern's handler receives this as a `FabricValue`, and where the pattern
+ * runs in a worker the detail crosses to it encoded, so every member has to be
+ * one. The `KeyboardEvent` itself has no such form and stays behind; what a
+ * handler would do with it -- `preventDefault()`, `stopPropagation()` -- the
+ * element does itself, through its `prevent-default` and `stop-propagation`
+ * attributes.
+ */
+export type CFKeybindDetail = {
+  name?: string;
+  code: string;
+  key: string;
+  alt: boolean;
+  ctrl: boolean;
+  meta: boolean;
+  shift: boolean;
+  repeat: boolean;
+};
+
+/** The {@link CFKeybindDetail} for binding `name` matching `e`. */
+export function keybindDetail(
+  name: string | undefined,
+  e: KeyboardEvent,
+): CFKeybindDetail {
+  return {
+    name,
+    code: e.code,
+    key: e.key,
+    alt: e.altKey,
+    ctrl: e.ctrlKey,
+    meta: e.metaKey,
+    shift: e.shiftKey,
+    repeat: e.repeat,
+  };
+}
+
+/**
  * CFKeybind - Declarative keyboard shortcut listener
  *
  * @element cf-keybind
@@ -21,8 +60,8 @@ import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
  * @attr {boolean} stopPropagation - Call stopPropagation() on match
  * @attr {boolean} allowRepeat - Allow AutoRepeat (default: false)
  *
- * @fires cf-keybind - Fired when the binding matches. Detail includes:
- *   { name?, event, code, key, alt, ctrl, meta, shift }
+ * @fires cf-keybind - Fired when the binding matches, with a
+ *   {@link CFKeybindDetail}.
  *
  * @example
  * <cf-keybind name="open" meta key="o"></cf-keybind>
@@ -128,16 +167,7 @@ export class CFKeybind extends BaseElement {
   #emitMatch(e: KeyboardEvent) {
     if (this.preventDefault) e.preventDefault();
     if (this.stopPropagation) e.stopPropagation();
-    this.emit("cf-keybind", {
-      name: this.name,
-      event: e,
-      code: e.code,
-      key: e.key,
-      alt: e.altKey,
-      ctrl: e.ctrlKey,
-      meta: e.metaKey,
-      shift: e.shiftKey,
-    });
+    this.emit("cf-keybind", keybindDetail(this.name, e));
   }
 
   #matchesContext(e: KeyboardEvent): boolean {

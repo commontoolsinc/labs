@@ -79,11 +79,14 @@ any page of the shell that shows a piece starts the ensure for a user
 whose Home exists, and Home's start stays off the path to that first piece. A
 page whose view fails to load a piece starts none. None of these waits for the
 ensure. A client's `idle()` does: the worker answers it once the ensure, the
-adoption of name-only entries, and the share intake's start have finished,
-and the intake has taken up every change it has been told of. The ensure has
-finished once Home's handler has run on the event it sends and that run has
-committed, which under server execution is on the server, after the event
-itself has committed. The shell's
+adoption of name-only entries, the repair that makes each of the user's profiles
+its space's root (see "Profile" in
+[`HOME_SPACE.md`](../common/conventions/HOME_SPACE.md)), and the share intake's
+start have finished, and the intake has taken up every change it has been told
+of. A step that fails has finished too: its failure is logged, and `idle()`
+resolves all the same. The ensure has finished once Home's handler has run on the event it sends
+and that run has committed, which under server execution is on the server, after
+the event itself has committed. The shell's
 `commonfabric.viewSettled` waits for its own request to bring Home up as well,
 from the moment it decides to make one, so a page that has settled has none of
 this still running. A request for another space's root starts no ensure, nor does a read

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { parse as parseJsonc } from "@std/jsonc";
+import { dirname, fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { DOC_DEMOS } from "../check-verb-session-sync.ts";
 import { namedBenchmarkFiles } from "../check-bench-workflow.ts";
@@ -29,7 +30,7 @@ const TREE_SHARE_DIVISOR = 8;
 /** The most gates one file may reach. */
 const GATES_PER_FILE = 4;
 
-const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+const root = dirname(dirname(dirname(fromFileUrl(import.meta.url))));
 
 const suites = await loadGateSuites(root);
 const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
