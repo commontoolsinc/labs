@@ -332,6 +332,31 @@ export interface ChatRoomActivity {
 
   /** The message the event changed or added. */
   what: Cell<ChatMessage>;
+
+  /**
+   * The entry as the room stored it, labeled `authored-by` the principal
+   * whose event it records.
+   */
+  record: Cell<ChatRoomActivityRecord>;
+}
+
+/**
+ * An activity entry as a room stores it: its `at`, `requestId`, and `what`,
+ * and its `seq` where the room stored one. An entry an obliteration or age
+ * cleared keeps only the `seq` it was stored with, if any.
+ */
+export interface ChatRoomActivityRecord {
+  /** The entry's `seq`, where it was stored with one. */
+  seq?: number;
+
+  /** When the room recorded it; absent once cleared. */
+  at?: FabricEpochNsec;
+
+  /** The `requestId` of the event it records; absent once cleared. */
+  requestId?: string;
+
+  /** The message the event changed or added; absent once cleared. */
+  what?: Cell<ChatMessage>;
 }
 
 /** Where a window of messages sits in its view. */

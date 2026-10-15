@@ -202,6 +202,15 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
         event: typed("Hello from Alice"),
         trustedUi: sendGesture,
       },
+      // The room offers the entry for her send with a link to the entry as
+      // stored, which carries her label.
+      {
+        assertion: assert(() =>
+          setup.aliceDid.get() !== "" &&
+          principalOf(room.recentActivity[0]?.record, "authored-by") ===
+            setup.aliceDid.get()
+        ),
+      },
       { label: "alice-sent" },
       { await: "bob-done" },
     ],

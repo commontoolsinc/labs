@@ -71,6 +71,7 @@ import {
   type ChatMessageVersion,
   type ChatReaction,
   type ChatRoomActivity,
+  type ChatRoomActivityRecord,
   type ChatRoomKind,
   type ChatRoomLink,
   type ChatRoomPolicy,
@@ -314,13 +315,12 @@ export type StoredUsedTime = WritePolicyAnyOf<UsedTime, [
 export type UsedTimesCell = Writable<StoredUsedTime[] | Default<[]>>;
 
 /**
- * What the room stores for an activity entry: a `ChatRoomActivity` that
- * carries its `seq` only where it was stored with one. An entry stored without
- * one takes its `seq` from its place in the list (`numberActivity()`). An
- * entry an obliteration or age cleared keeps only the `seq` it was stored
- * with, if any, so that the entries after it keep theirs.
+ * What the room stores for an activity entry. An entry stored without a `seq`
+ * takes one from its place in the list (`numberActivity()`), and a cleared
+ * entry keeps the `seq` it was stored with, so the entries after it keep
+ * theirs.
  */
-export type ActivityRecord = Partial<ChatRoomActivity>;
+export type ActivityRecord = ChatRoomActivityRecord;
 
 /** Whether the stored entry `entry` was cleared. */
 const isCleared = (entry: ActivityRecord | undefined): boolean =>
@@ -650,12 +650,23 @@ export const recentActivityOf = (
   numberActivity(
     (activity.get() ?? []) as ActivityRecord[],
     numberingOf(counters),
-  ).flatMap(({ seq, entry }) =>
-    entry.at === undefined || entry.requestId === undefined ||
+  ).flatMap(({ seq, entry }, index) => {
+    if (
+      entry.at === undefined || entry.requestId === undefined ||
       entry.what === undefined
-      ? []
-      : [{ seq, at: entry.at, requestId: entry.requestId, what: entry.what }]
-  );
+    ) {
+      return [];
+    }
+    const record: Cell<ChatRoomActivityRecord> = activity.key(index)
+      .resolveAsCell();
+    return [{
+      seq,
+      at: entry.at,
+      requestId: entry.requestId,
+      what: entry.what,
+      record,
+    }];
+  });
 
 /** A stored message as the views see it, keyed by its `sentAt`. */
 export interface MessageEntry extends ViewItem {
