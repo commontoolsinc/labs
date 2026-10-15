@@ -745,6 +745,29 @@ describe("preload", () => {
     }
   });
 
+  it("runs a file whose registrar another preload replaced without hooks", async () => {
+    // A preload ahead of this one can put a `Deno.test` in place that
+    // carries none of `beforeAll` and its siblings. The file's tests
+    // still run, and what it registered still reaches the name map.
+    const fixture = await makeFixture({
+      "bare.test.ts": BARE_FILE,
+      "hookless.ts": `const real = Deno.test;
+Reflect.set(Deno, "test", (...args: unknown[]) => Reflect.apply(real, Deno, args));
+`,
+    });
+    try {
+      const run = await runFixture(fixture, ["bare.test.ts"], {
+        before: ["./hookless.ts"],
+      });
+      assert(run.success, output(run));
+      expect(await readRegistrations(fixture.spool)).toEqual(
+        new Map([["bare.test.ts", new Set(["bare kept", "bare dropped"])]]),
+      );
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
   it("says so when the bdd re-export loaded before it", async () => {
     // Loading the re-export first is what makes it hand back the real
     // `describe` and `it`, and every leaf then reaches the report

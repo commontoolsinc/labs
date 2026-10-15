@@ -476,8 +476,10 @@ export function installRegistrationCapture(
   Reflect.set(Deno, "test", built.registrar);
   // Deno runs a file's `beforeAll` hooks once its module has settled,
   // having finished loading or stopped, before any other hook or test of
-  // the file, and this one was registered first.
-  Deno.test.beforeAll(() => built.capture.begin());
+  // the file, and this one was registered first. A registrar another
+  // preload put in place may carry no hooks; nothing then notes that the
+  // module settled, and an error at any point marks the file's names.
+  built.registrar.beforeAll?.(() => built.capture.begin());
   globalThis.addEventListener("error", () => built.capture.interrupt());
   globalThis.addEventListener(
     "unhandledrejection",
