@@ -5,7 +5,8 @@
  * notice for each. Once a later start with Alice names her profile, which
  * points at her private inbox, the room is offered there, she is added to its
  * participants, the notice for her is withdrawn, and the start's outcome is
- * the room found. A start after that sends no second offer, and neither does
+ * the room found. A start before that whose id is too long to key an offer by
+ * sends none. A start after that sends no second offer, and neither does
  * one from another manager whose notice for her a client reported delivered,
  * though she hasn't joined its room. Carol has joined her room before Bob
  * names her profile, so she is offered nothing, and Dave's profile points at
@@ -31,6 +32,7 @@ import {
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import PrivateInbox, {
   type Offer,
+  OFFER_ID_MAX_LENGTH,
   type OfferEvent,
 } from "../system/private-inbox.tsx";
 import type { ShareInboxPiece } from "../system/profile-home.tsx";
@@ -200,6 +202,9 @@ export const setup = pattern(() => ({
   daveDid: Writable.of<string>(""),
   carolRoom: Writable.of<{ room?: Cell<HeldRoom> }>({}),
 }));
+
+/** A request id longer than a share inbox keeps an offer's `id`. */
+const LONG_REQUEST_ID = "d-alice-".padEnd(OFFER_ID_MAX_LENGTH + 1, "x");
 
 /** The ids of the notices in `notices` waiting for `recipient`. */
 const noticeIdsFor = (
@@ -463,6 +468,23 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       },
       { label: "carol-room" },
       { await: "carol-joined" },
+      // A start whose id is too long to key an offer by offers nothing, and
+      // leaves her notice waiting.
+      {
+        action: manager.openDirect,
+        event: {
+          requestId: LONG_REQUEST_ID,
+          counterpart: setup.aliceDid,
+          profile: aliceProfile,
+        },
+        trustedUi: startGesture,
+      },
+      {
+        assertion: assert(() =>
+          requests.get()[LONG_REQUEST_ID]?.status === "done" &&
+          noticeIdsFor(notices, setup.aliceDid).length === 1
+        ),
+      },
       // Naming Alice's profile offers her the room the first start created,
       // and withdraws her notice.
       {

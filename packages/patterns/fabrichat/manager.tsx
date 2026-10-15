@@ -819,7 +819,9 @@ const createRoom = (
  * of the room is still waiting. The offer replaces each such notice, so they
  * are withdrawn. A counterpart the room's roster lists has joined the room
  * already, and is offered nothing, and so is one whose profile points at no
- * inbox, whose notice stays.
+ * inbox, whose notice stays. So does the notice when `requestId`, which keys
+ * the offer, is longer than a share inbox keeps an offer's `id`, since the
+ * inbox would cut it short and could take it for another's.
  */
 const reofferDirect = (
   state: ManagerActState,
@@ -832,7 +834,7 @@ const reofferDirect = (
   const waiting = notices.filter((notice) =>
     notice.recipient === counterpart && equals(notice.room, room)
   );
-  if (waiting.length === 0) return;
+  if (waiting.length === 0 || requestId.length > OFFER_ID_MAX_LENGTH) return;
   if (profile === undefined || inboxPointerOf(profile) === undefined) return;
   const joined = (room.key("roster").get() ?? []).some((member) =>
     principalOf(member, "represents-principal") === counterpart
