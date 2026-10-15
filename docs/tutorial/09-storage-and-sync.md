@@ -32,11 +32,14 @@ Documents also carry a **scope key**. `PerUser`/`PerSession` cells
 revisions by `scope_key` derived from the session's principal
 (`v2/engine.ts`). Isolation by partition, not by discipline.
 
-With server execution disabled, session documents live only in the owning
-runtime's local replica. Their reads and writes open no server connection,
-and their values are not persisted in the space's SQLite database. Space and
-user documents still synchronize. With server execution enabled, session
-documents synchronize too, so the serving runtime can read and derive them.
+Session documents synchronize by default. With the experimental
+[`localSessionDocuments`](../development/EXPERIMENTAL_OPTIONS.md#localsessiondocuments)
+flag enabled and server execution disabled, they live only in the owning
+runtime's local replica. A transaction whose reads, writes, and preconditions
+are entirely local needs no server connection. Session values are not persisted
+in the space's SQLite database. Space and user documents still synchronize.
+Server execution always synchronizes session documents so the serving runtime
+can read and derive them.
 
 ## The commit protocol: optimistic concurrency via read sets
 
@@ -57,9 +60,10 @@ ClientCommit {
 }
 ```
 
-In client-execution mode, transactions whose reads and writes are entirely
-session-scoped settle locally. A session write that consumes shared state still
-sends those shared reads for server validation. Mixed
+With local session storage enabled in client-execution mode, transactions whose
+reads, writes, and preconditions are entirely local settle locally. A session
+write that consumes shared state still sends those shared reads for server
+validation. Mixed
 transactions send their space/user operations and reads while keeping session
 operations and reads local. Their optimistic session writes settle with the
 server verdict: rejection rolls them back and rejects dependent local writes.
@@ -123,8 +127,8 @@ Offline-tolerant by construction, within a session's lifetime.
 
 ## Subscriptions: watches over schema-shaped graphs
 
-Local session reads in client-execution mode subscribe to replica changes
-without registering server graph watches. A local write or rollback notifies
+With local session storage enabled, client-executed session reads subscribe to
+replica changes without registering server graph watches. A local write or rollback notifies
 reactive readers through the same sink/trigger machinery.
 
 For synchronized documents, the read side mirrors the reactive model. Over one

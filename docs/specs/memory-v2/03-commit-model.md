@@ -61,9 +61,10 @@ interface Transaction {
 A transaction MUST contain operations, reads, or preconditions, unless it is a
 server wave carrying outbound appends. A validation-only transaction
 checks its reads and records a commit verdict without creating document revisions.
-Client-executed session writes use this form when their shared reads require
-server validation but their writes remain local. Validation of all reads happens
-before any writes are applied. Client rollout of local session storage requires
+With `localSessionDocuments` enabled, client-executed session writes use this
+form when their shared reads require server validation but their writes remain
+local. Validation of all reads happens
+before any writes are applied. Enabling local session storage requires
 servers that admit validation-only commits.
 
 ## 3.3 Client State: Confirmed and Pending

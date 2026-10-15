@@ -38,7 +38,7 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false },
+      experimental: { localSessionDocuments: true, serverExecution: false },
     });
     try {
       const cell = runtime.getCell<number>(
@@ -95,7 +95,7 @@ describe("local-session-documents", () => {
       const first = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: storage,
-        experimental: { serverExecution },
+        experimental: { localSessionDocuments: true, serverExecution },
       });
       let second: Runtime | undefined;
       try {
@@ -103,7 +103,10 @@ describe("local-session-documents", () => {
           second = new Runtime({
             apiUrl: new URL(import.meta.url),
             storageManager: storage,
-            experimental: { serverExecution: !serverExecution },
+            experimental: {
+              localSessionDocuments: true,
+              serverExecution: !serverExecution,
+            },
           });
         }).toThrow("Session document policy is already configured");
         storage.setLocalSessionDocuments(!serverExecution);
@@ -129,7 +132,11 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false, commitPreconditions: true },
+      experimental: {
+        localSessionDocuments: true,
+        serverExecution: false,
+        commitPreconditions: true,
+      },
     });
     try {
       const cell = runtime.getCell<number>(
@@ -206,7 +213,11 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false, commitPreconditions: true },
+      experimental: {
+        localSessionDocuments: true,
+        serverExecution: false,
+        commitPreconditions: true,
+      },
     });
     try {
       const session = runtime.getCell<number>(
@@ -264,7 +275,11 @@ describe("local-session-documents", () => {
         const reader = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: readerStorage,
-          experimental: { serverExecution, commitPreconditions: true },
+          experimental: {
+            localSessionDocuments: true,
+            serverExecution,
+            commitPreconditions: true,
+          },
         });
         try {
           const seed = writer.edit();
@@ -325,7 +340,7 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false },
+      experimental: { localSessionDocuments: true, serverExecution: false },
     });
     try {
       const local = runtime.getCell<number>(
@@ -388,7 +403,11 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false, commitPreconditions: true },
+      experimental: {
+        localSessionDocuments: true,
+        serverExecution: false,
+        commitPreconditions: true,
+      },
     });
     try {
       const session = runtime.getCell<number>(
@@ -438,7 +457,11 @@ describe("local-session-documents", () => {
         const runtime = new Runtime({
           apiUrl: new URL(import.meta.url),
           storageManager: storage,
-          experimental: { serverExecution: false, commitPreconditions: true },
+          experimental: {
+            localSessionDocuments: true,
+            serverExecution: false,
+            commitPreconditions: true,
+          },
         });
         try {
           const session = runtime.getCell<number>(
@@ -543,7 +566,11 @@ describe("local-session-documents", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storage,
-      experimental: { serverExecution: false, commitPreconditions: true },
+      experimental: {
+        localSessionDocuments: true,
+        serverExecution: false,
+        commitPreconditions: true,
+      },
     });
     try {
       const session = runtime.getCell<number>(
@@ -591,7 +618,11 @@ describe("local-session-documents", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: storage,
-        experimental: { serverExecution: false, commitPreconditions: true },
+        experimental: {
+          localSessionDocuments: true,
+          serverExecution: false,
+          commitPreconditions: true,
+        },
       });
       try {
         const session = runtime.getCell<number>(
@@ -639,70 +670,81 @@ describe("local-session-documents", () => {
     });
   }
 
-  for (const serverExecution of [false, true]) {
-    it(`exports session documents only when server execution is enabled (${serverExecution})`, async () => {
-      const server = newSharedServer();
-      const commits: ClientCommit[] = [];
-      const transact = server.transact.bind(server);
-      server.transact = (...args: Parameters<typeof transact>) => {
-        commits.push(args[0].commit);
-        return transact(...args);
-      };
-      const storage = EmulatedStorageManager.connectTo(server, { as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: storage,
-        experimental: { serverExecution },
-      });
-      try {
-        const session = runtime.getCell<number>(
-          space,
-          "count",
-          undefined,
-          undefined,
-          "session",
-        );
-        const shared = runtime.getCell<number>(space, "count");
-        const user = runtime.getCell<number>(
-          space,
-          "count",
-          undefined,
-          undefined,
-          "user",
-        );
-        const tx = runtime.edit();
-        session.withTx(tx).set(1);
-        shared.withTx(tx).set(2);
-        user.withTx(tx).set(3);
-        expect((await tx.commit().settled).error).toBeUndefined();
-        expect(session.get()).toBe(1);
-        expect(shared.get()).toBe(2);
-        expect(user.get()).toBe(3);
+  for (const localSessionDocuments of [undefined, false, true]) {
+    for (const serverExecution of [false, true]) {
+      it(
+        localSessionDocuments === true
+          ? `exports session documents only when server execution is enabled (${serverExecution})`
+          : `synchronizes session documents with local storage ${localSessionDocuments} and server execution ${serverExecution}`,
+        async () => {
+          const server = newSharedServer();
+          const commits: ClientCommit[] = [];
+          const transact = server.transact.bind(server);
+          server.transact = (...args: Parameters<typeof transact>) => {
+            commits.push(args[0].commit);
+            return transact(...args);
+          };
+          const storage = EmulatedStorageManager.connectTo(server, {
+            as: signer,
+          });
+          const runtime = new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager: storage,
+            experimental: { localSessionDocuments, serverExecution },
+          });
+          try {
+            const session = runtime.getCell<number>(
+              space,
+              "count",
+              undefined,
+              undefined,
+              "session",
+            );
+            const shared = runtime.getCell<number>(space, "count");
+            const user = runtime.getCell<number>(
+              space,
+              "count",
+              undefined,
+              undefined,
+              "user",
+            );
+            const tx = runtime.edit();
+            session.withTx(tx).set(1);
+            shared.withTx(tx).set(2);
+            user.withTx(tx).set(3);
+            expect((await tx.commit().settled).error).toBeUndefined();
+            expect(session.get()).toBe(1);
+            expect(shared.get()).toBe(2);
+            expect(user.get()).toBe(3);
 
-        const next = runtime.edit();
-        shared.withTx(next).set(session.withTx(next).get() + 4);
-        expect((await next.commit().settled).error).toBeUndefined();
-        expect(shared.get()).toBe(5);
-        await storage.synced();
-        const scopes = commits.flatMap((commit) =>
-          commit.operations.flatMap((op) =>
-            "id" in op ? [op.scope ?? "space"] : []
-          )
-        );
-        expect(scopes).toContain("space");
-        expect(scopes).toContain("user");
-        expect(scopes.includes("session")).toBe(serverExecution);
-        const reads = commits.flatMap((
-          commit,
-        ) => [...commit.reads.confirmed, ...commit.reads.pending]);
-        expect(reads.some((read) => read.scope === "session")).toBe(
-          serverExecution,
-        );
-      } finally {
-        await runtime.dispose();
-        await storage.close();
-        await server.close();
-      }
-    });
+            const next = runtime.edit();
+            shared.withTx(next).set(session.withTx(next).get() + 4);
+            expect((await next.commit().settled).error).toBeUndefined();
+            expect(shared.get()).toBe(5);
+            await storage.synced();
+            const scopes = commits.flatMap((commit) =>
+              commit.operations.flatMap((op) =>
+                "id" in op ? [op.scope ?? "space"] : []
+              )
+            );
+            expect(scopes).toContain("space");
+            expect(scopes).toContain("user");
+            expect(scopes.includes("session")).toBe(
+              localSessionDocuments !== true || serverExecution,
+            );
+            const reads = commits.flatMap((
+              commit,
+            ) => [...commit.reads.confirmed, ...commit.reads.pending]);
+            expect(reads.some((read) => read.scope === "session")).toBe(
+              localSessionDocuments !== true || serverExecution,
+            );
+          } finally {
+            await runtime.dispose();
+            await storage.close();
+            await server.close();
+          }
+        },
+      );
+    }
   }
 });

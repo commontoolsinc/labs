@@ -50,9 +50,11 @@ implemented as the gates below. Method inherited from the v1 learning run
 The integration suites run twice — `EXPERIMENTAL_SERVER_EXECUTION` OFF and
 ON. Each arm is held to its behavior in the
 [configuration registry](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution).
-In OFF, session documents stay local; tests of cross-runtime storage use user
-or space scope. Tests that require the server to read session documents enable
-ON for their producers and consumers. Both arms preserve mixed-transaction
+In OFF, session documents synchronize unless `localSessionDocuments` is enabled.
+Cross-runtime session fixtures run by default and skip only when that flag is
+on; their user-scope counterparts run in both settings. Tests that require the
+server to read session documents can also enable server execution for their
+producers and consumers. Both arms preserve mixed-transaction
 rollback and dependent-write rejection. The ON arm is allowed to skip
 not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
