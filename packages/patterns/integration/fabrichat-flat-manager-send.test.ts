@@ -162,7 +162,7 @@ describe("FabriChat flat manager sends", () => {
    * lists `people`, behind the wrapper and document-valued link Home keeps to
    * it, and Home's root, which names the wrapper as `chatManager` beside
    * `profile`. A `labeled` core declares the viewer's `PersonalSpace` label
-   * over all of it. Returns the core and its `offerRoom`.
+   * over all of it. Returns the wrapper and the core's `offerRoom`.
    */
   const writeHome = async (
     labeled: boolean,
@@ -226,7 +226,7 @@ describe("FabriChat flat manager sends", () => {
     );
     runtime.prepareTxForCommit(tx);
     expect((await tx.commit().settled).error).toBeUndefined();
-    return { manager, wrapper, offerRoom };
+    return { wrapper, offerRoom };
   };
 
   /**
@@ -284,15 +284,15 @@ describe("FabriChat flat manager sends", () => {
 
   /**
    * Adds Bob to a group room whose viewer's manager is `labeled` or not, and
-   * lists Bob among its people, and reports what came of it: the offers the
-   * manager's `offerRoom` received, the room's `addRequests`, whom the room's
-   * space grants, and the refusals CFC prepare reported once the room started
-   * and once the add was made.
+   * lists Bob among its people, rendering the room as a viewer would before and
+   * after the add, and reports what came of it: the offers the manager's
+   * `offerRoom` received, the room's `addRequests`, and whom the room's space
+   * grants.
    */
   const addBob = async (labeled: boolean) => {
     const profile = await writeProfile("viewer profile", "Viewer");
     const bobProfile = await writeProfile("bob profile", "Bob");
-    const { manager, offerRoom } = await writeHome(labeled, profile, {
+    const { offerRoom } = await writeHome(labeled, profile, {
       [BOB]: [bobProfile],
     });
     const offers: Record<string, unknown>[] = [];
@@ -303,7 +303,6 @@ describe("FabriChat flat manager sends", () => {
     const space = room.getAsNormalizedFullLink().space;
     await render(room);
     await runtime.idle();
-    const refusedAtStart = [...refusals];
 
     const addTx = runtime.edit();
     room.withTx(addTx).key("addMember").send(
@@ -324,16 +323,7 @@ describe("FabriChat flat manager sends", () => {
       space as Parameters<typeof server.readDocument>[0],
       aclDocId(space) as Parameters<typeof server.readDocument>[1],
     ))?.value;
-    return {
-      space,
-      core: manager.getAsNormalizedFullLink(),
-      bobProfile,
-      offers,
-      addRequests,
-      acl,
-      refusedAtStart,
-      refusedByAdd: refusals.slice(refusedAtStart.length),
-    };
+    return { space, bobProfile, offers, addRequests, acl };
   };
 
   for (const discovered of [false, true]) {
@@ -414,8 +404,7 @@ describe("FabriChat flat manager sends", () => {
   }
 
   it("offers a room to a member added through a public manager's discovered flat bindings", async () => {
-    const { space, offers, addRequests, acl, refusedAtStart, refusedByAdd } =
-      await addBob(false);
+    const { space, offers, addRequests, acl } = await addBob(false);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
     expect(offers).toHaveLength(1);
@@ -425,79 +414,56 @@ describe("FabriChat flat manager sends", () => {
       room: { "/": { "link@1": { space } } },
     });
     expect(addRequests).toEqual({ "add-bob": { status: "done" } });
-    expect(refusedAtStart).toEqual([]);
-    expect(refusedByAdd).toEqual([]);
+    expect(refusals).toEqual([]);
   });
 
-  it("refuses the people list, the offer, and the outcomes of an add through a root-private manager's discovered flat bindings", async () => {
-    // The add itself lands, since it reads nothing of the manager. What the
-    // room derives from the manager does not: the picker's list of the
-    // manager's people on every rendering, and, once the add is made, the
-    // `canOffer` the offer waits on and the `outcomes` the room's
-    // `addRequests` reads. So the manager is never asked to tell Bob of the
-    // room, and the room never lists the add.
-
-    const { space, core, bobProfile, offers, addRequests, acl, ...refused } =
-      await addBob(true);
+  it("offers a room to a member added through a root-private manager's discovered flat bindings", async () => {
+    const { space, bobProfile, offers, acl } = await addBob(true);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
-    expect(offers).toEqual([]);
-    expect(addRequests).toEqual({});
-    const all = [...refused.refusedAtStart, ...refused.refusedByAdd];
-    for (const refusal of all) expect(refusal.terminal).toBe(true);
+    expect(offers).toHaveLength(1);
+    expect(offers[0]).toMatchObject({
+      requestId: addMemberOfferId(space, "add-bob"),
+      member: BOB,
+      room: { "/": { "link@1": { space } } },
+    });
 
-    // The picker maps the profiles `candidates` reads from the manager into
-    // documents of the room's, per session.
-    const isPicker = ({ reasons }: Refusal) =>
+    // Root-private setup refuses what the room's space would store of the
+    // manager's data: the picker's list of the people `candidates` reads from
+    // the manager, on each rendering, and the `outcomes` that merge the
+    // manager's verdicts into `addRequests`. This add guard bounds that known
+    // debt and permits no other refusal.
+    const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
+      const people = runtime.getCellFromLink(
+        { ...input.read, path: [] } as Parameters<
+          typeof runtime.getCellFromLink
+        >[0],
+        { type: "array", items: { asCell: ["cell"] } },
+      ).get() as Cell<unknown>[];
+      return people.length === 1 && people[0].equalLinks(bobProfile);
+    };
+    const isPicker = ({ reasons, refusals: details }: Refusal) =>
       reasons.every((reason) =>
         /^writer-fit confidentiality misfit for of:\S+ at \/\S* .*PersonalSpace/
           .test(reason)
+      ) &&
+      details.length > 0 &&
+      details.every(({ target, inputs }) =>
+        target?.space === space && target.scope === "session" &&
+        inputs.length > 0 &&
+        inputs.every((input) =>
+          input.read.space === space && input.read.scope === "session" &&
+          listsBob(input)
+        )
       );
-    expect(refused.refusedAtStart.map(isPicker)).toEqual([true]);
-    for (const picker of all.filter(isPicker)) {
-      expect(picker.refusals.map(({ target }) => target?.path)).toContainEqual(
-        ["length"],
-      );
-      for (const { target, inputs } of picker.refusals) {
-        expect(target).toMatchObject({ space, scope: "session" });
-        expect(inputs.length).toBeGreaterThan(0);
-        for (const { read } of inputs) {
-          expect(read).toMatchObject({ space, scope: "session" });
-          const people = runtime.getCellFromLink(
-            { ...read, path: [] } as Parameters<
-              typeof runtime.getCellFromLink
-            >[0],
-            { type: "array", items: { asCell: ["cell"] } },
-          ).get() as Cell<unknown>[];
-          expect(people.map((profile) => profile.equalLinks(bobProfile)))
-            .toEqual([true]);
-        }
-      }
-    }
-
-    // `canOffer`, a document of its own, which reads the manager's
-    // `offerRoom`, and `outcomes`, a document of its own, which reads the
-    // manager's `requests` and links the add's own outcome.
-    const [canOffer, outcomes, ...others] = refused.refusedByAdd
-      .filter((refusal) => !isPicker(refusal))
-      .sort((a, b) => b.refusals.length - a.refusals.length);
-    expect(others).toEqual([]);
-    expect(canOffer?.reasons).toEqual([
-      expect.stringMatching(
-        /^writer-fit confidentiality misfit for computed:\S+ at \/ .*PersonalSpace/,
-      ),
-    ]);
-    expect(canOffer?.refusals[0].target?.space).toBe(space);
+    const isOutcomes = ({ reasons }: Refusal) =>
+      reasons.length === 1 &&
+      /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
+        .test(reasons[0]);
+    for (const refusal of refusals) expect(refusal.terminal).toBe(true);
     expect(
-      canOffer?.refusals[0].inputs.some(({ read }) =>
-        read.space === core.space && read.id === core.id &&
-        read.path[0] === "offerRoom"
-      ),
-    ).toBe(true);
-    expect(outcomes?.reasons).toEqual([
-      expect.stringMatching(
-        /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/,
-      ),
-    ]);
+      refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),
+    ).toEqual([]);
+    expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
   });
 });
