@@ -211,10 +211,20 @@ export const measureRequest = async (
   return { toolCount: tools.length, rows };
 };
 
-if (import.meta.main) {
-  if (Deno.args.length !== 1) {
-    console.error("usage: measure-request.ts <recorded-artifact-dir>");
-    Deno.exit(2);
+/**
+ * The command line: measures the run recorded in the one directory `args`
+ * names and prints the rows as JSON. Returns the exit code.
+ */
+export const main = async (
+  args: readonly string[],
+  print: (line: string) => void,
+): Promise<number> => {
+  if (args.length !== 1) {
+    print("usage: measure-request.ts <recorded-artifact-dir>");
+    return 2;
   }
-  console.log(JSON.stringify(await measureRequest(Deno.args[0]), null, 1));
-}
+  print(JSON.stringify(await measureRequest(args[0]), null, 1));
+  return 0;
+};
+
+if (import.meta.main) Deno.exit(await main(Deno.args, console.log));

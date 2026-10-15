@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
-import { measureRequest } from "../scripts/measure-request.ts";
+import { main, measureRequest } from "../scripts/measure-request.ts";
 
 /** What a recorded loom carry run leaves that the measurement reads. */
 const writeRecordedRun = (dir: string): void => {
@@ -14,6 +14,7 @@ const writeRecordedRun = (dir: string): void => {
       parentTools: {
         allowedToolIds: [
           "run_pattern",
+          "search_patterns",
           "describe_handle",
           "run_command",
           "loom_search",
@@ -58,7 +59,7 @@ describe("measure-request", () => {
 
   it("returns one row per tag over the recorded run's granted tools", async () => {
     const { toolCount, rows } = await measureRequest(dir);
-    expect(toolCount).toBe(5);
+    expect(toolCount).toBe(6);
     expect(rows.map((row) => row.tag)).toEqual([
       "respond",
       "find",
@@ -74,7 +75,7 @@ describe("measure-request", () => {
     expect(new Set(rows.map((row) => row.toolsBytes)).size).toBe(1);
   });
 
-  it("measures a recorded run whose system prompt has no result schema or additional instructions", async () => {
+  it("measures a recorded run with no result schema, additional instructions or pattern index", async () => {
     Deno.writeTextFileSync(
       join(dir, "transcript.json"),
       JSON.stringify([
@@ -82,6 +83,13 @@ describe("measure-request", () => {
         { role: "user", content: "count to 100" },
         { role: "assistant", content: "" },
       ]),
+    );
+    Deno.writeTextFileSync(
+      join(dir, "policy-snapshot.json"),
+      JSON.stringify({
+        parentTools: { allowedToolIds: ["run_pattern", "submit_result"] },
+        subagents: { allowedProfiles: ["default"] },
+      }),
     );
     const { rows } = await measureRequest(dir);
     expect(rows).toHaveLength(6);
@@ -93,5 +101,17 @@ describe("measure-request", () => {
       rows.find((row) => row.tag === tag)!.inputBytes;
     expect(inputOf("author")).toBeGreaterThan(inputOf("respond"));
     expect(inputOf("fallback")).toBeGreaterThanOrEqual(inputOf("author"));
+  });
+
+  it("prints the rows as JSON and exits 0 given one directory", async () => {
+    const printed: string[] = [];
+    expect(await main([dir], (line) => printed.push(line))).toBe(0);
+    expect(JSON.parse(printed[0]).rows).toHaveLength(6);
+  });
+
+  it("prints its usage and exits 2 given no directory", async () => {
+    const printed: string[] = [];
+    expect(await main([], (line) => printed.push(line))).toBe(2);
+    expect(printed[0]).toContain("usage:");
   });
 });
