@@ -1085,12 +1085,17 @@ cf piece setsrc --cell fid1:piece --root packages/patterns \
 cf piece render --cell fid1:piece >/dev/null
 ```
 
-The source commit and refresh of the running piece are separate operations. If
-the commit lands but refresh fails, `setsrc` prints the commit receipt on
-stdout, prints the failure and recovery checks on stderr, and exits nonzero.
-That status means “source changed, running deploy unverified,” not rollback: use
-`piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
-A receipt alone is never proof that the updated piece starts.
+The source commit and refresh of the running piece are separate operations. The
+refresh starts the piece in the command's own process, which commits the started
+graph's setup writes on a transaction of its own, and reads its result. Storage
+refusing that commit retires the graph, leaving the piece not running in the
+command's process, so it fails the refresh, and the failure names the refused
+commit and storage's reason. If the commit lands but refresh fails, `setsrc`
+prints the commit receipt on stdout, prints the failure and recovery checks on
+stderr, and exits nonzero. That status means “source changed, running deploy
+unverified,” not rollback: use `piece render`, `piece inspect`, and
+`piece getsrc` to determine the live state. A receipt alone is never proof that
+the updated piece starts.
 
 In either case the receipt names the committed pattern ref, the source revision,
 and the seq at which the space's commit log accepted the update. That seq is
