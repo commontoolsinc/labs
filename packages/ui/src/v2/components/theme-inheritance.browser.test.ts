@@ -200,6 +200,25 @@ Deno.test("the tools chip's open overlay follows a theme preference change", asy
   }
 });
 
+Deno.test("a partial theme given to the chat tints the ambient one", async () => {
+  const provider = new CFThemeProvider();
+  provider.theme = { fontFamily: HOST_FONT };
+  document.body.append(provider);
+  try {
+    await provider.updateComplete;
+    const chat = await mountIn<
+      HTMLElement & { theme: unknown; updateComplete: Promise<unknown> }
+    >(provider, "cf-chat");
+    chat.theme = { accentColor: "rgb(1, 2, 3)" };
+    await chat.updateComplete;
+
+    expect(token(chat, "--cf-theme-font-family")).toBe(HOST_FONT);
+    expect(token(chat, "--cf-theme-color-primary")).toBe("rgb(1, 2, 3)");
+  } finally {
+    provider.remove();
+  }
+});
+
 Deno.test("the chat's spacing tokens give way to a host's", async () => {
   const host = themedHost();
   host.style.setProperty("--cf-theme-spacing-message-bottom", "33px");

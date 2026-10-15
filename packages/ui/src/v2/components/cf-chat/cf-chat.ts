@@ -207,9 +207,11 @@ export class CFChat extends BaseElement {
    */
   #applyTheme() {
     const given = this.theme && Object.keys(this.theme).length > 0
-      ? mergeWithDefaultTheme(this.theme)
+      ? mergeWithDefaultTheme(this.theme, this.parentTheme)
       : undefined;
-    if (given || this.#wroteGivenTheme) applyThemeToElement(this, given);
+    if (given || this.#wroteGivenTheme) {
+      applyThemeToElement(this, given, this.parentTheme);
+    }
     this.#wroteGivenTheme = given !== undefined;
     const { density } = given ?? this.parentTheme;
     const spacing = {
