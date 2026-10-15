@@ -141,7 +141,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
     ...docs: { getAsNormalizedFullLink(): MemoryAddress }[]
   ): {
     parked: Promise<void>;
-    loads: { key: string; fail(error: Error): void }[];
+    loads: { key: string; fail(reason: unknown): void }[];
   } {
     const parked = Promise.withResolvers<void>();
     const held = docs.map((doc) => {
@@ -666,6 +666,115 @@ describe("event dispatch parks on in-flight closure loads", () => {
         failureClass: "authorization",
         permanentEvidence: false,
         recoveryEpoch: `load-key:${load.key}`,
+      },
+    }]);
+  });
+
+  it("drops once when a required load rejects with no reason", async () => {
+    // A rejection that carries no error is still a failed load, not an
+    // authorization one, so the client event drops rather than dispatching
+    // past it.
+
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "load-park-reasonless-cold",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-reasonless-event",
+      undefined,
+    );
+    await tx.commit().settled;
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    let callbackRuns = 0;
+    let callbackStatus: string | undefined;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => coldDoc.withTx(depTx).get(),
+    );
+    const { parked, loads: [load] } = holdLoadsInFlight(coldDoc);
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      (commitTx) => {
+        callbackRuns++;
+        callbackStatus = commitTx.status().status;
+      },
+    );
+    await parked;
+    expect(handlerRuns).toBe(0);
+
+    load.fail(undefined);
+    await runtime.idle();
+    expect(handlerRuns).toBe(0);
+    expect(callbackRuns).toBe(1);
+    expect(callbackStatus).toBe("error");
+  });
+
+  it("defers a SERVED event whose required load rejects with no reason", async () => {
+    const { runtime, tx } = env;
+    const coldDoc = runtime.getCell<string>(
+      space,
+      "load-park-served-reasonless-cold",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-served-reasonless-event",
+      undefined,
+    );
+    await tx.commit().settled;
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => coldDoc.withTx(depTx).get(),
+    );
+    const { parked, loads: [load] } = holdLoadsInFlight(coldDoc);
+
+    const outcomes: unknown[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      undefined,
+      false,
+      {
+        served: {
+          streamEntry: { sidecarId: "of:stream-events:pin", index: 0, seq: 1 },
+          onFailure: (outcome) => outcomes.push(outcome),
+        },
+      },
+    );
+    await parked;
+    expect(handlerRuns).toBe(0);
+
+    load.fail(undefined);
+    await runtime.idle();
+    expect(handlerRuns).toBe(0);
+    expect(outcomes).toEqual([{
+      kind: "deferred",
+      cause: "load-park",
+      role: "failed-head",
+      failure: {
+        failureClass: "unknown",
+        recoveryEpoch: "untyped",
+        permanentEvidence: false,
       },
     }]);
   });

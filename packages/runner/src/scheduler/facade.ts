@@ -3880,13 +3880,16 @@ export class Scheduler {
     errors: readonly unknown[],
   ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const error = event.served === undefined
-      ? errors.find((each) => !isAuthorizationLoadFailure(each))
-      : errors[0];
-    if (error === undefined) {
+    if (
+      event.served === undefined && errors.every(isAuthorizationLoadFailure)
+    ) {
       this.#releaseHeadEventLoadPark(event.id);
       return;
     }
+    // Chosen by position, since a rejection may carry no error at all.
+    const error = event.served === undefined
+      ? errors[errors.findIndex((each) => !isAuthorizationLoadFailure(each))]
+      : errors[0];
     const keys = this.#headEventLoadPark.keys.join(", ");
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
