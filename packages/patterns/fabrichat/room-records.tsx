@@ -1097,7 +1097,6 @@ const performMessageAct = (
   const requestKey = requestKeyOf(sender, requestId);
   if (actedOn(requests, requestKey)) return;
   const clock = clockNsec();
-  const entries = messageEntries(messages);
   const typed = event?.target?.value;
   const version: ChatMessageVersion | undefined = event?.version ??
     (typeof typed === "string"
@@ -1127,9 +1126,11 @@ const performMessageAct = (
     const replyCell = (event?.replyTo?.message ?? state.message ?? fromComposer)
       ?.resolveAsCell();
     const shownIn = event?.replyTo?.shownIn ?? state.shownIn ?? "main";
+    // Only a reply looks up a message, so a plain send builds no entry for
+    // any message already in the room.
     const target = replyCell === undefined
       ? undefined
-      : entryFor(entries, replyCell);
+      : entryFor(messageEntries(messages), replyCell);
     if (replyCell !== undefined) {
       if (target === undefined) {
         refuse("bad-reply", "The message replied to isn't in this chat.");
@@ -1193,7 +1194,7 @@ const performMessageAct = (
   }
 
   const target = (event?.message ?? state.message)?.resolveAsCell();
-  const entry = entryFor(entries, target);
+  const entry = entryFor(messageEntries(messages), target);
   if (target === undefined || entry === undefined) {
     refuse("unknown-target", "That message isn't in this chat.");
     return;
