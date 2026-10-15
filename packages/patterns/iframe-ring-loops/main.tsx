@@ -125,6 +125,7 @@ interface Attribution {
   color?: string;
 }
 
+/** The cell `addNote` places a note in, and who the note is by. */
 interface AddNoteEvent extends Attribution {
   /** Id of the ring, as `rings` lists it. */
   ring: string;
@@ -136,6 +137,7 @@ interface AddNoteEvent extends Attribution {
   lane: number;
 }
 
+/** What `addNote` placed. */
 interface AddNoteResult {
   /** The note as stored. */
   note: PlacedNote;
@@ -147,11 +149,13 @@ interface AddNoteResult {
   replaced: boolean;
 }
 
+/** The cells `addNotes` places notes in, and who the notes are by. */
 interface AddNotesEvent extends Attribution {
   /** The cells to place notes in, each by ring id, step, and lane. */
   notes: NoteSpec[];
 }
 
+/** How many notes `addNotes` placed. */
 interface AddNotesResult {
   /** How many notes were placed. */
   placed: number;
@@ -160,6 +164,7 @@ interface AddNotesResult {
   replaced: number;
 }
 
+/** The cell `removeNote` empties. */
 interface RemoveNoteEvent {
   /** Id of the ring, as `rings` lists it. */
   ring: string;
@@ -171,36 +176,43 @@ interface RemoveNoteEvent {
   lane: number;
 }
 
+/** Whether `removeNote` found a note to remove. */
 interface RemoveNoteResult {
   /** Whether the cell held a note. */
   removed: boolean;
 }
 
+/** Which ring `clearNotes` empties, or every ring. */
 interface ClearNotesEvent {
   /** Id of the one ring to clear. Left out, every ring is cleared. */
   ring?: string;
 }
 
+/** How many notes `clearNotes` removed. */
 interface ClearNotesResult {
   /** How many notes were removed. */
   removed: number;
 }
 
+/** The tempo `setTempo` stores. */
 interface SetTempoEvent {
   /** Beats per minute, from 40 to 200. */
   bpm: number;
 }
 
+/** The tempo `setTempo` stored. */
 interface SetTempoResult {
   /** The tempo now stored, in beats per minute. */
   tempoBpm: number;
 }
 
+/** The volume `setVolume` stores for the caller. */
 interface SetVolumeEvent {
   /** Playback volume, from 0 for silence to 1 for full. */
   volume: number;
 }
 
+/** The volume `setVolume` stored for the caller. */
 interface SetVolumeResult {
   /** The caller's volume now stored. */
   volume: number;
@@ -216,21 +228,29 @@ interface NoteVerbState {
 
   /** Profile name of the caller, or the empty string where none is known. */
   viewerName: string;
+
+  /** The caller's own settings, whose color the notes take by default. */
+  output: IframeOutputData;
 }
 
 /**
  * Returns who a verb's notes are by. The identifier is the principal the call
  * acts for, which the event cannot name, and the name is the agent's where the
- * event gives one.
+ * event gives one. The color is the event's, else the caller's chosen one,
+ * else one picked from the author.
  */
-function authorOf(event: Attribution, viewerName: string): NoteAuthor {
+function authorOf(
+  event: Attribution,
+  viewerName: string,
+  chosenColor: string | null,
+): NoteAuthor {
   const name = (event.agentName ?? "").trim() || viewerName.trim();
   const id = currentPrincipal() ?? "unknown";
   return {
     id,
     name,
     color: event.color === undefined
-      ? defaultColor(name || id)
+      ? chosenColor ?? defaultColor(name || id)
       : checkedColor(event.color),
   };
 }
@@ -261,10 +281,14 @@ function listRings(
 }
 
 const addNote = handler<AddNoteEvent, NoteVerbState, AddNoteResult>(
-  (event, { state, setup, viewerName }) => {
+  (event, { state, setup, viewerName, output }) => {
     const layout = ringLayoutOf(setup);
     const cell = cellOf(layout, event);
-    const note = noteFor(layout, cell, authorOf(event, viewerName));
+    const note = noteFor(
+      layout,
+      cell,
+      authorOf(event, viewerName, output.color),
+    );
     const notes = state.key("notes");
     const key = keyOf(layout, cell);
     const replaced = isOccupied(layout, notes, key);
@@ -278,12 +302,12 @@ const addNote = handler<AddNoteEvent, NoteVerbState, AddNoteResult>(
 );
 
 const addNotes = handler<AddNotesEvent, NoteVerbState, AddNotesResult>(
-  (event, { state, setup, viewerName }) => {
+  (event, { state, setup, viewerName, output }) => {
     const layout = ringLayoutOf(setup);
     // Every cell is checked ahead of the first write, so one bad cell leaves
     // the rings as they were.
     const cells = event.notes.map((spec) => cellOf(layout, spec));
-    const author = authorOf(event, viewerName);
+    const author = authorOf(event, viewerName, output.color);
     const notes = state.key("notes");
     const replaced =
       cells.filter((cell) => isOccupied(layout, notes, keyOf(layout, cell)))
@@ -354,9 +378,11 @@ export default pattern<RingLoopsInput, RingLoopsOutput>(({ input, output }) => {
   const viewerName = computed(() => (profileName.result ?? "").trim());
   const frame = Frame({ input: { setup, viewerName }, output });
   // Destructuring binds each name to a link into the frame's result. Reading
-  // `frame.state` here would bind a derived copy of it: one that a caller who
-  // has not run the piece reads stale, and that a direct write does not pass
-  // through.
+  // `frame.state` here would put a derived copy of it in this piece's result
+  // instead. Verbs and the running piece reach the frame's cell either way;
+  // the copy misleads a caller that does not run the piece, which reads it
+  // stale (`cf cell get` without `--step`) and writes into the copy rather
+  // than through it (`cf cell set`).
   const { state, [UI]: view } = frame;
   const rings = computed(() => listRings(setup, state.notes));
 
@@ -366,10 +392,10 @@ export default pattern<RingLoopsInput, RingLoopsOutput>(({ input, output }) => {
     rings,
     state,
     output,
-    addNote: addNote({ state, setup, viewerName }),
-    addNotes: addNotes({ state, setup, viewerName }),
-    removeNote: removeNote({ state, setup, viewerName }),
-    clearNotes: clearNotes({ state, setup, viewerName }),
+    addNote: addNote({ state, setup, viewerName, output }),
+    addNotes: addNotes({ state, setup, viewerName, output }),
+    removeNote: removeNote({ state, setup, viewerName, output }),
+    clearNotes: clearNotes({ state, setup, viewerName, output }),
     setTempo: setTempo({ state }),
     setVolume: setVolume({ output }),
   };

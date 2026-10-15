@@ -28,11 +28,10 @@ import {
   defaultColor,
   type DrumSound,
   drumSound,
-  followingClock,
+  followStep,
   freshPresses,
   HAND_FACET,
   handTurn,
-  isClockJump,
   JAM_ROOM,
   keyForPad,
   laneLabel,
@@ -54,6 +53,7 @@ import {
   peerHandPosition,
   POINTER_FACET,
   positionAt,
+  presenceName,
   PRESSES_FACET,
   readPeer,
   retimed,
@@ -79,6 +79,12 @@ const START_DELAY_SECONDS = 0.06;
 
 /** How long a cell stays lit after its note sounds, in seconds. */
 const FLASH_SECONDS = 0.28;
+
+/**
+ * Seconds after which a playing hand is announced again, so that peers'
+ * extrapolation, and anyone following, does not drift with the audio clock.
+ */
+const HAND_REANNOUNCE_SECONDS = 4;
 
 /** Steps by which the echo trails the note it repeats. */
 const ECHO_STEPS = 3;
@@ -155,6 +161,8 @@ let ownPresses: PadPress[] = [];
 let nextPressId = 0;
 let publishedName: string | undefined;
 let publishedColor: string | undefined;
+// Wall-clock time of the last hand announced while playing.
+let handAnnouncedAt = 0;
 // Membership of the peer this browser's playback follows, if any.
 let following: string | undefined;
 // Signature of what the people list last showed, so that a peer's pointer
@@ -371,7 +379,7 @@ function clearError(): void {
 // not confirmed yet.
 //
 
-/** Whether the guest has hydrated and holds a layout it can draw and play. */
+/** Returns whether the guest has hydrated and holds a layout it can play. */
 function ready(): boolean {
   return hydrated && !disposed && layout !== undefined;
 }
@@ -738,8 +746,15 @@ function frame(): void {
   try {
     scheduleAhead();
     draw();
+    if (
+      transport &&
+      Date.now() - handAnnouncedAt > HAND_REANNOUNCE_SECONDS * 1000
+    ) {
+      publishHand();
+    }
   } catch (cause) {
     transport = undefined;
+    publishHand();
     showError(cause);
     renderControls();
     return;
@@ -1038,7 +1053,6 @@ function rebuildRingRows(): void {
   }
 }
 
-/** Brings every control in the panel up to date with the settings in effect. */
 /**
  * Rebuilds the jam pads: a row for each ring, with a pad for each lane that
  * shows what the lane plays and the key that plays it.
@@ -1184,9 +1198,10 @@ function renderPeople(): void {
     ? "Joining the room…"
     : roomStatus === "unsupported"
     ? "This server has no live room, so nobody sees your pointer or hears your pads."
-    : "Lost the room. Click anywhere to rejoin.";
+    : "Lost the room. Press Play, a pad, or the rings to rejoin.";
 }
 
+/** Brings every control in the panel up to date with the settings in effect. */
 function renderControls(): void {
   const isReady = ready();
   title.textContent = input.get()?.setup.title ?? DEFAULT_INPUT.setup.title;
@@ -1305,9 +1320,17 @@ function setHover(cell: Cell | undefined): void {
   }
   hoverCell = cell;
   renderReadout();
-  renderControls();
+  for (const [index, row] of [...ringList.children].entries()) {
+    if (row instanceof HTMLElement) {
+      row.dataset.hover = String(hoverCell?.ringIndex === index);
+    }
+  }
   requestFrame();
 }
+
+//
+// Updates from the cells
+//
 
 /**
  * Brings the notes, the audio settings, the controls, the readout, and the
@@ -1335,6 +1358,7 @@ function adoptInput(): void {
     } catch (cause) {
       layout = undefined;
       transport = undefined;
+      publishHand();
       showError(cause);
       layoutErrorMessage = error.textContent ?? undefined;
       status.textContent = "These rings cannot be drawn";
@@ -1363,7 +1387,7 @@ function publish(publication: Promise<void>): void {
 /** Tells the room the viewer's name and color, where either has changed. */
 function publishLook(): void {
   if (!leaveRoom || !hydrated) return;
-  const name = viewerName() || "Guest";
+  const name = presenceName(viewerName());
   const color = effectiveColor();
   if (name !== publishedName) {
     publishedName = name;
@@ -1386,9 +1410,10 @@ function publishHand(): void {
     publish(room.clearFacet(HAND_FACET));
     return;
   }
+  handAnnouncedAt = Date.now();
   publish(room.setFacet(HAND_FACET, {
     step: positionAt(transport, audio.context.currentTime),
-    at: Date.now(),
+    at: handAnnouncedAt,
     bpm: transport.tempoBpm,
   }));
 }
@@ -1424,6 +1449,11 @@ function rejoinIfLost(): void {
   if (roomStatus === "lost") joinRoom();
 }
 
+/**
+ * Brings the peers up to date with one delivery from the room: the whole room
+ * on joining and rejoining, one member's new record, or one member leaving.
+ * Plays the pad presses that are new, and keeps a followed peer in step.
+ */
 function onRoomEvent(event: PresenceRoomEvent): void {
   switch (event.kind) {
     case "snapshot":
@@ -1433,6 +1463,7 @@ function onRoomEvent(event: PresenceRoomEvent): void {
       for (const participant of event.participants) {
         meetPeer(readPeer(participant));
       }
+      syncToFollowed();
       break;
     case "upsert": {
       const peer = readPeer(event.participant);
@@ -1472,12 +1503,13 @@ function meetPeer(peer: Peer): void {
 
 /** Records a peer's new record, and plays the presses that are new in it. */
 function hearPeer(peer: Peer): void {
-  const heard = pressesHeard.get(peer.id);
+  // A peer reaches here only once met, and meeting seeds the press number.
+  const heard = pressesHeard.get(peer.id) ?? -1;
   for (const press of freshPresses(peer.presses, heard)) {
     const played = playPress(press, peer.color, false);
     if (played) lastJammed.set(peer.id, played);
   }
-  pressesHeard.set(peer.id, lastPressId(peer.presses) ?? heard ?? -1);
+  pressesHeard.set(peer.id, lastPressId(peer.presses) ?? heard);
   peers.set(peer.id, peer);
 }
 
@@ -1514,8 +1546,9 @@ function unfollow(): void {
 
 /**
  * Brings this browser's clock in step with the followed peer's hand, or stops
- * it while the peer is stopped. A shift smaller than half a step keeps the
- * notes already queued, so that clock jitter neither repeats nor drops one.
+ * it while the peer is stopped, and stops following a peer who has left. A
+ * jitter-sized shift keeps the notes already queued and is not announced; see
+ * `followStep()`.
  */
 function syncToFollowed(): void {
   if (following === undefined || !audio || disposed) return;
@@ -1529,18 +1562,19 @@ function syncToFollowed(): void {
       publishHand();
     }
   } else {
-    const now = audio.context.currentTime;
-    const next = followingClock(
+    const next = followStep(
+      transport,
       peer.hand,
       Date.now(),
-      now,
+      audio.context.currentTime,
       START_DELAY_SECONDS,
+      LOOKAHEAD_SECONDS,
     );
-    if (!transport || isClockJump(transport, next, now)) {
-      scheduledThrough = positionAt(next, now);
+    if (next.restartQueueAt !== undefined) {
+      scheduledThrough = next.restartQueueAt;
     }
-    transport = next;
-    publishHand();
+    transport = next.clock;
+    if (next.announce) publishHand();
   }
   renderControls();
   requestFrame();
@@ -1635,6 +1669,10 @@ function disarmClear(): void {
   clearArmed = false;
   renderControls();
 }
+
+//
+// Wiring and startup
+//
 
 /**
  * Releases what the guest holds: its listeners and sinks, the frame it asked

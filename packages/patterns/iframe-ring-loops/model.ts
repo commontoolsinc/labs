@@ -700,6 +700,11 @@ export function defaultColor(authorId: string): string {
   return NOTE_COLORS[hash % NOTE_COLORS.length];
 }
 
+/** Returns whether `value` is a whole number indexing one of `length` slots. */
+function isIndexBelow(value: number, length: number): boolean {
+  return Number.isInteger(value) && value >= 0 && value < length;
+}
+
 //
 // Presence
 //
@@ -733,6 +738,9 @@ export const PAD_KEY_ROWS: readonly string[] = [
   "asdfghjk",
   "zxcvbnm,",
 ];
+
+/** Most code points a published name keeps. */
+const MAX_PRESENCE_NAME = 60;
 
 /** Furthest from the center a published pointer is drawn, in ring radii. */
 const MAX_POINTER_RADIUS = 1.2;
@@ -830,13 +838,14 @@ export function readPeer(record: PeerRecord): Peer {
 }
 
 /**
- * Returns the step position `hand` has reached at wall-clock time `nowMs`. A
- * time before the hand's own, as a sender's clock running ahead produces,
- * reads as the hand's own.
+ * Returns the step position `hand` has reached at wall-clock time `nowMs`, or
+ * 0 while that is still before the first step, as during the delay a clock
+ * starts with. A time before the hand's own, as a sender's clock running
+ * ahead produces, reads as the hand's own.
  */
 export function peerHandPosition(hand: PeerHand, nowMs: number): number {
   const elapsedSeconds = Math.max(0, nowMs - hand.at) / 1000;
-  return Math.max(0, hand.step) + elapsedSeconds / secondsPerStep(hand.bpm);
+  return Math.max(0, hand.step + elapsedSeconds / secondsPerStep(hand.bpm));
 }
 
 /**
@@ -861,7 +870,7 @@ export function followingClock(
 
 /**
  * Returns whether moving from `current` to `next` at audio time `audioNow`
- * shifts the playing position by half a step or more, as a peer restarting
+ * shifts the playing position by `maxShiftSteps` or more, as a peer restarting
  * does. A smaller shift is clock jitter, under which the steps already queued
  * stand.
  */
@@ -869,22 +878,88 @@ export function isClockJump(
   current: Transport,
   next: Transport,
   audioNow: number,
+  maxShiftSteps: number,
 ): boolean {
   return Math.abs(positionAt(next, audioNow) - positionAt(current, audioNow)) >=
-    0.5;
+    maxShiftSteps;
 }
 
 /**
- * Returns the presses in `presses` numbered above `lastSeen`, oldest first.
- * With no `lastSeen`, as for a participant just met, it returns none, so that
- * joining a room does not replay what was played before.
+ * Returns the largest shift, in steps, that counts as clock jitter at
+ * `tempoBpm`: half a step, or less where half the lookahead is shorter than
+ * that. A shift under half the lookahead can move the playing position past
+ * no step the queue has not yet reached, so keeping the queue drops none.
  */
+export function maxJitterSteps(
+  tempoBpm: number,
+  lookaheadSeconds: number,
+): number {
+  return Math.min(0.5, lookaheadSeconds / 2 / secondsPerStep(tempoBpm));
+}
+
+/** What following a peer's latest hand does to this browser's clock. */
+export interface FollowStep {
+  /** The clock to play by from now on. */
+  readonly clock: Transport;
+
+  /**
+   * The step position to queue notes from, where the queue starts afresh, or
+   * `undefined` where the notes already queued stand.
+   */
+  readonly restartQueueAt?: number;
+
+  /**
+   * Whether the room should hear this browser's hand: the clock started, its
+   * tempo changed, or it jumped. A jitter-sized re-sync is not announced, so
+   * two people following each other settle instead of answering each other.
+   */
+  readonly announce: boolean;
+}
+
+/**
+ * Returns how to follow `hand` from `current`, this browser's running clock,
+ * or from a stopped one when `current` is `undefined`. The times are as
+ * `followingClock()` takes them.
+ */
+export function followStep(
+  current: Transport | undefined,
+  hand: PeerHand,
+  nowMs: number,
+  audioNow: number,
+  delaySeconds: number,
+  lookaheadSeconds: number,
+): FollowStep {
+  const clock = followingClock(hand, nowMs, audioNow, delaySeconds);
+  const restartQueueAt = positionAt(clock, audioNow);
+  if (!current) return { clock, restartQueueAt, announce: true };
+  const jumped = isClockJump(
+    current,
+    clock,
+    audioNow,
+    maxJitterSteps(clock.tempoBpm, lookaheadSeconds),
+  );
+  return {
+    clock,
+    ...(jumped && { restartQueueAt }),
+    announce: jumped || current.tempoBpm !== clock.tempoBpm,
+  };
+}
+
+/** Returns the presses in `presses` numbered above `lastSeen`, oldest first. */
 export function freshPresses(
   presses: readonly PadPress[],
-  lastSeen: number | undefined,
+  lastSeen: number,
 ): PadPress[] {
-  if (lastSeen === undefined) return [];
   return presses.filter((press) => press.id > lastSeen);
+}
+
+/**
+ * Returns `name` as a presence record carries it: trimmed, `Guest` where
+ * blank, and cut to 60 code points so that the relay, which refuses longer
+ * names, takes it.
+ */
+export function presenceName(name: string): string {
+  return [...(name.trim() || "Guest")].slice(0, MAX_PRESENCE_NAME).join("");
 }
 
 /** Returns the highest press number in `presses`, or `undefined` for none. */
@@ -962,9 +1037,4 @@ function readPresses(value: unknown): PadPress[] {
       ? [{ id, ring, lane }]
       : [];
   }).slice(-MAX_PRESSES);
-}
-
-/** Returns whether `value` is a whole number indexing one of `length` slots. */
-function isIndexBelow(value: number, length: number): boolean {
-  return Number.isInteger(value) && value >= 0 && value < length;
 }

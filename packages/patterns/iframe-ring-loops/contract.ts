@@ -42,7 +42,10 @@ export interface PlacedNote {
   /** Lane within the ring's band, from 0 at its inner edge; picks the pitch. */
   lane: number;
 
-  /** Per-user instance that placed the note. */
+  /**
+   * Who placed the note: the per-user instance for a note placed in the
+   * browser, or the caller's DID for one placed through a verb.
+   */
   authorId: string;
 
   /** CSS color the note is drawn in, as its author chose it. */
@@ -97,6 +100,7 @@ export interface IframeOutputData {
   mutedRingIds: string[];
 }
 
+/** Four rings in A minor pentatonic, from a drum kit to a pluck. */
 export const DEFAULT_SETUP: RingLoopsSetup = {
   title: "Ring Loops",
   rings: [
@@ -109,11 +113,13 @@ export const DEFAULT_SETUP: RingLoopsSetup = {
   scale: [0, 3, 5, 7, 10],
 };
 
+/** What the guest reads where the frame is used on its own. */
 export const DEFAULT_INPUT: IframeInputData = {
   setup: DEFAULT_SETUP,
   viewerName: "",
 };
 
+/** A short starter groove, so that the first Play makes a sound. */
 export const DEFAULT_STATE: IframeStateData = {
   notes: {
     "drums:0:0": {
@@ -224,12 +230,17 @@ export const DEFAULT_STATE: IframeStateData = {
   tempoBpm: 96,
 };
 
+/** A new user's settings: no color chosen, 70% volume, nothing muted. */
 export const DEFAULT_OUTPUT: IframeOutputData = {
   color: null,
   volume: 0.7,
   mutedRingIds: [],
 };
 
+/**
+ * How `tools/write-iframe-wrapper.ts` builds `frame.tsx`: notes shared by the
+ * space, settings per user, and a presence room that follows the notes.
+ */
 export const IFRAME_PATTERN = {
   name: "RingLoopsFrame",
   displayName: "Ring Loops",

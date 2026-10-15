@@ -20,6 +20,7 @@ import {
   defaultColor,
   FALLBACK_TEMPO_BPM,
   followingClock,
+  followStep,
   freshPresses,
   HAND_FACET,
   handTurn,
@@ -32,6 +33,7 @@ import {
   LOOK_FACET,
   MAX_PRESSES,
   MAX_TEMPO_BPM,
+  maxJitterSteps,
   midiToFrequency,
   MIN_TEMPO_BPM,
   normalizeTempo,
@@ -42,6 +44,7 @@ import {
   peerHandPosition,
   POINTER_FACET,
   positionAt,
+  presenceName,
   PRESSES_FACET,
   readPeer,
   retimed,
@@ -562,6 +565,7 @@ describe("model", () => {
       expect(new Set(authors.map(defaultColor)).size).toBeGreaterThan(1);
     });
   });
+
   describe("readPeer()", () => {
     const base = { participantId: "peer-1", name: "Grace", facets: {} };
 
@@ -653,8 +657,14 @@ describe("model", () => {
       expect(peerHandPosition(hand, 4_000)).toBe(10);
     });
 
-    it("counts a negative step, as during a start delay, from 0", () => {
-      expect(peerHandPosition({ ...hand, step: -0.4 }, 5_000)).toBe(0);
+    it("returns 0 until a negative step, as during a start delay, has run out", () => {
+      const starting = { ...hand, step: -0.4 };
+      expect(peerHandPosition(starting, 5_000)).toBe(0);
+      expect(peerHandPosition(starting, 5_050)).toBe(0);
+    });
+
+    it("counts on from the negative step once it has run out, without a lead", () => {
+      expect(peerHandPosition({ ...hand, step: -0.4 }, 6_050)).toBe(8);
     });
   });
 
@@ -675,14 +685,62 @@ describe("model", () => {
   describe("isClockJump()", () => {
     const current = { anchorStep: 0, anchorTime: 10, tempoBpm: 120 };
 
-    it("returns `false` for a shift under half a step", () => {
+    it("returns `false` for a shift under the jitter bound", () => {
       const next = { ...current, anchorStep: 0.3 };
-      expect(isClockJump(current, next, 12)).toBe(false);
+      expect(isClockJump(current, next, 12, 0.5)).toBe(false);
+    });
+
+    it("returns `true` for a shift at or over the jitter bound", () => {
+      const next = { ...current, anchorStep: 0.3 };
+      expect(isClockJump(current, next, 12, 0.25)).toBe(true);
     });
 
     it("returns `true` for a peer restarting from the top", () => {
       const next = { anchorStep: 0, anchorTime: 12, tempoBpm: 120 };
-      expect(isClockJump(current, next, 12)).toBe(true);
+      expect(isClockJump(current, next, 12, 0.5)).toBe(true);
+    });
+  });
+
+  describe("maxJitterSteps()", () => {
+    it("returns half a step where half the lookahead is longer", () => {
+      expect(maxJitterSteps(200, 1)).toBe(0.5);
+    });
+
+    it("returns half the lookahead, in steps, where that is shorter", () => {
+      expect(maxJitterSteps(40, 0.12)).toBeCloseTo(0.16, 12);
+    });
+  });
+
+  describe("followStep()", () => {
+    const hand = { step: 10, at: 5_000, bpm: 120 };
+    const step = (current: Transport | undefined, peer = hand) =>
+      followStep(current, peer, 6_000, 40, 0.06, 0.12);
+    const following = step(undefined).clock;
+
+    it("starts the queue afresh and tells the room when the clock starts", () => {
+      const start = step(undefined);
+      expect([start.announce, start.restartQueueAt]).toEqual([
+        true,
+        positionAt(start.clock, 40),
+      ]);
+    });
+
+    it("keeps the queue and tells the room nothing for a jitter-sized shift", () => {
+      const nudged = step(following, { ...hand, at: 5_010 });
+      expect([nudged.announce, nudged.restartQueueAt]).toEqual([
+        false,
+        undefined,
+      ]);
+    });
+
+    it("tells the room when the tempo changes", () => {
+      expect(step(following, { ...hand, bpm: 100 }).announce).toBe(true);
+    });
+
+    it("starts the queue afresh and tells the room when the peer restarts", () => {
+      const restart = step(following, { step: 0, at: 6_000, bpm: 120 });
+      expect([restart.announce, restart.restartQueueAt !== undefined])
+        .toEqual([true, true]);
     });
   });
 
@@ -700,8 +758,24 @@ describe("model", () => {
       ]);
     });
 
-    it("returns none for a participant just met", () => {
-      expect(freshPresses(presses, undefined)).toEqual([]);
+    it("returns none when the last one seen is the newest", () => {
+      expect(freshPresses(presses, 6)).toEqual([]);
+    });
+  });
+
+  describe("presenceName()", () => {
+    it("returns a short name trimmed", () => {
+      expect(presenceName("  Ada  ")).toBe("Ada");
+    });
+
+    it("returns `Guest` for a blank name", () => {
+      expect(presenceName(" ")).toBe("Guest");
+    });
+
+    it("cuts a long name to 60 code points, keeping a character whole", () => {
+      const cut = presenceName("🎵".repeat(100));
+      expect([...cut].length).toBe(60);
+      expect(cut).toBe("🎵".repeat(60));
     });
   });
 

@@ -1,10 +1,13 @@
+/**
+ * Drives every verb of Ring Loops and reads the result back through `rings`,
+ * `state`, and `output`. No profile wish resolves in a pattern test, so every
+ * note a verb places here is named by the `agentName` its event carries.
+ */
+
 import { action, assert, pattern, TESTS } from "commonfabric";
 import RingLoops from "./main.tsx";
 
 export default pattern(() => {
-  // No profile wish resolves here, so every note a verb places is named by
-  // the `agentName` the event carries.
-
   const loops = RingLoops({});
 
   // A verb declares a result and a step takes a stream that declares none, so
