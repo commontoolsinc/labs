@@ -5,11 +5,13 @@
  * notice for each. Once a later start with Alice names her profile, which
  * points at her private inbox, the room is offered there, she is added to its
  * participants, the notice for her is withdrawn, and the start's outcome is
- * the room found. A start after that sends no second offer. Carol has joined
- * her room before Bob names her profile, so she is offered nothing, and Dave's
- * profile points at no inbox, so he is offered nothing either; both keep their
- * notices. Each person writes their own profile here, so its label names
- * them, as a Fabric profile's does.
+ * the room found. A start after that sends no second offer, and neither does
+ * one from another manager whose notice for her a client reported delivered,
+ * though she hasn't joined its room. Carol has joined her room before Bob
+ * names her profile, so she is offered nothing, and Dave's profile points at
+ * no inbox, so he is offered nothing either; both keep their notices. Each
+ * person writes their own profile here, so its label names them, as a Fabric
+ * profile's does.
  */
 import {
   action,
@@ -395,6 +397,29 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const daveProfile = profileOf(
     setup.records.messages.key(2).key("authorProfile"),
   );
+  // A manager of Bob's whose notice for Alice a client reports delivered.
+  const otherRequests = Writable.of<Record<string, ChatRequestOutcome>>({});
+  const otherNotices = Writable.of<ChatManagerNotice[]>([]);
+  const other = FabriChatManagerCore({
+    myProfile: profile,
+    sharedSpaceCatalog: emptyCatalog(),
+    direct: Writable.of<Record<string, ChatIndexEntry>>({}),
+    requests: otherRequests,
+    outgoingNotices: otherNotices,
+  } as ManagerArg);
+  const action_report_delivered = action(() =>
+    other.delivered.send({
+      requestId: "delivered-alice",
+      id: otherNotices.get()[0]?.id,
+    })
+  );
+  const otherRoom = Writable.of<{ room?: Cell<HeldRoom> }>({});
+  const action_hold_other = action(() =>
+    otherRoom.key("room").set(
+      otherRequests.key("d-alice-other").key("entry").key("room")
+        .resolveAsCell(),
+    )
+  );
   const aliceRoom = Writable.of<{ room?: Cell<HeldRoom> }>({});
   const action_hold = action(() => {
     aliceRoom.key("room").set(
@@ -500,8 +525,8 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             JSON.stringify([setup.daveDid.get(), "d-dave"])
         ),
       },
-      // With no notice waiting for Alice, naming her profile again offers
-      // her nothing more.
+      // She has no notice waiting now, and is on the room's roster, so
+      // naming her profile again offers her nothing more.
       {
         action: manager.openDirect,
         event: {
@@ -515,6 +540,40 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         assertion: assert(() =>
           requests.get()["d-alice-thrice"]?.status === "done" &&
           notices.get().length === 2
+        ),
+      },
+      // A room whose notice for her a client has delivered has none waiting,
+      // so naming her profile offers her nothing, though she isn't on its
+      // roster.
+      {
+        action: other.openDirect,
+        event: { requestId: "d-alice-other", counterpart: setup.aliceDid },
+        trustedUi: startGesture,
+      },
+      { action: action_hold_other },
+      { action: action_report_delivered },
+      {
+        assertion: assert(() =>
+          otherRequests.get()["d-alice-other"]?.status === "done" &&
+          otherNotices.get().length === 0
+        ),
+      },
+      {
+        action: other.openDirect,
+        event: {
+          requestId: "d-alice-delivered",
+          counterpart: setup.aliceDid,
+          profile: aliceProfile,
+        },
+        trustedUi: startGesture,
+      },
+      {
+        assertion: assert(() =>
+          otherRequests.get()["d-alice-delivered"]?.status === "done" &&
+          participantsOf(otherRoom).length === 1 &&
+          !participantsOf(otherRoom).some((known) =>
+            equals(known, aliceProfile)
+          )
         ),
       },
       { label: "bob-done" },
