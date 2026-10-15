@@ -87,6 +87,9 @@ several controls should share the treatment.
 
 ## Theme-First Workflow
 
+This is host and story authoring, where a full theme is declared; a pattern
+inside a host tints, see the opening.
+
 When polishing a non-trivial UI, default to this workflow:
 
 1. Define a `theme` object first.
@@ -112,32 +115,12 @@ around it, or over the default Common Fabric theme when there is none, and
 applies CSS custom properties to a subtree. A nested `cf-theme` sets only the
 properties its partial changes; the rest inherit.
 
+A pattern tints the theme it runs in, naming only what it changes:
+
 ```tsx
 const theme = {
-  fontFamily: "'Georgia', 'Times New Roman', serif",
-  borderRadius: "1rem",
-  density: "comfortable" as const,
-  colorScheme: "light" as const,
-  animationSpeed: "normal" as const,
-  colors: {
-    primary: "#8b4513",
-    primaryForeground: "#fff8f0",
-    background: "#fff8f0",
-    surface: "#fff0e0",
-    surfaceHover: "#ffe4cc",
-    text: "#2c1810",
-    textMuted: "#8b7355",
-    border: "#e8d5c0",
-    borderMuted: "#f0e6d8",
-    accent: "#c84c09",
-    accentForeground: "#fff8f0",
-    success: "#4a7c59",
-    successForeground: "#ffffff",
-    error: "#a03020",
-    errorForeground: "#ffffff",
-    warning: "#b8860b",
-    warningForeground: "#ffffff",
-  },
+  accentColor: "#c84c09",
+  fontFace: "'Georgia', 'Times New Roman', serif",
 };
 
 <cf-theme theme={theme}>
@@ -149,6 +132,9 @@ const theme = {
   </cf-screen>
 </cf-theme>;
 ```
+
+A host or a story declares a full theme (every color, `colorScheme`,
+`density`) the same way, with a complete object in place of the tint.
 
 ## Full-Height Layout Rule
 
@@ -307,6 +293,9 @@ not use them as a substitute for defining an overall theme.
 
 ## Aesthetic Guidance
 
+This is host and story authoring, where a full theme is declared; a pattern
+inside a host tints, see the opening.
+
 ### Typography
 
 - Prefer distinctive local font stacks or deliberate pairings.
@@ -340,6 +329,9 @@ not use them as a substitute for defining an overall theme.
   discipline; minimalism still needs character.
 
 ## Working Examples
+
+This is host and story authoring, where a full theme is declared; a pattern
+inside a host tints, see the opening.
 
 Use these as concrete references for theme-forward UI composition:
 
