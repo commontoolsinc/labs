@@ -117,6 +117,33 @@ Deno.test("a theme given to a widget directly is drawn over the host's, and with
   }
 });
 
+Deno.test("withdrawing a direct theme leaves the styles the author set on the widget", async () => {
+  const host = themedHost();
+  try {
+    const button = await mountIn<
+      HTMLElement & {
+        theme: CFTheme | undefined;
+        updateComplete: Promise<unknown>;
+      }
+    >(host, "cf-button");
+    button.style.setProperty("--cf-theme-color-text", "rgb(7, 7, 7)");
+    button.style.setProperty("font-family", "Courier");
+
+    button.theme = mergeWithDefaultTheme({ colors: { primary: "red" } });
+    await button.updateComplete;
+    button.theme = undefined;
+    await button.updateComplete;
+
+    expect(button.style.getPropertyValue("--cf-theme-color-text")).toBe(
+      "rgb(7, 7, 7)",
+    );
+    expect(button.style.getPropertyValue("font-family")).toBe("Courier");
+    expect(button.style.getPropertyValue("--cf-theme-color-primary")).toBe("");
+  } finally {
+    host.remove();
+  }
+});
+
 Deno.test("the tools chip's overlay on the document body carries the host's tokens", async () => {
   const host = themedHost();
   try {

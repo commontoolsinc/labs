@@ -733,10 +733,17 @@ export function themePropertyNames(): readonly string[] {
 }
 
 /**
+ * What an element's own style held for each theme property before
+ * `applyThemeToElement` wrote it, so that taking the theme back off restores
+ * what the element's author set rather than clearing it.
+ */
+const authored = new WeakMap<HTMLElement, Map<string, string>>();
+
+/**
  * Write `theme` onto `element`'s own style, where it overrides the theme the
  * element would otherwise inherit, for the element and everything inside it.
- * Passing `undefined` takes the theme properties back off, so the element
- * inherits again.
+ * Passing `undefined` takes back what this function wrote, so the element
+ * inherits again; a style the element's author set is left, or put back.
  * @param element - Element to apply theme properties to
  * @param theme - Theme configuration, or `undefined` to inherit
  * @param inherited - The theme an enclosing `cf-theme` already puts in effect
@@ -751,14 +758,23 @@ export function applyThemeToElement(
 ) {
   const properties = theme ? themeProperties(theme) : {};
   const around = inherited ? themeProperties(inherited) : {};
+  const wrote = authored.get(element) ?? new Map<string, string>();
   for (const name of themePropertyNames()) {
     const value = properties[name];
     if (value !== undefined && value !== around[name]) {
+      if (!wrote.has(name)) {
+        wrote.set(name, element.style.getPropertyValue(name));
+      }
       element.style.setProperty(name, value);
-    } else {
-      element.style.removeProperty(name);
+    } else if (wrote.has(name)) {
+      const before = wrote.get(name)!;
+      if (before) element.style.setProperty(name, before);
+      else element.style.removeProperty(name);
+      wrote.delete(name);
     }
   }
+  if (wrote.size) authored.set(element, wrote);
+  else authored.delete(element);
 }
 
 /**
