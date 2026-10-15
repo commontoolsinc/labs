@@ -596,8 +596,9 @@ export function diffAndUpdate(
  *
  * `existing` is the array the transaction read at `link`. Its elements are
  * carried through by reference, so each one the walk finds still stored at
- * its index is left alone: nothing is written below the old length, and the
- * cost of an append does not grow with the array. A hole in `existing` stays
+ * its index is stepped past without being normalized or descended into, and
+ * nothing is written below the old length. Copying and stepping past them is
+ * the only work an append does per stored element. A hole in `existing` stays
  * a hole.
  *
  * @param existing - The array stored at `link`, as the transaction read it.

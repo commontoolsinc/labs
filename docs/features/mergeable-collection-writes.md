@@ -292,7 +292,10 @@ first, since the op carries only the delta.
   runs, so id anchoring, cross-space link elements, and CFC write-policy
   recording apply to the appended elements as to any write. The walk passes over
   each element carried through from the stored array without descending into
-  it, so what an append costs locally does not grow with the list.
+  it. Copying the stored elements into the combined array and stepping past
+  them is still linear in the list's length, but that is a constant per element;
+  normalizing, link recognition, and writes happen for the appended elements
+  alone.
 
 ## Semantics and limitations
 
