@@ -4787,7 +4787,9 @@ export class Runner {
    * A failed commit retires the graph it set up, so a rejection says the
    * piece is not running here. A piece that was already running instantiates
    * nothing, and this waits for nothing then: a graph its pattern watcher
-   * swaps in later commits its setup the way `start()`'s does.
+   * swaps in later commits its setup the way `start()`'s does. On a runtime
+   * that seals into a serving wave, the commit settles with the wave, so an
+   * action feeding that wave cannot wait for it here.
    *
    * @throws Error naming the failed piece-start commit, with storage's
    * verdict, or whatever else cut the commit short, as its `cause`.
