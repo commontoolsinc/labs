@@ -381,6 +381,46 @@ export const attachMemorySocketPipeline = (
   return true;
 };
 
+/**
+ * Waits for the first frame on an upgraded `socket`, then attaches the memory
+ * pipeline when that frame is a memory protocol message, and closes the socket
+ * with 1002 when it is not. A setup that fails, a socket failing before its
+ * first frame among them, is logged with its cause and closes the socket with
+ * 1011 if it is still open. A socket closed without an error before its first
+ * frame is not a failure, and is not logged. The returned promise never
+ * rejects.
+ */
+export const setUpMemorySocket = (socket: WebSocket): Promise<void> =>
+  createSpan("memory.socket.setup", async (setupSpan) => {
+    const negotiation = bufferTextMessagesUntilNegotiated(socket);
+    const firstMessage = await negotiation.firstMessage;
+    if (firstMessage === undefined) {
+      negotiation.dispose();
+      setupSpan.setAttribute("socket.setup", "closed-before-message");
+      return;
+    }
+
+    if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
+      setupSpan.setAttribute("socket.setup", "memory");
+      return;
+    }
+
+    negotiation.dispose();
+    setupSpan.setAttribute("socket.setup", "unsupported-protocol");
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.close(1002, "Memory websocket expects memory protocol");
+    }
+  }).catch((error) => {
+    console.error("memory websocket: setup failed", error);
+    if (socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.close(1011, "Memory websocket setup failure");
+      } catch {
+        // Ignore close races with the peer.
+      }
+    }
+  });
+
 export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   return createSpan("memory.subscribe", (span) => {
     try {
@@ -395,34 +435,7 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
       });
       span.setAttribute("websocket.upgrade", "success");
 
-      void createSpan("memory.socket.setup", async (setupSpan) => {
-        const negotiation = bufferTextMessagesUntilNegotiated(socket);
-        const firstMessage = await negotiation.firstMessage;
-        if (firstMessage === undefined) {
-          negotiation.dispose();
-          setupSpan.setAttribute("socket.setup", "closed-before-message");
-          return;
-        }
-
-        if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
-          setupSpan.setAttribute("socket.setup", "memory");
-          return;
-        }
-
-        negotiation.dispose();
-        setupSpan.setAttribute("socket.setup", "unsupported-protocol");
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.close(1002, "Memory websocket expects memory protocol");
-        }
-      }).catch(() => {
-        if (socket.readyState === WebSocket.OPEN) {
-          try {
-            socket.close(1011, "Memory websocket setup failure");
-          } catch {
-            // Ignore close races with the peer.
-          }
-        }
-      });
+      void setUpMemorySocket(socket);
 
       return response;
     } catch (error) {

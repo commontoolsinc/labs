@@ -1,7 +1,14 @@
 import type { HarnessTaskTag } from "./task-classification.ts";
 
-const OPENING_RESEARCH_GUIDANCE =
-  "For a fresh task eligible for opening research, attached patternRefs or explicit pattern:<space>/<slug>, cf:pattern:<id>, or skill:<id> markers in the current request skip that pass. A skill marker names a registered skill or an owner/repository/skill address. Prose such as 'use the named skill X' remains open unless X uses a marker. Use the selected implementation through its ordinary tools; call research for a specific unresolved question if needed.";
+/** What research is, and when a fresh task gets its opening pass. */
+const researchGuidance = (patternIndex: boolean): string =>
+  [
+    `Research is a private pass that reads ${
+      patternIndex ? "the pattern index, docs, and source" : "docs and source"
+    } and reports what to run; it cannot execute anything.`,
+    "A fresh task eligible for opening research gets one pass before its first turn, except that attached patternRefs or explicit pattern:<space>/<slug>, cf:pattern:<id>, or skill:<id> markers in the current request skip that pass. A skill marker names a registered skill or an owner/repository/skill address. Prose such as 'use the named skill X' remains open unless X uses a marker.",
+    "Use the selected implementation through its ordinary tools; call research for a specific unresolved question if needed.",
+  ].join(" ");
 
 const GOAL_GUIDANCE =
   "Orient to the user's goal: distinguish what is given, what is findable within the granted scope, and what the available capabilities cannot do. Work toward the closest achievable outcome and state any limitation before asking for details that cannot remove it.";
@@ -17,11 +24,9 @@ const findableGuidance = (patternIndex: boolean): string =>
         "Search the pattern index for an applicable space-search pattern and use it over held references when the tools and release rules permit.",
       ]
       : []),
-    "Private research inspects candidates and tells the parent what to run; it cannot execute them.",
     ...(patternIndex
       ? ["The parent can run an indexed pattern with run_pattern."]
       : []),
-    "Keep the existing piece-targeting bounds: resolve_piece first for a slug, zero registry reads for an unnamed target, and at most one lookup for a display name. Explicit requests to list or analyze the space are not missing-target lookups.",
   ].join(" ");
 
 const ACTION_PATH_GUIDANCE =
@@ -31,7 +36,7 @@ const EVIDENCE_GUIDANCE =
   "Found requires released evidence; absent is limited to the scope actually checked. An unavailable, refused, or pending read stays unknown. Inspect run_pattern outputConcerns and the declared error branch before treating an empty result as data. Do not repeat probes or delegation to rediscover the same blocker. Offer the useful part you can achieve without silently substituting a different source or claiming the original goal is complete.";
 
 const RELEASE_REFUSAL_GUIDANCE =
-  "A release refusal is not a request for a new permission. Follow the existing not-checked verification rule: describe only the successfully applied change, say the result could not be inspected, and point to the piece. Never ask the user to release aggregates or change a sink ceiling through a control that does not exist. Actual execution or write failures still need repair or an honest failure report.";
+  "A release refusal is not a request for a new permission. Describe only the successfully applied change, say the result could not be inspected, and point to the piece. Never ask the user to release aggregates or change a sink ceiling through a control that does not exist. Actual execution or write failures still need repair or an honest failure report.";
 
 /** How the parent hands work to a child and reads what comes back. */
 export const DELEGATION_GUIDANCE = [
@@ -55,7 +60,7 @@ export const orientationGuidance = (
   const tagged = (...wanted: HarnessTaskTag[]) =>
     tags === undefined || wanted.some((tag) => tags.has(tag));
   return [
-    ...(tagged("author") ? [OPENING_RESEARCH_GUIDANCE] : []),
+    ...(tagged("author") ? [researchGuidance(patternIndex)] : []),
     GOAL_GUIDANCE,
     ...(tagged("pieces", "find") ? [GIVEN_GUIDANCE] : []),
     ...(tagged("find", "author") ? [findableGuidance(patternIndex)] : []),
@@ -71,3 +76,11 @@ export const delegationGuided = (
 ): boolean =>
   tags === undefined || tags.has("act") || tags.has("pieces") ||
   tags.has("author");
+
+/**
+ * Whether a task with these tags is framed as code to read and repair: work
+ * on held pieces or patterns, and writing one.
+ */
+export const codeWorkGuided = (
+  tags: ReadonlySet<HarnessTaskTag> | undefined,
+): boolean => tags === undefined || tags.has("pieces") || tags.has("author");
