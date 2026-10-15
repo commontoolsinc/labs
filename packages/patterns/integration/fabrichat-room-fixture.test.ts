@@ -99,7 +99,7 @@ describe("fabrichat-room-fixture", () => {
       // holds the last hundred of its main conversation.
       const roots = threadRoots(300, 150);
       expect(roots).toHaveLength(100);
-      expect(Math.min(...roots)).toBe(200);
+      expect(roots.at(-1)).toBe(200);
     });
   });
 });
