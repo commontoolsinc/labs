@@ -71,8 +71,8 @@ border radius, and motion, and every component inside inherits them. A pattern
 inherits its host's theme; it may tint it with a nested `cf-theme` carrying only
 what it changes; the nested `cf-theme` sets those tokens and leaves the rest to
 the enclosing theme. A pattern never declares a full theme, and prefers theme
-tokens to literal colors and fonts. Refine individual components with their documented
-`--cf-*` custom properties.
+tokens to literal colors and fonts. Refine individual components with their
+documented `--cf-*` custom properties.
 
 Useful references:
 

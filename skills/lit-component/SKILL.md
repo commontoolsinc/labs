@@ -155,9 +155,10 @@ connection lifecycle.
 Components use `var(--cf-theme-*)` CSS variables with fallbacks (`--cf-theme-*`
 first, then `--cf-*` base token, then a literal), and inherit their values from
 the `cf-theme` or host page above them. Only `cf-theme` writes tokens for the
-ambient theme; any other component writes none on its own host for it. Consume `cfThemeContext` only when JavaScript needs
-the theme object for runtime logic or derived values, and carry the tokens onto
-an overlay mounted outside the subtree with `copyThemeProperties`.
+ambient theme; any other component writes none on its own host for it. Consume
+`cfThemeContext` only when JavaScript needs the theme object for runtime logic
+or derived values, and carry the tokens onto an overlay mounted outside the
+subtree with `copyThemeProperties`.
 
 **Theme consumption code and complete reference:** See
 `references/theme-system.md` for all available CSS variables and helper
