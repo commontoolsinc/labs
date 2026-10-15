@@ -6444,7 +6444,12 @@ export class Runner {
       const rootSyncStart = performance.now();
       return rootCell.sync().then(() => {
         if (!this.#isStartAttemptCurrent(attempt)) return false;
-        logger.time(rootSyncStart, "start", "rootCellSync");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          rootSyncStart,
+          "start",
+          "rootCellSync",
+        );
         if (rootCell.getRaw() === undefined) {
           return Promise.reject(new Error("No data at cell"));
         } else {
@@ -6600,7 +6605,12 @@ export class Runner {
           if (!this.#isStartAttemptCurrent(attempt)) return false;
           // Resume-boot decomposition: source-doc fetch + module load/eval for
           // a pattern this runtime has never instantiated.
-          logger.time(loadStart, "start", "loadPatternByIdentity");
+          logger.timeDetailed(
+            () => `${identityRef.identity}#${identityRef.symbol}`,
+            loadStart,
+            "start",
+            "loadPatternByIdentity",
+          );
           if (loaded) {
             return this.#doStart(rootCell, seenCells, attempt);
           } else {
@@ -6704,7 +6714,12 @@ export class Runner {
       } finally {
         // Synchronous instantiation cost of the resumed piece (pattern
         // setup, node wiring), distinct from the syncs around it.
-        logger.time(startCoreStart, "start", "startCoreResume");
+        logger.timeDetailed(
+          () => rootCell.getAsNormalizedFullLink().id,
+          startCoreStart,
+          "start",
+          "startCoreResume",
+        );
       }
 
       return true;
@@ -9255,7 +9270,12 @@ export class Runner {
         // the runner timing stats (they record even when the logger is
         // disabled) so load summaries can attribute slow storage-resume
         // boots.
-        logger.time(syncStart, "start", "syncCellsForRunningPattern");
+        logger.timeDetailed(
+          () => resultCell.getAsNormalizedFullLink().id,
+          syncStart,
+          "start",
+          "syncCellsForRunningPattern",
+        );
       }
     };
     const syncer = this.#dependencySyncer;
@@ -9399,7 +9419,12 @@ export class Runner {
     await this.#kickResumeWave(cells, (c) => {
       const cellSyncStart = performance.now();
       const synced = this.#syncFamilyCell(c, identity).finally(() =>
-        logger.time(cellSyncStart, "start", "resumeCellSync")
+        logger.timeDetailed(
+          () => c.getAsNormalizedFullLink().id,
+          cellSyncStart,
+          "start",
+          "resumeCellSync",
+        )
       );
       // A start that writes nothing carrying the policy needs no manifest,
       // and one that does reads it as absent and fails its commit loudly, so
