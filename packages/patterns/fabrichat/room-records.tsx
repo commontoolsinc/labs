@@ -999,10 +999,11 @@ export interface ManagerJoinState {
  */
 export const tellManagerJoined = handler<void, ManagerJoinState>(
   (_event, { canJoin, container, manager, self }) => {
+    // The room decides first, so a room the viewer can't join reads nothing
+    // of the manager.
+    if (canJoin !== true || self === undefined) return;
     const joinRoom = manager?.joinRoom;
-    if (canJoin !== true || joinRoom === undefined || self === undefined) {
-      return;
-    }
+    if (joinRoom === undefined) return;
     joinRoom.send({ room: self, container });
   },
 );
