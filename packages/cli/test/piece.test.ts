@@ -1426,7 +1426,7 @@ describe("cli piece parsing", () => {
     // receipt reports the way a client-side update's does.
     const program = { main: "/main.tsx", files: [] };
     const cell = { name: "the piece's cell" };
-    const seen: { requests: unknown[]; started: unknown[] } = {
+    const seen: { requests: unknown[]; started: unknown[][] } = {
       requests: [],
       started: [],
     };
@@ -1435,8 +1435,8 @@ describe("cli piece parsing", () => {
       runtime: { experimental: { serverExecution: true } },
       getSpace: () => SPACE_DID,
       getPieceCell: () => Promise.resolve(cell),
-      startPiece: (started: unknown) => {
-        seen.started.push(started);
+      startPiece: (...args: unknown[]) => {
+        seen.started.push(args);
         return refreshFails
           ? Promise.reject(new Error("the piece never settled"))
           : Promise.resolve();
@@ -1482,7 +1482,11 @@ describe("cli piece parsing", () => {
       program,
       repository: "repo",
     });
-    expect(seen.started).toEqual([cell]);
+    // The start answers for its own setup commit, which a plain start would
+    // report only to the log.
+    expect(seen.started).toEqual([
+      [cell, undefined, { awaitSetupCommit: true }],
+    ]);
 
     refreshFails = true;
     const unrefreshed = await setPiecePattern(

@@ -248,6 +248,20 @@ argument is still checked against the candidate, which no flag waives, and a
 piece with recorded source history whose current source cannot be restored is
 still refused.
 
+A caller that decided to follow on the strength of what it inspected pins the
+follow to the source state it read, so a piece whose source changed in between
+is left as it is. The pins cover the pattern and the source log, not the piece's
+data: an edit to its stored data alone does not refuse the follow.
+`--expect <identity>#<symbol>` names the pattern the piece must still run, and
+`--expect-revision <revision>` the revision its source log must still end at, or
+`none` for a log that must still be empty; both are what
+`cf piece inspect --pattern-identity --json` reports, as `patternIdentity` and
+`symbol`, and as a `revisionId` that is absent for an empty log. Every source
+transition appends a revision, so the revision pin refuses one that left the
+pattern as it was, such as a detach. A piece off either pin is refused before
+anything is written, and the command ends with exit status 3, so a script can
+tell that refusal from a failure.
+
 For a detached profile with the legacy inbox descriptor, the manual migration is
 `cf piece follow --cell <profile> system:system/profile-home.tsx
 --dangerously-allow-incompatible-schema`
@@ -1070,12 +1084,17 @@ cf piece setsrc --cell fid1:piece --root packages/patterns \
 cf piece render --cell fid1:piece >/dev/null
 ```
 
-The source commit and refresh of the running piece are separate operations. If
-the commit lands but refresh fails, `setsrc` prints the commit receipt on
-stdout, prints the failure and recovery checks on stderr, and exits nonzero.
-That status means “source changed, running deploy unverified,” not rollback: use
-`piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
-A receipt alone is never proof that the updated piece starts.
+The source commit and refresh of the running piece are separate operations. The
+refresh starts the piece in the command's own process, which commits the started
+graph's setup writes on a transaction of its own, and reads its result. Storage
+refusing that commit retires the graph, leaving the piece not running in the
+command's process, so it fails the refresh, and the failure names the refused
+commit and storage's reason. If the commit lands but refresh fails, `setsrc`
+prints the commit receipt on stdout, prints the failure and recovery checks on
+stderr, and exits nonzero. That status means “source changed, running deploy
+unverified,” not rollback: use `piece render`, `piece inspect`, and
+`piece getsrc` to determine the live state. A receipt alone is never proof that
+the updated piece starts.
 
 In either case the receipt names the committed pattern ref, the source revision,
 and the seq at which the space's commit log accepted the update. That seq is
