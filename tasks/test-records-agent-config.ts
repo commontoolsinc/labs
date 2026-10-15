@@ -317,3 +317,42 @@ export async function unexportFromAgentConfigs(
   }
   return removals;
 }
+
+/**
+ * Points every installed harness's configuration that carries a
+ * variable with one value at another, returning what each one's update
+ * did. A configuration carrying any other value, or none, is left as it
+ * is and not reported.
+ */
+export async function reexportFromAgentConfigs(
+  name: string,
+  from: string,
+  to: string,
+  env: Environment = Deno.env.get,
+  harnesses: readonly AgentHarness[] = AGENT_HARNESSES,
+  write: ConfigWriter = writeConfig,
+): Promise<AgentConfigUpdate[]> {
+  const updates: AgentConfigUpdate[] = [];
+  for (
+    const { harness, config: path } of await installedHarnesses(
+      env,
+      harnesses,
+    )
+  ) {
+    const read = await readConfig(path);
+    if (read.kind !== "config") continue;
+    const block = envBlock(read.config);
+    if (block === undefined || block[name] !== from) continue;
+    const wrote = await write(
+      path,
+      { ...read.config, env: { ...block, [name]: to } },
+      read.text,
+    );
+    updates.push({
+      harness: harness.name,
+      path,
+      outcome: wrote ? "added" : "changed",
+    });
+  }
+  return updates;
+}
