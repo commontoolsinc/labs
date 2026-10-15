@@ -4754,15 +4754,15 @@ export class SpaceReplica
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
 
   /**
-   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
-   * overlay entries exist only in this process — the client never pushes them —
-   * so a _pushed_ commit whose read basis names one can _never_ have that
-   * dependency resolve server-side. `#commitOperations()` refuses such an
-   * export loudly; membership ends when the speculative commit settles
-   * (retirement/withdrawal drops its pending layers first, so no stack names a
-   * seq after it leaves this set).
+   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6),
+   * each with the promise its settlement resolves: overlay entries exist only
+   * in this process — the client never pushes them — so a _pushed_ commit whose
+   * read basis names one can _never_ have that dependency resolve server-side.
+   * `#commitOperations()` refuses such an export loudly; membership ends when
+   * the speculative commit settles (retirement/withdrawal drops its pending
+   * layers first, so no stack names a seq after it leaves this map).
    */
-  readonly #speculativeLocalSeqs = new Set<number>();
+  readonly #speculativeLocalSeqs = new Map<number, Promise<void>>();
 
   /**
    * The overlay destination's retirement _wake_ for origin accepts
@@ -6010,6 +6010,23 @@ export class SpaceReplica
     };
   }
 
+  /** @inheritDoc */
+  whenSpeculationSettled(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
+    const standing = new Set<Promise<void>>();
+    for (const entry of record?.pending ?? []) {
+      const settled = this.#speculativeLocalSeqs.get(entry.localSeq);
+      if (settled !== undefined) standing.add(settled);
+    }
+    return standing.size === 0
+      ? undefined
+      : Promise.all(standing).then(() => {});
+  }
+
   /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
    * speculation.md §4): the store seq a local commit's accept committed
    * at, or undefined while it is unsettled — or if it was rejected, or
@@ -6809,6 +6826,15 @@ export class SpaceReplica
       )
       : undefined;
 
+    // A speculative layer is registered before it is applied, so that a
+    // durable read made from a notification below already reads past it.
+    const speculationSettled = options?.speculative === true
+      ? Promise.withResolvers<void>()
+      : undefined;
+    if (speculationSettled !== undefined) {
+      this.#speculativeLocalSeqs.set(localSeq, speculationSettled.promise);
+    }
+
     for (const operation of operations) {
       this.#applyPending(operation, localSeq, commit.reads, identity);
     }
@@ -6836,7 +6862,7 @@ export class SpaceReplica
       verdict,
       identity,
     );
-    if (options?.speculative !== true) {
+    if (speculationSettled === undefined) {
       // Durable sealed commits (the wave's) join the synced() barrier
       // and the ordered-push outcome map as any commit does. A CLIENT
       // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
@@ -6856,15 +6882,15 @@ export class SpaceReplica
         this.#commitPromises.delete(settled);
       });
     } else {
-      // Track the speculative seq for the export refusal (speculation.md
-      // §6, RULED 2026-08-13): while any pending stack carries this
-      // layer, a pushed commit's read basis naming it is refused in
-      // commitOperations. Settlement (retirement or withdrawal) drops
-      // the pending layers before `settled` resolves, so removal here
-      // never races a stack that still names the seq.
-      this.#speculativeLocalSeqs.add(localSeq);
-      settled.catch(() => {}).finally(() => {
+      // The speculative seq stays tracked for the export refusal
+      // (speculation.md §6, RULED 2026-08-13): while any pending stack
+      // carries this layer, a pushed commit's read basis naming it is
+      // refused in commitOperations. Settlement (retirement or
+      // withdrawal) drops the pending layers before `settled` resolves,
+      // so removal here never races a stack that still names the seq.
+      settled.then(() => {}, () => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
+        speculationSettled.resolve();
       });
     }
     return { localSeq, commit, settled };
@@ -10994,9 +11020,10 @@ const toRejectedError = (
     // Scoped descriptors cross current protocol boundaries structurally.
     // Message-only errors retain default-scope recovery for every named read.
     const toConflicts = (details: unknown): IConflictError["conflict"][] => {
-      const { of, scope } = (details ?? {}) as {
+      const { of, scope, seq } = (details ?? {}) as {
         of?: unknown;
         scope?: unknown;
+        seq?: unknown;
       };
       return typeof of === "string"
         ? [{
@@ -11004,6 +11031,7 @@ const toRejectedError = (
           the: DOCUMENT_MIME,
           of: of as Entity,
           ...(isCellScope(scope) ? { scope } : {}),
+          ...(typeof seq === "number" ? { seq } : {}),
         }]
         : [];
     };
