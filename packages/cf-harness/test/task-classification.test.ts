@@ -124,6 +124,32 @@ describe("task-classification", () => {
       ).toBeUndefined();
     });
 
+    it("does not return author for making a new note or a new loom", () => {
+      for (
+        const task of [
+          "make me a new note called Test",
+          "make a new loom for the trip",
+          "create new note",
+        ]
+      ) {
+        expect(tagsOf(classifyTaskByRule(task, {})) ?? []).not.toContain(
+          "author",
+        );
+      }
+      expect(tagsOf(classifyTaskByRule("make me a new tracker", {})))
+        .toEqual(["author"]);
+    });
+
+    it("does not read this weekend as pointing at a held piece", () => {
+      expect(
+        tagsOf(
+          classifyTaskByRule("make a loom with ideas for a walk this weekend", {
+            inputCells: [cell("Pomodoro Timer")],
+          }),
+        ) ?? [],
+      ).not.toContain("pieces");
+    });
+
     it("returns undefined when no rule applies", () => {
       expect(classifyTaskByRule("the quarterly numbers for Q3 sales", {}))
         .toBeUndefined();
@@ -214,6 +240,70 @@ describe("task-classification", () => {
 
       expect(classification.path).toBe("fallback");
       expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
+      expect(classification.fallbackReason).toBe("no-model");
+    });
+
+    it("records why it fell back when the model answers no tag or fails", async () => {
+      const noTag = await classifyTask(
+        "the quarterly numbers for Q3 sales",
+        {},
+        {
+          askModel: () => Promise.resolve("I am not sure."),
+        },
+      );
+      const failed = await classifyTask(
+        "the quarterly numbers for Q3 sales",
+        {},
+        {
+          askModel: () => Promise.reject(new Error("provider down")),
+        },
+      );
+
+      expect(noTag.fallbackReason).toBe("no-tag");
+      expect(failed.fallbackReason).toBe("model-error");
+    });
+
+    it("falls back with the reason timeout when the model does not answer within its bound, and cancels the call", async () => {
+      let cancelled = false;
+      const classification = await classifyTask(
+        "the quarterly numbers for Q3 sales",
+        {},
+        {
+          modelBoundMs: 0,
+          askModel: (_prompt, signal) =>
+            new Promise((_resolve, reject) => {
+              signal.addEventListener("abort", () => {
+                cancelled = true;
+                reject(signal.reason);
+              });
+            }),
+        },
+      );
+
+      expect(classification.path).toBe("fallback");
+      expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
+      expect(classification.fallbackReason).toBe("timeout");
+      expect(cancelled).toBe(true);
+    });
+
+    it("falls back at its bound even when the model call ignores cancellation", async () => {
+      const classification = await classifyTask(
+        "the quarterly numbers for Q3 sales",
+        {},
+        { modelBoundMs: 0, askModel: () => new Promise<string>(() => {}) },
+      );
+
+      expect(classification.fallbackReason).toBe("timeout");
+    });
+
+    it("records no fallback reason when a rule or the model tags the task", async () => {
+      const byRule = await classifyTask("what's on Thursday?", {});
+      const byModel = await classifyTask("the quarterly numbers", {}, {
+        askModel: () => Promise.resolve("find"),
+      });
+
+      expect(byRule.fallbackReason).toBeUndefined();
+      expect(byModel.fallbackReason).toBeUndefined();
     });
   });
 

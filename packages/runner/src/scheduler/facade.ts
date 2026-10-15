@@ -3392,8 +3392,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
-      dropEvent: (queuedEvent, reason) => {
-        this.#dropEvent(queuedEvent, reason);
+      dropEvent: (queuedEvent, reason, options) => {
+        this.#dropEvent(queuedEvent, reason, options);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.recordEvent(originTx, queuedEvent);
@@ -3787,12 +3787,21 @@ export class Scheduler {
       `event ${event.id} parks on ${keys.length} loading document(s)`,
       keys,
     ]);
-    const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
-      Promise.resolve();
-    settled.then(
-      () => this.#releaseHeadEventLoadPark(event.id),
-      (error) => this.#failHeadEventLoadPark(event, error),
-    );
+    // Each key is waited for on its own, so that every failed load is seen,
+    // in the order the failures arrive, once all of them have settled.
+    const manager = this.runtime.storageManager;
+    const failures: unknown[] = [];
+    const settled = manager.loadsSettled === undefined
+      ? Promise.resolve()
+      : Promise.all(keys.map((key) =>
+        manager.loadsSettled!([key]).catch((error: unknown) => {
+          failures.push(error);
+        })
+      ));
+    settled.then(() => {
+      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+      else this.#failHeadEventLoadPark(event, failures);
+    });
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {
@@ -3848,20 +3857,47 @@ export class Scheduler {
    * children rather than later arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
-   * the drop keeps today's shape — the same split events.ts makes for a
-   * piece-load failure.
+   * a failed load drops the event — the same split events.ts makes for a
+   * piece-load failure — with one exception: when every failed load
+   * failed with an `authorization`-class failure, the park releases as
+   * completed loads do. The event's principal cannot read those
+   * documents, waiting does not change that, and the closure reads them
+   * as absent whether or not a load of them happened to be in flight
+   * when the event reached the head. So the handler runs, once, against
+   * what this replica holds, exactly as it would have with no load in
+   * flight; the settled generations the release records keep the next
+   * preflight from parking on those loads again. A failure of any other
+   * class among them still drops the event, since that document may yet
+   * hold what the closure reads.
+   *
+   * `errors` holds every failed load's error, in the order they failed;
+   * the first is the one reported.
    */
-  #failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
+  #failHeadEventLoadPark(
+    event: QueuedEvent,
+    errors: readonly unknown[],
+  ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const keys = this.#headEventLoadPark.keys.join(", ");
-    this.#headEventLoadPark = null;
-    this.#headEventLoadParkHistory = null;
-    const detail = error instanceof Error ? error.message : String(error);
+    const error = errors[0];
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
       failureClass: "unknown" as const,
       recoveryEpoch: "untyped",
       permanentEvidence: false,
     };
+    if (
+      event.served === undefined &&
+      errors.every((each) =>
+        each instanceof ReplicaLoadFailureError &&
+        each.failure.failureClass === "authorization"
+      )
+    ) {
+      this.#releaseHeadEventLoadPark(event.id);
+      return;
+    }
+    const keys = this.#headEventLoadPark.keys.join(", ");
+    this.#headEventLoadPark = null;
+    this.#headEventLoadParkHistory = null;
+    const detail = error instanceof Error ? error.message : String(error);
     if (event.served === undefined) {
       this.#dropEvent(
         event,

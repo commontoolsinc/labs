@@ -127,7 +127,7 @@ import {
 } from "./cfc/ui-contract.ts";
 import { createRef } from "./create-ref.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import { diffAndAppend, diffAndUpdate } from "./data-updating.ts";
 import {
   findAndInlineDataUriLinks,
   portableSnapshotId,
@@ -2975,12 +2975,25 @@ export class CellImpl<T extends FabricValue>
     // The append's destination snapshot supplies storage positions without
     // exposing content or length to the caller. It joins neither observed
     // labels nor conflict preconditions; explicit handler reads retain both.
-    let currentValue = this.#tx.readValueOrThrow(resolvedLink, {
+    const currentValue = this.#tx.readValueOrThrow(resolvedLink, {
       meta: { ...mergeableOpRead, ...writeDestinationRead },
     });
     const cause = this.#frame?.cause;
 
-    if (!Array.isArray(currentValue)) {
+    if (Array.isArray(currentValue)) {
+      // The anchor id source makes sure each pushed object gets its own doc,
+      // its id drawn from the frame this cell was made in
+      // (`frameAnchorIds()`).
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        currentValue,
+        values,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
       if (currentValue !== undefined) {
         throw new Error(
           "Cell.push() or Cell.pushAll() requires transaction and array " +
@@ -2999,9 +3012,7 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
-      // and assigning that back to `currentValue` would discard the narrowing
-      // this block exists to establish.
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`.
       const created: FabricValue[] =
         isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
@@ -3011,35 +3022,17 @@ export class CellImpl<T extends FabricValue>
             resolvedSchema.default,
           )
           : [];
-      // From here on `currentValue` is the array just created, not what the
-      // read returned.
-      currentValue = created;
+      // As above, each pushed object gets its own doc.
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...created, ...values],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
     }
-
-    // Read-only: a value that came from storage is a `FabricArray`, which is a
-    // `ReadonlyArray`, and though a freshly created one is not, this method
-    // only ever reads what it finds -- the replacement is `combined`, below.
-    const array: readonly unknown[] = currentValue;
-
-    // Append the new values to the array, preserving sparse holes in the original.
-    const combined = new Array(array.length + values.length);
-    array.forEach((v, i) => {
-      combined[i] = v;
-    });
-    for (let i = 0; i < values.length; i++) {
-      combined[array.length + i] = values[i];
-    }
-    // The anchor id source makes sure each pushed object gets its own doc,
-    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      combined,
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
     // operation instead of a position diffed against a possibly-stale base.
@@ -3083,6 +3076,7 @@ export class CellImpl<T extends FabricValue>
       meta: mergeableOpRead,
     });
     const cause = this.#frame?.cause;
+    const stored = Array.isArray(currentValue);
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -3161,15 +3155,27 @@ export class CellImpl<T extends FabricValue>
     }
     // The anchor id source makes sure each added object gets its own doc,
     // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      [...existing, ...toAdd],
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
+    if (stored) {
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        existing,
+        toAdd,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...existing, ...toAdd],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
+    }
     this.#tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
       count: toAdd.length,
