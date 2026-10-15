@@ -22,6 +22,7 @@ import {
   type NormalizedFullLink,
   orderProfileCandidates,
   profileCellIsValid,
+  readDurable,
   type Runtime,
   sendEvent,
   transactionFailureMessage,
@@ -218,6 +219,7 @@ export async function requestPrivateInboxOf(
   const receipt = await untilAborted(handled, signal);
   if (receipt === undefined) return { status: "abandoned" };
   const status = await firstPicked(
+    runtime,
     runtime.getCellFromLink(receipt, answerSchema),
     (answer) =>
       answer?.status === undefined || answer.status === "pending"
@@ -234,8 +236,12 @@ export async function requestPrivateInboxOf(
       return { status };
     case "ensured": {
       const inbox = await firstPicked(
+        runtime,
         profile.key("inbox").asSchema(pointerSchema),
-        (pointer) => isCell(pointer?.piece) ? pointer.piece : undefined,
+        // The read's transaction closes once the read is done, so the cell
+        // handed back is detached from it.
+        (pointer) =>
+          isCell(pointer?.piece) ? pointer.piece.withTx() : undefined,
         signal,
       );
       return inbox === undefined
@@ -265,11 +271,18 @@ function untilAborted<T>(
 }
 
 /**
- * Helper for {@link requestPrivateInboxOf}, which subscribes to `cell` and
- * resolves with what `pick` makes of the first of its values that `pick`
- * makes anything of, or with `undefined` once `signal` aborts.
+ * Helper for {@link requestPrivateInboxOf}, which resolves with what `pick`
+ * makes of the first of `cell`'s durable values that `pick` makes anything of,
+ * or with `undefined` once `signal` aborts. A durable value is one read past
+ * this runtime's speculation overlay (`readDurable()`), so under server
+ * execution it is what the server wrote, never this runtime's own preview of
+ * it, which can mix values from different moments. It reads again on each
+ * change a subscription to `cell` delivers, and once the speculation layers
+ * over what it read have settled, since a change beneath a layer delivers
+ * nothing.
  */
 function firstPicked<T, R>(
+  runtime: Runtime,
   cell: Cell<T>,
   pick: (value: Readonly<T>) => R | undefined,
   signal?: AbortSignal,
@@ -286,15 +299,21 @@ function firstPicked<T, R>(
     resolve(picked);
   };
   const abandon = () => settle(undefined);
+  const check = () => {
+    if (settled) return;
+    const { value, speculationSettled } = readDurable(
+      runtime,
+      (tx) => pick(cell.withTx(tx).get()),
+    );
+    if (value !== undefined) settle(value);
+    else speculationSettled?.then(check);
+  };
   if (signal?.aborted) {
     abandon();
     return promise;
   }
   signal?.addEventListener("abort", abandon);
-  subscription.cancel = cell.sink((value) => {
-    const picked = pick(value);
-    if (picked !== undefined) settle(picked);
-  });
+  subscription.cancel = cell.sink(check);
   if (settled) subscription.cancel();
   return promise;
 }
