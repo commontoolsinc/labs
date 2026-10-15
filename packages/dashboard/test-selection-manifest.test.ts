@@ -426,7 +426,7 @@ Deno.test("the selection tile says what share of the corpus's test time would ru
   }).collect(CTX);
   assertEquals(view.status, "good");
   assertEquals(view.value, "25%");
-  assertEquals(view.sub, "30m of 2h test time");
+  assertEquals(view.sub, "30m 00s of 2h 00m test time");
   assertEquals(view.href, "/test-selection");
   assertEquals(view.hint, "lanes ↗");
 });
@@ -488,7 +488,7 @@ Deno.test("the selection tile goes amber once the manifest has gone stale", asyn
   assertEquals(view.aside, '<span class="hfacet" title="28h old">28h old</span>');
   // Staleness reports itself in the badge, so it leaves the sub line to
   // the test time rather than taking it.
-  assertEquals(view.sub, "0m of 0m test time");
+  assertEquals(view.sub, "0s of 0s test time");
 });
 
 Deno.test("the lane budget comes from the manifest that named it", () => {

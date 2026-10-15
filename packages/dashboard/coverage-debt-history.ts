@@ -45,12 +45,12 @@ import {
   type StoredReportGroup,
 } from "@commonfabric/test-support/records";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { REPO } from "./config.ts";
 import { dashboardCacheFile } from "./history-files.ts";
 import { github } from "./lib.ts";
 import {
   TEST_RECORDS_BUCKET,
   TEST_RECORDS_CI_PREFIX,
+  TEST_RECORDS_REPO,
 } from "./test-records-history.ts";
 
 /** The group holding the repository-wide uncovered-line count. */
@@ -218,7 +218,7 @@ export function liveCoverageDebtSource(
   return {
     outcome: async (runId, attempt) => {
       const run = await githubImpl(
-        `repos/${REPO}/actions/runs/${runId}` +
+        `repos/${TEST_RECORDS_REPO}/actions/runs/${runId}` +
           (attempt === undefined ? "" : `/attempts/${attempt}`),
       );
       if (run.status !== "completed") {

@@ -47,6 +47,7 @@ import {
 } from "../test-selection-page.ts";
 import { REPO } from "../config.ts";
 import { publisherRunning } from "../test-selection-activity.ts";
+import { humanDuration } from "../tile-render-values.ts";
 import type { Status, Tile, TileView } from "../types.ts";
 
 /** Hours before a manifest is stale enough to say so. */
@@ -123,8 +124,8 @@ function selectionView(
       ? `${groupDigits(unplaceable)} test${
         unplaceable === 1 ? "" : "s"
       } too long for any lane`
-      : `${compactSpan(selected * 1_000)} of ${
-        compactSpan(corpus * 1_000)
+      : `${humanDuration(selected * 1_000)} of ${
+        humanDuration(corpus * 1_000)
       } test time`,
     aside: stale
       ? `<span class="hfacet" title="${badge}">${badge}</span>`
