@@ -1505,8 +1505,9 @@ function resolveSpaceTarget(
     // or a run from a later compilation of its pattern) reads the first-ever
     // captured time instead of re-reading the clock and jumping forward. A
     // capture written under the earlier key, the node's full cause, is carried
-    // over rather than taken from the clock again. sample() reads without
-    // subscribing the resolving action, so the write does not re-trigger it.
+    // over rather than taken from the clock again, once its document has
+    // loaded. sample() reads without subscribing the resolving action, so the
+    // write does not re-trigger it.
     // The per-instance closure cache (ctx.nowCell) just avoids re-fetching the
     // cell on every sync re-run within one instantiation.
     if (!ctx.nowCell) {
@@ -1515,7 +1516,17 @@ function resolveSpaceTarget(
       enrollRuntimeOwnedStore(ctx.tx, ctx.parentCell, cell);
       const existing = cell.withTx(ctx.tx).sample();
       if (existing == null) {
-        const carried = legacy?.withTx(ctx.tx).sample();
+        // The capture may sit in the earlier key's document, which this
+        // replica need not have loaded: a cold replica reads it as absent
+        // while the store holds the capture. Hold the wish until the document
+        // has loaded, or its absence is confirmed, as the shared clock cell is
+        // held for in handleIntervalNow(); the read it stages re-runs the wish
+        // when the answer arrives. A confirmed absence is not read again,
+        // since a read of it would start a load of its own.
+        const carried = legacy !== undefined &&
+            ctx.readiness.requireDocument(legacy, ctx.tx)
+          ? legacy.withTx(ctx.tx).sample()
+          : undefined;
         cell.withTx(ctx.tx).set(
           typeof carried === "number"
             ? carried

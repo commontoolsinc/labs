@@ -96,6 +96,11 @@ describe("wish-now-one-shot-identity", () => {
     await runtime.runner.runSynced(result, second, {});
     await runtime.idle();
     await result.pull();
-    expect(result.key("createdAt").get()).toBe(captured);
+    const read = result.key("createdAt").get();
+    // The read above starts a load of the wish's state document under the
+    // second compilation's schema; settle it before the runtime goes away.
+    await runtime.idle();
+    await storage.synced();
+    expect(read).toBe(captured);
   });
 });

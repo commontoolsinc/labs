@@ -91,6 +91,7 @@ describe("wish-now-one-shot-carry-over", () => {
     await clock.tick(1100);
     await runtime.runner.runSynced(result, compiled, {});
     await runtime.idle();
+    await storage.synced();
     await result.pull();
     expect(result.key("createdAt").get()).toBe(earlier);
   });
