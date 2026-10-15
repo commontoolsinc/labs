@@ -29,6 +29,7 @@ import {
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
+  forgetExpired,
   isDeleted,
   type JoinRoomRequest,
   type MessageCell,
@@ -257,6 +258,7 @@ export const FabriChatMessageRow = pattern<
     self,
   } = input;
   const joined = tellManagerJoined({ canJoin, container, joinRoom, self });
+  const expire = forgetExpired({ requests, usedTimes, activity, counters });
   const records = {
     kind,
     policy,
@@ -266,7 +268,7 @@ export const FabriChatMessageRow = pattern<
     requests,
     usedTimes,
     activity,
-    counters,
+    expire,
     outcomes,
     refusal,
     joined,
@@ -509,7 +511,7 @@ export const FabriChatMessageRow = pattern<
                         requests,
                         usedTimes,
                         activity,
-                        counters,
+                        expire,
                         outcomes,
                         refusal,
                         joined,
@@ -540,7 +542,7 @@ export const FabriChatMessageRow = pattern<
                         requests,
                         usedTimes,
                         activity,
-                        counters,
+                        expire,
                         outcomes,
                         refusal,
                         joined,
@@ -599,7 +601,7 @@ export const FabriChatMessageRow = pattern<
                     requests,
                     usedTimes,
                     activity,
-                    counters,
+                    expire,
                     outcomes,
                     refusal,
                     joined,

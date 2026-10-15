@@ -6,6 +6,7 @@ import {
   isSingleEmoji,
   mainView,
   threadView,
+  tickOffsetOf,
   type TimeBounds,
   type ViewItem,
   viewPlaces,
@@ -102,6 +103,42 @@ describe("logic", () => {
       ).toBeUndefined();
     });
 
+    it("starts a time taken from the clock `offset` into its tick", () => {
+      expect(
+        chooseRecordedTime(
+          { clock: 1000n, offset: 30n, isUsed: NOTHING_USED },
+          BOUNDS,
+        ),
+      ).toBe(1030n);
+    });
+
+    it("keeps a time taken from the clock in the first half of its tick", () => {
+      expect(
+        chooseRecordedTime(
+          { clock: 1000n, offset: 130n, isUsed: NOTHING_USED },
+          BOUNDS,
+        ),
+      ).toBe(1030n);
+    });
+
+    it("starts a proposal at the clock `offset` into its tick", () => {
+      expect(
+        chooseRecordedTime(
+          { proposed: 1000n, clock: 1000n, offset: 30n, isUsed: NOTHING_USED },
+          BOUNDS,
+        ),
+      ).toBe(1030n);
+    });
+
+    it("records a proposal before the clock as proposed, whatever the offset", () => {
+      expect(
+        chooseRecordedTime(
+          { proposed: 900n, clock: 1000n, offset: 30n, isUsed: NOTHING_USED },
+          BOUNDS,
+        ),
+      ).toBe(900n);
+    });
+
     it("bumps a time within the clock's tick", () => {
       expect(
         chooseRecordedTime(
@@ -109,6 +146,18 @@ describe("logic", () => {
           BOUNDS,
         ),
       ).toBe(1099n);
+    });
+  });
+
+  describe("tickOffsetOf()", () => {
+    it("returns the same offset for the same key", () => {
+      expect(tickOffsetOf("did:key:alice")).toBe(tickOffsetOf("did:key:alice"));
+    });
+
+    it("returns different offsets for different keys", () => {
+      expect(tickOffsetOf("did:key:alice")).not.toBe(
+        tickOffsetOf("did:key:bob"),
+      );
     });
   });
 

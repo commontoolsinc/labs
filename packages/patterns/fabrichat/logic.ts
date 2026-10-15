@@ -31,6 +31,14 @@ export interface TimeChoice {
   /** The earliest time allowed, exclusive: a reply's target's `sentAt`. */
   after?: bigint;
 
+  /**
+   * Where in the clock's tick a time taken from the clock starts, as any
+   * number: the time starts that far into the first half of what is left of
+   * the tick, modulo its length. A sender's records start from the same place
+   * (`tickOffsetOf()`), so two senders recording in one tick start apart.
+   */
+  offset?: bigint;
+
   /** Whether the room has already recorded something at a time. */
   isUsed: (time: bigint) => boolean;
 }
@@ -47,12 +55,14 @@ const tickEnd = (time: bigint, tickNsec: bigint): bigint =>
  *
  * A proposal more than `maxAgeNsec` before the clock, or more than
  * `maxLeadNsec` after it, is refused. One within those bounds is recorded as
- * proposed, except that one after the clock is recorded at the clock, since a
- * room never records a time later than its own. A reply's time is then raised,
- * if need be, past its target's. Last, a time already used is replaced by the
- * smallest later one that isn't, within the tick of the clock reading or of
- * the raised time, whichever ends later. A tick with no time left is refused,
- * and a later tick takes the record.
+ * proposed, except that one at or after the clock is recorded at the clock,
+ * since a room never records a time later than its own. A time taken from the
+ * clock starts `offset` into the clock's tick, which the reading stands for
+ * as a whole. A reply's time is then raised, if need be, past its target's.
+ * Last, a time already used is replaced by the smallest later one that isn't,
+ * within the tick of the clock reading or of the raised time, whichever ends
+ * later. A tick with no time left is refused, and a later tick takes the
+ * record.
  */
 export const chooseRecordedTime = (
   choice: TimeChoice,
@@ -63,8 +73,13 @@ export const chooseRecordedTime = (
     if (proposed < clock - bounds.maxAgeNsec) return undefined;
     if (proposed > clock + bounds.maxLeadNsec) return undefined;
   }
-  const asProposed = proposed === undefined || proposed > clock
-    ? clock
+  const spread = (tickEnd(clock, bounds.tickNsec) - clock) / 2n;
+  const fromClock = clock +
+    (choice.offset === undefined || spread === 0n
+      ? 0n
+      : ((choice.offset % spread) + spread) % spread);
+  const asProposed = proposed === undefined || proposed >= clock
+    ? fromClock
     : proposed;
   const base = after !== undefined && asProposed <= after
     ? after + 1n
@@ -78,6 +93,19 @@ export const chooseRecordedTime = (
     if (!isUsed(time)) return time;
   }
   return undefined;
+};
+
+/**
+ * A sender's place in a clock tick, as `TimeChoice.offset` takes it: a 64-bit
+ * FNV-1a hash of `key`, which names the sender. The same sender always starts
+ * at the same place, so its own records in one tick keep their order.
+ */
+export const tickOffsetOf = (key: string): bigint => {
+  let hash = 0xcbf29ce484222325n;
+  for (const unit of new TextEncoder().encode(key)) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(unit)) * 0x100000001b3n);
+  }
+  return hash;
 };
 
 /**

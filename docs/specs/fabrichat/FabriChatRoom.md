@@ -12,9 +12,9 @@ implementation, because they are part of the contract: `ChatMessage`,
 
 The room keeps these `PerSpace` values, shared by everyone the space admits:
 
-- The contract's own records: `about`, its messages, and `recentActivity` with
-  its next `seq` and `recentActivityExpiredThrough`. The messages are a list
-  ordered by `sentAt`. Each message's reactions are a keyed collection,
+- The contract's own records: `about`, its messages, and the activity entries
+  `recentActivity` numbers, with the `seq` their numbering starts from and
+  `recentActivityExpiredThrough`. The messages are a list ordered by `sentAt`. Each message's reactions are a keyed collection,
   projected as a list in the contract.
 - The request memory: the requests the room has acted on, by sender and
   `requestId` (see [writers](#writers)).
@@ -101,7 +101,13 @@ and `requestId` against a keyed collection of the requests the room has acted
 on, and does nothing for one it finds. It records the request there in the same
 transaction as its effect, and the collection drops a request once it was
 recorded longer ago than the greater of `proposedTimeMaxAgeNsec` plus
-`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The collection keeps
+`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec`. The dropping is
+`forgetExpired`'s, a handler each of those handlers sends an event to once it
+has recorded its act, which drops expired used times and activity entries as
+well. So an act reads none of the room's lists whole, and two acts at once, by
+different members, read nothing either of them writes: each writes documents of
+its own, keyed by its request or its time, and adds them to the room's lists by
+mergeable additions, which commute. The collection keeps
 a request even after its message is obliterated: it says only that the sender
 made a request, not what, and without it a late redelivery of the original send
 would send the message again. The two bounds of its window for proposed times
@@ -133,7 +139,12 @@ recorded time in the same transaction that records it: the chosen time, or the
 smallest later time, in nanoseconds, that the room hasn't used yet (see [unique
 times](ChatMessage.md#unique-times)). A room keeps the times it has used in a
 keyed collection, so the check doesn't scan every message, and two records made
-at once conflict and retry rather than share a time.
+at once conflict and retry rather than share a time. A time taken from the
+handler clock, which reads to the second, starts at a place in the clock's tick
+that the sender's principal decides, within the first half of the tick, as
+[recorded times](ChatRoomOutput.md#recorded-times) allows. Two members recording
+in the same second therefore start a long way apart and rarely meet, while one
+member's own records in a second keep the order they were made in.
 
 A reaction is never toggled, since a repeated or delayed toggle can turn into
 the opposite of what the person meant. `commitSendReaction` and
@@ -164,9 +175,16 @@ profile resolves.
 
 Every handler that changes the room's messages or reactions appends its
 `recentActivity` entry in the same transaction as the change, so the log never
-disagrees with the messages. Entries older than the window are dropped as new
-ones are appended. `commitObliterate`, and `commitDelete` when it obliterates,
-also remove the message's earlier entries.
+disagrees with the messages. The entry is a record of its own, keyed by its
+`at`, added to the room's list by a mergeable addition, and the handler reads
+neither the list nor its numbering. Its `seq` is its place in the list: the
+store appends entries in the order their transactions commit, and
+`recentActivity` numbers them from the `seq` after the last entry dropped from
+the front. `commitObliterate`, and `commitDelete` when it obliterates, clear the
+message's earlier entries where they stand, so no other entry's place moves.
+`forgetExpired` clears entries older than the window the same way, and drops
+the run of cleared entries at the front of the list, advancing the `seq` the
+numbering starts from past them.
 
 The message list keeps `windows` as a `PerSession` keyed collection, and
 fulfills `openWindow` and `closeWindow` by setting and removing entries in it.

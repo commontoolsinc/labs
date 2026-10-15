@@ -110,9 +110,6 @@ const mainTexts = (latest: readonly MessageCell[]): string =>
     return typeof message?.body === "string" ? message.body : "<gone>";
   }).join(" | ");
 
-const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
-  (activity.get() ?? []).map((entry) => entry.seq);
-
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
 
@@ -396,7 +393,8 @@ export default pattern(() => {
       // but for the obliterated message's earlier entries.
       {
         assertion: assert(() =>
-          activitySeqs(activity).join() === "1,2,4,5,6,7,8,9"
+          alice.recentActivity.map((entry) => entry.seq).join() ===
+            "1,2,4,5,6,7,8,9"
         ),
       },
       { assertion: assert(() => alice.recentActivityExpiredThrough === 0) },

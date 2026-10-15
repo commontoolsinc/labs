@@ -18,6 +18,9 @@ interface ChatRoomActivity {
 
   /** The message the event changed or added. */
   what: Cell<ChatMessage>;
+
+  /** The entry as the room stored it, which carries its label. */
+  record: Cell<ChatRoomActivityRecord>;
 }
 ```
 
@@ -51,10 +54,16 @@ can't find its message by its proposal among the messages. It can in
   | `editMessage`, `deleteMessage`, `obliterateMessage` | the message |
   | `sendReaction`, `deleteReaction` | the message the reaction is on |
 
-Each entry is labeled `authored-by` the principal whose event it records, as the
-record it describes is. So a sender finds the entry for a request of its own by
-the `requestId` and the label together: two senders can choose the same
-`requestId`, but not under the same label.
+- **`record`** links the entry as the room stored it, a
+  `ChatRoomActivityRecord`: the same `at`, `requestId`, and `what`, under the
+  entry's own label. The stored record needn't carry `seq`, which is the room's
+  numbering of it (see [catching up](#catching-up)).
+
+Each entry is stored as a record of its own, labeled `authored-by` the principal
+whose event it records, as the record it describes is, and `record` links it. So
+a sender finds the entry for a request of its own by the `requestId` and the
+label of its `record` together: two senders can choose the same `requestId`, but
+not under the same label.
 
 An entry records only that something happened, and where. It copies nothing from
 the thing it points at, so it holds nothing of a message's content that a later
@@ -63,10 +72,14 @@ obliteration would have to reach.
 ## Catching up
 
 A room numbers its entries with `seq`: 1 for its first entry, and one more for
-each entry after, assigned in the same transaction as the entry itself. So `seq`
-has no gaps and never goes backward, whatever any clock says, and it is what a
-client catches up by. `recentActivity` is in `seq` order, which can differ from
-the order of `at`, since a delayed event can carry an old `at` with a new `seq`.
+each entry after, in the order the room's store appended them, which is the
+order the transactions recording them committed. An event appends its entry in
+the same transaction as the change it records, and the entry's `seq` is fixed
+when that transaction commits, so two events recorded at once don't contend for
+a number. So `seq` has no gaps and never goes backward, whatever any clock says,
+and it is what a client catches up by. `recentActivity` is in `seq` order, which
+can differ from the order of `at`, since a delayed event can carry an old `at`
+with a new `seq`.
 
 A client remembers the highest `seq` it has seen. When it reads the room again,
 it reads the entries after that one. It can do that as long as the room still
@@ -85,8 +98,8 @@ catches up by reopening its windows. It never silently misses a change.
 
 `recentActivity` holds entries recorded no longer ago than the room's
 `recentActivityWindowNsec` (see [`ChatRoomPolicy`](ChatRoomPolicy.md)), by their
-`at`. A room drops older entries, and advances `recentActivityExpiredThrough` as
-it does. The window MUST be at least `proposedTimeMaxAgeNsec`: an accepted
+`at`. A room drops older entries after its next event, and advances
+`recentActivityExpiredThrough` as it does. The window MUST be at least `proposedTimeMaxAgeNsec`: an accepted
 send's entry is recorded no more than that after its proposal, and lives for the
 window after that, so a client that finds no entry for a send whose proposal is
 older than `proposedTimeMaxAgeNsec` can conclude it wasn't sent (see

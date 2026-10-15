@@ -64,6 +64,7 @@ import {
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
+  forgetExpired,
   isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
@@ -72,12 +73,12 @@ import {
   type MessageRights,
   messageRightsOf,
   type MessagesCell,
-  NO_ACTIVITY,
   NO_MESSAGE_RIGHTS,
-  NUMBERING_KEY,
+  numberingOf,
   ownersMayObliterateBy,
   ownersMayObliterateIn,
   type ReactionListsCell,
+  recentActivityOf,
   type RequestsCell,
   type RoomStreamEvent,
   type RoomWindowEvent,
@@ -1204,7 +1205,7 @@ export const FabriChatRoomCore = pattern<
     requests,
     usedTimes,
     activity,
-    counters,
+    expire: forgetExpired({ requests, usedTimes, activity, counters }),
     joined: tellManagerJoined({
       canJoin,
       container: ownSpace ? undefined : container,
@@ -1327,10 +1328,8 @@ export const FabriChatRoomCore = pattern<
     // The stored record itself, as a link, so a reader can read its label.
     record: about,
   };
-  const expiredThrough = computed(() =>
-    ((counters.elementById(NUMBERING_KEY).get() ??
-      NO_ACTIVITY) as ActivityCounters).expiredThrough
-  );
+  const recentActivity = computed(() => recentActivityOf(activity, counters));
+  const expiredThrough = computed(() => numberingOf(counters).expiredThrough);
   const name = computed(() =>
     title ?? (kind === "direct" ? "Direct chat" : "Chat")
   );
@@ -1448,7 +1447,7 @@ export const FabriChatRoomCore = pattern<
   };
   const view = {
     about: aboutView,
-    recentActivity: activity,
+    recentActivity,
     recentActivityExpiredThrough: expiredThrough,
     participants,
     roster: joined,

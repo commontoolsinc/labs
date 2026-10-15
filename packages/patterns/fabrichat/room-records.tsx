@@ -41,6 +41,7 @@ import {
   isSingleEmoji,
   type ShownIn,
   threadView,
+  tickOffsetOf,
   type ViewItem,
   type WindowAnchor,
   windowCount,
@@ -272,8 +273,9 @@ export interface RequestMemo {
 }
 
 /**
- * A remembered request, written by whichever handler acted on it. The tuple
- * is written out here, as `WritePolicyAnyOf` requires.
+ * A remembered request, written by whichever handler acted on it, and cleared
+ * by `forgetExpired`. The tuple is written out here, as `WritePolicyAnyOf`
+ * requires.
  */
 export type StoredRequestMemo = WritePolicyAnyOf<RequestMemo, [
   WriteAuthorizedBy<unknown, typeof commitSend>,
@@ -282,6 +284,7 @@ export type StoredRequestMemo = WritePolicyAnyOf<RequestMemo, [
   WriteAuthorizedBy<unknown, typeof commitObliterate>,
   WriteAuthorizedBy<unknown, typeof commitSendReaction>,
   WriteAuthorizedBy<unknown, typeof commitDeleteReaction>,
+  WriteAuthorizedBy<unknown, typeof forgetExpired>,
 ]>;
 
 /** The requests the room has acted on, each addressed by its key. */
@@ -293,7 +296,10 @@ export interface UsedTime {
   at: FabricEpochNsec;
 }
 
-/** A used time, written by whichever handler recorded something at it. */
+/**
+ * A used time, written by whichever handler recorded something at it, and
+ * cleared by `forgetExpired`.
+ */
 export type StoredUsedTime = WritePolicyAnyOf<UsedTime, [
   WriteAuthorizedBy<unknown, typeof commitSend>,
   WriteAuthorizedBy<unknown, typeof commitEdit>,
@@ -301,34 +307,64 @@ export type StoredUsedTime = WritePolicyAnyOf<UsedTime, [
   WriteAuthorizedBy<unknown, typeof commitObliterate>,
   WriteAuthorizedBy<unknown, typeof commitSendReaction>,
   WriteAuthorizedBy<unknown, typeof commitDeleteReaction>,
+  WriteAuthorizedBy<unknown, typeof forgetExpired>,
 ]>;
 
 /** The times the room has used, each addressed by its nanoseconds. */
 export type UsedTimesCell = Writable<StoredUsedTime[] | Default<[]>>;
 
 /**
+ * What the room stores for an activity entry: a `ChatRoomActivity` that
+ * carries its `seq` only where it was stored with one. An entry stored without
+ * one takes its `seq` from its place in the list (`numberActivity()`). An
+ * entry an obliteration or age cleared keeps only the `seq` it was stored
+ * with, if any, so that the entries after it keep theirs.
+ */
+export type ActivityRecord = Partial<ChatRoomActivity>;
+
+/** Whether the stored entry `entry` was cleared. */
+const isCleared = (entry: ActivityRecord | undefined): boolean =>
+  entry?.what === undefined || entry.at === undefined;
+
+/** What a cleared entry stores in place of `entry`. */
+const clearedFrom = (entry: ActivityRecord): ActivityRecord =>
+  entry.seq === undefined ? {} : { seq: entry.seq };
+
+/**
  * A stored activity entry: a document of its own, written once by the handler
  * whose act it records, and labeled `authored-by` the principal that handler
  * acts for. Its writers name no gesture, since entries record acts from every
- * surface; the label says whose act it was, not that they made a gesture.
+ * surface; the label says whose act it was, not that they made a gesture. An
+ * obliteration clears the message's earlier entries, and `forgetExpired` clears
+ * the entries it drops for age.
  */
 export type SentActivity = AuthoredByCurrentUser<
-  WritePolicyAnyOf<ChatRoomActivity, [
+  WritePolicyAnyOf<ActivityRecord, [
     WriteAuthorizedBy<unknown, typeof commitSend>,
     WriteAuthorizedBy<unknown, typeof commitEdit>,
     WriteAuthorizedBy<unknown, typeof commitDelete>,
     WriteAuthorizedBy<unknown, typeof commitObliterate>,
     WriteAuthorizedBy<unknown, typeof commitSendReaction>,
     WriteAuthorizedBy<unknown, typeof commitDeleteReaction>,
+    WriteAuthorizedBy<unknown, typeof forgetExpired>,
   ]>
 >;
 
-/** The room's recent activity, in `seq` order. */
+/**
+ * The room's recent activity, in `seq` order: the order the room's store
+ * appended the entries in. An entry cleared by an obliteration or for age
+ * keeps its place until `forgetExpired` drops the run of them at the front,
+ * so no entry's place moves while it is in the list.
+ */
 export type ActivityCell = Writable<SentActivity[] | Default<[]>>;
 
 /** Where the room's activity numbering stands. */
 export interface ActivityCounters {
-  /** The `seq` the next entry takes. */
+  /**
+   * The `seq` the first entry in the activity takes unless it was stored with
+   * one: one more than the last entry dropped from the front, and so the
+   * `seq` the next entry takes while the activity is empty.
+   */
   nextSeq: number;
 
   /** The highest `seq` dropped for age; 0 for none. */
@@ -341,20 +377,19 @@ export const NO_ACTIVITY = {
   expiredThrough: 0,
 } satisfies ActivityCounters;
 
-/** The activity numbering, written by whichever handler records an entry. */
-export type StoredActivityCounters = WritePolicyAnyOf<ActivityCounters, [
-  WriteAuthorizedBy<unknown, typeof commitSend>,
-  WriteAuthorizedBy<unknown, typeof commitEdit>,
-  WriteAuthorizedBy<unknown, typeof commitDelete>,
-  WriteAuthorizedBy<unknown, typeof commitObliterate>,
-  WriteAuthorizedBy<unknown, typeof commitSendReaction>,
-  WriteAuthorizedBy<unknown, typeof commitDeleteReaction>,
-]>;
+/**
+ * The activity numbering, written only by `forgetExpired`, as it drops
+ * entries: an act appends its entry without reading or writing it.
+ */
+export type StoredActivityCounters = WriteAuthorizedBy<
+  ActivityCounters,
+  typeof forgetExpired
+>;
 
 /**
  * The room's activity numbering, kept as one keyed record, `NUMBERING_KEY`,
- * absent until the first entry. The list around it defaults to empty, so
- * nothing but the handlers its policy lists ever writes the record.
+ * absent until the first entry is dropped. The list around it defaults to
+ * empty, so nothing but `forgetExpired` ever writes the record.
  */
 export type ActivityCountersCell = Writable<
   StoredActivityCounters[] | Default<[]>
@@ -487,15 +522,15 @@ const forgetBefore = <T extends { at: FabricEpochNsec }>(
 };
 
 /**
- * Records that the room acted on the request `key`, and forgets every request
- * older than the room's request memory.
+ * Records that the room acted on the request `key`. It reads nothing of the
+ * other requests, so two acts at once don't collide over the memory;
+ * `forgetExpired` forgets the requests older than the room's request memory.
  */
 const rememberRequest = (
   requests: RequestsCell,
   key: string,
   clock: bigint,
 ): void => {
-  forgetBefore(requests, (memo) => memo.key, clock - REQUEST_MEMORY_NSEC);
   const memo = requests.elementById(key);
   memo.set({ key, at: epochNsec(clock) });
   requests.addUnique(memo);
@@ -504,29 +539,23 @@ const rememberRequest = (
 /**
  * Chooses a recorded time as `chooseRecordedTime()` does, against the times
  * the room has used, and marks it used. `undefined` means the record is
- * refused.
- *
- * It also forgets every used time older than the request memory. A recorded
- * time is never older than the proposed-time window's lower bound, so no
- * runtime whose clock is within the window's lead of this one chooses a time
- * that old again.
+ * refused. It reads only the used times it considers, each by its key, and a
+ * time taken from the clock starts at the sender's `offset` into the tick, so
+ * two senders' acts in one tick don't consider the same times.
  */
 const claimTime = (
   usedTimes: UsedTimesCell,
   clock: bigint,
+  offset: bigint,
   proposed?: bigint,
   after?: bigint,
 ): FabricEpochNsec | undefined => {
-  forgetBefore(
-    usedTimes,
-    (used) => String(nsecOf(used.at)),
-    clock - REQUEST_MEMORY_NSEC,
-  );
   const time = chooseRecordedTime(
     {
       proposed,
       clock,
       after,
+      offset,
       isUsed: (t) => usedTimes.elementById(String(t)).get() !== undefined,
     },
     TIME_BOUNDS,
@@ -540,52 +569,93 @@ const claimTime = (
 };
 
 /**
- * Appends an activity entry recorded at `at`, and drops entries older than the
- * activity window. `dropFor` also drops every earlier entry about that
- * message. Each entry is a document of its own, so appending one never
- * rewrites another's. The act claims `at` before it writes anything, so an
+ * Appends an activity entry recorded at `at`. The entry is a document of its
+ * own, keyed by its `at`, which is unique in the room, and it joins the list
+ * by a mergeable addition, so appending one reads nothing another act writes:
+ * its `seq` is its place in the order the store appends entries in
+ * (`numberActivity()`). The act claims `at` before it writes anything, so an
  * act with no time left for its entry is refused rather than recorded without
  * one.
+ *
+ * `dropFor` first clears every earlier entry about that message, which an
+ * obliteration does. A cleared entry keeps its place, so no later entry's
+ * `seq` moves, and `numberActivity()` leaves it out.
  */
 const appendActivity = (
   activity: ActivityCell,
-  counters: ActivityCountersCell,
   at: FabricEpochNsec,
-  clock: bigint,
   requestId: string,
   what: Cell<unknown>,
   dropFor?: MessageCell,
 ): void => {
-  const record = counters.elementById(NUMBERING_KEY);
-  const numbering = (record.get() ?? NO_ACTIVITY) as ActivityCounters;
-  const horizon = clock - FABRICHAT_POLICY.recentActivityWindowNsec.value;
-  const current = (activity.get() ?? []) as ChatRoomActivity[];
-  const expired = current.filter((entry) => nsecOf(entry.at) < horizon);
-  const expiredThrough = expired.reduce(
-    (highest, entry) => Math.max(highest, entry.seq),
-    numbering.expiredThrough,
-  );
-  const dropped = current.filter((entry) =>
-    nsecOf(entry.at) < horizon ||
-    (dropFor !== undefined && equals(entry.what, dropFor))
-  );
-  dropped.forEach((entry) => {
-    const key = String(entry.seq);
-    activity.removeByValue(activity.elementById(key));
-    const cleared: Writable<SentActivity | undefined> = activity.elementById(
-      key,
-    );
-    cleared.set(undefined);
-  });
-  const entry = activity.elementById(String(numbering.nextSeq));
-  entry.set({ seq: numbering.nextSeq, at, requestId, what } as SentActivity);
+  if (dropFor !== undefined) {
+    ((activity.get() ?? []) as ActivityRecord[]).forEach((entry, index) => {
+      if (isCleared(entry) || !equals(entry.what, dropFor)) return;
+      const cleared: Writable<SentActivity> = activity.key(index)
+        .resolveAsCell();
+      cleared.set(clearedFrom(entry) as SentActivity);
+    });
+  }
+  const entry = activity.elementById(`t${nsecOf(at)}`);
+  entry.set({ at, requestId, what } as SentActivity);
   activity.addUnique(entry);
-  record.set({
-    nextSeq: numbering.nextSeq + 1,
-    expiredThrough,
-  } as StoredActivityCounters);
-  counters.addUnique(record);
 };
+
+/** An activity entry, with the `seq` its place in the list gives it. */
+export interface NumberedActivity {
+  /** The entry's `seq`. */
+  seq: number;
+
+  /** The stored entry. */
+  entry: ActivityRecord;
+}
+
+/**
+ * Numbers the stored activity `entries` as `ChatRoomActivity.seq` numbers
+ * them. An entry stored with a `seq` keeps it, and every other entry takes one
+ * more than the entry before it; the first takes `numbering.nextSeq`. The
+ * store appends entries in the order their acts commit, and an entry keeps its
+ * place until `forgetExpired` drops it from the front, which advances
+ * `nextSeq` past it, so no entry's `seq` changes while it is in the list.
+ */
+export const numberActivity = (
+  entries: readonly ActivityRecord[],
+  numbering: ActivityCounters,
+): NumberedActivity[] => {
+  let previous = numbering.nextSeq - 1;
+  return entries.map((entry) => {
+    const seq = entry.seq ?? previous + 1;
+    previous = seq;
+    return { seq, entry };
+  });
+};
+
+/** The activity numbering a room's `counters` holds. */
+export const numberingOf = (
+  counters: Cell<StoredActivityCounters[]>,
+): ActivityCounters =>
+  (counters.elementById(NUMBERING_KEY).get() ??
+    NO_ACTIVITY) as ActivityCounters;
+
+/**
+ * The room's recent activity as `ChatRoomOutput.recentActivity` offers it:
+ * every entry still standing, numbered, in `seq` order. It reads the list
+ * and writes nothing, so its parameters are `Cell`s for the reason
+ * `messageEntries()` gives.
+ */
+export const recentActivityOf = (
+  activity: Cell<SentActivity[]>,
+  counters: Cell<StoredActivityCounters[]>,
+): ChatRoomActivity[] =>
+  numberActivity(
+    (activity.get() ?? []) as ActivityRecord[],
+    numberingOf(counters),
+  ).flatMap(({ seq, entry }) =>
+    entry.at === undefined || entry.requestId === undefined ||
+      entry.what === undefined
+      ? []
+      : [{ seq, at: entry.at, requestId: entry.requestId, what: entry.what }]
+  );
 
 /** A stored message as the views see it, keyed by its `sentAt`. */
 export interface MessageEntry extends ViewItem {
@@ -902,9 +972,6 @@ export interface RoomActState {
   /** The room's recent activity. */
   activity: ActivityCell;
 
-  /** Where the activity's numbering stands. */
-  counters: ActivityCountersCell;
-
   /** The sender's outcomes, by `requestId`; absent where none are kept. */
   outcomes?: MessageRequestsCell;
 
@@ -954,6 +1021,14 @@ export interface RoomActState {
    * carry a label the room's space doesn't admit.
    */
   joined?: Stream<void>;
+
+  /**
+   * Drops what the room no longer keeps, as `forgetExpired` does, in an event
+   * of its own; absent where nothing is dropped. The act's own transaction
+   * reads none of the lists it drops from, so two acts at once don't collide
+   * over them.
+   */
+  expire?: Stream<void>;
 }
 
 /** What `tellManagerJoined` is bound to. */
@@ -991,12 +1066,14 @@ export const tellManagerJoined = handler<void, ManagerJoinState>(
 );
 
 /**
- * Records that the act `requestId` took effect, and clears the session's
- * shown refusal.
+ * Records that the act `requestId` took effect, clears the session's shown
+ * refusal, and has `forgetExpired` drop what the room no longer keeps, in an
+ * event of its own.
  */
 const actDone = (state: RoomActState, requestId: string): void => {
   state.outcomes?.key(requestId).set({ status: "done" });
   state.refusal?.set("");
+  state.expire?.send();
 };
 
 /**
@@ -1075,7 +1152,6 @@ const performMessageAct = (
     requests,
     usedTimes,
     activity,
-    counters,
     composer,
   } = state;
   const requestId = event?.requestId ?? eventKey();
@@ -1097,7 +1173,7 @@ const performMessageAct = (
   const requestKey = requestKeyOf(sender, requestId);
   if (actedOn(requests, requestKey)) return;
   const clock = clockNsec();
-  const entries = messageEntries(messages);
+  const offset = tickOffsetOf(sender);
   const typed = event?.target?.value;
   const version: ChatMessageVersion | undefined = event?.version ??
     (typeof typed === "string"
@@ -1127,9 +1203,10 @@ const performMessageAct = (
     const replyCell = (event?.replyTo?.message ?? state.message ?? fromComposer)
       ?.resolveAsCell();
     const shownIn = event?.replyTo?.shownIn ?? state.shownIn ?? "main";
+    // Only a reply reads the messages, to find its target among them.
     const target = replyCell === undefined
       ? undefined
-      : entryFor(entries, replyCell);
+      : entryFor(messageEntries(messages), replyCell);
     if (replyCell !== undefined) {
       if (target === undefined) {
         refuse("bad-reply", "The message replied to isn't in this chat.");
@@ -1154,12 +1231,13 @@ const performMessageAct = (
     const sentAt = claimTime(
       usedTimes,
       clock,
+      offset,
       nsecOf(version.sentAt),
       target?.sentAt,
     );
     const loggedAt = sentAt === undefined
       ? undefined
-      : claimTime(usedTimes, clock);
+      : claimTime(usedTimes, clock, offset);
     if (sentAt === undefined || loggedAt === undefined) {
       refuse("out-of-window", OUT_OF_WINDOW);
       return;
@@ -1182,7 +1260,7 @@ const performMessageAct = (
       reactions,
     } as SentMessage);
     messages.addUnique(record);
-    appendActivity(activity, counters, loggedAt, clock, requestId, record);
+    appendActivity(activity, loggedAt, requestId, record);
     rememberRequest(requests, requestKey, clock);
     actDone(state, requestId);
     if (state.replyFrom === "replyTo" && composing?.replyTo !== undefined) {
@@ -1193,7 +1271,7 @@ const performMessageAct = (
   }
 
   const target = (event?.message ?? state.message)?.resolveAsCell();
-  const entry = entryFor(entries, target);
+  const entry = entryFor(messageEntries(messages), target);
   if (target === undefined || entry === undefined) {
     refuse("unknown-target", "That message isn't in this chat.");
     return;
@@ -1228,10 +1306,10 @@ const performMessageAct = (
       );
       return;
     }
-    const editedAt = claimTime(usedTimes, clock);
+    const editedAt = claimTime(usedTimes, clock, offset);
     const loggedAt = editedAt === undefined
       ? undefined
-      : claimTime(usedTimes, clock);
+      : claimTime(usedTimes, clock, offset);
     if (editedAt === undefined || loggedAt === undefined) {
       refuse("out-of-window", OUT_OF_WINDOW);
       return;
@@ -1244,15 +1322,7 @@ const performMessageAct = (
       earlierVersions: [],
       ...(current.replyTo === undefined ? {} : { replyTo: current.replyTo }),
     } as SentMessage);
-    appendActivity(
-      activity,
-      counters,
-      loggedAt,
-      clock,
-      requestId,
-      target,
-      target,
-    );
+    appendActivity(activity, loggedAt, requestId, target, target);
     rememberRequest(requests, requestKey, clock);
     actDone(state, requestId);
     return;
@@ -1279,10 +1349,10 @@ const performMessageAct = (
     : [];
 
   if (op === "delete") {
-    const editedAt = claimTime(usedTimes, clock);
+    const editedAt = claimTime(usedTimes, clock, offset);
     const loggedAt = editedAt === undefined
       ? undefined
-      : claimTime(usedTimes, clock);
+      : claimTime(usedTimes, clock, offset);
     if (editedAt === undefined || loggedAt === undefined) {
       refuse("out-of-window", OUT_OF_WINDOW);
       return;
@@ -1296,7 +1366,7 @@ const performMessageAct = (
       earlierVersions: kept,
       ...(current.replyTo === undefined ? {} : { replyTo: current.replyTo }),
     } as SentMessage);
-    appendActivity(activity, counters, loggedAt, clock, requestId, target);
+    appendActivity(activity, loggedAt, requestId, target);
     rememberRequest(requests, requestKey, clock);
     actDone(state, requestId);
     return;
@@ -1306,10 +1376,10 @@ const performMessageAct = (
     refuse("invalid-body", "A message needs some text.");
     return;
   }
-  const editedAt = claimTime(usedTimes, clock, nsecOf(version.sentAt));
+  const editedAt = claimTime(usedTimes, clock, offset, nsecOf(version.sentAt));
   const loggedAt = editedAt === undefined
     ? undefined
-    : claimTime(usedTimes, clock);
+    : claimTime(usedTimes, clock, offset);
   if (editedAt === undefined || loggedAt === undefined) {
     refuse("out-of-window", OUT_OF_WINDOW);
     return;
@@ -1325,7 +1395,7 @@ const performMessageAct = (
       ? {}
       : { reactions: current.reactions }),
   } as SentMessage);
-  appendActivity(activity, counters, loggedAt, clock, requestId, target);
+  appendActivity(activity, loggedAt, requestId, target);
   rememberRequest(requests, requestKey, clock);
   actDone(state, requestId);
   const editing = composer.get()?.editing;
@@ -1347,8 +1417,7 @@ const performReactionAct = (
   event: RoomStreamEvent,
   state: RoomActState,
 ): void => {
-  const { myProfile, messages, requests, usedTimes, activity, counters } =
-    state;
+  const { myProfile, messages, requests, usedTimes, activity } = state;
   const requestId = event?.requestId ?? eventKey();
   const refuse = (code: MessageActRefusalCode, reason: string): void =>
     refuseAct(state, requestId, code, reason);
@@ -1386,26 +1455,27 @@ const performReactionAct = (
     return;
   }
   const clock = clockNsec();
+  const offset = tickOffsetOf(sender);
   if (state.closesPicker === true) state.pickerOpen?.set(false);
   const reactionKey = JSON.stringify([reactorKey, emoji]);
   const mine = list.elementById(reactionKey);
   const present = mine.get() !== undefined;
   if (op === "add" && !present) {
-    const sentAt = claimTime(usedTimes, clock);
+    const sentAt = claimTime(usedTimes, clock, offset);
     const loggedAt = sentAt === undefined
       ? undefined
-      : claimTime(usedTimes, clock);
+      : claimTime(usedTimes, clock, offset);
     if (sentAt === undefined || loggedAt === undefined) {
       refuse("out-of-window", OUT_OF_WINDOW);
       return;
     }
     mine.set({ reactorProfile: profile, emoji, sentAt } as SentReaction);
     list.addUnique(mine);
-    appendActivity(activity, counters, loggedAt, clock, requestId, target);
+    appendActivity(activity, loggedAt, requestId, target);
     state.joined?.send();
   }
   if (op === "remove" && present) {
-    const loggedAt = claimTime(usedTimes, clock);
+    const loggedAt = claimTime(usedTimes, clock, offset);
     if (loggedAt === undefined) {
       refuse("out-of-window", OUT_OF_WINDOW);
       return;
@@ -1417,7 +1487,7 @@ const performReactionAct = (
       reactionKey,
     );
     cleared.set(undefined);
-    appendActivity(activity, counters, loggedAt, clock, requestId, target);
+    appendActivity(activity, loggedAt, requestId, target);
   }
   rememberRequest(requests, requestKey, clock);
   actDone(state, requestId);
@@ -1451,6 +1521,87 @@ export const commitSendReaction = handler<RoomStreamEvent, RoomActState>(
 /** Removes the sender's reaction, from `ChatReactSurface`. */
 export const commitDeleteReaction = handler<RoomStreamEvent, RoomActState>(
   (event, state) => performReactionAct("remove", event, state),
+);
+
+/** What `forgetExpired` is bound to: the records the room keeps for a time. */
+export interface ExpiryState {
+  /** The requests the room has acted on. */
+  requests: RequestsCell;
+
+  /** The times the room has recorded something at. */
+  usedTimes: UsedTimesCell;
+
+  /** The room's recent activity. */
+  activity: ActivityCell;
+
+  /** Where the activity's numbering stands. */
+  counters: ActivityCountersCell;
+}
+
+/**
+ * Drops what the room no longer keeps: the requests and used times older than
+ * the request memory, and the activity entries older than the activity
+ * window. Every act sends it an event once it has recorded what it did, so the
+ * act's own transaction reads none of these lists whole, and one act never
+ * collides with another over them. It writes nothing while nothing has
+ * expired.
+ *
+ * An entry expired anywhere in the activity is cleared, and counts toward
+ * `expiredThrough`. Only the run of cleared entries at the front leaves the
+ * list, and `nextSeq` moves past it, so no entry still in the list changes its
+ * `seq` (`numberActivity()`).
+ */
+export const forgetExpired = handler<void, ExpiryState>(
+  (_event, { requests, usedTimes, activity, counters }) => {
+    const clock = clockNsec();
+    const forgotten = clock - REQUEST_MEMORY_NSEC;
+    forgetBefore(requests, (memo) => memo.key, forgotten);
+    forgetBefore(usedTimes, (used) => String(nsecOf(used.at)), forgotten);
+
+    const horizon = clock - FABRICHAT_POLICY.recentActivityWindowNsec.value;
+    const record = counters.elementById(NUMBERING_KEY);
+    const numbering = (record.get() ?? NO_ACTIVITY) as ActivityCounters;
+    const numbered = numberActivity(
+      (activity.get() ?? []) as ActivityRecord[],
+      numbering,
+    );
+    const expired = numbered.map(({ entry }) =>
+      !isCleared(entry) && entry.at !== undefined && nsecOf(entry.at) < horizon
+    );
+    const expiredThrough = numbered.reduce(
+      (highest, { seq }, index) =>
+        expired[index] ? Math.max(highest, seq) : highest,
+      numbering.expiredThrough,
+    );
+    const standing = numbered.findIndex(({ entry }, index) =>
+      !isCleared(entry) && !expired[index]
+    );
+    const dropped = standing === -1 ? numbered.length : standing;
+    // Every entry's cell is taken before the list changes, since a removal
+    // moves the places after it.
+    const cells = numbered.map((_, index) => {
+      const cell: Writable<SentActivity> = activity.key(index).resolveAsCell();
+      return cell;
+    });
+    cells.forEach((cell, index) => {
+      if (index < dropped) {
+        // An entry that leaves the list is cleared whole: nothing reads it.
+        activity.removeByValue(cell);
+        const removed: Writable<SentActivity | undefined> = cell;
+        removed.set(undefined);
+      } else if (expired[index]) {
+        cell.set(clearedFrom(numbered[index].entry) as SentActivity);
+      }
+    });
+    if (dropped === 0 && expiredThrough === numbering.expiredThrough) return;
+    record.set({
+      nextSeq: dropped === 0
+        ? numbering.nextSeq
+        : numbered[dropped - 1].seq + 1,
+      expiredThrough,
+    } as StoredActivityCounters);
+    counters.addUnique(record);
+  },
 );
 
 /** What `commitWindow` is bound to. */
