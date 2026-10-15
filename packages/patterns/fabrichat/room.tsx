@@ -32,6 +32,7 @@ import {
   principalOf,
   SELF,
   spaceAccess,
+  type SpaceAccessLevel,
   spaceOf,
   Stream,
   UI,
@@ -56,6 +57,7 @@ import {
   commitObliterate,
   commitSend,
   commitSendReaction,
+  commitSetTitle,
   commitWindow,
   compareEntries,
   type ComposerState,
@@ -67,14 +69,23 @@ import {
   type MessageCell,
   messageEntries,
   type MessageEntry,
+  type MessageRights,
+  messageRightsOf,
   type MessagesCell,
   NO_ACTIVITY,
+  NO_MESSAGE_RIGHTS,
   NUMBERING_KEY,
+  ownersMayObliterateBy,
+  ownersMayObliterateIn,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
   type RoomWindowEvent,
+  type SetTitleEvent,
   type StoredAbout,
+  tellManagerJoined,
+  TITLE_KEY,
+  type TitlesCell,
   type UsedTimesCell,
   type WindowsCell,
   type WindowsValue,
@@ -88,10 +99,13 @@ import {
   type AddMemberRefusalCode,
   CHAT_ADD_MEMBER_ACTION,
   CHAT_ADD_MEMBER_SURFACE,
+  CHAT_RETITLE_ACTION,
+  CHAT_RETITLE_SURFACE,
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   CHAT_START_ACTION,
   CHAT_START_SURFACE,
+  type ChatContainer,
   type ChatDisplay,
   type ChatProfile,
   type ChatRequestOutcome,
@@ -100,8 +114,11 @@ import {
   type ChatRoomKind,
   type ChatRoomLink,
   type ChatRoomPolicy,
+  epochNsec,
   isPrincipalDID,
+  type MessageActOutcome,
   type ProfileCell,
+  type SetTitleOutcome,
 } from "./schemas.tsx";
 
 /**
@@ -194,15 +211,8 @@ export interface ParticipantChipInput {
   myProfile: ProfileCell | undefined;
 
   /**
-   * Whether the viewer has a manager to start a direct chat with; absent for
-   * none.
-   */
-  startsDirect?: boolean;
-
-  /**
-   * The viewer's manager's `openDirect`, when `startsDirect` holds. The
-   * control sends its click there itself, so that the manager receives the
-   * viewer's reviewed `ChatStart`.
+   * The viewer's manager's `openDirect`. The control sends its click there
+   * itself, so that the manager receives the viewer's reviewed `ChatStart`.
    */
   startDirect?: Stream<StartDirectEvent>;
 }
@@ -215,9 +225,11 @@ export interface ParticipantChipOutput {
 
 /**
  * One participant, shown by their profile, with a control that starts a direct
- * chat with them. The control shows only where it can start one: for someone
- * other than the viewer, whose profile attests a principal, to a viewer who
- * has a manager. It names the participant to the manager by their profile,
+ * chat with them. The control shows for someone other than the viewer, whose
+ * profile attests a principal, to a viewer with a profile. Whether the viewer
+ * has a manager is not read here: the chip's display is stored in the room's
+ * space, and a manager whose data carries a label the room's space does not
+ * admit would make it refused. It names the participant to the manager by their profile,
  * bound as the control's `name`, which crosses into the click's event as the
  * profile's own cell; the manager reads whom it names from the profile's
  * `represents-principal` label, and offers the room through the share inbox
@@ -226,15 +238,15 @@ export interface ParticipantChipOutput {
 export const ParticipantChip = pattern<
   ParticipantChipInput,
   ParticipantChipOutput
->(({ participant, myProfile, startsDirect, startDirect }) => {
+>(({ participant, myProfile, startDirect }) => {
   const counterpart = computed(() =>
     principalOf(participant, "represents-principal") ?? ""
   );
   // Who may start a chat differs by viewer, so the control is hidden by a
   // prop rather than built as a different tree (see `FabriChatMessageRow`).
   const chatDisplay = computed((): ChatDisplay =>
-    startsDirect === true && myProfile?.get() !== undefined &&
-      !equals(participant, myProfile) && counterpart !== ""
+    myProfile?.get() !== undefined && !equals(participant, myProfile) &&
+      counterpart !== ""
       ? "inline-flex"
       : "none"
   );
@@ -391,6 +403,24 @@ interface LatestAdd {
   refusal?: string;
 }
 
+/**
+ * What an add asks of the viewer's manager once it has admitted someone: the
+ * event of `offerAddedMember`.
+ */
+interface AddedMemberEvent {
+  /** The add's `requestId`. */
+  requestId: string;
+
+  /** The DID of the person the add admitted. */
+  member: string;
+
+  /** The person's profile, when the add named one. */
+  // `Cell<…>` is written out rather than reached through an alias: the
+  // event's schema marks a reference position only where the wrapper is
+  // written in the event type.
+  profile?: Cell<ChatProfile>;
+}
+
 /** What adding a member is bound to. */
 interface AddMemberState {
   /** One of the room's records, which names the room's space. */
@@ -401,6 +431,32 @@ interface AddMemberState {
 
   /** The room's kind, which a direct room's space keeps to its two members. */
   kind: ChatRoomKind;
+
+  /** The viewer's adds' outcomes; absent where they aren't remembered. */
+  requests?: AddRequestsCell;
+
+  /** What the session's latest add came to, which the control shows. */
+  latest: Writable<LatestAdd | undefined>;
+
+  /**
+   * Has the viewer's manager tell the person admitted of the room, as
+   * `offerAddedMember` does, in an event of its own. The add's own
+   * transaction reads nothing of the manager, which can carry a label the
+   * room's space doesn't admit.
+   */
+  offer: Stream<AddedMemberEvent>;
+
+  /**
+   * A rendered picker's person, by their profile, which an event's own
+   * outranks.
+   */
+  picked?: Cell<ChatProfile>;
+}
+
+/** What `offerAddedMember` is bound to. */
+interface OfferAddedMemberState {
+  /** One of the room's records, which names the room's space. */
+  room: MessagesCell;
 
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   requests?: AddRequestsCell;
@@ -423,13 +479,40 @@ interface AddMemberState {
 
   /** The viewer's manager's `offerRoom`, when `canOffer` holds. */
   offerRoom?: Stream<OfferRoomRequest>;
-
-  /**
-   * A rendered picker's person, by their profile, which an event's own
-   * outranks.
-   */
-  picked?: Cell<ChatProfile>;
 }
+
+/**
+ * Has the viewer's manager offer the room to the person an add admitted, and
+ * decide how they were told, which it records and the room's `addRequests`
+ * then reads. With no manager to ask, because the viewer has none or theirs
+ * hasn't resolved, it records that the person was told nothing.
+ */
+const offerAddedMember = handler<AddedMemberEvent, OfferAddedMemberState>(
+  (event, state) => {
+    const { requestId, member, profile } = event;
+    const space = spaceOf(state.room);
+    // `offerRoom` is read only once `canOffer` holds, since reading it reads
+    // the manager.
+    if (
+      state.canOffer && state.self !== undefined && space !== undefined
+    ) {
+      state.offerRoom?.send({
+        requestId: addMemberOfferId(space, requestId),
+        room: state.self,
+        member,
+        ...(profile === undefined ? {} : { profile }),
+      });
+      return;
+    }
+    state.requests?.key(requestId).set({
+      status: "done",
+      delivery: "access-only",
+    });
+    if (state.latest.get()?.requestId === requestId) {
+      state.latest.set({ requestId, member, delivery: "access-only" });
+    }
+  },
+);
 
 /**
  * Admits a person to the room's space, with OWNER, so that they too may add
@@ -438,12 +521,10 @@ interface AddMemberState {
  * someone, only to a group room, and the session is shown what came of it.
  *
  * The person is named by chat address, or by a profile whose label names them,
- * or by both, which then have to agree. The viewer's manager offers them the
- * room through the profile's share inbox, or, given only their address,
- * through the profiles its people list for them, and decides how they were
- * told. An add with no manager to send to, because the viewer has none or
- * theirs hasn't resolved, admits them and tells them nothing, and records so
- * at once.
+ * or by both, which then have to agree. Once they are admitted and the add is
+ * recorded, `offer` has the viewer's manager offer them the room through the
+ * profile's share inbox, or, given only their address, through the profiles
+ * its people list for them, and decide how they were told.
  */
 const commitAddMember = handler<AddMemberEvent, AddMemberState>(
   (
@@ -454,9 +535,7 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       kind,
       requests,
       latest,
-      self,
-      canOffer,
-      offerRoom,
+      offer,
       picked,
     },
   ) => {
@@ -514,25 +593,13 @@ const commitAddMember = handler<AddMemberEvent, AddMemberState>(
       );
       return;
     }
-    // The manager decides how the member was told, in an event of its own,
-    // and records it, which the room's `addRequests` then reads.
-    const space = spaceOf(room);
-    if (
-      canOffer && offerRoom !== undefined && self !== undefined &&
-      space !== undefined
-    ) {
-      offerRoom.send({
-        requestId: addMemberOfferId(space, requestId),
-        room: self,
-        member,
-        ...(profile === undefined ? {} : { profile }),
-      });
-      requests?.key(requestId).set({ status: "done" });
-      latest.set({ requestId, member });
-      return;
-    }
-    requests?.key(requestId).set({ status: "done", delivery: "access-only" });
-    latest.set({ requestId, member, delivery: "access-only" });
+    requests?.key(requestId).set({ status: "done" });
+    latest.set({ requestId, member });
+    offer.send({
+      requestId,
+      member,
+      ...(profile === undefined ? {} : { profile }),
+    });
   },
 );
 
@@ -620,16 +687,15 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
     const canOffer = computed(() =>
       manager?.offerRoom !== undefined && self !== undefined
     );
-    const bindings = {
+    const offer = offerAddedMember({
       room,
-      ownSpace,
-      kind,
       requests,
       latest,
       self,
       canOffer,
       offerRoom: manager?.offerRoom,
-    };
+    });
+    const bindings = { room, ownSpace, kind, requests, latest, offer };
     const add = commitAddMember(bindings);
     const canAdd = computed(() =>
       ownSpace && kind !== "direct" && spaceAccess(room) === "OWNER"
@@ -744,6 +810,23 @@ export const AddMember = pattern<AddMemberInput, AddMemberOutput>(
   },
 );
 
+/**
+ * A thread, as the main conversation shows it beside its root: how many
+ * replies it holds, and when the newest was sent. A deleted or obliterated
+ * reply stays in its thread, so it is counted, and its `sentAt` can be the
+ * newest.
+ */
+export interface ChatThreadSummary {
+  /** The thread's root, a message the main conversation shows. */
+  root: MessageCell;
+
+  /** How many messages the thread holds besides its root; never 0. */
+  replyCount: number;
+
+  /** The newest `sentAt` among those messages. */
+  latestReplyAt: FabricEpochNsec;
+}
+
 /** A room's messages: facts, the newest, and this session's windows. */
 export interface ChatMessageList {
   /** How many messages the room holds, obliterated tombstones included. */
@@ -764,6 +847,12 @@ export interface ChatMessageList {
     hasOlder: boolean;
   };
 
+  /**
+   * Every thread in the room that holds a reply, oldest root first. A message
+   * of the main conversation that roots none has no entry.
+   */
+  threads: ChatThreadSummary[];
+
   /** This session's open windows, by the `windowId` its client chose. */
   windows: PerSession<WindowsCell>;
 
@@ -772,6 +861,42 @@ export interface ChatMessageList {
 
   /** Closes a window. */
   closeWindow: Stream<RoomWindowEvent>;
+}
+
+/** Who is reading a room. */
+export interface ChatRoomViewer {
+  /**
+   * The reader's profile, as a link to the profile itself, which is the form
+   * a message's `authorProfile` takes; absent until it resolves.
+   */
+  profile?: ProfileCell;
+
+  /**
+   * The principal the reader's profile's `represents-principal` label attests;
+   * absent when it attests none, or the label can't be read.
+   */
+  principal?: string;
+
+  /**
+   * The reader's access to the room's space, as its access list grants it;
+   * absent while that isn't known.
+   */
+  role?: SpaceAccessLevel;
+}
+
+/**
+ * The reader's profile, as a link to the profile itself, which `myProfile`
+ * may reach only through another link; `undefined` while it holds no value.
+ */
+const viewerProfileOf = (
+  myProfile: ProfileCell | undefined,
+): ProfileCell | undefined =>
+  myProfile?.get() === undefined ? undefined : myProfile.resolveAsCell();
+
+/** What a room's reader may do to one of its messages. */
+export interface ChatMessageRights extends MessageRights {
+  /** The message, as `messages.latest` links it. */
+  message: MessageCell;
 }
 
 /** A room's data face, for hosts that draw it natively. */
@@ -826,8 +951,26 @@ export interface ChatRoomView {
   /** The room's messages. */
   messages: ChatMessageList;
 
+  /**
+   * The message list's `openWindow`, here as well for a client that sends only
+   * to a view's own streams, as it reads a thread through a window.
+   */
+  openWindow: Stream<RoomWindowEvent>;
+
+  /** The message list's `closeWindow`, here as well, as `openWindow` is. */
+  closeWindow: Stream<RoomWindowEvent>;
+
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
+
+  /** Who is reading the room: their profile, its principal, and their access. */
+  viewer: ChatRoomViewer;
+
+  /**
+   * What this reader may do to each of the room's messages, oldest first.
+   * Nothing at all while `canSend` doesn't hold.
+   */
+  messageRights: ChatMessageRights[];
 
   /** Sends a message. */
   sendMessage: Stream<RoomStreamEvent>;
@@ -867,6 +1010,23 @@ export interface ChatRoomView {
    * the member was told of the room once that is decided.
    */
   addRequests: Record<string, AddMemberOutcome>;
+
+  /**
+   * The outcome of each of this reader's message acts, by its `requestId`:
+   * sends, edits, deletions, obliterations, and reactions added or removed.
+   */
+  messageRequests: Record<string, MessageActOutcome>;
+
+  /**
+   * Sets the room's title, which every member shares, from a trusted gesture
+   * on the rendering's `ChatRetitleSurface`, or from a client's own control
+   * through the sanctioned issuing path. Any member who can write in the room
+   * may, in a group room or a direct one.
+   */
+  setTitle: Stream<SetTitleEvent>;
+
+  /** The outcome of each of this reader's retitles, by its `requestId`. */
+  titleRequests: Record<string, SetTitleOutcome>;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -883,6 +1043,9 @@ export interface ChatRoomOutput extends ChatRoomView {
 
 /** What a room stores, and who is looking at it. */
 export interface FabriChatRoomCoreInput {
+  /** The space's root, which may explicitly declare this conversation. */
+  container?: Cell<ChatContainer>;
+
   /** The viewer's profile, which holds no value while it is unknown. */
   myProfile: ProfileCell | undefined;
 
@@ -910,19 +1073,19 @@ export interface FabriChatRoomCoreInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /**
+   * The room's title as a member last set it; absent for a room whose title
+   * no member sets.
+   */
+  titles?: TitlesCell;
+
   /** Those who joined the room; absent for a room nobody can join. */
   roster?: ParticipantRosterCell;
 
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   addRequests?: AddRequestsCell;
 
-  /**
-   * Whether the viewer has a manager to start a direct chat with; absent for
-   * none.
-   */
-  startsDirect?: boolean;
-
-  /** The viewer's manager's `openDirect`, when `startsDirect` holds. */
+  /** The viewer's manager's `openDirect`. */
   startDirect?: Stream<StartDirectEvent>;
 
   /**
@@ -936,6 +1099,14 @@ export interface FabriChatRoomCoreInput {
    * while the viewer has none, or theirs hasn't resolved.
    */
   manager?: RoomManager;
+
+  /**
+   * Whether the room's policy lets an OWNER of its space obliterate its
+   * messages, which picks the policy `about.policy` links; absent, as for
+   * every room the room's own pattern runs, yes for a group room and no for a
+   * direct room.
+   */
+  ownersMayObliterate?: boolean;
 }
 
 /**
@@ -961,6 +1132,7 @@ export const FabriChatRoomCore = pattern<
 >((input) => {
   const {
     myProfile,
+    container,
     about,
     messages,
     reactionLists,
@@ -968,12 +1140,13 @@ export const FabriChatRoomCore = pattern<
     usedTimes,
     activity,
     counters,
+    titles,
     roster,
     addRequests,
-    startsDirect,
     startDirect,
     self,
     manager,
+    ownersMayObliterate: ownersMayObliterateGiven,
   } = input;
   const composer = new Writable.perSession<ComposerState>({
     draft: "",
@@ -983,23 +1156,54 @@ export const FabriChatRoomCore = pattern<
   // A room the manager created has `about`, and is its space's root; a
   // space's own chat, sharing its space, has none.
   const ownSpace = computed(() => about?.get() !== undefined);
-  // Read as a value, as `canOffer` is: a handler bound to a manager that
-  // isn't there is bound to a stream that still reads as present.
-  const canJoin = computed(() =>
-    ownSpace && manager?.joinRoom !== undefined && self !== undefined
+  // The room's policy, a document of its own that `about` links, and which
+  // the message acts read: one for each answer to whether OWNERs may
+  // obliterate, since the rest of a room's policy is the same.
+  const policyWithOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: true,
+  });
+  const policyWithoutOwners = new Writable.perSpace<ChatRoomPolicy>({
+    ...FABRICHAT_POLICY,
+    ownersMayObliterate: false,
+  });
+  const policy = computed((): Cell<ChatRoomPolicy> =>
+    ownersMayObliterateIn(kind, ownersMayObliterateGiven)
+      ? policyWithOwners
+      : policyWithoutOwners
   );
+  // Whether the room is one a manager can take the viewer into. It reads
+  // nothing of the manager, whose label the room's space may not admit:
+  // `tellManagerJoined` reads whether the viewer has one, in its own event.
+  const canJoin = computed(() =>
+    (ownSpace || (container?.key("chatRoom").get() !== undefined &&
+      equals(container?.key("chatRoom").get(), self))) &&
+    self !== undefined
+  );
+  // The sender's outcomes, which follow them, and only them, across sessions,
+  // and why the session's latest act was refused, which the composer shows.
+  const messageRequests = new Writable.perUser<
+    Record<string, MessageActOutcome>
+  >({});
+  const refusal = new Writable.perSession<string>("");
   const records = {
     kind,
+    policy,
     composer,
+    outcomes: messageRequests,
+    refusal,
     messages,
     reactionLists,
     requests,
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom: manager?.joinRoom,
-    self,
+    joined: tellManagerJoined({
+      canJoin,
+      container: ownSpace ? undefined : container,
+      manager,
+      self,
+    }),
   };
   const alsoToMain = new Writable.perSession(false);
   const windows = new Writable.perSession<WindowsValue>();
@@ -1022,6 +1226,18 @@ export const FabriChatRoomCore = pattern<
     ) => entry.cell),
     hasOlder: mainEntries.length > FABRICHAT_POLICY.maxWindowCount,
   }));
+  // A thread's root is always in the main conversation, so its entries, in
+  // order, name every root.
+  const threads = computed((): ChatThreadSummary[] =>
+    mainEntries.flatMap((entry) => {
+      const place = places[entry.key];
+      return place?.latestReplyAt === undefined ? [] : [{
+        root: entry.cell,
+        replyCount: place.replies,
+        latestReplyAt: epochNsec(place.latestReplyAt),
+      }];
+    })
+  );
   const count = computed(() => entries.length);
   const sortedEntries = computed(() => [...entries].sort(compareEntries));
   const oldestAt = computed(() => sortedEntries[0]?.record.sentAt);
@@ -1065,11 +1281,44 @@ export const FabriChatRoomCore = pattern<
   });
   const cannotSend = computed(() => !canSend);
   const isOwner = computed(() => isOwnerOf(messages));
-  // The policy is a document of its own, which `about` links.
-  const policy = new Writable.perSpace<ChatRoomPolicy>(FABRICHAT_POLICY);
+  const viewer = computed((): ChatRoomViewer => {
+    const profile = viewerProfileOf(myProfile);
+    const principal = profile === undefined
+      ? undefined
+      : principalOf(profile, "represents-principal");
+    const role = spaceAccess(messages);
+    return {
+      ...(profile === undefined ? {} : { profile }),
+      ...(principal === undefined ? {} : { principal }),
+      ...(role === undefined ? {} : { role }),
+    };
+  });
+  // Every message's rights for the reader, by the rule the handlers admit an
+  // act by, derived once for the whole list as `places` is.
+  const messageRights = computed((): ChatMessageRights[] => {
+    const profile = viewerProfileOf(myProfile);
+    return sortedEntries.map((entry) => ({
+      message: entry.cell,
+      ...(canSend && profile !== undefined
+        ? messageRightsOf(
+          entry.record,
+          principalOf(profile, "represents-principal") !== undefined &&
+            principalOf(entry.cell, "authored-by") ===
+              principalOf(profile, "represents-principal"),
+          kind,
+          isOwner,
+          ownersMayObliterateBy(policy),
+        )
+        : NO_MESSAGE_RIGHTS),
+    }));
+  });
+  // The title a member last set outranks the one the room was created with.
+  const title = computed((): string | undefined =>
+    titles?.elementById(TITLE_KEY).get()?.title ?? about?.get()?.title
+  );
   const aboutView = {
     kind,
-    title: computed(() => about?.get()?.title),
+    title,
     createdAt: computed(() => about?.get()?.createdAt),
     policy,
     // The stored record itself, as a link, so a reader can read its label.
@@ -1079,8 +1328,32 @@ export const FabriChatRoomCore = pattern<
     ((counters.elementById(NUMBERING_KEY).get() ??
       NO_ACTIVITY) as ActivityCounters).expiredThrough
   );
-  const title = computed(() =>
-    about?.get()?.title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  const name = computed(() =>
+    title ?? (kind === "direct" ? "Direct chat" : "Chat")
+  );
+  // The sender's retitles' outcomes, which follow them, and only them, across
+  // sessions, and why the session's latest was refused, which the rendered
+  // control shows.
+  const titleRequests = new Writable.perUser<
+    Record<string, SetTitleOutcome>
+  >({});
+  const titleRefusal = new Writable.perSession<string>("");
+  const setTitle = commitSetTitle({
+    titles,
+    ownSpace,
+    messages,
+    outcomes: titleRequests,
+    refusal: titleRefusal,
+    joined: records.joined,
+  });
+  // Who may retitle differs by viewer, and what came of a retitle by session,
+  // so both are hidden by a prop rather than built as a different tree (see
+  // `FabriChatMessageRow`).
+  const retitleDisplay = computed((): ChatDisplay =>
+    ownSpace && titles !== undefined && canSend ? "flex" : "none"
+  );
+  const titleRefusalDisplay = computed((): ChatDisplay =>
+    titleRefusal.get() === "" ? "none" : "block"
   );
   // The key of the session's open thread's root; `""` while no thread is
   // open.
@@ -1114,6 +1387,11 @@ export const FabriChatRoomCore = pattern<
     (): ChatDisplay => (hasThread ? "flex" : "none"),
   );
   const isEmpty = computed(() => mainEntries.length === 0);
+  // Per session, so hidden by a prop rather than a branch (see
+  // `FabriChatMessageRow`).
+  const refusalDisplay = computed((): ChatDisplay =>
+    refusal.get() === "" ? "none" : "block"
+  );
   const threadShownIn = computed((): ShownIn =>
     alsoToMain.get() ? "both" : "thread"
   );
@@ -1153,14 +1431,17 @@ export const FabriChatRoomCore = pattern<
       ...records,
     }),
   };
+  const openWindow = commitWindow({ op: "open", messages, windows });
+  const closeWindow = commitWindow({ op: "close", messages, windows });
   const messageList = {
     count,
     oldestAt,
     newestAt,
     latest,
+    threads,
     windows,
-    openWindow: commitWindow({ op: "open", messages, windows }),
-    closeWindow: commitWindow({ op: "close", messages, windows }),
+    openWindow,
+    closeWindow,
   };
   const view = {
     about: aboutView,
@@ -1172,23 +1453,57 @@ export const FabriChatRoomCore = pattern<
     participantPrincipals,
     addParticipant: join,
     messages: messageList,
+    openWindow,
+    closeWindow,
     canSend,
+    viewer,
+    messageRights,
     ...streams,
     addMember: addMember.add,
     canAdd: addMember.canAdd,
     addRequests: addMember.outcomes,
+    messageRequests,
+    setTitle,
+    titleRequests,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
 
   return {
-    [NAME]: title,
+    [NAME]: name,
     [UI]: (
       <cf-vstack gap="3" style={{ padding: "1rem", maxWidth: "720px" }}>
         <cf-hstack justify="between" align="center" gap="4">
-          <cf-heading level={3}>{title}</cf-heading>
+          <cf-heading level={3}>{name}</cf-heading>
           <cf-profile-badge $profile={myProfile} size="sm" />
         </cf-hstack>
+        <cf-vstack
+          id="fabrichat-retitle"
+          gap="1"
+          hidden
+          style={{ display: retitleDisplay }}
+        >
+          <div
+            data-ui-pattern={CHAT_RETITLE_SURFACE}
+            data-ui-event-integrity={CHAT_RETITLE_SURFACE}
+          >
+            <cf-submit-input
+              data-ui-action={CHAT_RETITLE_ACTION}
+              inputId="fabrichat-title"
+              placeholder="New title"
+              buttonText="Rename"
+              onClick={setTitle}
+            />
+          </div>
+          <cf-text
+            id="fabrichat-retitle-refusal"
+            variant="caption"
+            hidden
+            style={{ display: titleRefusalDisplay }}
+          >
+            {titleRefusal}
+          </cf-text>
+        </cf-vstack>
 
         {
           /* A plain flex row, not `cf-hstack`, whose host clips overflow
@@ -1206,7 +1521,6 @@ export const FabriChatRoomCore = pattern<
             <ParticipantChip
               participant={participant}
               myProfile={myProfile}
-              startsDirect={startsDirect}
               startDirect={startDirect}
             />
           ))}
@@ -1228,14 +1542,18 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
-              joinRoom={manager?.joinRoom}
+              container={ownSpace ? undefined : container}
+              manager={manager}
               self={self}
             />
           ))}
@@ -1273,6 +1591,14 @@ export const FabriChatRoomCore = pattern<
             onClick={composeSend}
           />
         </div>
+        <cf-text
+          id="fabrichat-act-refusal"
+          variant="caption"
+          hidden
+          style={{ display: refusalDisplay }}
+        >
+          {refusal}
+        </cf-text>
 
         <cf-vstack
           id="fabrichat-thread"
@@ -1300,14 +1626,18 @@ export const FabriChatRoomCore = pattern<
               places={places}
               cannotWrite={cannotSend}
               isOwner={isOwner}
+              policy={policy}
               messages={messages}
               reactionLists={reactionLists}
               requests={requests}
               usedTimes={usedTimes}
               activity={activity}
               counters={counters}
+              outcomes={messageRequests}
+              refusal={refusal}
               canJoin={canJoin}
-              joinRoom={manager?.joinRoom}
+              container={ownSpace ? undefined : container}
+              manager={manager}
               self={self}
             />
           ))}
@@ -1372,6 +1702,12 @@ export interface FabriChatRoomInput {
   counters?: ActivityCountersCell;
 
   /**
+   * The room's title as a member last set it. It changes only through
+   * `setTitle`.
+   */
+  titles?: TitlesCell;
+
+  /**
    * Those who joined the room. It changes only through `addParticipant`, the
    * one writer its write contract admits.
    */
@@ -1392,11 +1728,13 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     usedTimes,
     activity,
     counters,
+    titles,
     participants,
     // The room itself, the link another member's manager lists it by.
     [SELF]: self,
   }) => {
     const profileWish = wish<ChatProfile>({ query: "#profile" });
+    const containerWish = wish<Cell<ChatContainer>>({ query: "#default" });
     // The viewer's adds' outcomes, which follow them, and only them, across
     // sessions.
     const addRequests = new Writable.perUser<
@@ -1408,7 +1746,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     const managerWish = wish<
       RoomManager & { openDirect: Stream<StartDirectEvent> }
     >({ query: "#chatManager" });
-    const startsDirect = computed(() => managerWish.result !== undefined);
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
     const setupDisplay = computed((): ChatDisplay =>
@@ -1417,6 +1754,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     const room = FabriChatRoomCore(
       {
         myProfile: profileWish.result,
+        container: containerWish.result,
         about,
         messages,
         reactionLists,
@@ -1424,9 +1762,9 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         usedTimes,
         activity,
         counters,
+        titles,
         roster: participants,
         addRequests,
-        startsDirect,
         startDirect: managerWish.result?.openDirect,
         self,
         manager: managerWish.result,
@@ -1445,7 +1783,11 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,
       messages: room.messages,
+      openWindow: room.openWindow,
+      closeWindow: room.closeWindow,
       canSend: room.canSend,
+      viewer: room.viewer,
+      messageRights: room.messageRights,
       sendMessage: room.sendMessage,
       editMessage: room.editMessage,
       deleteMessage: room.deleteMessage,
@@ -1455,6 +1797,9 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addMember: room.addMember,
       canAdd: room.canAdd,
       addRequests: room.addRequests,
+      messageRequests: room.messageRequests,
+      setTitle: room.setTitle,
+      titleRequests: room.titleRequests,
       [UI]: (
         <cf-screen>
           {room[UI]}

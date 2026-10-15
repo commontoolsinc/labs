@@ -3,8 +3,9 @@
 Use this guide to build a Common Fabric pattern whose application lives inside
 one sandboxed `cf-iframe`. The wrapper is deliberately mechanical: it exposes
 three named Cell resources (`input`, `state`, and `output`), optionally exposes
-SQLite databases, embeds the guest and its dependencies into one HTML string,
-and returns the state and output through the normal pattern result.
+SQLite databases and presence rooms, embeds the guest and its dependencies into
+one HTML string, and returns the state and output through the normal pattern
+result.
 
 No other pattern guide is required for this shape.
 
@@ -14,7 +15,7 @@ Keep these files together:
 
 ```text
 packages/patterns/quick-notes/
-├── contract.ts  # input, durable state, output, scopes, optional databases
+├── contract.ts  # input, durable state, output, scopes, optional resources
 ├── guest.ts     # the iframe application; guest.tsx is also accepted
 ├── guest.html   # optional custom document shell
 └── main.tsx     # generated wrapper; do not hand-edit
@@ -100,6 +101,9 @@ available scopes are:
 
 Choose scope independently for state and output. Do not put transient DOM state
 such as hover or an open tooltip in a Fabric Cell; keep that inside the guest.
+State that other people should see while it happens and nobody needs afterwards,
+such as a pointer position or a drag in flight, belongs in a presence room
+rather than a Cell; see [Optional presence](#optional-presence).
 
 The generated wrapper owns `space`-scoped state and output inside the piece. It
 declares `user`- and `session`-scoped state or output as optional scoped pattern
@@ -363,6 +367,113 @@ generated TypeScript bindings. They may use reserved words. When the exact name
 `__proto__` is required in `contract.ts`, write it as a computed property
 (`["__proto__"]`) so JavaScript creates an own property.
 
+## Optional presence
+
+A presence room carries what the people on a piece are doing right now. Nothing
+in it is stored: each member holds one record, a display name and a few named
+facets, and the record is gone when the member leaves. Use it for pointers,
+selections, a drag in flight, or a player's position. Use a Cell for anything
+that must be agreed on or must survive.
+
+Declare each room in `IFRAME_PATTERN`, naming the resource whose field it
+follows:
+
+```typescript
+export const IFRAME_PATTERN = {
+  name: "CursorCanvas",
+  displayName: "Cursor canvas",
+  stateScope: "space",
+  outputScope: "user",
+  frameHeight: "100vh",
+  databases: {},
+  presence: { cursors: "state" },
+} as const;
+```
+
+The value is `state` or `output`. Everyone who shares that resource shares the
+room, so a room following `space`-scoped state gathers every user and session
+on the piece, and a room following `user`-scoped output gathers only one user's
+sessions. The name grants the room and none of the resource's data.
+
+Join from the guest by listening, and publish your own record:
+
+```typescript
+// Shown at module scope.
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+
+const fabric = connectFabric();
+const cursors = fabric.presence("cursors");
+const board = document.querySelector<HTMLDivElement>("#root")!;
+
+const draw = () => {
+  for (const participant of cursors.participants) {
+    const pointer = participant.facets.pointer;
+    if (typeof pointer?.x !== "number" || typeof pointer.y !== "number") {
+      continue;
+    }
+    console.log(participant.name, pointer.x, pointer.y);
+  }
+};
+
+const leave = cursors.join((event) => {
+  if (event.kind === "failure") {
+    console.warn(event.error.code);
+    return;
+  }
+  draw();
+});
+
+// A publication that cannot land rejects; the room reports why to the
+// listener, so the rejection itself needs no handling.
+const publish = (publication: Promise<void>) => publication.catch(() => {});
+
+publish(cursors.setName("Ada"));
+board.addEventListener("pointermove", (event) => {
+  publish(cursors.setFacet("pointer", { x: event.offsetX, y: event.offsetY }));
+});
+board.addEventListener("pointerleave", () => {
+  publish(cursors.clearFacet("pointer"));
+});
+
+globalThis.addEventListener("pagehide", leave, { once: true });
+```
+
+The rules that shape a guest:
+
+- The room publishes nothing for a member with no name, so call `setName()`
+  before expecting peers to see you. The guest picks the name; a `user`-scoped
+  output field is a reasonable place to keep one.
+- `participants` holds every other member, never the guest itself. A
+  `participantId` names a membership, not a person: it changes on reconnect,
+  and two windows of one user are two participants.
+- A room holds latest state, not a stream. Each `setFacet()` replaces the
+  facet, and the host sends one publication per animation frame, so peers see
+  where a pointer is and not every place it was. A page that is not being
+  drawn, such as a background tab, publishes nothing until it is shown.
+- A facet is whatever another guest wrote. Check the type of every field
+  before using it, as the example does, and ignore a facet that does not fit.
+- A record holds at most eight facets and 8 KiB, and a facet's name starts
+  with a lowercase letter, continues with lowercase letters, digits, and
+  hyphens, and is at most 32 characters long. A publication outside those
+  bounds ends the room with a `presence-refused` failure.
+- A `failure` ends the room, and a new membership starts empty.
+  `presence-unsupported` means the host has no relay, and joining again will
+  not help. `presence-refused` means the relay refused the join or a
+  publication, and its message says which bound: correct what was published
+  before joining again, or the same publication ends the new room too, and a
+  full room may admit the guest later. After `presence-disconnected`, call
+  `join()` again when the user next acts and publish the name and facets as
+  they were.
+- Presence does not wait for the hydration barrier. Join at startup, and set
+  the name once the Cell that holds it has been pulled.
+
+A shape dragged across a shared board shows the division of labor. While the
+pointer is down, publish the shape's position as a facet and draw peers' facets
+over the stored positions. On release, write the position to the Cell, and
+clear the facet only after that write and a `pull()` have settled, so peers do
+not see the shape return to where it was in between.
+`packages/patterns/iframe-cursor-canvas/` is a complete example.
+
 ## Generate the wrapper
 
 Run the checked-in helper from the repository root:
@@ -400,25 +511,70 @@ deno task cf check packages/patterns/quick-notes/main.tsx --no-run
 If the pattern is intentionally outside the repository, pass its directory as
 `--root`; otherwise the CLI uses the repository as its source boundary.
 
-Launch a repository pattern against local servers from the repository root:
+Launch a repository pattern against local servers from the repository root.
+Start the servers first:
 
 ```bash
 ./scripts/start-local-dev.sh
+```
+
+The script serves on ports 8000 and 5173 and fails when either is taken, which
+is the usual case when another checkout has servers running. Start it with
+`--port-offset=<n>` then. Continue only once it reports that both servers
+started, and use the `Toolshed:` address it prints,
+`http://localhost:<8000 + n>`, as `CF_API_URL` below: a `cf` command pointed at
+port 8000 would deploy to the other checkout's server.
+[`LOCAL_DEV_SERVERS.md`](../../development/LOCAL_DEV_SERVERS.md) covers the
+scripts.
+
+Then mint a key, create a space, and create the piece in it:
+
+```bash
 mkdir -p .cf
 test -e .cf/iframe-pattern.key || \
   deno task cf id new > .cf/iframe-pattern.key
-CF_API_URL=http://localhost:8000 \
-CF_IDENTITY=.cf/iframe-pattern.key \
+# The Toolshed address that start-local-dev.sh printed.
+export CF_API_URL=http://localhost:8000
+export CF_IDENTITY=.cf/iframe-pattern.key
+export CF_SPACE="$(deno task cf space create --label "Iframe quick notes")"
 deno task cf piece new packages/patterns/quick-notes/main.tsx \
-  --root . --space iframe-quick-notes --slug quick-notes
+  --root . --slug quick-notes
 ```
 
 Never overwrite an existing key file: doing so selects a different PerUser
-identity. Open `http://localhost:8000/iframe-quick-notes/quick-notes`. If the
-shell shows its first-use login, register a new key and complete the passphrase
-confirmation. Exercise the meaningful action and check the browser console;
-compilation alone does not prove that the guest loaded or that a bridge write
-completed.
+identity. `cf piece new` does not create the space it names, so
+`cf space create` runs first. It prints the new space's DID, which `CF_SPACE`
+and `--space` accept. Run both commands once: each `cf space create` makes
+another space, and a second `cf piece new` leaves the slug with the first
+piece. `cf piece new` prints the page address under `Open in browser`, which is
+`$CF_API_URL/$CF_SPACE/quick-notes`. It also prints the `cf piece setsrc`
+command that updates the piece after a source change.
+
+Open the page address. A browser that has not signed in is shown the shell's
+login. Sign it in with the key the CLI used: choose **Register**, which a
+browser that has signed in before labels **Register New Key**, then
+**Import CLI Key**, and select `.cf/iframe-pattern.key`. The browser then acts
+as the identity that created the space, the only one the space admits, and `cf`
+commands read the PerUser values the page wrote.
+[`shared-identity.md`](../../features/shared-identity.md) covers that workflow.
+
+**Use Passphrase** on the same screen, followed by generating and confirming a
+passphrase, registers a new identity instead, and the space refuses it: the
+shell reports `Slug "quick-notes" not found.`, and the console carries
+`AuthorizationError: Principal did:key:… lacks READ on space did:key:…`.
+Take that route only when the tool driving the browser cannot choose a file, or
+for the second identity the multi-user checks below need. The principal the
+error names is the browser's DID, which
+`globalThis.app.state().identity.did()` also returns in the page's console.
+Grant it access with the CLI key, in a shell that has the three exports above,
+then reload the page:
+
+```bash
+deno task cf acl set <browser DID> WRITE
+```
+
+Exercise the meaningful action and check the browser console; compilation alone
+does not prove that the guest loaded or that a bridge write completed.
 
 Then run the pattern and exercise its meaningful interaction. Check that input
 renders, state survives at its declared scope, output changes only when the
@@ -426,7 +582,8 @@ guest intends, and any SQLite data has the declared isolation. A generated
 wrapper that compiles but never loads the guest is not complete.
 
 For multi-user behavior, cover two sessions of one identity, a second identity,
-and a reload. PerSpace data must agree everywhere; PerUser data must agree only
+and a reload. The second identity opens the piece only after the `cf acl set`
+grant above. PerSpace data must agree everywhere; PerUser data must agree only
 between the first identity's sessions; PerSession data must remain distinct.
 Exercise first use while scoped defaults and SQLite handles materialize, not
 only a warmed-up piece. When the pattern or bridge must support both execution

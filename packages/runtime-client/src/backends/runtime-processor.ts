@@ -979,9 +979,11 @@ export class RuntimeProcessor {
   #identity: Identity;
   #legacySpacesAdopted: Promise<void> | undefined;
   #privateInboxEnsured: Promise<void> | undefined;
+  #profileRootsRepaired: Promise<void> | undefined;
   #shareIntake: Promise<ShareIntake | undefined> | undefined;
   // Aborted as disposal begins, so an inbox ensure still in flight sends
-  // nothing after it, and the share intake stops.
+  // nothing after it, a profile root repair starts no commit after it, and
+  // the share intake stops.
   #disposal = new AbortController();
   #isDisposed = false;
   #disposingPromise: Promise<void> | undefined;
@@ -1151,6 +1153,7 @@ export class RuntimeProcessor {
     readonly awaitedHealth: boolean;
     legacySpacesAdopted: Promise<void> | undefined;
     privateInboxEnsured: Promise<void> | undefined;
+    profileRootsRepaired: Promise<void> | undefined;
     shareIntake: Promise<ShareIntake | undefined> | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
@@ -1180,6 +1183,12 @@ export class RuntimeProcessor {
       },
       set privateInboxEnsured(value) {
         outerThis.#privateInboxEnsured = value;
+      },
+      get profileRootsRepaired() {
+        return outerThis.#profileRootsRepaired;
+      },
+      set profileRootsRepaired(value) {
+        outerThis.#profileRootsRepaired = value;
       },
       get shareIntake() {
         return outerThis.#shareIntake;
@@ -1641,7 +1650,10 @@ export class RuntimeProcessor {
     const gate = this.#hostReadGate;
     let cell = getCell(this.#runtime, request.cell);
     if (request.meta !== undefined) {
-      const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
+      // The document root, which the keyed ancestor's schema does not
+      // describe.
+      const { keyedFrom: _keyedFrom, ...address } = request.cell;
+      const rootCell = getCell(this.#runtime, { ...address, path: [] });
       if (request.meta !== "argument" && request.meta !== "result") {
         // A metadata field that is not a link returns the raw data.
         return gate.readMetadata(rootCell, request.meta);
@@ -2328,16 +2340,19 @@ export class RuntimeProcessor {
       includeCfcLabel: request.includeCfcLabel,
     }, (value) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
-      // These are the call sites that need real schemas added.
-      const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
-      if (!hasSchema && isCellResult(value)) {
+      // These are the call sites that need real schemas added. The schema
+      // checked is the one the cell reads under, which for a ref keyed from
+      // an ancestor is the one the worker narrowed to.
+      if (!isCellResult(value)) return;
+      const schema = cell.getAsNormalizedFullLink().schema;
+      if (!hasExplicitSubscriptionSchema(schema)) {
         console.error(
           `[handleCellSubscribe] EMPTY SCHEMA SUBSCRIPTION producing ` +
             `CellResult proxy. Add a schema to this subscription site!\n` +
             `  cell: ${request.cell.id}\n` +
             `  path: ${JSON.stringify(request.cell.path)}\n` +
             `  space: ${request.cell.space}\n` +
-            `  schema: ${JSON.stringify(request.cell.schema)}`,
+            `  schema: ${JSON.stringify(schema)}`,
         );
       }
     }, (update) =>
@@ -2598,7 +2613,7 @@ export class RuntimeProcessor {
   ): CfcLabelViewResponse {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
-    const { schema: _schema, ...cellRef } = request.cell;
+    const { schema: _schema, keyedFrom: _keyedFrom, ...cellRef } = request.cell;
     const cell = getCell(this.#runtime, cellRef);
     // This reads the label with `cfcLabelViewForResolvedCell()`, which reads
     // what the store holds now, following a link the path crosses part way
@@ -2799,8 +2814,8 @@ export class RuntimeProcessor {
 
   /**
    * Tells the user's chat manager that the user has joined the FabriChat room
-   * whose space `request` names, when the space passes vetting, as
-   * `PiecesController.joinVisitedRoom` says, and answers with what was
+   * declared by the space `request` names, when it passes vetting, as
+   * `PiecesController.joinVisitedRoom()` says, and returns what was
    * decided. A user with no Home gets nothing done and no decision: Home is
    * never created for it, and an existing Home is brought up as any other
    * bring-up does.
@@ -2833,11 +2848,13 @@ export class RuntimeProcessor {
    * Helper for bringing up the user's Home pattern, which the first time in
    * this worker adopts the Home space list's name-only entries (see
    * `PiecesController.adoptLegacySpaces`), and then starts Home's ensure of
-   * the user's private inbox (see `PiecesController.ensurePrivateInbox`) and
-   * the share intake over Home's inboxes (see
-   * `PiecesController.startShareIntake`) without waiting for either. A later
-   * bring-up shares the run already made, and repeats only a step that
-   * failed. `homeCC` is a controller over the identity's Home space.
+   * the user's private inbox (see `PiecesController.ensurePrivateInbox`), the
+   * repair that makes each of the user's profiles its space's root (see
+   * `PiecesController.repairProfileRoots`), and the share intake over Home's
+   * inboxes (see `PiecesController.startShareIntake`) without waiting for
+   * any of them. A later bring-up shares the run already made, and repeats
+   * only a step that failed. `homeCC` is a controller over the identity's
+   * Home space.
    *
    * Resolves once the adoption has settled, and never rejects.
    */
@@ -2863,6 +2880,17 @@ export class RuntimeProcessor {
         console.warn("[RuntimeProcessor] Ensuring the private inbox:", error);
       },
     );
+    // The repair reads each listed profile's space and writes the space cell
+    // of one whose profile is not its root, so Home opens without waiting for
+    // it. A failure is reported unless the processor has been disposed, and
+    // the next bring-up of Home in this worker starts it again.
+    this.#profileRootsRepaired ??= homeCC.repairProfileRoots(
+      this.#disposal.signal,
+    ).catch((error) => {
+      this.#profileRootsRepaired = undefined;
+      if (this.#isDisposed) return;
+      console.warn("[RuntimeProcessor] Repairing profile roots:", error);
+    });
     // The intake follows Home's inboxes until disposal aborts its signal. A
     // failure to start it is reported unless the processor has been disposed,
     // and the next bring-up of Home in this worker starts it again.
@@ -2925,15 +2953,16 @@ export class RuntimeProcessor {
   /**
    * Helper for `handleIdle()`, which waits for the housekeeping over Home that
    * `#startHomeHousekeeping()` has started in this worker: the adoption of the
-   * Home space list's name-only entries, the private inbox ensure, the start
-   * of the share intake, and the intake taking up every change it has been
-   * told of. Returns the intake, when one is running. Never rejects: each step
-   * is held as a promise that does not, and a failure of the intake's own wait
-   * is reported rather than passed on.
+   * Home space list's name-only entries, the private inbox ensure, the profile
+   * root repair, the start of the share intake, and the intake taking up every
+   * change it has been told of. Returns the intake, when one is running. Never
+   * rejects: each step is held as a promise that does not, and a failure of
+   * the intake's own wait is reported rather than passed on.
    */
   async #homeHousekeepingIdle(): Promise<ShareIntake | undefined> {
     await this.#legacySpacesAdopted;
     await this.#privateInboxEnsured;
+    await this.#profileRootsRepaired;
     const intake = await this.#shareIntake;
     await intake?.idle().catch((error) => {
       console.warn("[RuntimeProcessor] Waiting for the share intake:", error);

@@ -79,11 +79,14 @@ any page of the shell that shows a piece starts the ensure for a user
 whose Home exists, and Home's start stays off the path to that first piece. A
 page whose view fails to load a piece starts none. None of these waits for the
 ensure. A client's `idle()` does: the worker answers it once the ensure, the
-adoption of name-only entries, and the share intake's start have finished,
-and the intake has taken up every change it has been told of. The ensure has
-finished once Home's handler has run on the event it sends and that run has
-committed, which under server execution is on the server, after the event
-itself has committed. The shell's
+adoption of name-only entries, the repair that makes each of the user's profiles
+its space's root (see "Profile" in
+[`HOME_SPACE.md`](../common/conventions/HOME_SPACE.md)), and the share intake's
+start have finished, and the intake has taken up every change it has been told
+of. A step that fails has finished too: its failure is logged, and `idle()`
+resolves all the same. The ensure has finished once Home's handler has run on the event it sends
+and that run has committed, which under server execution is on the server, after
+the event itself has committed. The shell's
 `commonfabric.viewSettled` waits for its own request to bring Home up as well,
 from the moment it decides to make one, so a page that has settled has none of
 this still running. A request for another space's root starts no ensure, nor does a read
@@ -804,14 +807,30 @@ Each time a runtime shows a piece of a space other than the last one it showed,
 the shell waits for Home's bring-up to answer and for the view to settle, and
 then asks the worker, through `RuntimeClient.joinVisitedRoom()`, to join the
 user to the room in that space. The worker does nothing for a user with no
-Home, and creates none. Otherwise it vets the space as the share intake vets an
-offered one, with the same reasons for a refusal (`vetSpace()` in
-`packages/piece/src/ops/space-vetting.ts`, which both use): the user can write
-there, through an entry of their own or the grant to every principal, the space
-declares itself a `fabrichat-room`, and its root is the room at the address the
-space's genesis commit reserves. A space that passes has its root sent to
-Home's `chatManager.joinRoom`, when Home has that stream, with no `requestId`
-(`joinVisitedRoomOf()` in `packages/piece/src/ops/join-visited-room.ts`).
+Home, and creates none. If Home has no `chatManager.joinRoom` stream, it
+returns `no-chat-manager` without vetting. Otherwise it requires write access
+to the visited space, through the user's own entry or the grant to every principal, and uses
+the space's declared kind to select its locator:
+
+- A `fabrichat-room` uses the same strict vetting as a share offer
+  (`vetSpace()` in `packages/piece/src/ops/space-vetting.ts`): its root is a
+  document of that space at the address its genesis commit reserves.
+- Every other kind, including an undeclared kind, uses the root's explicit
+  `chatRoom` link. The root must be a document of the visited space; its
+  address need not be reserved. The link may follow aliases, and must resolve
+  to a room document in that space or to the root of a foreign standalone
+  `fabrichat-room` space that passes strict vetting, including write access.
+  Inline objects and links to paths inside a document are refused. A missing
+  declaration yields `chat-room-missing`; a malformed one yields
+  `chat-room-invalid`. The host infers nothing from room-like fields.
+
+A passing visit sends the room to Home's `chatManager.joinRoom`, when Home has
+that stream, with no `requestId`. A declaration-based join also sends the
+root as `container`; the manager verifies that its `chatRoom` names the same
+room (`joinVisitedRoomOf()` in
+`packages/piece/src/ops/join-visited-room.ts`). Visiting a container counts as
+visiting its declared chat. A placement with no declaration is outside this
+locator contract. The share intake still requires a standalone room.
 
 The manager makes the room one of the user's chats, and, once the user's
 profile has resolved, adds them to its participants; a room their chats list

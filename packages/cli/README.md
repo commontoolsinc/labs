@@ -32,9 +32,11 @@ is an operator's command. It makes each existing profile whose space has no
 profile as its root into that root, across a whole store, so that a host holding
 only a profile space's DID reaches the profile. What a repaired profile is, and
 what it is not, is under "Profile" in
-[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person can
-repair their own profiles without a snapshot, as "A person's own profiles" below
-describes.
+[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person's own
+runtime makes the same repair to the profiles their Home lists when it brings
+Home up, as that document says, so the command is for the profiles of people who
+do not open Home again. A person can also run it over their own profiles without
+a snapshot, as "A person's own profiles" below describes.
 
 Which profiles exist comes from `<dir>`, a snapshot of the store's space
 databases, read offline and never written: every link in each Home's profile
@@ -1080,6 +1082,43 @@ and the seq at which the space's commit log accepted the update. That seq is
 what `cf inspect value-at --seq` and `diff --from` take, so the piece can be
 read at exactly the commit that applied the update, or diffed against what has
 landed since.
+
+## Rendering a piece
+
+`cf piece render --cell <reference>` starts the piece in the command's own
+process, renders its UI against an in-process document, and prints the HTML.
+`--no-start` renders the piece's stored state instead of starting it, and
+`--json` prints the HTML inside a JSON record. The references it accepts are
+described under [Cell references](#cell-references).
+
+Without `--watch` the command prints once and exits. It prints when three things
+hold at once: the piece has nothing left to compute, nothing it asked storage
+for is still loading, and no commit the render issued is still pending. The HTML
+is therefore the tree the piece settles to, including any list the piece builds
+only after its stored state has loaded.
+
+What ends a commit's pending state depends on where the commit went. One sent
+directly to the store is pending until the store confirms or refuses it. With
+[`serverExecution`](../../docs/development/EXPERIMENTAL_OPTIONS.md#serverexecution)
+on, what a computation writes is sealed into the client's speculation overlay
+instead, and that commit is pending only until the seal accepts it; the command
+does not wait for what becomes of it afterwards.
+
+With `serverExecution` off, starting a piece writes its derived state from this
+process, so the first render of a piece no client has run can issue hundreds of
+commits. The command waits for them because a commit still in flight when the
+process exits may never be applied, and the next load of the piece then computes
+and commits the same values again.
+
+The command does not wait for builtin I/O still in flight, such as a fetch or a
+language-model call. A piece that renders a pending state for one is printed in
+that state.
+
+With `--watch` the command stays connected and prints the HTML again each time
+the UI changes. Each print is the tree at a point where the piece has nothing
+left to compute and is waiting for nothing from storage. A commit may still be
+pending at that point, so a change that a commit's result causes is a later
+print.
 
 ## Compacting a space store
 

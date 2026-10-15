@@ -166,5 +166,6 @@ export {
   listedProfiles,
   type ProfileSpaceRootInspection,
   type ProfileSpaceRootStatus,
+  repairProfileRootsOf,
   repairProfileSpaceRoot,
 } from "./profile-space-root.ts";

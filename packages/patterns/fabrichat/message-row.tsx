@@ -21,6 +21,7 @@ import type { ViewPlace } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
+  type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -29,16 +30,20 @@ import {
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
-  FABRICHAT_POLICY,
   isDeleted,
   isObliterated,
-  type JoinRoomRequest,
+  type JoiningManager,
   type MessageCell,
   type MessageRecord,
+  type MessageRequestsCell,
+  messageRightsOf,
   type MessagesCell,
+  NO_MESSAGE_RIGHTS,
+  ownersMayObliterateBy,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
+  tellManagerJoined,
   type UsedTimesCell,
   viewKeyOf,
 } from "./room-records.tsx";
@@ -52,11 +57,13 @@ import {
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDisplay,
   type ChatReaction,
   type ChatReactionTally,
   type ChatRoomKind,
   type ChatRoomLink,
+  type ChatRoomPolicy,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -141,6 +148,12 @@ export interface FabriChatMessageRowInput {
   /** Whether the viewer holds OWNER in the room's space. */
   isOwner: boolean;
 
+  /**
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   */
+  policy?: Cell<ChatRoomPolicy>;
+
   /** The room's messages. */
   messages: MessagesCell;
 
@@ -159,11 +172,26 @@ export interface FabriChatMessageRowInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
-  /** Whether the viewer's manager can take the viewer into the room. */
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
+  /** Whether the room is one the viewer's manager can take them into. */
   canJoin?: boolean;
 
-  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
-  joinRoom?: Stream<JoinRoomRequest>;
+  /** The container's declaration for a room held inside another space. */
+  container?: Cell<ChatContainer>;
+
+  /**
+   * The viewer's manager, which a write tells it joined the room; absent
+   * while the viewer has none, or theirs hasn't resolved.
+   */
+  manager?: JoiningManager;
 
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
@@ -219,18 +247,24 @@ export const FabriChatMessageRow = pattern<
     places,
     cannotWrite,
     isOwner,
+    policy,
     messages,
     reactionLists,
     requests,
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
-    joinRoom,
+    container,
+    manager,
     self,
   } = input;
+  const joined = tellManagerJoined({ canJoin, container, manager, self });
   const records = {
     kind,
+    policy,
     composer,
     messages,
     reactionLists,
@@ -238,9 +272,9 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom,
-    self,
+    outcomes,
+    refusal,
+    joined,
   };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
@@ -255,27 +289,21 @@ export const FabriChatMessageRow = pattern<
     );
   });
   const isDeletedNow = computed(() => isDeleted(message.get()));
-  const isMine = computed(() => {
-    const viewer = myProfile?.get() === undefined
-      ? undefined
-      : principalOf(myProfile, "represents-principal");
-    const record = message.get();
-    return record !== undefined && !isObliterated(record) &&
-      viewer !== undefined &&
-      principalOf(message, "authored-by") === viewer;
-  });
-  const canObliterate = computed(() => {
-    const record = message.get();
-    if (
-      record === undefined || isObliterated(record) ||
-      myProfile?.get() === undefined
-    ) {
-      return false;
-    }
-    return kind === "direct"
-      ? isMine
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwner === true;
-  });
+  // What the viewer may do to the message, by the rule the room's handlers
+  // admit an act by, and none of it while they can't write in the room.
+  const rights = computed(() =>
+    cannotWrite || myProfile?.get() === undefined
+      ? NO_MESSAGE_RIGHTS
+      : messageRightsOf(
+        message.get(),
+        principalOf(myProfile, "represents-principal") !== undefined &&
+          principalOf(message, "authored-by") ===
+            principalOf(myProfile, "represents-principal"),
+        kind,
+        isOwner === true,
+        ownersMayObliterateBy(policy),
+      )
+  );
   const isEditing = computed(() => {
     const editing = composer.get()?.editing;
     return editing !== undefined && equals(editing, message);
@@ -318,14 +346,19 @@ export const FabriChatMessageRow = pattern<
   // for that viewer runs the room, which one that only renders it does not,
   // so a row's place in the main conversation, which every viewer is shown,
   // is decided from the room's messages alone.
-  const ownDisplay = computed((): ChatDisplay =>
-    isMine && !isDeletedNow ? "inline-flex" : "none"
+  const editDisplay = computed((): ChatDisplay =>
+    rights.canEdit ? "inline-flex" : "none"
+  );
+  const deleteDisplay = computed((): ChatDisplay =>
+    rights.canDelete ? "inline-flex" : "none"
   );
   const obliterateDisplay = computed((): ChatDisplay =>
-    canObliterate ? "inline-flex" : "none"
+    rights.canObliterate ? "inline-flex" : "none"
   );
-  const editorDisplay = computed(
-    (): ChatDisplay => (isEditing ? "block" : "none"),
+  // An open editor closes once the message no longer takes an edit from the
+  // viewer, as when an OWNER deletes it.
+  const editorDisplay = computed((): ChatDisplay =>
+    isEditing && rights.canEdit ? "block" : "none"
   );
   const pickerDisplay = computed((): ChatDisplay =>
     pickerOpen.get() === true ? "flex" : "none"
@@ -484,9 +517,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -515,9 +548,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -574,9 +607,9 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
-                    canJoin,
-                    joinRoom,
-                    self,
+                    outcomes,
+                    refusal,
+                    joined,
                     message,
                     emoji,
                     pickerOpen,
@@ -624,7 +657,7 @@ export const FabriChatMessageRow = pattern<
               size="sm"
               variant="ghost"
               hidden
-              style={{ display: ownDisplay }}
+              style={{ display: editDisplay }}
               onClick={startEdit}
             >
               Edit
@@ -639,7 +672,7 @@ export const FabriChatMessageRow = pattern<
                 size="sm"
                 variant="ghost"
                 hidden
-                style={{ display: ownDisplay }}
+                style={{ display: deleteDisplay }}
                 onClick={deleteMessage}
               >
                 Delete

@@ -771,12 +771,9 @@ export class Client {
       }
       throw error;
     }
-    // Between openSession resolving (the session now exists server-side)
-    // and the registration below, a session-scoped frame would find no
-    // routing entry. Unreachable for a transport that delivers one frame
-    // per event-loop task: this continuation is synchronous plus
-    // microtasks, which drain before the next task, and only a
-    // resume-mount has frames to deliver that early.
+    // A resumed session can receive `session/effect` while `openSession()`
+    // awaits catch-up. Reconnect restoration routes those frames to the
+    // existing `SpaceSession`; a new mount's routing entry is registered below.
     const session = new SpaceSession(
       this,
       space,

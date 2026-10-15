@@ -63,6 +63,7 @@ export const SHELL_FLAG_SOURCES = {
   computedCellIds: "build",
   lazyMaterialization: "build",
   serverExecution: "build",
+  localSessionDocuments: "deployment",
   viewScopedReplication: "build",
   webViewScopedReplication: "build",
   readerSchemaPrecedence: "build",

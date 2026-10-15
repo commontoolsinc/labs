@@ -57,13 +57,12 @@ export type SchemaHint = {
   readonly definesDocument?: true;
 
   /**
-   * Set on the remainder of a recursion the contract overlay of a handler's
-   * event or state cuts (`overlayContractCapabilities()`): every cell its
-   * reading reaches, outside the value of another cell, is opaque, since no
-   * use the body makes reaches it. Schema generation reads it as
-   * `SchemaHint.cellsOpaque`.
+   * Set on the node a verb's authored event is generated from: the handler
+   * body's capability summary of the event, which narrows each cell of the
+   * generated schema to the capability the body earns at its data path
+   * (`narrowEventCapabilities()`).
    */
-  readonly cellsOpaque?: true;
+  readonly contractCapabilities?: CapabilityParamSummary;
 };
 
 export type ReactiveCapability =

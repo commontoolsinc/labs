@@ -542,14 +542,21 @@ batch head H once a settle's frame barrier has completed with every frame
 at or below H applied — the moment at which an idle scheduler would have
 ended the settle — and carries H across cycles until W covers it,
 lowering it to a later cycle's batch head when that drain holds a record
-back. Any later moment at which the scheduler is idle, the
-demanded-structure load the settle awaits has completed, and no re-armed
-root is pending proves H covered: everything the scheduler ran after the
-barrier, it ran to completion. The proof is clamped by the shadow floor,
-the event-visibility floor and the re-armed roots' floor read at that
-moment, as the quiescent advance is. A floor read then may lift before
-the cycle ends, over input the proof never saw applied, so the floors
-read at the cycle's end do not replace it. The advance is clamped again
+back. Any later moment at which the scheduler is idle and the
+demanded-structure load the settle awaits has completed proves H covered:
+everything the scheduler ran after the barrier, it ran to completion. The
+proof is clamped by the shadow floor, the event-visibility floor and the
+re-armed roots' floor read at that moment, as the quiescent advance is. A
+root an input re-armed holds the proof below that input until its retry
+starts, and no lower: input that re-arms a root at every barrier does not
+keep the inputs below it from being proven. The retry starts at the first
+frame barrier a settle completes after the re-arm, on either side of
+T_flush, since frame application is all it waits for. A retry that starts
+as its settle ends at T_flush outlives that settle; the next cycle joins
+it, and runs for it even with no input behind it. A floor read with the
+proof may lift before the cycle ends, over input the proof never saw
+applied, so the floors read at the cycle's end do not replace it. The
+advance is clamped again
 by the cycle's own batch head and those floors at its end. An exhausted cycle advances W to the highest head
 proved before its wave closed, sealing the advance into that wave as any
 other. A wave commit that aborts discards the carried H
@@ -1179,17 +1186,10 @@ transaction of its own, so the speculative-consequence sanction
 above — written for the deferred-start transaction — has nothing
 to govern there; the load walk's own setup/instantiation writes
 keep the sanctioned `bookkeeping` stamp of the piece-start site,
-exactly as a reload's do. The OFF arm of a commit-callback deferred
-start keeps the refusal terminal. A named-family run under OFF,
-which sets up a piece after loading its dependencies, can instead
-lose its read basis to another participant's writes. That run
-awaits the conflict's catch-up and retries its setup in a fresh
-transaction, retaining the caller's argument. It uses the same
-bounded recovery and cancellation ownership as a named run whose
-policy-manifest install loses a race. Only stale-read conflicts
-and policy-manifest conflicts qualify; authorization and CFC
-refusals remain terminal. The ON arm continues to start from served
-documents without recommitting the refused setup.
+exactly as a reload's do. The OFF arm keeps the refusal terminal
+(a cross-tab race is the cross-tab mutex's story — this OFF
+sentence is the COORDINATOR's conservative default, not part of
+the 2026-08-24 ruling; the owner may re-rule it).
 
 - The accumulator is a layered view: store snapshot at the wave's input
   seq + previously sealed writes. Actions run serially per space, so a

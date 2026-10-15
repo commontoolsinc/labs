@@ -129,10 +129,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [`../features/vouched-ingest-channel-mint.md`](../features/vouched-ingest-channel-mint.md).
 - [Integration-test video demos](integration-test-video-demos.md) tracks
   optional CI adoption and further fixture hardening.
-- [Lazy cell materialization](lazy-cell-materialization.md) sequences a
-  schema-observing lazy view over a cell, a transaction mode that hands one back
-  from every read, and the runner disposition for a reader that touches data the
-  schema no longer describes.
 - [Stream markers out of stored data](stream-markers-out-of-stored-data.md)
   moves stream-ness out of the stored `{ "$stream": true }` value and into the
   link schema and the module wrapper, and triggers the cold-start repairs on a
@@ -142,7 +138,8 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the pre-sync repeats or does not need: a child start re-planning the
   subtree its parent named, every plan's inputs cell re-inlining its
   schemas, a cross-space pass that materializes every plan to find a link,
-  and a planning loop that never yields to read the answers it asked for.
+  a planning loop that never yields to read the answers it asked for, and a
+  node bound once for the pre-sync and again for its instantiation.
 - [Pre-syncing from node plans](presync-from-node-plans.md) makes one
   derivation per pattern node serve both instantiation and the pre-sync, so a
   resume and a fresh start name exactly what each lift, handler, builtin, and

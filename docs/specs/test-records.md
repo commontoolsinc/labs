@@ -265,11 +265,17 @@ asked of the identity the lane wrote, before any alias is resolved, so
 that a line in the alias file cannot decide whether a measurement enters
 a test's history.
 
-A test another workflow already records against the same commit is not
-recorded a second time. One execution of one test is one record, so a
-second workflow running those tests on that commit would give each of
-them two entries in its history. The exemption covers tests rather than
-jobs: a test that runs only in such a job is recorded there.
+A test another workflow already records against the same commit in the
+same order is not recorded a second time. One execution of one test is
+one record, so a second workflow running those tests on that commit in
+that order would give each of them two entries in its history. The
+exemption covers tests rather than jobs: a test that runs only in such a
+job is recorded there. A run in another order is a different execution
+and is recorded. The daily run of every suite at the head of `main`
+under the next day's seed
+([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead))
+is such a run, and its contexts' `shuffleSeed` is what tells its records
+apart from those of the commit's own run.
 
 `run-recorded` records the command it wraps, as one line carrying the
 identity the wrapper was given. It is therefore for a command that is
@@ -571,8 +577,9 @@ object in the store was authored under the write-access group's trust;
 trusted the same way a same-repository branch's is, and what the flag
 still tells a consumer is that the run executed unmerged pull-request
 code. Consumers that feed decisions read `submissions/ci/` only, and
-take baselines from `event: "push"` runs, whose code the tree itself
-carries. A
+take baselines from runs of the head of `main` — `event` `"push"`,
+`"schedule"` or `"workflow_dispatch"` on branch `main` — whose code the
+tree itself carries. A
 `local/<username>/` prefix attributes records to the key's named holder
 under the trust of the repository's write-access group, since the minting
 workflow's username input lets any member mint for any username, with the

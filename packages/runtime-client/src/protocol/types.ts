@@ -67,6 +67,15 @@ export type CellRef = NormalizedFullLink & {
    * this ref asked for one.
    */
   cfcLabelView?: CfcLabelView;
+  /**
+   * The schema of the ancestor this cell was keyed from, on a ref that has no
+   * schema of its own. `schema` describes the cell at `path.slice(0, depth)`,
+   * and the worker reads this cell as that ancestor's `key()` along the rest
+   * of the path, under the schema the runtime narrows to there. The main
+   * thread holds no schema narrowing of its own, which is why the ancestor's
+   * schema crosses rather than the child's.
+   */
+  keyedFrom?: { depth: number; schema: JSONSchema };
 };
 
 /** A piece as this connection names it, by the cell that holds it. */
@@ -857,6 +866,12 @@ export type InitializationData = {
      * answer.
      */
     serverExecution?: boolean;
+
+    /**
+     * Keep session documents local when server execution is disabled.
+     * Defaults to off.
+     */
+    localSessionDocuments?: boolean;
 
     /** Global default for server-selected view replication. */
     viewScopedReplication?: boolean;
@@ -1892,7 +1907,7 @@ export type EnsureHomePatternRunningRequest = BaseRequest & {
 export type JoinVisitedRoomRequest = BaseRequest & {
   type: RequestType.JoinVisitedRoom;
 
-  /** The space of the room the user visited. */
+  /** The visited space declaring a room through its kind or root. */
   space: DID;
 };
 
@@ -3647,7 +3662,7 @@ export type HomePatternResponse = {
  * What a {@link RequestType.JoinVisitedRoom} request came to, absent where the
  * user has no Home: `sent` to the chat manager, `no-chat-manager` for a Home
  * whose chat manager has no `joinRoom`, or the reason vetting refused the
- * space.
+ * space or its declared chat.
  */
 export type JoinVisitedRoomResponse = {
   decision?: JoinVisitDecision;

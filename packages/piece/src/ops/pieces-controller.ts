@@ -40,6 +40,7 @@ import {
   getPatternSource,
   getPieceSourceSnapshot,
   idStringForEntityAddress,
+  type IExtendedStorageTransaction,
   inSpaceRootCause,
   isCell,
   isLink,
@@ -122,6 +123,7 @@ import {
 } from "./join-visited-room.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
+import { repairProfileRootsOf } from "./profile-space-root.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
 import { compileProgram } from "./utils.ts";
 export {
@@ -526,20 +528,23 @@ export class PiecesController<T = unknown> {
    * `options.stillReplaceable` as well, the root linked now must also pass
    * that test, which reads it through the linking transaction. Both checks
    * are read in that transaction, so a root another writer links or changes
-   * meanwhile fails the call rather than being replaced.
+   * meanwhile fails the call rather than being replaced. With
+   * `options.signal`, no commit starts once it has aborted.
    *
    * @param defaultPatternCell - The cell representing the default pattern
    * @throws Error when `options.replacing` no longer names the space's root,
-   *   and when the root it names no longer passes `options.stillReplaceable`.
+   *   when the root it names no longer passes `options.stillReplaceable`, and
+   *   when `options.signal` aborts before the link's commit starts.
    */
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
     options: {
       replacing?: Cell<unknown> | null;
       stillReplaceable?: (root: Cell<unknown>) => boolean;
+      signal?: AbortSignal;
     } = {},
   ): Promise<void> {
-    const { error } = await this.runtime.editWithRetry((tx) => {
+    const link = (tx: IExtendedStorageTransaction) => {
       const spaceCellWithTx = this.#spaceCell.withTx(tx);
       const slot = spaceCellWithTx.key("defaultPattern");
       if (options.replacing !== undefined) {
@@ -565,7 +570,12 @@ export class PiecesController<T = unknown> {
         this.#refuseHomeRoot("replace");
       }
       slot.set(defaultPatternCell.withTx(tx));
-    });
+    };
+    const { error } = await this.runtime.editWithRetry(
+      link,
+      undefined,
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
     if (error) {
       throw new Error(
         `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
@@ -858,7 +868,9 @@ export class PiecesController<T = unknown> {
     const piecesCell = await this.getPieceRegistry();
     const pieces = await this.syncPieces(piecesCell);
     return pieces.map((piece) => {
-      const target = piece.resolveAsCell();
+      // The registry names pieces without loading their documents. Controllers
+      // load and mutate those documents after this read snapshot was taken.
+      const target = piece.resolveAsCell().withTx();
       const space = target.getAsNormalizedFullLink().space;
       const controller = space === this.#space ? this : new PiecesController(
         { as: this.#session.as, space },
@@ -869,10 +881,19 @@ export class PiecesController<T = unknown> {
     });
   }
 
-  async add(newPieces: Cell<unknown>[]): Promise<void> {
+  /**
+   * Registers `newPieces` in the space's piece list by sending each into the
+   * root's `addPiece` stream, starting the root first. The root follows its
+   * origin before it starts unless `reconcile` is `false`, which starts it on
+   * the pattern it holds, as {@link ensureDefaultPattern} does given the same.
+   */
+  async add(
+    newPieces: Cell<unknown>[],
+    { reconcile = true }: { reconcile?: boolean } = {},
+  ): Promise<void> {
     const defaultPattern = await timePiecePhase(
       "add.getDefaultPattern",
-      () => this.getDefaultPattern(true),
+      () => this.getDefaultPattern({ reconcile, start: true }),
     );
     if (!defaultPattern) {
       throw new Error("Cannot add pieces: default pattern not available");
@@ -2448,6 +2469,35 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Makes each of the identity's profiles that Home lists its space's root,
+   * where the space has no root or one only a space-root ensure created, as
+   * `repairProfileRootsOf()` does, through a controller over each profile's
+   * space on this controller's runtime. This controller must be over the
+   * identity's Home space.
+   *
+   * Resolves once every listed profile has been tried. Rejects when Home
+   * cannot be brought up or its list cannot be read, and, once every profile
+   * has been tried, when any one's inspection or repair failed. Once `signal`
+   * aborts, or the runtime begins disposal, it starts no further repair
+   * commit.
+   */
+  async repairProfileRoots(signal?: AbortSignal): Promise<void> {
+    this.#assertHomeSpace("repair its profiles' roots");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    await repairProfileRootsOf(
+      home,
+      this.runtime.userIdentityDID,
+      // Each repair syncs what it reads, so the controller makes no first
+      // sync of its own that nothing would wait for.
+      (space) =>
+        new PiecesController({ as: this.#session.as, space }, this.runtime, {
+          deferSpaceCellSync: true,
+        }),
+      signal,
+    );
+  }
+
+  /**
    * Starts the identity's share intake: it follows the offers in the private
    * inboxes Home holds and retains, and registers each offer that passes
    * vetting in Home's shared-space catalog, as `ShareIntake` describes, until
@@ -2473,7 +2523,7 @@ export class PiecesController<T = unknown> {
 
   /**
    * Tells the identity's chat manager that the identity has joined the
-   * FabriChat room whose space is `space`, when the space passes vetting, as
+   * FabriChat room declared by `space`, when the space passes vetting, as
    * `joinVisitedRoomOf()` says. This controller must be over the identity's
    * Home space, and Home is brought up, created where it has no root, so a
    * caller that must not create Home checks first that it exists.
@@ -2553,15 +2603,24 @@ export class PiecesController<T = unknown> {
    * within the wave's cycle cannot wait for, and this resolves with the
    * outgoing pattern's graph still running.
    *
+   * With `reconcile: false`, an existing root starts on the pattern it holds,
+   * and its origin is consulted only if that pattern cannot load: then the
+   * root is opened the default way, following its origin before it starts.
+   * That is for a caller that needs the root running rather than current, such
+   * as one registering a piece through the root's `addPiece` stream; the opens
+   * that show the root follow its origin.
+   *
    * @returns The default pattern piece, either existing or newly created
    */
-  async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
+  async ensureDefaultPattern(
+    { reconcile = true }: { reconcile?: boolean } = {},
+  ): Promise<PieceController<NameSchema>> {
     // Fast path: resolve the existing root WITHOUT starting it, so opening it
     // can follow its origin before bootstrap tries to load an identity that
     // origin has already replaced.
     const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
-      return await this.#startEnsuredDefaultPattern(existingPattern, true);
+      return await this.#startEnsuredDefaultPattern(existingPattern, reconcile);
     }
 
     // Determine which pattern to use based on space type
@@ -2623,18 +2682,20 @@ export class PiecesController<T = unknown> {
 
     // A root created by this successful attempt was compiled from the current
     // source immediately above. If another writer won the race, treat the
-    // discovered root like every other persisted root and reconcile it before
-    // start.
+    // discovered root like every other persisted root: reconcile it before
+    // start, unless the caller asked for no reconciliation.
     return await this.#startEnsuredDefaultPattern(
       finalPattern,
-      !createdByThisCall,
+      reconcile && !createdByThisCall,
     );
   }
 
   /**
-   * `reconcileBeforeStart` is false only for a root this call just created
-   * from its source: following that origin again would fetch the route to
-   * learn what was compiled from it moments ago.
+   * `reconcileBeforeStart` is false for a root this call just created from its
+   * source, where following that origin again would fetch the route to learn
+   * what was compiled from it moments ago, and for a caller that asked for no
+   * reconciliation. A root started that way whose pattern cannot load is
+   * opened again with reconciliation.
    */
   async #startEnsuredDefaultPattern(
     root: Cell<NameSchema>,
@@ -2723,6 +2784,12 @@ export class PiecesController<T = unknown> {
         throw startError;
       }
       if (pattern === undefined) {
+        // A start that skipped the root's origin opens it the default way
+        // instead, following that origin before starting it, so the origin
+        // has its chance before any repair below.
+        if (!reconcileBeforeStart) {
+          return await this.#startEnsuredDefaultPattern(rootToStart, true);
+        }
         // The pattern is not merely unrunnable, it is unreachable through every
         // supported recovery path, so re-running its setup cannot help. A root
         // that records no origin has nothing else to fall back on and its space

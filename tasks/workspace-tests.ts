@@ -540,7 +540,7 @@ export async function runTests(
   const fragment = spoolDir !== undefined && junitRoot !== undefined
     ? FragmentWriter.open(spoolDir)
     : undefined;
-  const workspaceUrl = new URL(`file://${path.resolve(workspaceCwd)}/`);
+  const workspaceUrl = path.toFileUrl(`${path.resolve(workspaceCwd)}/`);
   const capable = junitRoot !== undefined
     ? await junitCapableMembers(members, workspaceUrl)
     : new Set<string>();

@@ -120,9 +120,11 @@ describe("resume-presync-plan-count", () => {
     return runtime;
   }
 
-  it("plans each node of each instance once on a cold resume", async () => {
-    const cellId = "resume-presync-plan-count-root";
-
+  /**
+   * Runs `TREE_PROGRAM` over `ITEMS` under `cellId` on a runtime of its own
+   * until the store holds the whole tree, and returns the compiled root.
+   */
+  async function authorTree(cellId: string): Promise<Pattern> {
     const author = replica();
     const compiled = await author.patternManager.compilePattern(
       TREE_PROGRAM,
@@ -147,11 +149,16 @@ describe("resume-presync-plan-count", () => {
     ).toEqual([2, 4, 6]);
     await author.dispose({ closeStorage: false });
     runtimes.splice(runtimes.indexOf(author), 1);
+    return compiled;
+  }
 
-    // The pairs the tree holds: the root's nodes, each row's nodes once per
-    // item, and each badge's nodes once per item. `map` wraps its element
-    // pattern in a one-node piece, so a row is that wrapper's node plus the
-    // row pattern's own.
+  /**
+   * The `(instance, node)` pairs the tree `compiled` holds over `ITEMS`: the
+   * root's nodes, each row's nodes once per item, and each badge's nodes
+   * once per item. `map` wraps its element pattern in a one-node piece, so a
+   * row is that wrapper's node plus the row pattern's own.
+   */
+  function treePairs(compiled: Pattern): number {
     const wrapperPattern = compiled.nodes
       .map((node) => (node.inputs as { op?: unknown }).op)
       .find(isPattern)!;
@@ -161,9 +168,40 @@ describe("resume-presync-plan-count", () => {
     const badgePattern = rowPattern.nodes
       .map(childPatternOf)
       .find((pattern) => pattern !== undefined)!;
-    const expectedPairs = compiled.nodes.length +
+    return compiled.nodes.length +
       ITEMS.length * (wrapperPattern.nodes.length + rowPattern.nodes.length +
           badgePattern.nodes.length);
+  }
+
+  it("holds no stand-in bindings after a fresh tree starts", async () => {
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(TREE_PROGRAM, {
+      space,
+    });
+    const tx = author.edit();
+    const result = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      "fresh-tree-stand-in-bindings",
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, result);
+    await tx.commit().settled;
+    await result.pull();
+    await author.settled();
+    expect(
+      result.key("rows").getAsQueryResult().map((row: { value: number }) =>
+        row.value
+      ),
+    )
+      .toEqual([2, 4, 6]);
+    expect(author.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
+  });
+
+  it("plans each node of each instance once on a cold resume", async () => {
+    const cellId = "resume-presync-plan-count-root";
+    const compiled = await authorTree(cellId);
+    const expectedPairs = treePairs(compiled);
 
     const resumer = replica();
     await resumer.patternManager.compilePattern(TREE_PROGRAM, { space });
@@ -219,6 +257,83 @@ describe("resume-presync-plan-count", () => {
     expect(pairs).toBe(expectedPairs);
     expect(calls).toBe(pairs);
     expect(nameSyncs).toBe(1);
+  });
+
+  it("binds each node of each instance once across the pre-sync and the instantiation", async () => {
+    // A node's bindings are a function of the node, the result cell it is
+    // bound on and the argument link it is bound against, and the pre-sync
+    // and the instantiation bind the same nodes on the same cells. One
+    // binding per `(instance, node)` pair is what a load needs.
+
+    const cellId = "resume-presync-plan-count-bindings-root";
+    const compiled = await authorTree(cellId);
+    const expectedPairs = treePairs(compiled);
+
+    const resumer = replica();
+    await resumer.patternManager.compilePattern(TREE_PROGRAM, { space });
+    let bindings = 0;
+    resumer.runner.accessForTestingOnly.nodeBindingRecorder = () => {
+      bindings += 1;
+    };
+    const resumed = resumer.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+    );
+    expect(await resumer.runner.start(resumed)).toBe(true);
+    await resumed.pull();
+    await resumer.settled();
+    await resumer.storageManager.synced();
+    expect(
+      (resumed.key("rows").getAsQueryResult() as {
+        value: number;
+        badge: { label: string };
+      }[]).map((item) => [item.value, item.badge.label]),
+    ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
+
+    expect(bindings).toBe(expectedPairs);
+    // Each node's instantiation took the binding the pre-sync held for it.
+    expect(resumer.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
+  });
+
+  it("mints each derived internal cell's id once across a resume", async () => {
+    // The id of a derived internal cell is the hash of its result cell's
+    // entity and its partial cause. The pre-sync names every instance's
+    // owned cells, each node that binds one asks for its id again, and so
+    // does the scheduler summary of every action of the instance.
+
+    const cellId = "resume-presync-plan-count-derived-ids-root";
+    const compiled = await authorTree(cellId);
+
+    const resumer = replica();
+    await resumer.patternManager.compilePattern(TREE_PROGRAM, { space });
+    let mints = 0;
+    const minted = new Set<string>();
+    resumer.derivedInternalCellIds.accessForTestingOnly.mintRecorder = (
+      resultId,
+      partialCause,
+    ) => {
+      mints += 1;
+      minted.add(JSON.stringify([resultId, partialCause]));
+    };
+    const resumed = resumer.getCell<{ rows: { value: number }[] }>(
+      space,
+      cellId,
+      compiled.resultSchema,
+    );
+    expect(await resumer.runner.start(resumed)).toBe(true);
+    await resumed.pull();
+    await resumer.settled();
+    await resumer.storageManager.synced();
+    expect(
+      (resumed.key("rows").getAsQueryResult() as {
+        value: number;
+        badge: { label: string };
+      }[]).map((item) => [item.value, item.badge.label]),
+    ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
+
+    expect(minted.size).toBeGreaterThan(0);
+    expect(mints).toBe(minted.size);
   });
 
   it("names a nested instance's family once when its argument links to a document nothing has written", async () => {

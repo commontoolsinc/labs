@@ -3921,6 +3921,54 @@ created:
   authored and serving-runtime controls that still persist, and a pair
   covering the durable-read mark either side of the wait.
 
+Delta 2026-10-15 — a late echo is dropped before its commit is prepared:
+
+- speculation §4 step 2's sentence that a late echo's writes are
+  dropped before the run's commit is prepared ELABORATES the late-echo
+  rule; it adds no rule to §1's map. A run the rule finds jobless
+  writes nowhere, so the CFC boundary pass has nothing to guard, and
+  such a run can have read a space between its ancestor's retired echo
+  and the served write to that space: a profile's `setInbox` run in the
+  cascade of an inbox's creation linked the inbox's alias document,
+  whose metadata lives on the result document it names, and the pass
+  refused the link in the owner's runtime alone.
+- Instrument: `packages/runner/test/extended-storage-transaction.test.ts`
+  ("a seal destination that discards the transaction") — a link the
+  pass refuses is handed to a destination that discards it without the
+  refusal; `packages/runner/test/speculation-intent-listener.test.ts`
+  ("whether a run is discarded, asked before it seals") — a late
+  grandchild of a terminal intent is discarded, one of an outstanding
+  intent is not, and every speculative run is once the overlay closes.
+  End to end, `packages/patterns/integration/private-inbox-multi-runtime.test.ts`
+  ("replaces the refused inbox on a click on the refusal notice's
+  button …") holds the click-marked replacement to no refusal in the
+  owner's runtime or the serving loop.
+
+Delta 2026-10-13 — an echo sealed into a space other than its intent's:
+
+- speculation §4 step 2's sentence that the space an entry sealed into
+  is no part of the retirement's scope ELABORATES the step's own rule,
+  "retire overlay entries whose `origin` is `intent(e)`", and the
+  jobless-cascade clarification under it; it adds no rule to §1's map.
+  An entry is filed under the space its run wrote and the mark arrives
+  in the space the intent was fired in, so the two differ whenever a
+  handler sends to a stream in another space, as a sender's offer to a
+  private inbox does. The retirement walks every space's entries, an
+  intent's own echo in another space included, which can therefore go
+  before the served write to that space lands: the descendant's
+  one-wave flicker. The flicker count reads only an echo in the mark's
+  own space, since it compares seqs and a seq orders commits within one
+  space.
+- Instrument: `packages/runner/test/speculation-intent-listener.test.ts`
+  — the cases under "an echo sealed into a space other than its
+  intent's": a cascade child and a grandchild behind a write-less child
+  retire on the ancestor's mark, an intent's own echo retires in every
+  space it sealed into, another intent's cascade stands, and no echo in
+  another space counts as unarrived. End to end,
+  `packages/patterns/integration/private-inbox-multi-runtime.test.ts`
+  ("lets a sender read the offers back and find its own") holds the rows
+  a sender reads to be the documents the inbox's owner reads.
+
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
 
@@ -6420,19 +6468,15 @@ supply; OW29/OW32/OW34 closed):
     > and with existing code, so the client just speculates, the
     > servers fills in, it converges, done)."
 
-    — owner (Berni), 2026-08-24. With
-    `experimental.serverExecution === true`, both deferred-start arms
-    recover stale-read refusals through
-    `Runner.#catchUpAndStartOnStaleRead()` and `startFromServedState`,
-    loading served documents without recommitting the refused setup.
-    With server execution off, a commit-callback deferred start keeps
-    a stale-read refusal terminal. A named-family run instead waits
-    for catch-up and retries setup in a fresh transaction with the
-    caller's argument, within the same bounded retry budget and
-    cancellation ownership as policy-manifest conflicts. Authorization
-    and CFC refusals remain terminal. The
-    [serving loop](serving-loop.md) describes these separate recovery
-    paths. COVERED SHAPES, exactly (the
+    — owner (Berni), 2026-08-24. As built (`runner.ts`
+    `Runner.#catchUpAndStartOnStaleRead()` + `startFromServedState`; the
+    readiness `awaitCommitRetryReadiness` cherry-picked from closed
+    #6208 along with its discriminator — the retry itself
+    deliberately NOT brought): both deferred-start arms' stale-read
+    refusals, ON-ONLY (`experimental.serverExecution === true`, the
+    coordinator's conservative default — under OFF the refusal means
+    another CLIENT raced and cross-tab mutex semantics own that
+    story; OFF byte-identical, pinned). COVERED SHAPES, exactly (the
     adversarial review's F4 — the class language is scoped to these,
     never "all conflicts"): the engine's stale-read family —
     `stale confirmed read` (validateConfirmedReads) and its sibling
@@ -6450,7 +6494,7 @@ supply; OW29/OW32/OW34 closed):
     same-family preempt-mode client shape (`commit preempted: …`,
     experimental `CF_CONFLICT_ADMISSION=preempt`, default off) —
     recorded, not silently extended; a b04-shaped death under THAT
-    message is that mode's own open item. THE SERVED-STATE RECOVERY, as
+    message is that mode's own open item. THE RECOVERY, as
     restructured by the review's F1 (+ Cubic P1 — the
     cancellation-authority root, both faces) and CORRECTED by the
     delta review's D1: it recovers only an attempt whose install is

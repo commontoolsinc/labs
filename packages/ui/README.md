@@ -335,6 +335,15 @@ cf-card::part(header) {
 }
 ```
 
+### Iframe presentation
+
+`cf-iframe` inherits the nearest `iframePresentationContext` value (context key
+`cf-iframe-presentation`). A presentation supplies CSS, root `data-*`
+attributes, and stylesheet URLs to the guest document. Updates preserve the
+guest's state. Set `.presentation` explicitly to override the context, or to
+`null` to opt out. See
+[the iframe presentation contract](../iframe-sandbox/README.md#guest-presentation).
+
 ### TypeScript/JSX Support
 
 For React/TypeScript projects, add type definitions:

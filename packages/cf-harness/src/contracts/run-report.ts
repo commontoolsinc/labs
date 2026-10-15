@@ -11,6 +11,7 @@ import { countHarnessPolicyDecisions } from "./policy-trace.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../run-state.ts";
 import type { HarnessSubagentRunRef } from "./subagent.ts";
+import type { HarnessTaskClassification } from "../task-classification.ts";
 import type { HarnessTaskOutcome } from "./task-outcome.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessTranscriptMessage } from "./transcript.ts";
@@ -175,6 +176,10 @@ export interface HarnessRunReport {
   artifactRoot?: string;
   transcriptPath?: string;
   promptSlotBinding?: PromptSlotBinding;
+
+  /** The kinds of work the root task was classified with, and how. */
+  taskClassification?: HarnessTaskClassification;
+
   cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
   policyTrace?: HarnessPolicyTrace;
   policyTracePath?: string;
@@ -212,6 +217,7 @@ export interface CreateHarnessRunReportOptions {
     artifactRoot?: string;
     transcriptPath?: string;
     promptSlotBinding?: PromptSlotBinding;
+    taskClassification?: HarnessTaskClassification;
     cfcPolicySnapshot?: HarnessCfcPolicySnapshot;
     policyTrace?: HarnessPolicyTrace;
     policyTracePath?: string;
@@ -425,6 +431,9 @@ export const createHarnessRunReport = (
       : {}),
     ...(options.runState.promptSlotBinding !== undefined
       ? { promptSlotBinding: options.runState.promptSlotBinding }
+      : {}),
+    ...(options.runState.taskClassification !== undefined
+      ? { taskClassification: options.runState.taskClassification }
       : {}),
     ...(options.runState.cfcPolicySnapshot !== undefined
       ? { cfcPolicySnapshot: options.runState.cfcPolicySnapshot }

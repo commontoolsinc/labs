@@ -4,17 +4,12 @@ import { getCellWrapperInfo } from "@commonfabric/schema-generator/cell-brand";
 import {
   cfcCarrierProperty,
   isCfcCarrierMember,
-  memberValueType,
 } from "@commonfabric/schema-generator/cfc-carrier";
 import {
   isCommonFabricSymbol,
   resolvesToCommonFabricSymbol,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 import { getDefaultMarkerPayload } from "@commonfabric/schema-generator/default-brand";
-import {
-  cutsExpansion,
-  type ExpansionBudget,
-} from "@commonfabric/schema-generator/expanding-recursion";
 import { getPropertyNameText } from "@commonfabric/schema-generator/property-name";
 import {
   getScopeBrand,
@@ -113,7 +108,7 @@ function groupPathsByHead(
   for (const path of paths) {
     if (path.length === 0) continue;
     const [head, ...tail] = path;
-    if (!head) continue;
+    if (head === undefined) continue;
     const existing = grouped.get(head);
     if (existing) {
       existing.push(tail);
@@ -627,7 +622,7 @@ function getArrayItemPaths(
   for (const path of paths) {
     if (path.length === 0) continue;
     const [head, ...tail] = path;
-    if (!head) continue;
+    if (head === undefined) continue;
     if (isArrayRootOnlyPath(path)) {
       continue;
     }
@@ -2380,7 +2375,7 @@ function shrinkTypeLiteralMembers(
     }
 
     const propertyName = getRequestedPropertyNameText(member.name, checker);
-    if (!propertyName) continue;
+    if (propertyName === undefined) continue;
     const childPaths = grouped.get(propertyName);
     if (!childPaths) continue;
 
@@ -2722,7 +2717,7 @@ export function validateShrinkCoverage(
   const requestedHeads = new Set<string>();
   for (const p of paths) {
     const head = p[0];
-    if (!head) {
+    if (head === undefined) {
       continue;
     }
     if (
@@ -2842,489 +2837,6 @@ export function validateShrinkCoverage(
 //
 // Wrapping and defaults
 //
-
-//
-// Contract-mode capability overlay
-//
-
-/** A serialized path key with numeric segments normalized to `*`, so an
- * element access observed at one index matches the element position. */
-function contractPathKey(segments: readonly string[]): string {
-  return contractPathSegments(segments).join("\x00");
-}
-
-/** `segments` with each array index read as any index, `*`. */
-function contractPathSegments(segments: readonly string[]): string[] {
-  return segments.map((segment) => /^\d+$/.test(segment) ? "*" : segment);
-}
-
-function addPrefixKeys(
-  target: Set<string>,
-  paths: readonly (readonly string[])[] | undefined,
-): void {
-  for (const path of paths ?? []) {
-    for (let i = 1; i <= path.length; i++) {
-      target.add(contractPathKey(path.slice(0, i)));
-    }
-  }
-}
-
-/**
- * How many instantiations of one declaration, each newer than the one it is
- * read within, the contract overlay reads one inside another before it takes
- * the recursion for one without end (`cutsExpansion()`). The cut bounds
- * the overlay's work and decides no capability: past it, a cell no use
- * reaches is opaque, as reading on would make it, and a use that reaches
- * past it carries the expansion along its path.
- */
-const MAX_OVERLAY_NESTING = 8;
-
-/** Whether any data position in `type`'s subtree may be cell-like — the test
- * for whether a named reference must be expanded to overlay capabilities
- * inside it. Cycles end the search. A recursion that instantiates its
- * declaration without end is cut where `cutsExpansion()` finds it, read
- * inside `path` and spending `budget`, and may hold a cell past the cut, so
- * the search takes it to; the expansion that follows ends at the same cut. */
-function typeSubtreeContainsCellLike(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-  visited: Set<ts.Type>,
-  path: ts.Type[],
-  budget: ExpansionBudget,
-): boolean {
-  if (visited.has(type)) return false;
-  visited.add(type);
-  if (isCellLikeType(type, checker)) {
-    // A stream or sqlite brand is authoritative and never rewritten, so it
-    // is not a reason to expand the reference that holds it — every piece
-    // output type carries its verb streams, and expanding those would trade
-    // a named `$defs` identity for an anonymous literal.
-    const kind = getCellKind(type, checker);
-    return kind !== "stream" && kind !== "sqlite";
-  }
-  const within = (inner: ts.Type) =>
-    typeSubtreeContainsCellLike(inner, checker, visited, path, budget);
-  if ((type.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) !== 0) {
-    return (type as ts.UnionOrIntersectionType).types.some(within);
-  }
-  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
-  if (cutsExpansion(type, path, budget, checker, MAX_OVERLAY_NESTING)) {
-    return true;
-  }
-  path.push(type);
-  try {
-    if (isArrayShapeType(type, checker)) {
-      const element = getArrayElementType(type, checker);
-      return !!element && within(element);
-    }
-    return checker.getPropertiesOfType(type).some((property) => {
-      if ((property.flags & ts.SymbolFlags.Method) !== 0) return false;
-      const declaration = property.valueDeclaration ??
-        property.declarations?.[0];
-      return !!declaration &&
-        within(checker.getTypeOfSymbolAtLocation(property, declaration));
-    });
-  } finally {
-    path.pop();
-  }
-}
-
-/** The observation record the contract overlay consults, built once per
- * event from the capability summary's path channels. */
-interface ContractObservation {
-  readonly write: ReadonlySet<string>;
-  readonly read: ReadonlySet<string>;
-  readonly comparable: ReadonlySet<string>;
-
-  /** Exact positions whose observed use needs an identity handle even when
-   * the authored type is plain — `equals`-style comparison materializes
-   * through a comparable cell, not through the value. */
-  readonly exactComparableCell: ReadonlySet<string>;
-
-  /** Positions whose value escaped whole, a cell's handle among them, at
-   * and below which the body's uses are not recorded one by one. */
-  readonly escaped: readonly (readonly string[])[];
-
-  /** The prefixes of the body's wildcards, and of its reads through a key
-   * that can name any member, below which its uses are not recorded one by
-   * one. Its use of a prefix itself is: a `.get()` reads it, and a write
-   * through such a key writes it. */
-  readonly reachedBelow: readonly (readonly string[])[];
-}
-
-function contractObservationFrom(
-  summary: CapabilityParamSummary,
-): ContractObservation {
-  const write = new Set<string>();
-  const read = new Set<string>();
-  const comparable = new Set<string>();
-  addPrefixKeys(write, summary.writePaths);
-  addPrefixKeys(read, summary.readPaths);
-  addPrefixKeys(read, summary.fullShapePaths);
-  addPrefixKeys(read, summary.opaquePaths);
-  addPrefixKeys(comparable, summary.comparablePaths);
-  addPrefixKeys(comparable, summary.comparableCellPaths);
-  addPrefixKeys(comparable, summary.identityPaths);
-  addPrefixKeys(comparable, summary.identityCellPaths);
-  const exactComparableCell = new Set<string>();
-  for (const path of summary.comparableCellPaths ?? []) {
-    exactComparableCell.add(contractPathKey(path));
-  }
-  for (const path of summary.identityCellPaths ?? []) {
-    exactComparableCell.add(contractPathKey(path));
-  }
-  const escaped = (summary.escapedPaths ?? []).map(contractPathSegments);
-  const reachedBelow = (summary.wildcardPaths ?? []).map(
-    contractPathSegments,
-  );
-  return {
-    write,
-    read,
-    comparable,
-    exactComparableCell,
-    escaped,
-    reachedBelow,
-  };
-}
-
-/**
- * Whether the body may use the position at `path` in a way the summary does
- * not record: it lies at or below a value that escaped whole, or strictly
- * below a wildcard's prefix (`ContractObservation`).
- */
-function usedUntracked(
-  observation: ContractObservation,
-  path: readonly string[],
-): boolean {
-  const segments = contractPathSegments(path);
-  const startsWith = (prefix: readonly string[]) =>
-    prefix.every((segment, index) => segments[index] === segment);
-  return observation.escaped.some((prefix) =>
-    prefix.length <= segments.length && startsWith(prefix)
-  ) ||
-    observation.reachedBelow.some((prefix) =>
-      prefix.length < segments.length && startsWith(prefix)
-    );
-}
-
-function contractCapabilityAt(
-  observation: ContractObservation,
-  path: readonly string[],
-): ReactiveCapability {
-  const key = contractPathKey(path);
-  if (observation.write.has(key)) return "writable";
-  if (observation.read.has(key)) return "readonly";
-  if (observation.comparable.has(key)) return "comparable";
-  return "opaque";
-}
-
-/**
- * The contract half of docs/history/plans/verb-input-contract.md, applied to a verb's
- * event: the authored TypeNode is served VERBATIM in structure — objects,
- * unions, intersections, arrays, and primitives alike — and only cell-like
- * positions are rewritten, to the capability the body's usage earns:
- * writable where it writes, read-only where it reads, comparable where it
- * only compares, and OPAQUE where it never touches the position, so a
- * declared-but-unread reference confers no exercised authority while the
- * contract still names it. A position the body may use in a way its summary
- * does not record (`usedUntracked()`) keeps the capability written for it,
- * since no narrower one can be shown to suffice.
- *
- * A reference to a type alias is walked as the node the alias names
- * (`readAuthoredTypeNode()`), so a cell declared through an alias is rewritten
- * as the wrapper the alias names. The reference stays as written where nothing
- * in that node changes, and where the alias recurs through its own type.
- * A cell-like position is one whose node names a `commonfabric` cell wrapper
- * (`namesCellWrapper()`), not merely one spelled like it.
- *
- * A named reference whose subtree holds no cell-like position passes through
- * untouched, keeping its `$defs` identity and its prose. One expands only
- * when a capability inside it must change, and a self-referential type ends
- * that expansion at the cycle with the node kept as authored — the accepted
- * residual, since a literal cannot spell its own recursion. A recursion that
- * instantiates its declaration without end, as `Nest<T[]>` inside `Nest<T>`
- * does, never meets itself. Its expansion is cut where `cutsExpansion()`
- * finds it (`MAX_OVERLAY_NESTING`), unless a use the body makes reaches below,
- * and the remainder is read as its instantiation with every cell in it opaque
- * (`SchemaHint.cellsOpaque`): no use reaches those cells, so opaque is the
- * capability each would earn.
- *
- * A reference expands as the type it denotes, which for a generic declaration
- * is the declaration instantiated with the reference's arguments, built one
- * level deep (`unfoldReferencedType()`): an object as its properties, each
- * written as its declaration's annotation where that still denotes the
- * property's type and printed where an argument replaced what the annotation
- * names; a union, an array, or a cell as its printed parts. A tuple, and a
- * type that carries a scope, are kept as written, as a tuple written out is,
- * and as only a scope wrapper names its scope. A printed node is overlaid on
- * its unfolding (`unfoldPrint()`), never taken apart, by the same expansion a
- * reference takes, cut where a recursion is, and only once a position the
- * body compares by identity alone has been wrapped `comparable`, as a
- * reference is. An optional member's node is read at
- * the member's type without the `undefined` its `?` adds
- * (`memberValueType()`, which leaves a type that also holds `null` whole).
- */
-export function overlayContractCapabilities(
-  node: ts.TypeNode,
-  type: ts.Type | undefined,
-  summary: CapabilityParamSummary,
-  checker: ts.TypeChecker,
-  factory: ts.NodeFactory,
-  sourceFile: ts.SourceFile,
-  typeRegistry?: WeakMap<ts.Node, ts.Type>,
-  state?: CrossStageState,
-): ts.TypeNode {
-  const observation = contractObservationFrom(summary);
-  const visiting = new Set<ts.Type>();
-  const expansions: ts.Type[] = [];
-  // Shared by the expansion and every search for a cell it makes.
-  const budget: ExpansionBudget = { readingsInside: 0 };
-  const expanding = new Set<ts.TypeNode>();
-
-  /** Whether a use the body makes reaches `path` or a position below it. */
-  const usedWithin = (path: readonly string[]): boolean => {
-    const key = contractPathKey(path);
-    return observation.write.has(key) || observation.read.has(key) ||
-      observation.comparable.has(key);
-  };
-
-  /**
-   * `type`, the remainder of a recursion cut at `current`, as a node read at
-   * its instantiation with every cell in it opaque; `current`, as written,
-   * where there is no state to record that reading in.
-   */
-  const opaqueRemainder = (
-    current: ts.TypeNode,
-    type: ts.Type,
-  ): ts.TypeNode => {
-    if (!state) return current;
-    const printed = typeToTypeNodeWithRegistry(
-      type,
-      { checker, factory, sourceFile, state },
-      typeRegistry,
-    );
-    state.recordSchemaHint(printed, { cellsOpaque: true });
-    return printed;
-  };
-
-  const walk = (
-    current: ts.TypeNode,
-    currentType: ts.Type | undefined,
-    path: readonly string[],
-  ): ts.TypeNode => {
-    if (ts.isParenthesizedTypeNode(current)) {
-      const inner = walk(current.type, currentType, path);
-      return inner === current.type
-        ? current
-        : factory.createParenthesizedType(inner);
-    }
-
-    const authored = readAuthoredTypeNode(current, checker);
-    if (authored !== current) {
-      if (expanding.has(authored)) return current;
-      expanding.add(authored);
-      try {
-        const walked = walk(authored, currentType, path);
-        return walked === authored ? current : walked;
-      } finally {
-        expanding.delete(authored);
-      }
-    }
-
-    if (
-      !namesCellWrapper(current, checker) &&
-      observation.exactComparableCell.has(contractPathKey(path))
-    ) {
-      // Identity-only use of a plain-declared position: the authored
-      // structure serves, and the observed comparison adds the identity
-      // handle the runtime materializes it through.
-      return wrapTypeNodeWithCapability(current, "comparable", factory);
-    }
-
-    // A printed node is not taken apart: capabilities inside it are overlaid
-    // on its unfolding, or not at all.
-    const printedType = state?.printedFrom(current);
-    if (printedType && isUnfoldableKind(current)) {
-      return expand(
-        current,
-        printedType,
-        path,
-        () =>
-          unfoldPrint(
-            current,
-            printedType,
-            checker,
-            sourceFile,
-            factory,
-            typeRegistry,
-            state,
-          ),
-      );
-    }
-
-    if (namesCellWrapper(current, checker)) {
-      if (preservedWrapperFor(current, currentType, checker)) return current;
-      // No capability narrower than the one written can be shown to suffice
-      // for a use the summary does not record.
-      if (usedUntracked(observation, path)) return current;
-      const innerNode = current.typeArguments?.[0];
-      if (!innerNode) return current;
-      // The wrapper's capability is this position's to overlay; the target's
-      // own schema is not — a referenced value serves as authored, `$defs`
-      // identity intact, and its interior is governed at its own reads.
-      return wrapTypeNodeWithCapability(
-        innerNode,
-        contractCapabilityAt(observation, path),
-        factory,
-      );
-    }
-
-    if (ts.isTypeLiteralNode(current)) {
-      let changed = false;
-      const members = current.members.map((member) => {
-        if (!ts.isPropertySignature(member) || !member.type) return member;
-        const name = getPropertyNameText(member.name);
-        if (name === undefined) return member;
-        const memberSymbol = currentType
-          ? checker.getPropertyOfType(currentType, name)
-          : undefined;
-        const memberType = memberSymbol
-          ? checker.getTypeOfSymbolAtLocation(
-            memberSymbol,
-            memberSymbol.valueDeclaration ?? member,
-          )
-          : undefined;
-        const walked = walk(
-          member.type,
-          memberSymbol && memberType
-            ? memberValueType(memberSymbol, memberType, checker)
-            : memberType,
-          [...path, name],
-        );
-        if (walked === member.type) return member;
-        changed = true;
-        return factory.updatePropertySignature(
-          member,
-          member.modifiers,
-          member.name,
-          member.questionToken,
-          walked,
-        );
-      });
-      return changed ? factory.createTypeLiteralNode(members) : current;
-    }
-
-    if (ts.isArrayTypeNode(current)) {
-      const elementType = currentType
-        ? getArrayElementType(currentType, checker)
-        : undefined;
-      const walked = walk(current.elementType, elementType, [...path, "*"]);
-      return walked === current.elementType
-        ? current
-        : factory.createArrayTypeNode(walked);
-    }
-
-    if (ts.isUnionTypeNode(current) || ts.isIntersectionTypeNode(current)) {
-      let changed = false;
-      const constituents = current.types.map((member) => {
-        const memberType = getTypeFromTypeNodeWithFallback(
-          member,
-          checker,
-          typeRegistry,
-        );
-        const walked = walk(member, memberType, path);
-        if (walked !== member) changed = true;
-        return walked;
-      });
-      if (!changed) return current;
-      return ts.isUnionTypeNode(current)
-        ? factory.createUnionTypeNode(constituents)
-        : factory.createIntersectionTypeNode(constituents);
-    }
-
-    if (ts.isTypeReferenceNode(current)) {
-      const referenceName = ts.isIdentifier(current.typeName)
-        ? current.typeName.text
-        : undefined;
-      if (
-        (referenceName === "Array" || referenceName === "ReadonlyArray") &&
-        current.typeArguments?.length === 1
-      ) {
-        const elementType = currentType
-          ? getArrayElementType(currentType, checker)
-          : undefined;
-        const walked = walk(
-          current.typeArguments[0]!,
-          elementType,
-          [...path, "*"],
-        );
-        return walked === current.typeArguments[0]
-          ? current
-          : factory.createTypeReferenceNode(current.typeName, [walked]);
-      }
-      const resolvedType = currentType ??
-        getTypeFromTypeNodeWithFallback(current, checker, typeRegistry);
-      if (!resolvedType) return current;
-      return expand(
-        current,
-        resolvedType,
-        path,
-        () =>
-          unfoldReferencedType(
-            resolvedType,
-            checker,
-            sourceFile,
-            factory,
-            typeRegistry,
-            state,
-          ),
-      );
-    }
-
-    return current;
-  };
-
-  /**
-   * `current`, a node standing for `type`, overlaid on `unfold()`, the node
-   * `type` unfolds to one level deep, which a reference and a print both
-   * reach: `current` itself where `type` is already being expanded, where it
-   * holds no cell-like position, or where nothing in the unfolding changes;
-   * the remainder read with its cells opaque where the expansion is cut.
-   */
-  const expand = (
-    current: ts.TypeNode,
-    type: ts.Type,
-    path: readonly string[],
-    unfold: () => ts.TypeNode | undefined,
-  ): ts.TypeNode => {
-    if (visiting.has(type)) return current;
-    // Every cell a use the summary does not record may reach keeps the
-    // capability written for it, so the node serves as written.
-    if (usedUntracked(observation, path)) return current;
-    if (
-      cutsExpansion(type, expansions, budget, checker, MAX_OVERLAY_NESTING) &&
-      !usedWithin(path)
-    ) {
-      return opaqueRemainder(current, type);
-    }
-    if (!typeSubtreeContainsCellLike(type, checker, new Set(), [], budget)) {
-      return current;
-    }
-    const unfolded = unfold();
-    if (!unfolded) return current;
-    visiting.add(type);
-    expansions.push(type);
-    try {
-      const walked = walk(unfolded, type, path);
-      return walked === unfolded ? current : walked;
-    } finally {
-      visiting.delete(type);
-      expansions.pop();
-    }
-  };
-
-  return walk(node, type, []);
-}
 
 export function wrapTypeNodeWithCapability(
   node: ts.TypeNode,
@@ -3789,7 +3301,7 @@ function groupCellCapabilityPathsByHead(
   for (const entry of entries) {
     if (entry.path.length === 0) continue;
     const [head, ...tail] = entry.path;
-    if (!head) continue;
+    if (head === undefined) continue;
     const existing = grouped.get(head);
     const childEntry = { path: tail, capability: entry.capability };
     if (existing) {
@@ -3867,7 +3379,7 @@ function applyCellCapabilityPathsToTypeNode(
       return member;
     }
     const propertyName = getRequestedPropertyNameText(member.name, checker);
-    if (!propertyName) {
+    if (propertyName === undefined) {
       return member;
     }
     const childPaths = grouped.get(propertyName);
@@ -4027,62 +3539,16 @@ function unfoldPrint(
     );
 }
 
-/**
- * Returns a node standing for `type`, the type a reference denotes, built one
- * level deep in the type's own structure (`unfoldTypeAs()`), with each property
- * of an object written as its declaration's annotation where that still
- * denotes the property's type at `type`. An annotation is written in its
- * declaration's type parameters, which `type` may have replaced with
- * arguments, as `Box<string>` replaces `T` in `v: T`; such a property is
- * printed from its type. Returns `undefined` for a tuple, for a type that
- * carries a scope, and for a type that says something only as a whole.
- */
-function unfoldReferencedType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-  sourceFile: ts.SourceFile,
-  factory: ts.NodeFactory,
-  typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
-  state: CrossStageState | undefined,
-): ts.TypeNode | undefined {
-  // Only a scope wrapper names its scope, so a node built from what it wraps
-  // would drop it.
-  if (getScopeBrand(type, checker)) return undefined;
-  const shape: UnfoldedShape | undefined = type.isUnion()
-    ? "union"
-    : isCellLikeType(type, checker)
-    ? "cell"
-    : !isArrayShapeType(type, checker)
-    ? "object"
-    : !isHomogeneousArrayType(type, checker)
-    ? undefined
-    : type.getSymbol()?.getName() === "ReadonlyArray"
-    ? "readonly array"
-    : "array";
-  return shape && unfoldTypeAs(
-    shape,
-    type,
-    checker,
-    sourceFile,
-    factory,
-    typeRegistry,
-    state,
-    true,
-  );
-}
-
 /** The structure an unfolding builds one level of. */
 type UnfoldedShape = "object" | "union" | "array" | "readonly array" | "cell";
 
 /**
- * Helper for `unfoldPrint()` and `unfoldReferencedType()`, which returns a
- * node of `shape` standing for `type`, each type node below it printed from
- * its own type: an object's properties and index signatures, a union's
- * members, an array's element, or a cell's value. Where `annotated` is set, an
- * object's property is written instead as its declaration's annotation where
- * that denotes the property's type (`readMemberAnnotation()`). Returns
- * `undefined` where `type` says something only as a whole: a union with a
- * `Default` brand, or an object with a property keyed by a symbol.
+ * Helper for `unfoldPrint()`, which returns a node of `shape` standing for
+ * `type`, each type node below it printed from its own type: an object's
+ * properties and index signatures, a union's members, an array's element, or
+ * a cell's value. Returns `undefined` where `type` says something only as a
+ * whole: a union with a `Default` brand, or an object with a property keyed
+ * by a symbol.
  */
 function unfoldTypeAs(
   shape: UnfoldedShape,
@@ -4092,7 +3558,6 @@ function unfoldTypeAs(
   factory: ts.NodeFactory,
   typeRegistry: WeakMap<ts.Node, ts.Type> | undefined,
   state: CrossStageState | undefined,
-  annotated = false,
 ): ts.TypeNode | undefined {
   const print = (printable: ts.Type) =>
     typeToTypeNodeWithRegistry(
@@ -4108,7 +3573,6 @@ function unfoldTypeAs(
         sourceFile,
         factory,
         print,
-        annotated,
       );
     case "union": {
       if (!type.isUnion()) return undefined;
@@ -4156,11 +3620,9 @@ function unfoldTypeAs(
 /**
  * Helper for `unfoldTypeAs()`, which returns a type literal holding the
  * properties and index signatures of `type`, an object type, each printed
- * from its own type, or, for a property where `annotated` is set, written as
- * its declaration's annotation where that denotes the property's type
- * (`readMemberAnnotation()`). Methods are left out, as schema generation reads
- * none. Returns `undefined` for a type with a property keyed by a symbol,
- * which has no name to write it under.
+ * from its own type. Methods are left out, as schema generation reads none.
+ * Returns `undefined` for a type with a property keyed by a symbol, which has
+ * no name to write it under.
  */
 function unfoldObjectType(
   type: ts.Type,
@@ -4168,7 +3630,6 @@ function unfoldObjectType(
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
   print: (printable: ts.Type) => ts.TypeNode,
-  annotated: boolean,
 ): ts.TypeLiteralNode | undefined {
   const members: ts.TypeElement[] = [];
   for (const property of checker.getPropertiesOfType(type)) {
@@ -4181,9 +3642,6 @@ function unfoldObjectType(
       property,
       declaration,
     );
-    const annotation = annotated
-      ? readMemberAnnotation(property, propertyType, checker)
-      : undefined;
     // An optional property is written without the `undefined` its
     // optionality adds to its type, as the printer writes it.
     const written = optional && propertyType.isUnion()
@@ -4195,10 +3653,9 @@ function unfoldObjectType(
       undefined,
       createPropertyName(property.getName(), factory),
       optional ? factory.createToken(ts.SyntaxKind.QuestionToken) : undefined,
-      annotation ??
-        (written.length === 1
-          ? print(written[0]!)
-          : factory.createUnionTypeNode(written.map(print))),
+      written.length === 1
+        ? print(written[0]!)
+        : factory.createUnionTypeNode(written.map(print)),
     ));
   }
   for (const index of checker.getIndexInfosOfType(type)) {
@@ -4607,7 +4064,7 @@ function applyIdentityOnlyPathsToTypeNode(
         return member;
       }
       const propertyName = getRequestedPropertyNameText(member.name, checker);
-      if (!propertyName) {
+      if (propertyName === undefined) {
         return member;
       }
       const childPaths = grouped.get(propertyName);

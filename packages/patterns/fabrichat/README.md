@@ -24,16 +24,25 @@ Messages retain exact epoch nanoseconds, live profile links, previous versions,
 and explicit reply placement. Reactions are separate authored records. Reviewed
 controls admit sends, edits, deletions, reactions, and permanent removal.
 Ownership checks in writers use the authenticated principal, independently of
-profile selection. Display controls use the principal attested by the viewer's
-profile. Without that attestation, original-sender controls are unavailable.
-Room records and request bookkeeping use separately protected documents from
-their creation metadata.
+profile selection. Only the author may edit or delete a message. A direct room
+also lets the author obliterate it. The room's `ownersMayObliterate` policy
+controls owner moderation, defaulting to true for group rooms and false for
+direct rooms. Display controls use the principal attested by the viewer's
+profile. Without that attestation, original-sender controls are unavailable. The
+runtime exposes the authenticated principal only inside handlers. Selecting
+another person's attested profile can therefore offer controls the handler
+refuses; view rights cannot fully identify the authenticated viewer yet. Room
+records and request bookkeeping use separately protected documents from their
+creation metadata.
 
 The room offers the latest 100 main-conversation messages and up to 50 fixed
 session windows. A window retains original message links, so edits and removal
 remain visible without moving the window when new messages arrive. The UI has
 thread navigation, older-message navigation, version history, and a composer
 shared by placements in the same session. A refused send preserves its draft.
+Private per-request outcomes report success or refusal, and remain terminal on
+replay. Members can retitle a room through its reviewed title control. Thread
+summaries expose reply counts and latest replies without opening a window.
 
 Activity has a ten-minute retention window; writers prune expired entries when
 recording the next event. The expiration watermark is independent of permanent
@@ -48,12 +57,14 @@ placement or adapter does not relay writes. Native hosts bind reviewed controls
 through the trusted native UI bridge, which belongs to the host's real
 user-input path.
 
-Home's shared-space catalog supplies the manager's rooms. Creating or accepting
-a room registers its space; forgetting archives the catalog entry at the
-revision the client observed. The manager retains its direct-room lookup after
-forgetting, so opening that direct conversation again restores the same room.
-Creation commits the room, its grants, catalog registration, and terminal
-outcome together. Repeated requests preserve their original outcome.
+Home's shared-space catalog supplies standalone rooms and container
+declarations. The manager discovers a container's conversation through its root
+`chatRoom` link and deduplicates by room identity. Private membership records
+keep joins and forgotten conversations independently of their containers. The
+manager retains its direct-room lookup after forgetting, so opening that
+conversation again restores the same room. Creation commits the room, its
+grants, catalog registration, and terminal outcome together. Repeated requests
+preserve their original outcome.
 
 A client must verify direct-room container admission before creating a
 placement, as the specification requires. The placement reports the viewer's
@@ -65,11 +76,12 @@ the request names. Members offered nothing receive a notice containing a room
 link and recipient, never conversation contents. The manager's people picker
 finds profiles through the participants of its listed rooms. Clients acknowledge
 delivered notices through `delivered`. Receiving a notice grants no access;
-`accept` checks admission and the immutable creator attestation. A social
-space's own chat cannot be added to the catalog as a standalone room. Writing in
-a standalone room asks the manager to join it; the room reads no private catalog
-while writing shared messages. Each attested participant has a reviewed control
-for starting a direct conversation.
+`accept` checks admission and the immutable creator attestation. A declared
+container conversation can be joined through its root declaration. Writing in a
+standalone or declared container room asks the manager to join it through a
+separate event; shared message writes read neither the manager binding nor its
+private catalog. Each attested participant has a reviewed control for starting a
+direct conversation.
 
 ## Validation
 

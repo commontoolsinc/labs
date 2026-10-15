@@ -3606,7 +3606,7 @@ interface CFIframeAttributes<T> extends CFHTMLAttributes<T> {
   "$context"?: CellLike<any>;
   "resourceKinds"?: Record<
     string,
-    "cell" | "readonly" | "stream" | "sqlite"
+    "cell" | "readonly" | "stream" | "sqlite" | "presence"
   >;
 }
 

@@ -348,6 +348,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   setSharedMemoryConnection?(enabled: boolean): void;
 
   /**
+   * Keeps session-scoped documents in the local replica when enabled.
+   * Repeated configuration must agree across runtimes sharing this manager.
+   * @throws If a different policy has already been configured.
+   */
+  setLocalSessionDocuments?(enabled: boolean): void;
+
+  /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
    * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
@@ -1935,6 +1942,15 @@ export interface TransactionSealDestination {
   ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt;
 
   /**
+   * Whether `seal` would drop `tx`'s writes rather than accept them, were
+   * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
+   * pass for a transaction this returns `true` for: writes that reach no
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   */
+  discards?(tx: IExtendedStorageTransaction): boolean;
+
+  /**
    * The HOME space of the wave this destination seals into (the space
    * the serving loop serves). The send site's LT1-vs-outbox decision
    * reads it: an emission targeting THIS space rides the wave's own
@@ -2215,6 +2231,13 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T;
 
   markCfcRelevant(reason?: string): void;
+
+  /**
+   * Invalidates the transaction's CFC preparation, adding `reason` to the
+   * reasons a commit is refused for. The reason is recorded without any verdict
+   * tag at its front, since only a preparation decides that a refusal is
+   * terminal; a refusal for an invalidation alone is retryable.
+   */
   invalidateCfc(reason: string): void;
 
   getNarrowestReadScope(): CellScope;
@@ -3760,7 +3783,7 @@ export interface IStorageTransactionWriteIsolationError extends IStorageError {
 }
 
 /**
- * Error returned when attempting to write to a read-only address (data: URI).
+ * Error returned when attempting to write to a read-only address (`snapshot:` or `data:` URI).
  */
 export interface IReadOnlyAddressError extends IStorageError {
   readonly name: "ReadOnlyAddressError";

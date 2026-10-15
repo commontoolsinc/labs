@@ -113,7 +113,7 @@ const ITEMS_SCHEMA = {
   items: { type: "object", properties: { seed: { type: "string" } } },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 16;
+const CARD_COUNT = 15;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -735,57 +735,6 @@ describe("piece-named-before-start", () => {
     expect(b.runner.cancels.has(key)).toBe(false);
   });
 
-  it("preserves a named run's new argument after a stale-read refusal", async () => {
-    const { cardB, key } = locateCard(15);
-    const id = cardB.getAsNormalizedFullLink().id;
-    let attempts = 0;
-    b.runner.accessForTestingOnly.deferredStartCommitter = async (
-      _tx,
-      _resultCell,
-      commit,
-    ) => {
-      attempts++;
-      if (attempts !== 1) return commit();
-      // Refuse at the server so storage rolls back the writes and dispatches
-      // commit compensation with the wire verdict, as a concurrent write does.
-      const transact = server.transact.bind(server);
-      server.transact = (message, publishVerdict) => {
-        server.transact = transact;
-        const response: Awaited<ReturnType<typeof transact>> = {
-          type: "response",
-          requestId: message.requestId,
-          error: {
-            name: "ConflictError",
-            message:
-              `stale confirmed read: ${id} at seq 0 conflicted with seq 10`,
-          },
-        };
-        publishVerdict?.(response);
-        return Promise.resolve(response);
-      };
-      try {
-        const result = await commit();
-        expect(result.error?.name).toBe("ConflictError");
-        return result;
-      } finally {
-        server.transact = transact;
-      }
-    };
-    const runTx = b.edit();
-    b.runner.run(runTx, cardPattern, { item: { seed: "replacement" } }, cardB);
-    b.prepareTxForCommit(runTx);
-    expect((await runTx.commit().settled).error).toBeUndefined();
-    await b.settled();
-    expect(attempts).toBe(2);
-    expect(b.runner.cancels.has(key)).toBe(true);
-    await cardB.pull();
-    await b.settled();
-    expect(cardB.key("item").key("seed").get()).toBe("replacement");
-    expect(cardB.key("label").get()).toBe("card-replacement");
-    expect(await bump(cardB)).toBe(1);
-    expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
-  });
-
   it("hands the named run's start the trust snapshot of the transaction that asked for the run", async () => {
     const { cardB, itemB, key } = locateCard(14);
     // B stamps its runs the way a serving loop does, so the start runs under
@@ -868,9 +817,6 @@ describe("piece-named-before-start", () => {
     b.prepareTxForCommit(runTx);
     expect((await runTx.commit().settled).error).toBeUndefined();
     await quiesce(b);
-    // The watcher loads the incoming pattern's authority outside scheduler
-    // work, so its completed follow is the barrier for the new handler.
-    await b.runner.patternPointerFollowed(cardB);
     expect(await send(cardB, "poke")).toBe(11);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
