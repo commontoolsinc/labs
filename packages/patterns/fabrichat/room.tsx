@@ -65,7 +65,7 @@ import {
   entryFor,
   FABRICHAT_POLICY,
   isOwnerOf,
-  type JoinRoomRequest,
+  type JoiningManager,
   type MessageCell,
   messageEntries,
   type MessageEntry,
@@ -228,11 +228,13 @@ export interface ParticipantChipOutput {
  * profile attests a principal, to a viewer with a profile. Whether the viewer
  * has a manager is not read here: the chip's display is stored in the room's
  * space, and a manager whose data carries a label the room's space does not
- * admit would make it refused. It names the participant to the manager by their profile,
- * bound as the control's `name`, which crosses into the click's event as the
- * profile's own cell; the manager reads whom it names from the profile's
- * `represents-principal` label, and offers the room through the share inbox
- * the profile points at.
+ * admit would make it refused, as would any read of the wish that finds the
+ * manager. So a viewer whose Home has no manager sees the control, and its
+ * click reaches no one. It names the participant to the manager by their
+ * profile, bound as the control's `name`, which crosses into the click's event
+ * as the profile's own cell; the manager reads whom it names from the
+ * profile's `represents-principal` label, and offers the room through the
+ * share inbox the profile points at.
  */
 export const ParticipantChip = pattern<
   ParticipantChipInput,
@@ -330,7 +332,7 @@ export interface OfferRoomRequest {
  * The part of the viewer's manager a room reaches: what it tells a member it
  * admits through, and what it tells of the viewer joining it.
  */
-export interface RoomManager {
+export interface RoomManager extends JoiningManager {
   /** Offers the room to a member, and records how it told them. */
   offerRoom: Stream<OfferRoomRequest>;
 
@@ -342,9 +344,6 @@ export interface RoomManager {
    * the profiles attesting it.
    */
   people: PerSession<Record<string, ProfileCell[]>>;
-
-  /** Makes a room the viewer has joined one of their chats. */
-  joinRoom?: Stream<JoinRoomRequest>;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */
