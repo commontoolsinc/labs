@@ -14,7 +14,7 @@ not just properties. Theme is ambient context that flows down the tree.
 providing context.
 
 ```typescript
-import { provide } from "@lit/context";
+import { ContextConsumer, provide } from "@lit/context";
 
 export class CFThemeProvider extends BaseElement {
   static override styles = css`
@@ -29,6 +29,23 @@ export class CFThemeProvider extends BaseElement {
   @provide({ context: cfThemeContext })
   @property({ attribute: false })
   _computedTheme: CFTheme = defaultTheme;
+
+  /** The enclosing cf-theme's theme, or undefined for an outermost one. */
+  #enclosing: CFTheme | undefined;
+
+  constructor() {
+    super();
+    // A provider ignores requests from its own host, so this is answered by
+    // the enclosing cf-theme, if there is one.
+    new ContextConsumer(this, {
+      context: cfThemeContext,
+      subscribe: true,
+      callback: (theme) => {
+        this.#enclosing = theme;
+        if (this.hasUpdated) this._recomputeAndApply();
+      },
+    });
+  }
 
   private _recomputeAndApply() {
     // Merge the partial theme over the enclosing cf-theme's, or the defaults
