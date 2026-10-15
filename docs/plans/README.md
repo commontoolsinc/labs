@@ -293,6 +293,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   factory's request. It carries the shape of program that has no home without
   one, the two routes a design could take and what each gives up, and the
   provider-side stack left standing in the meantime.
+- [Denied inputs as unavailable data](denied-inputs-as-unavailable.md) makes
+  a read that reaches a space the principal has been refused return an
+  unavailable marker instead of an absence, and keeps anything computed from
+  that marker out of shared state: a computation that only propagates it parks,
+  and one that observes it writes a session-scoped output. It builds on the
+  explicit unavailable data flow and on client-local session documents, and
+  retires the local fold of a refused derived write.
 
 ## Concepts not planned for deployment
 
