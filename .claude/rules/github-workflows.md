@@ -106,8 +106,10 @@ half of `deno task check-test-topology` fails on every identity such a step
 records, and says which of the two it is.
 
 A job whose every test another workflow already records against the same
-commit records nothing: no spool directory, no `run-recorded` wrapper, no ship
-step. Recording there would file each of those tests twice against one commit.
+commit in the same order records nothing: no spool directory, no
+`run-recorded` wrapper, no ship step. Recording there would file each of those
+tests twice against one commit. A run under another shuffle seed is recorded,
+which is why the relay follows the Tomorrow's Test Order workflow.
 The Dashboard workflow's tests job is the one such job, and the test-records
 relay (`.github/workflows/test-records-relay.yml`) does not follow that
 workflow.

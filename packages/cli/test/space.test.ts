@@ -112,6 +112,15 @@ function writeToWorkingCopy(dir: string, docs: [string, unknown][]): void {
   db.close();
 }
 
+/** The words a POSIX shell makes of `line`, one per line of output. */
+async function shellWords(line: string): Promise<string[]> {
+  const { stdout } = await new Deno.Command("sh", {
+    args: ["-c", `printf '%s\\n' ${line}`],
+    stdout: "piped",
+  }).output();
+  return new TextDecoder().decode(stdout).split("\n").slice(0, -1);
+}
+
 async function withFixture(
   run: (t: { snapshot: string; clone: string; root: string }) => Promise<void>,
 ): Promise<void> {
@@ -444,6 +453,28 @@ describe("cf space", () => {
     });
   });
 
+  it("prints commands that keep a target path one shell word", async () => {
+    // A person pastes these lines into a shell, so a `$` or a `'` in the
+    // target must reach the command as written rather than be expanded.
+    await withFixture(async ({ snapshot, root }) => {
+      const target = `${root}/it's$HOME`;
+      const cloned = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${target}`,
+      );
+      expect(cloned.code).toBe(0);
+      const real = await Deno.realPath(target);
+      const lines = text(cloned.stdout).split("\n").map((line) => line.trim());
+      const after = (prefix: string): string =>
+        lines.find((line) => line.startsWith(prefix))!.slice(prefix.length);
+      expect(await shellWords(after("cf space verify "))).toEqual([real]);
+      expect(await shellWords(after("cf space reset  "))).toEqual([real]);
+      const memoryDir = after("HOST=127.0.0.1 MEMORY_DIR=").split(" ./")[0];
+      expect(await shellWords(memoryDir)).toEqual([
+        toFileUrl(`${real}/`).href,
+      ]);
+    });
+  });
+
   it("names what a reset removed, apart from the space it restored", async () => {
     // A pass that follows a link into another space leaves that space's store
     // beside the working copy, and cell-derived databases sit there too. Both
@@ -517,7 +548,7 @@ describe("cf space", () => {
       // MEMORY_DIR is how the CLI learns what the local server is serving.
       const result = await cf(
         `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
-        { env: { MEMORY_DIR: `file://${live}/` } },
+        { env: { MEMORY_DIR: toFileUrl(`${live}/`).href } },
       );
       expect(result.code).not.toBe(0);
       expect(text(result.stderr)).toContain(

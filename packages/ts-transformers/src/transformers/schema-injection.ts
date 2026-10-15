@@ -71,7 +71,6 @@ import {
   containsAnyOrUnknownTypeNode,
   getAuthoredCellValueTypeNode,
   isCellLikeTypeNode,
-  overlayContractCapabilities,
   preservedWrapperFor,
   printTypeNode,
   validateShrinkCoverage,
@@ -309,6 +308,27 @@ function findCapabilitySummaryForParameter(
   return summary.params.find((param) => param.name === paramName);
 }
 
+/**
+ * `node`, a verb's authored event, as the node its schema is generated from:
+ * a node of its own around it, which carries the handler body's capability
+ * summary (`SchemaHint.contractCapabilities`), so that only this reading of
+ * the node is narrowed; `node` itself where there is no state to record that
+ * in.
+ */
+function contractReading(
+  node: ts.TypeNode,
+  type: ts.Type | undefined,
+  summary: CapabilityParamSummary,
+  factory: ts.NodeFactory,
+  context: TransformationContext | undefined,
+): ts.TypeNode {
+  if (!context) return node;
+  const reading = factory.createParenthesizedType(node);
+  if (type) context.state.typeRegistry.set(reading, type);
+  context.state.recordSchemaHint(reading, { contractCapabilities: summary });
+  return reading;
+}
+
 function applyCapabilitySummaryToArgument(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   argumentNode: ts.TypeNode | undefined,
@@ -338,21 +358,18 @@ function applyCapabilitySummaryToArgument(
     return argumentNode;
   }
   if (mode === "contract") {
-    // The contract half of docs/history/plans/verb-input-contract.md: the authored
-    // event serves verbatim in structure, with capabilities overlaid from
-    // the body's usage and unobserved cell positions made opaque. The
+    // The contract half of docs/history/plans/verb-input-contract.md: the
+    // authored event's schema is generated as written, and its cells take
+    // the capabilities the body's usage earns (`contractReading()`). The
     // body's observed paths still validate against the authored type — a
     // read of an unknown-typed property is an authoring error under either
     // mode.
-    const overlaid = overlayContractCapabilities(
+    const reading = contractReading(
       argumentNode,
       argumentType,
       paramSummary,
-      checker,
       factory,
-      sourceFile,
-      context?.state.typeRegistry,
-      context?.state,
+      context,
     );
     if (context) {
       validateShrinkCoverage(
@@ -364,13 +381,13 @@ function applyCapabilitySummaryToArgument(
           ...paramSummary.writePaths,
           ...paramSummary.fullShapePaths ?? [],
         ],
-        overlaid,
+        reading,
         context,
         fnNode ?? fn,
         checker,
       );
     }
-    return overlaid;
+    return reading;
   }
   let innerTypeNode = getAuthoredCellValueTypeNode(argumentNode, checker);
   if (!innerTypeNode && argumentType && isCellLikeType(argumentType, checker)) {
@@ -451,15 +468,12 @@ function applyCapabilitySummaryToParameter(
   }
   if (mode === "contract") {
     // See the matching branch in applyCapabilitySummaryToArgument.
-    const overlaid = overlayContractCapabilities(
+    const reading = contractReading(
       parameterNode,
       parameterType,
       paramSummary,
-      checker,
       factory,
-      sourceFile,
-      context?.state.typeRegistry,
-      context?.state,
+      context,
     );
     if (context) {
       validateShrinkCoverage(
@@ -471,13 +485,13 @@ function applyCapabilitySummaryToParameter(
           ...paramSummary.writePaths,
           ...paramSummary.fullShapePaths ?? [],
         ],
-        overlaid,
+        reading,
         context,
         fnNode ?? fn,
         checker,
       );
     }
-    return overlaid;
+    return reading;
   }
 
   const innerTypeNode = getAuthoredCellValueTypeNode(parameterNode, checker);

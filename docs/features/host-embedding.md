@@ -40,6 +40,7 @@ weeks later.
 | 9 | Custody seal and trust configuration | trusted host API | `runtime-client`, `runner`, `ui` | available | `runtime-client/test/backends/custody-seal.test.ts`; `runtime-client/test/custody-seal.test.ts`; `runtime-client/test/backends/initialization-data-reach.test.ts`; `ui/src/v2/components/cf-custody-seal/` |
 | 10 | Native reviewed controls | trusted host API | `runner` | available | `runner/test/native-ui.test.ts` |
 | 11 | Native reviewed acts count as trusted gestures | policy record | `runner` | n/a | `runner/test/cfc-ui-contract.test.ts`; `runner/test/builder/space-access-change.test.ts`; `runner/test/executor-space-access-change.test.ts`; `runtime-client/test/send-reviewed.test.ts`. Not yet met for `UiPromptSlot` and `UiDisclosure` contracts |
+| 12 | Bringing up the user's Home | host obligation | `runtime-client`, `piece` | available | `runtime-client/test/backends/runtime-processor.test.ts` — `ensuring an existing Home only`; `runtime-client/test/runtime-client.test.ts` — `ensureHomePatternRunning()` |
 
 ---
 
@@ -675,9 +676,66 @@ surface for it.
 
 ---
 
+## 12. Bringing up the user's Home
+
+**Contract.** A host whose runtime acts as a user brings that user's Home up
+once per runtime, once the runtime is ready, whether or not it shows anything
+of Home. The shell does it once the first piece it shows is on screen and its
+view has settled, as [private inbox](private-inbox.md) describes. The call is
+`RuntimeClient.ensureHomePatternRunning({ existingOnly: true })`. It brings up
+a Home whose root already records the pattern it runs, and returns its cell.
+Where the user has no Home, or another writer is still creating it, it creates
+nothing, starts nothing, and returns `undefined`. A host through which a user
+first gets a Home makes the same call without `existingOnly`, which creates one
+where there is none. Nothing is rendered either way.
+
+Bringing Home up is what maintains it. The first bring-up in a runtime worker
+starts the worker's housekeeping over Home, once per worker:
+
+- adopting the Home space list's name-only entries
+  (`PiecesController.adoptLegacySpaces()`);
+- ensuring the user's private inbox
+  ([private inbox](private-inbox.md));
+- making each profile Home lists, in a space the user owns, the root of its
+  space where the space has no root, or has only one that a space-root ensure
+  created and nothing was added to. It leaves any other root alone
+  (`PiecesController.repairProfileRoots()`, described in
+  [Home space](../common/conventions/HOME_SPACE.md));
+- starting the share intake over Home's inboxes
+  (`PiecesController.startShareIntake()`).
+
+The call returns once the adoption has settled, without waiting for the other
+steps, and a step that fails is logged and run again at the worker's next
+bring-up of Home. `RuntimeClient.idle()` waits for all of them. The
+housekeeping runs only in a worker that brings Home up: no server process does
+it for a user. Where no host ever brings a user's Home up, their Home and
+profiles stay as they are, and the cost is not theirs alone. Other people's
+hosts read a user's profiles, and a profile that is not its space's root is
+one a host holding only the profile space's DID cannot reach.
+
+Two other requests bring Home up as a side effect: `createSpace()`, and
+`getSpaceRootPattern()` for the user's own Home DID unless it passes
+`start: false`. A host that makes one of those anyway still gets the
+housekeeping, but neither is the contract.
+
+**Test.** `packages/runtime-client/test/backends/runtime-processor.test.ts`,
+`describe("ensuring an existing Home only")`, holds that the request brings up
+an existing Home and starts the housekeeping, and that it creates and starts
+nothing where there is no Home. The cases beside it, in the same file's home
+pattern IPC block, hold each housekeeping step running once per worker and Home
+opening when a step fails.
+`packages/runtime-client/test/runtime-client.test.ts`,
+`describe("ensureHomePatternRunning()")`, holds the request the client sends
+and the `undefined` it returns where no Home was brought up.
+
+---
+
 ## Summary for embedders
 
-Provide `runtimeContext` + `spaceContext`. Mount a wrapper pattern that
+Provide `runtimeContext` + `spaceContext`. Once the runtime is ready,
+bring the user's existing Home up with
+`ensureHomePatternRunning({ existingOnly: true })`, which is what runs Home's
+housekeeping. Mount a wrapper pattern that
 wishes `#profile`. Listen for `cf-navigate` (both shapes) and
 `cf-open-external` on `globalThis`. Deep-import the
 guarded-define components into one bundle. If you persist profile data

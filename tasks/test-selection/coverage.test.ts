@@ -313,6 +313,31 @@ describe("coverage", () => {
         });
       });
 
+      it("counts each unit's hooks with its entries' time", () => {
+        // The glaze unit's hooks take five seconds on top of its entries'
+        // seven, and the proof unit has none, so the tests take seventeen
+        // seconds through the correction of two. The largest entry is then
+        // glaze's four seconds rather than proof's five.
+        expect(measuredCost(
+          fittedAs({
+            overhead: 10,
+            correction: 2,
+            unitOverhead: 1,
+            unitHooks: { "packages/bakery/glaze.test.ts": 5 },
+          }),
+          [
+            entry("bakery", "packages/bakery/glaze.test.ts", 3),
+            entry("bakery", "packages/bakery/glaze.test.ts", 4),
+            entry("bakery", "packages/bakery/proof.test.ts", 5),
+          ],
+        )).toEqual({
+          overhead: 10,
+          spread: 34,
+          units: [{ overhead: 1, entries: 2 }, { overhead: 1, entries: 1 }],
+          largest: 29,
+        });
+      });
+
       it("charges its largest entry no less than that entry's own time", () => {
         // The suite runs its units side by side, and a lane holding one
         // entry still takes that entry's whole time, twice over where it

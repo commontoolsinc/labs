@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { dirname, fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
@@ -16,10 +17,7 @@ import { loadTopology } from "../test-topology.ts";
  * own directory: a package's tests run with that package as the working
  * directory, and the paths the topology reads are the repository's.
  */
-const REPOSITORY = new URL("../..", import.meta.url).pathname.replace(
-  /\/$/,
-  "",
-);
+const REPOSITORY = dirname(dirname(dirname(fromFileUrl(import.meta.url))));
 import { UNMEASURED_COST_SECONDS } from "./policy.ts";
 
 /** A suite holding exactly what a case describes. */

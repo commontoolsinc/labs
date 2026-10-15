@@ -35,6 +35,7 @@ import {
   type ClientCommit,
   type CommitClass,
   type CommitPrecondition,
+  commitPreconditionValueHash,
   DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
@@ -1617,6 +1618,7 @@ export class StorageManager implements IStorageManager {
 
   /** What `setSharedMemoryConnection()` last declared. */
   #sharedMemoryConnection = false;
+  #localSessionDocuments: boolean | undefined;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
 
@@ -2045,6 +2047,17 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  setLocalSessionDocuments(enabled: boolean): void {
+    if (
+      this.#localSessionDocuments !== undefined &&
+      this.#localSessionDocuments !== enabled
+    ) {
+      throw new Error("Session document policy is already configured");
+    }
+    this.#localSessionDocuments = enabled;
+  }
+
   /** See `IStorageManager.setSharedMemoryConnection`. */
   setSharedMemoryConnection(enabled: boolean): void {
     if (enabled !== this.#sharedMemoryConnection && this.#providers.size > 0) {
@@ -2224,6 +2237,7 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         scopeKeyIdentity: () => this.scopeKeyIdentity(),
+        localSessionDocuments: () => this.#localSessionDocuments === true,
         // Phase 5's producer-side foreign-scoped-read refusal: only a
         // serving manager sets a home space, and only its FOREIGN
         // providers refuse (see Options.servingHomeSpace).
@@ -3640,6 +3654,8 @@ type OpenedSpaceSession = {
 };
 
 type ProviderOptions = {
+  /** Whether session documents live only in the owning runtime. */
+  localSessionDocuments?: () => boolean;
   as: Signer;
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
@@ -4126,6 +4142,7 @@ class Provider
     this.options.routeState.generation++;
     this.#routeAbort = new AbortController();
     const replacement = this.#createReplica();
+    previous.transferLocalSessionStateTo(replacement);
     this.replica = replacement;
     for (const subscription of this.#operationSubscriptions) {
       subscription.cancel?.();
@@ -4509,6 +4526,14 @@ export class SpaceReplica
   >();
 
   /**
+   * Local-only commit verdicts for origin preconditions. An entry starts
+   * false and becomes true on acceptance; callers await its outcome before
+   * checking it. Kept for this replica's lifetime because no server commit
+   * row can validate a later reference to a local origin.
+   */
+  readonly #localSessionCommitAccepted = new Map<number, boolean>();
+
+  /**
    * Server verdict promises superseded by a local rejection. Kept _out_ of
    * `#commitPromises` so `synced()` never blocks on a verdict the server may
    * withhold indefinitely; `close()`/`closeNow()` drain the set after client
@@ -4555,6 +4580,7 @@ export class SpaceReplica
   /** The store read-through this replica serves misses from (see
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
+  readonly #localSessionDocuments: () => boolean;
 
   /** See ProviderOptions.loadCrossings. */
   readonly #loadCrossings:
@@ -4728,15 +4754,15 @@ export class SpaceReplica
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
 
   /**
-   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
-   * overlay entries exist only in this process — the client never pushes them —
-   * so a _pushed_ commit whose read basis names one can _never_ have that
-   * dependency resolve server-side. `#commitOperations()` refuses such an
-   * export loudly; membership ends when the speculative commit settles
-   * (retirement/withdrawal drops its pending layers first, so no stack names a
-   * seq after it leaves this set).
+   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6),
+   * each with the promise its settlement resolves: overlay entries exist only
+   * in this process — the client never pushes them — so a _pushed_ commit whose
+   * read basis names one can _never_ have that dependency resolve server-side.
+   * `#commitOperations()` refuses such an export loudly; membership ends when
+   * the speculative commit settles (retirement/withdrawal drops its pending
+   * layers first, so no stack names a seq after it leaves this map).
    */
-  readonly #speculativeLocalSeqs = new Set<number>();
+  readonly #speculativeLocalSeqs = new Map<number, Promise<void>>();
 
   /**
    * The overlay destination's retirement _wake_ for origin accepts
@@ -4819,6 +4845,8 @@ export class SpaceReplica
 
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
+    this.#localSessionDocuments = options.localSessionDocuments ??
+      (() => false);
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
     this.#onSessionReplaced = options.onSessionReplaced;
@@ -5832,6 +5860,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
+    if (this.#isLocalSessionDocument({ scope }, identity)) return true;
     const key = this.#docKeyOf({ id, scope }, identity);
     const record = this.#docs.get(key);
     return this.#delivered.has(key) ||
@@ -5979,6 +6008,23 @@ export class SpaceReplica
         ...new Set(record.pending.map((entry) => entry.localSeq)),
       ],
     };
+  }
+
+  /** @inheritDoc */
+  whenSpeculationSettled(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
+    const standing = new Set<Promise<void>>();
+    for (const entry of record?.pending ?? []) {
+      const settled = this.#speculativeLocalSeqs.get(entry.localSeq);
+      if (settled !== undefined) standing.add(settled);
+    }
+    return standing.size === 0
+      ? undefined
+      : Promise.all(standing).then(() => {});
   }
 
   /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
@@ -6401,6 +6447,9 @@ export class SpaceReplica
   async pull(
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
+    entries = entries.filter(([address]) =>
+      !this.#isLocalSessionDocument(address)
+    );
     if (entries.length === 0) {
       return { ok: {} };
     }
@@ -6777,6 +6826,15 @@ export class SpaceReplica
       )
       : undefined;
 
+    // A speculative layer is registered before it is applied, so that a
+    // durable read made from a notification below already reads past it.
+    const speculationSettled = options?.speculative === true
+      ? Promise.withResolvers<void>()
+      : undefined;
+    if (speculationSettled !== undefined) {
+      this.#speculativeLocalSeqs.set(localSeq, speculationSettled.promise);
+    }
+
     for (const operation of operations) {
       this.#applyPending(operation, localSeq, commit.reads, identity);
     }
@@ -6804,7 +6862,7 @@ export class SpaceReplica
       verdict,
       identity,
     );
-    if (options?.speculative !== true) {
+    if (speculationSettled === undefined) {
       // Durable sealed commits (the wave's) join the synced() barrier
       // and the ordered-push outcome map as any commit does. A CLIENT
       // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
@@ -6824,15 +6882,15 @@ export class SpaceReplica
         this.#commitPromises.delete(settled);
       });
     } else {
-      // Track the speculative seq for the export refusal (speculation.md
-      // §6, RULED 2026-08-13): while any pending stack carries this
-      // layer, a pushed commit's read basis naming it is refused in
-      // commitOperations. Settlement (retirement or withdrawal) drops
-      // the pending layers before `settled` resolves, so removal here
-      // never races a stack that still names the seq.
-      this.#speculativeLocalSeqs.add(localSeq);
-      settled.catch(() => {}).finally(() => {
+      // The speculative seq stays tracked for the export refusal
+      // (speculation.md §6, RULED 2026-08-13): while any pending stack
+      // carries this layer, a pushed commit's read basis naming it is
+      // refused in commitOperations. Settlement (retirement or
+      // withdrawal) drops the pending layers before `settled` resolves,
+      // so removal here never races a stack that still names the seq.
+      settled.then(() => {}, () => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
+        speculationSettled.resolve();
       });
     }
     return { localSeq, commit, settled };
@@ -7047,6 +7105,25 @@ export class SpaceReplica
     } finally {
       this.#settleInFlightCommit(localSeq);
     }
+  }
+
+  /** Carries confirmed local session state into a fresh route replica. */
+  transferLocalSessionStateTo(replacement: SpaceReplica): void {
+    if (!this.#localSessionDocuments()) return;
+    const prefix = `${this.instanceKey("session")}\0`;
+    for (const [key, record] of this.#docs) {
+      if (!key.startsWith(prefix)) continue;
+      replacement.#docs.set(key, {
+        confirmed: record.confirmed,
+        pending: [],
+      });
+    }
+    // Pending origins remain rejected in the replacement: the route reset
+    // cancels their writes. Sequence numbers cannot be reused by new commits.
+    for (const [seq, accepted] of this.#localSessionCommitAccepted) {
+      replacement.#localSessionCommitAccepted.set(seq, accepted);
+    }
+    replacement.#nextLocalSeq = this.#nextLocalSeq;
   }
 
   reset(): void {
@@ -7382,6 +7459,16 @@ export class SpaceReplica
     }
   }
 
+  /** Returns whether an address is held only in this replica. */
+  #isLocalSessionDocument(
+    address: { scope?: CellScope; scopeKey?: ScopeKey },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#localSessionDocuments() && address.scope === "session" &&
+      this.instanceKey("session", identity, address.scopeKey) ===
+        this.instanceKey("session");
+  }
+
   async #commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
@@ -7390,6 +7477,36 @@ export class SpaceReplica
     commitOptions?: NativeCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
+    for (const pin of activePreconditions) {
+      if (
+        pin.kind === "origin-committed" || !this.#isLocalSessionDocument(pin)
+      ) continue;
+      const record = this.#docs.get(
+        this.#docKeyOf({ id: pin.id as URI, scope: pin.scope }),
+      );
+      const document = this.#visibleDocument(pin.id as URI, pin.scope);
+      const failed = pin.kind === "entity-absent"
+        ? (record?.confirmed.seq ?? 0) > 0 || (record?.pending.length ?? 0) > 0
+        : (document && Object.hasOwn(document, "value")
+          ? commitPreconditionValueHash(document.value!)
+          : null) !== pin.valueHash;
+      if (failed) {
+        const rejection: StorageTransactionRejected =
+          pin.kind === "entity-absent"
+            ? {
+              name: "PreconditionFailedError",
+              message: "Local session document already exists",
+              precondition: "receipt-exists",
+            }
+            : this.#makeLocalRejection({
+              localSeq: this.#nextLocalSeq,
+              reads: { confirmed: [], pending: [] },
+              operations: [],
+            }, "Local session value changed");
+        if (source !== undefined) notifyCommitRejected(source, rejection);
+        return { error: rejection };
+      }
+    }
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
@@ -7407,7 +7524,7 @@ export class SpaceReplica
         localSeq,
         reads: this.#readsOverLocalFolds(
           operations,
-          this.#buildReads(source, localSeq),
+          this.#buildReads(source, localSeq, undefined, activePreconditions),
         ),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
@@ -7668,6 +7785,28 @@ export class SpaceReplica
       commit,
       source,
     );
+    const remoteOperations = commit.operations.filter((operation) =>
+      !("id" in operation && this.#isLocalSessionDocument(operation))
+    );
+    const remotePreconditions = commit.preconditions?.filter((pin) =>
+      pin.kind === "origin-committed"
+        ? !this.#localSessionCommitAccepted.has(pin.originLocalSeq)
+        : !this.#isLocalSessionDocument(pin)
+    );
+    const remoteReads = {
+      confirmed: commit.reads.confirmed.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+      pending: commit.reads.pending.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+    };
+    const localOnly = this.#localSessionDocuments() &&
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
+    // Record local origins before the first rejection checkpoint: a later
+    // guard must validate their failed verdict without contacting the server.
+    if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
     const telemetry = this.#getTelemetry();
     const pushOpId = `push:${this.#space}:${localSeq}`;
     try {
@@ -7709,6 +7848,105 @@ export class SpaceReplica
             sealed,
             { pushed: true },
           );
+        }
+      }
+      // A local session read can depend on a mixed commit awaiting its
+      // verdict or local application. Promote that dependency before its
+      // consumer can replace the confirmed base.
+      if (this.#localSessionDocuments()) {
+        const origins = (commit.preconditions ?? []).flatMap((pin) =>
+          pin.kind === "origin-committed" ? [pin.originLocalSeq] : []
+        );
+        const localOrigins = origins.filter((seq) =>
+          this.#localSessionCommitAccepted.has(seq)
+        );
+        // An origin can itself be waiting for local session dependencies
+        // before it reaches the server. Its guarded write must follow it.
+        const dependencies = new Set<number>(origins);
+        for (const read of commit.reads.pending) {
+          if (!localOnly && !this.#isLocalSessionDocument(read)) continue;
+          for (
+            const seq of Array.isArray(read.localSeq)
+              ? read.localSeq
+              : [read.localSeq]
+          ) dependencies.add(seq);
+        }
+        // A blind write still follows earlier writes to the same local
+        // document. Waiting preserves promotion order without making the
+        // blind write depend on those writes being accepted.
+        for (const operation of operations) {
+          if (!this.#isLocalSessionDocument(operation)) continue;
+          const record = this.#docs.get(this.#docKeyOf(operation));
+          for (const pending of record?.pending ?? []) {
+            if (pending.localSeq < localSeq) dependencies.add(pending.localSeq);
+          }
+        }
+        if (dependencies.size > 0) {
+          await Promise.all(
+            [...dependencies].map(async (seq) => {
+              await this.#commitOutcomeBySeq.get(seq);
+              await this.whenApplied(seq);
+            }),
+          );
+        }
+        if (this.#closed) {
+          const rejection = this.#makeLocalRejection(
+            commit,
+            "memory replica closed before local session commit settled",
+          );
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const failedOrigin = localOrigins.find((seq) =>
+          !this.#localSessionCommitAccepted.get(seq)
+        );
+        if (failedOrigin !== undefined) {
+          const rejection: StorageTransactionRejected = {
+            name: "PreconditionFailedError",
+            message:
+              `Local origin commit not committed: localSeq ${failedOrigin}`,
+            precondition: "origin-committed",
+          };
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const rejection = inFlight && this.#preSendRejection(inFlight);
+        if (rejection) {
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        commit = {
+          ...commit,
+          reads: remoteReads,
+          operations: remoteOperations,
+          preconditions: remotePreconditions,
+        };
+        if (localOnly) {
+          this.#confirmPending(localSeq, operations, {
+            seq: localSeq,
+            branch: DEFAULT_BRANCH,
+            revisions: [],
+          }, "authored");
+          this.#localSessionCommitAccepted.set(localSeq, true);
+          return { ok: {} };
         }
       }
       // Strategy 1: a commit whose read set lands on a still-catching-up id.
@@ -8444,14 +8682,18 @@ export class SpaceReplica
     // The reading run's identity (a served per-instance seal): each read's
     // pending layers and confirmed seq come from THAT instance's record.
     identity?: ScopeKeyIdentity,
+    preconditions: readonly CommitPrecondition[] = [],
   ): ClientCommit["reads"] {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
-    if (!source) {
+    const localPreconditions = preconditions
+      .filter((pin) => pin.kind !== "origin-committed")
+      .filter((pin) => this.#isLocalSessionDocument(pin, identity));
+    if (!source && localPreconditions.length === 0) {
       return { confirmed, pending };
     }
 
-    const reads = getDirectTransactionReadActivities(source);
+    const reads = source ? getDirectTransactionReadActivities(source) : [];
     if (!reads) {
       throw new Error(
         "Memory v2 commit tracking requires source.getReadActivities(); " +
@@ -8462,7 +8704,9 @@ export class SpaceReplica
     // For a blind UI-input write, handleCellSet threads the cell's PARENT address
     // here; its `ignoreReadForCommit` reads are dropped below and replaced by one
     // nonRecursive read at this parent (emitted after the loop).
-    const structuralTarget = getBlindStructuralTarget(source);
+    const structuralTarget = source
+      ? getBlindStructuralTarget(source)
+      : undefined;
 
     // Pending bases belong to a document instance and the speculative-layer
     // policy. Every path read in this synchronous build shares that same stack.
@@ -8583,7 +8827,14 @@ export class SpaceReplica
       }
     };
 
-    for (const read of this.#commitReadActivities(source, reads)) {
+    // A local value pin consumes the same pending state as a document read,
+    // so rejection of that state also rejects the guarded write.
+    for (const pin of localPreconditions) {
+      pushCommitRead(pin.id as URI, pin.scope, toCommitReadPath([]), false);
+    }
+    for (
+      const read of source ? this.#commitReadActivities(source, reads) : []
+    ) {
       const scope = normalizeCellScope(read.scope);
       pushCommitRead(
         read.id as URI,
@@ -8893,11 +9144,26 @@ export class SpaceReplica
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    const pushed = MemoryV2Client.isPushedSync(sync);
     // No read during a frame's integration — the differential checkout's
     // snapshot, the arrived-cfc hydration — starts a store read-through:
     // that would integrate a second frame from inside this one.
     this.#frameApplyDepth += 1;
     try {
+      if (this.#localSessionDocuments()) {
+        sync = {
+          ...sync,
+          upserts: sync.upserts.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          removes: sync.removes.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          crossings: sync.crossings?.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+        };
+      }
       this.#applySessionSyncFrame(sync, type);
     } catch (error) {
       this.#completeThroughLost = true;
@@ -8906,7 +9172,7 @@ export class SpaceReplica
       this.#frameApplyDepth -= 1;
       this.#frameTouchedKeys = undefined;
     }
-    if (MemoryV2Client.isPushedSync(sync)) {
+    if (pushed) {
       this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
     }
     // The frame's crossings name documents in other spaces: their loads
@@ -10000,10 +10266,17 @@ export class SpaceReplica
       : undefined;
     // Each operation's document, in the wire commit's order: an elision
     // report names operations by that index.
-    const operationKeys = this.#touchedOf(operations, identity).map((
+    const operationKeys = this.#touchedOf(
+      operations.filter((operation) =>
+        !this.#isLocalSessionDocument(operation, identity)
+      ),
+      identity,
+    ).map((
       address,
     ) => this.#docKeyOf(address));
     for (const [key, { id, scope, scopeKey }] of keys.entries()) {
+      const local = this.#isLocalSessionDocument({ scope, scopeKey }, identity);
+      const acceptedSeq = local ? localSeq : applied.seq;
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -10036,15 +10309,15 @@ export class SpaceReplica
       // copy of it: a transaction loads the confirmed document by identity,
       // and one that writes over a mutable root changes it in place, leaving
       // no difference from what it loaded to commit.
-      const elidedHere = applied.elidedOpIndexes !== undefined &&
+      const elidedHere = !local && applied.elidedOpIndexes !== undefined &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
         );
       const computed = record.pending[lastPendingIndex]!;
       if (elidedHere && computed.read === true) {
-        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+        if (computed.op !== "delete" && record.confirmed.seq < acceptedSeq) {
           record.confirmed = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
@@ -10078,12 +10351,12 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      const previousWave = record.confirmed.seq === applied.seq
+      const previousWave = record.confirmed.seq === acceptedSeq
         ? previousConfirmed.localWavePromotion
         : undefined;
       if (
         coverClass === "derived" &&
-        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+        (record.confirmed.seq < acceptedSeq || previousWave !== undefined)
       ) {
         // One wave can accept several local contributions to this document.
         // Their shared seq covers all of them only after each has promoted.
@@ -10100,7 +10373,7 @@ export class SpaceReplica
             scope,
           });
         }
-        promoted = confirmedVersion(applied.seq, value, coverClass);
+        promoted = confirmedVersion(acceptedSeq, value, coverClass);
         const lastApplied = entries.at(-1)!.localSeq;
         const earlierPending = record.pending.some((entry) =>
           entry.localSeq !== localSeq && entry.localSeq < lastApplied
@@ -10108,7 +10381,7 @@ export class SpaceReplica
         promoted.localWavePromotion = earlierPending
           ? { base, entries }
           : { base: value, entries: [] };
-      } else if (record.confirmed.seq < applied.seq) {
+      } else if (record.confirmed.seq < acceptedSeq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -10117,7 +10390,7 @@ export class SpaceReplica
           );
           const cache = ensurePendingMaterializationCache(record);
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             prefix.value,
             coverClass,
           );
@@ -10127,7 +10400,7 @@ export class SpaceReplica
           }
         } else {
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             applyPendingVersion(record.confirmed.value, pending, {
               space: this.#space,
               id,
@@ -10747,9 +11020,10 @@ const toRejectedError = (
     // Scoped descriptors cross current protocol boundaries structurally.
     // Message-only errors retain default-scope recovery for every named read.
     const toConflicts = (details: unknown): IConflictError["conflict"][] => {
-      const { of, scope } = (details ?? {}) as {
+      const { of, scope, seq } = (details ?? {}) as {
         of?: unknown;
         scope?: unknown;
+        seq?: unknown;
       };
       return typeof of === "string"
         ? [{
@@ -10757,6 +11031,7 @@ const toRejectedError = (
           the: DOCUMENT_MIME,
           of: of as Entity,
           ...(isCellScope(scope) ? { scope } : {}),
+          ...(typeof seq === "number" ? { seq } : {}),
         }]
         : [];
     };

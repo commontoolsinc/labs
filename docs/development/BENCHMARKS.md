@@ -926,6 +926,31 @@ the functional assertions, declared collection sizes, and render windows when
 adjusting a ceiling; a budget failure should lead to attribution of the added
 reads before changing the limit.
 
+## A piece grid of stopped pieces
+
+`packages/patterns/integration/piece-grid-stopped.bench.ts` measures what a
+display costs when it starts the piece it shows. `cf-render` opens every piece
+it displays, so a `piece-grid` of note tiles starts each note in the viewer's
+runtime. Each size, 13 and 60 notes, seeds a space of its own, starts the notes
+in the seeding process, and disposes that process's runtime before any browser
+opens, so the notes hold stored results and are stopped in the runtime under
+measurement.
+
+- `load <n>` runs from signing in on a page already routed to the grid until
+  the view has settled and every tile shows its note's body. It holds the
+  runtime's start, the grid's render, and every tile's open of its note.
+- `first interaction <n>` types one character into the first tile's editor and
+  commits it, until the view has settled. Work a start defers past the load
+  lands here.
+
+Each iteration launches a fresh browser. For a local run, start the dev servers
+as described in [Local dev servers](LOCAL_DEV_SERVERS.md), then run:
+
+```sh
+API_URL=http://localhost:8000/ FRONTEND_URL=http://localhost:5173/ \
+deno bench -A packages/patterns/integration/piece-grid-stopped.bench.ts
+```
+
 ## The FabriChat room benchmarks
 
 Three bench files measure a FabriChat group room, on the pattern in
@@ -1023,8 +1048,11 @@ the last. A
 fresh room per send would multiply each size's seeding by five, and against
 sizes a factor of three or more apart that growth stays well inside one step of
 the curve.
-Sizes above 100 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
-the limit.
+Sizes above 30 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
+the limit. On the Benchmarks workflow's runner a hundred-message room takes
+about seven minutes to seed and over a minute and a half to load, and a send
+into it does not settle within the browser driver's five-minute bound, which
+fails the run.
 
 ### Concurrent sends
 

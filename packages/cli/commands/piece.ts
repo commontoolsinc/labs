@@ -14,6 +14,7 @@ import {
   type PiecePatternRef,
   type PiecePlan,
   type PieceSelector,
+  PieceSourceChangedError,
   type PlanDiff,
   type RepairReport,
   type RepairRow,
@@ -90,6 +91,7 @@ import {
   type EntryConfig,
   executePieceCallable,
   followPieceSource,
+  type FollowPieceSourceResult,
   formatViewTree,
   generateSpaceMap,
   getCellCfcLabel,
@@ -2608,7 +2610,11 @@ the children of system pieces, say:
 
 Unlike 'setsrc', which detaches, the origin is recorded with the revision.
 Not served yet: against a deployment that serves piece lifecycle verbs the
-command refuses, since the served update takes no origin.`,
+command refuses, since the served update takes no origin.
+
+--expect and --expect-revision make the follow conditional on the source state
+a caller inspected ('cf piece inspect --pattern-identity --json' reports both):
+a piece that is off either pin is refused, writing nothing, with exit status 3.`,
     ),
   )
   .example(
@@ -2617,7 +2623,22 @@ command refuses, since the served update takes no origin.`,
     ),
     `Make "${EX_PIECE}" follow the deployment's profile pattern.`,
   )
+  .example(
+    cliText(
+      `cf piece follow ${EX_ID} ${EX_COMP_PIECE} --expect <identity>#default --expect-revision none system:fabrichat/room.tsx`,
+    ),
+    `Follow only while "${EX_PIECE}" runs that pattern and its source log is empty.`,
+  )
   .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
+  .option(
+    "--expect <pattern:string>",
+    "Follow only while the piece runs this pattern, as <identity>#<symbol>.",
+  )
+  .option(
+    "--expect-revision <revision:string>",
+    "Follow only while the piece's source log ends at this revision, or is " +
+      "empty for none.",
+  )
   .option(
     "--dangerously-allow-incompatible-schema",
     "Accept the reviewed incompatibility, including a current pattern " +
@@ -5081,6 +5102,18 @@ export async function setPieceSourceFromCommand(
   return { config, update };
 }
 
+/** The flags `cf piece follow` takes beyond the shared piece flags. */
+export interface FollowPieceSourceCLIOptions extends PieceCLIOptions {
+  /** The pattern the piece must still run, as `<identity>#<symbol>`. */
+  expect?: string;
+
+  /** The revision the piece's source log must still end at, or `none`. */
+  expectRevision?: string;
+}
+
+/** Exit status of a follow refused because the piece is off a pin. */
+export const FOLLOW_PIN_REFUSED_EXIT_CODE = 3;
+
 /** Injectable effects for {@link followPieceSourceAction}. */
 export interface FollowPieceSourceCommandDependencies {
   followPieceSource?: typeof followPieceSource;
@@ -5096,7 +5129,7 @@ export interface FollowPieceSourceCommandDependencies {
  * with the compatibility message and a non-zero exit, and nothing is written.
  */
 export async function followPieceSourceAction(
-  options: PieceCLIOptions,
+  options: FollowPieceSourceCLIOptions,
   origin: string,
   deps: FollowPieceSourceCommandDependencies = {},
 ): Promise<void> {
@@ -5105,14 +5138,36 @@ export async function followPieceSourceAction(
   if (trimmed.length === 0) {
     throw new ValidationError("An origin is required.", { exitCode: 1 });
   }
-  const result = await (deps.followPieceSource ?? followPieceSource)(
-    config,
-    trimmed,
-    {
-      dangerouslyAllowIncompatibleSchema:
-        options.dangerouslyAllowIncompatibleSchema,
-    },
-  );
+  const setExitCode = deps.setExitCode ?? ((code: number) => {
+    Deno.exitCode = code;
+  });
+  let result: FollowPieceSourceResult;
+  try {
+    result = await (deps.followPieceSource ?? followPieceSource)(
+      config,
+      trimmed,
+      {
+        dangerouslyAllowIncompatibleSchema:
+          options.dangerouslyAllowIncompatibleSchema,
+        ...(options.expect === undefined
+          ? {}
+          : { expectedPattern: parsePatternPin(options.expect) }),
+        ...(options.expectRevision === undefined
+          ? {}
+          : { expectedRevision: parseRevisionPin(options.expectRevision) }),
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof PieceSourceChangedError)) throw error;
+    // A refusal the caller asked for rather than a failure: the piece moved
+    // off what was inspected, nothing was written, and the status says so to
+    // a script that has to tell the two apart.
+    (deps.printError ?? console.error)(
+      `${config.piece} was not pointed at ${trimmed}: ${error.message}`,
+    );
+    setExitCode(FOLLOW_PIN_REFUSED_EXIT_CODE);
+    return;
+  }
   if (result.status === "incompatible") {
     (deps.printError ?? console.error)(
       `The source ${trimmed} serves now cannot replace what ${config.piece} ` +
@@ -5125,9 +5180,7 @@ export async function followPieceSourceAction(
           "longer fit the new pattern.",
       );
     }
-    (deps.setExitCode ?? ((code: number) => {
-      Deno.exitCode = code;
-    }))(1);
+    setExitCode(1);
     return;
   }
   if (result.acceptedIncompatibility !== undefined) {
@@ -5143,14 +5196,52 @@ export async function followPieceSourceAction(
     (deps.printError ?? console.error)(
       `The follow committed, but refreshing the running piece failed: ${result.executionWarning}`,
     );
-    (deps.setExitCode ?? ((code: number) => {
-      Deno.exitCode = code;
-    }))(1);
+    setExitCode(1);
     return;
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Inspect state: cf piece inspect --cell ${config.piece} ...
   → Open the piece in the shell; each later release of the origin is adopted there.`));
+}
+
+/**
+ * Parses `--expect`, a pattern written `<identity>#<symbol>`. The
+ * `cf:module/` prefix `cf piece inspect` prints before a pattern reference is
+ * accepted, so a reference copied from there pins as written.
+ *
+ * @throws ValidationError when either half is empty or `#` is missing.
+ */
+export function parsePatternPin(
+  spec: string,
+): { identity: string; symbol: string } {
+  const ref = spec.trim().replace(/^cf:module\//, "");
+  const hash = ref.lastIndexOf("#");
+  const identity = ref.slice(0, hash);
+  const symbol = ref.slice(hash + 1);
+  if (hash < 0 || identity.length === 0 || symbol.length === 0) {
+    throw new ValidationError(
+      `--expect takes <identity>#<symbol>, got "${spec}".`,
+      { exitCode: 1 },
+    );
+  }
+  return { identity, symbol };
+}
+
+/**
+ * Parses `--expect-revision`: a revision id, or `none` for a source log that
+ * must be empty, which `changeSource()` pins as `null`.
+ *
+ * @throws ValidationError for an empty value.
+ */
+export function parseRevisionPin(spec: string): string | null {
+  const revision = spec.trim();
+  if (revision.length === 0) {
+    throw new ValidationError(
+      "--expect-revision takes a revision id, or none.",
+      { exitCode: 1 },
+    );
+  }
+  return revision === "none" ? null : revision;
 }
 
 /** Applies `piece setsrc` and renders the receipt returned by the commit. */
