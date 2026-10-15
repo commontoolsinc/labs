@@ -138,7 +138,7 @@ export default pattern((input) => {
     isOwner: false,
     ...records,
     canJoin: true,
-    joinRoom: manager.joinRoom,
+    manager,
     self,
   } as RowArg);
 

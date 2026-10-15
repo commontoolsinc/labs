@@ -1682,7 +1682,11 @@ ignores every test inside it. Where a file declares a hook outside every
 `describe()`, that outermost one is the `global` suite the runner
 invents. A lane therefore never lists the title of a `describe()`
 holding a test the lane runs. A `describe()` a lane chose runs its hooks
-with the tests inside it ignored. Ingestion records the case a
+with the tests inside it ignored. A lane running a test inside a
+`describe()` runs that `describe()`'s hooks too, on every run of the unit,
+whether or not it chose the `describe()` itself, so the packer charges it
+the `describe()`'s own cost for each of those runs, once however many tests
+inside it the lane holds. Ingestion records the case a
 `describe()` reports for itself in two separate cases: whenever it fails
 on its own account, and on every run, pass or fail, once the manifest
 holds its title in the unit that ran and no other case in the report has

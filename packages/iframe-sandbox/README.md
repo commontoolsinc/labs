@@ -81,6 +81,32 @@ concrete scope before the guest loads. A name marked `presence` grants the
 presence room of that cell's field and none of the cell's data; see
 [Presence](#presence).
 
+## Guest presentation
+
+A host can set `.presentation` to `{ css, attributes, stylesheets }` on
+`common-iframe-sandbox`. `css` is a stylesheet string, `attributes` maps root
+`data-*` attributes to strings, and `stylesheets` lists external stylesheet
+URLs. The guest's Content Security Policy governs stylesheet and font loads.
+Head meta policies are activated before presentation is installed; a policy that
+refuses the inline bootstrap prevents both initial presentation and live
+updates.
+
+Presentation is installed before the guest's scripts run. Replacing it updates
+the current document without reloading its source or capability bridge. Setting
+it to `null` removes the host's sheets and restores the root attributes it
+replaced. Guest-authored styles remain in place and follow the host's sheets in
+cascade order. The guest document emits `common-iframe-presentation` after each
+applied change. A new guest receives the latest presentation.
+
+`cf-iframe` accepts the same property. With `undefined` (the default), it
+subscribes to the nearest `iframePresentationContext` provider, whose context
+key is `cf-iframe-presentation`. An explicit object overrides the inherited
+value; `null` opts out. Contexts are per DOM subtree, including across shadow
+roots, so separate hosts can supply different presentations.
+
+The transport assigns no meaning to a stylesheet's variable names or data
+attributes. It grants no additional network or host capabilities.
+
 ## Guest API
 
 The guest connects once and receives a Cell-shaped client. Remote operations

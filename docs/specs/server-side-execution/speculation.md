@@ -281,7 +281,16 @@ On each pushed `derived` commit with `derivedThrough = W` and
    refused) has already arrived at this client — the local dispatch
    ran late (a load-parked head event, a busy worker) — is jobless on
    the same grounds and is NOT registered: its writes are dropped
-   before any layer is sealed. A
+   before any layer is sealed. They are dropped before the run's
+   commit is prepared, too: the commit asks the overlay whether it
+   would drop the run (`discards`) and skips the CFC boundary pass for
+   a run it would, since writes that reach no layer cross no boundary.
+   A late run can have read state no commit sees — a cascade child
+   running after its ancestor's echo in another space has retired, and
+   before the served write to that space lands, reads that space
+   without the documents the echo held — and the pass would refuse
+   what it read there, a refusal counted and reported for writes that
+   go nowhere. A
    non-idempotent handler's late echo is divergent by construction (it
    re-toggles the already-served state), and its floor sits at the
    served commit's seq, above every W reachable until the next authored

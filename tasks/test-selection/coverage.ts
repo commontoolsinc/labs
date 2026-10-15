@@ -19,7 +19,7 @@ import {
 } from "../test-topology/suite.ts";
 import { memberScope } from "../test-topology/unit.ts";
 import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
-import { chargedTests, testsOf } from "./plan.ts";
+import { aroundIn, chargedTests, testsOf } from "./plan.ts";
 import {
   COST_WINDOW_DAYS,
   EXCLUDED_FROM_COVERAGE_GATE,
@@ -229,10 +229,12 @@ export function measuredCost(
   for (const [suite, held] of bySuite) {
     const fitted = calibration.suitesWithCoverage?.[suite];
     if (fitted === undefined) return undefined;
+    const around = aroundIn(held);
     /** What `entries` take, and their overheads past one lane's first. */
     const beyond = (entries: readonly ManifestEntry[]) => {
       const tests = testsOf(
         entries.map((entry) => ({ entry, repeats: entry.repeats })),
+        around,
       );
       const units = new Set(entries.map((entry) => entry.unit)).size;
       return chargedTests(fitted.correction, tests) +
