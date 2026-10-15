@@ -202,3 +202,19 @@ Deno.test("cf-vscroll snap-to-bottom follows text streaming into a slotted text 
     element.remove();
   }
 });
+
+Deno.test("cf-vscroll snap-to-bottom follows an item that grows inside a display: contents wrapper", async () => {
+  // As an image in a message does when it loads.
+  const wrapper = document.createElement("span");
+  wrapper.style.display = "contents";
+  const [item] = rows(1);
+  wrapper.append(item);
+  const element = await mount([wrapper]);
+  try {
+    item.style.height = "1000px";
+    await framesForSnap();
+    expect(distanceFromBottom(element)).toBe(0);
+  } finally {
+    element.remove();
+  }
+});

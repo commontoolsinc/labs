@@ -174,9 +174,12 @@ export class CFVScroll extends BaseElement {
    * added inside a `display: contents` wrapper (how the renderer slots an
    * array), or text streaming into a text node.
    */
-  private _mutationObserver = new MutationObserver(() =>
-    this.snapIfFollowing()
-  );
+  private _mutationObserver = new MutationObserver((records) => {
+    if (records.some((record) => record.type === "childList")) {
+      this.observeContent();
+    }
+    this.snapIfFollowing();
+  });
   /**
    * Whether new content should snap: true until the reader scrolls up, and
    * true again once they reach the bottom. Only a scroll toward the top clears
@@ -244,15 +247,28 @@ export class CFVScroll extends BaseElement {
     if (!this.scrollContainer || !slot) return;
     this._resizeObserver.disconnect();
     this._resizeObserver.observe(this.scrollContainer);
-    for (const element of slot.assignedElements()) {
-      this._resizeObserver.observe(element);
-    }
+    this.observeBoxes(slot.assignedElements());
     this._mutationObserver.observe(this, {
       childList: true,
       subtree: true,
       characterData: true,
     });
   };
+
+  /**
+   * Observes each element's box, or, for a `display: contents` element (the
+   * renderer wraps an array of children in one), which has no box, its
+   * children's, so an image loading inside the wrapper still reports.
+   */
+  private observeBoxes(elements: Iterable<Element>) {
+    for (const element of elements) {
+      if (getComputedStyle(element).display === "contents") {
+        this.observeBoxes(element.children);
+      } else {
+        this._resizeObserver.observe(element);
+      }
+    }
+  }
 
   /**
    * With `snapToBottom` set and the reader following, scroll to the bottom:
