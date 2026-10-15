@@ -283,6 +283,59 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .pad-grid {
+      display: grid;
+      grid-template-columns: 3.4rem repeat(var(--lanes, 5), minmax(0, 1fr));
+      gap: 0.3rem;
+      align-items: center;
+    }
+
+    .pad-label {
+      grid-column: 1;
+      color: #a3abc7;
+      font-size: 0.76rem;
+    }
+
+    .pad {
+      display: grid;
+      gap: 0.1rem;
+      justify-items: center;
+      border-radius: 0.5rem;
+      padding: 0.35rem 0.1rem;
+      font-size: 0.74rem;
+      font-weight: 600;
+      touch-action: manipulation;
+      user-select: none;
+    }
+
+    .pad kbd {
+      color: #6f789c;
+      font: 600 0.62rem ui-monospace, monospace;
+    }
+
+    .hint {
+      margin: 0.5rem 0 0;
+      color: #a3abc7;
+      font-size: 0.78rem;
+      line-height: 1.4;
+    }
+
+    .people-list {
+      display: grid;
+      gap: 0.3rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .person {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
+      font-size: 0.88rem;
+    }
+
     .clear {
       align-self: flex-start;
       font-size: 0.86rem;

@@ -2,10 +2,15 @@
  * Browser guest of Ring Loops. It draws the rings on a canvas, plays the
  * placed notes on a Web Audio graph from a step clock that exists only in this
  * browser, and writes each placement to the shared state as one keyed cell, so
- * two people editing different cells never write the same value.
+ * two people editing different cells never write the same value. Through the
+ * `jam` presence room it shows where everyone else's pointer and playback
+ * are, and plays the jam pads they press; nothing in the room is stored.
  */
 
-import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import {
+  connectFabric,
+  type PresenceRoomEvent,
+} from "@commonfabric/iframe-sandbox/guest";
 import {
   DEFAULT_INPUT,
   DEFAULT_OUTPUT,
@@ -23,29 +28,44 @@ import {
   defaultColor,
   type DrumSound,
   drumSound,
+  freshPresses,
+  HAND_FACET,
   handTurn,
+  JAM_ROOM,
+  keyForPad,
   laneLabel,
   laneMidi,
+  lastPressId,
   type LiveNote,
   liveNotes,
+  LOOK_FACET,
   MAX_TEMPO_BPM,
   midiToFrequency,
   MIN_TEMPO_BPM,
   normalizeTempo,
   NOTE_COLORS,
   notesAtStep,
+  padForKey,
+  type PadPress,
+  type Peer,
+  peerHandPosition,
+  POINTER_FACET,
   positionAt,
+  PRESSES_FACET,
+  readPeer,
   retimed,
   type Ring,
   ringBands,
   type RingLayout,
   ringLayoutOf,
+  type RingPoint,
   secondsPerStep,
   STEPS_PER_BEAT,
   stepsBetween,
   timeOfStep,
   toggleEdit,
   type Transport,
+  withPress,
 } from "./model.ts";
 
 /** How far ahead of the audio clock notes are queued, in seconds. */
@@ -116,6 +136,24 @@ let clearArmed = false;
 const pendingEdits = new Map<string, PlacedNote | null>();
 // Audio time at which each cell last sounded, by cell key.
 const flashes = new Map<string, number>();
+
+const room = fabric.presence(JAM_ROOM);
+let leaveRoom: (() => void) | undefined;
+let roomStatus: "joining" | "live" | "lost" | "unsupported" = "joining";
+// Everyone else in the room, by membership.
+const peers = new Map<string, Peer>();
+// Number of the last press played for each peer, so that a peer's new record
+// plays only the presses that are new in it.
+const pressesHeard = new Map<string, number>();
+// What each person last played on a pad, this viewer's own under `SELF`.
+const lastJammed = new Map<string, string>();
+const SELF = "";
+let ownPresses: PadPress[] = [];
+let nextPressId = 0;
+let publishedName: string | undefined;
+let publishedColor: string | undefined;
+// The jam pads, by ring index and lane.
+const padButtons = new Map<string, HTMLButtonElement>();
 
 //
 // Document
@@ -207,6 +245,29 @@ viewerLine.className = "viewer";
 viewerLine.dataset.testid = "viewer-name";
 colorGroup.append(colorHeading, swatches, viewerLine);
 
+const jamGroup = document.createElement("div");
+const jamHeading = document.createElement("h2");
+jamHeading.textContent = "Jam";
+const padGrid = document.createElement("div");
+padGrid.className = "pad-grid";
+padGrid.dataset.testid = "jam-pads";
+const jamHint = document.createElement("p");
+jamHint.className = "hint";
+jamHint.textContent =
+  "Press a pad, or its key, to play it over the loop. Everyone here hears it.";
+jamGroup.append(jamHeading, padGrid, jamHint);
+
+const peopleGroup = document.createElement("div");
+const peopleHeading = document.createElement("h2");
+peopleHeading.textContent = "Here now";
+const peopleList = document.createElement("ul");
+peopleList.className = "people-list";
+peopleList.dataset.testid = "people";
+const roomLine = document.createElement("p");
+roomLine.className = "hint";
+roomLine.dataset.testid = "room-status";
+peopleGroup.append(peopleHeading, peopleList, roomLine);
+
 const ringGroup = document.createElement("div");
 const ringHeading = document.createElement("h2");
 ringHeading.textContent = "Rings, inner to outer";
@@ -245,6 +306,8 @@ panel.append(
   tempoField,
   volumeField,
   colorGroup,
+  jamGroup,
+  peopleGroup,
   ringGroup,
   authorGroup,
   clearButton,
@@ -595,6 +658,7 @@ function applySettings(): void {
   );
   if (transport && transport.tempoBpm !== tempo) {
     transport = retimed(transport, now, tempo);
+    publishHand();
   }
 }
 
@@ -622,6 +686,7 @@ async function startPlayback(): Promise<void> {
     tempoBpm: effectiveTempo(),
   };
   scheduledThrough = 0;
+  publishHand();
   renderControls();
   requestFrame();
 }
@@ -630,6 +695,7 @@ async function startPlayback(): Promise<void> {
 function stopPlayback(): void {
   transport = undefined;
   flashes.clear();
+  publishHand();
   renderControls();
   requestFrame();
 }
@@ -670,7 +736,9 @@ function frame(): void {
     renderControls();
     return;
   }
-  if (transport) animationFrame = requestAnimationFrame(frame);
+  if (transport || [...peers.values()].some((peer) => peer.hand)) {
+    animationFrame = requestAnimationFrame(frame);
+  }
 }
 
 /** Asks for a frame, unless one is already on its way. */
@@ -704,17 +772,24 @@ function resizeCanvas(): void {
   canvas.height = Math.round(size * density);
 }
 
-/** Returns the cell under a pointer event on the canvas, if it is over one. */
-function cellUnder(event: MouseEvent): Cell | undefined {
-  if (!layout) return undefined;
+/**
+ * Returns where a pointer event on the canvas is, measured from the center in
+ * ring radii, so that the same point means the same place on every screen.
+ */
+function ringPointOf(event: MouseEvent): RingPoint | undefined {
   const size = canvas.clientWidth;
   const radius = ringRadius(size);
   if (radius <= 0) return undefined;
-  return cellAt(
-    layout,
-    (event.offsetX - size / 2) / radius,
-    (event.offsetY - size / 2) / radius,
-  );
+  return {
+    x: (event.offsetX - size / 2) / radius,
+    y: (event.offsetY - size / 2) / radius,
+  };
+}
+
+/** Returns the cell under a pointer event on the canvas, if it is over one. */
+function cellUnder(event: MouseEvent): Cell | undefined {
+  const point = ringPointOf(event);
+  return layout && point ? cellAt(layout, point.x, point.y) : undefined;
 }
 
 /** Returns the canvas angle of a fraction of a turn clockwise from the top. */
@@ -853,6 +928,21 @@ function draw(): void {
       handTurn(position, ring.steps),
     );
   }
+  const nowMs = Date.now();
+  context.lineWidth = 1.5;
+  for (const peer of peers.values()) {
+    if (!peer.hand) continue;
+    const peerPosition = peerHandPosition(peer.hand, nowMs);
+    context.strokeStyle = peer.color;
+    for (const [ringIndex, ring] of layout.rings.entries()) {
+      const band = bands[ringIndex];
+      strokeRadial(
+        band.inner * radius,
+        band.outer * radius,
+        handTurn(peerPosition, ring.steps),
+      );
+    }
+  }
   context.lineCap = "butt";
 
   const hub = bands[0].inner * radius;
@@ -864,6 +954,34 @@ function draw(): void {
   context.fillStyle = "#a3abc7";
   context.font = `600 ${hub * 0.24}px Inter, ui-sans-serif, system-ui`;
   context.fillText("BPM", 0, hub * 0.42);
+
+  drawPointers(radius);
+}
+
+/** Draws each peer's pointer as a dot with a label naming them. */
+function drawPointers(radius: number): void {
+  const context = drawing;
+  context.font = "600 12px Inter, ui-sans-serif, system-ui";
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  for (const peer of peers.values()) {
+    if (!peer.pointer) continue;
+    const x = peer.pointer.x * radius;
+    const y = peer.pointer.y * radius;
+    context.beginPath();
+    context.arc(x, y, 5, 0, TAU);
+    context.fillStyle = peer.color;
+    context.fill();
+    context.lineWidth = 2;
+    context.strokeStyle = "#0b0d17";
+    context.stroke();
+    const width = context.measureText(peer.name).width + 12;
+    context.beginPath();
+    context.roundRect(x + 9, y - 10, width, 20, 10);
+    context.fill();
+    context.fillStyle = "#0b0d17";
+    context.fillText(peer.name, x + 15, y);
+  }
 }
 
 //
@@ -913,6 +1031,104 @@ function rebuildRingRows(): void {
 }
 
 /** Brings every control in the panel up to date with the settings in effect. */
+/**
+ * Rebuilds the jam pads: a row for each ring, with a pad for each lane that
+ * shows what the lane plays and the key that plays it.
+ */
+function rebuildPads(): void {
+  padButtons.clear();
+  padGrid.replaceChildren();
+  if (!layout) return;
+  padGrid.style.setProperty("--lanes", String(layout.lanes));
+  for (const [ringIndex, ring] of layout.rings.entries()) {
+    const label = document.createElement("span");
+    label.className = "pad-label";
+    label.textContent = ring.label;
+    padGrid.append(label);
+    for (let lane = 0; lane < layout.lanes; lane++) {
+      const pad = document.createElement("button");
+      pad.type = "button";
+      pad.className = "pad";
+      pad.dataset.testid = `pad-${ringIndex}-${lane}`;
+      const plays = laneLabel(layout, ring, lane);
+      const key = keyForPad(ringIndex, lane);
+      pad.textContent = plays;
+      if (key) {
+        const hint = document.createElement("kbd");
+        hint.textContent = key.toUpperCase();
+        pad.append(hint);
+      }
+      pad.setAttribute("aria-label", `Play ${ring.label} ${plays}`);
+      // A pad plays on press rather than on click, so the note is not late
+      // by however long the button is held.
+      pad.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        pressPad(ringIndex, lane);
+      }, { signal });
+      pad.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        pressPad(ringIndex, lane);
+      }, { signal });
+      padButtons.set(`${ringIndex}:${lane}`, pad);
+      padGrid.append(pad);
+    }
+  }
+}
+
+/** Lists this viewer and everyone else in the room, and how the room stands. */
+function renderPeople(): void {
+  const row = (
+    name: string,
+    color: string,
+    playing: boolean,
+    jammed: string | undefined,
+  ) => {
+    const item = document.createElement("li");
+    item.className = "person";
+    const dot = document.createElement("span");
+    dot.className = "author-dot";
+    dot.style.background = color;
+    const label = document.createElement("span");
+    label.className = "author-name";
+    label.textContent = name;
+    const activity = document.createElement("span");
+    activity.className = "author-count";
+    activity.textContent = [
+      playing ? "playing" : "",
+      jammed ? `jammed ${jammed}` : "",
+    ].filter(Boolean).join(" · ");
+    item.append(dot, label, activity);
+    return item;
+  };
+  const others = [...peers.values()];
+  peopleList.replaceChildren(
+    row(
+      `${viewerName() || "Guest"} (you)`,
+      hydrated ? effectiveColor() : "#8b93a7",
+      transport !== undefined,
+      lastJammed.get(SELF),
+    ),
+    ...others.map((peer) =>
+      row(
+        peer.name,
+        peer.color,
+        peer.hand !== undefined,
+        lastJammed.get(peer.id),
+      )
+    ),
+  );
+  roomLine.textContent = roomStatus === "live"
+    ? others.length === 0
+      ? "Nobody else is here right now."
+      : `${others.length} ${others.length === 1 ? "other" : "others"} here.`
+    : roomStatus === "joining"
+    ? "Joining the room…"
+    : roomStatus === "unsupported"
+    ? "This server has no live room, so nobody sees your pointer or hears your pads."
+    : "Lost the room. Click anywhere to rejoin.";
+}
+
 function renderControls(): void {
   const isReady = ready();
   title.textContent = input.get()?.setup.title ?? DEFAULT_INPUT.setup.title;
@@ -968,6 +1184,8 @@ function renderControls(): void {
     ? `Notes you place carry the name ${name}.`
     : "No profile name is known, so notes you place carry none.";
   renderAuthors();
+  renderPeople();
+  for (const pad of padButtons.values()) pad.disabled = !isReady;
 
   if (isReady) {
     status.textContent = `${live.length} ${
@@ -1039,6 +1257,7 @@ function setHover(cell: Cell | undefined): void {
  */
 function refresh(): void {
   live = ready() && layout ? liveNotes(layout, currentNotes()) : [];
+  publishLook();
   applySettings();
   renderControls();
   renderReadout();
@@ -1065,9 +1284,191 @@ function adoptInput(): void {
     hoverCell = undefined;
     hoverRowIndex = undefined;
     rebuildRingRows();
+    rebuildPads();
     renderReadout();
   }
   refresh();
+}
+
+//
+// Presence
+//
+
+/**
+ * Publishes to the room. A rejection needs no handling of its own: a room that
+ * cannot take a publication reports its failure to the listener.
+ */
+function publish(publication: Promise<void>): void {
+  publication.catch(() => {});
+}
+
+/** Tells the room the viewer's name and color, where either has changed. */
+function publishLook(): void {
+  if (!leaveRoom || !hydrated) return;
+  const name = viewerName() || "Guest";
+  const color = effectiveColor();
+  if (name !== publishedName) {
+    publishedName = name;
+    publish(room.setName(name));
+  }
+  if (color !== publishedColor) {
+    publishedColor = color;
+    publish(room.setFacet(LOOK_FACET, { color }));
+  }
+}
+
+/**
+ * Tells the room where this browser's playback is: the step it holds at this
+ * wall-clock moment and its tempo, from which peers extrapolate. A stopped
+ * clock clears the facet.
+ */
+function publishHand(): void {
+  if (!leaveRoom) return;
+  if (!transport || !audio) {
+    publish(room.clearFacet(HAND_FACET));
+    return;
+  }
+  publish(room.setFacet(HAND_FACET, {
+    step: positionAt(transport, audio.context.currentTime),
+    at: Date.now(),
+    bpm: transport.tempoBpm,
+  }));
+}
+
+/** Tells the room where the pointer is over the rings. */
+function publishPointer(event: PointerEvent): void {
+  const point = ringPointOf(event);
+  if (!leaveRoom || !point) return;
+  publish(room.setFacet(POINTER_FACET, {
+    x: Math.round(point.x * 1000) / 1000,
+    y: Math.round(point.y * 1000) / 1000,
+  }));
+}
+
+/**
+ * Joins the room unless already in it, and tells it everything this guest
+ * publishes. A new membership starts with no presses of its own.
+ */
+function joinRoom(): void {
+  if (leaveRoom || roomStatus === "unsupported" || disposed) return;
+  roomStatus = "joining";
+  publishedName = undefined;
+  publishedColor = undefined;
+  ownPresses = [];
+  leaveRoom = room.join(onRoomEvent);
+  publishLook();
+  publishHand();
+  renderPeople();
+}
+
+/** Joins the room again after the host lost it, as the user acts. */
+function rejoinIfLost(): void {
+  if (roomStatus === "lost") joinRoom();
+}
+
+function onRoomEvent(event: PresenceRoomEvent): void {
+  switch (event.kind) {
+    case "snapshot":
+      roomStatus = "live";
+      peers.clear();
+      pressesHeard.clear();
+      for (const participant of event.participants) {
+        meetPeer(readPeer(participant));
+      }
+      break;
+    case "upsert": {
+      const peer = readPeer(event.participant);
+      if (peers.has(peer.id)) hearPeer(peer);
+      else meetPeer(peer);
+      break;
+    }
+    case "remove":
+      peers.delete(event.participantId);
+      pressesHeard.delete(event.participantId);
+      lastJammed.delete(event.participantId);
+      break;
+    case "failure":
+      leaveRoom = undefined;
+      peers.clear();
+      pressesHeard.clear();
+      roomStatus = event.error.code === "presence-unsupported"
+        ? "unsupported"
+        : "lost";
+      break;
+  }
+  renderPeople();
+  requestFrame();
+}
+
+/** Records a peer met for the first time, without playing its past presses. */
+function meetPeer(peer: Peer): void {
+  peers.set(peer.id, peer);
+  pressesHeard.set(peer.id, lastPressId(peer.presses) ?? -1);
+}
+
+/** Records a peer's new record, and plays the presses that are new in it. */
+function hearPeer(peer: Peer): void {
+  const heard = pressesHeard.get(peer.id);
+  for (const press of freshPresses(peer.presses, heard)) {
+    const played = playPress(press, peer.color, false);
+    if (played) lastJammed.set(peer.id, played);
+  }
+  pressesHeard.set(peer.id, lastPressId(peer.presses) ?? heard ?? -1);
+  peers.set(peer.id, peer);
+}
+
+/** Plays a jam pad here, and tells the room so that everyone else hears it. */
+function pressPad(ringIndex: number, lane: number): void {
+  if (!ready() || !layout) return;
+  rejoinIfLost();
+  const press = { id: nextPressId++, ring: layout.rings[ringIndex].id, lane };
+  const played = playPress(press, effectiveColor(), true);
+  if (played) lastJammed.set(SELF, played);
+  renderPeople();
+  ownPresses = withPress(ownPresses, press);
+  if (!leaveRoom) return;
+  // Copied into literals, which a facet takes where an interface is not one.
+  const list = ownPresses.map(({ id, ring, lane }) => ({ id, ring, lane }));
+  publish(room.setFacet(PRESSES_FACET, { list }));
+}
+
+/**
+ * Lights the pad `press` names in `color` and sounds it, unless its ring is
+ * muted, and returns what the pad plays, such as `snare` or `C5`. Returns
+ * `undefined` for a press naming no pad of these rings. Only this viewer's own
+ * press may start the audio, since a browser starts audio only for a gesture;
+ * a peer's press is heard once it has.
+ */
+function playPress(
+  press: PadPress,
+  color: string,
+  ownGesture: boolean,
+): string | undefined {
+  if (!layout) return undefined;
+  const ringIndex = layout.rings.findIndex((ring) => ring.id === press.ring);
+  if (ringIndex < 0 || press.lane < 0 || press.lane >= layout.lanes) {
+    return undefined;
+  }
+  padButtons.get(`${ringIndex}:${press.lane}`)?.animate(
+    [{ backgroundColor: color, boxShadow: `0 0 14px ${color}` }, {}],
+    { duration: 280, easing: "ease-out" },
+  );
+  const ring = layout.rings[ringIndex];
+  const plays = laneLabel(layout, ring, press.lane);
+  if (mutedRingIds().has(ring.id)) return plays;
+  if (ownGesture) audio ??= createAudioEngine();
+  const engine = audio;
+  if (!engine) return plays;
+  const sound = () => {
+    if (!layout || disposed) return;
+    playNote(engine, layout, ring, press.lane, engine.context.currentTime);
+  };
+  if (engine.context.state === "running") {
+    sound();
+  } else if (ownGesture) {
+    void engine.context.resume().then(sound).catch(showError);
+  }
+  return plays;
 }
 
 //
@@ -1120,6 +1521,8 @@ function teardown(): void {
   animationFrame = undefined;
   transport = undefined;
   void audio?.context.close().catch(() => undefined);
+  leaveRoom?.();
+  leaveRoom = undefined;
   fabric.disconnect();
 }
 
@@ -1135,10 +1538,15 @@ const stops = [
   output.sink(refresh),
 ];
 
-canvas.addEventListener("pointermove", (event) => setHover(cellUnder(event)), {
-  signal,
-});
-canvas.addEventListener("pointerleave", () => setHover(undefined), { signal });
+canvas.addEventListener("pointermove", (event) => {
+  setHover(cellUnder(event));
+  publishPointer(event);
+}, { signal });
+canvas.addEventListener("pointerleave", () => {
+  setHover(undefined);
+  if (leaveRoom) publish(room.clearFacet(POINTER_FACET));
+}, { signal });
+canvas.addEventListener("pointerdown", rejoinIfLost, { signal });
 canvas.addEventListener("click", (event) => {
   const cell = cellUnder(event);
   if (cell) toggleCell(cell);
@@ -1146,6 +1554,7 @@ canvas.addEventListener("click", (event) => {
 
 playButton.addEventListener("click", () => {
   clearError();
+  rejoinIfLost();
   if (transport) {
     stopPlayback();
   } else {
@@ -1198,7 +1607,19 @@ clearButton.addEventListener("click", () => {
 clearButton.addEventListener("blur", disarmClear, { signal });
 clearButton.addEventListener("pointerleave", disarmClear, { signal });
 
+globalThis.addEventListener("keydown", (event) => {
+  if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target instanceof HTMLInputElement || !layout) return;
+  const pad = padForKey(layout, event.key);
+  if (!pad) return;
+  event.preventDefault();
+  pressPad(pad.ringIndex, pad.lane);
+}, { signal });
 globalThis.addEventListener("pagehide", teardown, { once: true, signal });
+
+// Presence does not wait for the cells: the room is joined at once, and the
+// name is published once the input that holds it has been pulled.
+joinRoom();
 
 void (async () => {
   try {

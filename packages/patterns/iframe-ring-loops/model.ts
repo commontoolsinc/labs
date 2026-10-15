@@ -700,6 +700,235 @@ export function defaultColor(authorId: string): string {
   return NOTE_COLORS[hash % NOTE_COLORS.length];
 }
 
+//
+// Presence
+//
+// What a participant publishes to the `jam` room, read back defensively: a
+// facet is whatever another guest wrote, so every field is checked and a facet
+// that does not fit is ignored.
+//
+
+/** Name of the presence room every participant on a piece shares. */
+export const JAM_ROOM = "jam";
+
+/** Facet holding the color a participant's notes and pointer are drawn in. */
+export const LOOK_FACET = "look";
+
+/** Facet holding where a participant's pointer is over the rings. */
+export const POINTER_FACET = "pointer";
+
+/** Facet holding where a participant's playback was at one wall-clock time. */
+export const HAND_FACET = "hand";
+
+/** Facet holding a participant's most recent jam-pad presses. */
+export const PRESSES_FACET = "presses";
+
+/** Most presses a participant's facet keeps, oldest first. */
+export const MAX_PRESSES = 8;
+
+/** Keys that play the jam pads, one row per ring from the innermost. */
+export const PAD_KEY_ROWS: readonly string[] = [
+  "12345678",
+  "qwertyui",
+  "asdfghjk",
+  "zxcvbnm,",
+];
+
+/** Furthest from the center a published pointer is drawn, in ring radii. */
+const MAX_POINTER_RADIUS = 1.2;
+
+/**
+ * Where a participant's playback was: the step position it held at wall-clock
+ * time `at`, advancing at `bpm` from there.
+ */
+export interface PeerHand {
+  /** Step position at `at`. */
+  readonly step: number;
+
+  /** Wall-clock time, in milliseconds since the epoch. */
+  readonly at: number;
+
+  /** Tempo the hand advances at, in beats per minute. */
+  readonly bpm: number;
+}
+
+/** One press of a jam pad. */
+export interface PadPress {
+  /** Number of the press, increasing within one membership of the room. */
+  readonly id: number;
+
+  /** Identifier of the ring whose instrument and lane were played. */
+  readonly ring: string;
+
+  /** Lane of that ring, from 0. */
+  readonly lane: number;
+}
+
+/** A point over the rings, measured from the center in ring radii. */
+export interface RingPoint {
+  /** Distance right of the center. */
+  readonly x: number;
+
+  /** Distance below the center. */
+  readonly y: number;
+}
+
+/** One other participant, as this guest draws and plays them. */
+export interface Peer {
+  /** Membership the record belongs to. */
+  readonly id: string;
+
+  /** Name the participant published. */
+  readonly name: string;
+
+  /** Color to draw the participant in. */
+  readonly color: string;
+
+  /** Where the participant's pointer is, or `undefined` when off the rings. */
+  readonly pointer?: RingPoint;
+
+  /** Where the participant's playback is, or `undefined` when stopped. */
+  readonly hand?: PeerHand;
+
+  /** The participant's most recent presses, oldest first. */
+  readonly presses: readonly PadPress[];
+}
+
+/** A presence record, as the room delivers it. */
+export interface PeerRecord {
+  /** Membership the record belongs to. */
+  readonly participantId: string;
+
+  /** Name the participant published. */
+  readonly name: string;
+
+  /** What the participant published, by facet name. */
+  readonly facets: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Returns `record` as a peer. A facet of the wrong shape reads as absent, and a
+ * color that is not one of `NOTE_COLORS` reads as the membership's default.
+ */
+export function readPeer(record: PeerRecord): Peer {
+  const { facets } = record;
+  const look = facets[LOOK_FACET];
+  const color = isRecord(look) && typeof look.color === "string" &&
+      NOTE_COLORS.includes(look.color)
+    ? look.color
+    : defaultColor(record.participantId);
+  const pointer = readRingPoint(facets[POINTER_FACET]);
+  const hand = readHand(facets[HAND_FACET]);
+  return {
+    id: record.participantId,
+    name: record.name.trim() || "Someone",
+    color,
+    ...(pointer && { pointer }),
+    ...(hand && { hand }),
+    presses: readPresses(facets[PRESSES_FACET]),
+  };
+}
+
+/**
+ * Returns the step position `hand` has reached at wall-clock time `nowMs`. A
+ * time before the hand's own, as a sender's clock running ahead produces,
+ * reads as the hand's own.
+ */
+export function peerHandPosition(hand: PeerHand, nowMs: number): number {
+  const elapsedSeconds = Math.max(0, nowMs - hand.at) / 1000;
+  return Math.max(0, hand.step) + elapsedSeconds / secondsPerStep(hand.bpm);
+}
+
+/**
+ * Returns the presses in `presses` numbered above `lastSeen`, oldest first.
+ * With no `lastSeen`, as for a participant just met, it returns none, so that
+ * joining a room does not replay what was played before.
+ */
+export function freshPresses(
+  presses: readonly PadPress[],
+  lastSeen: number | undefined,
+): PadPress[] {
+  if (lastSeen === undefined) return [];
+  return presses.filter((press) => press.id > lastSeen);
+}
+
+/** Returns the highest press number in `presses`, or `undefined` for none. */
+export function lastPressId(presses: readonly PadPress[]): number | undefined {
+  return presses.length === 0
+    ? undefined
+    : presses.reduce((highest, press) => Math.max(highest, press.id), -1);
+}
+
+/** Returns `presses` with `press` appended, keeping the newest ones. */
+export function withPress(
+  presses: readonly PadPress[],
+  press: PadPress,
+): PadPress[] {
+  return [...presses, press].slice(-MAX_PRESSES);
+}
+
+/**
+ * Returns the pad `key` plays: the ring is the key's row in `PAD_KEY_ROWS`
+ * and the lane its place in the row. Returns `undefined` for any other key,
+ * and for a row or lane the layout does not have.
+ */
+export function padForKey(
+  layout: RingLayout,
+  key: string,
+): { readonly ringIndex: number; readonly lane: number } | undefined {
+  const lower = key.toLowerCase();
+  const ringIndex = PAD_KEY_ROWS.findIndex((row) => row.includes(lower));
+  if (ringIndex < 0 || ringIndex >= layout.rings.length) return undefined;
+  const lane = PAD_KEY_ROWS[ringIndex].indexOf(lower);
+  return lane < layout.lanes ? { ringIndex, lane } : undefined;
+}
+
+/** Returns the key that plays lane `lane` of ring `ringIndex`, if any. */
+export function keyForPad(ringIndex: number, lane: number): string | undefined {
+  return PAD_KEY_ROWS[ringIndex]?.[lane];
+}
+
+/** Returns whether `value` is a record whose fields can be read by name. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Helper for `readPeer()`, which reads a pointer facet. */
+function readRingPoint(value: unknown): RingPoint | undefined {
+  if (!isRecord(value)) return undefined;
+  const { x, y } = value;
+  if (typeof x !== "number" || typeof y !== "number") return undefined;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  return Math.hypot(x, y) > MAX_POINTER_RADIUS ? undefined : { x, y };
+}
+
+/** Helper for `readPeer()`, which reads a hand facet. */
+function readHand(value: unknown): PeerHand | undefined {
+  if (!isRecord(value)) return undefined;
+  const { step, at, bpm } = value;
+  if (
+    typeof step !== "number" || typeof at !== "number" ||
+    typeof bpm !== "number" || !Number.isFinite(step) || !Number.isFinite(at)
+  ) {
+    return undefined;
+  }
+  return { step, at, bpm: normalizeTempo(bpm) };
+}
+
+/** Helper for `readPeer()`, which reads a presses facet. */
+function readPresses(value: unknown): PadPress[] {
+  if (!isRecord(value) || !Array.isArray(value.list)) return [];
+  return value.list.flatMap((entry: unknown) => {
+    if (!isRecord(entry)) return [];
+    const { id, ring, lane } = entry;
+    return typeof id === "number" && Number.isInteger(id) &&
+        typeof ring === "string" && typeof lane === "number" &&
+        Number.isInteger(lane)
+      ? [{ id, ring, lane }]
+      : [];
+  }).slice(-MAX_PRESSES);
+}
+
 /** Returns whether `value` is a whole number indexing one of `length` slots. */
 function isIndexBelow(value: number, length: number): boolean {
   return Number.isInteger(value) && value >= 0 && value < length;

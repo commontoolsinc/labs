@@ -19,10 +19,16 @@ import {
   checkedVolume,
   defaultColor,
   FALLBACK_TEMPO_BPM,
+  freshPresses,
+  HAND_FACET,
   handTurn,
+  keyForPad,
   laneLabel,
   laneMidi,
+  lastPressId,
   liveNotes,
+  LOOK_FACET,
+  MAX_PRESSES,
   MAX_TEMPO_BPM,
   midiToFrequency,
   MIN_TEMPO_BPM,
@@ -30,7 +36,12 @@ import {
   NOTE_COLORS,
   noteFor,
   notesAtStep,
+  padForKey,
+  peerHandPosition,
+  POINTER_FACET,
   positionAt,
+  PRESSES_FACET,
+  readPeer,
   retimed,
   ringBands,
   ringLayoutOf,
@@ -41,6 +52,7 @@ import {
   toggleEdit,
   type Transport,
   validLayoutOf,
+  withPress,
 } from "./model.ts";
 
 const layout = ringLayoutOf(DEFAULT_SETUP);
@@ -546,6 +558,175 @@ describe("model", () => {
 
     it("returns more than one color across fifty authors", () => {
       expect(new Set(authors.map(defaultColor)).size).toBeGreaterThan(1);
+    });
+  });
+  describe("readPeer()", () => {
+    const base = { participantId: "peer-1", name: "Grace", facets: {} };
+
+    it("returns the name, and the color the look facet names", () => {
+      const peer = readPeer({
+        ...base,
+        facets: { [LOOK_FACET]: { color: "#69db7c" } },
+      });
+      expect([peer.name, peer.color]).toEqual(["Grace", "#69db7c"]);
+    });
+
+    it("returns the membership's default color for a color not on offer", () => {
+      const peer = readPeer({
+        ...base,
+        facets: { [LOOK_FACET]: { color: "url(evil)" } },
+      });
+      expect(peer.color).toBe(defaultColor("peer-1"));
+    });
+
+    it("returns `Someone` for a blank name", () => {
+      expect(readPeer({ ...base, name: "  " }).name).toBe("Someone");
+    });
+
+    it("returns a pointer inside the rings", () => {
+      const peer = readPeer({
+        ...base,
+        facets: { [POINTER_FACET]: { x: 0.5, y: -0.25 } },
+      });
+      expect(peer.pointer).toEqual({ x: 0.5, y: -0.25 });
+    });
+
+    it("returns no pointer for one far outside the rings, or one that is not a number", () => {
+      const far = readPeer({
+        ...base,
+        facets: { [POINTER_FACET]: { x: 40, y: 0 } },
+      });
+      const text = readPeer({
+        ...base,
+        facets: { [POINTER_FACET]: { x: "1", y: 0 } },
+      });
+      expect([far.pointer, text.pointer]).toEqual([undefined, undefined]);
+    });
+
+    it("returns a hand, with its tempo inside the offered range", () => {
+      const peer = readPeer({
+        ...base,
+        facets: { [HAND_FACET]: { step: 3, at: 1000, bpm: 900 } },
+      });
+      expect(peer.hand).toEqual({ step: 3, at: 1000, bpm: MAX_TEMPO_BPM });
+    });
+
+    it("returns no hand for a facet missing its time", () => {
+      const peer = readPeer({
+        ...base,
+        facets: { [HAND_FACET]: { step: 3, bpm: 96 } },
+      });
+      expect(peer.hand).toBeUndefined();
+    });
+
+    it("returns the well-formed presses and drops the rest", () => {
+      const peer = readPeer({
+        ...base,
+        facets: {
+          [PRESSES_FACET]: {
+            list: [
+              { id: 1, ring: "bass", lane: 2 },
+              { id: 1.5, ring: "bass", lane: 2 },
+              { id: 2, ring: 7, lane: 2 },
+              { id: 3, ring: "drums", lane: 0 },
+            ],
+          },
+        },
+      });
+      expect(peer.presses).toEqual([
+        { id: 1, ring: "bass", lane: 2 },
+        { id: 3, ring: "drums", lane: 0 },
+      ]);
+    });
+  });
+
+  describe("peerHandPosition()", () => {
+    const hand = { step: 10, at: 5_000, bpm: 120 };
+
+    it("advances eight steps a second at 120 beats per minute", () => {
+      expect(peerHandPosition(hand, 6_000)).toBe(18);
+    });
+
+    it("returns the hand's own step for a time before the hand's", () => {
+      expect(peerHandPosition(hand, 4_000)).toBe(10);
+    });
+
+    it("counts a negative step, as during a start delay, from 0", () => {
+      expect(peerHandPosition({ ...hand, step: -0.4 }, 5_000)).toBe(0);
+    });
+  });
+
+  describe("freshPresses()", () => {
+    const presses = [
+      { id: 4, ring: "bass", lane: 0 },
+      { id: 5, ring: "bass", lane: 1 },
+      { id: 6, ring: "bass", lane: 2 },
+    ];
+
+    it("returns the presses numbered above the last one seen", () => {
+      expect(freshPresses(presses, 4).map((press) => press.id)).toEqual([
+        5,
+        6,
+      ]);
+    });
+
+    it("returns none for a participant just met", () => {
+      expect(freshPresses(presses, undefined)).toEqual([]);
+    });
+  });
+
+  describe("lastPressId()", () => {
+    it("returns the highest press number", () => {
+      expect(lastPressId([
+        { id: 2, ring: "bass", lane: 0 },
+        { id: 7, ring: "bass", lane: 0 },
+      ])).toBe(7);
+    });
+
+    it("returns `undefined` for no presses", () => {
+      expect(lastPressId([])).toBeUndefined();
+    });
+  });
+
+  describe("withPress()", () => {
+    it("keeps the newest presses once the list is full", () => {
+      const full = Array.from(
+        { length: MAX_PRESSES },
+        (_, id) => ({ id, ring: "bass", lane: 0 }),
+      );
+      const next = withPress(full, { id: MAX_PRESSES, ring: "bass", lane: 1 });
+      expect([next.length, next[0].id, next.at(-1)?.id]).toEqual([
+        MAX_PRESSES,
+        1,
+        MAX_PRESSES,
+      ]);
+    });
+  });
+
+  describe("padForKey()", () => {
+    it("returns the ring of the key's row and the lane of its place", () => {
+      expect(padForKey(layout, "w")).toEqual({ ringIndex: 1, lane: 1 });
+    });
+
+    it("reads an upper-case key as its lower-case one", () => {
+      expect(padForKey(layout, "A")).toEqual({ ringIndex: 2, lane: 0 });
+    });
+
+    it("returns `undefined` for a lane the layout does not have", () => {
+      expect(padForKey(layout, "y")).toBeUndefined();
+    });
+
+    it("returns `undefined` for a key on no row", () => {
+      expect(padForKey(layout, "p")).toBeUndefined();
+    });
+
+    it("returns the pad `keyForPad()` gives the key of, for every pad of the layout", () => {
+      for (const [ringIndex] of layout.rings.entries()) {
+        for (let lane = 0; lane < layout.lanes; lane++) {
+          expect(padForKey(layout, keyForPad(ringIndex, lane) ?? ""))
+            .toEqual({ ringIndex, lane });
+        }
+      }
     });
   });
 });

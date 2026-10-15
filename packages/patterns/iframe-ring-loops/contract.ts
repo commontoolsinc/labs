@@ -237,4 +237,5 @@ export const IFRAME_PATTERN = {
   outputScope: "user",
   frameHeight: "100vh",
   databases: {},
+  presence: { jam: "state" },
 } as const;
