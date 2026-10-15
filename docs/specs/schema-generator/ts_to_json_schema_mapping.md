@@ -336,19 +336,17 @@ whole interface, including a default referring to a preceding parameter.
 A bound parameter reads as its argument. Structural member syntax retains those
 bindings through object properties, literal index signatures, arrays, tuples,
 unions and intersections, and through alias bodies such as `Array<T>`,
-`ReadonlyArray<T>`, `Record<string, T>`, `[T]` and `T | null`. Optional properties
-remain outside `required`. When the checker adds `undefined` for an optional
-property, the declared bound value retains that alternative, including an
-optional cell reference. A synthetic reference with no checker instantiation
-reads that alternative from the member's optional flag. A bound value whose
-schema carries CFC labels at its root, such as an optional
-`Confidential<Node<T>, …>` member, takes no `undefined` alternative: its labels
-stay on the property, because the runtime's policy merge refuses labels on one
-`anyOf` branch whose siblings it cannot prove type-disjoint, and a labeled
-`$ref` cannot be (`assertNoDivergentIfcBranches`,
-`packages/runner/src/cfc/schema-merge.ts`). The property remains outside
-`required`. Explicit `T | undefined` and optional tuple elements also retain
-`undefined`.
+`ReadonlyArray<T>`, `Record<string, T>`, `[T]` and `T | null`. An optional
+property stays outside `required`, and its schema is the bound value's
+without the `undefined` the checker adds for its `?`, as a property declared
+with no parameters reads: the property's absence is what that alternative
+would admit, and the store keeps no property whose value is `undefined`
+(`docs/specs/json_schema.md`). That holds for an optional cell reference and
+for a value whose schema carries CFC labels at its root alike, and for a
+member a mapped type such as `Pick`, `Omit` or `Partial` makes from a bound
+declaration. An `undefined` the author writes, in the declaration or in the
+argument (`T | undefined`, `Box<string | undefined>`), and an optional tuple
+element keep it.
 
 Library key arguments also read their bindings: `Pick<T, K>` and `Omit<T, K>`
 accept a `K` bound to a literal key union, and `Record<K, T>` accepts a bound

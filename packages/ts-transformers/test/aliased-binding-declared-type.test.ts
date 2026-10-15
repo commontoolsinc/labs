@@ -264,7 +264,7 @@ export default pattern<Input<Box<number>>>(({ c }) => ({
           { type: "object", properties: {} },
           {
             type: "object",
-            properties: { value: { type: ["number", "undefined"] } },
+            properties: { value: { type: "number" } },
           },
         ],
         default: {},
