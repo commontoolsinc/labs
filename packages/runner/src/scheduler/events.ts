@@ -1381,7 +1381,11 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
-  readonly dropEvent: (event: QueuedEvent, reason: string) => void;
+  readonly dropEvent: (
+    event: QueuedEvent,
+    reason: string,
+    options?: { quiet?: boolean },
+  ) => void;
   readonly recordLineageEvent: (
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
@@ -1865,6 +1869,7 @@ export async function processPullQueuedEventDuringExecute(
       state.dropEvent(
         queuedEvent,
         `Event dropped: lineage origin failed before ${queuedEvent.id} dispatched`,
+        { quiet: state.lineageRunsAgain(queuedEvent.originTx) },
       );
       logger.debug("scheduler-lineage", () => [
         "Dropping event from failed lineage origin",

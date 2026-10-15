@@ -198,15 +198,8 @@ export interface ParticipantChipInput {
   myProfile: ProfileCell | undefined;
 
   /**
-   * Whether the viewer has a manager to start a direct chat with; absent for
-   * none.
-   */
-  startsDirect?: boolean;
-
-  /**
-   * The viewer's manager's `openDirect`, when `startsDirect` holds. The
-   * control sends its click there itself, so that the manager receives the
-   * viewer's reviewed `ChatStart`.
+   * The viewer's manager's `openDirect`. The control sends its click there
+   * itself, so that the manager receives the viewer's reviewed `ChatStart`.
    */
   startDirect?: Stream<StartDirectEvent>;
 }
@@ -219,9 +212,11 @@ export interface ParticipantChipOutput {
 
 /**
  * One participant, shown by their profile, with a control that starts a direct
- * chat with them. The control shows only where it can start one: for someone
- * other than the viewer, whose profile attests a principal, to a viewer who
- * has a manager. It names the participant to the manager by their profile,
+ * chat with them. The control shows for someone other than the viewer, whose
+ * profile attests a principal, to a viewer with a profile. Whether the viewer
+ * has a manager is not read here: the chip's display is stored in the room's
+ * space, and a manager whose data carries a label the room's space does not
+ * admit would make it refused. It names the participant to the manager by their profile,
  * bound as the control's `name`, which crosses into the click's event as the
  * profile's own cell; the manager reads whom it names from the profile's
  * `represents-principal` label, and offers the room through the share inbox
@@ -230,15 +225,15 @@ export interface ParticipantChipOutput {
 export const ParticipantChip = pattern<
   ParticipantChipInput,
   ParticipantChipOutput
->(({ participant, myProfile, startsDirect, startDirect }) => {
+>(({ participant, myProfile, startDirect }) => {
   const counterpart = computed(() =>
     principalOf(participant, "represents-principal") ?? ""
   );
   // Who may start a chat differs by viewer, so the control is hidden by a
   // prop rather than built as a different tree (see `FabriChatMessageRow`).
   const chatDisplay = computed((): ChatDisplay =>
-    startsDirect === true && myProfile?.get() !== undefined &&
-      !equals(participant, myProfile) && counterpart !== ""
+    myProfile?.get() !== undefined && !equals(participant, myProfile) &&
+      counterpart !== ""
       ? "inline-flex"
       : "none"
   );
@@ -1039,13 +1034,7 @@ export interface FabriChatRoomCoreInput {
   /** The viewer's adds' outcomes; absent where they aren't remembered. */
   addRequests?: AddRequestsCell;
 
-  /**
-   * Whether the viewer has a manager to start a direct chat with; absent for
-   * none.
-   */
-  startsDirect?: boolean;
-
-  /** The viewer's manager's `openDirect`, when `startsDirect` holds. */
+  /** The viewer's manager's `openDirect`. */
   startDirect?: Stream<StartDirectEvent>;
 
   /**
@@ -1098,7 +1087,6 @@ export const FabriChatRoomCore = pattern<
     titles,
     roster,
     addRequests,
-    startsDirect,
     startDirect,
     self,
     manager,
@@ -1125,19 +1113,20 @@ export const FabriChatRoomCore = pattern<
       ? policyWithOwners
       : policyWithoutOwners
   );
-  // Read as a value, as `canOffer` is: a handler bound to a manager that
-  // isn't there is bound to a stream that still reads as present.
+  // Whether the room is one a manager can take the viewer into. It reads
+  // nothing of the manager, whose label the room's space may not admit:
+  // `tellManagerJoined` reads whether the viewer has one, in its own event.
   const canJoin = computed(() =>
     (ownSpace || (container?.key("chatRoom").get() !== undefined &&
       equals(container?.key("chatRoom").get(), self))) &&
-    manager?.joinRoom !== undefined && self !== undefined
+    self !== undefined
   );
   // Why the session's latest act was refused, which the composer shows.
   const refusal = new Writable.perSession<string>("");
   const tellJoined = tellManagerJoined({
     canJoin,
     container: ownSpace ? undefined : container,
-    joinRoom: manager?.joinRoom,
+    manager,
     self,
   });
   const alsoToMain = new Writable.perSession(false);
@@ -1448,7 +1437,6 @@ export const FabriChatRoomCore = pattern<
             <ParticipantChip
               participant={participant}
               myProfile={myProfile}
-              startsDirect={startsDirect}
               startDirect={startDirect}
             />
           ))}
@@ -1475,7 +1463,7 @@ export const FabriChatRoomCore = pattern<
               refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
-              joinRoom={manager?.joinRoom}
+              manager={manager}
               self={self}
             />
           ))}
@@ -1548,7 +1536,7 @@ export const FabriChatRoomCore = pattern<
               refusal={refusal}
               canJoin={canJoin}
               container={ownSpace ? undefined : container}
-              joinRoom={manager?.joinRoom}
+              manager={manager}
               self={self}
             />
           ))}
@@ -1632,7 +1620,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
     const managerWish = wish<
       RoomManager & { openDirect: Stream<StartDirectEvent> }
     >({ query: "#chatManager" });
-    const startsDirect = computed(() => managerWish.result !== undefined);
     // Hidden by a prop rather than a branch, and `hidden` until the prop has a
     // value, as `FabriChatMessageRow` says.
     const setupDisplay = computed((): ChatDisplay =>
@@ -1647,7 +1634,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
         titles,
         roster: participants,
         addRequests,
-        startsDirect,
         startDirect: managerWish.result?.openDirect,
         self,
         manager: managerWish.result,

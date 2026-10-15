@@ -236,7 +236,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     isOwner: false,
     messages: setup.messages,
     canJoin: true,
-    joinRoom: counted,
+    manager: { joinRoom: counted },
     self,
   } as RowArg);
 

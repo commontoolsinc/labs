@@ -28,7 +28,7 @@ import {
   type ComposerCell,
   entityKeyOf,
   isDeleted,
-  type JoinRoomRequest,
+  type JoiningManager,
   type MessageCell,
   type MessageRecord,
   messageRightsOf,
@@ -155,14 +155,17 @@ export interface FabriChatMessageRowInput {
    */
   refusal?: ActRefusalCell;
 
-  /** Whether the viewer's manager can take the viewer into the room. */
+  /** Whether the room is one the viewer's manager can take them into. */
   canJoin?: boolean;
 
   /** The container's declaration for a room held inside another space. */
   container?: Cell<ChatContainer>;
 
-  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
-  joinRoom?: Stream<JoinRoomRequest>;
+  /**
+   * The viewer's manager, which a write tells it joined the room; absent
+   * while the viewer has none, or theirs hasn't resolved.
+   */
+  manager?: JoiningManager;
 
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
@@ -223,10 +226,10 @@ export const FabriChatMessageRow = pattern<
     refusal,
     canJoin,
     container,
-    joinRoom,
+    manager,
     self,
   } = input;
-  const joined = tellManagerJoined({ canJoin, container, joinRoom, self });
+  const joined = tellManagerJoined({ canJoin, container, manager, self });
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
   const tallies = computed(() => {

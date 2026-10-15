@@ -662,20 +662,31 @@ export interface AddReactionState extends ReactionState {
   joined?: Stream<void>;
 }
 
+/** The part of the viewer's manager `tellManagerJoined` reaches. */
+export interface JoiningManager {
+  /** Makes a room the viewer has joined one of their chats. */
+  joinRoom?: Stream<JoinRoomRequest>;
+}
+
 /** What `tellManagerJoined` is bound to. */
 export interface ManagerJoinState {
   /**
-   * Whether the viewer's manager can take the viewer into the room: the
-   * viewer has a manager and the room is standalone or its container's
-   * declared conversation. Absent, it can't.
+   * Whether the room is one a manager can take the viewer into: it names
+   * itself, and is standalone or its container's declared conversation.
+   * Absent, it isn't. It says nothing of the manager, so that what the room
+   * stores reads nothing of a manager that can carry a label the room's space
+   * doesn't admit.
    */
   canJoin?: boolean;
 
   /** The container's declaration, for a room held inside another space. */
   container?: Cell<ChatContainer>;
 
-  /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
-  joinRoom?: Stream<JoinRoomRequest>;
+  /**
+   * The viewer's manager; absent while the viewer has none, or theirs hasn't
+   * resolved.
+   */
+  manager?: JoiningManager;
 
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
@@ -686,12 +697,19 @@ export interface ManagerJoinState {
  * own event checks its private catalog and leaves an already listed room
  * unchanged, so catalog reads stay in the manager's event. A room's acts send
  * it an event once they have recorded what the viewer wrote.
+ *
+ * The manager is read here, as a value, rather than by what the room stores:
+ * a stream bound to a manager that isn't there still reads as present, so
+ * only the manager's own value says whether it has a `joinRoom`, and this
+ * event writes nothing in the room's space.
  */
 export const tellManagerJoined = handler<void, ManagerJoinState>(
-  (_event, { canJoin, container, joinRoom, self }) => {
-    if (canJoin !== true || joinRoom === undefined || self === undefined) {
-      return;
-    }
+  (_event, { canJoin, container, manager, self }) => {
+    // The room decides first, so a room the viewer can't join reads nothing
+    // of the manager.
+    if (canJoin !== true || self === undefined) return;
+    const joinRoom = manager?.joinRoom;
+    if (joinRoom === undefined) return;
     joinRoom.send({ room: self, container });
   },
 );

@@ -206,7 +206,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   } as ManagerArg);
   const chipFor = {
     myProfile: profile,
-    startsDirect: true,
     startDirect: manager.openDirect,
   };
   // Alice's profile, reached as the room reaches it: through her message.
