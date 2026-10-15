@@ -858,7 +858,9 @@ export class PiecesController<T = unknown> {
     const piecesCell = await this.getPieceRegistry();
     const pieces = await this.syncPieces(piecesCell);
     return pieces.map((piece) => {
-      const target = piece.resolveAsCell();
+      // The registry names pieces without loading their documents. Controllers
+      // load and mutate those documents after this read snapshot was taken.
+      const target = piece.resolveAsCell().withTx();
       const space = target.getAsNormalizedFullLink().space;
       const controller = space === this.#space ? this : new PiecesController(
         { as: this.#session.as, space },
