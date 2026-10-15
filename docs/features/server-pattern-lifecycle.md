@@ -275,8 +275,8 @@ it starts the piece it holds, which under the flag runs the graph as speculation
 while the serving loop serves the derived values, and reports that refresh's
 outcome beside the receipt — a failed refresh is a non-zero exit over a durable
 commit. The start waits for the commit of the started graph's setup writes,
-since a refused one retires the graph and leaves the piece running nowhere here;
-that refusal is a failed refresh too. A piece addressed at a scope keeps the
+since a refused one retires the graph in the command's process, whatever the
+serving loop goes on serving; that refusal is a failed refresh too. A piece addressed at a scope keeps the
 client-side path, since the verb takes the piece's id alone.
 
 Another client of the piece controller, the browser shell, keeps the client-side
@@ -299,9 +299,11 @@ it moves onto.
   opened afterwards; for `setsrc`, the successor's authority over the
   predecessor registered on the serving runtime and stored in the closure a
   later runtime reads.
-- `packages/piece/test/ops/pieces-controller.test.ts` — the start a served
-  `setsrc` refreshes with rejects when storage refuses its setup commit, and
-  a plain start resolves over the same refusal.
+- `packages/piece/test/ops/pieces-controller.test.ts` — `startPiece()` given
+  `awaitSetupCommit` rejects when storage refuses the start's setup commit,
+  and a plain `startPiece()` resolves over the same refusal;
+  `packages/cli/test/piece.test.ts` checks that a served `setsrc` refreshes
+  the piece through that option.
 - `packages/toolshed/routes/pattern-lifecycle/` — the writer check against a
   real ACL document, the status each refusal maps to, and the middleware order
   in front of the handler.
