@@ -416,7 +416,12 @@ export interface Manifest {
   /** The `main` commit whose topology was enumerated. */
   commit: string;
 
-  /** How many workflow runs the aggregate behind this manifest saw. */
+  /**
+   * How many workflow runs the reports this publisher run read came from. A
+   * report is read once, by the first publisher run to find it, and folded
+   * into the aggregate, so this counts what is new since the previous
+   * manifest rather than what stands behind this one.
+   */
   runs: number;
 
   /** Every dial this manifest was built with. */
