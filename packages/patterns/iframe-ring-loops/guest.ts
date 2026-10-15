@@ -161,6 +161,9 @@ const pressesHeard = new Map<string, number>();
 const lastJammed = new Map<string, string>();
 const SELF = "";
 let ownPresses: PadPress[] = [];
+// Whether a peer pressed a pad while this browser's audio had not started, so
+// that the hint can say how to hear the next one.
+let missedPeerPress = false;
 let nextPressId = 0;
 let publishedName: string | undefined;
 let publishedColor: string | undefined;
@@ -1100,7 +1103,9 @@ function rebuildPads(): void {
         pressPad(ringIndex, lane);
       }, { signal });
       pad.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
+        if (event.repeat || (event.key !== "Enter" && event.key !== " ")) {
+          return;
+        }
         event.preventDefault();
         pressPad(ringIndex, lane);
       }, { signal });
@@ -1270,6 +1275,11 @@ function renderControls(): void {
     : "No profile name is known, so notes you place carry none.";
   renderAuthors();
   renderPeople();
+  const audioRunning = audio?.context.state === "running";
+  if (audioRunning) missedPeerPress = false;
+  jamHint.textContent = missedPeerPress
+    ? "Someone is playing the pads. Press Play or a pad to hear them."
+    : "Press a pad, or its key, to play it over the loop. Everyone here hears it.";
   for (const pad of padButtons.values()) pad.disabled = !isReady;
 
   if (isReady) {
@@ -1488,13 +1498,17 @@ function onRoomEvent(event: PresenceRoomEvent): void {
       break;
     }
     case "remove":
-      if (event.participantId === following) following = undefined;
+      if (event.participantId === following) {
+        following = undefined;
+        applySettings();
+      }
       peers.delete(event.participantId);
       pressesHeard.delete(event.participantId);
       lastJammed.delete(event.participantId);
       break;
     case "failure":
       following = undefined;
+      applySettings();
       leaveRoom = undefined;
       peers.clear();
       pressesHeard.clear();
@@ -1567,6 +1581,7 @@ function syncToFollowed(): void {
   const peer = peers.get(following);
   if (!peer) {
     following = undefined;
+    applySettings();
   } else if (!peer.hand) {
     if (transport) {
       transport = undefined;
@@ -1633,7 +1648,13 @@ function playPress(
   if (mutedRingIds().has(ring.id)) return plays;
   if (ownGesture) audio ??= createAudioEngine();
   const engine = audio;
-  if (!engine) return plays;
+  if (!engine || (!ownGesture && engine.context.state !== "running")) {
+    if (!ownGesture && !missedPeerPress) {
+      missedPeerPress = true;
+      renderControls();
+    }
+    return plays;
+  }
   const sound = () => {
     if (!layout || disposed) return;
     playNote(engine, layout, ring, press.lane, engine.context.currentTime);
@@ -1641,7 +1662,10 @@ function playPress(
   if (engine.context.state === "running") {
     sound();
   } else if (ownGesture) {
-    void engine.context.resume().then(sound).catch(showError);
+    void engine.context.resume().then(() => {
+      sound();
+      renderControls();
+    }).catch(showError);
   }
   return plays;
 }

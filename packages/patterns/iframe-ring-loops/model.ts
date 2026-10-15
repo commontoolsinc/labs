@@ -6,6 +6,7 @@
  * a cell, so all of it runs under `deno test`.
  */
 
+import { normalizePresenceParticipantName } from "../shared-note/participant-name.ts";
 import type { PlacedNote, RingSpec, RingVoice } from "./contract.ts";
 
 /** Steps a beat divides into, which makes a step a sixteenth note. */
@@ -262,7 +263,8 @@ export interface AuthorTally {
  * @throws {TypeError} When the rings or the scale are missing or hold a value
  *   of the wrong kind, or when two rings share an identifier.
  * @throws {RangeError} When the ring count, the lane count, or a ring's beats
- *   fall outside what the canvas can draw.
+ *   fall outside what the canvas can draw, or a pitched ring would play a note
+ *   outside MIDI 0 to 127.
  */
 export function ringLayoutOf(setup: RingSetup): RingLayout {
   const { rings, scale, rootMidi } = setup;
@@ -284,7 +286,7 @@ export function ringLayoutOf(setup: RingSetup): RingLayout {
   }
 
   const seen = new Set<string>();
-  return {
+  const layout = {
     rings: rings.map((ring, index) => {
       const ordinal = index + 1;
       if (typeof ring.id !== "string" || seen.has(ring.id)) {
@@ -319,6 +321,16 @@ export function ringLayoutOf(setup: RingSetup): RingLayout {
     scale: [...scale],
     rootMidi,
   };
+  for (const [index, ring] of layout.rings.entries()) {
+    if (ring.voice === "drums") continue;
+    const pitches = scale.map((offset) => rootMidi + ring.transpose + offset);
+    if (pitches.some((midi) => midi < 0 || midi > 127)) {
+      throw new RangeError(
+        `Ring ${index + 1} would play outside MIDI notes 0 to 127.`,
+      );
+    }
+  }
+  return layout;
 }
 
 /**
@@ -753,9 +765,6 @@ export const PAD_KEY_ROWS: readonly string[] = [
   "zxcvbnm,",
 ];
 
-/** Most code points a published name keeps. */
-const MAX_PRESENCE_NAME = 60;
-
 /** Furthest from the center a published pointer is drawn, in ring radii. */
 const MAX_POINTER_RADIUS = 1.2;
 
@@ -968,17 +977,12 @@ export function freshPresses(
 }
 
 /**
- * Returns `name` as a presence record carries it, in a form the relay takes:
- * without the control characters and lone surrogates it refuses, trimmed,
- * `Guest` where nothing is left, and cut to 60 code points.
+ * Returns `name` as a presence record carries it, in the form the relay takes
+ * (see `normalizePresenceParticipantName()`), or `Guest` where nothing of it
+ * is left.
  */
 export function presenceName(name: string): string {
-  const printable = [...name].filter((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint > 0x1f && !(codePoint >= 0x7f && codePoint <= 0x9f) &&
-      !(codePoint >= 0xd800 && codePoint <= 0xdfff);
-  }).join("").trim();
-  return [...(printable || "Guest")].slice(0, MAX_PRESENCE_NAME).join("");
+  return normalizePresenceParticipantName(name) || "Guest";
 }
 
 /** Returns the highest press number in `presses`, or `undefined` for none. */

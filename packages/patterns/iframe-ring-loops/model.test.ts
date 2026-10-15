@@ -117,6 +117,26 @@ describe("model", () => {
     it("throws a `RangeError` for an empty scale", () => {
       expect(() => ringLayoutOf(setupWith({ scale: [] }))).toThrow(RangeError);
     });
+
+    it("throws a `RangeError` for a pitched ring that would play above MIDI 127", () => {
+      expect(() => ringLayoutOf(setupWith({ rootMidi: 120 }))).toThrow(
+        RangeError,
+      );
+    });
+
+    it("throws a `RangeError` for a pitched ring that would play below MIDI 0", () => {
+      const [drums, bells, bass, pluck] = DEFAULT_SETUP.rings;
+      const sunk = { ...bass, transpose: -80 };
+      expect(() =>
+        ringLayoutOf(setupWith({ rings: [drums, bells, sunk, pluck] }))
+      ).toThrow(RangeError);
+    });
+
+    it("returns a layout whatever the root, where every ring is drums", () => {
+      const [drums] = DEFAULT_SETUP.rings;
+      expect(ringLayoutOf(setupWith({ rings: [drums], rootMidi: 500 })).lanes)
+        .toBe(5);
+    });
   });
 
   describe("validLayoutOf()", () => {
@@ -791,10 +811,12 @@ describe("model", () => {
       expect(presenceName("\u0001\udc00")).toBe("Guest");
     });
 
-    it("cuts a long name to 60 code points, keeping a character whole", () => {
-      const cut = presenceName("🎵".repeat(100));
-      expect([...cut].length).toBe(60);
-      expect(cut).toBe("🎵".repeat(60));
+    it("cuts a long name to the relay's 80 code points", () => {
+      expect(presenceName("a".repeat(100))).toBe("a".repeat(80));
+    });
+
+    it("cuts a wide name to the relay's 256 bytes, keeping a character whole", () => {
+      expect(presenceName("🎵".repeat(100))).toBe("🎵".repeat(64));
     });
   });
 
