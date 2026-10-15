@@ -2,13 +2,11 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   hashStringOf,
+  isDeepFrozen,
   isKeyableObjectOrArray,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
-import {
-  hasDataUriScheme,
-  valueFromDataUri,
-} from "@commonfabric/data-model/codec-data-uri";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   verifySchemaDocument,
   walkSchemaDocumentClosure,
@@ -91,6 +89,11 @@ import {
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
+import {
+  hasInlineCellScheme,
+  inlineCellValue,
+  isImmutableCellId,
+} from "../immutable-cell.ts";
 import {
   diagnosticPrefix,
   type PendingCommitContext,
@@ -369,7 +372,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 }
 
 /**
- * Identity of one data-URI pull: the URI, the schema it was read against, the
+ * Identity of one immutable-document pull: the URI, the schema it was read against, the
  * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
@@ -1206,6 +1209,123 @@ const compactDependencyGroup = <
   compact(root, observed, false);
 };
 
+/**
+ * The most reads one dependency group — one document at one basis — may
+ * carry on the wire. Past it, `coarsenCommitReads` replaces the group's
+ * reads with one recursive read at their common prefix, and a shallow read
+ * there beside it when the group held one.
+ *
+ * A commit names every path a transaction read (03-commit-model.md §3.4),
+ * one `ConfirmedRead` or `PendingRead` per path, and the server refuses a
+ * message past `MAX_UNTRUSTED_MESSAGE_SLOTS`. A pattern setup that runs
+ * inside its own commit — a source swap, `runSyncedWithCommit` — reads
+ * every document its program touches, and on a board of nine hundred
+ * members that was 58 paths on each member's document: 139,441 reads over
+ * 40,095 documents, a 17 MB message, refused. The lossless compaction
+ * (`compactCommitReads`) cannot fold those, since the members' container
+ * was not read in full.
+ *
+ * Applied to the OUTGOING message only. The replica keeps the lossless
+ * set for everything it decides locally — a pending layer's `read` flag,
+ * and `intendedSplicePaths`, which takes a recursive read at an array's
+ * ancestor as the transaction having read that array; a prefix read minted
+ * here would claim splices on arrays the transaction never read.
+ *
+ * The coarser set is a stronger precondition. The engine's
+ * `patchOverlapsRead` matches a touched leaf and a recursive read's path by
+ * prefix in either direction, so whatever overlapped a read under the
+ * prefix overlaps the prefix. A shallow read's rule is different — a
+ * touched path at or ABOVE the read, with a key add/remove injecting its
+ * parent, so an indexed removal at `list/0` is matched by a shallow read
+ * under `list/1` through the injected `list` — which a recursive read at
+ * `list/1` never sees; so a group that held any shallow read keeps a
+ * shallow read at the prefix beside the recursive one. The cost is
+ * conflicting with disjoint writes to the same document, and a retry.
+ */
+const MAX_READS_PER_DEPENDENCY_GROUP = 16;
+
+const commonDocumentPathPrefix = (
+  paths: readonly (readonly string[])[],
+): DocumentPath => {
+  let prefix: readonly string[] = paths[0] ?? [];
+  for (const path of paths) {
+    let length = 0;
+    while (
+      length < prefix.length && length < path.length &&
+      prefix[length] === path[length]
+    ) {
+      length++;
+    }
+    prefix = prefix.slice(0, length);
+    if (prefix.length === 0) break;
+  }
+  return toDocumentPath([...prefix]);
+};
+
+type WireRead =
+  | ClientCommit["reads"]["confirmed"][number]
+  | ClientCommit["reads"]["pending"][number];
+
+const commitReadDependencyKey = (read: WireRead): string =>
+  "seq" in read
+    ? `confirmed:${normalizeCellScope(read.scope)}:${read.id}:${read.seq}`
+    : `pending:${normalizeCellScope(read.scope)}:${read.id}:${
+      localSeqKey(read.localSeq)
+    }:${read.basisSeq}`;
+
+const coarsenWideReadGroup = <Read extends WireRead>(
+  group: readonly Read[],
+): Read[] => {
+  if (group.length <= MAX_READS_PER_DEPENDENCY_GROUP) return [...group];
+  const prefix = commonDocumentPathPrefix(group.map((read) => read.path));
+  const { nonRecursive: _shallow, ...statement } = group[0];
+  const coarsened: Read[] = [];
+  if (group.some((read) => read.nonRecursive === true)) {
+    coarsened.push({ ...statement, path: prefix, nonRecursive: true } as Read);
+  }
+  coarsened.push({ ...statement, path: prefix } as Read);
+  return coarsened;
+};
+
+/**
+ * The commit's reads as the wire carries them: each dependency group past
+ * `MAX_READS_PER_DEPENDENCY_GROUP` coarsened to its prefix. Returns the
+ * input itself when nothing coarsens, so a caller can tell.
+ */
+export const coarsenCommitReads = (
+  reads: ClientCommit["reads"],
+): ClientCommit["reads"] => {
+  const coarsen = <Read extends WireRead>(list: Read[]): Read[] => {
+    const grouped = new Map<string, Read[]>();
+    for (const read of list) {
+      const key = commitReadDependencyKey(read);
+      const group = grouped.get(key);
+      if (group === undefined) grouped.set(key, [read]);
+      else group.push(read);
+    }
+    if (
+      [...grouped.values()].every((g) =>
+        g.length <= MAX_READS_PER_DEPENDENCY_GROUP
+      )
+    ) {
+      return list;
+    }
+    return [...grouped.values()].flatMap((group) =>
+      coarsenWideReadGroup(group)
+    );
+  };
+  const confirmed = coarsen(reads.confirmed);
+  const pending = coarsen(reads.pending);
+  return confirmed === reads.confirmed && pending === reads.pending
+    ? reads
+    : { confirmed, pending };
+};
+
+const coarsenCommitForWire = (commit: ClientCommit): ClientCommit => {
+  const reads = coarsenCommitReads(commit.reads);
+  return reads === commit.reads ? commit : { ...commit, reads };
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -1322,6 +1442,12 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
+ * What `selectorSchemaForLink()` returned for each deep-frozen reader schema,
+ * by that schema's interned instance.
+ */
+const selectorSchemasForLinks = new WeakMap<object, JSONSchema>();
+
+/**
  * The selector schema a link target is asked for. Where the reader's schema
  * takes a handle at the link (`asCell` at its root, or at the root of an
  * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
@@ -1330,11 +1456,33 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
  * than as a reference it delivered once. Inner boundaries stay, as they do
  * on the handle's own schema, and a schema that takes no handle is asked for
  * as it is.
+ *
+ * A deep-frozen schema gets the interned result, the same one on every call
+ * and for every schema equal to it: each sync of a link's target normalizes a
+ * selector over the result, which interns it, and a schema built per sync
+ * would be hashed whole per sync. A schema that is not deep-frozen gets a
+ * schema of its own each time and is left as it was.
  */
-function selectorSchemaForLink(
+export function selectorSchemaForLink(
   schema: JSONSchema | undefined,
 ): JSONSchema | false {
   if (!isObjectOrArray(schema)) return schema ?? false;
+  if (!isDeepFrozen(schema)) return withoutOuterHandles(schema);
+  const interned = internSchema(schema);
+  let remembered = selectorSchemasForLinks.get(interned);
+  if (remembered === undefined) {
+    remembered = internSchema(withoutOuterHandles(interned));
+    selectorSchemasForLinks.set(interned, remembered);
+  }
+  return remembered;
+}
+
+/**
+ * Helper for `selectorSchemaForLink()`, which returns `schema` rebuilt
+ * without its outermost handle boundary, at its root and at the root of each
+ * `anyOf`/`oneOf` branch.
+ */
+function withoutOuterHandles(schema: JSONSchemaObj): JSONSchemaObj {
   const unwrapped = unwrapOuterHandle(schema);
   const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
     const list = unwrapped[key];
@@ -1425,7 +1573,7 @@ export class StorageManager implements IStorageManager {
   #docPullKicks = new Set<string>();
 
   /**
-   * Data URIs whose linked targets this manager has already pulled, keyed by a
+   * Immutable documents whose linked targets this manager has already pulled, keyed by a
    * hash of the URI, schema, path, space, and scope. Per manager rather than
    * per process: a hit skips the pull, and a manager that inherited another
    * manager's hit would leave its own replica without those documents.
@@ -1435,13 +1583,13 @@ export class StorageManager implements IStorageManager {
   );
 
   /**
-   * What a data URI is worth knowing per sync, by the URI: the hash of the id
-   * and the value it decodes to. A plan's inputs document is synced under
+   * What a legacy data URI is worth knowing per sync, by the URI: the hash of the id
+   * and the value it decodes to. An immutable document can be synced under
    * each schema its node reads through and again on every pre-sync wave, and
    * hashing and decoding tens of kilobytes of URI on each would cost more than
    * the sync. An entry weighs its URI, which it keeps alive as its key, and
    * the value decoded from it, taken as the payload's bytes several times
-   * over; a URI too large for a share of the budget is not kept at all.
+   * over. Native snapshots bypass this decoded-value cache; a URI too large for a share of the budget is not kept at all.
    */
   #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
     capacity: DATA_URI_SYNC_CACHE_MAX,
@@ -2577,7 +2725,7 @@ export class StorageManager implements IStorageManager {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
-    if (hasDataUriScheme(id)) {
+    if (hasInlineCellScheme(id)) {
       return false;
     }
     const instance = this.#foreignInstanceKey(scope, identity);
@@ -2856,8 +3004,8 @@ export class StorageManager implements IStorageManager {
       throw new Error("No space set");
     }
 
-    if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(
+    if (hasInlineCellScheme(id)) {
+      return this.#syncImmutableCell(
         cell,
         space,
         id,
@@ -2882,13 +3030,22 @@ export class StorageManager implements IStorageManager {
       id,
       ...(instance !== undefined ? { scopeKey: instance } : {}),
     });
+    // A cell declared a stream is loaded whole. Its document holds no value a
+    // read uses, so a selector carrying the event schema would ask the store
+    // to walk a shape that is never there, at the cost of a root carrying
+    // that schema per stream. A load of such a cell serves a meta write,
+    // which retries a conflict against the document's record, or the resume
+    // gate, which probes that record, and the whole document carries it.
+    const selectorSchema = ContextualFlowControl.declaresStream(schema)
+      ? false
+      : schema ?? false;
     let loadFailure: unknown;
     try {
       const result = await provider.sync(
         id,
         {
           path: cell.path.map((segment) => segment.toString()),
-          schema: schema ?? false,
+          schema: selectorSchema,
         },
         scope,
         instance,
@@ -3018,7 +3175,7 @@ export class StorageManager implements IStorageManager {
     address: { space: MemorySpace; id: URI; scope?: CellScope },
     identity: ScopeKeyIdentity,
   ): Promise<void> {
-    if (hasDataUriScheme(address.id)) return;
+    if (hasInlineCellScheme(address.id)) return;
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
@@ -3139,7 +3296,7 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.#resolveCrossSpace(resolve));
   }
 
-  async #syncDataURICell<T>(
+  async #syncImmutableCell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3147,7 +3304,7 @@ export class StorageManager implements IStorageManager {
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
-    const memo = this.#dataUri(id);
+    const memo = this.#immutableValue(id);
     const cacheKey = dataURISyncKey({
       id,
       idHash: memo.idHash,
@@ -3159,7 +3316,7 @@ export class StorageManager implements IStorageManager {
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(
+      work = this.#syncImmutableLinkTargets(
         cell,
         space,
         id,
@@ -3174,11 +3331,14 @@ export class StorageManager implements IStorageManager {
     return cell;
   }
 
-  /** The memo entry for the data URI `id`, decoded and hashed on first use. */
-  #dataUri(id: string): { idHash: string; value: unknown } {
+  /** Returns the native snapshot or a legacy value decoded and hashed on first use. */
+  #immutableValue(id: string): { idHash: string; value: unknown } {
+    if (isImmutableCellId(id)) {
+      return { idHash: id, value: inlineCellValue(id) };
+    }
     let entry = this.#dataUriMemo.get(id);
     if (entry === undefined) {
-      entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
+      entry = { idHash: hashStringOf(id), value: inlineCellValue(id as URI) };
       if (dataUriMemoWeight(id) <= DATA_URI_MEMO_MAX_ENTRY_WEIGHT) {
         this.#dataUriMemo.put(id, entry);
       }
@@ -3186,7 +3346,7 @@ export class StorageManager implements IStorageManager {
     return entry;
   }
 
-  async #syncDataURILinkTargets<T>(
+  async #syncImmutableLinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3228,8 +3388,9 @@ export class StorageManager implements IStorageManager {
    * linked document onto `promises`, under the schema a read at the link's
    * place in `schema` would cross it with: the reader's sub-schema, which the
    * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
-   * through `#syncLinkTarget`, which crosses a link into a data-URI document
-   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * through `#syncLinkTarget`, which crosses a link into an immutable document
+   * locally rather than sending it. `seen` holds the current ancestors; completed
+   * visits are memoized by value, base, schema, and principal context. A served run's
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
@@ -3241,6 +3402,7 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity?: ScopeKeyIdentity,
+    completed = new WeakMap<object, Set<string>>(),
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -3248,72 +3410,99 @@ export class StorageManager implements IStorageManager {
     if (typeof value !== "object") {
       return;
     }
+    const context = JSON.stringify([
+      base.id,
+      base.space,
+      base.scope,
+      base.path,
+      hashStringOf(schema),
+      identity,
+    ]);
+    if (completed.get(value)?.has(context)) return;
     seen.add(value);
-
-    if (isPrimitiveCellLink(value)) {
-      // A position the reader declares a stream names a document that holds
-      // no value a read uses, whatever the link's own schema says of it.
-      if (ContextualFlowControl.declaresStream(schema)) return;
-      const link = parseLinkPrimitive(value, base);
-      if (link.id === undefined) return;
-      this.#syncLinkTarget(
-        { ...link, id: link.id },
-        base,
-        combineOptionalSchema(schema, link.schema),
-        promises,
-        seen,
-        identity,
-      );
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        const item = value[i];
-        const itemSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          item,
+    let succeeded = true;
+    // A shared frozen node can occur under different schemas and origins.
+    // Guard ancestors, not all previously visited identities: each occurrence
+    // must contribute the reads its own schema requests.
+    try {
+      if (isPrimitiveCellLink(value)) {
+        // A position the reader declares a stream names a document that holds
+        // no value a read uses, whatever the link's own schema says of it.
+        if (ContextualFlowControl.declaresStream(schema)) return;
+        const link = parseLinkPrimitive(value, base);
+        if (link.id === undefined) return;
+        this.#syncLinkTarget(
+          { ...link, id: link.id },
           base,
-          itemSchema,
+          combineOptionalSchema(schema, link.schema),
           promises,
           seen,
           identity,
+          completed,
         );
+        return;
       }
-      return;
-    }
 
-    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
-    // held inside a `FabricInstance` reconstructed from the data URI is never
-    // found here and its target document is never synced — the later read
-    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
-    // leaf.)
-    if (isKeyableObjectOrArray(value)) {
-      for (const key of Object.keys(value)) {
-        const child = value[key];
-        if (!isObjectOrArray(child)) {
-          continue;
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const item = value[i];
+          const itemSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            item,
+            base,
+            itemSchema,
+            promises,
+            seen,
+            identity,
+            completed,
+          );
         }
-        const childSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [key])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          child,
-          base,
-          childSchema,
-          promises,
-          seen,
-          identity,
-        );
+        return;
+      }
+
+      // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+      // held inside a `FabricInstance` reconstructed from the data URI is never
+      // found here and its target document is never synced — the later read
+      // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+      // leaf.)
+      if (isKeyableObjectOrArray(value)) {
+        for (const key of Object.keys(value)) {
+          const child = value[key];
+          if (!isObjectOrArray(child)) {
+            continue;
+          }
+          const childSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [key])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            child,
+            base,
+            childSchema,
+            promises,
+            seen,
+            identity,
+            completed,
+          );
+        }
+      }
+    } catch (error) {
+      succeeded = false;
+      throw error;
+    } finally {
+      seen.delete(value);
+      if (succeeded) {
+        let contexts = completed.get(value);
+        if (contexts === undefined) completed.set(value, contexts = new Set());
+        contexts.add(context);
       }
     }
   }
 
   /**
    * Syncs the document `link` names under `schema`, the schema a read
-   * crosses the link with. A link into a data-URI document is walked
+   * crosses the link with. A link into an immutable document is walked
    * locally instead: the walk descends the link's path through the
    * document's value, and a link it meets on the way is followed with the
    * rest of the path appended, so a stand-in holding a caller's cell at
@@ -3329,12 +3518,13 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity: ScopeKeyIdentity | undefined,
+    completed: WeakMap<object, Set<string>>,
   ): void {
     const space = link.space ?? base.space!;
     // A handle with no declared value shape transfers only its
     // address. Loading its target requires a read through that handle.
     if (
-      !hasDataUriScheme(link.id) && link.overwrite !== "redirect" &&
+      !hasInlineCellScheme(link.id) && link.overwrite !== "redirect" &&
       isUnknownCellSchema(schema)
     ) return;
     // A link that declares a stream names a document that holds no value: a
@@ -3343,10 +3533,10 @@ export class StorageManager implements IStorageManager {
     // delivers nothing and costs a root carrying that schema per stream.
     if (ContextualFlowControl.declaresStream(schema)) return;
     const scope = normalizeCellScope(link.scope as CellScope | undefined);
-    if (hasDataUriScheme(link.id)) {
+    if (hasInlineCellScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
-      let target: unknown = this.#dataUri(link.id).value;
+      let target: unknown = this.#immutableValue(link.id).value;
       for (let i = 0; i < segments.length; i++) {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);
@@ -3366,6 +3556,7 @@ export class StorageManager implements IStorageManager {
             promises,
             seen,
             identity,
+            completed,
           );
           return;
         }
@@ -3382,6 +3573,7 @@ export class StorageManager implements IStorageManager {
         promises,
         seen,
         identity,
+        completed,
       );
       return;
     }
@@ -7618,7 +7810,7 @@ export class SpaceReplica
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
           const applied = await session.transact(
-            wireCommit,
+            coarsenCommitForWire(wireCommit),
             () => this.#markRouteWriteIssued(routeSources),
           );
           const settled = this.#settleAccept(
@@ -7650,7 +7842,7 @@ export class SpaceReplica
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
         const verdict = session.transact(
-          wireCommit,
+          coarsenCommitForWire(wireCommit),
           () => this.#markRouteWriteIssued(routeSources),
         );
         const outcome = await Promise.race([
@@ -8114,7 +8306,7 @@ export class SpaceReplica
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id) ||
+        hasInlineCellScheme(read.id) ||
         // Content-addressed documents cannot change, so their reads carry no
         // commit-time concurrency precondition.
         read.id.startsWith("cid:") ||

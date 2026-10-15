@@ -83,18 +83,27 @@ export {
   type InboxAdoptionRefusal,
   inboxPieceLinkSchema,
   type PrivateInboxEnsure,
+  type PrivateInboxRequestOutcome,
+  requestPrivateInboxOf,
 } from "./private-inbox.ts";
 export {
+  type JoinVisitDecision,
+  joinVisitedRoomOf,
+} from "./join-visited-room.ts";
+export {
+  CHAT_ROOM_SPACE_KIND,
   LOOM_OFFER_KIND,
   type OfferDecision,
   type OfferRefusal,
   ShareIntake,
   startShareIntakeOf,
 } from "./share-intake.ts";
+export { type SpaceRefusal, vetSpace } from "./space-vetting.ts";
 export {
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
+  piecePatternPointer,
   type PiecePatternRef,
   type PiecePatternSourceRef,
   type PieceSourceAction,

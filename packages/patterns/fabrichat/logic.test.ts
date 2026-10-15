@@ -5,11 +5,10 @@ import {
   isInMain,
   isSingleEmoji,
   mainView,
-  threadReplyCounts,
-  threadRootOf,
   threadView,
   type TimeBounds,
   type ViewItem,
+  viewPlaces,
   windowCount,
   windowSlice,
 } from "./logic.ts";
@@ -181,7 +180,31 @@ describe("logic", () => {
     });
 
     it("counts each thread's replies", () => {
-      expect([...threadReplyCounts(items)]).toEqual([["a", 3]]);
+      const places = viewPlaces(items);
+      expect(items.map((item) => [item.key, places[item.key].replies]))
+        .toEqual([["c", 0], ["a", 3], ["b", 0], ["d", 0], ["e", 0]]);
+    });
+
+    it("gives each thread's newest reply time, whatever the list's order", () => {
+      const places = viewPlaces(items);
+      expect(items.map((item) => [item.key, places[item.key].latestReplyAt]))
+        .toEqual([
+          ["c", undefined],
+          ["a", 50n],
+          ["b", undefined],
+          ["d", undefined],
+          ["e", undefined],
+        ]);
+    });
+
+    it("places each message in the main conversation, in a thread, or both", () => {
+      expect(viewPlaces(items)).toEqual({
+        a: { inMain: true, replies: 3, latestReplyAt: 50n },
+        b: { inMain: false, replies: 0, thread: "a" },
+        c: { inMain: true, replies: 0, thread: "a" },
+        d: { inMain: true, replies: 0 },
+        e: { inMain: false, replies: 0, thread: "a" },
+      });
     });
 
     it("finds the root of a very long reply chain", () => {
@@ -196,9 +219,9 @@ describe("logic", () => {
           }),
         ),
       ];
-      const byKey = new Map(chain.map((item) => [item.key, item]));
-      expect(threadRootOf(chain[20_000], byKey)).toBe("0");
-      expect(threadReplyCounts(chain).get("0")).toBe(20_000);
+      const places = viewPlaces(chain);
+      expect(places["20000"].thread).toBe("0");
+      expect(places["0"].replies).toBe(20_000);
     });
 
     it("stops at a reply chain that loops", () => {
@@ -206,9 +229,9 @@ describe("logic", () => {
         { key: "x", sentAt: 1n, replyTo: { key: "y", shownIn: "thread" } },
         { key: "y", sentAt: 2n, replyTo: { key: "x", shownIn: "thread" } },
       ];
-      const byKey = new Map(loop.map((item) => [item.key, item]));
-      expect(threadRootOf(loop[0], byKey)).toBeDefined();
-      expect(threadReplyCounts(loop).size).toBeGreaterThan(0);
+      const places = viewPlaces(loop);
+      expect(places.x.thread).toBeDefined();
+      expect(places.x.replies + places.y.replies).toBeGreaterThan(0);
     });
   });
 

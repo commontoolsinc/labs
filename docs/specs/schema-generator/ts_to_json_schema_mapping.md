@@ -135,7 +135,8 @@ arguments or preceding-parameter defaults (§4.1). A member the bindings cannot
 read, such as an indexed access with no checker-created instantiation, remains
 unread at that member; it does not discard the enclosing object's readable
 shape. Missing required arguments and deferred conditional declarations remain
-unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers
+unread on this fallback path. `CommonFabricFormatter` lowers scope wrappers,
+read through parentheses as other wrappers are (`resolveScopeWrapperNode()`),
 from their own payload argument without resolving the wrapper's name (the
 transformer prints a wrapper it builds as `__cfHelpers.PerUser<…>`, a name no
 scope declares), and follows CFC alias chains under their bindings (§11). A
@@ -196,7 +197,12 @@ type — a mapped type over an unbound parameter — which reads as an empty
 object with every member dropped. The alias rules exist so such a read keeps
 its declared members, `unknown` ones included. A mapped view is derived on
 a copy of the definition its argument refers to; the shared `Foo` definition
-other consumers read is untouched. `Partial<Foo>` and `Required<Foo>` map
+other consumers read is untouched. A member a homomorphic mapped type such as
+`Pick`, `Omit`, `Partial` or `Readonly` makes keeps the declaration of the
+member it maps, and is read as that declaration reads it where the mapping
+leaves its value as declared: a named member type stays a `$ref`, and the
+`undefined` an optional member's `?` adds stays out of it.
+`Partial<Foo>` and `Required<Foo>` map
 over each arm's own keys and so distribute over a union, arm by arm; on an
 array they map the elements, which count as optional: `Partial` admits
 `undefined` into the items, `Required` removes it. `Required` reads its
@@ -291,9 +297,9 @@ by any repo test.
 | Type parameter bound at the reading (§4.1) | its argument, retaining authored argument syntax and its declaration scope | `schema-generator.ts`; `type-parameter-bindings.ts` | `test/typescript/type-arguments.test.ts`; generic writer tests |
 | Unbound type parameter | constraint if any, else default, else `{}` | `schema-generator.ts` | constraint reading: `test/typescript/type-arguments.test.ts`; the pipeline substitutes `unknown` nodes before generation (ts-transformers spec §10.5), so `{}` is the *local* behavior |
 | Conditional type | `{}`; a deferred reading under bindings is reported as unread | `schema-generator.ts` | `test/typescript/type-arguments.test.ts` |
-| `T[]` / `Array<T>` / `ReadonlyArray<T>` / aliases | `{ type: "array", items: <T> }`; node-first element detection, then Reference/typeArguments, then numeric index | `type-utils.ts`; `array-formatter.ts` | fixtures |
+| `T[]` / `Array<T>` / `ReadonlyArray<T>` / aliases | `{ type: "array", items: <T> }`; node-first element detection, then Reference/typeArguments, then the numeric index of an array-like type (one declaring `length` beside it: a tuple, a type built on an array, `ArrayLike<T>`) | `type-utils.ts`; `array-formatter.ts` | fixtures; record-mapped-types.test.ts |
 | Tuple (`[string, number]`) | `{ type: "array", items: <merged element union> }` — e.g. `items: { type: ["number","string"] }`. **No `prefixItems`, no length bounds**; positional structure is lost (numeric-index fallback, `type-utils.ts`; grep confirms `prefixItems` appears only in a comment) | `type-utils.ts` | `test/tuple-emission.test.ts` |
-| Dictionary with both string and number index | treated as object map, not array | `type-utils.ts` | untested directly |
+| Object with a numeric index signature and no `length` | an object map (`additionalProperties`), not an array, with or without a string index or declared numeric keys such as `0` | `type-utils.ts` | record-mapped-types.test.ts |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property. Generic members, including nested type literals, union/intersection arms and array elements, use their instantiated type or bound argument to classify callability | classification: `object-formatter.ts`; member paths: `object-formatter.ts`, `schema-generator.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
@@ -1437,7 +1443,8 @@ Mechanics:
   a named policy alias such as `Readonly<Protected>`. An ordinary value query
   such as `Partial<typeof value>` retains the checker's utility-type semantics.
   Non-generic tuples and literal index signatures also retain authored writer
-  queries. Recursive definitions keep each writer's query origin even when
+  queries, a tuple named through a non-generic alias as much as one written in
+  place: it is read as the tuple the alias declares. Recursive definitions keep each writer's query origin even when
   handlers have identical types. An indexed access or conditional member that
   leaves a writer carrier without binding syntax, in a schema that defines a
   document, reports `cfc-write-authorized-by:unread` and explains the
@@ -1705,7 +1712,9 @@ Mechanics:
   So is a number index signature beside a string one whose value type holds
   a writer policy the string one's does not, naming the first policy its
   values hold (`writerPolicyHeldWithin()`): the pair is lowered as the
-  string one alone, so the policy is lost. A reading of a type stops at a
+  string one alone, so the policy is lost. That reading goes through the
+  values a type holds but not into the type a cell or a stream links to,
+  whose policy is the linked document's; a carrier around the cell is read. A reading of a type stops at a
   bound, 100 object types deep or 10,000 types read, which a recursion that
   instantiates its declaration without end always reaches and the types
   patterns write do not (`readWriterPolicy()` is `"unread"`). It may miss a
@@ -1804,8 +1813,10 @@ and its original (`cross-stage-state.ts`), and `narrowedFrom`, `spelledBy`,
 `schema-generator.ts` and `object-formatter.ts`); an `items` lookup reads the
 current hint node (`common-fabric-formatter.ts`); a `narrowedFrom` lookup reads
 the node, and the node inside its parentheses (`schema-generator.ts`); a
-`definesDocument` or `cellsOpaque` lookup reads the node (`formatChildType` in
-`schema-generator.ts`); a `spelledBy` lookup reads the node, wherever a member
+`definesDocument` lookup reads the node (`formatChildType` in
+`schema-generator.ts`); a `cellsOpaque` lookup reads the node wherever a member
+is formatted (`formatChildType`), and the generation root, or the print a
+printed root is read in place of (`#generateSchemaInternal`); a `spelledBy` lookup reads the node, wherever a member
 or a printed generation root is formatted (`formatChildType` and
 `#generateSchemaInternal` in
 `schema-generator.ts`).
@@ -1865,7 +1876,10 @@ or a printed generation root is formatted (`formatChildType` and
   `PolicyOf<typeof rules>` does. A print spells the binding as the structural
   type of the value it names, from which no reader can tell the binding, so
   the node is read as the annotation spells the type at hand (`#spelling` in
-  `schema-generator.ts`):
+  `schema-generator.ts`). A print of an array is read by its type, and its
+  element at the annotation the hint on the print's element node spells,
+  where the lowering recorded one there (`ArrayFormatter`); that hint is
+  recorded only where the annotation denotes the element type:
   - Where the annotation denotes that type, the node is read as the
     annotation. An annotation denotes a type that is its own, or a union of
     the same members, since a union written through an alias is a type apart
@@ -1911,9 +1925,11 @@ or a printed generation root is formatted (`formatChildType` and
   policy, and reads that policy in part (§11, `definesDocument`). A value
   any other expression writes, such as an element of an array literal, has no
   binding to read, and is read by its type.
-- **`cellsOpaque`** marks the remainder of a recursion the contract overlay of
-  a handler's event or state cuts (`overlayContractCapabilities()`), whose
-  cells no use the callback makes reaches. Every cell the node's reading reaches, outside
+- **`cellsOpaque`** marks a node the contract overlay of a handler's event or
+  state (`overlayContractCapabilities()`) reads without reading inside it, whose
+  cells no use the callback makes reaches: the remainder of a recursion it cuts,
+  or a node it keeps as written because it cannot read inside it, as a tuple or
+  a scoped cell. Every cell the node's reading reaches, outside
   the value of another cell, is `opaque`, whatever capability its wrapper
   writes; a stream or a SQLite handle keeps its brand
   (`isCellCapabilityKind`), and the cells inside a cell's value are read as

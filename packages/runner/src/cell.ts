@@ -127,16 +127,19 @@ import {
 } from "./cfc/ui-contract.ts";
 import { createRef } from "./create-ref.ts";
 import { runtimeWritePolicyAuthorization } from "./cfc/types.ts";
-import { diffAndUpdate } from "./data-updating.ts";
+import { diffAndAppend, diffAndUpdate } from "./data-updating.ts";
 import {
-  dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
+  portableSnapshotId,
+  portableSnapshotLinks,
+  resolveImmutableValueLinks,
 } from "./data-uri.ts";
 import { actingForEmission, waveRunContextOf } from "./executor/wave.ts";
+import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
+import { areLinksSame } from "./link-equality.ts";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
-import { areNormalizedLinksSame } from "./link-types.ts";
+import { areNormalizedLinksSame, isPrimitiveCellLink } from "./link-types.ts";
 import {
-  areLinksSame,
   createSigilLinkFromParsedLink,
   declareStreamSchema,
   isCellLink,
@@ -622,26 +625,60 @@ export type StreamSendOptions = {
 // import runner internals — can produce an array the send path accepts.
 const mintedRuntimeInjectedKeys = new WeakSet<readonly string[]>();
 
+/** How a sent event's delivery failed: its append was refused, or its
+ * served handling ended without committing (events.md §5) — the handler
+ * threw (`errored`), admission refused it (`refused`), it was dropped, or it
+ * needs attention. */
+export type EventDeliveryFailure =
+  | "append-refused"
+  | "errored"
+  | "refused"
+  | "dropped"
+  | "needs-attention";
+
+/** The error a sender's commit callback reads from `tx.status()` when the
+ * durable-ack coupling reports a failed delivery: `kind` says which failure
+ * and `reason` carries the outcome's own words, so a caller can tell a
+ * handler that refused the event (`errored`, `refused`) from one that never
+ * ran without reading the message. */
+export class EventDeliveryError extends Error {
+  #kind: EventDeliveryFailure;
+  #reason: string;
+
+  constructor(kind: EventDeliveryFailure, reason: string) {
+    super(
+      kind === "append-refused"
+        ? `event append refused: ${reason}`
+        : `event handling ${kind}: ${reason}`,
+    );
+    this.name = "EventDeliveryError";
+    this.#kind = kind;
+    this.#reason = reason;
+  }
+
+  get kind(): EventDeliveryFailure {
+    return this.#kind;
+  }
+
+  get reason(): string {
+    return this.#reason;
+  }
+}
+
 /** An error-status VIEW of a transaction (the durable-ack coupling;
  * verdict blocker, 2026-08-12): everything passes through except
- * `status()`, which reports the append/consequence failure — so a
- * caller that reads the settle callback's tx as the durable
- * acknowledgment (the CLI verb dispatch's verb-contract Settlement
- * read) sees the authoritative failure instead of the speculative
- * echo's local state. */
+ * `status()`, which reports the append/consequence failure as `error` — so
+ * a caller that reads the settle callback's tx as the durable
+ * acknowledgment (the CLI verb dispatch's verb-contract Settlement read)
+ * sees the authoritative failure instead of the speculative echo's local
+ * state. */
 const errorStatusTxView = (
   tx: IExtendedStorageTransaction,
-  message: string,
+  error: EventDeliveryError,
 ): IExtendedStorageTransaction => {
   const status = () => {
     const real = tx.status();
-    return {
-      ...real,
-      status: "error" as const,
-      error: Object.assign(new Error(message), {
-        name: "EventDeliveryError",
-      }),
-    };
+    return { ...real, status: "error" as const, error };
   };
   return new Proxy(tx, {
     get(target, prop, receiver) {
@@ -1180,7 +1217,7 @@ export function encodeSqliteParams(
       if (!isLinkCol) {
         throw new TypeError("cells may only be bound to _cf_link columns");
       }
-      return encodeCellToSigilString(cell);
+      return encodeCellToSigilString(cell, portableSnapshotId);
     }
     return encodeNested(value);
   };
@@ -2184,9 +2221,12 @@ export class CellImpl<T extends FabricValue>
       // the client side.
       //
       // TODO(danfuzz): constrain `T`, so that neither cast is needed.
-      const event = convertCellsToLinks(
-        newValue as CellLinkInput,
-      ) as AnyCellWrapping<T>;
+      // Local delivery retains immutable cell identity. Server execution
+      // persists events, so its echo and durable delivery use portable links.
+      const convertedEvent = convertCellsToLinks(newValue as CellLinkInput);
+      const event = (this.#runtime.experimental.serverExecution === true
+        ? portableSnapshotLinks(convertedEvent)
+        : convertedEvent) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
 
       const mintedKeys = mintedRuntimeInjectedEventKeys(
@@ -2322,11 +2362,16 @@ export class CellImpl<T extends FabricValue>
                     ? doneStatusTxView(echoTx)
                     : echoTx,
                 );
-                if (callerOnCommit === undefined) return;
+                if (callerOnCommit === undefined) {
+                  return;
+                }
                 if (!delivery.delivered) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event append refused: ${delivery.refused}`,
+                    new EventDeliveryError(
+                      "append-refused",
+                      delivery.refused,
+                    ),
                   ));
                   return;
                 }
@@ -2341,9 +2386,10 @@ export class CellImpl<T extends FabricValue>
                 ) {
                   callerOnCommit(errorStatusTxView(
                     echoTx,
-                    `event handling ${consequence.kind}: ${
-                      consequence.reason ?? consequence.kind
-                    }`,
+                    new EventDeliveryError(
+                      consequence.kind,
+                      consequence.reason ?? consequence.kind,
+                    ),
                   ));
                   return;
                 }
@@ -2589,7 +2635,9 @@ export class CellImpl<T extends FabricValue>
           this.#cleanup?.();
           const [cancel, addCancel] = useCancelGroup();
           this.#cleanup = cancel;
-          this.#listeners.forEach((callback) => addCancel(callback(event)));
+          this.#listeners.forEach((callback) =>
+            addCancel(callback(event))
+          );
           return this as unknown as Cell<T>;
         }
       }
@@ -2927,12 +2975,25 @@ export class CellImpl<T extends FabricValue>
     // The append's destination snapshot supplies storage positions without
     // exposing content or length to the caller. It joins neither observed
     // labels nor conflict preconditions; explicit handler reads retain both.
-    let currentValue = this.#tx.readValueOrThrow(resolvedLink, {
+    const currentValue = this.#tx.readValueOrThrow(resolvedLink, {
       meta: { ...mergeableOpRead, ...writeDestinationRead },
     });
     const cause = this.#frame?.cause;
 
-    if (!Array.isArray(currentValue)) {
+    if (Array.isArray(currentValue)) {
+      // The anchor id source makes sure each pushed object gets its own doc,
+      // its id drawn from the frame this cell was made in
+      // (`frameAnchorIds()`).
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        currentValue,
+        values,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
       if (currentValue !== undefined) {
         throw new Error(
           "Cell.push() or Cell.pushAll() requires transaction and array " +
@@ -2951,9 +3012,7 @@ export class CellImpl<T extends FabricValue>
         cause,
       );
       const resolvedSchema = resolveSchema(this.schema);
-      // Annotated rather than inferred: `processDefaultValue()` returns `any`,
-      // and assigning that back to `currentValue` would discard the narrowing
-      // this block exists to establish.
+      // Annotated rather than inferred: `processDefaultValue()` returns `any`.
       const created: FabricValue[] =
         isObjectOrArray(resolvedSchema) && Array.isArray(resolvedSchema.default)
           ? processDefaultValue(
@@ -2963,35 +3022,17 @@ export class CellImpl<T extends FabricValue>
             resolvedSchema.default,
           )
           : [];
-      // From here on `currentValue` is the array just created, not what the
-      // read returned.
-      currentValue = created;
+      // As above, each pushed object gets its own doc.
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...created, ...values],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
     }
-
-    // Read-only: a value that came from storage is a `FabricArray`, which is a
-    // `ReadonlyArray`, and though a freshly created one is not, this method
-    // only ever reads what it finds -- the replacement is `combined`, below.
-    const array: readonly unknown[] = currentValue;
-
-    // Append the new values to the array, preserving sparse holes in the original.
-    const combined = new Array(array.length + values.length);
-    array.forEach((v, i) => {
-      combined[i] = v;
-    });
-    for (let i = 0; i < values.length; i++) {
-      combined[array.length + i] = values[i];
-    }
-    // The anchor id source makes sure each pushed object gets its own doc,
-    // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      combined,
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
     // operation instead of a position diffed against a possibly-stale base.
@@ -3035,6 +3076,7 @@ export class CellImpl<T extends FabricValue>
       meta: mergeableOpRead,
     });
     const cause = this.#frame?.cause;
+    const stored = Array.isArray(currentValue);
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -3113,15 +3155,27 @@ export class CellImpl<T extends FabricValue>
     }
     // The anchor id source makes sure each added object gets its own doc,
     // its id drawn from the frame this cell was made in (`frameAnchorIds()`).
-    diffAndUpdate(
-      this.#runtime,
-      this.#tx,
-      resolvedLink,
-      [...existing, ...toAdd],
-      cause,
-      undefined,
-      frameAnchorIds(this.#frame),
-    );
+    if (stored) {
+      diffAndAppend(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        existing,
+        toAdd,
+        cause,
+        frameAnchorIds(this.#frame),
+      );
+    } else {
+      diffAndUpdate(
+        this.#runtime,
+        this.#tx,
+        resolvedLink,
+        [...existing, ...toAdd],
+        cause,
+        undefined,
+        frameAnchorIds(this.#frame),
+      );
+    }
     this.#tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
       count: toAdd.length,
@@ -3766,7 +3820,7 @@ export class CellImpl<T extends FabricValue>
         );
       }
     }
-    link = maybeConvertArrayPathToDataURILink(readTx, link);
+    link = maybeConvertArrayPathToImmutableLink(readTx, link);
     return createCell(
       this.#runtime,
       link,
@@ -3799,7 +3853,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
-    return this.#link;
+    return pinImmutableCell(this.#link, this.#link.id);
   }
 
   /**
@@ -3873,13 +3927,12 @@ export class CellImpl<T extends FabricValue>
     const tx = this.#runtime.readTx(this.#tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
-      // A raw read still resolves links on the way to the target, and those
-      // crossings are content reads: the seam marks labeled hops.
-      resolveLink(this.#runtime, tx, this.#link, lastNode, {
-        markIfcCrossings: true,
-      }),
-      readOptions,
+    const resolved = resolveLink(this.#runtime, tx, this.#link, lastNode, {
+      markIfcCrossings: true,
+    });
+    const value = resolveImmutableValueLinks(
+      tx.readValueOrThrow(resolved, readOptions),
+      resolved.id,
     );
     // Deep-copy with desired frozenness, without unwrapping to JS form --
     // getRaw() and getRawUntyped() return fabric-layer values, not
@@ -4710,10 +4763,13 @@ function cellImplOf(value: unknown): CellImpl<FabricValue> | undefined {
  * it.
  */
 function frozenLink(link: NormalizedLink): NormalizedLink {
-  return Object.freeze(
-    Object.isFrozen(link.path)
-      ? link
-      : { ...link, path: Object.freeze([...link.path]) },
+  return pinImmutableCell(
+    Object.freeze(
+      Object.isFrozen(link.path)
+        ? link
+        : { ...link, path: Object.freeze([...link.path]) },
+    ),
+    link.id,
   );
 }
 
@@ -5069,7 +5125,7 @@ export function deepTraverse(
   }
 }
 
-function maybeConvertArrayPathToDataURILink(
+function maybeConvertArrayPathToImmutableLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
 ): NormalizedFullLink {
@@ -5139,45 +5195,9 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: inlineElementSnapshotId(candidate.value, baseLink),
+    id: immutableCellsFor(tx).createElement(candidate.value, baseLink).id,
     path: candidate.remainingPath,
   };
-}
-
-/**
- * The snapshot ids minted for inline elements, by the element's value and
- * then by the link it was read through, which decides how its relative links
- * resolve. A stored value is a frozen object the replica holds until the
- * document changes, so one element resolved by every reader of the same
- * document version is encoded once rather than per reader: the renderer
- * resolves each element it shows several times over.
- */
-const inlineElementSnapshotIds = new WeakMap<object, Map<string, URI>>();
-
-function inlineElementSnapshotId(
-  value: FabricValue,
-  base: NormalizedFullLink,
-): URI {
-  if (!isObjectOrArray(value)) {
-    return dataUriFromValueWithResolvedLinks(value, base);
-  }
-  const baseKey = JSON.stringify([
-    base.space,
-    base.id,
-    normalizeCellScope(base.scope),
-    base.path,
-  ]);
-  let byBase = inlineElementSnapshotIds.get(value);
-  if (byBase === undefined) {
-    byBase = new Map();
-    inlineElementSnapshotIds.set(value, byBase);
-  }
-  let id = byBase.get(baseKey);
-  if (id === undefined) {
-    id = dataUriFromValueWithResolvedLinks(value, base);
-    byBase.set(baseKey, id);
-  }
-  return id;
 }
 
 /**
@@ -5708,7 +5728,7 @@ function convertOneToLinks(
     // filled by assignment costs about half again as much to structured-clone
     // as the same object built from entries, and every consumer of a converted
     // value pays that, the crossing to the client included.
-    return Object.freeze(Object.fromEntries(
+    const converted = Object.freeze(Object.fromEntries(
       Object.entries(container).map(([key, member]) => {
         stack.push(key);
 
@@ -5724,6 +5744,9 @@ function convertOneToLinks(
         return [key, converted];
       }),
     ));
+    return isPrimitiveCellLink(converted)
+      ? pinImmutableCell(converted, parseLink(converted).id)
+      : converted;
   } finally {
     // `popExpect()` instead of just `pop()`, as defense-in-depth against bugs
     // elsewhere in the code.

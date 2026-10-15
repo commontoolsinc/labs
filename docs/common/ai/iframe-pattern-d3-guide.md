@@ -258,6 +258,12 @@ state.
 Append new members with `push()` as the complete guest above does, so
 concurrent additions compose.
 
+Status that other viewers should see while it happens and that nobody needs
+afterwards, such as a brush in progress or each viewer's hovered mark, travels
+through a presence room instead of a Cell.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
+
 When an interaction starts from an array position, resolve that position to a
 stable Cell before subscribing or writing. The returned handle remains attached
 to the same item even when it moves:
@@ -336,6 +342,11 @@ deno fmt packages/patterns/d3-shared-bars
 deno check packages/patterns/d3-shared-bars/guest.ts
 deno task cf check packages/patterns/d3-shared-bars/main.tsx --no-run
 ```
+
+Launch the pattern with the steps under
+[Verify](./iframe-pattern-guide.md#verify) in the plain DOM guide, substituting
+this pattern's path, a space label, and a slug. Those steps start local
+servers, create the space, and sign the browser in as its owner.
 
 In a real browser, verify all of the following:
 

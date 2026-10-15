@@ -58,9 +58,10 @@ export type SchemaHint = {
 
   /**
    * Set on the remainder of a recursion the contract overlay of a handler's
-   * event or state cuts (`overlayContractCapabilities()`): every cell its
-   * reading reaches, outside the value of another cell, is opaque, since no
-   * use the body makes reaches it. Schema generation reads it as
+   * event or state cuts (`overlayContractCapabilities()`), and on a node it
+   * keeps as written because it cannot read inside it, where no use the body
+   * makes reaches inside: every cell its reading reaches, outside the value of
+   * another cell, is opaque. Schema generation reads it as
    * `SchemaHint.cellsOpaque`.
    */
   readonly cellsOpaque?: true;
@@ -95,6 +96,15 @@ export type CapabilityParamSummary = {
   readonly escapedPaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+
+  /**
+   * The static path prefixes below which the body reaches members this
+   * analysis does not name one by one: a wildcard's, and a read through a key
+   * that can name any member. `[]` is the whole parameter. A position below
+   * one may be used in any way the analysis did not record; the use of a
+   * prefix itself is recorded with the other paths.
+   */
+  readonly wildcardPaths?: readonly (readonly string[])[];
 
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`

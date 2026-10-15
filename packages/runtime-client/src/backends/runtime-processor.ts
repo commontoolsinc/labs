@@ -229,6 +229,8 @@ import {
   type IPCClientNotification,
   IPCClientRequest,
   isCellRef,
+  type JoinVisitedRoomRequest,
+  type JoinVisitedRoomResponse,
   type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
@@ -1636,7 +1638,10 @@ export class RuntimeProcessor {
     const gate = this.#hostReadGate;
     let cell = getCell(this.#runtime, request.cell);
     if (request.meta !== undefined) {
-      const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
+      // The document root, which the keyed ancestor's schema does not
+      // describe.
+      const { keyedFrom: _keyedFrom, ...address } = request.cell;
+      const rootCell = getCell(this.#runtime, { ...address, path: [] });
       if (request.meta !== "argument" && request.meta !== "result") {
         // A metadata field that is not a link returns the raw data.
         return gate.readMetadata(rootCell, request.meta);
@@ -2323,16 +2328,19 @@ export class RuntimeProcessor {
       includeCfcLabel: request.includeCfcLabel,
     }, (value) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
-      // These are the call sites that need real schemas added.
-      const hasSchema = hasExplicitSubscriptionSchema(request.cell.schema);
-      if (!hasSchema && isCellResult(value)) {
+      // These are the call sites that need real schemas added. The schema
+      // checked is the one the cell reads under, which for a ref keyed from
+      // an ancestor is the one the worker narrowed to.
+      if (!isCellResult(value)) return;
+      const schema = cell.getAsNormalizedFullLink().schema;
+      if (!hasExplicitSubscriptionSchema(schema)) {
         console.error(
           `[handleCellSubscribe] EMPTY SCHEMA SUBSCRIPTION producing ` +
             `CellResult proxy. Add a schema to this subscription site!\n` +
             `  cell: ${request.cell.id}\n` +
             `  path: ${JSON.stringify(request.cell.path)}\n` +
             `  space: ${request.cell.space}\n` +
-            `  schema: ${JSON.stringify(request.cell.schema)}`,
+            `  schema: ${JSON.stringify(schema)}`,
         );
       }
     }, (update) =>
@@ -2593,7 +2601,7 @@ export class RuntimeProcessor {
   ): CfcLabelViewResponse {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
-    const { schema: _schema, ...cellRef } = request.cell;
+    const { schema: _schema, keyedFrom: _keyedFrom, ...cellRef } = request.cell;
     const cell = getCell(this.#runtime, cellRef);
     // This reads the label with `cfcLabelViewForResolvedCell()`, which reads
     // what the store holds now, following a link the path crosses part way
@@ -2790,6 +2798,25 @@ export class RuntimeProcessor {
     // controller.
     const homePattern = await this.#ensureHomePattern();
     return { cell: createCellRef(homePattern) };
+  }
+
+  /**
+   * Tells the user's chat manager that the user has joined the FabriChat room
+   * declared by the space `request` names, when it passes vetting, as
+   * `PiecesController.joinVisitedRoom()` says, and returns what was
+   * decided. A user with no Home gets nothing done and no decision: Home is
+   * never created for it, and an existing Home is brought up as any other
+   * bring-up does.
+   */
+  async handleJoinVisitedRoom(
+    request: JoinVisitedRoomRequest,
+  ): Promise<JoinVisitedRoomResponse> {
+    if (!(await this.#homeExists())) return {};
+    await this.#ensureHomePattern();
+    const decision = await this.#homeController().joinVisitedRoom(
+      request.space,
+    );
+    return { decision };
   }
 
   /**
@@ -3941,6 +3968,8 @@ export class RuntimeProcessor {
         return this.handleGetHomeSpaceCell(request);
       case RequestType.EnsureHomePatternRunning:
         return await this.handleEnsureHomePatternRunning(request);
+      case RequestType.JoinVisitedRoom:
+        return await this.handleJoinVisitedRoom(request);
       case RequestType.Idle:
         return await this.handleIdle();
       case RequestType.ListEventAttention:

@@ -10,22 +10,17 @@ import {
   equals,
   pattern,
   type PerSession,
+  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
   Writable,
 } from "commonfabric";
-import {
-  isInMain,
-  threadReplyCounts,
-  threadRootOf,
-  type ViewItem,
-} from "./logic.ts";
-import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
+import type { ViewPlace } from "./logic.ts";
 import {
   type ActivityCell,
   type ActivityCountersCell,
-  canActIn,
+  type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
@@ -34,19 +29,21 @@ import {
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
-  entryFor,
-  FABRICHAT_POLICY,
   isDeleted,
-  isOwnerOf,
   type JoinRoomRequest,
   type MessageCell,
-  messageEntries,
   type MessageRecord,
+  type MessageRequestsCell,
+  messageRightsOf,
   type MessagesCell,
+  NO_MESSAGE_RIGHTS,
+  ownersMayObliterateBy,
   type ReactionListsCell,
   type RequestsCell,
   type RoomStreamEvent,
+  tellManagerJoined,
   type UsedTimesCell,
+  viewKeyOf,
 } from "./room-records.tsx";
 import {
   CHAT_DELETE_ACTION,
@@ -58,11 +55,13 @@ import {
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
   CHAT_UNREACT_ACTION,
+  type ChatContainer,
   type ChatDisplay,
   type ChatReaction,
   type ChatReactionTally,
   type ChatRoomKind,
   type ChatRoomLink,
+  type ChatRoomPolicy,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -123,8 +122,9 @@ export interface FabriChatMessageRowInput {
 
   /**
    * Whether the row belongs to the open thread's list rather than the main
-   * conversation's. Every message has a row in each list, shown only where
-   * the message belongs.
+   * conversation's. Every message has a row in the main conversation's list,
+   * shown only where the message belongs there. The thread's list holds a row
+   * only for a message of the session's open thread, and shows each one.
    */
   inThread: boolean;
 
@@ -133,6 +133,24 @@ export interface FabriChatMessageRowInput {
 
   /** The session's composer state. */
   composer: PerSession<ComposerCell>;
+
+  /**
+   * Every message's place in the room's views, by the message's key, as the
+   * room derives them from its messages. The row reads its own message's.
+   */
+  places: ReadonlyCell<Record<string, ViewPlace>>;
+
+  /** Whether the viewer can't send, edit, delete, or react in the room. */
+  cannotWrite: boolean;
+
+  /** Whether the viewer holds OWNER in the room's space. */
+  isOwner: boolean;
+
+  /**
+   * The room's policy, as `about.policy` links it, whose `ownersMayObliterate`
+   * says whether an OWNER may obliterate; absent or unread, no OWNER may.
+   */
+  policy?: Cell<ChatRoomPolicy>;
 
   /** The room's messages. */
   messages: MessagesCell;
@@ -152,14 +170,23 @@ export interface FabriChatMessageRowInput {
   /** Where the activity's numbering stands. */
   counters: ActivityCountersCell;
 
+  /** The sender's outcomes, by `requestId`; absent where none are kept. */
+  outcomes?: MessageRequestsCell;
+
+  /**
+   * Why the session's latest act was refused, which the composer shows;
+   * absent where nothing shows it.
+   */
+  refusal?: ActRefusalCell;
+
   /** Whether the viewer's manager can take the viewer into the room. */
   canJoin?: boolean;
 
+  /** The container's declaration for a room held inside another space. */
+  container?: Cell<ChatContainer>;
+
   /** The viewer's manager's `joinRoom`, when `canJoin` holds. */
   joinRoom?: Stream<JoinRoomRequest>;
-
-  /** The shared-space catalog the viewer's manager lists its rooms from. */
-  catalog?: SharedSpaceCatalogStorage;
 
   /** The room itself, as the viewer's manager links it. */
   self?: Cell<ChatRoomLink>;
@@ -212,19 +239,27 @@ export const FabriChatMessageRow = pattern<
     inThread,
     kind,
     composer,
+    places,
+    cannotWrite,
+    isOwner,
+    policy,
     messages,
     reactionLists,
     requests,
     usedTimes,
     activity,
     counters,
+    outcomes,
+    refusal,
     canJoin,
+    container,
     joinRoom,
-    catalog,
     self,
   } = input;
+  const joined = tellManagerJoined({ canJoin, container, joinRoom, self });
   const records = {
     kind,
+    policy,
     composer,
     messages,
     reactionLists,
@@ -232,10 +267,9 @@ export const FabriChatMessageRow = pattern<
     usedTimes,
     activity,
     counters,
-    canJoin,
-    joinRoom,
-    catalog,
-    self,
+    outcomes,
+    refusal,
+    joined,
   };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
@@ -249,23 +283,20 @@ export const FabriChatMessageRow = pattern<
       `fabrichat-reactors-${key}`,
     );
   });
-  const cannotWrite = computed(() => !canActIn(messages, myProfile));
   const isDeletedNow = computed(() => isDeleted(message.get()));
-  const isMine = computed(() => {
-    const author = message.get()?.authorProfile;
-    return myProfile?.get() !== undefined && author !== undefined &&
-      equals(author, myProfile.resolveAsCell());
-  });
-  const canObliterate = computed(() => {
-    const record = message.get();
-    if (record?.authorProfile === undefined || myProfile?.get() === undefined) {
-      return false;
-    }
-    const viewer = myProfile.resolveAsCell();
-    return kind === "direct"
-      ? equals(record.authorProfile, viewer)
-      : FABRICHAT_POLICY.ownersMayObliterate && isOwnerOf(messages);
-  });
+  // What the viewer may do to the message, by the rule the room's handlers
+  // admit an act by, and none of it while they can't write in the room.
+  const rights = computed(() =>
+    cannotWrite || myProfile?.get() === undefined
+      ? NO_MESSAGE_RIGHTS
+      : messageRightsOf(
+        message.get(),
+        myProfile.resolveAsCell(),
+        kind,
+        isOwner === true,
+        ownersMayObliterateBy(policy),
+      )
+  );
   const isEditing = computed(() => {
     const editing = composer.get()?.editing;
     return editing !== undefined && equals(editing, message);
@@ -279,43 +310,23 @@ export const FabriChatMessageRow = pattern<
     const reply = message.get()?.replyTo;
     return reply?.shownIn === "main" ? bodyText(reply.message.get()) : "";
   });
-  // Whether the message belongs in the main conversation, and how many
-  // replies the thread it roots holds. Both read the room's messages alone,
-  // so whichever runtime runs the room computes them for every viewer.
-  const placement = computed(() => {
-    const entries = messageEntries(messages);
-    const own = entryFor(entries, message);
-    if (own === undefined) return { inMain: false, replies: 0 };
-    return {
-      inMain: isInMain(own),
-      replies: threadReplyCounts(entries).get(own.key) ?? 0,
-    };
-  });
-  // Whether the message is in the session's open thread, which only the
-  // session's own runtime computes.
-  const inOpenThread = computed(() => {
-    const openRoot = composer.get()?.thread;
-    if (openRoot?.get() === undefined) return false;
-    const entries = messageEntries(messages);
-    const own = entryFor(entries, message);
-    const root = entryFor(entries, openRoot);
-    if (own === undefined || root === undefined) return false;
-    const byKey = new Map<string, ViewItem>(
-      entries.map((entry) => [entry.key, entry]),
-    );
-    return own.key === root.key || threadRootOf(own, byKey) === root.key;
+  // Where the views show the message. The room derives every message's place
+  // at once, from its messages alone, so whichever runtime runs the room
+  // computes them for every viewer. The row reads its own, and runs again
+  // only when that one changes.
+  const place = computed(() => {
+    const key = viewKeyOf(message);
+    const own = key === undefined ? undefined : places.key(key).get();
+    return { inMain: own?.inMain === true, replies: own?.replies ?? 0 };
   });
   const mainRowDisplay = computed((): ChatDisplay =>
-    placement.inMain ? "block" : "none"
-  );
-  const threadRowDisplay = computed((): ChatDisplay =>
-    inOpenThread ? "block" : "none"
+    place.inMain ? "block" : "none"
   );
   const threadLabel = computed(() =>
-    placement.replies === 1 ? "1 reply" : `${placement.replies} replies`
+    place.replies === 1 ? "1 reply" : `${place.replies} replies`
   );
   const threadLinkDisplay = computed((): ChatDisplay =>
-    !inThread && placement.replies > 0 ? "inline-flex" : "none"
+    !inThread && place.replies > 0 ? "inline-flex" : "none"
   );
   // What differs by viewer or by session is shown or hidden through a prop,
   // never by building a different tree: a branch chosen per viewer is stored
@@ -327,15 +338,20 @@ export const FabriChatMessageRow = pattern<
   // viewer's or the session's state has a value only once a runtime acting
   // for that viewer runs the room, which one that only renders it does not,
   // so a row's place in the main conversation, which every viewer is shown,
-  // is decided by a computed reading the room's messages alone.
-  const ownDisplay = computed((): ChatDisplay =>
-    isMine && !isDeletedNow ? "inline-flex" : "none"
+  // is decided from the room's messages alone.
+  const editDisplay = computed((): ChatDisplay =>
+    rights.canEdit ? "inline-flex" : "none"
+  );
+  const deleteDisplay = computed((): ChatDisplay =>
+    rights.canDelete ? "inline-flex" : "none"
   );
   const obliterateDisplay = computed((): ChatDisplay =>
-    canObliterate ? "inline-flex" : "none"
+    rights.canObliterate ? "inline-flex" : "none"
   );
-  const editorDisplay = computed(
-    (): ChatDisplay => (isEditing ? "block" : "none"),
+  // An open editor closes once the message no longer takes an edit from the
+  // viewer, as when an OWNER deletes it.
+  const editorDisplay = computed((): ChatDisplay =>
+    isEditing && rights.canEdit ? "block" : "none"
   );
   const pickerDisplay = computed((): ChatDisplay =>
     pickerOpen.get() === true ? "flex" : "none"
@@ -396,11 +412,12 @@ export const FabriChatMessageRow = pattern<
     [UI]: (
       // A row of the main conversation takes its display from shared state
       // alone, never the session's, or a viewer whose runtime only renders
-      // the room would have the row hidden for good. A thread row's display
-      // is the session's, and stays hidden until the session runs the room.
+      // the room would have the row hidden for good. A thread row is built
+      // only for a message of the session's open thread, so it is shown
+      // wherever it exists.
       <div
         hidden
-        style={{ display: inThread ? threadRowDisplay : mainRowDisplay }}
+        style={{ display: inThread ? "block" : mainRowDisplay }}
       >
         <cf-hover-reveal revealed={pickerOpen}>
           <div
@@ -493,10 +510,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        catalog,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -525,10 +541,9 @@ export const FabriChatMessageRow = pattern<
                         usedTimes,
                         activity,
                         counters,
-                        canJoin,
-                        joinRoom,
-                        catalog,
-                        self,
+                        outcomes,
+                        refusal,
+                        joined,
                         message,
                         emoji: tally.emoji,
                       })}
@@ -585,10 +600,9 @@ export const FabriChatMessageRow = pattern<
                     usedTimes,
                     activity,
                     counters,
-                    canJoin,
-                    joinRoom,
-                    catalog,
-                    self,
+                    outcomes,
+                    refusal,
+                    joined,
                     message,
                     emoji,
                     pickerOpen,
@@ -636,7 +650,7 @@ export const FabriChatMessageRow = pattern<
               size="sm"
               variant="ghost"
               hidden
-              style={{ display: ownDisplay }}
+              style={{ display: editDisplay }}
               onClick={startEdit}
             >
               Edit
@@ -651,7 +665,7 @@ export const FabriChatMessageRow = pattern<
                 size="sm"
                 variant="ghost"
                 hidden
-                style={{ display: ownDisplay }}
+                style={{ display: deleteDisplay }}
                 onClick={deleteMessage}
               >
                 Delete

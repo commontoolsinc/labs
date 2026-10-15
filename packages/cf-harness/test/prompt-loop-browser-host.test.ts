@@ -237,6 +237,25 @@ describe("prompt-loop with a browser host", () => {
     }
   });
 
+  it("classifies a web purchase as acting when the run can drive the browser", async () => {
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: "run-browser-host-classified",
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+        browserHost: new RecordingBrowserHost(),
+      }),
+      allowedToolIds: ["delegate_task"],
+      allowedSubagentProfiles: ["browser"],
+    });
+
+    const classification = await loop.classifyTask("buy the cheapest oat milk");
+
+    expect(classification).toMatchObject({ tags: ["act"], path: "rule" });
+  });
+
   it("asks a parent whose browser child did not finish to end through finish_task, rather than accept its text", async () => {
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({

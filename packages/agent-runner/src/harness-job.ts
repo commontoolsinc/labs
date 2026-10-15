@@ -62,6 +62,12 @@ export interface HarnessJobFabric {
 
   /** Input cells the model holds as handles: name to rendered reference. */
   inputs: Readonly<Record<string, string>>;
+
+  /**
+   * Other spaces the session may reach, each a DID mapped to the host serving
+   * it: where a piece handed in as an input lives outside the job's space.
+   */
+  foreignSpaces?: Readonly<Record<string, string>>;
 }
 
 /** One job, as plain data. */
@@ -270,6 +276,12 @@ const argvOf = (
       spec.fabric.space,
       "--max-confidentiality",
       JSON.stringify(spec.fabric.maxConfidentiality),
+      ...(Object.keys(spec.fabric.foreignSpaces ?? {}).length > 0
+        ? [
+          "--fabric-foreign-spaces",
+          JSON.stringify(spec.fabric.foreignSpaces),
+        ]
+        : []),
     ]
     : []),
   ...(spec.patternIndexUrl !== undefined
@@ -402,6 +414,14 @@ export const runHarnessJob = async (
           }
         },
         runTranscript: loop.runTranscript.bind(loop),
+        // The harness classifies the task before it assembles the prompt; a
+        // wrapper without this seam runs every job with full orientation.
+        ...(loop.classifyTask !== undefined
+          ? {
+            classifyTask: (task: string) =>
+              loop.classifyTask!(task, { signal: options.signal }),
+          }
+          : {}),
       };
     },
   };

@@ -55,7 +55,12 @@ import {
   hostMountsToAdditionalMounts,
 } from "./host-mounts.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
-import { pieceTargetingContextMessages } from "./piece-targeting.ts";
+import {
+  HELD_PIECES_GUIDANCE,
+  MAY_HOLD_PIECES_GUIDANCE,
+  PIECE_TARGETING_GUIDANCE,
+  pieceTargetingContextMessages,
+} from "./piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import { WEAVER_COMMAND_GUIDANCE } from "./tools/weaver-action.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
@@ -66,6 +71,7 @@ import type {
 } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
+import type { HarnessTaskTag } from "./task-classification.ts";
 import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 
 /**
@@ -508,4 +514,34 @@ const establishContextMessages = async (
   }
   messages.push(REVISION_VERIFICATION_GUIDANCE);
   return messages;
+};
+
+/**
+ * Fits a run's context messages to its task tags. In the piece-targeting
+ * guidance's place, a task about the pieces it holds is told how to read and
+ * act on them, and any other task that it may hold some. Piece targeting
+ * itself belongs to authoring, as does revision verification, where a
+ * pattern's output can be inspected; the Weaver's commands, which read as well
+ * as change the person's application, belong to finding and acting. Every
+ * other message passes through.
+ */
+export const orientContextMessages = (
+  messages: readonly string[],
+  tags: ReadonlySet<HarnessTaskTag>,
+): string[] => {
+  const author = tags.has("author");
+  const withheld = new Set([
+    ...(author ? [] : [REVISION_VERIFICATION_GUIDANCE]),
+    ...(tags.has("act") || tags.has("find") ? [] : [WEAVER_COMMAND_GUIDANCE]),
+  ]);
+  return messages.flatMap((message) =>
+    message === PIECE_TARGETING_GUIDANCE
+      ? [
+        tags.has("pieces") ? HELD_PIECES_GUIDANCE : MAY_HOLD_PIECES_GUIDANCE,
+        ...(author ? [PIECE_TARGETING_GUIDANCE] : []),
+      ]
+      : withheld.has(message)
+      ? []
+      : [message]
+  );
 };

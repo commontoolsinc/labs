@@ -21,7 +21,7 @@ import {
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Identity, legacySpaceDid } from "@commonfabric/identity";
+import { type DID, Identity, legacySpaceDid } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -44,6 +44,7 @@ import {
   entityIdFrom,
   type EventIntentOutcome,
   type IExtendedStorageTransaction,
+  type JSONSchema,
   parseLink,
   popFrame,
   pushFrame,
@@ -4732,6 +4733,50 @@ describe("runtime-processor", () => {
         expect(housekeeping.starts()[0]).toBe(1);
       });
     });
+
+    describe("joining a visited room", () => {
+      const ROOM_SPACE = "did:key:z6Mk-home-worker-visited-room" as DID;
+
+      it("asks Home's controller to join the room, and answers with its decision", async () => {
+        await using worker = await homeWorker([]);
+        using _housekeeping = stubHousekeeping();
+        using join = stub(
+          PiecesController.prototype,
+          "joinVisitedRoom",
+          () => Promise.resolve("sent" as const),
+        );
+
+        // Routed as a client's request is, through `handleRequest()`.
+        const response = await worker.processor.handleRequest({
+          type: RequestType.JoinVisitedRoom,
+          space: ROOM_SPACE,
+        });
+
+        expect(response).toStrictEqual({ decision: "sent" });
+        expect(join.calls.map(({ args }) => args)).toEqual([[ROOM_SPACE]]);
+      });
+
+      it("creates nothing, joins nothing, and decides nothing where Home has no root", async () => {
+        await using worker = await homeWorker([]);
+        using housekeeping = stubHousekeeping();
+        using join = stub(
+          PiecesController.prototype,
+          "joinVisitedRoom",
+          () => Promise.resolve("sent" as const),
+        );
+        worker.storeRoot(undefined);
+
+        const response = await worker.processor.handleJoinVisitedRoom({
+          type: RequestType.JoinVisitedRoom,
+          space: ROOM_SPACE,
+        });
+
+        expect(response).toStrictEqual({});
+        expect(join.calls.length).toBe(0);
+        expect(worker.rootEnsures()).toBe(0);
+        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+      });
+    });
   });
 
   describe("system-pattern update wiring", () => {
@@ -4880,6 +4925,85 @@ describe("runtime-processor", () => {
         }),
       ).resolves.toEqual({ value: { ready: true } });
       expect(calls).toEqual(["pull", "commits"]);
+    });
+  });
+
+  describe("`RuntimeProcessor` cell subscribe IPC", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        state: {
+          type: "object",
+          properties: {
+            shapes: {
+              type: "array",
+              items: { type: "object", properties: { x: { type: "number" } } },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    /**
+     * Subscribes to `state.shapes` of a stored cell through `keyedFrom`, and
+     * returns what the subscription posted and the empty-schema diagnostics
+     * it logged.
+     */
+    async function subscribeToShapes(keyedFrom: CellRef["keyedFrom"]) {
+      const { runtime, storageManager } = createRuntime();
+      try {
+        const ancestor = runtime.getCell(
+          cfcSigner.did(),
+          "keyed-subscribe",
+          schema,
+        );
+        const seed = runtime.edit();
+        ancestor.withTx(seed).set({ state: { shapes: [{ x: 1 }] } });
+        expect((await seed.commit().settled).error).toBeUndefined();
+        const { schema: _schema, ...address } = createCellRef(ancestor);
+        const posted: Array<{ value?: unknown }> = [];
+        using errors = stub(console, "error");
+
+        buildProcessor({ runtime }).handleCellSubscribe({
+          type: RequestType.CellSubscribe,
+          cell: {
+            ...address,
+            path: ["state", "shapes"],
+            ...(keyedFrom !== undefined && { keyedFrom }),
+          },
+        }, {
+          id: 1,
+          post: (message) => {
+            posted.push(message as { value?: unknown });
+            return true;
+          },
+        });
+        // The sink posts from a microtask.
+        await Promise.resolve();
+
+        const diagnostics = errors.calls.map(({ args }) => String(args[0]))
+          .filter((message) => message.includes("EMPTY SCHEMA SUBSCRIPTION"));
+        return { posted, diagnostics };
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    }
+
+    it("logs no empty-schema subscription for a ref keyed from an ancestor whose schema reaches its path", async () => {
+      const { posted, diagnostics } = await subscribeToShapes({
+        depth: 0,
+        schema,
+      });
+
+      expect(diagnostics).toEqual([]);
+      expect(posted.map(({ value }) => value)).toEqual([[{ x: 1 }]]);
+    });
+
+    it("logs an empty-schema subscription for a keyed ref with no schema above it", async () => {
+      const { diagnostics } = await subscribeToShapes(undefined);
+
+      expect(diagnostics).toHaveLength(1);
     });
   });
 
@@ -6860,6 +6984,56 @@ describe("runtime-processor", () => {
 
       getCell(runtime, ref);
       expect(seen).toEqual([undefined]);
+    });
+
+    it("reads a ref keyed from an ancestor as the ancestor's `key()` along the rest of its path", async () => {
+      const { runtime, storageManager } = createRuntime();
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            state: {
+              type: "object",
+              properties: {
+                shapes: { type: "array", items: { $ref: "#/$defs/Shape" } },
+              },
+            },
+          },
+          $defs: {
+            Shape: { type: "object", properties: { x: { type: "number" } } },
+          },
+        } as const satisfies JSONSchema;
+        const ancestor = runtime.getCell(cfcSigner.did(), "keyed-from", schema);
+        const { schema: _schema, ...address } = createCellRef(ancestor);
+
+        const cell = getCell(runtime, {
+          ...address,
+          path: ["state", "shapes"],
+          keyedFrom: { depth: 0, schema },
+        });
+
+        expect(cell.getAsNormalizedFullLink()).toEqual(
+          ancestor.key("state").key("shapes").getAsNormalizedFullLink(),
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("throws for a ref keyed from an ancestor deeper than its own path", () => {
+      const ref: CellRef = {
+        id: "of:keyed-too-deep" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: ["state"],
+        keyedFrom: { depth: 2, schema: { type: "object" } },
+      };
+
+      expect(() => getCell({} as Runtime, ref)).toThrow(
+        "A cell ref's `keyedFrom.depth` (2) must be a whole number no " +
+          "greater than its path's length (1).",
+      );
     });
 
     it("strips label views from raw sigil links in inbound values", () => {

@@ -56,6 +56,7 @@ import { utf8Compare } from "@commonfabric/utils/utf8";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { areLinksSame } from "../link-equality.ts";
 import {
   droppedStoredClaim,
   type ForeignPositions,
@@ -83,7 +84,6 @@ import {
 } from "./current-principal-confidentiality.ts";
 import { MAX_PATH_RESOLUTION_LENGTH } from "../link-resolution.ts";
 import {
-  areLinksSame,
   isPrimitiveCellLink,
   isWriteRedirectLink,
   type NormalizedLink,
@@ -98,6 +98,7 @@ import type {
   IMemorySpaceAddress,
   IReadActivity,
   MediaType,
+  TransactionWriteDetail,
 } from "../storage/interface.ts";
 import {
   internalVerifierRead,
@@ -1787,6 +1788,53 @@ const slotHoldsInitialization = (
 };
 
 /**
+ * The write details of `tx` covering the logical `path` of `target`'s
+ * document, in the order their paths were first written.
+ */
+const writeDetailsCovering = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  path: readonly string[],
+): TransactionWriteDetail[] => {
+  const addressPath = ["value", ...path];
+  const details = tx.getWriteDetailsForTarget?.(target) ??
+    tx.getWriteDetails?.(target.space) ?? [];
+  return [...details].filter((detail) =>
+    detail.address.id === target.id &&
+    normalizeCellScope(detail.address.scope) === target.scope &&
+    concretePathHasPrefix(addressPath, detail.address.path.map(String))
+  );
+};
+
+/**
+ * What the snapshot of `detail`, a write detail covering the logical `path`,
+ * held at that path, or `undefined` where it can't tell: where the detail
+ * records no presence, or the way down passes through a value that is not an
+ * object or array, or one `opaque` names.
+ */
+const previousAtPath = (
+  detail: TransactionWriteDetail,
+  path: readonly string[],
+  opaque: (value: unknown) => boolean,
+): { present: false } | { present: true; value: FabricValue } | undefined => {
+  if (detail.previousPresent === undefined) return undefined;
+  if (!detail.previousPresent) return { present: false };
+  let previous = detail.previousValue;
+  for (const segment of ["value", ...path].slice(detail.address.path.length)) {
+    if (!isWalkableObjectOrArray(previous) || opaque(previous)) {
+      return undefined;
+    }
+    if (!Object.hasOwn(previous, segment)) return { present: false };
+    previous = (previous as Record<string, FabricValue>)[segment];
+  }
+  return { present: true, value: previous };
+};
+
+/**
  * A runtime initialization covers one absent slot and its exact final value.
  * A capture covers a slot that was absent or held a link to the same cell,
  * and ends holding a link to it, whatever schema each link carries. A binding
@@ -1834,33 +1882,10 @@ const writeIsRuntimeInitialization = (
   // setup staged is all a binding asks; a write in the transaction that
   // re-points the slot elsewhere leaves it holding another cell.
   if (input.mode === "binding") return true;
-  const addressPath = ["value", ...input.target.path];
-  const details = tx.getWriteDetailsForTarget?.(target) ??
-    tx.getWriteDetails?.(target.space) ?? [];
-  const covering = [...details].filter((detail) =>
-    detail.address.id === target.id &&
-    normalizeCellScope(detail.address.scope) === target.scope &&
-    concretePathHasPrefix(addressPath, detail.address.path.map(String))
-  );
+  const covering = writeDetailsCovering(tx, target, input.target.path);
   // A link staged over the link the slot holds already lands no write there:
   // the slot keeps its link, so nothing is repointed.
   if (staged && covering.length === 0) return true;
-  // What one covering write's snapshot held at the slot, if it can tell.
-  const previousAtSlot = (
-    detail: (typeof covering)[number],
-  ): { present: false } | { present: true; value: FabricValue } | undefined => {
-    if (detail.previousPresent === undefined) return undefined;
-    if (!detail.previousPresent) return { present: false };
-    let previous = detail.previousValue;
-    for (const segment of addressPath.slice(detail.address.path.length)) {
-      if (!isWalkableObjectOrArray(previous) || isWriteRedirectLink(previous)) {
-        return undefined;
-      }
-      if (!Object.hasOwn(previous, segment)) return { present: false };
-      previous = (previous as Record<string, FabricValue>)[segment];
-    }
-    return { present: true, value: previous };
-  };
   // The slot as it stood before the transaction. A write detail keeps its
   // path's state from before the path was first written, and details come in
   // the order their paths were first written, so the first covering detail
@@ -1870,7 +1895,9 @@ const writeIsRuntimeInitialization = (
   // about what the slot held before. Overlapping write paths capture
   // different intermediate states, so the deepest detail is no substitute.
   const first = covering[0];
-  const before = first === undefined ? undefined : previousAtSlot(first);
+  const before = first === undefined
+    ? undefined
+    : previousAtPath(first, input.target.path, isWriteRedirectLink);
   if (before === undefined) return false;
   // A capture staged again, under whatever schema its link now carries, over
   // a slot that held a link to the same cell repoints nothing, even when the
@@ -7669,6 +7696,9 @@ const verifyTrustedEventRequirements = (
     scope: ReturnType<typeof normalizeCellScope>;
   },
   schema: JSONSchema,
+  // A UI contract names who may write its path, as `writeAuthorizedBy`
+  // does, so its refusal is deferred on the same terms as a writer's.
+  deferWriterRefusal?: (reason: string, path: readonly string[]) => boolean,
 ): string | undefined => {
   for (const entry of uiContractsFromSchema(schema)) {
     if (
@@ -7697,9 +7727,11 @@ const verifyTrustedEventRequirements = (
       continue;
     }
     if (!trustedEventMatchesContract(tx, target, entry.path, entry.contract)) {
-      return `missing trusted-event policy input for ${target.id} at /${
+      const reason = `missing trusted-event policy input for ${target.id} at /${
         entry.path.join("/")
       }`;
+      if (deferWriterRefusal?.(reason, entry.path) === true) continue;
+      return reason;
     }
   }
   return undefined;
@@ -9740,6 +9772,59 @@ const beneathForeignPosition =
   };
 
 /**
+ * Whether a logical path of `target`'s document lies at or beneath a new
+ * field: a concrete property the object holding it lacked before the
+ * transaction, so that one holding `undefined` is not new, which
+ * `storedSchema` declares no policy at or beneath and which overlaps none of
+ * `restatedPaths`. A path whose prior state can't be told, which passes
+ * through a link, or which reaches a `*` before such a property, lies beneath
+ * none.
+ */
+const atOrBeneathNewField = (
+  tx: IExtendedStorageTransaction,
+  target: {
+    space: MemorySpace;
+    id: URI;
+    scope: ReturnType<typeof normalizeCellScope>;
+  },
+  storedSchema: JSONSchema,
+  restatedPaths: readonly (readonly string[])[],
+) => {
+  const declared = cfcSchemaEntries(storedSchema).map((entry) => entry.path);
+  // Whether the document held `field` before the transaction. Where nothing
+  // the transaction wrote covers it, the object holding it holds it, or not,
+  // as it did before.
+  const heldBefore = (field: readonly string[]): boolean | undefined => {
+    const first = writeDetailsCovering(tx, target, field)[0];
+    if (first !== undefined) {
+      return previousAtPath(first, field, isPrimitiveCellLink)?.present;
+    }
+    const holder = tx.readValueOrThrow(
+      { ...target, path: field.slice(0, -1) },
+      {
+        meta: INTERNAL_VERIFIER_META,
+      },
+    );
+    return isWalkableObjectOrArray(holder) && !isPrimitiveCellLink(holder)
+      ? Object.hasOwn(holder, field[field.length - 1])
+      : undefined;
+  };
+  return (path: readonly string[]): boolean => {
+    for (let depth = 1; depth <= path.length; depth++) {
+      if (path[depth - 1] === "*") return false;
+      const field = path.slice(0, depth);
+      const held = heldBefore(field);
+      if (held === undefined) return false;
+      if (!held) {
+        return !declared.some((entry) => pathPatternsOverlap(field, entry)) &&
+          !restatedPaths.some((restated) => pathsOverlap(restated, field));
+      }
+    }
+    return false;
+  };
+};
+
+/**
  * The envelope a document stores after a write under `candidate`: the stored
  * envelope where the write leaves it unchanged, and the two merged otherwise.
  * Throws what {@link mergeCfcSchemaEnvelopes} throws.
@@ -11537,6 +11622,32 @@ export function* prepareBoundaryCommitSteps(
       target,
       (path) => identityForSchemaPath(writeAuthorIdentities.get(key), path),
     );
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/67
+    // TODO(danfuzz): Restating a replayed argument slot admits more than
+    // §8.15.4 permits, and runs by default rather than behind the dial
+    // `cfc-spec-correspondence.md` step 4 asks for, by Dan's decision. Drop
+    // this, or put it behind a dial, when the specs ruling lands.
+    //
+    // A refusal of the writer a path names, by `writeAuthorizedBy` or by a UI
+    // contract, is deferred where the write changes nothing there.
+    const deferWriterRefusal = stored.status === "loaded"
+      ? (reason: string, path: readonly string[]): boolean => {
+        if (
+          writeReplaysArgumentSlot(tx, target, path) &&
+          writeLeavesPathUnchanged(tx, target, path)
+        ) {
+          deferredWriterPaths.push(path);
+        } else if (
+          path.length === 0 && writePreservesRuntimeOutput(tx, target)
+        ) {
+          deferredPreservedOutput = true;
+        } else {
+          return false;
+        }
+        deferredWriterRefusal ??= reason;
+        return true;
+      }
+      : undefined;
     const requirementFailure = firstFailure((schema, index) =>
       verifyInputRequirements(
         tx,
@@ -11553,24 +11664,7 @@ export function* prepareBoundaryCommitSteps(
         inputReads,
         // The precision counters measure each protected write once.
         index === 0 ? prefixProvenance : undefined,
-        stored.status === "loaded"
-          ? (reason, path) => {
-            if (
-              writeReplaysArgumentSlot(tx, target, path) &&
-              writeLeavesPathUnchanged(tx, target, path)
-            ) {
-              deferredWriterPaths.push(path);
-            } else if (
-              path.length === 0 && writePreservesRuntimeOutput(tx, target)
-            ) {
-              deferredPreservedOutput = true;
-            } else {
-              return false;
-            }
-            deferredWriterRefusal ??= reason;
-            return true;
-          }
-          : undefined,
+        deferWriterRefusal,
         policyApplication,
       )
     );
@@ -11598,7 +11692,7 @@ export function* prepareBoundaryCommitSteps(
     const trustedEventFailure = policyApplication
       ? undefined
       : firstFailure((schema) =>
-        verifyTrustedEventRequirements(tx, target, schema)
+        verifyTrustedEventRequirements(tx, target, schema, deferWriterRefusal)
       );
     if (trustedEventFailure) {
       reasons.push(verdictReason(trustedEventFailure));
@@ -13185,11 +13279,30 @@ export function* prepareBoundaryCommitSteps(
     // runtime spelled inline. The stored schema is kept: writing another
     // spelling of it is the writer's to do. Labels elsewhere in the document
     // are not the writer policy's to guard, and persist as for any write.
+    // In a release, the claims beneath a position holding links describe
+    // the documents linked there, which the release may re-describe; they
+    // govern nothing in this document, so they are not compared.
+    // Nor are the claims at a field the write adds beside those paths, which
+    // the document held nothing at and the stored envelope declares nothing
+    // at or beneath: they govern a value the setup initializes. Where any are
+    // left out, the merged envelope, which declares them, is stored in place
+    // of the stored one; in a release it re-describes the claims beneath
+    // links too, as any release's merged envelope does.
     let keepsStoredSchema = false;
+    // TODO(danfuzz): Leaving out the positions beneath links applies the
+    // link-position rule of commonfabric/specs pull request 52, in its
+    // sections "Claims Beneath a Link Position" and "Release". The ruling
+    // this waits on is commonfabric/specs pull request 67, which depends on
+    // 52, through the marker at the restatement deferral this waiver
+    // discharges. Like that deferral, leaving out those positions and the
+    // ones at new fields admits more than §8.15.4 permits, and runs by
+    // default ahead of the ruling by Dan's decision.
+    const governsNothingHere = foreignPositions === undefined
+      ? () => false
+      : beneathForeignPosition(foreignPositions);
     if (
       deferredWriterRefusal !== undefined && !deferredPreservedOutput &&
-      existing !== undefined && storedSchema !== undefined &&
-      cfcSchemaPoliciesEqual(storedSchema, schemaAndHash.schema)
+      existing !== undefined && storedSchema !== undefined
     ) {
       const storedEntries = canonicalizeCfcMetadata(existing).labelMap.entries;
       const derivedEntries = canonicalizeCfcMetadata(metadata).labelMap.entries;
@@ -13197,32 +13310,59 @@ export function* prepareBoundaryCommitSteps(
         entries: readonly LabelMapEntry[],
         path: readonly string[],
       ) => entries.filter((entry) => pathsOverlap(entry.path, path));
-      // The stored schema is the one kept, so the labels derived here must
-      // be the ones it declares. Equal claims can lay out differently — a
-      // rest claim is a label position only beside no named property — so
-      // the positions both schemas declare are compared whole, not at the
-      // deferred paths alone.
-      const declaredPositions = (schema: JSONSchema) =>
-        cfcSchemaEntries(schema).map((entry) => ({
-          path: encodePointer(entry.path),
-          ifc: withoutUndefinedMembers(
-            isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
-          ),
-        })).sort((left, right) => utf8Compare(left.path, right.path));
-      if (
-        deepEqual(
-          declaredPositions(storedSchema),
-          declaredPositions(schemaAndHash.schema),
+      // Whether the envelope leaves the deferred paths as they were, the
+      // positions `omitted` names left out. The stored schema is the one
+      // kept where nothing but foreign positions is left out, so the labels
+      // derived here must be the ones it declares. Equal claims can lay out
+      // differently — a rest claim is a label position only beside no named
+      // property — so the positions both schemas declare are compared whole,
+      // not at the deferred paths alone.
+      const leavesDeferredPaths = (
+        omitted: (path: readonly string[]) => boolean,
+      ): boolean => {
+        const declaredPositions = (schema: JSONSchema) =>
+          cfcSchemaEntries(schema).filter((entry) => !omitted(entry.path))
+            .map((entry) => ({
+              path: encodePointer(entry.path),
+              ifc: withoutUndefinedMembers(
+                isObjectOrArray(entry.schema) ? entry.schema.ifc ?? null : null,
+              ),
+            })).sort((left, right) => utf8Compare(left.path, right.path));
+        return cfcSchemaPoliciesEqual(
+          storedSchema,
+          schemaAndHash.schema,
+          omitted,
         ) &&
-        deferredWriterPaths.every((path) =>
           deepEqual(
-            entriesAt(storedEntries, path),
-            entriesAt(derivedEntries, path),
-          )
-        )
-      ) {
+            declaredPositions(storedSchema),
+            declaredPositions(schemaAndHash.schema),
+          ) &&
+          deferredWriterPaths.every((path) =>
+            deepEqual(
+              entriesAt(storedEntries, path),
+              entriesAt(derivedEntries, path),
+            )
+          );
+      };
+      if (leavesDeferredPaths(governsNothingHere)) {
         deferredWriterRefusal = undefined;
         keepsStoredSchema = true;
+      } else {
+        const newField = atOrBeneathNewField(
+          tx,
+          { space, id, scope },
+          storedSchema,
+          deferredWriterPaths,
+        );
+        if (
+          leavesDeferredPaths((path) =>
+            governsNothingHere(path) || newField(path)
+          )
+        ) {
+          deferredWriterRefusal = undefined;
+        }
+      }
+      if (keepsStoredSchema) {
         // The stored spelling is kept whole, its envelope version included;
         // a version-1 store migrates on its next authorized write.
         metadata = {
