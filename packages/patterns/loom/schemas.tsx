@@ -2,6 +2,7 @@
 
 import type {
   Default,
+  JSONValue,
   NAME,
   PerSession,
   PerSpace,
@@ -122,10 +123,27 @@ export type ChatRoomCell = Writable<
   ChatRoomRecord | Default<Record<PropertyKey, never>>
 >;
 
+/** Caller-computed portable keys for one iCalendar occurrence. */
+export interface PortableMeetingIdentity {
+  /** The UID and typed original-slot hash contract. */
+  scheme: "ical-uid-slot";
+
+  /** Canonical lowercase SHA-256 item key. */
+  item_key: string;
+
+  /** Canonical lowercase SHA-256 occurrence key. */
+  occurrence_key: string;
+
+  [field: string]: JSONValue;
+}
+
 /** The meeting occurrence associated with this Loom, absent while unbound. */
 export interface MeetingAssociation {
-  /** Canonical lowercase 64-character hexadecimal meeting occurrence key. */
+  /** Immutable lowercase 64-character hexadecimal legacy meeting key. */
   key?: string;
+
+  /** Portable occurrence evidence supplied by an authorized caller. */
+  portableIdentity?: PortableMeetingIdentity;
 
   [field: string]: unknown;
 }
@@ -146,6 +164,10 @@ export type BindMeetingResult =
 /** A meeting key and an optional cell receiving this request's outcome. */
 export interface BindMeetingRequest {
   key: string;
+
+  /** A PortableMeetingIdentity validated from its JSON event payload. */
+  portableIdentity?: JSONValue;
+
   reply?: Writable<BindMeetingResult>;
 }
 
