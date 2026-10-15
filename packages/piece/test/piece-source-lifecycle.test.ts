@@ -515,6 +515,44 @@ describe("piece source lifecycle", () => {
     expect(await piece.result.get(["version"])).toBe("v1");
   });
 
+  it("throws `PieceSourceChangedError` for a pinned repoint the piece moves under while it is prepared", async () => {
+    // The move lands after the pin check has read the piece and before the
+    // transition's baseline reads it again: the first `await` past the read.
+    webSources["/api/patterns/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    const pattern = getPatternIdentityRef(piece.getCell())!;
+    const proved = getPieceSourceSnapshot(piece.getCell())!.revisionId;
+    const runner = runtime.runner;
+    const pointerFor = runner.sessionPatternPointerFor.bind(runner);
+    let moved = false;
+    runner.sessionPatternPointerFor = (cell) => {
+      if (!moved) {
+        moved = true;
+        queueMicrotask(() => {
+          const tx = runtime.edit();
+          setPatternSource(piece.getCell(), tx, "system:pattern.tsx");
+          tx.commit();
+        });
+      }
+      return pointerFor(cell);
+    };
+
+    try {
+      await expect(
+        piece.changeSource(
+          { kind: "repoint", url: "system:entered.tsx" },
+          { expectedPattern: pattern, expectedRevision: proved },
+        ),
+      ).rejects.toThrow(PieceSourceChangedError);
+    } finally {
+      runner.sessionPatternPointerFor = pointerFor;
+    }
+
+    expect(moved).toBe(true);
+    expect(getPatternSource(piece.getCell())).toBe("system:pattern.tsx");
+    expect(await piece.result.get(["version"])).toBe("v1");
+  });
+
   it("points a piece at a fabric piece it has never followed", async () => {
     const source = await pieces.create(versionProgram("source-v1"), {
       input: {},

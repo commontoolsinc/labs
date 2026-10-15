@@ -4323,7 +4323,7 @@ export class PieceController<T = unknown> {
    * that is no source transition leaves the head alone, which is what the
    * pattern pin is for. Either pin refuses with
    * {@link PieceSourceChangedError}, before the change is prepared and again
-   * when the piece moves inside the write.
+   * when the piece's source moves while it is prepared or written.
    */
   async changeSource(
     action: PieceSourceAction,
@@ -4413,10 +4413,11 @@ export class PieceController<T = unknown> {
       if (expected.origin === null) {
         throw new Error("piece is not following a source");
       }
-      const baseline = await preparePieceSourceTransitionBaseline(
+      const baseline = await preparePinnedBaseline(
         this.#pieces.runtime,
         this.#cell,
         expected,
+        proved,
       );
       const transition = pieceSourceTransition(
         expected,
@@ -4454,7 +4455,7 @@ export class PieceController<T = unknown> {
             executionWarning: pieceSourceErrorMessage(error),
           };
         }
-        throw error;
+        throw pinnedSourceMoved(error, proved);
       }
     }
 
@@ -4523,10 +4524,11 @@ export class PieceController<T = unknown> {
       // displaced-identity arm, as it does under `setPattern`. A piece that
       // recorded how it got its pattern keeps its claim to a restorable
       // current source, so the baseline still refuses one that has none.
-      const baseline = await preparePieceSourceTransitionBaseline(
+      const baseline = await preparePinnedBaseline(
         this.#pieces.runtime,
         this.#cell,
         expected,
+        proved,
         expected.revisionId === null && expected.origin === null
           ? { allowUnavailable: true }
           : {},
@@ -5602,6 +5604,31 @@ function isOverridableArgumentCompatibilityError(error: unknown): boolean {
 
 function pieceSourceErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Helper for `changeSource()`, which prepares a transition's baseline and
+ * reports a move under a pinned caller as {@link PieceSourceChangedError}.
+ * The baseline reads the piece again past an `await`, so a source change
+ * landing after the pin check is found there before the write sees it.
+ */
+async function preparePinnedBaseline(
+  runtime: Runtime,
+  cell: Cell<unknown>,
+  expected: PieceSourceSnapshot,
+  proved: { identity: string; symbol: string } | undefined,
+  options: { allowUnavailable?: boolean } = {},
+): Promise<PieceSourceTransitionBaseline> {
+  try {
+    return await preparePieceSourceTransitionBaseline(
+      runtime,
+      cell,
+      expected,
+      options,
+    );
+  } catch (error) {
+    throw pinnedSourceMoved(error, proved);
+  }
 }
 
 /**
