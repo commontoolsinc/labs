@@ -44,6 +44,7 @@ import {
   emptyState,
   flakeRate,
   type IdentityState,
+  lastMainIn,
   samplesOf,
   sealDay,
   value,
@@ -131,6 +132,15 @@ describe("build", () => {
   describe("provenance()", () => {
     it("reads a push to main as a run on main", () => {
       expect(provenance(context(), CI_NAME)).toEqual({
+        place: "main",
+        source: "main",
+      });
+    });
+
+    it("reads a scheduled run of main as a run on main", () => {
+      const scheduled = context();
+      scheduled.ci!.event = "schedule";
+      expect(provenance(scheduled, CI_NAME)).toEqual({
         place: "main",
         source: "main",
       });
@@ -1876,6 +1886,69 @@ describe("a batch whose reports interleave in time", () => {
     expect(backwards).toEqual(forwards);
     expect(shuffled).toEqual(forwards);
     expect(forwards.mainCatches).toBe(2);
+  });
+});
+
+describe("a run of main under the next day's seed", () => {
+  // The daily run of every suite at the head of `main` under the seed the
+  // next day's commits will take, beside that commit's own push.
+  const pushed = context({ shuffleSeed: 20260820 });
+  const scheduled = context({
+    shuffleSeed: 20260821,
+    startedAt: "2026-08-20T11:00:00.000Z",
+  });
+  scheduled.ci!.event = "schedule";
+  scheduled.ci!.workflowRunId = "2";
+
+  function folded(
+    pushOutcome: TestRecord["outcome"],
+    outcome: TestRecord["outcome"],
+  ) {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      new AliasResolver([]),
+      "2026-08-20",
+    );
+    fold.add([
+      stored(CI_NAME, pushed, [record({ outcome: pushOutcome })]),
+      stored(CI_NAME.replace("run-1", "run-2"), scheduled, [
+        record({ outcome }),
+      ]),
+    ]);
+    return fold.finish().states.get(KEY)!;
+  }
+
+  it("holds a failure only that order shows as a failure on main", () => {
+    // Nothing between the two runs changed the code, so the failure says
+    // nothing about a change. It waits for a run of `main` in the same
+    // order, as a failure in a push there does.
+    const state = folded("pass", "fail");
+    expect(state.prCatches).toBe(0);
+    expect(state.mainCatches).toBe(0);
+    expect(state.pendingMain).toEqual([{
+      day: "2026-08-20",
+      commit: "c1",
+      seed: 20260821,
+      source: "main",
+    }]);
+    expect(lastMainIn(state.lastMainByOrder, 20260821)).toBe("fail");
+    expect(lastMainIn(state.lastMainByOrder, 20260820)).toBe("pass");
+  });
+
+  it("records a pass as main's outcome in its own order only", () => {
+    // The push's failure is in another order, so the pass leaves it
+    // waiting for a run in its own, and `main` is still failing the test
+    // in the push's order.
+    const state = folded("fail", "pass");
+    expect(state.runsByDay["2026-08-20"]).toBe(2);
+    expect(state.pendingMain).toEqual([{
+      day: "2026-08-20",
+      commit: "c1",
+      seed: 20260820,
+      source: "main",
+    }]);
+    expect(lastMainIn(state.lastMainByOrder, 20260821)).toBe("pass");
+    expect(lastMainIn(state.lastMainByOrder, 20260820)).toBe("fail");
   });
 });
 

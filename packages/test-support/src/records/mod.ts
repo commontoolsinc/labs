@@ -2,7 +2,7 @@ export {
   buildObjectBody,
   ciObjectName,
   datePartition,
-  isMainPush,
+  isMainRun,
   isSeed,
   localObjectName,
   objectNameSlug,
