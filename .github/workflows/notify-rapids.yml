@@ -17,15 +17,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: 📋 Report unconfigured notification
-        if: vars.RAPIDS_APP_ID == ''
-        run: >-
-          echo '::notice::Rapids notifications need RAPIDS_APP_ID and
-          RAPIDS_APP_PRIVATE_KEY; see commonfabric/infra releases/rapids.md.'
+      - name: 📋 Check notification configuration
+        id: config
+        env:
+          APP_ID: ${{ vars.RAPIDS_APP_ID }}
+          APP_KEY: ${{ secrets.RAPIDS_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Rapids notifications need RAPIDS_APP_ID and RAPIDS_APP_PRIVATE_KEY; see commonfabric/infra releases/rapids.md.'
+          fi
       - name: 🔑 Create infra-only dispatch token
-        if: vars.RAPIDS_APP_ID != ''
+        if: steps.config.outputs.enabled == 'true'
         id: token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ vars.RAPIDS_APP_ID }}
           private-key: ${{ secrets.RAPIDS_APP_PRIVATE_KEY }}
@@ -34,7 +41,7 @@ jobs:
           permission-actions: write
           permission-contents: read
       - name: 📤 Notify the infra coordinator
-        if: vars.RAPIDS_APP_ID != ''
+        if: steps.config.outputs.enabled == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           PRODUCER_RUN: ${{ github.event.workflow_run.id }}
