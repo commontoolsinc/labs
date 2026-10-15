@@ -3787,12 +3787,21 @@ export class Scheduler {
       `event ${event.id} parks on ${keys.length} loading document(s)`,
       keys,
     ]);
-    const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
-      Promise.resolve();
-    settled.then(
-      () => this.#releaseHeadEventLoadPark(event.id),
-      (error) => this.#failHeadEventLoadPark(event, error),
-    );
+    // Each key is waited for on its own, so that every failed load is seen,
+    // in the order the failures arrive, once all of them have settled.
+    const manager = this.runtime.storageManager;
+    const failures: unknown[] = [];
+    const settled = manager.loadsSettled === undefined
+      ? Promise.resolve()
+      : Promise.all(keys.map((key) =>
+        manager.loadsSettled!([key]).catch((error: unknown) => {
+          failures.push(error);
+        })
+      ));
+    settled.then(() => {
+      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+      else this.#failHeadEventLoadPark(event, failures);
+    });
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {
@@ -3849,25 +3858,38 @@ export class Scheduler {
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
    * a failed load drops the event — the same split events.ts makes for a
-   * piece-load failure — with one exception: an `authorization`-class
-   * failure releases the park as a completed load does. The event's
-   * principal cannot read that document, waiting does not change that,
-   * and the closure reads it as absent whether or not a load of it
-   * happened to be in flight when the event reached the head. So the
-   * handler runs, once, against what this replica holds, exactly as it
-   * would have with no load in flight; the settled generations the
-   * release records keep the next preflight from parking on that load
-   * again.
+   * piece-load failure — with one exception: when every failed load
+   * failed with an `authorization`-class failure, the park releases as
+   * completed loads do. The event's principal cannot read those
+   * documents, waiting does not change that, and the closure reads them
+   * as absent whether or not a load of them happened to be in flight
+   * when the event reached the head. So the handler runs, once, against
+   * what this replica holds, exactly as it would have with no load in
+   * flight; the settled generations the release records keep the next
+   * preflight from parking on those loads again. A failure of any other
+   * class among them still drops the event, since that document may yet
+   * hold what the closure reads.
+   *
+   * `errors` holds every failed load's error, in the order they failed;
+   * the first is the one reported.
    */
-  #failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
+  #failHeadEventLoadPark(
+    event: QueuedEvent,
+    errors: readonly unknown[],
+  ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
+    const error = errors[0];
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
       failureClass: "unknown" as const,
       recoveryEpoch: "untyped",
       permanentEvidence: false,
     };
     if (
-      event.served === undefined && failure.failureClass === "authorization"
+      event.served === undefined &&
+      errors.every((each) =>
+        each instanceof ReplicaLoadFailureError &&
+        each.failure.failureClass === "authorization"
+      )
     ) {
       this.#releaseHeadEventLoadPark(event.id);
       return;

@@ -133,36 +133,44 @@ describe("event dispatch parks on in-flight closure loads", () => {
     return observed.promise;
   }
 
-  // Reports one load of `doc` as in flight, at generation 1, to every
-  // preflight, and settles every park on it through `fail()`.
-  function holdLoadInFlight(
-    doc: { getAsNormalizedFullLink(): MemoryAddress },
+  // Reports one load of each of `docs` as in flight, at generation 1, to
+  // every preflight. `parked` resolves once a park waits on any of them, and
+  // each load settles only through its own `fail()`.
+  function holdLoadsInFlight(
+    ...docs: { getAsNormalizedFullLink(): MemoryAddress }[]
   ): {
-    key: string;
     parked: Promise<void>;
-    fail(error: Error): void;
+    loads: { key: string; fail(error: Error): void }[];
   } {
-    const link = doc.getAsNormalizedFullLink();
-    const key = `${link.space}/${link.scope}/${link.id}`;
-    const load = Promise.withResolvers<void>();
     const parked = Promise.withResolvers<void>();
+    const held = docs.map((doc) => {
+      const link = doc.getAsNormalizedFullLink();
+      return {
+        address: { space: link.space, scope: link.scope, id: link.id },
+        key: `${link.space}/${link.scope}/${link.id}`,
+        load: Promise.withResolvers<void>(),
+      };
+    });
     const manager = env.runtime.storageManager as unknown as {
       pendingLoadAddresses(): readonly MemoryAddress[];
       pendingLoadGeneration(key: string): number | undefined;
       loadsSettled(keys: readonly string[]): Promise<void>;
     };
-    manager.pendingLoadAddresses = () => [{
-      space: link.space,
-      scope: link.scope,
-      id: link.id,
-    }];
+    manager.pendingLoadAddresses = () => held.map((each) => each.address);
     manager.pendingLoadGeneration = (candidate) =>
-      candidate === key ? 1 : undefined;
-    manager.loadsSettled = () => {
+      held.some((each) => each.key === candidate) ? 1 : undefined;
+    manager.loadsSettled = (keys) => {
       parked.resolve();
-      return load.promise;
+      return Promise.all(
+        held.filter((each) => keys.includes(each.key)).map((each) =>
+          each.load.promise
+        ),
+      ).then(() => {});
     };
-    return { key, parked: parked.promise, fail: load.reject };
+    return {
+      parked: parked.promise,
+      loads: held.map((each) => ({ key: each.key, fail: each.load.reject })),
+    };
   }
 
   /** An `authorization`-class failure of the load of the document at `key`. */
@@ -385,7 +393,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
       (depTx) => coldDoc.withTx(depTx).get(),
     );
 
-    const load = holdLoadInFlight(coldDoc);
+    const { parked, loads: [load] } = holdLoadsInFlight(coldDoc);
 
     runtime.scheduler.queueEvent(
       eventCell.getAsNormalizedFullLink(),
@@ -396,7 +404,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
         callbackStatus = commitTx.status().status;
       },
     );
-    await load.parked;
+    await parked;
     expect(handlerRuns).toBe(0);
 
     load.fail(authorizationFailure(load.key));
@@ -407,6 +415,77 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(callbackStatus).toBe("done");
     await runtime.idle();
     expect(handlerRuns).toBe(1);
+    expect(callbackRuns).toBe(1);
+  });
+
+  it("drops once when one required load fails authorization and another fails otherwise", async () => {
+    // The authorization failure arrives first. The other document may yet
+    // hold what the closure reads, so the event drops as it does for any
+    // failure but an authorization one.
+
+    const { runtime, tx } = env;
+    const unreadableDoc = runtime.getCell<string>(
+      space,
+      "load-park-mixed-unreadable",
+      undefined,
+    );
+    const unreachableDoc = runtime.getCell<string>(
+      space,
+      "load-park-mixed-unreachable",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "load-park-mixed-event",
+      undefined,
+    );
+    await tx.commit().settled;
+    env.tx = runtime.edit();
+
+    let handlerRuns = 0;
+    let callbackRuns = 0;
+    let callbackStatus: string | undefined;
+    const handler: EventHandler = () => {
+      handlerRuns++;
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventCell.getAsNormalizedFullLink(),
+      (depTx) => [
+        unreadableDoc.withTx(depTx).get(),
+        unreachableDoc.withTx(depTx).get(),
+      ],
+    );
+    const { parked, loads: [unreadable, unreachable] } = holdLoadsInFlight(
+      unreadableDoc,
+      unreachableDoc,
+    );
+
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      true,
+      (commitTx) => {
+        callbackRuns++;
+        callbackStatus = commitTx.status().status;
+      },
+    );
+    await parked;
+    expect(handlerRuns).toBe(0);
+
+    unreadable.fail(authorizationFailure(unreadable.key));
+    unreachable.fail(
+      new ReplicaLoadFailureError({
+        failureClass: "connection",
+        permanentEvidence: false,
+        recoveryEpoch: `load-key:${unreachable.key}`,
+      }, new Error("memory client closed")),
+    );
+    await runtime.idle();
+    expect(handlerRuns).toBe(0);
+    expect(callbackRuns).toBe(1);
+    expect(callbackStatus).toBe("error");
+    await runtime.idle();
     expect(callbackRuns).toBe(1);
   });
 
@@ -547,7 +626,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
       eventCell.getAsNormalizedFullLink(),
       (depTx) => coldDoc.withTx(depTx).get(),
     );
-    const load = holdLoadInFlight(coldDoc);
+    const { parked, loads: [load] } = holdLoadsInFlight(coldDoc);
 
     const outcomes: unknown[] = [];
     runtime.scheduler.queueEvent(
@@ -563,7 +642,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
         },
       },
     );
-    await load.parked;
+    await parked;
     expect(handlerRuns).toBe(0);
 
     load.fail(authorizationFailure(load.key));
