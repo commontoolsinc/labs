@@ -96,7 +96,9 @@ import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import type {
   PendingCommitContext,
   SpaceStorageDiagnostic,
+  SpaceStorageSizes,
   StorageDiagnostics,
+  StorageSizes,
 } from "./diagnostics.ts";
 
 export type {
@@ -547,6 +549,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /** Snapshot pending work without waiting for durability or starting I/O. */
   getDiagnostics?(): StorageDiagnostics;
+
+  /** The sizes of the structures held across every open space. */
+  getSizes?(): StorageSizes;
 
   /**
    * Whether any registered commit is still unconfirmed. Every write flows
@@ -3196,6 +3201,9 @@ export interface ViewInterestLease {
 export interface ISpaceReplica extends ISpace {
   /** Existing session progress without starting I/O or awaiting commits. */
   getDiagnostics?(): SpaceStorageDiagnostic;
+
+  /** The sizes of the structures this replica holds. */
+  getSizes?(): SpaceStorageSizes;
 
   /**
    * Return a state for the requested entry or returns `undefined` if replica

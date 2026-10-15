@@ -353,8 +353,14 @@ and most runtime code runs in a web worker, so its loggers are in a separate
 
 ```javascript
 // Shown inside a pattern body.
-// Fetch worker counts, timing, and flags
+// Fetch worker counts, timing, flags, CFC counters, and structure sizes
 await commonfabric.rt.getLoggerCounts()
+
+// How large the worker's live structures are right now: scheduler nodes and
+// queues, storage documents and subscriptions, compiled-code caches, the
+// worker's own subscription and mount tables, and CFC commit refusals by
+// reason. A heap that keeps growing shows up here as the structure growing it.
+(await commonfabric.rt.getLoggerCounts()).sizes
 
 // Control worker loggers
 await commonfabric.rt.setLoggerLevel("debug")         // all loggers
@@ -689,7 +695,7 @@ await commonfabric.watchWrites([])
 | `commonfabric.rt` | RuntimeClient for worker IPC |
 | `commonfabric.rt.setLoggerLevel(lvl, name?)` | Set worker logger level |
 | `commonfabric.rt.setLoggerEnabled(on, name?)` | Enable/disable worker logger |
-| `commonfabric.rt.getLoggerCounts()` | Get worker logger counts/timing/flags |
+| `commonfabric.rt.getLoggerCounts()` | Get worker logger counts/timing/flags/CFC counters/structure sizes |
 | `commonfabric.rt.setSettleStatsEnabled(on)` | Enable/disable worker settle stats |
 | `commonfabric.rt.getSettleStats()` | Get the last worker settle stats payload |
 | `commonfabric.rt.getSettleStatsHistory()` | Get recent worker settle stats history |

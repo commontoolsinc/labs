@@ -98,7 +98,10 @@ import {
   diagnosticPrefix,
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
+  type SpaceStorageSizes,
   type StorageDiagnostics,
+  type StorageSizes,
+  sumSpaceStorageSizes,
 } from "./diagnostics.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -2690,6 +2693,22 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  getSizes(): StorageSizes {
+    return {
+      ...sumSpaceStorageSizes(
+        [...this.#providers.values()].map((provider) =>
+          provider.replica.getSizes()
+        ),
+      ),
+      spaces: this.#providers.size,
+      pendingCommits: this.#pendingCommits.size,
+      pendingLoads: this.#pendingLoads.size,
+      pendingCrossingLoads: this.#pendingCrossingLoads.size,
+      pendingCrossSpace: this.#crossSpacePromises.size,
+    };
+  }
+
   hasPendingCommits(): boolean {
     return this.#pendingCommits.size > 0;
   }
@@ -4934,6 +4953,25 @@ export class SpaceReplica
       repairCount: this.#rejectedPendingLayers.size,
       parkedAcceptLocalSeqs: diagnosticPrefix(this.#parkedAccepts.keys()),
       parkedAcceptCount: this.#parkedAccepts.size,
+    };
+  }
+
+  /** @inheritDoc */
+  getSizes(): SpaceStorageSizes {
+    let subscriptions = 0;
+    for (const sinks of this.#sinks.values()) subscriptions += sinks.size;
+    return {
+      documents: this.#docs.size,
+      subscribedDocuments: this.#sinks.size,
+      subscriptions,
+      watchedDocuments: this.#watchedIds.size,
+      operationSinks: this.#operationSinks.size,
+      inFlightCommits: this.#commitPromises.size,
+      unsettledCommits: this.#commitOutcomeBySeq.size,
+      repairingCommits: this.#rejectedPendingLayers.size,
+      parkedAccepts: this.#parkedAccepts.size,
+      syncTasks: this.#syncTasks.size,
+      pendingReads: this.#syncPromises.size,
     };
   }
 

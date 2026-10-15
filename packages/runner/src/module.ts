@@ -72,6 +72,11 @@ export class ModuleRegistry {
     this.runtime = runtime;
   }
 
+  /** How many modules are registered. */
+  get size(): number {
+    return this.#moduleMap.size;
+  }
+
   addModuleByRef(ref: string, module: Module): void {
     const target = Object.isExtensible(module)
       ? module

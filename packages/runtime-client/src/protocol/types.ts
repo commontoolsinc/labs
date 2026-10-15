@@ -21,7 +21,7 @@ import type {
   PresenceFacets,
   PresenceRecord,
 } from "@commonfabric/memory/v2";
-import type { MetaField } from "@commonfabric/runner";
+import type { MetaField, RuntimeSizes } from "@commonfabric/runner";
 import type {
   CfcConfClause,
   CfcTrustConfigInput,
@@ -3802,6 +3802,35 @@ export type LoggerCountsResponse = {
    * no index signature does not satisfy, and every counter there is a number.
    */
   cfc: Record<string, number>;
+
+  /**
+   * How large the runtime's live structures are at this moment: the
+   * scheduler's tables, storage's documents and subscriptions, the compiled
+   * code caches, and the worker's own subscription and mount tables. A heap
+   * that grows shows up here as the structure growing it.
+   */
+  sizes: RuntimeSizes & { worker: WorkerSizes };
+};
+
+/** Sizes of the tables the worker keeps on its clients' behalf. */
+export type WorkerSizes = {
+  /** Cell subscriptions, one per client per cell. */
+  cellSubscriptions: number;
+
+  /** Operation subscriptions. */
+  operationSubscriptions: number;
+
+  /** Operation sessions open. */
+  operationSessions: number;
+
+  /** Presence room memberships. */
+  presenceMemberships: number;
+
+  /** VDOM mounts. */
+  vdomMounts: number;
+
+  /** Spaces with a pieces controller. */
+  spaces: number;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */

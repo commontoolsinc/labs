@@ -183,6 +183,7 @@ import type {
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
+  SchedulerSizes,
   ServedEventDispatch,
   ServedEventFailureOutcome,
   SettleStats,
@@ -2413,6 +2414,18 @@ export class Scheduler {
    */
   getGraphSnapshot(): SchedulerGraphSnapshot {
     return buildSchedulerGraphSnapshot(this.#graphSnapshotState);
+  }
+
+  /** The sizes of the scheduler's live tables, read without walking them. */
+  getSizes(): SchedulerSizes {
+    return {
+      nodes: this.#nodes.activeCount,
+      invalidNodes: this.#nodes.invalidCount,
+      eventQueue: this.#eventQueue.length,
+      pendingActions: this.#pending.size,
+      backgroundTasks: this.#backgroundTasks.size,
+      actionStats: this.#actionStats.size,
+    };
   }
 
   //

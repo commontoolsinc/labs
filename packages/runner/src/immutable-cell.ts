@@ -160,6 +160,11 @@ export class ImmutableCellStore {
     this.#retainValue(value);
   }
 
+  /** How many snapshots the store retains. */
+  get size(): number {
+    return this.#snapshots.size;
+  }
+
   /** Returns a live snapshot, or throws for an absent or expired identifier. */
   get(id: URI): ImmutableSnapshot {
     const snapshot = this.#snapshots.get(id);
