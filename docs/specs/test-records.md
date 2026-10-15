@@ -155,6 +155,30 @@ for. Either way the scope is applied before ambiguity is judged, or a
 name two packages happen to share would cost each of them a file it held
 unambiguously.
 
+A name map is also a statement of what a file holds, which a lane reads to tell
+a test the tree no longer holds from one a batch never reached. An uncaught
+error or an unhandled rejection can stop a module part way through loading,
+after it has registered some of its tests. Deno runs each test file in a realm
+of its own, with a preload of its own. So once an `error` or
+`unhandledrejection` event reaches a test file's realm before any of that file's
+hooks or tests has begun, whether or not anything handles it, the preload writes
+every name it has noted for the file again, in a map carrying `"interrupted":
+true`, and marks every later map of that file the same way. Deno begins a file's
+hooks and tests only once its module has settled, having finished loading or
+stopped, and the preload marks nothing after that. The names still say which
+file each came from, but no file such a map names counts as having registered
+only those names. A module whose loading never finishes, or that calls
+`Deno.exit`, leaves a map without the mark, but none of its file's tests run, so
+its file records nothing, and a unit that recorded nothing fails the run.
+
+The browser test runner registers no names through the preload, and makes the
+same statement for the whole of a run with a mark named `whole-run-<uuid>.json`.
+The mark holds a JSON object with the `kind` and `scope` the run's records carry
+and `tests`, every test's name by the repository-relative file that registered
+it. The runner writes one only when it loaded every file it was handed and every
+test returned a result, so a run that stopped part way leaves none. No mark
+reaches the store: a spool shipped as a run ships only its records.
+
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
 name (a constant owned by the repository's tooling, never derived from git
