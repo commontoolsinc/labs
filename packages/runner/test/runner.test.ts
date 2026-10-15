@@ -2526,6 +2526,108 @@ describe("setup/start", () => {
     expect(started).toHaveLength(1);
   });
 
+  describe("startWithCommit()", () => {
+    // Each case starts a piece it stopped, so the start instantiates the
+    // graph again and commits its setup writes on a transaction of its own.
+    // The install opens read transactions it never commits, so that one is
+    // the first transaction committed after the runner announces the install.
+
+    const stoppedPiece = async (name: string): Promise<Cell<unknown>> => {
+      const cell = runtime.getCell(space, name);
+      await runtime.runSynced(
+        cell,
+        await compileReceiptPattern(runtime, "v1"),
+        {},
+      );
+      runtime.runner.stop(cell);
+      return cell;
+    };
+
+    /**
+     * Holds the settlement of the start's commit until `release()`, and
+     * refuses the commit first when given a `refusal`.
+     */
+    const holdStartCommit = (refusal?: Error) => {
+      const gate = Promise.withResolvers<void>();
+      const originalEdit = runtime.edit.bind(runtime);
+      let holding = false;
+      const onInstall = (event: Event) => {
+        const { marker } = (event as RuntimeTelemetryEvent).detail;
+        if (marker.type !== "runner.piece.install") return;
+        runtime.telemetry.removeEventListener("telemetry", onInstall);
+        holding = true;
+        runtime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+          const tx = originalEdit(...args);
+          const commit = tx.commit.bind(tx);
+          tx.commit = (options) => {
+            if (!holding) return commit(options);
+            holding = false;
+            runtime.edit = originalEdit;
+            if (refusal !== undefined) tx.abort(refusal);
+            const receipt = commit(options);
+            return {
+              then: receipt.then,
+              verdict: receipt.verdict,
+              settled: gate.promise.then(() => receipt.settled),
+            };
+          };
+          return tx;
+        }) as Runtime["edit"];
+      };
+      runtime.telemetry.addEventListener("telemetry", onInstall);
+      return {
+        release: () => gate.resolve(),
+        restore: () => {
+          gate.resolve();
+          runtime.telemetry.removeEventListener("telemetry", onInstall);
+          runtime.edit = originalEdit;
+        },
+      };
+    };
+
+    it("resolves only once the start's setup commit has landed", async () => {
+      const cell = await stoppedPiece("startWithCommit landed");
+      const held = holdStartCommit();
+      try {
+        let resolved = false;
+        const withCommit = runtime.runner.startWithCommit(cell).then(
+          (started) => {
+            resolved = true;
+            return started;
+          },
+        );
+        // A plain start of the same piece joins the one in flight, and
+        // resolves without waiting for the commit held above.
+        expect(await runtime.start(cell)).toBe(true);
+        await runtime.idle();
+        expect(resolved).toBe(false);
+
+        held.release();
+        expect(await withCommit).toBe(true);
+        expect(runtime.runner.isRunning(cell)).toBe(true);
+      } finally {
+        held.restore();
+      }
+    });
+
+    it("rejects with the reason storage refused the start's setup commit, and leaves the piece stopped", async () => {
+      const cell = await stoppedPiece("startWithCommit refused");
+      const refusal = new Error("injected refusal of the piece-start commit");
+      const held = holdStartCommit(refusal);
+      held.release();
+      try {
+        await expect(runtime.runner.startWithCommit(cell)).rejects.toThrow(
+          `piece-start commit piece-instantiate/${cell.sourceURI} failed, ` +
+            "so the started graph's setup writes did not land: " +
+            refusal.message,
+        );
+        expect(runtime.runner.isRunning(cell)).toBe(false);
+      } finally {
+        held.restore();
+      }
+    });
+  });
+
   it("runSynced refuses to grant update authority in a caller-owned transaction", async () => {
     const resultCell = runtime.getCell(space, "bound source authority");
     const initial = await compileReceiptPattern(runtime, "v1");

@@ -7,6 +7,7 @@ import {
   getPieceSourceRevisions,
   Runtime,
   type RuntimeProgram,
+  type RuntimeTelemetryEvent,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -199,6 +200,72 @@ describe("setsrc commit receipt", () => {
       pieces.syncPattern = originalSyncPattern;
       runtime.runSyncedWithCommit = originalRunSyncedWithCommit;
       unwatch();
+      console.warn = originalWarn;
+    }
+  });
+
+  it("returns a failed refresh when storage refuses the started piece's setup commit", async () => {
+    // A runtime that has not started the piece, which is the one
+    // `cf piece setsrc` runs in, starts it once the update commits, and that
+    // start commits the graph's setup writes on a transaction of its own.
+    // Storage refusing it leaves the source update durable and the piece
+    // running nowhere, so the receipt says the refresh failed, and why.
+
+    const piece = await pieces.create(markedProgram("v1"), {
+      input: {},
+      start: false,
+    });
+    const refusal = new Error("injected refusal of the piece-start commit");
+    const originalEdit = runtime.edit.bind(runtime);
+    const originalWarn = console.warn;
+    // The install opens read transactions it never commits, so the start's
+    // own transaction is the first one committed after the runner announces
+    // the install. Its commit is refused by aborting it first.
+    let refusing = false;
+    const refuseNextCommit = (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type !== "runner.piece.install") return;
+      runtime.telemetry.removeEventListener("telemetry", refuseNextCommit);
+      refusing = true;
+      runtime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+        const tx = originalEdit(...args);
+        const commit = tx.commit.bind(tx);
+        tx.commit = (options) => {
+          if (refusing) {
+            refusing = false;
+            runtime.edit = originalEdit;
+            tx.abort(refusal);
+          }
+          return commit(options);
+        };
+        return tx;
+      }) as Runtime["edit"];
+    };
+    const failures: string[] = [];
+    runtime.pieceStartCommitFailureObserver = ({ actionId }) => {
+      failures.push(actionId);
+    };
+    runtime.telemetry.addEventListener("telemetry", refuseNextCommit);
+    console.warn = () => {};
+
+    try {
+      const receipt = await piece.setPattern(markedProgram("v2"));
+      await runtime.runner.idlePieceInstantiationSettlements();
+
+      // The refused transaction is the start's own, as the runner reports it.
+      expect(failures).toEqual([
+        `piece-instantiate/${piece.getCell().sourceURI}`,
+      ]);
+      expect(receipt.status).toBe("committed");
+      expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
+      expect(receipt.refresh).toEqual({
+        status: "failed",
+        warning: expect.stringContaining(refusal.message),
+      });
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", refuseNextCommit);
+      runtime.edit = originalEdit;
+      runtime.pieceStartCommitFailureObserver = undefined;
       console.warn = originalWarn;
     }
   });

@@ -222,6 +222,7 @@ import {
   isStaleReadConflict,
   isStorageTransactionInconsistent,
 } from "./storage/rejection.ts";
+import { transactionFailureMessage } from "./storage/transaction-errors.ts";
 
 import "./builtins/index.ts";
 
@@ -2290,6 +2291,27 @@ function dedupeNormalizedLinks(
  */
 type PieceRegistration = Cancel & { graphIsInstalled: () => boolean };
 
+/**
+ * A piece-start commit that failed, as `Runner.#reportPieceStartCommitFailure()`
+ * reports it. The started graph's setup writes did not land.
+ */
+type PieceStartCommitFailure = {
+  /** The commit's action identity, which names the piece. */
+  actionId: string;
+
+  /** Storage's verdict on the commit, or what else cut it short. */
+  error: unknown;
+};
+
+/**
+ * Settlement of a self-minted piece instantiation commit, following the one
+ * retry a recoverable refusal takes: the failure it reported, or `undefined`
+ * when its setup writes landed or nothing was lost.
+ */
+type PieceInstantiationSettlement = Promise<
+  PieceStartCommitFailure | undefined
+>;
+
 /** A resident view graph whose unavailable bindings can resume independently. */
 export type ViewPieceRegistration = PieceRegistration & {
   /** Binds newly available nodes; returns false if this registration retired. */
@@ -2387,6 +2409,17 @@ export class Runner {
    * readiness gate or a wave that a closing serving loop may abandon.
    */
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
+
+  /**
+   * Collectors of the settlements of self-minted piece instantiations, by the
+   * key of the piece instantiated. A `startWithCommit()` call holds one for
+   * its piece while its start runs, and hands each settlement it collects back
+   * to its caller.
+   */
+  #pieceInstantiationCollectors = new Map<
+    string,
+    Set<(settlement: PieceInstantiationSettlement) => void>
+  >();
 
   /**
    * Results this runner prepared, so a later start of the same result can reuse
@@ -4744,6 +4777,53 @@ export class Runner {
   }
 
   /**
+   * Like `start()`, except the returned promise also waits for the commit of
+   * the setup writes of each graph this call instantiates for `resultCell`'s
+   * document, through the one retry a recoverable refusal takes, and rejects
+   * when one of them failed. `start()` resolves before that commit settles,
+   * and reports its failure only to the log and to
+   * `Runtime.pieceStartCommitFailureObserver`.
+   *
+   * A failed commit retires the graph it set up, so a rejection says the
+   * piece is not running here. A piece that was already running instantiates
+   * nothing, and this waits for nothing then: a graph its pattern watcher
+   * swaps in later commits its setup the way `start()`'s does.
+   *
+   * @throws Error naming the failed piece-start commit, with storage's
+   * verdict, or whatever else cut the commit short, as its `cause`.
+   */
+  async startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    const key = this.#getDocKey(resultCell);
+    const settlements: PieceInstantiationSettlement[] = [];
+    const collect = (settlement: PieceInstantiationSettlement) => {
+      settlements.push(settlement);
+    };
+    let collectors = this.#pieceInstantiationCollectors.get(key);
+    if (collectors === undefined) {
+      collectors = new Set();
+      this.#pieceInstantiationCollectors.set(key, collectors);
+    }
+    collectors.add(collect);
+    let started: boolean;
+    try {
+      started = await this.start(resultCell);
+    } finally {
+      collectors.delete(collect);
+      if (collectors.size === 0) this.#pieceInstantiationCollectors.delete(key);
+    }
+    for (const failure of await Promise.all(settlements)) {
+      if (failure === undefined) continue;
+      throw new Error(
+        `piece-start commit ${failure.actionId} failed, so the started ` +
+          "graph's setup writes did not land: " +
+          transactionFailureMessage(failure.error),
+        { cause: failure.error },
+      );
+    }
+    return started;
+  }
+
+  /**
    * Releases a child an enclosing pattern is done with. Stops only the exact
    * registration this invocation installed — a later attempt that replaced it
    * owns itself — and leaves a result that has a lifetime of its own running.
@@ -5238,12 +5318,14 @@ export class Runner {
       stage: (tx: IExtendedStorageTransaction) => void;
     } | undefined;
 
-    // Helper to instantiate nodes for a pattern
+    // Helper to instantiate nodes for a pattern. Returns the settlement of the
+    // transaction it commits itself, and nothing when it stages into `useTx`
+    // or instantiates nothing.
     const instantiatePattern = (
       pattern: Pattern,
       useTx?: IExtendedStorageTransaction,
       recoverOnce = true,
-    ) => {
+    ): PieceInstantiationSettlement | undefined => {
       if (!active || startLifecycleEpoch !== this.#lifecycleEpoch) return;
       // Create new cancel group for nodes
       const [nodeCancel, addNodeCancel] = useCancelGroup();
@@ -5312,6 +5394,7 @@ export class Runner {
       schedulerRehydration.implementationSelection = options.variantRegistration
         ?.selection;
       initialSchedulerRehydrationAvailable = false;
+      let commitSettlement: PieceInstantiationSettlement | undefined;
       try {
         if (
           this.#runtime.servingPosture &&
@@ -5409,10 +5492,10 @@ export class Runner {
         if (shouldCommit) {
           this.#runtime.prepareTxForCommit(actualTx);
           // Fire-and-forget by design (start() resolves before the
-          // commit settles), but NEVER swallowed: a refused or failed
-          // instantiation commit means the piece is running against
-          // writes that never landed, so the failure surfaces loudly
-          // and, on a serving runtime, counted.
+          // commit settles, and only `startWithCommit()` waits for it), but
+          // NEVER swallowed: a refused or failed instantiation commit means
+          // the piece is running against writes that never landed, so the
+          // failure surfaces loudly and, on a serving runtime, counted.
           const instantiateActionId = startActionId;
           const patternKeyAtInstantiation = currentPatternKey;
           const teardownRegistrationIfCurrent = () => {
@@ -5437,7 +5520,7 @@ export class Runner {
           const recoverInstantiationOnce = async (
             error: unknown,
             refusal: "basis" | "manifest" | "terminal",
-          ) => {
+          ): PieceInstantiationSettlement => {
             if (!exactNodesAreCurrent()) {
               // A stop, a runtime cycle, or a newer instantiation retired
               // these nodes while the commit was in flight. Whoever holds
@@ -5453,9 +5536,12 @@ export class Runner {
               // Either the one retry lost the same way, or this failure was
               // never the recoverable class. The graph's setup does not
               // become durable and the load has genuinely failed.
-              this.#reportPieceStartCommitFailure(instantiateActionId, error);
+              const failure = this.#reportPieceStartCommitFailure(
+                instantiateActionId,
+                error,
+              );
               teardownRegistrationIfCurrent();
-              return;
+              return failure;
             }
 
             // Recoverable, and about to be recovered: the setup writes have
@@ -5503,7 +5589,7 @@ export class Runner {
             // not be loaded would read as absent and be installed again, so
             // the start fails here, with the reason the load gave.
             if (refusal === "manifest" && unloaded.length > 0) {
-              this.#reportPieceStartCommitFailure(
+              const failure = this.#reportPieceStartCommitFailure(
                 instantiateActionId,
                 new Error(
                   `piece-start commit ${instantiateActionId} lost a policy ` +
@@ -5519,26 +5605,26 @@ export class Runner {
                 ),
               );
               teardownRegistrationIfCurrent();
-              return;
+              return failure;
             }
             try {
-              instantiatePattern(pattern, undefined, false);
+              return await instantiatePattern(pattern, undefined, false);
             } catch (retryError) {
-              this.#reportPieceStartCommitFailure(
+              const failure = this.#reportPieceStartCommitFailure(
                 instantiateActionId,
                 retryError,
               );
               teardownRegistrationIfCurrent();
+              return failure;
             }
           };
           const commitWork = actualTx.commit().settled.then(
-            async ({ error }) => {
+            async ({ error }): PieceInstantiationSettlement => {
               if (error !== undefined) {
                 // A lost manifest install recovers in every posture, for the
                 // reason `refusalNamesOnlyPolicyManifests` gives.
                 if (refusalNamesOnlyPolicyManifests(error)) {
-                  await recoverInstantiationOnce(error, "manifest");
-                  return;
+                  return await recoverInstantiationOnce(error, "manifest");
                 }
                 // A stale read recovers only where a serving side supplies the
                 // view the retry reads.
@@ -5546,12 +5632,14 @@ export class Runner {
                   this.#runtime.experimental.serverExecution === true &&
                   isStaleReadConflict(error)
                 ) {
-                  await recoverInstantiationOnce(error, "basis");
-                  return;
+                  return await recoverInstantiationOnce(error, "basis");
                 }
-                this.#reportPieceStartCommitFailure(instantiateActionId, error);
+                const failure = this.#reportPieceStartCommitFailure(
+                  instantiateActionId,
+                  error,
+                );
                 if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
-                return;
+                return failure;
               }
               const settlement = waveSettlementOf(actualTx);
               if (settlement === undefined) return;
@@ -5577,7 +5665,7 @@ export class Runner {
               // contribution stands, so there is no rolled-back view to
               // re-instantiate against, and it takes the same terminal arm a
               // second failure takes.
-              await recoverInstantiationOnce(
+              return await recoverInstantiationOnce(
                 settled.error,
                 waveWithdrawalCause === "contribution-dropped"
                   ? "basis"
@@ -5585,15 +5673,27 @@ export class Runner {
               );
             },
           ).catch((error) => {
-            this.#reportPieceStartCommitFailure(instantiateActionId, error);
+            const failure = this.#reportPieceStartCommitFailure(
+              instantiateActionId,
+              error,
+            );
             if (exactNodesAreCurrent()) teardownRegistrationIfCurrent();
+            return failure;
           });
           this.#pendingPieceInstantiationSettlements.add(commitWork);
           commitWork.finally(() =>
             this.#pendingPieceInstantiationSettlements.delete(commitWork)
           );
+          for (
+            const collect of this.#pieceInstantiationCollectors.get(pieceKey) ??
+              []
+          ) {
+            collect(commitWork);
+          }
+          commitSettlement = commitWork;
         }
       }
+      return commitSettlement;
     };
 
     // Helper to set up the pattern watcher. Sinks on the `patternIdentity` meta
@@ -8675,7 +8775,10 @@ export class Runner {
           // a stale caller can never instantiate its old candidate while
           // recording a newer identity as current.
           await resultCell.sync();
-          await this.start(resultCell);
+          // A receipt's caller is told whether the piece it started is
+          // running, which takes the start's own commit landing too.
+          if (requireCommit) await this.startWithCommit(resultCell);
+          else await this.start(resultCell);
         }
       }
 
@@ -8760,12 +8863,13 @@ export class Runner {
    * Reports a piece-start setup/instantiation commit failure. Such a commit
    * is fire-and-forget by design but NEVER silent — loud in every arm, and
    * handed to the serving runtime's installed observer (the SpaceServer
-   * counts it into serving-loop.md §7's structureLoadFailures).
+   * counts it into serving-loop.md §7's structureLoadFailures). Returns the
+   * failure it reported, which an instantiation's settlement resolves to.
    */
   #reportPieceStartCommitFailure(
     actionId: string,
     error: unknown,
-  ): void {
+  ): PieceStartCommitFailure {
     logger.error("piece-start-commit-failed", () => [
       `piece-start commit ${actionId} failed; the started graph's setup ` +
       "writes did not land (stage P2-F, F1)",
@@ -8779,6 +8883,7 @@ export class Runner {
         observerError,
       ]);
     }
+    return { actionId, error };
   }
 
   /**
