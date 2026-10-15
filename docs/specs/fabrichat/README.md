@@ -27,13 +27,9 @@ departs from this design.
   - [`ChatReply`](ChatReply.md): what a reply replies to, and where it's shown.
   - [`ChatThreadSummary`](ChatThreadSummary.md): a thread's reply count and
     latest reply time.
-  - [`ChatMessageVersion`](ChatMessageVersion.md): an earlier version of a
-    message.
   - [`ChatReaction`](ChatReaction.md)
   - [`ChatRoomAbout`](ChatRoomAbout.md)
   - [`ChatRoomPolicy`](ChatRoomPolicy.md): a room's policy, stated correctly.
-  - [`ChatRoomActivity`](ChatRoomActivity.md): an entry in a room's recent
-    activity.
   - [`ChatProfile`](ChatProfile.md): the part of a profile the room reads.
 - Records a manager holds:
   - [`ChatIndexEntry`](ChatIndexEntry.md)
@@ -116,10 +112,8 @@ provide, the document says so, under the heading "Prerequisites".
    [`ChatMessageWindow.md`](ChatMessageWindow.md),
    [`ChatWindowAnchor.md`](ChatWindowAnchor.md), [`ChatReply.md`](ChatReply.md),
    [`ChatThreadSummary.md`](ChatThreadSummary.md),
-   [`ChatMessageVersion.md`](ChatMessageVersion.md),
    [`ChatReaction.md`](ChatReaction.md), [`ChatRoomAbout.md`](ChatRoomAbout.md),
-   [`ChatRoomPolicy.md`](ChatRoomPolicy.md),
-   [`ChatRoomActivity.md`](ChatRoomActivity.md), and
+   [`ChatRoomPolicy.md`](ChatRoomPolicy.md), and
    [`ChatProfile.md`](ChatProfile.md), the part of a person's profile the room
    reads.
 7. The record a manager holds: [`ChatIndexEntry.md`](ChatIndexEntry.md).
@@ -169,13 +163,13 @@ provide, the document says so, under the heading "Prerequisites".
    for a room in a space of its own is the room itself. The room keeps no
    membership beyond that list.
 3. **History is attested.** Messages and reactions are `AuthoredByCurrentUser`
-   and `TrustedActionWrite`. A message's sender can
-   edit or delete it, each change recorded as a new version, and no one else
-   can. A message can be obliterated, by an OWNER curating the room where its
-   policy allows it, or by either person in a direct room for their own
-   messages, leaving only an attested tombstone. A
-   reaction is removed only by its own reactor, or with its message. Every
-   recorded version has a time unique in its room.
+   and `TrustedActionWrite`, each an object pushed onto a list and so a
+   document of its own, identified by its cell. A message's sender can edit or
+   delete it, each change recorded in place, and no one else can. A message
+   can be obliterated, by an OWNER curating the room where its policy allows
+   it, or by either person in a direct room for their own messages, leaving
+   only an attested tombstone. A reaction is removed only by its own reactor,
+   or goes out of reach with its message.
 4. **Each user has one manager, in their home space**, found with a well-known
    `wish` target. A user's index of conversations is private to that user.
 5. **A direct room is keyed by the other member's principal**, not by a profile.
@@ -314,10 +308,8 @@ design, as below.
   existing social space lists that space's participants, then those who
   joined the room itself.
 - **Principals.** A handler learns the principal it acts for
-  (`currentPrincipal()`), so a room keys its request memory by the sender's
-  principal, and the manager refuses a direct room with the user themself and
-  leaves them out of a group's other members. A reaction's address still
-  derives from its reactor's profile, as the design says. The manager takes
+  (`currentPrincipal()`), so the manager refuses a direct room with the user
+  themself and leaves them out of a group's other members. The manager takes
   principals as typed. A room offers a direct chat with each participant
   whose profile attests a principal (`principalOf()`), except the viewer, by
   sending that principal to the `openDirect` of the viewer's manager, found
@@ -336,10 +328,13 @@ design, as below.
 ### Writers and labels
 
 - **Every record names its writers.** Beyond what the design requires of
-  messages and reactions, each of the room's records (its request memory, used
-  times, activity and its numbering, and each session's windows) has a write
-  policy listing the handlers that write it (`WritePolicyAnyOf`), so no other
-  code can write it, even code a member runs in the room's space.
+  messages and reactions, each of the room's records (the title a member set,
+  and each session's windows) has a write policy naming the handler that
+  writes it, so no other code can write it, even code a member runs in the
+  room's space. A message's policy names the send handlers, `commitEdit`,
+  `commitDelete`, and `commitObliterate`, and a reaction's the two reaction
+  handlers, which is what admits each one's push onto its list and its removal
+  from it; the lists themselves carry no policy.
 - **A start is checked where it creates a room.** `openDirect` and `createGroup`
   are performed by a handler of their own, `commitStart`, and the record a
   manager-created room keeps about itself names that handler and `ChatStart` on
@@ -357,25 +352,26 @@ design, as below.
   share inbox the profile points at. A chip a room rendered before its control
   named a profile names the participant's principal instead, as
   `target.dataset.counterpart`, which the manager still reads.
-- **Labels without a gesture.** Messages and reactions are labeled
+- **Labels under a gesture.** Messages and reactions are labeled
   `authored-by` under a reviewed gesture, as the design says, and so is
-  `about.record`, under the start that created the room. A `recentActivity`
-  entry is labeled too, by a writer that names no gesture (each handler
-  appending an entry), so its label says whose run wrote it, not that the
-  person made a gesture. `about` is the room's own view, with its `policy`, a
-  document the room writes when it starts, and `about.record` links the stored
-  record.
+  `about.record`, under the start that created the room. `about` is the room's
+  own view, with its `policy`, a document the room writes when it starts, and
+  `about.record` links the stored record.
 
 ### Records
 
-- **Keyed records.** Each message, each reaction, and each `recentActivity`
-  entry is a document of its own, addressed by a key (`elementById`), so
-  writing one never rewrites another, and a record keeps the label its own
-  writer gave it.
+- **Pushed records.** Each message and each reaction is an object pushed onto
+  a list, a document of its own, so writing one never rewrites another, and a
+  record keeps the label its own writer gave it. Nothing is addressed by a
+  key: a record is identified by its cell, and a handler is handed the one it
+  acts on.
 - **Reactions are a list the message links.** Each message links a list of its
-  own reactions, a document the send creates empty and only the reaction
-  handlers write after that, until a deletion or an obliteration clears it and
-  drops the link.
+  own reactions, a document the send makes empty and only the reaction
+  handlers write after that, until a deletion or an obliteration drops the
+  link.
+- **Once per event.** A handler runs once per event, which the runtime
+  guarantees, so the room keeps no memory of the events it has acted on, and
+  a rendered control sends no `requestId`.
 - **Thread summaries.** `messages.threads` is derived in the pass that places
   each message in the views, which walks each reply chain once for the whole
   room. So the summaries together cost one walk of the messages rather than one
@@ -418,9 +414,9 @@ design, as below.
   sends this declaration to `joinRoom`. The host can also join the declared
   conversation when the user visits a container
   ([visiting rooms](../../features/private-inbox.md#joining-a-room-the-user-visits)).
-- **Request ids.** A rendered control sends no `requestId`, and the room and
-  the manager use the event's own key (`eventKey()`), which is the same on
-  every run of that event.
+- **Request ids.** A rendered control sends no `requestId`, and the manager
+  uses the event's own key (`eventKey()`), which is the same on every run of
+  that event.
 
 ## Identity and presentation
 

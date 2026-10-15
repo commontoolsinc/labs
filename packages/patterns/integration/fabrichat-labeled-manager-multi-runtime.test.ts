@@ -87,10 +87,11 @@ describe("fabrichat labeled manager across runtimes", () => {
       { piece: room },
     );
     await harness.settle();
-    const activity = await ada.read(["recentActivity"], { piece: room });
-    expect(activity).toHaveLength(1);
+    expect(await ada.read(["messages", "count"], { piece: room })).toBe(1);
     expect(
-      await ada.read(["recentActivity", 0, "what", "body"], { piece: room }),
+      await ada.read(["messages", "latest", "messages", 0, "body"], {
+        piece: room,
+      }),
     ).toBe("Hello");
 
     await ada.send(

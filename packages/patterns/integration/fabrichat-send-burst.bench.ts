@@ -7,12 +7,9 @@
  * runtime holds every message. It is the FabriChat counterpart of
  * `lunch-poll-vote-burst.bench.ts`, and differs from it in what the writes
  * share. A lunch-poll vote is a keyed write that collides with nothing. A
- * FabriChat message is a keyed write too, but the same send appends to the
- * room's recent activity, which reads the activity list and the counters
- * record every send writes, and claims its recorded time from the times the
- * room has used. Two members sending at once therefore collide, and the loser
- * rolls back and runs again. How long that takes, and how much is thrown away
- * on the way, is what this measures.
+ * FabriChat message is pushed onto the one list every member's send appends
+ * to, a mergeable append, so two members sending at once both land without a
+ * retry, and what this measures is how long the room takes to agree on them.
  *
  * The size is small because larger ones do not complete. At twelve members
  * sending five messages each, sends conflicted for thirty seconds and more,
@@ -175,26 +172,14 @@ async function burst(room: Room, round: number): Promise<void> {
 
 /**
  * Checks, outside the measured interval, that every member's runtime holds
- * the room's joins and `sent` messages from each member, and that the room
- * recorded each of the member's own requests as done.
+ * the room's joins and `sent` messages from each member.
  */
-async function verify(room: Room, round: number, sent: number): Promise<void> {
+async function verify(room: Room, _round: number, sent: number): Promise<void> {
   await Promise.all(members.map(async (member) => {
     expect(
       await member.read(["messages", "count"], { piece: room }),
       member.label,
     ).toBe(MEMBERS * (1 + sent));
-    const requests = await member.read(["messageRequests"], {
-      piece: room,
-    }) as Record<string, { status?: string }>;
-    const expected = [
-      `join-${round}`,
-      ...Array.from({ length: sent }, (_, i) => `burst-${round}-${i}`),
-    ];
-    expect(
-      expected.map((id) => requests[id]?.status),
-      member.label,
-    ).toEqual(expected.map(() => "done"));
   }));
 }
 

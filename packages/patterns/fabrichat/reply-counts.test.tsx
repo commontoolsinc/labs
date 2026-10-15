@@ -14,14 +14,9 @@ import {
 } from "commonfabric";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type MessageRecord,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { type ChatThreadSummary, FabriChatRoomCore } from "./room.tsx";
 import {
@@ -68,24 +63,29 @@ function messageOf(cell: unknown): unknown {
 const stored = (messages: Writable<MessagesValue>): MessageRecord[] =>
   messages.get() as MessageRecord[];
 
-/**
- * Each thread the room lists, in its order, as `<root>:<count>@<latest>`,
- * where `<latest>` is the index among the stored messages of the one whose
- * `sentAt` is the thread's latest reply time.
- */
-const threadsText = (
-  threads: readonly ChatThreadSummary[],
-  messages: Writable<MessagesValue>,
-): string =>
+/** Each thread the room lists, in its order, as `<root>:<count>`. */
+const threadsText = (threads: readonly ChatThreadSummary[]): string =>
   threads.map((thread) => {
     const root = thread.root.get()?.body;
-    const latest = stored(messages).findIndex((message) =>
-      nsecOf(message.sentAt) === nsecOf(thread.latestReplyAt)
-    );
-    return `${
-      typeof root === "string" ? root : "<gone>"
-    }:${thread.replyCount}@${latest}`;
+    return `${typeof root === "string" ? root : "<gone>"}:${thread.replyCount}`;
   }).join(" | ");
+
+/**
+ * Whether each thread's latest reply time is the `sentAt` of the stored
+ * message at the index `latest` gives for it. Two messages can share a time,
+ * so the time is compared, not the message it finds.
+ */
+const latestAre = (
+  threads: readonly ChatThreadSummary[],
+  messages: Writable<MessagesValue>,
+  latest: readonly number[],
+): boolean =>
+  threads.length === latest.length &&
+  threads.every((thread, index) => {
+    const message = stored(messages)[latest[index]];
+    return message !== undefined &&
+      nsecOf(message.sentAt) === nsecOf(thread.latestReplyAt);
+  });
 
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
@@ -94,11 +94,6 @@ export default pattern(() => {
   const records = {
     about: { kind: "group" as const },
     messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const alice = FabriChatRoomCore(
     { myProfile: aliceProfile, ...records } as RoomArg,
@@ -154,9 +149,7 @@ export default pattern(() => {
       },
       // A message with no replies roots no thread, so the list is empty.
       {
-        assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) === ""
-        ),
+        assertion: assert(() => threadsText(alice.messages.threads) === ""),
       },
 
       // Each reply in the thread raises its root's count, and moves the
@@ -168,7 +161,8 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) === "Root:1@2" &&
+          threadsText(alice.messages.threads) === "Root:1" &&
+          latestAre(alice.messages.threads, messages, [2]) &&
           equals(alice.messages.threads[0]?.root, messages.key(0))
         ),
       },
@@ -179,7 +173,8 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) === "Root:2@3"
+          threadsText(alice.messages.threads) === "Root:2" &&
+          latestAre(alice.messages.threads, messages, [3])
         ),
       },
 
@@ -192,7 +187,8 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) === "Root:2@3"
+          threadsText(alice.messages.threads) === "Root:2" &&
+          latestAre(alice.messages.threads, messages, [3])
         ),
       },
 
@@ -205,7 +201,8 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) === "Root:3@5"
+          threadsText(alice.messages.threads) === "Root:3" &&
+          latestAre(alice.messages.threads, messages, [5])
         ),
       },
 
@@ -218,10 +215,10 @@ export default pattern(() => {
       },
       {
         assertion: assert(() =>
-          threadsText(alice.messages.threads, messages) ===
-            "Root:3@5 | Other:1@6" &&
-          threadsText(bob.messages.threads, messages) ===
-            "Root:3@5 | Other:1@6"
+          threadsText(alice.messages.threads) === "Root:3 | Other:1" &&
+          latestAre(alice.messages.threads, messages, [5, 6]) &&
+          threadsText(bob.messages.threads) === "Root:3 | Other:1" &&
+          latestAre(bob.messages.threads, messages, [5, 6])
         ),
       },
 
@@ -236,15 +233,15 @@ export default pattern(() => {
       // policy, as the OWNER this lane's user is may.
       {
         action: alice.obliterateMessage,
-        event: { requestId: "o-nested", message: messageOf(messages.key(5)) },
+        event: { message: messageOf(messages.key(5)) },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
           typeof stored(messages)[2]?.body === "object" &&
           stored(messages)[5]?.authorProfile === undefined &&
-          threadsText(alice.messages.threads, messages) ===
-            "Root:3@5 | Other:1@6"
+          threadsText(alice.messages.threads) === "Root:3 | Other:1" &&
+          latestAre(alice.messages.threads, messages, [5, 6])
         ),
       },
     ],

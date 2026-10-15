@@ -1,9 +1,10 @@
 # FabriChat messages as pushed elements
 
-**Status:** proposed, not started. Written against `main` at `67143bae62`
-(2026-10-14). The two spikes it rests on are scratch pattern tests that have not
-been committed; their findings are recorded below. Paths are under
-`packages/patterns/fabrichat/` unless they say otherwise.
+**Status:** stage 1 built, on branch `claude/loom-chat-send-refactor-525c8b`.
+Written against `main` at `67143bae62` (2026-10-14). The two spikes it rests
+on became `labels.test.tsx`, which drives the real handlers; their findings
+are recorded below. Paths are under `packages/patterns/fabrichat/` unless they
+say otherwise.
 
 **Summary.** A FabriChat room stores far more than a chat needs. Beside the
 messages it keeps a request memory, a set of used times, an activity log with
@@ -171,10 +172,20 @@ helper never touches. So:
 | `commitDeleteReaction` | the reaction it is handed; the message's `reactions` link | removes the reaction from that list |
 
 A reply's target, and an act's target, is checked to be one of the room's
-messages by identity. With an inline body and no `elementById` on the list, the
-transformer reduces the list's elements to their identity, so the check reads
-the list's links and no message record. That check is the only read of
-`messages` a send makes; the push is a write.
+messages by its space: a message in the space the room's records live in. The
+check reads the target and nothing of the list, where a check by identity
+against the list would read the list's links; and the push's element schema,
+which carries the label, keeps the list's full element shape in a send's state
+whichever check is made. So a send reads the target it replies to and no
+other message, and the acts on a message take a `room: Cell<unknown>` that
+names the space and reads nothing. A target in the room's space that is not
+among its messages is a document the sender could write anyway, since the
+label decides which handler may write a message and the space's access list
+who may write there.
+
+`commitDeleteReaction` takes the message and the emoji, as the stream does,
+reads the message's reaction list, and removes the sender's reaction with that
+emoji by its cell.
 
 ## Proposals for the decisions this plan has to make
 
@@ -284,11 +295,12 @@ which this plan does not touch.
 The room's contract breaks on purpose, and `pattern-compat` refuses a break
 unless `tasks/pattern-compat-accepted-breaks.ts` names it, each `(pattern,
 baseline)` pair with the schema paths it forgives and a decision record under
-`docs/history/`. The room has 51 baselines, the placement and the adapter 2
-each. Retiring the room's path and starting the new room under a new one,
-whose first contract is recorded fresh, is the other route the gate allows; the
-first stage settles which, against `tasks/check-baselines-append-only.ts`.
-Home and the default app may not appear in either list, which the
+`docs/history/`. Stage 1 took that route: five entries, three for the room's
+51 baselines by the result each reports beside the messages' changed `ifc`,
+and one each for the placement and the adapter, all citing
+`docs/history/fabrichat-pushed-messages-break.md`. Three earlier room entries
+went with them, since they could forgive nothing once the messages broke
+beside their paths. Home and the default app appear in no entry, which the
 `ChatRoomPolicy` proposal keeps them out of.
 
 ## Specifications to rewrite
@@ -305,10 +317,14 @@ describe surfaces this plan removes, and are archived.
 
 ## Stages
 
-- [ ] **1. Records and handlers.** New stored types and write policies in
+- [x] **1. Records and handlers.** New stored types and write policies in
   `room-records.tsx`, the nine handlers as above, and pattern tests for each
-  act, including the two spikes as tests with `TrustedActionWrite`. Settle the
-  contract-gate route.
+  act, including the two spikes as `labels.test.tsx` with
+  `TrustedActionWrite`. The views key messages by entity rather than by time
+  meanwhile, and `recentActivity`, `messageRequests`, and the activity and
+  request records are gone from the room, the placement, the fixtures, and
+  the specs; `messageRefusal` carries the session's refusal. The contract-gate
+  route is settled below.
 - [ ] **2. Views.** The room's derivations by reference, rows given their
   place, windows removed, `message-row.tsx` bindings.
 - [ ] **3. Consumers and gates.** Placement, adapter, manager, integration
@@ -319,18 +335,11 @@ describe surfaces this plan removes, and are archived.
 
 ## Open questions
 
-- Whether a pushed reaction list created by the send, under
-  `TrustedActionWrite`, admits the reaction handlers' pushes as the spike's
-  `WriteAuthorizedBy` version does. Stage 1 answers it first.
-- Whether the write-policy gate reads a `removeByValue()` as it read the
-  spike's `remove()`: a refusal at `/*` for an element whose policy does not
-  name the handler.
-- Whether an admitted rewrite by someone other than the author relabels the
-  element with the new writer, which obliteration by an OWNER rests on. The
-  spike refused such a rewrite and never admitted one;
-  `owner-obliteration.test.tsx` exercises it on today's records, which are the
-  same document kind, so stage 1's tests cover it on the new shape.
-- The contract-gate route: 55 accepted-break pairs, or a new path.
+Settled by stage 1's tests: a reaction list the send makes under
+`TrustedActionWrite` admits the reaction handlers' pushes; the gate refuses a
+`removeByValue()` by an element's policy as it refused the spike's `remove()`;
+and an admitted rewrite by someone other than the author relabels the element
+(`labels.test.tsx`, `owner-obliteration.test.tsx`).
 - Whether the room's output should offer the session's refusal text at all, or
   whether the refused act's absence from the room is enough for a client that
   renders its own UI.

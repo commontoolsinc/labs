@@ -97,20 +97,17 @@ A client that draws natively MUST:
 - **Offer any single emoji as a reaction** (see
   [`ChatReaction`](ChatReaction.md)), and show any that others have used, even
   ones the client wouldn't offer itself.
-- **Follow the room through `recentActivity`** (see
-  [`ChatRoomActivity`](ChatRoomActivity.md)) rather than by comparing the
-  messages with what it had. It catches up by `seq`, from the highest one it has
-  seen, and reopens its windows when the room's `recentActivityExpiredThrough`
-  shows it has missed entries (see [catching
-  up](ChatRoomActivity.md#catching-up)).
-- **Use each message's entity as its id**, or its `sentAt`, which is unique in
-  its room.
+- **Follow the room through its messages**: `messages.latest`, `messages.count`,
+  and the windows it has open, which stay live as the messages in them change.
+- **Use each message's cell as its identity**, compared with `equals()`, and
+  never its `sentAt`, which is not unique (see
+  [times](ChatMessage.md#times)).
 - **Show edits and deletions.** A client shows a deleted message as deleted,
-  never with text from its history, and marks a message with `editedAt` as
-  edited. Whether it shows `earlierVersions` is its choice.
+  and marks a message with `editedAt` as edited. A message keeps no earlier
+  text.
 - **Show obliterated messages as removed**, by whoever the tombstone is labeled
   with, and drop anything the client had kept of the message: its text, its
-  sender, its history, and its reactions.
+  sender, and its reactions.
 - **Show replies where they say they are shown**: the main conversation and each
   thread, derived from `replyTo` as [`ChatReply`](ChatReply.md#the-two-views)
   states, with flat threads. A thread's reply count and latest reply time are
@@ -176,37 +173,22 @@ direct one, but not a space's own chat, which is shown by its space's name.
 A client sends to the room's own streams, never through a placement or an
 adapter.
 
-A room records why it refused a message act in the sender's
-`messageRequests`, where a client shows it to the person, but a client still
+A room records why it refused a message act in the sending session's
+`messageRefusal`, where a client shows it to the person, but a client still
 MUST check each event against its stream's rules before sending it: a non-empty body, a reply whose target is
 in the same room and allowed for its `shownIn`, a single emoji (see
 [`ChatRoomOutput`](ChatRoomOutput.md#streams)). A client uses the room's
-`canSend` to tell the person when they can't send at all. A client mints a fresh
-`requestId` for each request, such as a random 128-bit value: it is what keeps
-two messages with the same text apart, and what lets the room ignore an event
-its runtime happens to deliver twice. It proposes a version's `sentAt` from its
-own clock when the person sends or edits.
+`canSend` to tell the person when they can't send at all.
 
 A client never sends an event again on its own. It can't re-issue a trusted
 gesture from its code (rule 2 below), so an event it sent again would be
 refused, and getting an event to the room is its runtime's job: a runtime
-re-submits an event it can't tell was appended, with its trusted mark, and runs
-an appended event until the run completes.
-
-A send can go unacknowledged: the room's `recentActivity` holds no entry with
-the send's `requestId`, labeled with the sender (see
-[`ChatRoomActivity`](ChatRoomActivity.md)). An entry that does match links, as
-its `what`, the message the send produced. While the send's proposal is within
-the room's `proposedTimeMaxAgeNsec`, its runtime may still be delivering it.
-Once the proposal is older than that, the room would refuse it, so, unless the
-client has missed entries (see [catching up](ChatRoomActivity.md#catching-up)),
-it SHOULD show the message as not sent and offer the person an explicit retry. A
-retry is the person pressing Send again: a new gesture, sent as a new request,
-with a fresh `requestId` and a fresh proposal, and showing exactly what it
-sends, as rule 3 requires. The retry is the person's decision because it can
-duplicate the message, if the first send did arrive and the client never saw it.
-The same holds for an edit. A client that has missed entries can't tell whether
-the send arrived, and says so, rather than calling it not sent.
+re-submits an event it can't tell was appended, with its trusted mark and the
+same event id, which the room's runtime deduplicates, and runs an appended
+event once. A client sees a send take effect when the message appears in the
+room's `messages`, and a send that is refused in `messageRefusal`; nothing
+else is owed, and a client offers no retry of its own, since a person who
+sends again sends another message.
 
 A client that resumes an interrupted `createGroup` MUST resend it with its
 original `requestId`, and SHOULD do the same for `openDirect` (see

@@ -439,40 +439,27 @@ function countOf(member: MemberSession): Cell<number | undefined> {
 }
 
 /**
- * Sends one message as `member` and waits until the room has recorded it, and
- * until their copy of the room counts `total` entries.
+ * Sends one message as `member` and waits until their copy of the room counts
+ * `total` entries, which it does once the room has recorded it.
  */
 async function writeAs(
   member: MemberSession,
   event: Record<string, unknown>,
   total: number,
 ): Promise<void> {
-  const requestId = `seed-${member.index}-${member.sent++}`;
-  await sendTrusted(member.controller, member.room!.key("sendMessage"), {
-    requestId,
-    ...event,
-  }, CHAT_SEND);
-  await settleRequest(member, requestId);
+  member.sent++;
+  await sendTrusted(
+    member.controller,
+    member.room!.key("sendMessage"),
+    event,
+    CHAT_SEND,
+  );
   await until(countOf(member), (count) => (count ?? 0) >= total);
 }
 
-/** Waits for the room's outcome of `member`'s request, and throws a refusal. */
-async function settleRequest(
-  member: MemberSession,
-  requestId: string,
-): Promise<void> {
-  const outcome = await until(
-    member.room!.key("messageRequests").key(requestId) as Cell<
-      { status?: string; code?: string; reason?: string } | undefined
-    >,
-    (value) => value?.status !== undefined,
-  );
-  if (outcome.status !== "done") {
-    throw new Error(
-      `The room refused ${memberName(member.index)}'s request ${requestId}: ` +
-        `${outcome.code ?? "?"} ${outcome.reason ?? ""}`,
-    );
-  }
+/** How many reactions `message` holds, as `member`'s copy of the room has it. */
+function reactionCountOf(message: Cell<unknown>): Cell<number | undefined> {
+  return message.key("reactions").key("length") as Cell<number | undefined>;
 }
 
 /**
@@ -486,14 +473,15 @@ async function reactAs(
   main: number,
   written: number,
 ): Promise<void> {
-  const requestId = `seed-${member.index}-${member.sent++}`;
+  member.sent++;
   await until(countOf(member), (count) => (count ?? 0) >= written);
+  const message = await mainMessage(member, index, main);
+  const before = (await reactionCountOf(message).pull()) ?? 0;
   await sendTrusted(member.controller, member.room!.key("sendReaction"), {
-    requestId,
-    message: await mainMessage(member, index, main),
+    message,
     emoji: SEEDED_REACTION,
   }, CHAT_REACT);
-  await settleRequest(member, requestId);
+  await until(reactionCountOf(message), (count) => (count ?? 0) > before);
 }
 
 /** The main conversation's message at `index`, as `member`'s room holds it. */

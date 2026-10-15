@@ -50,7 +50,7 @@ client that can't learn it MUST treat the container as admitting others.
   - `messages` and `canSend`, from the room (see
     [`ChatRoomOutput`](ChatRoomOutput.md#facts)). Through `messages` the reader
     reaches their own windows onto the room's messages.
-  - `about`, `recentActivity`, `participants`, and `reactionTallies` (per
+  - `about`, `participants`, and `reactionTallies` (per
     message in `messages.latest` and in the session's windows: emoji, count,
     whether the viewer is among them, and the reactors' profiles), each read
     through the link. They're empty unless `state` is `"member"`.

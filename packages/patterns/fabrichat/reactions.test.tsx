@@ -15,14 +15,10 @@ import {
 } from "commonfabric";
 import { FabriChatMessageRow, type ReactionTally } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type MessageRecord,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
+  type ReactionsValue,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -79,17 +75,16 @@ const reactionsOn = (
 
 // How many reactions a held reaction list holds.
 const heldCount = (
-  holder: Cell<{ list?: Writable<ReactionList> }>,
+  holder: Cell<{ list?: Writable<ReactionsValue> }>,
 ): number => ((holder.get()?.list?.get() ?? []) as unknown[]).length;
 
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
   const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
-  const reactionLists = Writable.of<ReactionList[]>([] as ReactionList[]);
   // The first message's reaction list, held apart from the message, whose link
   // to it a deletion drops.
-  const firstReactions = Writable.of<{ list?: Writable<ReactionList> }>({});
+  const firstReactions = Writable.of<{ list?: Writable<ReactionsValue> }>({});
   const action_hold_first_reactions = action(() =>
     firstReactions.key("list").set(
       messages.key(0).key("reactions").resolveAsCell(),
@@ -98,23 +93,9 @@ export default pattern(() => {
   const records = {
     about: { kind: "group" as const },
     messages,
-    reactionLists,
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const alice = FabriChatRoomCore(
     { myProfile: aliceProfile, ...records } as RoomArg,
-  );
-  // The same room with a request memory of its own, empty: it has forgotten
-  // every request, as the room does once a request's memo expires.
-  const aliceForgetful = FabriChatRoomCore(
-    {
-      myProfile: aliceProfile,
-      ...records,
-      requests: Writable.of<RequestMemo[]>([]),
-    } as RoomArg,
   );
   const rowRecords = {
     inThread: false,
@@ -157,27 +138,27 @@ export default pattern(() => {
       // Any single emoji is a reaction; text, and two emoji together, are not.
       {
         action: aliceOnFirst.sendReaction,
-        event: { requestId: "a1", emoji: "👍🏽" },
+        event: { emoji: "👍🏽" },
         trustedUi: reactGesture,
       },
       {
         action: aliceOnFirst.sendReaction,
-        event: { requestId: "a2", emoji: "cat" },
+        event: { emoji: "cat" },
         trustedUi: reactGesture,
       },
       {
         action: aliceOnFirst.sendReaction,
-        event: { requestId: "a3", emoji: "😺😺" },
+        event: { emoji: "😺😺" },
         trustedUi: reactGesture,
       },
       {
         action: bobOnFirst.sendReaction,
-        event: { requestId: "b1", emoji: "👍🏽" },
+        event: { emoji: "👍🏽" },
         trustedUi: reactGesture,
       },
       {
         action: bobOnFirst.sendReaction,
-        event: { requestId: "b2", emoji: "🎉" },
+        event: { emoji: "🎉" },
         trustedUi: reactGesture,
       },
       {
@@ -193,19 +174,19 @@ export default pattern(() => {
       // Adding one already there changes nothing, even under a new request.
       {
         action: bobOnFirst.sendReaction,
-        event: { requestId: "b3", emoji: "🎉" },
+        event: { emoji: "🎉" },
         trustedUi: reactGesture,
       },
       { assertion: assert(() => reactionsOn(messages, 0).length === 3) },
       // Removing is never a toggle: removing twice leaves it removed.
       {
         action: bobOnFirst.deleteReaction,
-        event: { requestId: "b4", emoji: "🎉" },
+        event: { emoji: "🎉" },
         trustedUi: unreactGesture,
       },
       {
         action: bobOnFirst.deleteReaction,
-        event: { requestId: "b5", emoji: "🎉" },
+        event: { emoji: "🎉" },
         trustedUi: unreactGesture,
       },
       {
@@ -214,7 +195,7 @@ export default pattern(() => {
       // A reaction on one message leaves the other's alone.
       {
         action: aliceOnSecond.sendReaction,
-        event: { requestId: "a4", emoji: "😂" },
+        event: { emoji: "😂" },
         trustedUi: reactGesture,
       },
       {
@@ -223,25 +204,9 @@ export default pattern(() => {
           reactionsOn(messages, 0).length === 2
         ),
       },
-      // A send arriving again after its memo has expired changes nothing.
-      {
-        action: alice.sendMessage,
-        event: { requestId: "again", target: { value: "Again" } },
-        trustedUi: sendGesture,
-      },
-      {
-        action: aliceForgetful.sendMessage,
-        event: { requestId: "again", target: { value: "Changed" } },
-        trustedUi: sendGesture,
-      },
-      {
-        assertion: assert(() =>
-          (messages.get() as MessageRecord[]).length === 3 &&
-          (messages.get() as MessageRecord[])[2]?.body === "Again"
-        ),
-      },
-      // Deleting a message clears its reactions and takes them out of the
-      // room's record, and the deleted message takes no new ones.
+      // Deleting a message drops its link to its reactions, so the room
+      // shows none and the deleted message takes no new ones; the list itself
+      // outlives the link.
       { action: action_hold_first_reactions },
       {
         assertion: assert(() => heldCount(firstReactions) === 2),
@@ -253,13 +218,13 @@ export default pattern(() => {
       },
       {
         action: bobOnFirst.sendReaction,
-        event: { requestId: "b6", emoji: "😢" },
+        event: { emoji: "😢" },
         trustedUi: reactGesture,
       },
       {
         assertion: assert(() =>
           reactionsOn(messages, 0).length === 0 &&
-          heldCount(firstReactions) === 0 &&
+          heldCount(firstReactions) === 2 &&
           aliceOnFirst.tallies.length === 0
         ),
       },

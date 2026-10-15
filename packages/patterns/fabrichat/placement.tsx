@@ -21,7 +21,6 @@ import {
   type ChatReaction,
   type ChatReactionTally,
   type ChatRoomAbout,
-  type ChatRoomActivity,
   type ProfileCell,
   reactionTalliesOf,
 } from "./schemas.tsx";
@@ -61,9 +60,6 @@ export interface PlacedRoom {
   /** What the room says about itself. */
   about?: ChatRoomAbout;
 
-  /** What the room recorded recently. */
-  recentActivity?: ChatRoomActivity[];
-
   /** The room's participants. */
   participants?: ProfileCell[];
 
@@ -93,9 +89,6 @@ export interface FabriChatPlacementView {
 
   /** Whether the viewer can send. */
   canSend: boolean;
-
-  /** What the room recorded recently. */
-  recentActivity: ChatRoomActivity[];
 
   /** The room's participants. */
   participants: ProfileCell[];
@@ -177,9 +170,6 @@ const FabriChatPlacement = pattern<
     about: computed(() => (isMember ? about : undefined)),
     messages,
     canSend: computed(() => isMember && room.get()?.canSend === true),
-    recentActivity: computed(() =>
-      isMember ? [...(room.get()?.recentActivity ?? [])] : []
-    ),
     participants: computed(() =>
       isMember ? [...(room.get()?.participants ?? [])] : []
     ),

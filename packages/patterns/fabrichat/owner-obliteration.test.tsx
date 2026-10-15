@@ -17,15 +17,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import { type ChatMessageRights, FabriChatRoomCore } from "./room.tsx";
 import {
@@ -36,7 +28,6 @@ import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatProfile,
-  type MessageActOutcome,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -71,19 +62,6 @@ const bodies = (messages: Cell<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-/** The outcome `outcomes` records under `id`, as `status/code`. */
-const outcomeOf = (
-  outcomes: Record<string, MessageActOutcome> | undefined,
-  id: string,
-): string => {
-  const outcome = outcomes?.[id];
-  return outcome === undefined
-    ? "none"
-    : outcome.status === "refused"
-    ? `refused/${outcome.code}`
-    : outcome.status;
-};
-
 // The view's rights for the message at `index` of `messages`.
 const rightsAt = (
   rights: readonly ChatMessageRights[],
@@ -108,11 +86,6 @@ export default pattern(() => {
     about: { kind: "group" as const, title: "Team" },
     ownersMayObliterate: false,
     messages: groupMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const aliceInGroup = FabriChatRoomCore(
     { myProfile: aliceProfile, ...groupRecords } as RoomArg,
@@ -127,11 +100,6 @@ export default pattern(() => {
     about: { kind: "direct" as const },
     ownersMayObliterate: true,
     messages: directMessages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const aliceInDirect = FabriChatRoomCore(
     { myProfile: aliceProfile, ...directRecords } as RoomArg,
@@ -152,11 +120,6 @@ export default pattern(() => {
     cannotWrite: false,
     isOwner: true,
     messages: groupMessages,
-    reactionLists: groupRecords.reactionLists,
-    requests: groupRecords.requests,
-    usedTimes: groupRecords.usedTimes,
-    activity: groupRecords.activity,
-    counters: groupRecords.counters,
   } as RowArg);
 
   return {
@@ -194,7 +157,6 @@ export default pattern(() => {
       {
         action: bobInGroup.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -202,24 +164,19 @@ export default pattern(() => {
       {
         action: bobInGroup.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(groupMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         action: bobInGroup.obliterateMessage,
-        event: { requestId: "o-his", message: messageOf(groupMessages.key(1)) },
+        event: { message: messageOf(groupMessages.key(1)) },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInGroup.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-hers") ===
-            "refused/not-allowed" &&
-          outcomeOf(bobInGroup.messageRequests, "o-his") ===
-            "refused/not-allowed" &&
+          bobInGroup.messageRefusal ===
+            "Messages in this chat can't be removed." &&
           bodies(groupMessages) === "Alice in the group | Bob in the group"
         ),
       },
@@ -246,29 +203,27 @@ export default pattern(() => {
       {
         action: bobInDirect.deleteMessage,
         event: {
-          requestId: "d-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: deleteGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "d-hers") ===
-            "refused/not-allowed" &&
+          bobInDirect.messageRefusal ===
+            "Only its author can delete a message." &&
           bodies(directMessages) === "Alice in private"
         ),
       },
       {
         action: bobInDirect.obliterateMessage,
         event: {
-          requestId: "o-hers",
           message: messageOf(directMessages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(bobInDirect.messageRequests, "o-hers") === "done" &&
+          bobInDirect.messageRefusal === "" &&
           bodies(directMessages) === "<obliterated>"
         ),
       },

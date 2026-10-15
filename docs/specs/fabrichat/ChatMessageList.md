@@ -134,8 +134,7 @@ client mints at random.
 
 A window stays live: as the messages in it change, it changes with them. It
 doesn't grow with new messages on its own. A client learns of those from
-`recentActivity` (see [`ChatRoomActivity`](ChatRoomActivity.md)), and moves a
-window when it wants them in it.
+`latest` and `count`, and moves a window when it wants them in it.
 
 Like every stream, `openWindow` is one-way. A client knows its request has been
 fulfilled when `windows[windowId].requestId` becomes the request's.

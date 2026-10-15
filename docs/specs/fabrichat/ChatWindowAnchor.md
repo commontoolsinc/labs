@@ -31,9 +31,9 @@ Exactly one of the three keys is present.
   message a link points at, without paging from either end. The message MUST be
   in the view: an `around` that names a message outside it is refused.
 
-Every message's `sentAt` is unique in the room (see [unique
-times](ChatMessage.md#unique-times)), so a `sentAt` names one point exactly, and
-a window never starts or ends in the middle of a tie.
+A `sentAt` is not unique in the room (see [times](ChatMessage.md#times)), so an
+anchor names every message at that time together: a window never starts or
+ends between two messages sent at one time.
 
 A window's `hasOlder` and `hasNewer` (see
 [`ChatMessageWindow`](ChatMessageWindow.md)) say whether there is more on either

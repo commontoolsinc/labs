@@ -12,14 +12,9 @@ import {
   Writable,
 } from "commonfabric";
 import {
-  type ActivityCounters,
   type ChatMessageWindow,
   type ChatMessageWindows,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -68,15 +63,9 @@ const windowText = (window: ChatMessageWindow | undefined): string =>
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
-  const activity = Writable.of<SentActivity[]>([]);
   const records = {
     about: { kind: "group" as const },
     messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity,
-    counters: Writable.of<ActivityCounters[]>([]),
   };
   const alice = FabriChatRoomCore(
     { myProfile: aliceProfile, ...records } as RoomArg,

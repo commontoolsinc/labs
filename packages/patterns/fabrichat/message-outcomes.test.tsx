@@ -1,11 +1,9 @@
 /**
- * The outcome a FabriChat room records for each of its sender's message acts,
- * by `requestId`, in the sender's own `messageRequests`: `done` for an act that
- * took effect, and `refused` with a reason and a code for one that broke the
- * stream's rules, which writes nothing else. The composer shows the session's
- * latest refusal until an act takes effect. A viewer whose profile doesn't
- * resolve, as `#profile` resolves none where Home lists no profile, has each
- * send refused as `no-profile`.
+ * What a FabriChat room tells a session of a message act it refused: the
+ * reason, in `messageRefusal` and in the composer, until an act takes effect,
+ * which clears it. A refused act writes nothing else. A viewer whose profile
+ * doesn't resolve, as `#profile` resolves none where Home lists no profile,
+ * has each send refused for the want of one.
  */
 import {
   action,
@@ -22,15 +20,7 @@ import {
   readValue,
   textContent,
 } from "../test/vnode-helpers.ts";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import FabriChatRoom, { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_DELETE_ACTION,
@@ -41,7 +31,6 @@ import {
   CHAT_SEND_SURFACE,
   type ChatProfile,
   epochNsec,
-  type MessageActOutcome,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -60,24 +49,10 @@ const deleteGesture = {
   action: CHAT_DELETE_ACTION,
 };
 
-const typed = (text: string, requestId: string) => ({
-  type: "click",
-  requestId,
-  target: { value: text },
-});
+const NO_PROFILE =
+  "Acting in a chat needs a profile, and yours hasn't resolved.";
 
-/** The outcome `outcomes` records under `id`, as `status/code`. */
-const outcomeOf = (
-  outcomes: Record<string, MessageActOutcome> | undefined,
-  id: string,
-): string => {
-  const outcome = outcomes?.[id];
-  return outcome === undefined
-    ? "none"
-    : outcome.status === "refused"
-    ? `refused/${outcome.code}`
-    : outcome.status;
-};
+const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 /** What the room's composer shows of the session's latest refusal. */
 const shownRefusal = (root: unknown): string => {
@@ -97,11 +72,6 @@ function messageOf(cell: unknown): unknown {
 /** A room's records, with none of them holding anything yet. */
 const freshRecords = () => ({
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
 });
 
 export default pattern(() => {
@@ -128,49 +98,40 @@ export default pattern(() => {
   // `profiles` is empty: a space's own chat, which needs no `about`.
   const homeless = FabriChatRoom({ ...freshRecords() } as FullRoomArg);
 
-  const action_send_too_old = action(() =>
-    alice.sendMessage.send({
-      requestId: "s-old",
-      version: { body: "Late", sentAt: epochNsec(1n) },
-    })
-  );
   const action_bob_edits_alices = action(() =>
     bob.editMessage.send({
-      requestId: "e-bob",
       message: messageOf(records.messages.key(0)),
       target: { value: "Bob was here" },
     })
   );
-  const action_edit_foreign = action(() =>
+  // A message that isn't one of the room's: one made beside the room.
+  const action_edit_unsent = action(() =>
     alice.editMessage.send({
-      requestId: "e-foreign",
       message: Writable.of<MessageRecord>(
-        { body: "Not here", sentAt: epochNsec(0n), earlierVersions: [] },
+        { body: "Not here", sentAt: epochNsec(0n) },
       ),
       target: { value: "Changed" },
     })
   );
   const action_edit_deleted = action(() =>
     alice.editMessage.send({
-      requestId: "e-deleted",
       message: messageOf(records.messages.key(0)),
       target: { value: "Never mind" },
     })
   );
 
-  const action_lose_profile = action(() => aliceProfile.set(undefined));
-
   return {
     [TESTS]: [
-      // A send that takes effect is done, and the composer shows nothing.
+      // A send that takes effect leaves no refusal, and the composer shows
+      // nothing.
       {
         action: alice.sendMessage,
-        event: typed("Hello", "s-1"),
+        event: typed("Hello"),
         trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "s-1") === "done" &&
+          alice.messageRefusal === "" &&
           records.messages.get().length === 1 &&
           shownRefusal(alice[UI]) === ""
         ),
@@ -179,13 +140,12 @@ export default pattern(() => {
       // says why.
       {
         action: alice.sendMessage,
-        event: typed("   ", "s-blank"),
+        event: typed("   "),
         trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "s-blank") ===
-            "refused/invalid-body" &&
+          alice.messageRefusal === "A message needs some text." &&
           records.messages.get().length === 1 &&
           shownRefusal(alice[UI]) === "A message needs some text."
         ),
@@ -193,99 +153,68 @@ export default pattern(() => {
       // An act that takes effect clears what the composer shows.
       {
         action: alice.sendMessage,
-        event: typed("Again", "s-2"),
+        event: typed("Again"),
         trustedUi: sendGesture,
       },
-      { assertion: assert(() => shownRefusal(alice[UI]) === "") },
-      // A time outside the room's window is refused.
-      { action: action_send_too_old },
       {
         assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "s-old") === "refused/out-of-window"
+          alice.messageRefusal === "" && shownRefusal(alice[UI]) === ""
         ),
       },
-      // Editing someone else's message isn't allowed, and editing a message
-      // not in the room names no target.
+      // Editing someone else's message isn't allowed, and a message that
+      // isn't one of the room's names no target.
       { action: action_bob_edits_alices },
-      { action: action_edit_foreign },
+      { action: action_edit_unsent },
       {
         assertion: assert(() =>
-          outcomeOf(bob.messageRequests, "e-bob") === "refused/not-allowed" &&
-          outcomeOf(alice.messageRequests, "e-foreign") ===
-            "refused/unknown-target" &&
+          bob.messageRefusal === "Only its author can edit a message." &&
+          alice.messageRefusal === "That message isn't in this chat." &&
           (records.messages.get() as MessageRecord[])[0]?.body === "Hello"
         ),
       },
-      // A reaction that isn't a single emoji has no valid body.
+      // A reaction that isn't a single emoji is refused.
       {
         action: alice.sendReaction,
-        event: {
-          requestId: "r-cat",
-          emoji: "cat",
-          message: messageOf(records.messages.key(0)),
-        },
+        event: { emoji: "cat", message: messageOf(records.messages.key(0)) },
         trustedUi: reactGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "r-cat") === "refused/invalid-body"
+          alice.messageRefusal === "A reaction is a single emoji."
         ),
       },
       // Editing a deleted message targets a deleted message.
       {
         action: alice.deleteMessage,
-        event: {
-          requestId: "d-first",
-          message: messageOf(records.messages.key(0)),
-        },
+        event: { message: messageOf(records.messages.key(0)) },
         trustedUi: deleteGesture,
       },
+      { assertion: assert(() => alice.messageRefusal === "") },
       { action: action_edit_deleted },
       {
         assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "d-first") === "done" &&
-          outcomeOf(alice.messageRequests, "e-deleted") ===
-            "refused/deleted-target"
-        ),
-      },
-      // A replay of a send that took effect keeps its outcome, even arriving
-      // once the sender's profile no longer resolves, and leaves what the
-      // composer shows as it was.
-      { action: action_lose_profile },
-      {
-        action: alice.sendMessage,
-        event: typed("Hello", "s-1"),
-        trustedUi: sendGesture,
-      },
-      {
-        assertion: assert(() =>
-          outcomeOf(alice.messageRequests, "s-1") === "done" &&
-          shownRefusal(alice[UI]) === "That message was deleted."
+          alice.messageRefusal === "That message was deleted."
         ),
       },
       // A viewer whose profile hasn't resolved can't send.
       {
         action: unresolved.sendMessage,
-        event: typed("Anyone?", "s-unresolved"),
+        event: typed("Anyone?"),
         trustedUi: sendGesture,
       },
       {
-        assertion: assert(() =>
-          outcomeOf(unresolved.messageRequests, "s-unresolved") ===
-            "refused/no-profile"
-        ),
+        assertion: assert(() => unresolved.messageRefusal === NO_PROFILE),
       },
       // Nor can a viewer whose `#profile` resolves none, as where Home lists
-      // no profile: the send records why, rather than vanishing.
+      // no profile: the send says why, rather than vanishing.
       {
         action: homeless.sendMessage,
-        event: typed("Is this thing on?", "s-homeless"),
+        event: typed("Is this thing on?"),
         trustedUi: sendGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(homeless.messageRequests, "s-homeless") ===
-            "refused/no-profile" &&
+          homeless.messageRefusal === NO_PROFILE &&
           homeless.messages.count === 0
         ),
       },

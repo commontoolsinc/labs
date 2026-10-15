@@ -34,7 +34,11 @@ interface ChatRoomPolicy {
 }
 ```
 
-A plain object, with every key present. Each duration is a
+A plain object, with every key present. A room enforces `ownersMayObliterate`
+and `deletionIsObliteration`, and bounds its windows by `maxWindowCount` and
+`maxOpenWindows`; it states `keepsHistory`, `proposedTimeMaxAgeNsec`,
+`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec` for the policy's
+shape, and reads none of them. Each duration is a
 [`FabricDurationNsec`](../space-model-formal-spec/1-fabric-values.md): an exact
 count of nanoseconds, held as a `bigint`.
 
@@ -62,10 +66,8 @@ The policy document is labeled `authored-by` the principal who wrote it (see
   and so may a direct room, between two people who each hold OWNER. A room
   enforces the value its policy states, and a policy that can't be read lets
   no OWNER obliterate.
-- **`keepsHistory`**: whether an edit, or a deletion that isn't obliteration,
-  keeps the version it replaces in `earlierVersions`
-  ([`ChatMessage`](ChatMessage.md)). A room under a retention requirement says
-  yes, and then keeps deleted text too.
+- **`keepsHistory`**: stated and read by nothing. A message keeps no history
+  ([`ChatMessage`](ChatMessage.md#deleted-messages)).
 - **`deletionIsObliteration`**: whether a sender's `deleteMessage` of their own
   message obliterates it, removing its history and its author, as
   `obliterateMessage` does (see [obliterated
@@ -73,19 +75,10 @@ The policy document is labeled `authored-by` the principal who wrote it (see
   of a group room takes back what they said completely. It governs
   `deleteMessage` only: a direct room MUST let either person obliterate their
   own messages with `obliterateMessage`, whatever its policy.
-- **`proposedTimeMaxAgeNsec`**: how far before the room's handler clock a
-  sender's proposed time is accepted, and recorded as proposed. It covers
-  network delay, retries, and sends queued offline, so it can be generous.
-- **`proposedTimeMaxLeadNsec`**: how far after the room's handler clock a
-  sender's proposed time is accepted. It covers only clock skew, so it can be
-  small. An accepted proposal on this side is recorded at the current time,
-  never later (see [recorded times](ChatRoomOutput.md#recorded-times)).
-
-A proposal outside both bounds is refused.
-
-- **`recentActivityWindowNsec`**: how long, before the room's handler clock, an
-  entry stays in `recentActivity` ([`ChatRoomActivity`](ChatRoomActivity.md)).
-  It MUST be at least `proposedTimeMaxAgeNsec`.
+- **`proposedTimeMaxAgeNsec`**, **`proposedTimeMaxLeadNsec`**, and
+  **`recentActivityWindowNsec`**: stated and read by nothing. A sender
+  proposes no time, and the room keeps no activity log (see
+  [times](ChatMessage.md#times)).
 - **`maxWindowCount`**: the most messages a message window holds (see
   [`ChatMessageList`](ChatMessageList.md#limits)). A request for more gets this
   many.

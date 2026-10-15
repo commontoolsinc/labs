@@ -16,15 +16,10 @@ import {
 } from "commonfabric";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ChatMessageWindow,
   type ChatMessageWindows,
   type ComposerState,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -53,11 +48,6 @@ const typed = (text: string) => ({ type: "click", target: { value: text } });
 const roomRecords = () => ({
   about: { kind: "group" as const },
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
 });
 
 /** The session's windows, as the room's output offers them. */
