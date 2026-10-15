@@ -11,7 +11,8 @@ import { layoutSpacingUtilityStyles } from "../../styles/layout-spacing.ts";
  *
  * @attr {boolean} show-scrollbar - Always show scrollbar
  * @attr {boolean} fade-edges - Show fade effect at edges
- * @attr {boolean} snap-to-bottom - Automatically scroll to bottom when new content is added
+ * @attr {boolean} snap-to-bottom - Open at the bottom, and follow content as it
+ *   grows while the reader is at the bottom
  * @attr {string} padding - Padding inside scroll area
  * @attr {string} height - Fixed height of the container
  * @attr {string} max-height - Maximum height of the container
@@ -159,19 +160,23 @@ export class CFVScroll extends BaseElement {
   declare _atEnd: boolean;
 
   private _scrollContainer: HTMLElement | null = null;
-  private _mutationObserver: MutationObserver | null = null;
   /**
-   * Whether the reader was at the bottom when they last scrolled. Only a
-   * scroll changes it, so content overflowing before the first snap does not
-   * read as the reader having scrolled up.
+   * Watches the container and every slotted element, so any growth of the
+   * content (a message added, text streaming in, an image laying out, a
+   * hidden panel shown) can snap. It reports sizes on `observe()` too, which
+   * covers content that is already slotted when the element connects: a
+   * renderer builds a subtree before inserting it, so a history whose
+   * messages are ready on first render arrives whole.
    */
-  private _wasAtBottom = true;
+  private _resizeObserver = new ResizeObserver(() => this.snapIfFollowing());
   /**
-   * Whether the next snap is the first since this element connected. The
-   * first jumps rather than animates: a history that opens at its end should
-   * already be there, not scroll down through every message to reach it.
+   * Whether new content should snap: true until the reader scrolls up, and
+   * true again once they reach the bottom. Only a scroll toward the top clears
+   * it, so the component's own smooth snaps, which pass through positions
+   * short of the bottom, never stop it following.
    */
-  private _firstSnap = true;
+  private _following = true;
+  private _lastScrollTop = 0;
 
   constructor() {
     super();
@@ -201,41 +206,22 @@ export class CFVScroll extends BaseElement {
       ".scroll-container",
     ) as HTMLElement | null;
     this.updateScrollState();
+    this.observeContent();
   }
 
   override connectedCallback() {
     super.connectedCallback();
     // A disconnected element loses its scroll position, so it opens afresh.
-    this._wasAtBottom = true;
-    this._firstSnap = true;
-    // Set up scroll listener after element is ready
-    this.updateComplete.then(() => {
-      if (this.scrollContainer) {
-        (this.scrollContainer as HTMLElement).addEventListener(
-          "scroll",
-          this.handleScroll,
-        );
-      }
-      this.setupMutationObserver();
-      // The observer sees only later changes, and content is often already
-      // slotted when the element connects: a renderer builds a subtree before
-      // inserting it, so a history whose messages are ready on first render
-      // arrives whole. Snap to whatever is there now.
-      this.snapIfFollowing();
-    });
+    this._following = true;
+    this._lastScrollTop = 0;
+    if (this.hasUpdated) this.observeContent();
     // Listen for cf-chat-updated events
     this.addEventListener("cf-chat-updated", this._handleChatUpdate);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.scrollContainer) {
-      (this.scrollContainer as HTMLElement).removeEventListener(
-        "scroll",
-        this.handleScroll,
-      );
-    }
-    this.cleanupMutationObserver();
+    this._resizeObserver.disconnect();
     this.removeEventListener("cf-chat-updated", this._handleChatUpdate);
   }
 
@@ -244,21 +230,40 @@ export class CFVScroll extends BaseElement {
     requestAnimationFrame(() => this.snapIfFollowing());
   };
 
+  private observeContent = () => {
+    const slot = this.shadowRoot?.querySelector("slot");
+    if (!this.scrollContainer || !slot) return;
+    this._resizeObserver.disconnect();
+    this._resizeObserver.observe(this.scrollContainer);
+    for (const element of slot.assignedElements()) {
+      this._resizeObserver.observe(element);
+    }
+  };
+
   /**
-   * With `snapToBottom` set and the reader at the bottom, scroll to the
-   * bottom: instantly the first time content overflows, smoothly after.
+   * With `snapToBottom` set and the reader following, scroll to the bottom:
+   * a jump when it is more than a screen away, as when a history opens, so
+   * the reader is not carried down through every message; a smooth scroll
+   * for anything nearer, as when a message arrives.
    */
   private snapIfFollowing() {
     const container = this.scrollContainer;
-    if (!this.snapToBottom || !this._wasAtBottom || !container) return;
-    if (container.scrollHeight <= container.clientHeight) return;
-    this.scrollToBottom(!this._firstSnap);
-    this._firstSnap = false;
+    if (!this.snapToBottom || !this._following || !container) return;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distance = scrollHeight - clientHeight - scrollTop;
+    if (distance <= 0) return;
+    this.scrollToBottom(distance <= clientHeight);
+    // Measure the reader's next scroll from here: a jump has landed, and a
+    // smooth scroll only moves down from where it starts.
+    this._lastScrollTop = container.scrollTop;
   }
 
   private handleScroll = () => {
     this.updateScrollState();
-    this._wasAtBottom = this._atEnd;
+    const { scrollTop } = this.scrollContainer as HTMLElement;
+    if (this._atEnd) this._following = true;
+    else if (scrollTop < this._lastScrollTop) this._following = false;
+    this._lastScrollTop = scrollTop;
     this.emit("cf-scroll", {
       scrollTop: (this.scrollContainer as HTMLElement)?.scrollTop || 0,
       scrollHeight: (this.scrollContainer as HTMLElement)?.scrollHeight || 0,
@@ -298,8 +303,9 @@ export class CFVScroll extends BaseElement {
           class="${classMap(containerClasses)}"
           style="${styleMap(containerStyles)}"
           part="container"
+          @scroll="${this.handleScroll}"
         >
-          <slot></slot>
+          <slot @slotchange="${this.observeContent}"></slot>
         </div>
       </div>
     `;
@@ -336,31 +342,6 @@ export class CFVScroll extends BaseElement {
     if (this.scrollContainer) {
       const { scrollHeight } = this.scrollContainer as HTMLElement;
       this.scrollToY(scrollHeight, smooth);
-    }
-  }
-
-  private setupMutationObserver() {
-    if (!this.snapToBottom) return;
-
-    this.cleanupMutationObserver();
-
-    this._mutationObserver = new MutationObserver(() => {
-      // Use requestAnimationFrame to ensure DOM has updated
-      requestAnimationFrame(() => this.snapIfFollowing());
-    });
-
-    // Observe changes to the slotted content
-    this._mutationObserver.observe(this, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-  }
-
-  private cleanupMutationObserver() {
-    if (this._mutationObserver) {
-      this._mutationObserver.disconnect();
-      this._mutationObserver = null;
     }
   }
 }

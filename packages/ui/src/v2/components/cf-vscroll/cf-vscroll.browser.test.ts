@@ -22,6 +22,16 @@ function distanceFromBottom(element: CFVScroll): number {
   return scrollHeight - clientHeight - scrollTop;
 }
 
+/**
+ * The frames a change takes to reach the scroller: a resize observer reports
+ * after layout, in the rendering step that ends the next frame, and an
+ * instant snap it makes has landed by the frame after.
+ */
+async function framesForSnap(): Promise<void> {
+  await nextFrame();
+  await nextFrame();
+}
+
 /** A 100px-tall snapping scroller, holding `children` when it connects. */
 async function mount(children: HTMLElement[]): Promise<CFVScroll> {
   const element = document.createElement("cf-vscroll") as CFVScroll;
@@ -31,17 +41,8 @@ async function mount(children: HTMLElement[]): Promise<CFVScroll> {
   document.body.append(element);
   expect(element).toBeInstanceOf(CFVScroll);
   await element.updateComplete;
+  await framesForSnap();
   return element;
-}
-
-/**
- * The frames a mutation takes to reach the scroller: the observer's callback
- * runs as a microtask and schedules the snap for the next frame, and an
- * instant snap has landed by the frame after.
- */
-async function framesForSnap(): Promise<void> {
-  await nextFrame();
-  await nextFrame();
 }
 
 Deno.test("cf-vscroll snap-to-bottom opens at the bottom when its content is there at connect", async () => {
@@ -82,8 +83,6 @@ Deno.test("cf-vscroll snap-to-bottom jumps, rather than animates, to content tha
 Deno.test("cf-vscroll snap-to-bottom follows content appended while the reader is at the bottom", async () => {
   const element = await mount(rows(20));
   try {
-    // Let the opening snap's own scroll events go by first.
-    await framesForSnap();
     const settled = new Promise((resolve) =>
       container(element).addEventListener("scrollend", resolve, { once: true })
     );
@@ -109,5 +108,58 @@ Deno.test("cf-vscroll snap-to-bottom holds position when content is appended whi
     expect(container(element).scrollTop).toBe(200);
   } finally {
     element.remove();
+  }
+});
+
+Deno.test("cf-vscroll snap-to-bottom keeps following content that streams in frame by frame", async () => {
+  const element = await mount(rows(20));
+  try {
+    for (let i = 0; i < 30; i++) {
+      element.append(...rows(1));
+      await nextFrame();
+    }
+    if (distanceFromBottom(element) > 0) {
+      await new Promise((resolve) =>
+        container(element).addEventListener("scrollend", resolve, {
+          once: true,
+        })
+      );
+    }
+    expect(distanceFromBottom(element)).toBe(0);
+  } finally {
+    element.remove();
+  }
+});
+
+Deno.test("cf-vscroll snap-to-bottom follows content that grows inside a slotted element's shadow root", async () => {
+  const host = document.createElement("div");
+  const shadow = host.attachShadow({ mode: "open" });
+  const element = await mount([host]);
+  try {
+    shadow.append(...rows(20));
+    await framesForSnap();
+    expect(distanceFromBottom(element)).toBe(0);
+  } finally {
+    element.remove();
+  }
+});
+
+Deno.test("cf-vscroll snap-to-bottom opens at the bottom when shown after connecting hidden", async () => {
+  const panel = document.createElement("div");
+  panel.hidden = true;
+  document.body.append(panel);
+  const element = document.createElement("cf-vscroll") as CFVScroll;
+  element.snapToBottom = true;
+  element.height = "100px";
+  element.append(...rows(20));
+  panel.append(element);
+  try {
+    await element.updateComplete;
+    await framesForSnap();
+    panel.hidden = false;
+    await framesForSnap();
+    expect(distanceFromBottom(element)).toBe(0);
+  } finally {
+    panel.remove();
   }
 });
