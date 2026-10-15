@@ -1279,6 +1279,56 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
     });
   });
 
+  describe("whether a run is discarded, asked before it seals", () => {
+    // A commit asks before its CFC boundary pass. A run whose intent already
+    // reached a terminal consequence reads state between its retired echo and
+    // the authoritative writes, and the pass would refuse what it read there,
+    // for writes the seal is about to drop.
+
+    it("returns `true` for a late grandchild of an intent whose mark arrived", async () => {
+      const { destination, echoOf, seedAppend, markConsequenced } =
+        cascadeDestination();
+      seedAppend(["evt-click"]);
+      destination.trackIntent(SPACE, W21_SIDECAR, "evt-click");
+      await destination.seal(echoOf("evt:c:0:forward", {
+        parentEventId: "evt-click",
+        writes: [],
+      })).settled;
+      markConsequenced(0, {});
+      await flushMicrotasks();
+
+      expect(destination.discards(echoOf("evt:c:0:point", {
+        parentEventId: "evt:c:0:forward",
+        writes: ["of:pointer"],
+      }))).toBe(true);
+      destination.close();
+    });
+
+    it("returns `false` for a grandchild of an intent still outstanding", async () => {
+      const { destination, echoOf, seedAppend } = cascadeDestination();
+      seedAppend(["evt-click"]);
+      destination.trackIntent(SPACE, W21_SIDECAR, "evt-click");
+      await destination.seal(echoOf("evt:c:0:forward", {
+        parentEventId: "evt-click",
+        writes: [],
+      })).settled;
+
+      expect(destination.discards(echoOf("evt:c:0:point", {
+        parentEventId: "evt:c:0:forward",
+        writes: ["of:pointer"],
+      }))).toBe(false);
+      destination.close();
+    });
+
+    it("returns `true` for any speculative run once the overlay is closed", () => {
+      const { destination, echoOf } = cascadeDestination();
+      destination.close();
+
+      expect(destination.discards(echoOf("evt-click", { writes: ["of:a"] })))
+        .toBe(true);
+    });
+  });
+
   it("W2.1-6: the post-sealInto re-check walks the thread too (combined review 2026-08-19, F1) — P's mark landing while a SILENT child's grandchild is MID-SEAL withdraws the collected entry at the re-check instead of registering it (mutation: the re-check one level deep → the grandchild registers and strands)", async () => {
     const { destination, echoOf, seedAppend, markConsequenced } =
       cascadeDestination();

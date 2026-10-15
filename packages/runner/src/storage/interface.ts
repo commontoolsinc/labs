@@ -1935,6 +1935,15 @@ export interface TransactionSealDestination {
   ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt;
 
   /**
+   * Whether `seal` would drop `tx`'s writes rather than accept them, were
+   * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
+   * pass for a transaction this returns `true` for: writes that reach no
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   */
+  discards?(tx: IExtendedStorageTransaction): boolean;
+
+  /**
    * The HOME space of the wave this destination seals into (the space
    * the serving loop serves). The send site's LT1-vs-outbox decision
    * reads it: an emission targeting THIS space rides the wave's own
