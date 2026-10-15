@@ -270,7 +270,10 @@ The optional `meeting.portableIdentity` carries `scheme: "ical-uid-slot"`,
 SHA-256 digests computed by the caller from the opaque iCalendar UID and typed
 original slot. The root validates their scheme and format and stores these three
 fields without recomputing them. The caller retains the provider evidence and
-verifies which occurrence those keys identify.
+verifies which occurrence those keys identify. Any space member with WRITE may
+supply this evidence, so the stored identity is a claim. Readers must
+corroborate its relationship to the calendar occurrence before adopting a room
+or accepting a lookup alias.
 
 `bindMeeting({key, portableIdentity?, reply?})` binds an empty association once,
 including the portable evidence when supplied. A same-key replay can add
@@ -280,17 +283,19 @@ supported portable keys leave the association unchanged and return a conflict.
 The handler reads the association inside its transaction, so competing binds
 retry against the first committed key. If supplied, the per-event reply cell
 receives `{status: "bound", key}`, `{status: "already-bound", key}`, or
-`{status: "conflict", key}`, where a conflict names the stored key. An invalid
-request key receives `{status: "invalid-key"}`. Malformed portable request
-evidence, including an explicit `null`, receives `{status: "invalid-key"}`
-without binding the key. Unrecognized stored state, including extra fields
-without a key or a malformed stored key, receives `{status: "invalid-state"}`
-and stays intact. Extra metadata alongside a valid key stays intact on replay,
-enrichment, or conflict, including unknown fields inside an existing portable
-identity. A valid same-key request for portable evidence receives
-`{status: "invalid-state"}` for malformed or unsupported stored portable
-evidence and leaves it intact. A legacy replay omitting portable evidence still
-confirms the legacy key and preserves that stored metadata.
+`{status: "conflict", key}`, where a conflict names the stored key. When the
+reply key equals the request key, the conflict is between portable keys;
+otherwise the legacy keys differ. An invalid request key receives
+`{status: "invalid-key"}`. Malformed portable request evidence, including an
+explicit `null`, receives `{status: "invalid-key"}` without binding the key.
+Unrecognized stored state, including extra fields without a key or a malformed
+stored key, receives `{status: "invalid-state"}` and stays intact. Extra
+metadata alongside a valid key stays intact on replay, enrichment, or conflict,
+including unknown fields inside an existing portable identity. A valid same-key
+request for portable evidence receives `{status: "invalid-state"}` for malformed
+or unsupported stored portable evidence and leaves it intact. A legacy replay
+omitting portable evidence still confirms the legacy key and preserves that
+stored metadata.
 
 A request whose `reply` is the association cell itself changes nothing and
 receives no response, since any response written there would replace the
