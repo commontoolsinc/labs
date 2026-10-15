@@ -492,8 +492,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * or undefined when it is authorized or was never opened. Scoped to one space
    * on purpose: `synced()` stays silent so a denied cross-space link stays a
    * silent absent read, and a caller that must reach a specific space reads this
-   * after `synced()` to surface the real failure. Optional: emulated/test
-   * managers may omit it.
+   * after `synced()` to surface the real failure. A transaction reads this and
+   * `spaceAccessError()` to record a read that reached a refused space
+   * (`storage/denied-reads.ts`), which the scheduler parks a reactive run on
+   * under the `deniedInputsUnavailable` flag. Optional: emulated/test managers
+   * may omit it.
    */
   authorizationError?(space: MemorySpace): Error | undefined;
 

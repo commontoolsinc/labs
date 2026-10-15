@@ -410,6 +410,18 @@ export interface ExperimentalOptions {
    * flag. Defaults to off.
    */
   sharedMemoryConnection?: boolean | undefined;
+
+  /**
+   * A reactive run that read a document of a space the memory server has
+   * refused this runtime is parked rather than committed, and made again when
+   * the verdict changes; the readers of a space are run again when it is
+   * first refused, so a run that read it before the refusal arrived parks
+   * too (`docs/plans/denied-inputs-as-unavailable.md`). What such a run
+   * computed rests on data its principal cannot see, and differs from what a
+   * principal who can see it computes. When false, the read is an absence
+   * like any other and the run commits. Defaults to off.
+   */
+  deniedInputsUnavailable?: boolean | undefined;
 }
 
 /**
@@ -1930,6 +1942,7 @@ export class Runtime {
     this.experimental.plainResultReceipts ??= true;
     this.experimental.lazyMaterialization ??= true;
     this.experimental.agentBuiltin ??= true;
+    this.experimental.deniedInputsUnavailable ??= false;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -2147,6 +2160,13 @@ export class Runtime {
 
       // Register built-in modules with runtime injection
       registerBuiltins(this);
+
+      // A run that read a space the memory server refused this runtime is
+      // parked (`scheduler/run.ts`), and a refusal that arrives after a run
+      // committed runs the space's readers again so that they park too.
+      if (this.experimental.deniedInputsUnavailable === true) {
+        this.spaceAccessWatch.rerunReadersOnLoss();
+      }
 
       // Set this runtime as the current runtime for global cell compatibility
       // Removed setCurrentRuntime call - no longer using singleton pattern

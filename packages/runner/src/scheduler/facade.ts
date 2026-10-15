@@ -2186,6 +2186,28 @@ export class Scheduler {
     this.queueExecution();
   }
 
+  /**
+   * Runs again every subscribed action whose last run read a document of
+   * `space`. A refusal of the space changes no document, so a run that read
+   * one before the refusal arrived committed what it computed and nothing
+   * would wake it; running it again lets it find the refusal and park.
+   */
+  invalidateReadersOfSpace(space: MemorySpace): void {
+    let woke = false;
+    for (const node of this.#nodes.nodes()) {
+      const log = this.#dependencies.get(node.action);
+      if (
+        log === undefined ||
+        (!log.reads.some((read) => read.space === space) &&
+          !log.shallowReads.some((read) => read.space === space))
+      ) continue;
+      this.#markActionInvalid(node.action);
+      this.#pending.add(node.action);
+      woke = true;
+    }
+    if (woke) this.queueExecution();
+  }
+
   /** Wakes blocked consumers even when a successful producer kept the same value. */
   noteViewActionCurrent(action: Action): void {
     if (

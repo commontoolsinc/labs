@@ -77,6 +77,7 @@ export const UNAVAILABLE_ERROR_KINDS = Object.freeze(
     compile: "compile",
     provider: "provider",
     sync: "sync",
+    access: "access",
   } as const,
 );
 
@@ -303,6 +304,7 @@ export class FabricUnavailable extends BaseFabricPrimitive
     compile: "Compilation failed.",
     provider: "A provider reported a failure.",
     sync: "Synchronization failed.",
+    access: "The space the value lives in is not readable by this principal.",
   });
 
   static #jsonCodec = Object.freeze(

@@ -1,10 +1,12 @@
 # Denied inputs as unavailable data
 
-**Status:** proposed; no stage has started. Investigated against `main` at
-`67dbfce051` (2026-10-15), with three open pull requests it builds on or
-replaces: #4677 (explicit unavailable data flow), #8919 (client-executed
-session documents stay local) and #8695 (the `localFold` flag). Paths are under
-`packages/` unless they start with `docs/`.
+**Status:** stage 1 and the parking half of stage 3 are built, behind the
+`deniedInputsUnavailable` flag; stages 2, 4 and 5 and the observing half of
+stage 3 are open. Investigated against `main` at `67dbfce051` (2026-10-15),
+with three open pull requests it builds on or replaces: #4677 (explicit
+unavailable data flow), #8919 (client-executed session documents stay local)
+and #8695 (the `localFold` flag). Paths are under `packages/` unless they start
+with `docs/`.
 
 **Summary.** A principal can read a space without being able to read every
 space that space links to. A reactive computation that follows such a link
@@ -208,26 +210,46 @@ folds is rescoped or closed.
 
 ## Stages
 
-1. **The `access` error kind.** Add it to `UnavailableErrorKind` and the
-   tables in `data-model/src/fabric-primitives/FabricUnavailable.ts`, with its
-   default message and its conformance fixture. Independent of everything else.
-2. **Classify the read** (section 1), behind an experimental flag registered in
-   `docs/development/EXPERIMENTAL_OPTIONS.md`. Sequenced after #4677: without its
-   preflight, a computation would receive the marker as an ordinary value.
-3. **Park and narrow** (section 3). Parking needs only `main`; the
-   session-scoped output needs #8919.
+1. **The `access` error kind.** Built: `UnavailableErrorKind` and the tables
+   in `data-model/src/fabric-primitives/FabricUnavailable.ts` carry it, with
+   its default message; the generated pattern declarations and the formal
+   spec name it.
+2. **Classify the read** (section 1). Open, sequenced after #4677: without its
+   preflight, a computation would receive the marker as an ordinary value. What
+   is built of it is the detection: a transaction records a read that reached a
+   refused space (`runner/src/storage/denied-reads.ts`), decided once per
+   transaction and space from the storage manager's verdict, and the read
+   itself still returns the absence. A read of a space whose session has not
+   yet been decided is not recorded, so a run that opens the space by reading
+   it commits what it computed from the absence; the next stage's `syncing`
+   classification is what closes that, and until then the refusal that follows
+   runs the space's readers again.
+3. **Park and narrow** (section 3). The parking half is built, behind the
+   `deniedInputsUnavailable` flag registered in
+   `docs/development/EXPERIMENTAL_OPTIONS.md`: a reactive run that recorded a
+   denied read is parked through the scheduler's unavailable-run path, woken by
+   `Runtime.spaceAccessWatch`, and every reader of a space is run again when
+   the space is first refused (`SpaceAccessWatch.rerunReadersOnLoss()`). The
+   observing half, the session-scoped output, needs #8919.
 4. **The Loom roster** guards its members' profiles and shows a member whose
    profile the viewer cannot read as one, rather than dropping it from the label
-   map.
+   map. Needs stage 2.
 5. **Turn the flag on**, soak, then retire the fold (section 4) and the flag.
 
 ## Tests
 
+`runner/test/denied-reads.test.ts` holds the built half: with the flag off a
+run commits what it computed from a refused space; with it on, a run that read
+a refused space parks and commits nothing, a grant and `retrySpaceAccess()`
+run it again and it commits what it read, a document nobody wrote in a space
+the principal may read still reads as absent and the run commits, and a
+refusal that arrives after a run committed runs it again, after which the
+owner's correction stands unfought. The rest are open:
+
 - The denied-versus-absent read, at every level in the table above, returns
   absent for a missing document in an open space, `syncing` before a refused
   space answers, and the `access` error after.
-- A grant after a denial runs the computation again and it reads the document;
-  a revocation while it runs parks it.
+- A revocation while a computation runs parks it.
 - The two-computation measurement above, with this design on, shows no refused
   commits, no downstream writes by the reader, and no breaker trip, and the
   reader's downstream value equals the owner's.

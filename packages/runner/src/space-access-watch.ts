@@ -13,21 +13,40 @@ import type { IStorageManager } from "./storage/interface.ts";
  * subscriptions, which matters when the storage manager outlives the runtime.
  * An action the scheduler unsubscribes is let go at once, so a discarded
  * computation is not held until its space next changes.
+ *
+ * A runtime that parks runs on a denied read (`deniedInputsUnavailable`) also
+ * asks it to run every reader of a space again when the space is first
+ * refused: a run that read the space before the refusal arrived committed
+ * what it computed from the absence, and only another run can find the
+ * refusal and park on it.
  */
 export class SpaceAccessWatch {
-  #storage: Pick<IStorageManager, "subscribeSpaceAccessChange">;
-  #scheduler: Pick<Scheduler, "invalidateAction" | "observeUnsubscribe">;
+  #storage: Pick<
+    IStorageManager,
+    "subscribeSpaceAccessChange" | "subscribeSpaceAccessLoss"
+  >;
+  #scheduler: Pick<
+    Scheduler,
+    "invalidateAction" | "invalidateReadersOfSpace" | "observeUnsubscribe"
+  >;
   #waiting = new Map<MemorySpace, Set<Action>>();
   #cancels: Cancel[] | undefined;
   #subscribed = false;
+  #cancelLossRerun: Cancel | undefined;
 
   /**
    * Constructs an instance which subscribes to `storage` and `scheduler` on
    * first use, and runs actions again through `scheduler`.
    */
   constructor(
-    storage: Pick<IStorageManager, "subscribeSpaceAccessChange">,
-    scheduler: Pick<Scheduler, "invalidateAction" | "observeUnsubscribe">,
+    storage: Pick<
+      IStorageManager,
+      "subscribeSpaceAccessChange" | "subscribeSpaceAccessLoss"
+    >,
+    scheduler: Pick<
+      Scheduler,
+      "invalidateAction" | "invalidateReadersOfSpace" | "observeUnsubscribe"
+    >,
   ) {
     this.#storage = storage;
     this.#scheduler = scheduler;
@@ -66,10 +85,23 @@ export class SpaceAccessWatch {
     actions.add(action);
   }
 
+  /**
+   * Runs every reader of a space again when the memory server first refuses
+   * it, for as long as this watch lives. Does nothing with a storage manager
+   * that reports no access loss, and nothing more when already asked.
+   */
+  rerunReadersOnLoss(): void {
+    this.#cancelLossRerun ??= this.#storage.subscribeSpaceAccessLoss?.((
+      space,
+    ) => this.#scheduler.invalidateReadersOfSpace(space));
+  }
+
   /** Cancels the subscriptions and drops every registration. */
   dispose(): void {
     for (const cancel of this.#cancels ?? []) cancel();
     this.#cancels = undefined;
+    this.#cancelLossRerun?.();
+    this.#cancelLossRerun = undefined;
     this.#waiting.clear();
   }
 

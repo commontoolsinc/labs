@@ -9,6 +9,10 @@ import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { waveSettlementOf } from "../executor/wave.ts";
+import {
+  deniedReadOf,
+  DeniedReadUnavailable,
+} from "../storage/denied-reads.ts";
 import { createDuplicateWorkTransaction } from "../storage/extended-storage-transaction.ts";
 import type {
   ChangeGroup,
@@ -924,7 +928,14 @@ interface FanOutRunArgs {
   readonly deferInstance: () => void;
 }
 
-/** Disposes unavailable work and parks its still-live registration. */
+/**
+ * Disposes unavailable work and parks its still-live registration. A run is
+ * unavailable when a local-read policy found an input it could not serve, or,
+ * under `deniedInputsUnavailable`, when it read a document of a space the
+ * memory server has refused this runtime: what such a run computed rests on
+ * data its principal cannot see, so none of it is committed, and the run is
+ * made again when the verdict on the space changes.
+ */
 function parkUnavailableRun(state: SchedulerActionRunState, args: {
   action: Action;
   tx: IExtendedStorageTransaction;
@@ -936,6 +947,34 @@ function parkUnavailableRun(state: SchedulerActionRunState, args: {
       args.tx.abort("local action registration retired");
     }
     releaseLocalReadBasis(args.tx);
+    args.resolve(undefined);
+    return true;
+  }
+  const denied = state.runtime.experimental.deniedInputsUnavailable === true
+    ? deniedReadOf(args.tx.tx)
+    : undefined;
+  if (denied !== undefined) {
+    const attempted = txToReactivityLog(args.tx);
+    const log = {
+      reads: [...attempted.reads, denied],
+      shallowReads: attempted.shallowReads,
+      writes: [],
+    };
+    if (args.tx.status().status === "ready") {
+      args.tx.abort(new DeniedReadUnavailable(denied));
+    }
+    releaseLocalReadBasis(args.tx);
+    if (!args.registrationIsCurrent()) {
+      args.resolve(undefined);
+      return true;
+    }
+    state.pending.delete(args.action);
+    state.parkLocalRead?.(args.action, log);
+    state.nodes.setStatus(args.action, "unavailable");
+    // A readmission changes no document the run read, so the wake for it is
+    // the verdict's own; the loads it repeats wake the run through the
+    // coverage subscription the park above installed.
+    state.runtime.spaceAccessWatch.rerunOnChange(denied.space, args.action);
     args.resolve(undefined);
     return true;
   }

@@ -171,6 +171,31 @@ was before the retry. The placeholder's `data-space-access-retries` attribute
 counts the space's settled retries, which is what a test waits on to know that
 a retry has been decided.
 
+## A computation that reads a space the principal was refused
+
+A computation that follows a link into a space the memory server has refused
+the runtime reads an absence, the same absence a document nobody wrote reads
+as, and computes from it. What it computes rests on data its principal cannot
+see, and differs from what a principal who can see it computes.
+
+Under the `deniedInputsUnavailable` experimental flag
+([registry](../development/EXPERIMENTAL_OPTIONS.md#deniedinputsunavailable)),
+the transaction records a read that reached a refused space
+(`packages/runner/src/storage/denied-reads.ts`), and the scheduler parks a
+reactive run that made one rather than committing it, marked `unavailable`
+like a run whose local-read policy found an input it could not serve. The run
+registers with `Runtime.spaceAccessWatch` and is made again when the verdict
+on the space changes; an admission repeats the loads the refusal failed, and
+the run then reads the document. The runtime also asks the watch to run every
+reader of a space again when the space is first refused
+(`SpaceAccessWatch.rerunReadersOnLoss()`, through
+`Scheduler.invalidateReadersOfSpace()`), since a run that read the space
+before the refusal arrived committed what it computed and nothing else would
+wake it. Event handlers are not parked. A read of a space whose session has
+not yet been decided is an absence, and the run commits;
+[`docs/plans/denied-inputs-as-unavailable.md`](../plans/denied-inputs-as-unavailable.md)
+carries what remains.
+
 ## Changing the level
 
 `spaceAccess(target)` only reads. A handler changes a principal's entry with

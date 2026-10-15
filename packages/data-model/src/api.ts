@@ -523,7 +523,9 @@ export type UnavailableReason = "pending" | "syncing" | "error";
 
 /**
  * The kinds of failure a `FabricUnavailable` with reason `error` sorts into.
- * `general` is the kind for a failure none of the others describes.
+ * `general` is the kind for a failure none of the others describes; `access`
+ * is the one kind that differs by principal, since it says the principal may
+ * not read the space the value lives in.
  */
 export type UnavailableErrorKind =
   | "general"
@@ -533,7 +535,8 @@ export type UnavailableErrorKind =
   | "decode"
   | "compile"
   | "provider"
-  | "sync";
+  | "sync"
+  | "access";
 
 /**
  * A marker standing in for data that is not available, saying why. It holds

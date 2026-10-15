@@ -68,6 +68,7 @@ function errorsByKind(): Record<UnavailableErrorKind, FabricUnavailable> {
     compile: new FabricUnavailable("error", "compile"),
     provider: new FabricUnavailable("error", "provider"),
     sync: new FabricUnavailable("error", "sync"),
+    access: new FabricUnavailable("error", "access"),
   };
 }
 

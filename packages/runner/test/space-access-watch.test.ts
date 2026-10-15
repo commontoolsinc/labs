@@ -14,11 +14,13 @@ const spaceA = "did:key:z6Mk-space-access-watch-a" as MemorySpace;
 const spaceB = "did:key:z6Mk-space-access-watch-b" as MemorySpace;
 
 /**
- * A storage manager's access-change subscription, reduced to what the watch
- * uses, which records how many subscriptions are live and delivers a change.
+ * A storage manager's access-change and access-loss subscriptions, reduced
+ * to what the watch uses, which record how many subscriptions are live and
+ * deliver a change or a loss.
  */
 class FakeStorage {
   observers = new Set<(space: MemorySpace) => void>();
+  lossObservers = new Set<(space: MemorySpace, error: Error) => void>();
 
   subscribeSpaceAccessChange(
     observer: (space: MemorySpace) => void,
@@ -27,8 +29,21 @@ class FakeStorage {
     return () => this.observers.delete(observer);
   }
 
+  subscribeSpaceAccessLoss(
+    observer: (space: MemorySpace, error: Error) => void,
+  ): () => void {
+    this.lossObservers.add(observer);
+    return () => this.lossObservers.delete(observer);
+  }
+
   change(space: MemorySpace): void {
     for (const observer of [...this.observers]) observer(space);
+  }
+
+  lose(space: MemorySpace): void {
+    for (const observer of [...this.lossObservers]) {
+      observer(space, new Error("refused"));
+    }
   }
 }
 
@@ -45,14 +60,18 @@ describe("SpaceAccessWatch", () => {
 
   /**
    * Returns a watch over a fake storage manager and a fake scheduler, what it
-   * invalidated, and the scheduler's unsubscribe observers.
+   * invalidated, the spaces whose readers it invalidated, and the scheduler's
+   * unsubscribe observers.
    */
   function watchOverFake() {
     const storage = new FakeStorage();
     const invalidated: Action[] = [];
+    const readersInvalidated: MemorySpace[] = [];
     const unsubscribeObservers = new Set<(action: Action) => void>();
     const watch = new SpaceAccessWatch(storage, {
       invalidateAction: (action: Action) => invalidated.push(action),
+      invalidateReadersOfSpace: (space: MemorySpace) =>
+        readersInvalidated.push(space),
       observeUnsubscribe: (observer) => {
         unsubscribeObservers.add(observer);
         return () => unsubscribeObservers.delete(observer);
@@ -61,7 +80,14 @@ describe("SpaceAccessWatch", () => {
     const unsubscribe = (action: Action) => {
       for (const observer of unsubscribeObservers) observer(action);
     };
-    return { storage, invalidated, unsubscribeObservers, unsubscribe, watch };
+    return {
+      storage,
+      invalidated,
+      readersInvalidated,
+      unsubscribeObservers,
+      unsubscribe,
+      watch,
+    };
   }
 
   describe("instance members", () => {
@@ -85,6 +111,28 @@ describe("SpaceAccessWatch", () => {
         watch.rerunOnChange(spaceA, fakeAction());
         watch.rerunOnChange(spaceB, fakeAction());
         expect(storage.observers.size).toBe(1);
+      });
+    });
+
+    describe("rerunReadersOnLoss()", () => {
+      it("runs the readers of a space again at each loss of it, and subscribes once", () => {
+        const { storage, readersInvalidated, watch } = watchOverFake();
+        storage.lose(spaceA);
+        expect(readersInvalidated).toEqual([]);
+
+        watch.rerunReadersOnLoss();
+        watch.rerunReadersOnLoss();
+        expect(storage.lossObservers.size).toBe(1);
+        storage.lose(spaceA);
+        storage.lose(spaceB);
+        expect(readersInvalidated).toEqual([spaceA, spaceB]);
+      });
+
+      it("runs nothing again for a change that is not a loss", () => {
+        const { storage, readersInvalidated, watch } = watchOverFake();
+        watch.rerunReadersOnLoss();
+        storage.change(spaceA);
+        expect(readersInvalidated).toEqual([]);
       });
     });
 
@@ -129,19 +177,29 @@ describe("SpaceAccessWatch", () => {
 
     describe("dispose()", () => {
       it("cancels the subscriptions, and runs nothing again afterward", () => {
-        const { storage, invalidated, unsubscribeObservers, watch } =
-          watchOverFake();
+        const {
+          storage,
+          invalidated,
+          readersInvalidated,
+          unsubscribeObservers,
+          watch,
+        } = watchOverFake();
         watch.rerunOnChange(spaceA, fakeAction());
+        watch.rerunReadersOnLoss();
         expect(storage.observers.size).toBe(1);
+        expect(storage.lossObservers.size).toBe(1);
         expect(unsubscribeObservers.size).toBe(1);
 
         watch.dispose();
         expect(storage.observers.size).toBe(0);
+        expect(storage.lossObservers.size).toBe(0);
         expect(unsubscribeObservers.size).toBe(0);
         watch.rerunOnChange(spaceA, fakeAction());
         expect(storage.observers.size).toBe(0);
         storage.change(spaceA);
+        storage.lose(spaceA);
         expect(invalidated).toEqual([]);
+        expect(readersInvalidated).toEqual([]);
       });
 
       it("is what disposing its runtime does, when the storage manager outlives the runtime", async () => {

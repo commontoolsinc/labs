@@ -1457,7 +1457,8 @@ type UnavailableErrorKind =
   | "decode"
   | "compile"
   | "provider"
-  | "sync";
+  | "sync"
+  | "access";
 ```
 
 The reasons split along one axis, which `isTransient()` reports:
@@ -1480,6 +1481,9 @@ service from a violated data contract without parsing a message:
 * `compile` — a program failed to compile.
 * `provider` — an external provider reported a failure.
 * `sync` — synchronization with stored data failed.
+* `access` — the principal may not read the space the value lives in. The one
+  kind that differs by principal: another principal reading the same position
+  may see the value.
 
 ```typescript
 // Shown at module scope.

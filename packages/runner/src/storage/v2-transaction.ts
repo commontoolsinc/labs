@@ -40,6 +40,7 @@ import type { CellScope } from "../builder/types.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { getCommitLocalSeq, getCommitSeq } from "./commit-identity.ts";
 import { createTransactionCommitReceipt } from "./commit-receipt.ts";
+import { noteDeniedRead } from "./denied-reads.ts";
 import { diagnosticPrefix, type PendingCommitContext } from "./diagnostics.ts";
 import type {
   Activity,
@@ -220,6 +221,12 @@ type SpaceBranch = {
   space: MemorySpace;
   replica: ReturnType<IStorageManager["open"]>["replica"];
   docs: Map<string, DocumentEntry>;
+
+  /**
+   * Whether the memory server has refused this runtime the space for good,
+   * decided at the branch's first read and kept for the transaction.
+   */
+  refused?: boolean;
 };
 
 type ReadyState = {
@@ -1771,6 +1778,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const branch = this.#branch(address.space);
     const { doc } = this.#document(branch, address);
+    if (!hasInlineCellScheme(address.id) && this.#spaceRefused(branch)) {
+      noteDeniedRead(this, address);
+    }
     if (readStatsActive && !hasInlineCellScheme(address.id)) {
       recordDocumentRead(this, doc);
     }
@@ -3312,6 +3322,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#branches.set(space, branch);
     }
     return branch;
+  }
+
+  /**
+   * Whether the memory server has refused this runtime `branch`'s space for
+   * good. The verdict is read once per transaction and space, so a read of a
+   * space the principal may read costs one lookup per branch and no more.
+   */
+  #spaceRefused(branch: SpaceBranch): boolean {
+    return branch.refused ??=
+      this.#storage.spaceAccessError?.(branch.space) !== undefined ||
+      this.#storage.authorizationError?.(branch.space) !== undefined;
   }
 
   #replicaForCommit(

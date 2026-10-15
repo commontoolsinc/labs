@@ -66,6 +66,9 @@ export const EXPERIMENTAL_ENV_VARS = {
   viewScopedReplication: "EXPERIMENTAL_VIEW_SCOPED_REPLICATION",
   webViewScopedReplication: "EXPERIMENTAL_WEB_VIEW_SCOPED_REPLICATION",
   sharedMemoryConnection: "EXPERIMENTAL_SHARED_MEMORY_CONNECTION",
+  // Parking a run on a denied read is default-off; env-reachable so a process
+  // can opt in with an explicit "true".
+  deniedInputsUnavailable: "EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
@@ -168,6 +171,11 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // one that routes a connection by the space its address names cannot
   // serve a client that shares connections.
   sharedMemoryConnection: "server",
+  // Decides whether a client commits what it computed from a space it cannot
+  // read, which is visible in what gets written: a deployment that turns it
+  // on wants every client it serves to stop, since one client still writing
+  // is enough to overwrite what the clients that see everything computed.
+  deniedInputsUnavailable: "server",
 } as const satisfies Record<
   keyof ExperimentalOptions,
   ExperimentalFlagAuthority

@@ -23,6 +23,7 @@ declare global {
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
   var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
   var $EXPERIMENTAL_SHARED_MEMORY_CONNECTION: string | undefined;
+  var $EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -57,6 +58,11 @@ const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
 const EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE =
   typeof $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE === "string"
     ? $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE
+    : undefined;
+
+const EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE_DEFINE =
+  typeof $EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE === "string"
+    ? $EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -149,6 +155,12 @@ export const EXPERIMENTAL = {
   // resolve hops under one rule).
   readerSchemaPrecedence: flagValue(
     EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
+  ),
+  // Parking a reactive run on a read of a space the principal was refused.
+  // Off by default in the runner; `EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE=true`
+  // bakes a shell whose worker parks such runs instead of committing them.
+  deniedInputsUnavailable: flagValue(
+    EXPERIMENTAL_DENIED_INPUTS_UNAVAILABLE_DEFINE,
   ),
 };
 
