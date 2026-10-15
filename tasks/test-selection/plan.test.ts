@@ -4,6 +4,7 @@ import { testIdentityKey } from "@commonfabric/test-support/records";
 
 import {
   crowdingLine,
+  enclosingIn,
   fixedCharges,
   foldWholeUnits,
   fullLaneCount,
@@ -640,6 +641,24 @@ describe("plan", () => {
       expect(
         strangers.filter((s) => chosen.get(s.test.n) === "density").length,
       ).toBe(1);
+    });
+
+    it("moves a step up once its lane runs the describe around it", () => {
+      // The opener leaves its file open, so a step of it costs the lane its
+      // own second and the twelve its describe's hooks take where nothing
+      // else of the describe runs. The first step is the densest there is,
+      // and takes 13 of the 25.5 seconds the density pass has. The second
+      // then costs one second, which makes it denser than the stranger at
+      // twelve, and there is room for one of the two.
+      const chosen = reasons(packed([
+        test("steps", "open.test.ts", { cost: 12, score: 0 }),
+        test("steps > first", "open.test.ts", { score: 0.5 }),
+        test("steps > second", "open.test.ts"),
+        test("stranger", "open.test.ts", { cost: 12, score: 0.1 }),
+      ]));
+      expect(chosen.get("steps > first")).toBe("density");
+      expect(chosen.get("steps > second")).toBe("density");
+      expect(chosen.get("stranger")).not.toBe("density");
     });
 
     it("moves a suite's shorter tests up once its lane holds a longer one", () => {
@@ -1484,11 +1503,12 @@ describe("plan", () => {
         expect(suiteLoad(manifest, "workspace-unit", lane.selections))
           .toBeCloseTo(190, 6);
         expect(lane.projectedSeconds).toBeCloseTo(190, 6);
-        expect(testsOf(lane.selections)).toEqual({
-          ran: 100 + 120 + 90,
-          longest: [100, 60, 30],
-          opened: 6,
-        });
+        expect(testsOf(lane.selections, enclosingIn(manifest.entries)))
+          .toEqual({
+            ran: 100 + 120 + 90,
+            longest: [100, 60, 30],
+            opened: 6,
+          });
       });
     });
 
@@ -1500,8 +1520,20 @@ describe("plan", () => {
           cost: [0.1, 0.2, 0.3][i]!,
           unit: "packages/memory/test/one.test.ts",
         })).map((entry) => ({ entry, repeats: 1 }));
-        expect(testsOf(selections.toReversed())).toEqual(testsOf(selections));
-        expect(testsOf(selections).ran).toBe(0.6000000000000001);
+        const enclosing = enclosingIn(selections.map(({ entry }) => entry));
+        expect(testsOf(selections.toReversed(), enclosing))
+          .toEqual(testsOf(selections, enclosing));
+        expect(testsOf(selections, enclosing).ran).toBe(0.6000000000000001);
+      });
+
+      it("throws given one identity twice", () => {
+        const [entry] = entries(1);
+        const selections = [entry!, { ...entry!, cost: 2 }].map((one) => ({
+          entry: one,
+          repeats: 1,
+        }));
+        expect(() => testsOf(selections, enclosingIn([entry!])))
+          .toThrow("is selected more than once");
       });
     });
 
@@ -1637,6 +1669,160 @@ describe("plan", () => {
       });
       expect(run(manifest, { lanes: 1 }).lanes[0]!.projectedSeconds)
         .toBeCloseTo(3, 6);
+    });
+
+    describe("the tests enclosing a selection", () => {
+      // A `describe()` is recorded under its own title with the time it
+      // spends outside the cases inside it, which is its hooks, and runs
+      // them whenever a case inside it runs. Every case here is in one
+      // file, and the suite charges nothing but its tests' time unless a
+      // case says otherwise.
+
+      const file = "packages/memory/test/inbox.test.ts";
+
+      function test(
+        name: string,
+        fields: Partial<ManifestEntry> = {},
+      ): ManifestEntry {
+        return sampleEntry({ k: "unit", s: "memory", n: name }, {
+          unit: file,
+          cost: 1,
+          ...fields,
+        });
+      }
+
+      const inbox = test("inbox", { cost: 300 });
+      const replaces = test("inbox > replaces", { cost: 3 });
+      const adopts = test("inbox > adopts", { cost: 2 });
+
+      /**
+       * What one lane is projected to take running `chosen` and nothing
+       * else of `corpus`. The rest is held back as too flaky to choose,
+       * which leaves it in the manifest.
+       */
+      function projected(
+        corpus: ManifestEntry[],
+        chosen: { entry: ManifestEntry; repeats?: number }[],
+        fit = { overhead: 0, correction: 1, unitOverhead: 0 },
+      ): { manifest: Manifest; lane: ReturnType<typeof plan>["lanes"][0] } {
+        const manifest = sampleManifest({
+          entries: corpus.map((entry) => {
+            const one = chosen.find((one) => one.entry === entry);
+            return {
+              ...entry,
+              repeats: one?.repeats ?? 1,
+              flakeRate: one === undefined ? 1 : 0,
+            };
+          }),
+          calibration: {
+            setupCost: {},
+            suites: { "workspace-unit": fit },
+            prologue: 0,
+          },
+        });
+        const lane = run(manifest, {
+          lanes: 1,
+          budgetSeconds: 10_000,
+          boundSeconds: 10_000,
+          mandatory: new Map(
+            chosen.map(({ entry }) => [
+              testIdentityKey(entry.test),
+              "changed" as const,
+            ]),
+          ),
+        }).lanes[0]!;
+        return { manifest, lane };
+      }
+
+      it("charges a lone repeated step its describe's time on every run", () => {
+        // Eight passes, each paying the suite's overhead, the unit's, and
+        // the 303 seconds a run of the unit takes with the describe's hooks
+        // in it. The unit is the only one in each pass, so what it takes
+        // sets the charge, past what the correction makes of it.
+        const { manifest, lane } = projected(
+          [inbox, replaces, adopts],
+          [{ entry: replaces, repeats: 8 }],
+          { overhead: 5, correction: 0.75, unitOverhead: 15 },
+        );
+        expect(lane.selections.map(({ entry }) => entry.test.n))
+          .toEqual(["inbox > replaces"]);
+        expect(lane.projectedSeconds)
+          .toBeCloseTo(8 * 5 + 8 * 15 + 8 * (300 + 3), 6);
+        expect(suiteCharge(manifest, "workspace-unit", lane.selections))
+          .toBeCloseTo(lane.projectedSeconds, 6);
+      });
+
+      it("charges a describe once for a unit holding several of its steps", () => {
+        const { lane } = projected([inbox, replaces, adopts], [
+          { entry: replaces },
+          { entry: adopts },
+        ]);
+        expect(lane.projectedSeconds).toBeCloseTo(300 + 3 + 2, 6);
+      });
+
+      it("charges a describe the lane chose once beside a step inside it", () => {
+        const { lane } = projected([inbox, replaces, adopts], [
+          { entry: inbox },
+          { entry: replaces },
+        ]);
+        expect(lane.projectedSeconds).toBeCloseTo(300 + 3, 6);
+      });
+
+      it("charges every describe enclosing a nested step", () => {
+        const refusal = test("inbox > refusal", { cost: 20 });
+        const clears = test("inbox > refusal > clears", { cost: 1 });
+        const { lane } = projected([inbox, refusal, clears], [
+          { entry: clears },
+        ]);
+        expect(lane.projectedSeconds).toBeCloseTo(300 + 20 + 1, 6);
+      });
+
+      it("charges a step no more than its own time where the manifest holds no describe around it", () => {
+        const { lane } = projected([replaces, adopts], [{ entry: replaces }]);
+        expect(lane.projectedSeconds).toBeCloseTo(3, 6);
+      });
+
+      it("charges a step nothing for a describe of the same title in another file", () => {
+        const elsewhere = {
+          ...inbox,
+          unit: "packages/memory/test/outbox.test.ts",
+        };
+        const { lane } = projected([elsewhere, replaces], [
+          { entry: replaces },
+        ]);
+        expect(lane.projectedSeconds).toBeCloseTo(3, 6);
+      });
+
+      it("leaves the describe out of the suite's fixed charge", () => {
+        const manifest = sampleManifest({
+          entries: [replaces, inbox],
+          calibration: {
+            setupCost: {},
+            suites: {
+              "workspace-unit": {
+                overhead: 5,
+                correction: 1,
+                unitOverhead: 15,
+              },
+            },
+            prologue: 0,
+          },
+        });
+        expect(fixedCharges({ manifest, capabilities: NO_CAPABILITIES }))
+          .toEqual({ "workspace-unit": 20 });
+      });
+
+      it("charges a run of a unit the same however the steps are listed", () => {
+        const manifest = sampleManifest({ entries: [inbox, replaces, adopts] });
+        const selections = [replaces, adopts, inbox].map((entry) => ({
+          entry,
+          repeats: 1,
+        }));
+        expect(suiteLoad(manifest, "workspace-unit", selections.toReversed()))
+          .toBe(suiteLoad(manifest, "workspace-unit", selections));
+        expect(suiteLoad(manifest, "workspace-unit", selections))
+          .toBeCloseTo(305, 6);
+      });
     });
   });
 

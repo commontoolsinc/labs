@@ -428,11 +428,13 @@ describe("turning a lane's selections into batches", () => {
         })),
       )[0]!.units[0]!;
     // A name sharing only its first characters encloses nothing, and a
-    // chosen describe runs its hooks without the tests inside it.
+    // chosen describe runs its hooks without the tests inside it. A
+    // describe around a chosen test runs its hooks too, so a run of the
+    // unit is expected to take its time as well.
     expect(unitFor("glaze > sets", "icing")).toEqual({
       unit: "packages/bakery/glaze.test.ts",
       skip: ["glaze > browns", "glazed", "icing > sets", "icing > browns"],
-      cost: 2 + 16,
+      cost: 1 + 2 + 16,
     });
   });
 

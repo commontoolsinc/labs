@@ -660,11 +660,21 @@ suite it holds:
   so a batch whose identities run three times takes three passes;
 - the suite's `unitOverhead` for each time a pass opens a unit;
 - what its tests take, which is the larger of two figures. One is the
-  suite's `correction` times the tests' own costs, each counted once for
-  each time its unit runs. The other is what the longest unit of each pass
-  takes, added together, since a pass does not finish before its longest
-  unit does. The second is the one that binds for a suite whose runner
-  runs its units side by side.
+  suite's `correction` times what a run of each unit takes, counted once
+  for each time the unit runs. The other is what the longest unit of each
+  pass takes, added together, since a pass does not finish before its
+  longest unit does. The second is the one that binds for a suite whose
+  runner runs its units side by side.
+
+A run of a unit takes the costs of the identities the lane holds in it,
+and the cost of each identity the manifest holds in that unit whose name
+encloses one of theirs, counted once however many of them it encloses. A
+`describe()`, or a `Deno.test` holding steps, is recorded with the time it
+spent outside the cases directly inside it, which is what its hooks and its
+own body take, and it spends that on every run that runs any case inside
+it. An identity the manifest holds no entry for, a withheld one included,
+is charged nothing here, and its time is part of what a batch spends
+beyond its tests.
 
 A suite with no fit is charged no overhead, nothing per unit, and a
 correction of one. A runner that runs units side by side starts the

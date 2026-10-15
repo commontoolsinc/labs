@@ -436,9 +436,14 @@ describe("coverage", () => {
                 },
                 prologue: 0,
               },
-              entries: costs.map((cost) =>
-                entry("cellar", "packages/cellar/rack.test.ts", cost)
-              ),
+              entries: costs.map((cost, i) => {
+                const one = entry(
+                  "cellar",
+                  "packages/cellar/rack.test.ts",
+                  cost,
+                );
+                return { ...one, test: { ...one.test, n: `rack ${i}` } };
+              }),
             }),
             [{ ...suite("workspace-unit", [cellar]), needs: ["deno"] }],
           );

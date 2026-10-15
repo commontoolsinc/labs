@@ -10,6 +10,7 @@
  */
 
 import {
+  enclosingNames,
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
@@ -292,23 +293,119 @@ interface Filling {
  * it each time.
  */
 interface UnitRun {
-  /** The selections' own costs, added together. */
+  /**
+   * The selections' own costs, and those of the tests enclosing them, each
+   * added once.
+   */
   once: number;
 
   /** How many times the unit runs. */
   runs: number;
+
+  /**
+   * The keys of the identities whose costs `once` holds. A run that
+   * `withIdentity()` returns shares this set with the run it extends, and
+   * `holdIn()` adds to it only once that run is kept, so that pricing a
+   * selection changes nothing.
+   */
+  held: Set<string>;
 }
 
-/** What a unit's selections take once it holds `entry` as well. */
-function withIdentity(
+/**
+ * The tests a lane runs whenever it runs an identity, whether or not it
+ * chose them: the entries the manifest holds in the identity's unit whose
+ * names enclose the identity's name, outermost first. A `describe()`, or a
+ * `Deno.test` holding steps, is recorded under its own name with the time it
+ * spent outside the cases directly inside it, which is the time its hooks
+ * and its own body take, and it spends that on every run that runs any case
+ * inside it. One the manifest does not hold is not among them, and its time
+ * is in no entry's cost.
+ */
+export type Enclosing = (
+  entry: Pick<ManifestEntry, "test" | "suite" | "unit">,
+) => readonly ManifestEntry[];
+
+/** What `enclosingIn()` has worked out, by the entries it was handed. */
+const enclosingByCorpus = new WeakMap<readonly ManifestEntry[], Enclosing>();
+
+/**
+ * The tests among `entries` that enclose an identity, as `Enclosing` says.
+ * The answer for one array of entries is worked out once, so a caller pricing
+ * many selections against one manifest pays for the index once.
+ */
+export function enclosingIn(entries: readonly ManifestEntry[]): Enclosing {
+  const known = enclosingByCorpus.get(entries);
+  if (known !== undefined) return known;
+  const named = (
+    entry: Pick<ManifestEntry, "test" | "suite" | "unit">,
+    name: string,
+  ) => `${openedUnit(entry)}\t${testIdentityKey({ ...entry.test, n: name })}`;
+  const byName = new Map(entries.map((entry) => [
+    named(entry, entry.test.n),
+    entry,
+  ]));
+  const found = new Map<string, readonly ManifestEntry[]>();
+  const enclosing: Enclosing = (entry) => {
+    const key = named(entry, entry.test.n);
+    let outer = found.get(key);
+    if (outer === undefined) {
+      outer = enclosingNames(entry.test.n).flatMap((name) => {
+        const around = byName.get(named(entry, name));
+        return around === undefined ? [] : [around];
+      });
+      found.set(key, outer);
+    }
+    return outer;
+  };
+  enclosingByCorpus.set(entries, enclosing);
+  return enclosing;
+}
+
+/**
+ * What one run of `unit` takes more once it holds `entry`: the identity's
+ * own cost, and the cost of each test in `around`, the tests enclosing it,
+ * that the unit does not hold already.
+ */
+function addedBy(
   unit: UnitRun | undefined,
   entry: ManifestEntry,
+  around: readonly ManifestEntry[],
+): number {
+  let added = 0;
+  for (const one of [...around, entry]) {
+    if (!unit?.held.has(testIdentityKey(one.test))) added += one.cost;
+  }
+  return added;
+}
+
+/**
+ * What a unit's selections take once it holds one adding `added` to each
+ * run and asking for `repeats` runs.
+ */
+function withIdentity(
+  unit: UnitRun | undefined,
+  added: number,
   repeats: number,
 ): UnitRun {
   return {
-    once: (unit?.once ?? 0) + entry.cost,
+    once: (unit?.once ?? 0) + added,
     runs: Math.max(unit?.runs ?? 1, repeats),
+    held: unit?.held ?? new Set(),
   };
+}
+
+/**
+ * Records that `unit` holds `entry` and `around`, the tests enclosing it,
+ * which is what `addedBy()` reads to charge each of them to a unit once.
+ */
+function holdIn(
+  unit: UnitRun,
+  entry: ManifestEntry,
+  around: readonly ManifestEntry[],
+): void {
+  for (const one of [...around, entry]) {
+    unit.held.add(testIdentityKey(one.test));
+  }
 }
 
 /**
@@ -384,16 +481,19 @@ function capabilityCost(manifest: Manifest, capability: string): number {
 
 /**
  * What a lane pays to hold one identity of a suite, before that
- * identity's own time. It is one identity's lone cost with the time
- * taken out, read through the same function the packer charges by, so
- * that a term added there is in this the moment it is added there.
+ * identity's own time and that of the tests enclosing it. It is one
+ * identity's lone cost with the time taken out, read through the same
+ * function the packer charges by, so that a term added there is in this
+ * the moment it is added there. It is priced against a manifest holding no
+ * tests, so that whichever identity stands for its suite, nothing encloses
+ * it.
  */
 function fixedCost(
   manifest: Manifest,
   input: PlanInput,
   entry: ManifestEntry,
 ): number {
-  return loneCost(manifest, input, { ...entry, cost: 0 });
+  return loneCost({ ...manifest, entries: [] }, input, { ...entry, cost: 0 });
 }
 
 /** How a lane names one unit of one suite among the units it has opened. */
@@ -533,24 +633,45 @@ export function foldWholeUnits(
 }
 
 /**
- * What `selections` of one suite take, all of them in one lane.
+ * What `selections` of one suite take, all of them in one lane. Each run
+ * of a unit takes its selections' own costs and the cost of every test
+ * that `enclosing` says encloses one of them, once however many of the
+ * selections it encloses.
  *
- * Each unit is summed from its selections cheapest first and the units
- * are added up smallest first, so that the figures are the same numbers
- * however the selections were listed, since floating-point addition
- * rounds differently in a different order.
+ * Each unit is summed from its selections cheapest first, with the identity
+ * key settling a tie, and the units are added up smallest first, so that the
+ * figures are the same numbers however the selections were listed, since
+ * floating-point addition rounds differently in a different order.
+ *
+ * Throws where `selections` holds one identity twice, which a lane never
+ * does: its unit would be charged for it once.
  */
 export function testsOf(
   selections: readonly Pick<Selection, "entry" | "repeats">[],
+  enclosing: Enclosing,
 ): SuiteTests {
   const units = new Map<string, UnitRun>();
-  for (
-    const { entry, repeats } of selections.toSorted((a, b) =>
-      a.entry.cost - b.entry.cost
-    )
-  ) {
+  const ordered = selections
+    .map((selection) => ({
+      ...selection,
+      key: testIdentityKey(selection.entry.test),
+    }))
+    .toSorted((a, b) =>
+      a.entry.cost - b.entry.cost ||
+      (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    );
+  const keys = new Set(ordered.map(({ key }) => key));
+  if (keys.size < ordered.length) {
+    const twice = ordered.find(({ key }) => !keys.delete(key))!.key;
+    throw new Error(`${twice} is selected more than once`);
+  }
+  for (const { entry, repeats } of ordered) {
     const key = openedUnit(entry);
-    units.set(key, withIdentity(units.get(key), entry, repeats));
+    const was = units.get(key);
+    const around = enclosing(entry);
+    const unit = withIdentity(was, addedBy(was, entry, around), repeats);
+    holdIn(unit, entry, around);
+    units.set(key, unit);
   }
   const runs = [...units.values()];
   const longest: number[] = [];
@@ -597,7 +718,7 @@ export function suiteLoad(
   }
   return chargedTests(
     chargesOf(manifest.calibration.suites[suite]).correction,
-    testsOf(selections),
+    testsOf(selections, enclosingIn(manifest.entries)),
   );
 }
 
@@ -614,7 +735,7 @@ export function suiteCharge(
   selections: readonly Pick<Selection, "entry" | "repeats">[],
 ): number {
   const fitted = chargesOf(manifest.calibration.suites[suite]);
-  const tests = testsOf(selections);
+  const tests = testsOf(selections, enclosingIn(manifest.entries));
   return fitted.overhead * tests.longest.length +
     fitted.unitOverhead * tests.opened +
     chargedTests(fitted.correction, tests);
@@ -622,16 +743,18 @@ export function suiteCharge(
 
 /**
  * What `lane`'s selections of the suite of `entry` take once it holds
- * `entry` as well, and what its unit then takes. `ran` and `floor` are
- * what the two figures the lane is charged the larger of grow by, worked
- * out from what changed rather than as the difference of two sums, so that
- * where the loads set the charge the identity adds exactly its own cost
- * for each time its unit runs.
+ * `entry` as well, and what its unit then takes. `around` is the tests
+ * enclosing `entry`. `ran` and `floor` are what the two figures the lane is
+ * charged the larger of grow by, worked out from what changed rather than as
+ * the difference of two sums, so that where the loads set the charge the
+ * identity adds exactly what it adds to a run of its unit, for each time
+ * that unit runs.
  */
 function withSelection(
   lane: Filling,
   entry: ManifestEntry,
   repeats: number,
+  around: readonly ManifestEntry[],
 ): {
   held: SuiteTests;
   tests: SuiteTests;
@@ -641,7 +764,8 @@ function withSelection(
 } {
   const held = lane.tests.get(entry.suite) ?? NO_TESTS;
   const was = lane.unitTime.get(entry.suite)?.get(entry.unit);
-  const unit = withIdentity(was, entry, repeats);
+  const added = addedBy(was, entry, around);
+  const unit = withIdentity(was, added, repeats);
   const before = was ?? { once: 0, runs: 0 };
   const longest = [...held.longest];
   let floor = 0;
@@ -650,8 +774,7 @@ function withSelection(
     floor += Math.max(0, unit.once - other);
     longest[pass] = Math.max(other, unit.once);
   }
-  const ran = entry.cost * unit.runs +
-    before.once * (unit.runs - before.runs);
+  const ran = added * unit.runs + before.once * (unit.runs - before.runs);
   return {
     held,
     tests: {
@@ -667,7 +790,8 @@ function withSelection(
 
 /**
  * What adding this identity to this lane would cost: what it raises the
- * lane's charge for its suite's tests by, plus its suite's overhead for
+ * lane's charge for its suite's tests by, the tests enclosing it that its
+ * unit does not hold yet among them, plus its suite's overhead for
  * each pass it adds to the lane's batch of the suite and its suite's
  * per-unit overhead for each time it adds its unit to a pass, plus any
  * capability setup this lane has not opened yet.
@@ -681,7 +805,12 @@ function marginalCost(
 ): number {
   const fitted = chargesOf(manifest.calibration.suites[entry.suite]);
   const correction = fitted.correction;
-  const { held, tests, ran, floor } = withSelection(lane, entry, repeats);
+  const { held, tests, ran, floor } = withSelection(
+    lane,
+    entry,
+    repeats,
+    enclosingIn(manifest.entries)(entry),
+  );
   // Each term is taken past the old charge before the larger is chosen,
   // so that where the loads are the charge, what is added is exactly the
   // identity's own share of them, however large the lane's loads have
@@ -782,29 +911,33 @@ interface Opened {
   suite: boolean;
 
   /**
-   * Whether the lane had not yet opened the unit, or now runs it more
-   * times than it did. Adding to a unit that runs no more often than it
-   * did lowers what nothing else in that unit costs, since what the lane
-   * charges for a suite's tests only grows faster the more one unit holds.
-   * Running the unit more often can: the reruns can raise the loads past
-   * the floor, and a test of the unit that was charged against the floor
-   * is then charged its share of the loads, which can be less.
+   * Whether the lane had not yet opened the unit, now runs it more times
+   * than it did, or now runs a test enclosing the identity that it did not
+   * run before. Otherwise adding to a unit lowers what nothing else in that
+   * unit costs, since what the lane charges for a suite's tests only grows
+   * faster the more one unit holds. Running the unit more often can: the
+   * reruns can raise the loads past the floor, and a test of the unit that
+   * was charged against the floor is then charged its share of the loads,
+   * which can be less. And a test the newly run one encloses is no longer
+   * charged for it.
    */
   unit: boolean;
   capabilities: string[];
 
   /**
    * Which tests of its suite may now cost this lane less: every one of
-   * them; or those whose own cost is more than `outside`, together with
-   * those in a unit open in this lane whose own cost is more than
-   * `within()` of that unit's `UnitRun` here; or none, where this is
-   * `undefined`. `outside` covers a unit not open here, which takes
-   * nothing and runs once. Neither covers the unit the placement went in,
-   * whose tests `unit` says may cost less where they can.
+   * them; or those whose reach is more than `outside`, together with
+   * those in a unit open in this lane whose reach is more than `within()`
+   * of that unit's `UnitRun` here; or none, where this is `undefined`. A
+   * test's reach is its own cost and that of every test enclosing it, which
+   * is the most one run of it can add to a run of its unit. `outside`
+   * covers a unit not open here, which takes nothing and runs once. Neither
+   * covers the unit the placement went in, whose tests `unit` says may cost
+   * less where they can.
    *
    * A lane holding a suite's tests is charged the larger of their loads
-   * `cL` and their floor `P`; call that `C`. One run of a test costing `k`
-   * in a unit taking `t` a run and running `r` times adds `ckr` to the
+   * `cL` and their floor `P`; call that `C`. One run of a test adding `k`
+   * to a unit taking `t` a run and running `r` times adds `ckr` to the
    * loads, and to the floor what the unit's `t + k` takes past the longest
    * unit of each of its passes, which is no more than `r(t + k - m)` where
    * `m` is the longest unit of its last pass. Its cost against the charge
@@ -834,12 +967,14 @@ function place(
 ): Opened {
   const lane = spot.lane;
   const was = lane.unitTime.get(entry.suite)?.get(entry.unit);
-  const { held, tests, unit } = withSelection(lane, entry, repeats);
+  const around = enclosingIn(input.manifest.entries)(entry);
+  const { held, tests, unit } = withSelection(lane, entry, repeats, around);
   const suite = !lane.suites.has(entry.suite);
   const opened: Opened = {
     lane,
     suite,
-    unit: was === undefined || unit.runs > was.runs,
+    unit: was === undefined || unit.runs > was.runs ||
+      around.some((outer) => !was.held.has(testIdentityKey(outer.test))),
     capabilities: (input.capabilities.get(entry.suite) ?? []).filter(
       (capability) => !lane.capabilities.has(capability),
     ),
@@ -849,6 +984,7 @@ function place(
       tests,
     ),
   };
+  holdIn(unit, entry, around);
   lane.selections.push({ entry, reason, repeats });
   lane.tests.set(entry.suite, tests);
   lane.unitTime.set(
@@ -1607,14 +1743,21 @@ function density(entry: ManifestEntry, cost: number): number {
  */
 function fillDensest(pass: Pass, candidates: readonly ManifestEntry[]): void {
   const { input, taken } = pass;
-  const costliestFirstBy = (by: (entry: ManifestEntry) => string) =>
+  const enclosing = enclosingIn(input.manifest.entries);
+  const reach: Reach = new Map(
+    candidates.map((entry) => [
+      entry,
+      enclosing(entry).reduce((sum, outer) => sum + outer.cost, entry.cost),
+    ]),
+  );
+  const descendingReachBy = (by: (entry: ManifestEntry) => string) =>
     new Map(
       [...groupBy(candidates, by)].map((
         [key, entries],
-      ) => [key, entries.toSorted((a, b) => b.cost - a.cost)]),
+      ) => [key, entries.toSorted((a, b) => reach.get(b)! - reach.get(a)!)]),
     );
-  const bySuite = costliestFirstBy((entry) => entry.suite);
-  const byUnit = costliestFirstBy(openedUnit);
+  const bySuite = descendingReachBy((entry) => entry.suite);
+  const byUnit = descendingReachBy(openedUnit);
   /** The suites among the candidates needing each capability. */
   const needing = new Map<string, string[]>();
   for (const suite of bySuite.keys()) {
@@ -1652,7 +1795,7 @@ function fillDensest(pass: Pass, candidates: readonly ManifestEntry[]): void {
     }
     const opened = take(pass, entry, once);
     const lowered = [
-      ...cheaperOf(opened, entry, bySuite, byUnit),
+      ...cheaperOf(opened, entry, bySuite, byUnit, reach),
       ...(opened.unit ? byUnit.get(openedUnit(entry)) ?? [] : []),
       ...opened.capabilities.flatMap((capability) =>
         (needing.get(capability) ?? []).flatMap((suite) =>
@@ -1682,27 +1825,36 @@ function fillDensest(pass: Pass, candidates: readonly ManifestEntry[]): void {
 }
 
 /**
+ * Each candidate of the density pass against its reach, as
+ * `Opened.cheaper` defines it.
+ */
+type Reach = ReadonlyMap<ManifestEntry, number>;
+
+/**
  * Helper for `fillDensest()`, which lists the candidates of the suite of
  * `entry` that `opened`, the placement of `entry`, says may now cost its
- * lane less. Both maps hold their entries
- * costliest first.
+ * lane less. Both maps hold their entries in descending order of `reach`.
  */
 function cheaperOf(
   opened: Opened,
   entry: ManifestEntry,
   bySuite: ReadonlyMap<string, readonly ManifestEntry[]>,
   byUnit: ReadonlyMap<string, readonly ManifestEntry[]>,
+  reach: Reach,
 ): readonly ManifestEntry[] {
   const { cheaper } = opened;
   const suite = entry.suite;
   if (cheaper === undefined) return [];
   if (cheaper === "all") return bySuite.get(suite) ?? [];
-  const found = [...costliestFirst(bySuite.get(suite) ?? [], cheaper.outside)];
+  const found = [
+    ...reachingPast(bySuite.get(suite) ?? [], cheaper.outside, reach),
+  ];
   for (const [unit, run] of opened.lane.unitTime.get(suite) ?? []) {
     if (unit === entry.unit) continue;
-    const inUnit = costliestFirst(
+    const inUnit = reachingPast(
       byUnit.get(openedUnit({ suite, unit })) ?? [],
       cheaper.within(run),
+      reach,
     );
     for (const candidate of inUnit) found.push(candidate);
   }
@@ -1711,13 +1863,15 @@ function cheaperOf(
 
 /**
  * Helper for `fillDensest()`, which takes the leading entries of a list
- * sorted costliest first, as far as the ones costing more than `above`.
+ * sorted in descending order of `reach`, as far as the ones whose reach is
+ * more than `above`.
  */
-function costliestFirst(
+function reachingPast(
   entries: readonly ManifestEntry[],
   above: number,
+  reach: Reach,
 ): readonly ManifestEntry[] {
-  const end = entries.findIndex((entry) => entry.cost <= above);
+  const end = entries.findIndex((entry) => reach.get(entry)! <= above);
   return end === -1 ? entries : entries.slice(0, end);
 }
 

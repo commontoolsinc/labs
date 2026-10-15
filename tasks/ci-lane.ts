@@ -83,6 +83,7 @@ import {
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
+  enclosingIn,
   fullLaneCount,
   type Plan,
   plan,
@@ -499,12 +500,16 @@ export function batchesOf(
     const all = inUnit.get(key) ?? [];
     // A unit declared whole runs every identity in it, chosen or not.
     const whole = wholeOf.get(suite)!.has(unit);
-    const runs = whole ? all : all.filter((entry) => names.has(entry.test.n));
     // A `describe` that fails as a whole is recorded under its own title,
     // and the outermost `describe` registers one test under its title, so
     // skipping that title skips every leaf inside it. A title enclosing a
-    // chosen name therefore stays off the list.
+    // chosen name therefore stays off the list, and runs with the name.
     const around = new Set([...names].flatMap(enclosingNames));
+    const runs = whole
+      ? all
+      : all.filter((entry) =>
+        names.has(entry.test.n) || around.has(entry.test.n)
+      );
     const request: UnitRequest = {
       unit,
       skip: whole ? [] : all
@@ -1676,6 +1681,7 @@ export function describeWithheld(
 
 /** What one suite's share of a lane was chosen for, and what it costs. */
 function chosenFor(
+  manifest: Manifest,
   suite: string,
   selections: readonly Selection[],
 ): { identities: number; seconds: number; why: string } {
@@ -1686,7 +1692,7 @@ function chosenFor(
   }
   return {
     identities: mine.length,
-    seconds: testsOf(mine).ran,
+    seconds: testsOf(mine, enclosingIn(manifest.entries)).ran,
     why: [...reasons].sort().map(([reason, count]) => `${reason} ${count}`)
       .join(", "),
   };
@@ -1781,7 +1787,11 @@ export function describePlan(
   );
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const batch of batches) {
-    const share = chosenFor(batch.suite.id, chosen.selections);
+    const share = chosenFor(
+      chosen.manifest,
+      batch.suite.id,
+      chosen.selections,
+    );
     lines.push(
       `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
         `${duration(share.seconds)} | ${batchRepeats(batch)} | ` +

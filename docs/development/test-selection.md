@@ -1692,6 +1692,20 @@ lane's own skip list named and does not ship.
 A `describe()` whose `beforeAll` fails reports no test inside it, so its
 own failing case is the record that stands.
 
+The time such a record carries is what the `describe()` spent outside the
+cases directly inside it, which is its hooks, so its entry's cost is what
+those take. A lane running any test inside it pays that on every run of the
+unit, chosen or not, and the packer charges it so: a run of a unit is
+charged its selections' costs and the cost of every entry the manifest
+holds in that unit enclosing one of them, each once however many of the
+selections it encloses, and the unit's runs are each charged that again. A
+test repeated alone, in a file whose `describe()` has an expensive
+`beforeAll`, is charged the hook on every run. A `describe()` the manifest
+holds no entry for, a withheld one included, is charged nothing, and its
+time is part of what the per-pass and per-unit charges are fitted to. A
+suite's fixed charge leaves the enclosing entries out, being what a lane
+pays before any test's time.
+
 Some units hold more than one test and cannot be split. These are a
 workspace member whose test task takes no file list, a member's browser
 half, the reload suite's directory, and a section of the FUSE

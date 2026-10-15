@@ -19,7 +19,7 @@ import {
 } from "../test-topology/suite.ts";
 import { memberScope } from "../test-topology/unit.ts";
 import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
-import { chargedTests, testsOf } from "./plan.ts";
+import { chargedTests, enclosingIn, testsOf } from "./plan.ts";
 import {
   COST_WINDOW_DAYS,
   EXCLUDED_FROM_COVERAGE_GATE,
@@ -226,6 +226,7 @@ export function measuredCost(
     units: [],
     largest: 0,
   };
+  const enclosing = enclosingIn(entries);
   for (const [suite, held] of bySuite) {
     const fitted = calibration.suitesWithCoverage?.[suite];
     if (fitted === undefined) return undefined;
@@ -233,6 +234,7 @@ export function measuredCost(
     const beyond = (entries: readonly ManifestEntry[]) => {
       const tests = testsOf(
         entries.map((entry) => ({ entry, repeats: entry.repeats })),
+        enclosing,
       );
       const units = new Set(entries.map((entry) => entry.unit)).size;
       return chargedTests(fitted.correction, tests) +
