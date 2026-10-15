@@ -54,6 +54,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   publishing existing database and companion-cell references once per Loom
   environment, with a staged person-inbox migration and compiled integration
   acceptance gates.
+- [FabriChat messages as pushed elements](fabrichat-messages-as-pushed-elements.md)
+  replaces the room's request memory, unique times, activity log, keyed
+  records, and per-message reaction lists with messages and reactions pushed
+  onto lists, each labeled by its writer, so every handler reads at most the
+  message it acts on; with the label and removal spikes it rests on, and
+  proposals for delete, obliteration, edit history, and the room's outcomes.
 - [Revising a piece's source from an agent session](piece-revision-from-a-session.md)
   covers the two `pattern-author` tools that revise a piece someone already
   has — a handle-addressed read of its current source, and a direct edit
