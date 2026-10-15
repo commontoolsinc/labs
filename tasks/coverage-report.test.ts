@@ -39,7 +39,9 @@ import {
 } from "./test-selection/coverage.ts";
 
 /** The repository the measured-set tests read the workspace from. */
-const REPOSITORY = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const REPOSITORY = path.dirname(
+  path.dirname(path.fromFileUrl(import.meta.url)),
+);
 
 /** The workspace member those tests write a set report for. */
 const MEMBER = "packages/leb128";

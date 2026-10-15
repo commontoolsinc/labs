@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { dirname, fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import {
@@ -1562,6 +1563,7 @@ describe("post-main-report", () => {
     const flags = /deno run ((?:--allow-\S+\s+)+)tasks\/post-main-report\.ts/
       .exec(workflow)?.[1]?.split(/\s+/).filter((flag) => flag !== "");
     expect(flags).toBeDefined();
+    const config = fromFileUrl(new URL("deno.jsonc", root));
     const script = await Deno.makeTempFile({ suffix: ".ts" });
     try {
       await Deno.writeTextFile(
@@ -1570,7 +1572,7 @@ describe("post-main-report", () => {
           new URL("tasks/test-topology.ts", root).href
         }";\n` +
           `const suites = await loadTopology(${
-            JSON.stringify(root.pathname.replace(/\/$/, ""))
+            JSON.stringify(dirname(config))
           });\n` +
           `const typecheck = suites.find((suite) => suite.id === "typecheck");\n` +
           `console.log(JSON.stringify(typecheck.unitsForChange(` +
@@ -1581,7 +1583,7 @@ describe("post-main-report", () => {
         // rather than finding it beside itself.
         args: [
           "run",
-          `--config=${new URL("deno.jsonc", root).pathname}`,
+          `--config=${config}`,
           ...flags!,
           script,
         ],
