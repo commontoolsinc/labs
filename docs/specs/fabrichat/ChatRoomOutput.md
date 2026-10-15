@@ -614,8 +614,7 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
 - **Effect:** records the title, trimmed of the whitespace around it, labeled
   `authored-by` the sender, as the title a member last set. It replaces any
   title set before, and outranks the one the room was created with, which
-  `about.record` keeps. Nothing else about the room changes, and nothing is
-  added to `recentActivity`, which logs messages and reactions: a client
+  `about.record` keeps. Nothing else about the room changes: a client
   follows the title by reading `about.title`. Then, as a write in the room
   does, it sends the sender's manager's `joinRoom`, in an event of its own,
   and the manager brings the title its catalog lists the room under up to the

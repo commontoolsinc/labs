@@ -166,14 +166,14 @@ profile resolves.
 
 [`ChatRoomOutput`](ChatRoomOutput.md#implementation-defined-behavior) leaves
 some behavior to the implementation. `FabriChatRoom` has an affordance for
-configuring each of them: a room's settings, read by the handlers the setting
-governs, and kept apart from the room's record. The configuration itself isn't
-built at first. The first build fixes each setting at an initial value:
+configuring each of them: a room's settings, kept apart from the room's
+record. The configuration itself isn't built at first. The first build fixes
+each setting at an initial value:
 
 | Setting | `ChatRoomPolicy` key | Initial value |
 | --- | --- | --- |
 | OWNERs may obliterate messages, anyone's | `ownersMayObliterate` | yes in a group room or a space's own chat, no in a direct room |
-| An edit or a plain deletion keeps the version it replaces | `keepsHistory` | yes, every version |
+| An edit or a plain deletion keeps the version it replaces | `keepsHistory` | no |
 | A sender's deletion obliterates their message | `deletionIsObliteration` | no |
 | How far before the clock a proposed time is accepted | `proposedTimeMaxAgeNsec` | 10 minutes |
 | How far after the clock a proposed time is accepted | `proposedTimeMaxLeadNsec` | 10 seconds |

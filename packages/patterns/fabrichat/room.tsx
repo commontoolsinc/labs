@@ -58,7 +58,6 @@ import {
   commitSendReaction,
   commitSetTitle,
   commitThreadSend,
-  compareEntries,
   type ComposerState,
   entryFor,
   FABRICHAT_POLICY,
@@ -120,9 +119,7 @@ export const participantsOf = (
 ): ProfileCell[] =>
   [
     ...listed,
-    ...[...entries].sort(compareEntries).map((entry) =>
-      entry.record.authorProfile
-    ),
+    ...entries.map((entry) => entry.record.authorProfile),
   ].reduce<ProfileCell[]>(
     (found, profile) =>
       profile === undefined || found.some((known) => equals(known, profile))
@@ -1140,9 +1137,9 @@ export const FabriChatRoomCore = pattern<
       entries.map(({ key, sentAt, replyTo }) => ({ key, sentAt, replyTo })),
     )
   );
-  const mainEntries = computed(() =>
-    entries.filter(isInMain).sort(compareEntries)
-  );
+  // The views keep the order the room recorded the messages in: a time is
+  // the handler clock's reading, and nothing sorts by it.
+  const mainEntries = computed(() => entries.filter(isInMain));
   const latest = computed(() => ({
     messages: mainEntries.slice(-FABRICHAT_POLICY.maxWindowCount).map((
       entry,
@@ -1162,11 +1159,8 @@ export const FabriChatRoomCore = pattern<
     })
   );
   const count = computed(() => entries.length);
-  const sortedEntries = computed(() => [...entries].sort(compareEntries));
-  const oldestAt = computed(() => sortedEntries[0]?.record.sentAt);
-  const newestAt = computed(() =>
-    sortedEntries[sortedEntries.length - 1]?.record.sentAt
-  );
+  const oldestAt = computed(() => entries[0]?.record.sentAt);
+  const newestAt = computed(() => entries[entries.length - 1]?.record.sentAt);
   // The space's participants as its root lists them, for a room that isn't
   // that root. A root room's `#default` is the room itself, so it reads only
   // its own; a space whose root isn't there yet lists none.
@@ -1218,7 +1212,7 @@ export const FabriChatRoomCore = pattern<
   // act by, derived once for the whole list as `places` is.
   const messageRights = computed((): ChatMessageRights[] => {
     const profile = viewerProfileOf(myProfile);
-    return sortedEntries.map((entry) => ({
+    return entries.map((entry) => ({
       message: entry.cell,
       ...(canSend && profile !== undefined
         ? messageRightsOf(

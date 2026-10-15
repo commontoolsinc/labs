@@ -86,14 +86,16 @@ import {
 const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
- * The policy every room starts from, a group room's. Each setting is read by
- * the handlers it governs, and `about.policy` states it, so the two cannot
- * disagree. A room's `ownersMayObliterate` is `ownersMayObliterateIn()`'s,
- * and the message acts read it from the room's stated policy.
+ * The policy every room starts from, a group room's. `about.policy` states
+ * it, and the handlers read `ownersMayObliterate` and `deletionIsObliteration`
+ * from it, so the two cannot disagree; `maxWindowCount` bounds
+ * `messages.latest`. The other settings are stated for the policy's shape,
+ * which a user's Home carries, and read by nothing. A room's
+ * `ownersMayObliterate` is `ownersMayObliterateIn()`'s.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
-  keepsHistory: true,
+  keepsHistory: false,
   deletionIsObliteration: false,
   proposedTimeMaxAgeNsec: durationNsec(600n * NSEC_PER_SEC),
   proposedTimeMaxLeadNsec: durationNsec(10n * NSEC_PER_SEC),
@@ -123,7 +125,11 @@ export const ownersMayObliterateIn = (
  * `commitSendReaction`, from the reviewed reaction surface with its own
  * action, and labeled `authored-by` its reactor. `commitDeleteReaction`
  * removes it from the list, from the same surface, and a removal is a write
- * to the element removed, so the policy names both.
+ * to the element removed, so the policy names both. The policy is the
+ * element's, so it sits at the element's position in the list: a claim only
+ * beneath a link position does not govern replacing the link or pointing it
+ * elsewhere, so a policy moved down to a field would leave the list open to
+ * a forged element.
  */
 export type SentReaction = AuthoredByCurrentUser<
   WritePolicyAnyOf<ChatReaction, [
@@ -151,10 +157,36 @@ export type ReactionsValue = SentReaction[] | Default<[]>;
  */
 export type ReactionsCell = Writable<ReactionsValue>;
 
+/**
+ * What a reply reads of the message it replies to: the message without its
+ * reactions, and of the message's own reply only where that is shown.
+ */
+export interface RepliedMessage {
+  /** The profile the sender sent under; absent once obliterated. */
+  authorProfile?: ProfileCell;
+
+  /** The current text, or the marker of a deleted message. */
+  body: string | ChatDeletedBody;
+
+  /** The room's handler clock when it recorded the message. */
+  sentAt: FabricEpochNsec;
+
+  /** Where the message's own reply is shown; absent for none. */
+  replyTo?: { shownIn: ShownIn };
+}
+
 /** A stored reply: which message, and where the reply is shown. */
 export interface StoredReply {
-  /** The message replied to, in the same room. */
-  message: Cell<MessageRecord>;
+  /**
+   * The message replied to, in the same room, read as `RepliedMessage`. The
+   * link carries no more of the message's schema than that, so a message's
+   * schema nests no message: a reply typed as the message it replies to would
+   * nest without end, the generator would cut the nesting at a depth that
+   * varies with the type a writer addresses the message by, and a write cut
+   * shallower than the stored schema would drop the policies stored below
+   * the cut and be refused.
+   */
+  message: Cell<RepliedMessage>;
 
   /** Where the reply is shown. */
   shownIn: ShownIn;
@@ -188,7 +220,10 @@ export interface MessageRecord {
  * A stored message: written only by the message handlers, each from its act's
  * reviewed surface, and labeled with whoever wrote its current version. The
  * four send handlers write from the send surface, and differ only in where a
- * send's reply comes from.
+ * send's reply comes from. As with `SentReaction`, the policy is the
+ * element's and sits at its position in the list, which is what refuses a
+ * message replaced in place, a position pointed at another document, or an
+ * element pushed under someone else's profile.
  */
 export type SentMessage = AuthoredByCurrentUser<
   WritePolicyAnyOf<MessageRecord, [
@@ -322,7 +357,7 @@ export interface MessageEntry extends ViewItem {
  * the document that holds it, or `undefined` while it links none. It resolves
  * the link, and reads nothing of the message.
  */
-export const viewKeyOf = (message: MessageCell): string | undefined =>
+export const viewKeyOf = (message: Cell<unknown>): string | undefined =>
   entityKeyOf(message.resolveAsCell());
 
 /** A link to the stored message at `index` of `messages`. */
@@ -371,12 +406,8 @@ export const entryFor = (
     ? undefined
     : entries.find((entry) => equals(entry.cell, message));
 
-/** Oldest first, by `sentAt`. */
-export const compareEntries = (a: ViewItem, b: ViewItem): number =>
-  a.sentAt < b.sentAt ? -1 : a.sentAt > b.sentAt ? 1 : 0;
-
 /** Whether a message is deleted, by its sender or by obliteration. */
-export const isDeleted = (record: MessageRecord | undefined): boolean =>
+export const isDeleted = (record: RepliedMessage | undefined): boolean =>
   record === undefined || typeof record.body !== "string";
 
 /** The reply-shown-in values the room accepts. */
@@ -760,27 +791,31 @@ const emojiOf = (event: RoomStreamEvent, bound: string | undefined): unknown =>
  */
 const isMessageIn = (
   room: Cell<unknown>,
-  message: MessageCell,
-  current: MessageRecord | undefined,
-): current is MessageRecord =>
+  message: Cell<unknown>,
+  current: RepliedMessage | undefined,
+): current is RepliedMessage =>
   current?.sentAt !== undefined && spaceOf(message) === spaceOf(room);
 
 /**
- * What is left of a message once deleted: its time and what it replies to,
- * under `author`, with no reactions. A deletion keeps the author; an
- * obliteration keeps none.
+ * Leaves a tombstone of the message at `target`: its time and what it replies
+ * to stay, its body becomes the deleted marker, its reactions go, and so does
+ * its author unless `keepsAuthor`. The whole message is written, where an
+ * edit writes its text alone, since only a write of the whole drops a key: a
+ * key written `undefined` is present, and an author's link so written reads
+ * as a handle to nothing rather than as no author.
  */
-const tombstoneOf = (
-  current: MessageRecord,
-  author: ProfileCell | undefined,
-): SentMessage =>
-  ({
-    ...(author === undefined ? {} : { authorProfile: author }),
+const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
+  const current = target.get();
+  target.set({
+    ...(keepsAuthor && current.authorProfile !== undefined
+      ? { authorProfile: current.authorProfile }
+      : {}),
     body: { deleted: true },
     sentAt: current.sentAt,
     editedAt: now(),
     ...(current.replyTo === undefined ? {} : { replyTo: current.replyTo }),
-  }) as SentMessage;
+  } as SentMessage);
+};
 
 /**
  * Records a send: the text `event` carries, from `myProfile`, as a reply to
@@ -794,7 +829,7 @@ const recordSend = (
   event: RoomStreamEvent,
   myProfile: ProfileCell | undefined,
   messages: MessagesCell,
-  reply: MessageCell | undefined,
+  reply: Cell<RepliedMessage> | undefined,
   shownIn: ShownIn,
   refusal: ActRefusalCell | undefined,
   joined: Stream<void> | undefined,
@@ -929,16 +964,8 @@ export const commitEdit = handler<RoomStreamEvent, EditState>(
     }
     const body = textOf(event);
     if (body === "") return refuse(NO_TEXT);
-    target.set({
-      authorProfile: current.authorProfile,
-      body,
-      sentAt: current.sentAt,
-      editedAt: now(),
-      ...(current.replyTo === undefined ? {} : { replyTo: current.replyTo }),
-      ...(current.reactions === undefined
-        ? {}
-        : { reactions: current.reactions }),
-    } as SentMessage);
+    target.key("body").set(body);
+    target.key("editedAt").set(now());
     refusal?.set("");
     const editing = composer.get()?.editing;
     if (editing !== undefined && equals(editing, target)) {
@@ -971,14 +998,7 @@ export const commitDelete = handler<RoomStreamEvent, MessageActState>(
     if (!isAuthorOf(current, profile)) {
       return refuse("Only its author can delete a message.");
     }
-    target.set(
-      tombstoneOf(
-        current,
-        FABRICHAT_POLICY.deletionIsObliteration
-          ? undefined
-          : current.authorProfile,
-      ),
-    );
+    leaveTombstone(target, !FABRICHAT_POLICY.deletionIsObliteration);
     refusal?.set("");
   },
 );
@@ -1016,7 +1036,7 @@ export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
     if (!rights.canObliterate) {
       return refuse(obliterationRefusal(kind, ownersMayObliterate));
     }
-    target.set(tombstoneOf(current, undefined));
+    leaveTombstone(target, false);
     refusal?.set("");
   },
 );
@@ -1074,9 +1094,10 @@ export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
 );
 
 /**
- * Removes the sender's reaction to a message, from `ChatReactSurface`: the
- * one with the event's emoji, or the one its control is bound to. Removing a
- * reaction that isn't there changes nothing, and the act is done.
+ * Removes the sender's reaction to a message, from `ChatReactSurface`: every
+ * one of theirs with the event's emoji, or the one its control is bound to,
+ * since two sessions of theirs reacting at once can each have added one.
+ * Removing a reaction that isn't there changes nothing, and the act is done.
  */
 export const commitDeleteReaction = handler<RoomStreamEvent, ReactionState>(
   (event, { myProfile, room, message, emoji: bound, refusal }) => {
@@ -1098,10 +1119,13 @@ export const commitDeleteReaction = handler<RoomStreamEvent, ReactionState>(
     const list = current.reactions;
     if (isDeleted(current) || list === undefined) return refuse(DELETED);
     const reactions = (list.get() ?? []) as ChatReaction[];
-    const index = reactions.findIndex((reaction) =>
-      reaction?.emoji === emoji && equals(reaction.reactorProfile, profile)
-    );
-    if (index >= 0) list.removeByValue(list.key(index));
+    reactions.forEach((reaction, index) => {
+      if (
+        reaction?.emoji === emoji && equals(reaction.reactorProfile, profile)
+      ) {
+        list.removeByValue(list.key(index));
+      }
+    });
     refusal?.set("");
   },
 );

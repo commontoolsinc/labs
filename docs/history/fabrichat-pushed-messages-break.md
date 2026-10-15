@@ -28,17 +28,19 @@ delivery" and §4), and no activity log, since nothing read it. The plan is
 
 ## What the gate reports
 
-Against every one of the room's fifty-one recorded baselines, the
+Against forty-seven of the room's fifty-one recorded baselines, the
 pattern-update proof reports `argument.messages[]: ifc changed`: the stored
 messages' write policy named the old handlers, and the new elements' policy
 names the four send handlers, `commitEdit`, `commitDelete`, and
-`commitObliterate`. The proof reports one issue per role, so each baseline
-reports one result the room no longer offers beside it: `result.recentActivity`
-for the thirty-five that offered the activity log, and
-`result.messageRequests` for the sixteen that offered the per-user act
-outcomes, which the room replaced with the session's `messageRefusal`. The
-four oldest baselines report `argument.about` instead of the messages, the
-break `fabrichat-start-reviewed-break.md` records, beside `result.recentActivity`.
+`commitObliterate`. The four oldest report `argument.about` instead, the
+break `fabrichat-start-reviewed-break.md` records. The proof reports one
+issue per role, so each baseline reports one result the room no longer offers
+beside its argument: `result.recentActivity` for the thirty-five that offered
+the activity log, `result.messageRequests` for seven that offered the per-user
+act outcomes, which the room replaced with the session's `messageRefusal`,
+and `result.closeWindow` for the eleven newest, which offered that stream at the
+room's top level, which the proof reports ahead of the outcomes they offered
+too; the room offers no message windows.
 
 The placement and the adapter each report `result.$VIEWS.chat.recentActivity`
 against their two baselines, the field they passed through from the room.
@@ -55,8 +57,11 @@ keep the lists every act had to read, which is what the change removes.
 ## What is left behind
 
 Every room created before this change holds messages and reactions the new
-handlers cannot write, and reads them through views that expect the new shape.
-The rooms on Estuary and the shared Loom rooms are among them. They are not
+handlers cannot write. Such a room never adopts the new source: each open
+proposes the release, the write-policy gate refuses it (`writePolicyAnyOf
+must remain stable at /messages/*`), and the room keeps running the code it
+was deployed with, so what a person sees is the old room, not a broken new
+one. The rooms on Estuary and the shared Loom rooms are among them. They are not
 migrated: the decision, taken on 2026-10-15, is that breaking the rooms is
 acceptable, as the system has not been deployed for keeps, and
 `docs/history/fabrichat-room-link-messages-break.md` records the same ruling

@@ -3,7 +3,9 @@
  * of their own with an identity of their own: a message is labeled with its
  * sender and a reaction with its reactor, each writer's label survives the
  * other's writes, and a write no handler of the room makes is refused, whether
- * to a message's text, to someone else's reaction, or to the room's list.
+ * to a message's text, to someone else's reaction, or to the room's list:
+ * removing an element, replacing it in place, pointing its position at
+ * another document, or pushing one under someone else's profile.
  */
 import {
   action,
@@ -22,6 +24,7 @@ import {
   type MessageRecord,
   type MessagesValue,
   type ReactionsValue,
+  type SentMessage,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -170,6 +173,30 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const removeAlicesMessage = action(() =>
     setup.messages.removeByValue(setup.messages.key(0))
   );
+  // Writes at the message's position in the list, which the element's
+  // policy governs: the element replaced in place, the position pointed at
+  // a document of Bob's, and a push under Alice's profile.
+  const forged = Writable.of<MessageRecord | undefined>(undefined);
+  const replaceAlicesMessage = action(() => {
+    const current = setup.messages.key(0).get();
+    if (current === undefined) return;
+    setup.messages.key(0).set(
+      { ...current, body: "Bob replaced this" } as SentMessage,
+    );
+  });
+  const repointAlicesMessage = action(() => {
+    const current = setup.messages.key(0).get();
+    if (current === undefined) return;
+    forged.set({ ...current, body: "Bob pointed here" });
+    setup.messages.key(0).set(forged as never);
+  });
+  const pushAsAlice = action(() => {
+    const current = setup.messages.key(0).get();
+    if (current === undefined) return;
+    setup.messages.push(
+      { ...current, body: "Bob pushed this" } as SentMessage,
+    );
+  });
 
   return {
     allowRuntimeErrors: true,
@@ -194,11 +221,18 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
             ) === me.get()
         ),
       },
-      // Bob can't change Alice's text outside the room's handlers.
+      // Bob can't change Alice's text outside the room's handlers, nor
+      // replace her message, point its position elsewhere, or push one as
+      // her.
       { action: editAlicesMessage },
+      { action: replaceAlicesMessage },
+      { action: repointAlicesMessage },
+      { action: pushAsAlice },
       {
         assertion: assert(() =>
-          firstBody(setup.messages) === "Hello from Alice"
+          firstBody(setup.messages) === "Hello from Alice" &&
+          messageCount(setup.messages) === 1 &&
+          principalOf(setup.messages.key(0), "authored-by") !== me.get()
         ),
       },
       { label: "bob-reacted" },

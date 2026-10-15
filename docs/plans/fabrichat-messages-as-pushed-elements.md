@@ -1,7 +1,6 @@
 # FabriChat messages as pushed elements
 
-**Status:** stages 1 to 3 built, on branch
-`claude/loom-chat-send-refactor-525c8b` (commonfabric/labs#8931); stage 4's
+**Status:** stages 1 to 3 built, in commonfabric/labs#8931; stage 4's
 rewrites landed with the stages that changed each behavior.
 Written against `main` at `67143bae62` (2026-10-14). The two spikes it rests
 on became `labels.test.tsx`, which drives the real handlers; their findings
@@ -49,8 +48,16 @@ interface MessageRecord {
   /** The handler clock at the latest edit or deletion; absent until then. */
   editedAt?: FabricEpochNsec;
 
-  /** What this message replies to, and where it is shown. */
-  replyTo?: { message: Cell<MessageRecord>; shownIn: ShownIn };
+  /**
+   * What this message replies to, and where it is shown. The link reads the
+   * target as `RepliedMessage`, the message without its reactions and with
+   * only where its own reply is shown, so a message's schema nests no message.
+   * A link typed as the message itself nests without end; the generator cuts
+   * the nesting at a depth that varies with the type a writer addresses the
+   * message by, and a whole-message write cut shallower than the stored schema
+   * drops the policies stored below the cut and is refused.
+   */
+  replyTo?: { message: Cell<RepliedMessage>; shownIn: ShownIn };
 
   /** Everyone's reactions; absent once the message is deleted. */
   reactions?: Writable<SentReaction[]>;
@@ -347,6 +354,7 @@ Settled by stage 1's tests: a reaction list the send makes under
 `removeByValue()` by an element's policy as it refused the spike's `remove()`;
 and an admitted rewrite by someone other than the author relabels the element
 (`labels.test.tsx`, `owner-obliteration.test.tsx`).
-- Whether the room's output should offer the session's refusal text at all, or
-  whether the refused act's absence from the room is enough for a client that
-  renders its own UI.
+- Whether `messageRefusal`, which the room's output offers and its own
+  composer shows, should stay offered to a client that draws the room itself,
+  or whether the refused act's absence from the room is enough for such a
+  client.

@@ -176,6 +176,49 @@
         },
         "type": "array"
       },
+      "RepliedMessage": {
+        "properties": {
+          "authorProfile": {
+            "$ref": "#/$defs/ChatProfile",
+            "asCell": [
+              "cell"
+            ],
+            "description": "The profile the sender sent under; absent once obliterated."
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ChatDeletedBody"
+              }
+            ],
+            "description": "The current text, or the marker of a deleted message."
+          },
+          "replyTo": {
+            "description": "Where the message's own reply is shown; absent for none.",
+            "properties": {
+              "shownIn": {
+                "$ref": "#/$defs/ShownIn"
+              }
+            },
+            "required": [
+              "shownIn"
+            ],
+            "type": "object"
+          },
+          "sentAt": {
+            "description": "The room's handler clock when it recorded the message.",
+            "type": "FabricEpochNsec"
+          }
+        },
+        "required": [
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
       "SentMessage": {
         "$ref": "#/$defs/MessageRecord",
         "ifc": {
@@ -200,7 +243,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitSend"
                   ]
@@ -219,7 +262,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitComposerSend"
                   ]
@@ -238,7 +281,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitThreadSend"
                   ]
@@ -257,7 +300,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitReply"
                   ]
@@ -276,7 +319,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitEdit"
                   ]
@@ -295,7 +338,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitDelete"
                   ]
@@ -314,7 +357,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitObliterate"
                   ]
@@ -348,7 +391,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -367,7 +410,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -406,7 +449,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/manager.tsx",
-              "moduleIdentity": "4O2STeYyGzK0AV7SZnhOHYnAEqhlttQMy8WbyooY5KA",
+              "moduleIdentity": "ckh6qWjxY5dOhsEHwzBhftNCkYRp6m9pG1vKFgUgaUI",
               "path": [
                 "commitStart"
               ]
@@ -417,11 +460,11 @@
       "StoredReply": {
         "properties": {
           "message": {
-            "$ref": "#/$defs/MessageRecord",
+            "$ref": "#/$defs/RepliedMessage",
             "asCell": [
               "cell"
             ],
-            "description": "The message replied to, in the same room."
+            "description": "The message replied to, in the same room, read as `RepliedMessage`. The\nlink carries no more of the message's schema than that, so a message's\nschema nests no message: a reply typed as the message it replies to would\nnest without end, the generator would cut the nesting at a depth that\nvaries with the type a writer addresses the message by, and a write cut\nshallower than the stored schema would drop the policies stored below\nthe cut and be refused."
           },
           "shownIn": {
             "$ref": "#/$defs/ShownIn",
@@ -456,7 +499,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/room-records.tsx",
-              "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+              "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
               "path": [
                 "commitSetTitle"
               ]
@@ -787,15 +830,15 @@
             "type": "boolean"
           },
           "keepsHistory": {
-            "description": "Whether an edit or a plain deletion keeps the version it replaces.",
+            "description": "Stated for the policy's shape, and read by nothing: a message keeps no history.",
             "type": "boolean"
           },
           "maxOpenWindows": {
-            "description": "The most message windows a session can have open.",
+            "description": "Stated for the policy's shape, and read by nothing: the room offers no windows.",
             "type": "number"
           },
           "maxWindowCount": {
-            "description": "The most messages a message window holds.",
+            "description": "How many of the newest messages `messages.latest` holds.",
             "type": "number"
           },
           "ownersMayObliterate": {
@@ -803,15 +846,15 @@
             "type": "boolean"
           },
           "proposedTimeMaxAgeNsec": {
-            "description": "How far before the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "proposedTimeMaxLeadNsec": {
-            "description": "How far after the room's clock a proposed time is accepted, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: a sender proposes no time.",
             "type": "FabricDurationNsec"
           },
           "recentActivityWindowNsec": {
-            "description": "How long an entry stays in `recentActivity`, in ns.",
+            "description": "Stated for the policy's shape, and read by nothing: the room keeps no activity log.",
             "type": "FabricDurationNsec"
           }
         },
@@ -1111,6 +1154,46 @@
         },
         "type": "array"
       },
+      "RepliedMessage": {
+        "properties": {
+          "authorProfile": {
+            "$ref": "#/$defs/ChatProfile",
+            "description": "The profile the sender sent under; absent once obliterated."
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ChatDeletedBody"
+              }
+            ],
+            "description": "The current text, or the marker of a deleted message."
+          },
+          "replyTo": {
+            "description": "Where the message's own reply is shown; absent for none.",
+            "properties": {
+              "shownIn": {
+                "$ref": "#/$defs/ShownIn"
+              }
+            },
+            "required": [
+              "shownIn"
+            ],
+            "type": "object"
+          },
+          "sentAt": {
+            "description": "The room's handler clock when it recorded the message.",
+            "type": "FabricEpochNsec"
+          }
+        },
+        "required": [
+          "body",
+          "sentAt"
+        ],
+        "type": "object"
+      },
       "RoomStreamEvent": {
         "properties": {
           "body": {
@@ -1165,7 +1248,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -1184,7 +1267,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
+                  "moduleIdentity": "BzLFWbZ9d2dIAhJpsAMtCKFjJJLXfjqDuDYRNLbjmPc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -1285,8 +1368,8 @@
       "StoredReply": {
         "properties": {
           "message": {
-            "$ref": "#/$defs/MessageRecord",
-            "description": "The message replied to, in the same room."
+            "$ref": "#/$defs/RepliedMessage",
+            "description": "The message replied to, in the same room, read as `RepliedMessage`. The\nlink carries no more of the message's schema than that, so a message's\nschema nests no message: a reply typed as the message it replies to would\nnest without end, the generator would cut the nesting at a depth that\nvaries with the type a writer addresses the message by, and a write cut\nshallower than the stored schema would drop the policies stored below\nthe cut and be refused."
           },
           "shownIn": {
             "$ref": "#/$defs/ShownIn",

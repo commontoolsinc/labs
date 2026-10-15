@@ -30,11 +30,11 @@ import {
   isDeleted,
   type JoiningManager,
   type MessageCell,
-  type MessageRecord,
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
   ownersMayObliterateBy,
+  type RepliedMessage,
   type RoomStreamEvent,
   tellManagerJoined,
   viewKeyOf,
@@ -94,7 +94,7 @@ export const reactionTallies = (
   }));
 
 /** How a message's body reads, for a quote or a deleted message. */
-export const bodyText = (record: MessageRecord | undefined): string =>
+export const bodyText = (record: RepliedMessage | undefined): string =>
   record === undefined
     ? ""
     : typeof record.body === "string"

@@ -8,14 +8,18 @@
  * `lunch-poll-vote-burst.bench.ts`, and differs from it in what the writes
  * share. A lunch-poll vote is a keyed write that collides with nothing. A
  * FabriChat message is pushed onto the one list every member's send appends
- * to, a mergeable append, so two members sending at once both land without a
- * retry, and what this measures is how long the room takes to agree on them.
+ * to, a mergeable append, so two members sending at once both land, and what
+ * this measures is how long the room takes to agree on them.
  *
- * The size is small because larger ones do not complete. At twelve members
- * sending five messages each, sends conflicted for thirty seconds and more,
- * after which the runtime drops the message, and the burst never agreed; at
- * six sending three, a send outlasted the harness's two-minute call limit. And
- * memory grows with the members: twelve peaked at 13.75GB resident.
+ * The size is small because larger ones did not complete when a message was
+ * a keyed record whose send read and rewrote the room's shared bookkeeping,
+ * so two members sending at once conflicted and the loser ran again: at
+ * twelve members sending five messages each, sends conflicted for thirty
+ * seconds and more, after which the runtime dropped the message, and the
+ * burst never agreed; at six sending three, a send outlasted the harness's
+ * two-minute call limit. And memory grows with the members: twelve peaked at
+ * 13.75GB resident. A pushed message collides with nothing, so a larger size
+ * may complete now; the size stays until it is measured again.
  *
  * Each iteration writes into a room of its own. A send adds a message, so a
  * burst into one room would leave the next iteration a room eight messages
