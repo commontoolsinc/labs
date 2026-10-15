@@ -7,6 +7,13 @@ Use this page when you are in a UI polish or UI design pass and need to make a
 pattern feel intentional, distinctive, and coherent rather than merely
 functional.
 
+A pattern inherits the theme of the host it runs in: the host, or a `cf-theme`
+around the pattern, puts one look in effect, and every `cf-*` component inside
+draws it. A pattern may tint that theme with a nested `cf-theme` carrying only
+what it changes, such as `{ accentColor }`, and inherits the rest. It never
+declares a full theme, and never writes out a color or a font anywhere but in
+that tint.
+
 ## Why This System Works This Way
 
 Common Fabric UI is designed for composition across opaque subtrees.
@@ -44,8 +51,10 @@ Before writing JSX, decide these things explicitly:
    etc.
 3. **Memorable hook**: What is the one thing someone should remember about this
    interface?
-4. **Constraint strategy**: How will you get there using `cf-*` components,
-   local fonts, and public styling hooks?
+4. **Constraint strategy**: How will you get there with `cf-*` components and
+   public styling hooks over the host's theme? What the pattern changes in that
+   theme is a tint: a nested `cf-theme` naming only what differs, never a full
+   theme of its own.
 
 Do not settle into a generic default app shell. Commit to a direction and make
 the UI clearly about that direction.
@@ -98,8 +107,10 @@ available, prefer it over scattered one-off overrides.
 
 ## `cf-theme` Usage
 
-`cf-theme` merges a partial theme object with the default Common Fabric theme
-and applies CSS custom properties to a subtree.
+`cf-theme` merges a partial theme object over the theme of the `cf-theme`
+around it, or over the default Common Fabric theme when there is none, and
+applies CSS custom properties to a subtree. A nested `cf-theme` sets only the
+properties its partial changes; the rest inherit.
 
 ```tsx
 const theme = {
