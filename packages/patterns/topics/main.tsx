@@ -660,18 +660,13 @@ export const submitProfileTopic = handler<void, {
 
   /** The mention universe, declared at the child's own demand — the three
    * strings a universe entry carries — so the board's index rows and a plain
-   * list of pieces both satisfy it. `Writable` for the handler-state reason
-   * `boardCrossrefs` states, and nothing here writes an entry. */
-  mentionable: Writable<TopicMentionable[] | Default<[]>>;
+   * list of pieces both satisfy it. Handed to the new topic as it arrives;
+   * nothing here writes an entry. */
+  mentionable: ReadonlyCell<TopicMentionable[] | Default<[]>>;
 
-  /** `Writable` because a `Cell` is what survives handler state: `HandlerState`
-   * passes one through whole and recursively maps everything else, and a
-   * `ReadonlyCell` is not a `Cell`, so it arrives as a plain readonly object
-   * that no longer satisfies the input this is handed straight to. The input
-   * is not what refuses it — it declares `ReadonlyCell`, and an intact
-   * `ReadonlyCell` and the plain rows `StripCell` unwraps it to both fit.
-   * Nothing here writes a row. */
-  boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
+  /** The board's pivot, handed to the new topic as it arrives; nothing here
+   * writes a row. */
+  boardCrossrefs: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
 
   /** The namespace, written one key per create. Read for its keys and written
    * at one of them inside this handler, so the allocation and the append are

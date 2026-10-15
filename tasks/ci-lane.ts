@@ -80,6 +80,7 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  aroundOf,
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
@@ -499,12 +500,17 @@ export function batchesOf(
     const all = inUnit.get(key) ?? [];
     // A unit declared whole runs every identity in it, chosen or not.
     const whole = wholeOf.get(suite)!.has(unit);
-    const runs = whole ? all : all.filter((entry) => names.has(entry.test.n));
     // A `describe` that fails as a whole is recorded under its own title,
     // and the outermost `describe` registers one test under its title, so
     // skipping that title skips every leaf inside it. A title enclosing a
-    // chosen name therefore stays off the list.
+    // chosen name therefore stays off the list, and its hooks run, so its
+    // own cost is part of what the unit takes.
     const around = new Set([...names].flatMap(enclosingNames));
+    const runs = whole
+      ? all
+      : all.filter((entry) =>
+        names.has(entry.test.n) || around.has(entry.test.n)
+      );
     const request: UnitRequest = {
       unit,
       skip: whole ? [] : all
@@ -1674,8 +1680,12 @@ export function describeWithheld(
   say(lines);
 }
 
-/** What one suite's share of a lane was chosen for, and what it costs. */
+/**
+ * What one suite's share of a lane was chosen for, and what it costs, the
+ * tests `manifest` holds around its selections included.
+ */
 function chosenFor(
+  manifest: Manifest,
   suite: string,
   selections: readonly Selection[],
 ): { identities: number; seconds: number; why: string } {
@@ -1686,7 +1696,7 @@ function chosenFor(
   }
   return {
     identities: mine.length,
-    seconds: testsOf(mine).ran,
+    seconds: testsOf(mine, aroundOf(manifest, mine)).ran,
     why: [...reasons].sort().map(([reason, count]) => `${reason} ${count}`)
       .join(", "),
   };
@@ -1728,9 +1738,11 @@ function standingOnStandIns(
  * expected to take and why each of its identities was chosen. "Why did
  * my test not run" is the question a selected run provokes, and a
  * summary that only names the suites cannot begin to answer it. The
- * seconds in the table are the tests' own time and not what the lane
- * will take: the overheads the packer charged on top are per lane rather
- * than per identity, and `projectedSeconds` is where the whole figure is.
+ * seconds in the table are the own time of the tests and of the tests
+ * around them, such as a `describe` whose `beforeAll` every run of a unit
+ * runs, and not what the lane will take: the overheads the packer charged
+ * on top are per lane rather than per identity, and `projectedSeconds` is
+ * where the whole figure is.
  *
  * Not all of that time is measured. A unit nothing has recorded is
  * carried on a stand-in whose cost comes from the suite around it, and
@@ -1781,7 +1793,11 @@ export function describePlan(
   );
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const batch of batches) {
-    const share = chosenFor(batch.suite.id, chosen.selections);
+    const share = chosenFor(
+      chosen.manifest,
+      batch.suite.id,
+      chosen.selections,
+    );
     lines.push(
       `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
         `${duration(share.seconds)} | ${batchRepeats(batch)} | ` +

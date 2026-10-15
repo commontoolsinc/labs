@@ -666,6 +666,15 @@ suite it holds:
   unit does. The second is the one that binds for a suite whose runner
   runs its units side by side.
 
+A unit's tests are the identities the lane holds in it, and every test the
+manifest holds around one of them in that unit: the `describe` blocks
+enclosing a leaf, whose `beforeAll` and `afterAll` hooks run on every run of
+the unit that runs anything inside them. A `describe`'s own cost is the time
+it spent outside the cases directly inside it, so a chain of them is counted
+level by level without overlap. Each is counted once per run of its unit,
+whichever lane holds its own identity, and once only where the lane holds
+both it and a test inside it.
+
 A suite with no fit is charged no overhead, nothing per unit, and a
 correction of one. A runner that runs units side by side starts the
 costliest first, by the cost the lane hands it with each unit, since the

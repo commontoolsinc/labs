@@ -3921,6 +3921,29 @@ created:
   authored and serving-runtime controls that still persist, and a pair
   covering the durable-read mark either side of the wait.
 
+Delta 2026-10-15 — a late echo is dropped before its commit is prepared:
+
+- speculation §4 step 2's sentence that a late echo's writes are
+  dropped before the run's commit is prepared ELABORATES the late-echo
+  rule; it adds no rule to §1's map. A run the rule finds jobless
+  writes nowhere, so the CFC boundary pass has nothing to guard, and
+  such a run can have read a space between its ancestor's retired echo
+  and the served write to that space: a profile's `setInbox` run in the
+  cascade of an inbox's creation linked the inbox's alias document,
+  whose metadata lives on the result document it names, and the pass
+  refused the link in the owner's runtime alone.
+- Instrument: `packages/runner/test/extended-storage-transaction.test.ts`
+  ("a seal destination that discards the transaction") — a link the
+  pass refuses is handed to a destination that discards it without the
+  refusal; `packages/runner/test/speculation-intent-listener.test.ts`
+  ("whether a run is discarded, asked before it seals") — a late
+  grandchild of a terminal intent is discarded, one of an outstanding
+  intent is not, and every speculative run is once the overlay closes.
+  End to end, `packages/patterns/integration/private-inbox-multi-runtime.test.ts`
+  ("replaces the refused inbox on a click on the refusal notice's
+  button …") holds the click-marked replacement to no refusal in the
+  owner's runtime or the serving loop.
+
 Delta 2026-10-13 — an echo sealed into a space other than its intent's:
 
 - speculation §4 step 2's sentence that the space an entry sealed into
