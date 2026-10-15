@@ -15,11 +15,11 @@ it is the counterpart of.
 
 ## What the score measures
 
-A test earns its place by having caught real breakage before. That is a
-property of the test rather than a symptom of a problem: a test that found
+A test earns its place by having had new real test failures before. That is
+a property of the test rather than a symptom of a problem: a test that found
 a regression once sits somewhere mistakes get made, and it will find the
-next one. So the score is built on catches and decays over months rather
-than days.
+next one. So the score is built on new real test failures and decays over
+months rather than days.
 
 That is a different quantity from "this test is currently flaky", and the
 two are never scored together. A test failing a third of the time carries
@@ -49,11 +49,11 @@ its daily run, the next day's, so an order-dependent test can be failing
 there in one and passing in the other. The rules that count failures across
 sources take runs in any order.
 
-### What a catch is
+### What a new real test failure is
 
 For every failing record, the publisher asks whether the failure says
-something about a change or something about the test. A failure is a
-**catch** unless one of these holds:
+something about a change or something about the test. A failure is a **new
+real test failure** unless one of these holds:
 
 - The identity was already failing in the most recent run on the default
   branch, in the order described above. The test was already broken and
@@ -62,28 +62,28 @@ something about a change or something about the test. A failure is a
   the two runs but chance. That is a flake observation, and it is counted as
   one.
 - The identity failed across at least `ENVIRONMENTAL_MIN_SOURCES` distinct
-  sources within `CATCH_BREADTH_WINDOW_DAYS`. That is the environment or a
-  dependency, not any one change. A failure away from the default branch
-  while that branch was already failing the identity, as the first rule
-  reads it, is left out of that count, though another failure from the
-  same source can still count that source. A pull request's run tests the
-  pull request merged into the default branch, and a workstation runs a
-  change on top of one of that branch's commits, so while the branch fails
-  a test, every pull request and workstation that runs the test fails it
-  too. Those failures are the default branch's one breakage, and the
-  default branch is already one of the sources. While the default branch
-  is failing a test, nothing tells a failure its code caused from one its
-  environment caused. So a breakage of the environment is credited to the
-  default branch as one catch when that branch fails the test before
-  enough other sources do to reach `ENVIRONMENTAL_MIN_SOURCES`.
+  sources within `NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS`. That is the
+  environment or a dependency, not any one change. A failure away from the
+  default branch while that branch was already failing the identity, as the
+  first rule reads it, is left out of that count, though another failure from
+  the same source can still count that source. A pull request's run tests the
+  pull request merged into the default branch, and a workstation runs a change
+  on top of one of that branch's commits, so while the branch fails a test,
+  every pull request and workstation that runs the test fails it too. Those
+  failures are the default branch's one breakage, and the default branch is
+  already one of the sources. While the default branch is failing a test,
+  nothing tells a failure its code caused from one its environment caused. So a
+  breakage of the environment is credited to the default branch as one new real
+  test failure when that branch fails the test before enough other sources do to
+  reach `ENVIRONMENTAL_MIN_SOURCES`.
 - The run that saw it newly broke at least `MASS_FAILURE_MIN_IDENTITIES`
   identities. That is the run, or the change as a whole, and not any one
   test.
 
-Each catch is attributed to the pair of the commit and the source that saw
-it, so re-running one broken commit ten times counts once. A source is the
-branch for a continuous-integration run and the reporting person's login
-for a local one.
+Each new real test failure is attributed to the pair of the commit and the
+source that saw it, so re-running one broken commit ten times counts once. A
+source is the branch for a continuous-integration run and the reporting
+person's login for a local one.
 
 A test is worth a place in a pull request for the breakage it finds that
 the rest of the selection would miss. A breakage that a crowd of tests
@@ -103,51 +103,49 @@ one the default branch was not already failing. So a pull request run
 while the default branch is red for a hundred tests is judged by what it
 broke itself.
 
-On the default branch the crowd is judged at the failure that began a
-breakage, and a failure continuing it belongs to the same breakage until
-the branch passes in that failure's order, since the catch would be dated
-to the first failure. Where the branch has not yet run the identity in
-that order, as on the first run of a new day's order, the failure
-continues whatever breakage the branch was in when it last ran it.
+On the default branch the crowd is judged at the failure that began a breakage,
+and a failure continuing it belongs to the same breakage until the branch passes
+in that failure's order, since the new real test failure would be dated to the
+first failure. Where the branch has not yet run the identity in that order, as
+on the first run of a new day's order, the failure continues whatever breakage
+the branch was in when it last ran it.
 
 The publisher folds the objects one continuous-integration run uploaded
 in one batch, and carries what each run newly broke from one batch to
 the next for `SAME_COMMIT_REACH_DAYS`. A part of a run arriving in a later
 publisher run is judged with what was counted before it.
 
-A run on the default branch is a run of that branch's own head: each
-push to it, and the daily run of every suite at its head under the seed
-the next day's commits will take
-([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead)).
-A failure on the default branch cannot be judged when it happens. Each
-of those runs is the one run at its point. When a test fails in one of
-them, the run runs the test again, up to `RERUN_EXECUTIONS` times
-([the guide](../development/test-selection.md#running-a-failure-again)), and
-a pass on one of those reruns is the test disagreeing with itself at that
-point, which counts as a flake observation. A failure every rerun repeats
-says nothing yet. Counting each such failure as a catch would make a test
-that is flaky enough to fail several times in a row look like the most
-valuable test in the repository. Such a failure waits for the next run on
-that branch with the same seed. Still failing is the same breakage
-continuing, and nothing new is learned. Passing at the same point is the
-test disagreeing with itself, and counts as a flake observation. Passing
-at a later commit with the same seed counts as a catch: the change
-between the two commits fixed what the test found. Passing with a
-different seed judges nothing, since an order-dependent test stops
-failing when the order moves on, so that pass says nothing about whether
-a change fixed anything. The failure goes on waiting. A run with its seed
-is a later commit of the same Pacific day, a rerun of one of that day's
-commits, or, for a failure in the daily run under the next day's seed,
-one of the next day's commits. A pass that judges a failure in its own
-order also drops the failures waiting in other orders, since they are the
-same breakage seen in another order. A failure no run judges is dropped
-once it is older than the longest window a test's history keeps. That
-drops the catch of a real breakage whose fix landed on a later Pacific
-day than the breakage did, which is the price of not crediting an order
-change as a fix.
-A run of failures ended by one pass counts one catch, dated to the first of
-them in the pass's order, so a week of the branch being red is worth one
-catch and not seven.
+A run on the default branch is a run of that branch's own head: each push to it,
+and the daily run of every suite at its head under the seed the next day's
+commits will take
+([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead)). A
+failure on the default branch cannot be judged when it happens. Each of those
+runs is the one run at its point. When a test fails in one of them, the run runs
+the test again, up to `RERUN_EXECUTIONS` times ([the
+guide](../development/test-selection.md#running-a-failure-again)), and a pass on
+one of those reruns is the test disagreeing with itself at that point, which
+counts as a flake observation. A failure every rerun repeats says nothing yet.
+Counting each such failure as a new real test failure would make a test that is
+flaky enough to fail several times in a row look like the most valuable test in
+the repository. Such a failure waits for the next run on that branch with the
+same seed. Still failing is the same breakage continuing, and nothing new is
+learned. Passing at the same point is the test disagreeing with itself, and
+counts as a flake observation. Passing at a later commit with the same seed
+counts as a new real test failure: the change between the two commits fixed what
+the test found. Passing with a different seed judges nothing, since an
+order-dependent test stops failing when the order moves on, so that pass says
+nothing about whether a change fixed anything. The failure goes on waiting. A
+run with its seed is a later commit of the same Pacific day, a rerun of one of
+that day's commits, or, for a failure in the daily run under the next day's
+seed, one of the next day's commits. A pass that judges a failure in its own
+order also drops the failures waiting in other orders, since they are the same
+breakage seen in another order. A failure no run judges is dropped once it is
+older than the longest window a test's history keeps. That drops the new real
+test failure of a real breakage whose fix landed on a later Pacific day than the
+breakage did, which is the price of not crediting an order change as a fix. A
+run of failures ended by one pass counts one new real test failure, dated to the
+first of them in the pass's order, so a week of the branch being red is worth
+one new real test failure and not seven.
 
 Nothing separates a failure a change fixed from one that healed itself, so
 a test flaky on the default branch is credited for its own noise. The
@@ -155,26 +153,27 @@ judgement errs toward crediting a test rather than away from it. An
 overstated score costs run time, and an understated one costs a test its
 place.
 
-### Where a catch happened
+### Where a new real test failure happened
 
-A catch is always a point in the test's favor, and the place says
-something further.
+A new real test failure is always a point in the test's favor, and the place
+says something further.
 
-- A **local catch** — somebody at a workstation, part way through writing
-  something — is the highest-quality evidence this system can receive, and
-  counts double.
-- A **pull-request catch** is continuous integration doing its job.
-- A **catch on the default branch** is a recorded escape: this test would
-  have prevented a red default branch had it run on the pull request, and
-  it did not. It counts one and a half times, which is the feedback loop
-  that fixes that on its own.
+- A **local** new real test failure — somebody at a workstation, part way
+  through writing something — is the highest-quality evidence this system
+  can receive, and counts double.
+- A new real test failure on a **pull request** is continuous integration
+  doing its job.
+- A new real test failure on the **default branch** is a recorded escape:
+  this test would have prevented a red default branch had it run on the pull
+  request, and it did not. It counts one and a half times, which is the
+  feedback loop that fixes that on its own.
 
 ### The formula
 
 ```text
-catches   = CATCH_WEIGHT_LOCAL * localCatches
-          + CATCH_WEIGHT_PR    * prCatches
-          + CATCH_WEIGHT_MAIN  * mainCatches
+catches   = NEW_REAL_TEST_FAILURE_WEIGHT_LOCAL * localCatches
+          + NEW_REAL_TEST_FAILURE_WEIGHT_PR    * prCatches
+          + NEW_REAL_TEST_FAILURE_WEIGHT_MAIN  * mainCatches
 
 if catches == 0:
     record = 0
@@ -193,13 +192,13 @@ value = VALUE_FLOOR + WEIGHT_PROVEN * record
 Two guarantees follow, and both are asserted rather than argued:
 
 - A test that has **never failed anywhere** scores exactly `VALUE_FLOOR`.
-- A test with **no catches but recent failures** — every one classified as
-  flake evidence, or as a continuation of an already-broken default branch
-  — scores `VALUE_FLOOR + WEIGHT_CHURN * churn`, and never a missing
-  value. The branch for a test with no catches is written out rather than
-  left to the algebra: there is no date to measure freshness from, and
-  multiplying zero by a missing number yields a missing number, which
-  sorts unpredictably against real scores.
+- A test with **no new real test failures but recent failures** — every one
+  classified as flake evidence, or as a continuation of an already-broken
+  default branch — scores `VALUE_FLOOR + WEIGHT_CHURN * churn`, and never a
+  missing value. The branch for a test with no new real test failures is
+  written out rather than left to the algebra: there is no date to measure
+  freshness from, and multiplying zero by a missing number yields a missing
+  number, which sorts unpredictably against real scores.
 
 `VALUE_FLOOR` is what points the packing at the cheap tail. A
 fifty-millisecond test that has never failed has a value per second of
@@ -214,7 +213,7 @@ and one number damages most of them.
 | Input | Horizon |
 | --- | --- |
 | `catches`, `lastCatch` | unbounded; `freshness` does the discounting |
-| `sources` | unbounded, counted only over catches |
+| `sources` | unbounded, counted only over new real test failures |
 | `churn` | decayed with a `CHURN_HALF_LIFE_DAYS` half-life, read over `CHURN_WINDOW_DAYS` |
 | `flakeRate` | decayed with a `FLAKE_HALF_LIFE_RUNS` half-life in runs, read over `FLAKE_WINDOW_DAYS` |
 | `cost` | `COST_WINDOW_DAYS` |
@@ -363,10 +362,10 @@ has nothing else on its record, is held out until it has shown otherwise.
 
 That cuts the other way for a disagreement the environment caused rather
 than the test. Nothing here separates the two, so a bad runner that makes
-several tests disagree at one commit holds out the ones with few runs
-behind them. The rule that reads a failure across many sources as the
-environment covers catches and not disagreements, and extending it is what
-would fix this.
+several tests disagree at one commit holds out the ones with few runs behind
+them. The rule that reads a failure across many sources as the environment
+covers new real test failures and not disagreements, and extending it is
+what would fix this.
 
 Both counts are published beside the share, because a share cannot be
 weighed without them: one disagreement in two runs and a thousand in two
@@ -464,16 +463,17 @@ somebody re-runs the job, so every run an excluded identity gets on the
 default branch lowers its share and almost none can raise it. Left there,
 the exclusion reverses on runs that were incapable of keeping it in place,
 and each of the identity's spurious failures, judged by the next run that
-passed at a later commit, is credited as a catch. The identity returns to
-changes with a share near nothing and a score raised by its own noise. Two
-rules answer this, and a consumer may apply the first without the second.
+passed at a later commit, is credited as a new real test failure. The
+identity returns to changes with a share near nothing and a score raised by
+its own noise. Two rules answer this, and a consumer may apply the first
+without the second.
 
 **An excluded identity that may be run without its neighbours runs as many
 times as its share asks for.** The count is the one the line already gives
 that share, which runs past the exclusion rate. Several runs at one commit
-are what let a share rise as well as fall, and they also put a pass beside
-a spurious failure at its own commit, which classifies it as a
-disagreement rather than crediting it as a catch.
+are what let a share rise as well as fall, and they also put a pass beside a
+spurious failure at its own commit, which classifies it as a disagreement
+rather than crediting it as a new real test failure.
 
 Every run of it at that commit takes one invocation shape, since a
 consumer that runs the identity once beside its neighbours and again on
@@ -484,10 +484,10 @@ single run: running its whole unit several times would run every
 neighbour several times, and a neighbour that is not flaky would fail the
 run several times as often for it.
 
-What several runs at one commit cannot separate is a bad machine. A
-consumer that runs them together runs them on one machine, so a machine
-that fails one fails all, which is no disagreement at all. The rule that
-reads a failure across many sources as the environment covers catches
+What several runs at one commit cannot separate is a bad machine. A consumer
+that runs them together runs them on one machine, so a machine that fails
+one fails all, which is no disagreement at all. The rule that reads a
+failure across many sources as the environment covers new real test failures
 rather than disagreements, and a default branch offers one source to read.
 
 **A failure of an excluded identity does not fail the run.** This is a
@@ -670,12 +670,12 @@ Two rules force a test in.
   runs stays mostly what the score chose. No one unit may be reached by a
   significant share of the tree, and no one file may reach a significant
   share of the units. Something whose input is a large part of the
-  repository declares the small and specific part of it, or declares
-  nothing and is reached by the score alone. Declaring too little costs
-  only that; declaring too much places the unit in every lane by
-  declaration rather than by what it has caught. Nothing about a changed
-  source file forces a test in except through a declaration that reaches
-  it. Which tests run for it otherwise is what the score decides.
+  repository declares the small and specific part of it, or declares nothing
+  and is reached by the score alone. Declaring too little costs only that;
+  declaring too much places the unit in every lane by declaration rather
+  than by its new real test failures. Nothing about a changed source file
+  forces a test in except through a declaration that reaches it. Which tests
+  run for it otherwise is what the score decides.
 
   The type check is not bounded that way. A change reaches every
   type-check group whose files import a changed file, directly or through
@@ -882,8 +882,8 @@ identity, of kind `gate`, owned by the member whose lines it counts and
 named for the suite whose units it judges, such as `coverage-gate
 workspace-unit`. Every run that reaches its verdict records it, and the
 publisher scores those records like any other identity's. A gate
-therefore earns a place in a pull request by what it has caught, as a
-test does.
+therefore earns a place in a pull request by its new real test failures,
+as a test does.
 
 What sets a gate apart is where its verdict is reached. Several lanes may
 share a set's units between them, so no lane can judge the set, and the
@@ -1075,20 +1075,20 @@ the ones it looked at.
 
 A manifest declaring an earlier shape is read forward field by field. So
 is the publisher's own rolling aggregate, and for a stronger reason: the
-aggregate is where every catch a test has been credited with lives, over
-unbounded history, and no window of records the publisher ordinarily reads
-gives those back.
+aggregate is where every new real test failure a test has been credited
+with lives, over unbounded history, and no window of records the publisher
+ordinarily reads gives those back.
 
-The rules that decide whether a failure is a catch change, and the
-aggregate holds catches as counts rather than as the failures they came
-from, so a count credited under other rules cannot be judged again by
-itself. The aggregate therefore names the set of rules its catches were
-credited under, as `CATCH_RULE`. A publisher reading an aggregate that
-names another set, or none, folds every day that aggregate's history
-holds again into an empty aggregate. Records carry no retention, so
-every record those catches came from is folded again under the rules in
-force. What that costs is one run reading the whole history, which has
-to fit inside one job.
+The rules that decide whether a failure is a new real test failure change, and
+the aggregate holds new real test failures as counts rather than as the failures
+they came from, so a count credited under other rules cannot be judged again by
+itself. The aggregate therefore names the set of rules its new real test
+failures were credited under, as `NEW_REAL_TEST_FAILURE_RULE`. A publisher
+reading an aggregate that names another set, or none, folds every day that
+aggregate's history holds again into an empty aggregate. Records carry no
+retention, so every record those new real test failures came from is folded
+again under the rules in force. What that costs is one run reading the whole
+history, which has to fit inside one job.
 
 A stored aggregate the publisher cannot read is passed over for the
 newest one behind it that it can. Nothing but the publisher creates an
@@ -1110,12 +1110,34 @@ what stopped it. Refusing costs a stale manifest; starting from an empty
 aggregate would cost a manifest scoring every test at the floor, so a
 run never does that on its own.
 
-The area of the store both are written under is named rather than
-numbered, and does not move when a shape changes. An area that moved
-with the shape would leave the aggregate behind in the old one, which
-costs the catches and puts a manual cold start between one shape and the
-next, during which nothing publishes and every consumer runs the whole
-corpus.
+A cold start, the bootstrap, is the one run that starts from an empty
+aggregate, and it does so only where the store holds no aggregate any
+publisher can read. Where one is stored, of any day, it refuses and names
+it. An incremental run folding onto it keeps every new real test failure it
+holds and reads from the last day it read.
+
+The objects the publisher has folded are the other part of an aggregate that
+would otherwise grow with the store. A day the publisher has read, with every
+day before it read too, closes once it is as far behind as the store waits for
+late arrivals, and the aggregate records the last closed day rather than the
+name of every object of the days up to it. The names of the first day its
+history holds stay, since that day is where a fold of the whole history begins.
+An incremental run reads from the last day its aggregate read, so no day is left
+unread behind one that closes. It reads no day before both that one and the day
+before today, since an object that arrives late for one would be folded after
+the days that follow it, out of the order the rules judge runs in.
+
+The selection area deletes its objects at a fixed age, which has to exceed
+the longest the publisher may stop for. Every run writes a new aggregate
+carrying each new real test failure forward, so an aggregate expiring costs
+nothing while a newer one exists, and only an outage longer than that age
+leaves none.
+
+The area of the store both are written under is named rather than numbered,
+and does not move when a shape changes. An area that moved with the shape
+would leave the aggregate behind in the old one, which costs the new real
+test failures and puts a manual cold start between one shape and the next,
+during which nothing publishes and every consumer runs the whole corpus.
 
 A withheld entry naming a reason the reader has no rule for is the one
 thing dropped rather than refused. Refusing it would refuse the whole
@@ -1150,17 +1172,21 @@ than it should have, which the full run on the default branch catches.
 
 ## Renames
 
-Renaming a test costs it all of its history, and the cost falls in the
-worst possible place: `catches` accumulates over unbounded history and is
-the whole of what makes a test worth running, so the best test in an area
-drops to the floor at the exact moment somebody is working there.
+Renaming a test costs it all of its history, and the cost falls in the worst
+possible place: the count of new real test failures, `catches`, accumulates
+over unbounded history and is the whole of what makes a test worth running,
+so the best test in an area drops to the floor at the exact moment somebody
+is working there.
 
-`tasks/test-identity-aliases/` is what bridges the two halves, and
-every reader of the store resolves through it, the publisher included. A
-rename is never inferred: a wrong bridge silently credits one test with
-another's record, and since the whole score rests on catch attribution
-there is no downstream check that would notice. Suggesting a line is help;
-writing one unasked is not.
+`tasks/test-identity-aliases/` is what bridges the two halves, and every
+reader of the store resolves through it, the publisher included. The
+publisher resolves the history its aggregate already holds as well as each
+record it reads, on every run, so an alias line that lands after the old
+name's records were folded still moves their new real test failures to the
+new name. A rename is never inferred: a wrong bridge silently credits one
+test with another's record. Since the whole score rests on attributing new
+real test failures, there is no downstream check that would notice.
+Suggesting a line is help; writing one unasked is not.
 
 ## Removals
 
@@ -1234,20 +1260,20 @@ commit, a unit that recorded something — and never on a record that is
 missing. A run whose records cannot be found at all is a run nothing is
 known about, and in particular is not a run that skipped every test.
 
-A test that both passed and failed at one commit is that test
-disagreeing with itself, which is flake evidence rather than a catch, and
-it is not a first failure. An excluded identity that failed every one of
-its runs at a commit and passed every one at the parent is the one
-statement about such a test that several runs at one commit make
-available, and a consumer reporting it says that the test is a known flaky
-one and that the run was not failed by it. Whether a run excused an identity is
-a fact about that run, and a consumer reads it from what the run recorded rather
-than working it out again from the manifest. A run that did not apply the rule
-excused nothing, and one that did withdraws an excusal wherever an invocation
-left an identity it was asked to run, and the tree holds, unaccounted for. That a
-test is new is likewise a claim about the store rather than about one run: an
-identity the store has never seen is new, and an identity absent from one run's
-records is only absent from that run.
+A test that both passed and failed at one commit is that test disagreeing with
+itself, which is flake evidence rather than a new real test failure, and it is
+not a first failure. An excluded identity that failed every one of its runs at a
+commit and passed every one at the parent is the one statement about such a test
+that several runs at one commit make available, and a consumer reporting it says
+that the test is a known flaky one and that the run was not failed by it.
+Whether a run excused an identity is a fact about that run, and a consumer reads
+it from what the run recorded rather than working it out again from the
+manifest. A run that did not apply the rule excused nothing, and one that did
+withdraws an excusal wherever an invocation left an identity it was asked to
+run, and the tree holds, unaccounted for. That a test is new is likewise a claim
+about the store rather than about one run: an identity the store has never seen
+is new, and an identity absent from one run's records is only absent from that
+run.
 
 Whether a change's own run ran a test is settled by that run's records
 and by nothing else. The manifest it resolved answers the next question,

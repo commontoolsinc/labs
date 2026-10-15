@@ -1,13 +1,13 @@
 /**
  * What the record store says about one test, and what that is worth.
  *
- * A test earns its place in a pull request by having caught real breakage
- * before, so the score is built on catches and decays slowly. Deciding
- * whether a failure is a catch is the delicate part: a test that is flaky
- * on `main` produces one failure per commit and would otherwise look like
- * the most valuable test in the repository. `foldObservations` is where
- * that judgement is made, once per observation, with the state it needs
- * carried forward from the day before.
+ * A test earns its place in a pull request by having had new real test failures
+ * before, so the score is built on new real test failures and decays slowly.
+ * Deciding whether a failure is a new real test failure is the delicate part: a
+ * test that is flaky on `main` produces one failure per commit and would
+ * otherwise look like the most valuable test in the repository.
+ * `foldObservations` is where that judgement is made, once per observation,
+ * with the state it needs carried forward from the day before.
  */
 
 import type {
@@ -20,10 +20,6 @@ import { minOf } from "@commonfabric/utils/math";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   BREADTH_SATURATION,
-  CATCH_BREADTH_WINDOW_DAYS,
-  CATCH_WEIGHT_LOCAL,
-  CATCH_WEIGHT_MAIN,
-  CATCH_WEIGHT_PR,
   CHURN_HALF_LIFE_DAYS,
   CHURN_WINDOW_DAYS,
   COMMIT_REACH_DAYS,
@@ -35,6 +31,10 @@ import {
   FRESHNESS_FLOOR,
   FRESHNESS_HALF_LIFE_DAYS,
   MASS_FAILURE_MIN_IDENTITIES,
+  NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS,
+  NEW_REAL_TEST_FAILURE_WEIGHT_LOCAL,
+  NEW_REAL_TEST_FAILURE_WEIGHT_MAIN,
+  NEW_REAL_TEST_FAILURE_WEIGHT_PR,
   PROVEN_SATURATION,
   SAME_COMMIT_REACH_DAYS,
   VALUE_FLOOR,
@@ -44,7 +44,7 @@ import {
 } from "./policy.ts";
 
 /** Where a failure happened, which changes what it means. */
-export type CatchPlace = "local" | "pr" | "main";
+export type NewRealTestFailurePlace = "local" | "pr" | "main";
 
 /** One execution of one test, as the publisher reads it from a report. */
 export interface Observation {
@@ -79,26 +79,45 @@ export interface Observation {
    */
   source: string;
 
-  /** Where it ran, which is what a catch there is worth. */
-  place: CatchPlace;
+  /** Where it ran, which is what a new real test failure there is worth. */
+  place: NewRealTestFailurePlace;
 }
 
-/** What one identity's history has accumulated. */
+/**
+ * What one identity's history has accumulated.
+ *
+ * The fields counting new real test failures are named `...Catches`, and
+ * the most recent one's day `lastCatch`, because those are the names the
+ * stored aggregate holds them under. Every publisher that reads a stored
+ * aggregate looks for them by those names.
+ */
 export interface IdentityState {
-  /** Catches on a workstation. */
+  /** New real test failures on a workstation. */
   localCatches: number;
 
-  /** Catches on a pull request. */
+  /** New real test failures on a pull request. */
   prCatches: number;
 
-  /** Catches on the default branch. */
+  /** New real test failures on the default branch. */
   mainCatches: number;
 
-  /** The day of the most recent catch, absent when there are none. */
+  /**
+   * The day of the most recent new real test failure, absent when there
+   * are none.
+   */
   lastCatch?: string;
 
-  /** The distinct sources among the catches. */
+  /** The distinct sources among the new real test failures. */
   sources: string[];
+
+  /**
+   * The new real test failures by the day each is dated to. The four
+   * fields above are what these add up to, kept beside them because the
+   * score reads those and every publisher that reads a state reads them.
+   * The days are what history is divided by: an alias moves the days
+   * before its date to the new name.
+   */
+  newRealTestFailureDays: Record<string, NewRealTestFailureDay>;
 
   /** Failures per day, the numerator of the churn term. */
   failuresByDay: Record<string, number>;
@@ -125,10 +144,10 @@ export interface IdentityState {
   lastMainByOrder?: MainOutcomes;
 
   /**
-   * Failures on `main` that no later `main` run in their order has judged
-   * yet. A failure that a later `main` run in its order passes was fixed
-   * by the change between them, which makes it a catch unless it arrived
-   * in a crowd; one that is still failing is the same breakage
+   * Failures on `main` that no later `main` run in their order has judged yet.
+   * A failure that a later `main` run in its order passes was fixed by the
+   * change between them, which makes it a new real test failure unless it
+   * arrived in a crowd; one that is still failing is the same breakage
    * continuing, and waits.
    */
   pendingMain: Array<PendingMainFailure>;
@@ -181,22 +200,35 @@ export interface PendingMainFailure {
   /**
    * Whether the breakage arrived in a crowd: a run that newly broke at
    * least `MASS_FAILURE_MIN_IDENTITIES` identities. Whichever of them a
-   * change runs sees that breakage, so it is no one test's catch.
+   * change runs sees that breakage, so it is no one test's new real test
+   * failure.
    */
   crowded?: true;
 }
 
 /**
- * Which set of rules credited the catches an aggregate holds: what
- * decides whether a failure is a catch, and when and where it is counted.
- * Change it to any other value in the same change that alters those. A
- * catch is held as a count rather than as the failure it came from, so a
- * count credited under other rules cannot be judged again by itself, and
- * the publisher folds the whole history behind it again instead. The
- * values are not ordered and nothing but equality is asked of them; an
- * aggregate carrying none was written before the stamps began.
+ * Which set of rules credited the new real test failures an aggregate
+ * holds: what decides whether a failure is a new real test failure, and
+ * when and where it is counted, which includes the day each is dated to.
+ * Change it to any other value in the same change that alters those. A new
+ * real test failure is held as a count rather than as the failure it came
+ * from, so a count credited under other rules cannot be judged again by
+ * itself, and the publisher folds the whole history behind it again
+ * instead. The values are not ordered and nothing but equality is asked
+ * of them; an aggregate carrying none was written before the stamps
+ * began. It is stored under the name `catchRule`.
  */
-export const CATCH_RULE = 3;
+export const NEW_REAL_TEST_FAILURE_RULE = 4;
+
+/** One day's new real test failures of one identity. */
+export interface NewRealTestFailureDay {
+  local: number;
+  pr: number;
+  main: number;
+
+  /** The distinct sources among that day's new real test failures. */
+  sources: string[];
+}
 
 /** A fresh, empty history. */
 export function emptyState(): IdentityState {
@@ -205,6 +237,7 @@ export function emptyState(): IdentityState {
     prCatches: 0,
     mainCatches: 0,
     sources: [],
+    newRealTestFailureDays: {},
     failuresByDay: {},
     runsByDay: {},
     flakesByDay: {},
@@ -224,12 +257,21 @@ function addSource(state: IdentityState, source: string): void {
   if (!state.sources.includes(source)) state.sources.push(source);
 }
 
-function creditCatch(
+function creditNewRealTestFailure(
   state: IdentityState,
-  place: CatchPlace,
+  place: NewRealTestFailurePlace,
   day: string,
   source: string,
 ): void {
+  const failed = state.newRealTestFailureDays[day] ??
+    (state.newRealTestFailureDays[day] = {
+      local: 0,
+      pr: 0,
+      main: 0,
+      sources: [],
+    });
+  failed[place]++;
+  if (!failed.sources.includes(source)) failed.sources.push(source);
   if (place === "local") state.localCatches++;
   else if (place === "pr") state.prCatches++;
   else state.mainCatches++;
@@ -237,6 +279,156 @@ function creditCatch(
     state.lastCatch = day;
   }
   addSource(state, source);
+}
+
+/**
+ * Sets the totals of a state's new real test failures from its days of
+ * new real test failures, which is what they are the totals of.
+ */
+function totalNewRealTestFailures(state: IdentityState): void {
+  state.localCatches = 0;
+  state.prCatches = 0;
+  state.mainCatches = 0;
+  state.sources = [];
+  delete state.lastCatch;
+  for (const [day, failed] of Object.entries(state.newRealTestFailureDays)) {
+    state.localCatches += failed.local;
+    state.prCatches += failed.pr;
+    state.mainCatches += failed.main;
+    for (const source of failed.sources) addSource(state, source);
+    if (state.lastCatch === undefined || state.lastCatch < day) {
+      state.lastCatch = day;
+    }
+  }
+}
+
+/** Whether a stored figure is a count. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Whether a stored value is a day of new real test failures this can
+ * count with.
+ */
+function isNewRealTestFailureDay(
+  value: unknown,
+): value is NewRealTestFailureDay {
+  if (!isObjectNotArray(value)) return false;
+  return isCount(value.local) && isCount(value.pr) && isCount(value.main) &&
+    Array.isArray(value.sources) &&
+    value.sources.every((source) => typeof source === "string");
+}
+
+/**
+ * Reads a state's new real test failures forward. Its days of new real
+ * test failures are kept where they read, and a day that does not is
+ * dropped. The totals are then set from the days, so the two agree. A
+ * state stored without days was credited under other rules, so the fold
+ * that reads it folds its whole history again rather than counting it.
+ */
+export function readNewRealTestFailuresForward(state: IdentityState): void {
+  const days: Record<string, NewRealTestFailureDay> = {};
+  const held: unknown = state.newRealTestFailureDays;
+  if (isObjectNotArray(held)) {
+    for (const [day, failed] of Object.entries(held)) {
+      if (isNewRealTestFailureDay(failed)) days[day] = failed;
+    }
+  }
+  state.newRealTestFailureDays = days;
+  totalNewRealTestFailures(state);
+}
+
+/** Two counts of one day's new real test failures, as one. */
+function mergeNewRealTestFailureDays(
+  a: NewRealTestFailureDay | undefined,
+  b: NewRealTestFailureDay,
+): NewRealTestFailureDay {
+  if (a === undefined) return b;
+  return {
+    local: a.local + b.local,
+    pr: a.pr + b.pr,
+    main: a.main + b.main,
+    sources: [...new Set([...a.sources, ...b.sources])],
+  };
+}
+
+/**
+ * Every day a state holds anything for, in any of its histories. A day
+ * is what an alias is applied by, so these are what a state is divided
+ * along when part of its history belongs to another name.
+ */
+export function daysHeld(state: IdentityState): Set<string> {
+  const days = new Set<string>([
+    ...Object.keys(state.newRealTestFailureDays),
+    ...Object.keys(state.failuresByDay),
+    ...Object.keys(state.runsByDay),
+    ...Object.keys(state.flakesByDay),
+    ...Object.keys(state.costByDay),
+  ]);
+  for (const pending of state.pendingMain) days.add(pending.day);
+  return days;
+}
+
+/**
+ * Moves the days of `from` that `moves` answers yes for into `into`,
+ * adding each to whatever `into` holds for the same day. Afterwards each
+ * day is in one of the two states and not both, and each state's totals
+ * are what its own days add up to.
+ *
+ * A day's cost is combined only where both were sealed under the same
+ * set of cost rules. Where they were not, the day `into` holds stays and
+ * the moved one is dropped, since a state holds one set's days.
+ *
+ * Which outcome `main` last gave goes with the history once `from` has
+ * nothing left, and only to a state that has none of its own.
+ */
+export function moveHistory(
+  from: IdentityState,
+  into: IdentityState,
+  moves: (day: string) => boolean,
+): void {
+  for (const [day, failed] of Object.entries(from.newRealTestFailureDays)) {
+    if (!moves(day)) continue;
+    into.newRealTestFailureDays[day] = mergeNewRealTestFailureDays(
+      into.newRealTestFailureDays[day],
+      failed,
+    );
+    delete from.newRealTestFailureDays[day];
+  }
+  for (
+    const field of ["failuresByDay", "runsByDay", "flakesByDay"] as const
+  ) {
+    for (const [day, count] of Object.entries(from[field])) {
+      if (!moves(day)) continue;
+      into[field][day] = (into[field][day] ?? 0) + count;
+      delete from[field][day];
+    }
+  }
+  for (const [day, samples] of Object.entries(from.costByDay)) {
+    if (!moves(day)) continue;
+    const held = into.costByDay[day];
+    if (held === undefined) into.costByDay[day] = samples;
+    else if (held.rule === samples.rule) {
+      into.costByDay[day] = {
+        ...mergeSamples(held, samples),
+        ...(held.rule === undefined ? {} : { rule: held.rule }),
+      };
+    }
+    delete from.costByDay[day];
+  }
+  for (const pending of from.pendingMain) {
+    if (moves(pending.day)) into.pendingMain.push(pending);
+  }
+  from.pendingMain = from.pendingMain.filter((pending) => !moves(pending.day));
+  if (daysHeld(from).size === 0 && into.lastMainByOrder === undefined) {
+    if (from.lastMainByOrder !== undefined) {
+      into.lastMainByOrder = from.lastMainByOrder;
+    }
+    delete from.lastMainByOrder;
+  }
+  totalNewRealTestFailures(from);
+  totalNewRealTestFailures(into);
 }
 
 function bump(counts: Record<string, number>, day: string): void {
@@ -250,25 +442,23 @@ function bump(counts: Record<string, number>, day: string): void {
 const LONGEST_WINDOW_DAYS = Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS);
 
 /**
- * Judges the failures on `main` that were waiting for a later `main` run.
- * A failure the next run still shows is the same breakage continuing, so
- * it keeps waiting and nothing new is learned. A failure the next run
- * does not show is a flake when that run is at the commit of any of
- * them in the same order, or `disagreed` says the test also failed at
- * the pass's point, and a catch when it is at a later commit in the same
- * order. A pass judges only the failures in its own order: an
- * order-dependent test stops failing when the order moves on, so a pass
- * in another order says nothing about whether a change fixed anything.
- * A pass with no failure in its own order leaves every failure waiting,
- * for a run in its own order or until `trimWindows` ages it out. A pass
- * that judges any of them ends the stretch, and every failure in other
- * orders goes with it, since they are the same breakage seen in another
- * order.
- * Nothing separates a failure a change fixed from one that healed
- * itself, so a failure that healed itself in one order is credited as a
- * catch as well. A breakage that arrived in a crowd is no catch however
- * it ends, since whichever of the crowd a change runs would have found
- * it.
+ * Judges the failures on `main` that were waiting for a later `main` run. A
+ * failure the next run still shows is the same breakage continuing, so it keeps
+ * waiting and nothing new is learned. A failure the next run does not show is a
+ * flake when that run is at the commit of any of them in the same order, or
+ * `disagreed` says the test also failed at the pass's point, and a new real
+ * test failure when it is at a later commit in the same order. A pass judges
+ * only the failures in its own order: an order-dependent test stops failing
+ * when the order moves on, so a pass in another order says nothing about
+ * whether a change fixed anything. A pass with no failure in its own order
+ * leaves every failure waiting, for a run in its own order or until
+ * `trimWindows` ages it out. A pass that judges any of them ends the stretch,
+ * and every failure in other orders goes with it, since they are the same
+ * breakage seen in another order. Nothing separates a failure a change fixed
+ * from one that healed itself, so a failure that healed itself in one order is
+ * credited as a new real test failure as well. A breakage that arrived in a
+ * crowd is no new real test failure however it ends, since whichever of the
+ * crowd a change runs would have found it.
  */
 function resolvePendingMain(
   state: IdentityState,
@@ -280,14 +470,13 @@ function resolvePendingMain(
     pending.seed === observation.seed
   );
   if (inOrder.length === 0) return;
-  // A failure nothing has judged inside the longest window a state keeps
-  // is one the default branch has carried for that long, and crediting a
-  // catch for it now would credit the test with a fix it did not find.
-  // `trimWindows` ages these by the same window, and applies it too late
-  // to answer this on its own: a fold resolves every observation it
-  // reads before it ages anything. A pass that finds only those in its
-  // order judges nothing, so it drops them and leaves the other orders
-  // waiting.
+  // A failure nothing has judged inside the longest window a state keeps is one
+  // the default branch has carried for that long, and crediting a new real test
+  // failure for it now would credit the test with a fix it did not find.
+  // `trimWindows` ages these by the same window, and applies it too late to
+  // answer this on its own: a fold resolves every observation it reads before
+  // it ages anything. A pass that finds only those in its order judges nothing,
+  // so it drops them and leaves the other orders waiting.
   const live = inOrder.filter((pending) =>
     daysBetween(pending.day, observation.day) <= LONGEST_WINDOW_DAYS
   );
@@ -305,7 +494,7 @@ function resolvePendingMain(
     // stretch. The two runs can arrive in separate batches, so the
     // same-commit check that catches this within one batch does not see
     // it, and dropping the pending failure silently would lose the flake
-    // as well as the catch.
+    // as well as the new real test failure.
     bump(state.flakesByDay, here.day);
     return;
   }
@@ -314,17 +503,17 @@ function resolvePendingMain(
   // itself and counted then. It ends the stretch as a flake rather than
   // a fix.
   if (disagreed) return;
-  // One breakage, one catch. A test that stays red across several runs on
-  // the default branch has one thing wrong with it, and the change that
-  // makes it green fixed that one thing; crediting every run it failed
-  // would make a long outage look like the most valuable test in the
-  // repository. The first failure is the one the catch belongs to, since
-  // that is where the breakage entered.
+  // One breakage, one new real test failure. A test that stays red across
+  // several runs on the default branch has one thing wrong with it, and the
+  // change that makes it green fixed that one thing; crediting every run it
+  // failed would make a long outage look like the most valuable test in the
+  // repository. The first failure is the one the new real test failure belongs
+  // to, since that is where the breakage entered.
   const first = live.reduce((earliest, pending) =>
     pending.day < earliest.day ? pending : earliest
   );
   if (first.crowded === true) return;
-  creditCatch(state, "main", first.day, first.source);
+  creditNewRealTestFailure(state, "main", first.day, first.source);
 }
 
 /**
@@ -394,9 +583,10 @@ export interface FoldContext {
   mainAtCommit: Map<string, { day: string; outcome: "pass" | "fail" }>;
 
   /**
-   * The commit and source pairs a catch has already been credited to,
-   * against the day it was credited on, so the set can be aged like
-   * everything else here rather than growing with every catch ever made.
+   * The commit and source pairs a new real test failure has already been
+   * credited to, against the day it was credited on. That lets the set be
+   * aged like everything else here rather than growing with every new
+   * real test failure ever credited.
    */
   credited: Map<string, string>;
 
@@ -417,13 +607,13 @@ export interface SeenFailure {
   source: string;
 
   /**
-   * Whether this failure was away from the default branch while that
-   * branch was already failing this identity, which is also what stops
-   * it being a catch. A pull request's run tests the pull request merged
-   * into the default branch, and a workstation runs a change on top of
-   * one of its commits, so either fails a test the default branch is
-   * failing. Such a failure is the default branch's breakage seen again,
-   * and the environmental rule leaves it out when it counts sources.
+   * Whether this failure was away from the default branch while that branch was
+   * already failing this identity, which is also what stops it being a new real
+   * test failure. A pull request's run tests the pull request merged into the
+   * default branch, and a workstation runs a change on top of one of its
+   * commits, so either fails a test the default branch is failing. Such a
+   * failure is the default branch's breakage seen again, and the environmental
+   * rule leaves it out when it counts sources.
    */
   brokenOnMain?: true;
 }
@@ -518,7 +708,8 @@ export function parseContext(value: unknown): FoldContext {
       if (!Array.isArray(raw)) continue;
       // An outcome this reader does not know would read as one more
       // thing the identity did at that commit, and two of them is the
-      // test disagreeing with itself — which suppresses a real catch.
+      // test disagreeing with itself — which suppresses a new real test
+      // failure.
       const outcomes = raw.filter((outcome): outcome is string =>
         typeof outcome === "string" && OUTCOMES.has(outcome)
       );
@@ -541,7 +732,7 @@ export function parseContext(value: unknown): FoldContext {
   }
   for (const [attribution, day] of pairs(stored.credited)) {
     // A day that cannot be read cannot be aged, and an entry that is
-    // never aged suppresses that catch for good.
+    // never aged suppresses that new real test failure for good.
     if (isDay(day)) context.credited.set(attribution, day);
   }
   for (const [key, seen] of pairs(stored.failures)) {
@@ -582,7 +773,7 @@ export function parseContext(value: unknown): FoldContext {
  */
 export function trimContext(context: FoldContext, today: string): void {
   const beyondBreadth = (day: string) =>
-    daysBetween(day, today) > CATCH_BREADTH_WINDOW_DAYS;
+    daysBetween(day, today) > NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS;
   for (const [key, seen] of context.failures) {
     const kept = seen.filter((failure) => !beyondBreadth(failure.day));
     if (kept.length === 0) context.failures.delete(key);
@@ -603,7 +794,7 @@ export function trimContext(context: FoldContext, today: string): void {
   );
   // A commit is re-run within days of the run it repeats, not months, so
   // these age on the same window. Kept forever they would grow with the
-  // number of catches the repository has ever made.
+  // number of new real test failures the repository has ever had.
   const old = (day: string) => daysBetween(day, today) > COMMIT_REACH_DAYS;
   for (const [at, seen] of context.mainAtCommit) {
     if (old(seen.day)) context.mainAtCommit.delete(at);
@@ -626,11 +817,11 @@ export interface FoldOptions {
  * Folds a batch of observations into per-identity state.
  *
  * The observations must be in ascending time order, because the rules
- * that decide whether a failure is a catch look backwards at what `main`
- * last said and forwards at what it says next. Observations at one commit
- * in one order are considered together: an identity that both passed and
- * failed there disagreed with itself, which is a flake observation and
- * never a catch.
+ * that decide whether a failure is a new real test failure look backwards
+ * at what `main` last said and forwards at what it says next.
+ * Observations at one commit in one order are considered together: an
+ * identity that both passed and failed there disagreed with itself, which
+ * is a flake observation and never a new real test failure.
  *
  * Both of those need the whole batch in view before any one observation is
  * judged, so this walks the batch more than once and the iterable has to
@@ -799,7 +990,8 @@ export function foldObservations(
     for (const failure of failures.get(key) ?? []) {
       if (
         failure.brokenOnMain === true ||
-        Math.abs(daysBetween(failure.day, day)) > CATCH_BREADTH_WINDOW_DAYS
+        Math.abs(daysBetween(failure.day, day)) >
+          NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS
       ) {
         continue;
       }
@@ -831,8 +1023,9 @@ export function foldObservations(
     return size >= MASS_FAILURE_MIN_IDENTITIES;
   };
 
-  // A catch is attributed to the pair of the commit and the source that
-  // saw it, so re-running one broken commit ten times counts once.
+  // A new real test failure is attributed to the pair of the commit and
+  // the source that saw it, so re-running one broken commit ten times
+  // counts once.
   const credited = context.credited;
 
   for (const observation of observations) {
@@ -874,12 +1067,12 @@ export function foldObservations(
     }
     if (environmental(key, day, observation.source)) continue;
     if (observation.place === "main") {
-      // Whether this was a catch depends on what the next `main` run
-      // says, so it waits. A failure continuing a breakage, which `main`
-      // has not passed since in this order, is part of that breakage,
+      // Whether this was a new real test failure depends on what the next
+      // `main` run says, so it waits. A failure continuing a breakage, which
+      // `main` has not passed since in this order, is part of that breakage,
       // crowd and all. Where `main` has not run it in this order, what it
-      // continues is the breakage in whichever order `main` last ran it.
-      // A failure after a pass begins a breakage of its own.
+      // continues is the breakage in whichever order `main` last ran it. A
+      // failure after a pass begins a breakage of its own.
       const waiting = state.pendingMain;
       const continued = lastMain === "fail"
         ? waiting.findLast((pending) =>
@@ -904,7 +1097,7 @@ export function foldObservations(
     const attribution = `${key} ${observation.commit} ${observation.source}`;
     if (credited.has(attribution)) continue;
     credited.set(attribution, day);
-    creditCatch(state, observation.place, day, observation.source);
+    creditNewRealTestFailure(state, observation.place, day, observation.source);
   }
 
   return states;
@@ -1165,8 +1358,9 @@ export function trimWindows(state: IdentityState, today: string): void {
   // it, and a test the branch does not go red for is one no run has to
   // arrive for. So this is aged like everything else, over the longest
   // window a state keeps: a failure nothing has judged in that time is
-  // one the branch has carried for that long, and crediting a catch for
-  // it afterwards would credit the test with a fix it did not find.
+  // one the branch has carried for that long, and crediting a new real
+  // test failure for it afterwards would credit the test with a fix it
+  // did not find.
   state.pendingMain = state.pendingMain.filter((pending) =>
     daysBetween(pending.day, today) <= LONGEST_WINDOW_DAYS
   );
@@ -1323,9 +1517,9 @@ export function scoreInputs(
   today: string,
 ): ScoreInputs {
   const inputs: ScoreInputs = {
-    catches: CATCH_WEIGHT_LOCAL * state.localCatches +
-      CATCH_WEIGHT_PR * state.prCatches +
-      CATCH_WEIGHT_MAIN * state.mainCatches,
+    catches: NEW_REAL_TEST_FAILURE_WEIGHT_LOCAL * state.localCatches +
+      NEW_REAL_TEST_FAILURE_WEIGHT_PR * state.prCatches +
+      NEW_REAL_TEST_FAILURE_WEIGHT_MAIN * state.mainCatches,
     sources: state.sources.length,
     churn: churn(state, today),
   };
@@ -1336,11 +1530,11 @@ export function scoreInputs(
 /**
  * What a test is worth running.
  *
- * The no-catch branch is not decoration. A test with no catches has no
- * `lastCatch`, so the age of its most recent one does not exist, and
- * multiplying zero by a missing number yields a missing number rather
- * than zero. A missing score sorts unpredictably against real ones, so
- * the branch is written rather than left to the algebra.
+ * The branch for no new real test failures is not decoration. A test with none
+ * has no `lastCatch`, so the age of its most recent one does not exist, and
+ * multiplying zero by a missing number yields a missing number rather than
+ * zero. A missing score sorts unpredictably against real ones, so the branch is
+ * written rather than left to the algebra.
  */
 export function value(inputs: ScoreInputs, today: string): number {
   let record = 0;

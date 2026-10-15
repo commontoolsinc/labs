@@ -14,6 +14,7 @@ import {
   foldObservations,
   type IdentityState,
   mergeSamples,
+  moveHistory,
   type Observation,
   parseContext,
   percentile90,
@@ -29,11 +30,11 @@ import {
   value,
 } from "./score.ts";
 import {
-  CATCH_BREADTH_WINDOW_DAYS,
   COST_WINDOW_DAYS,
   FLAKE_COMMIT_REACH,
   FLAKE_EXCLUSION_RATE,
   MASS_FAILURE_MIN_IDENTITIES,
+  NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS,
   SAME_COMMIT_REACH_DAYS,
   VALUE_FLOOR,
 } from "./policy.ts";
@@ -118,8 +119,9 @@ describe("score", () => {
     it("drops what it cannot read rather than believing it", () => {
       // An unknown outcome would read as one more thing the identity did
       // at that commit, and two of them is the test disagreeing with
-      // itself, which suppresses a real catch. A credited entry with no
-      // readable day can never be aged out, so it suppresses one forever.
+      // itself, which suppresses a new real test failure. A credited
+      // entry with no readable day can never be aged out, so it
+      // suppresses one forever.
       const back = parseContext({
         outcomesAtCommit: [
           ["c1", { day: "2026-08-20", identities: [["k", ["wat"]]] }],
@@ -341,7 +343,7 @@ describe("score", () => {
     });
   });
 
-  describe("what counts as a catch", () => {
+  describe("what counts as a new real test failure", () => {
     it("counts a failure on a branch where main was green", () => {
       const state = stateFrom([
         saw("pass", { day: "2026-08-19", commit: "c0" }),
@@ -395,7 +397,7 @@ describe("score", () => {
       expect(state.prCatches).toBe(0);
     });
 
-    it("counts one catch however often a broken commit is re-run", () => {
+    it("counts one new real test failure however often a broken commit is re-run", () => {
       const state = stateFrom([
         saw("fail", { commit: "c1", place: "pr", source: "branch" }),
         saw("fail", { commit: "c1", place: "pr", source: "branch" }),
@@ -404,7 +406,7 @@ describe("score", () => {
       expect(state.prCatches).toBe(1);
     });
 
-    it("weighs a catch on a workstation double", () => {
+    it("weighs a new real test failure on a workstation double", () => {
       const state = stateFrom([
         saw("fail", { commit: "c1", place: "local", source: "ianh" }),
       ]);
@@ -423,7 +425,7 @@ describe("score", () => {
       expect(state.pendingMain.length).toBe(2);
     });
 
-    it("counts a catch once a later run passes", () => {
+    it("counts a new real test failure once a later run passes", () => {
       const state = stateFrom([
         saw("fail", { day: "2026-08-19", commit: "c0" }),
         saw("pass", { commit: "c1" }),
@@ -432,7 +434,7 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
-    it("counts one catch for a run of failures one change ended", () => {
+    it("counts one new real test failure for a run of failures one change ended", () => {
       // A test red across several commits on the default branch has one
       // thing wrong with it, and the change that makes it green fixed
       // that one thing.
@@ -445,8 +447,8 @@ describe("score", () => {
       expect(state.mainCatches).toBe(1);
       expect(state.lastCatch).toBe("2026-08-17");
       expect(state.pendingMain).toEqual([]);
-      // One catch and nothing else: the run resolved, so none of the
-      // failures in it is also flake evidence.
+      // One new real test failure and nothing else: the run resolved, so
+      // none of the failures in it is also flake evidence.
       expect(flakeRate(state, "2026-08-20")).toBe(0);
     });
 
@@ -471,7 +473,7 @@ describe("score", () => {
       // A lane of the full run that saw a test fail runs it again, and
       // ships the rerun in the run's own records: the same commit, the
       // same start, the same seed. Commits that alternate between failing
-      // and passing are otherwise a run of catches.
+      // and passing are otherwise a run of new real test failures.
       const history = (rerun: boolean) =>
         ["c1", "c2", "c3", "c4"].flatMap((commit, at) => {
           const run = {
@@ -565,7 +567,7 @@ describe("score", () => {
       expect(state.flakesByDay["2026-08-20"] ?? 0).toBe(0);
     });
 
-    it("credits no catch to a failure on main that a new order ended", () => {
+    it("credits no new real test failure to a failure on main that a new order ended", () => {
       // The order moved on and the test stopped failing, which says
       // nothing about whether any change fixed it, so the failure goes on
       // waiting for a run in its own order.
@@ -593,7 +595,7 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
-    it("credits one catch to a breakage failing in two orders", () => {
+    it("credits one new real test failure to a breakage failing in two orders", () => {
       // The run under the next day's seed saw the breakage the day's push
       // did. The fix that ends it in the day's order ends it in both, so
       // the next day's first push, passing in the other order, credits
@@ -644,7 +646,7 @@ describe("score", () => {
       expect(state.prCatches).toBe(0);
     });
 
-    it("leaves a pull request's catch alone after a failure in another order", () => {
+    it("leaves a pull request's new real test failure alone after a failure in another order", () => {
       const state = stateFrom([
         saw("pass", { commit: "c1", seed: 20260820 }),
         saw("fail", {
@@ -695,7 +697,7 @@ describe("score", () => {
       // The run of `main` under the next day's seed lands between the
       // day's pushes. Its pass leaves the day's failures waiting, so a
       // rerun of the failing push still reads as the flake it is, and a
-      // later push in that order still credits a catch.
+      // later push in that order still credits a new real test failure.
       const prior = new Map<string, IdentityState>();
       const context = emptyContext();
       const fold = (observation: Observation) =>
@@ -733,7 +735,7 @@ describe("score", () => {
       expect(later.pendingMain).toEqual([]);
     });
 
-    it("still credits a catch to a failure a later commit in one order ended", () => {
+    it("still credits a new real test failure to a failure a later commit in one order ended", () => {
       const state = stateFrom([
         saw("fail", { day: "2026-08-20", commit: "c0", seed: 20260820 }),
         saw("pass", { commit: "c1", seed: 20260820 }),
@@ -741,7 +743,7 @@ describe("score", () => {
       expect(state.mainCatches).toBe(1);
     });
 
-    it("reads a rerun of one commit in another order as neither flake nor catch", () => {
+    it("reads a rerun of one commit in another order as neither flake nor new real test failure", () => {
       const state = stateFrom([
         saw("fail", { commit: "c1", seed: 20260820 }),
         saw("pass", {
@@ -787,9 +789,10 @@ describe("score", () => {
       );
     });
 
-    it("scores failures that were not catches at the floor plus churn", () => {
+    it("scores failures that were not new real test failures at the floor plus churn", () => {
       // Every failure here disagrees with a pass at the same commit, so
-      // none is a catch, and what is left is the churn term alone.
+      // none is a new real test failure, and what is left is the churn
+      // term alone.
       const state = stateFrom([
         saw("pass", { commit: "c1", place: "pr", source: "branch" }),
         saw("fail", { commit: "c1", place: "pr", source: "branch" }),
@@ -820,7 +823,7 @@ describe("score", () => {
       );
     });
 
-    it("saturates, so a fifth catch cannot crowd everything out", () => {
+    it("saturates, so a fifth new real test failure cannot crowd everything out", () => {
       const at = (catches: number) =>
         value(
           {
@@ -836,7 +839,7 @@ describe("score", () => {
       expect(at(100)).toBeLessThan(1);
     });
 
-    it("decays a catch slowly and never below the freshness floor", () => {
+    it("decays a new real test failure slowly and never below the freshness floor", () => {
       const at = (lastCatch: string) =>
         value(
           { catches: 4, lastCatch, sources: 0, churn: 0 },
@@ -1484,7 +1487,8 @@ describe("a main failure resolved in a later batch", () => {
   it("is a flake when the same commit later passes", () => {
     // The two runs of one commit can arrive in separate batches, so the
     // same-commit check inside a batch does not see this pair. Dropping
-    // the pending failure would lose the flake as well as the catch.
+    // the pending failure would lose the flake as well as the new real
+    // test failure.
     const context = emptyContext();
     const first = foldObservations([saw("fail", { commit: "c1" })], {
       context,
@@ -1495,12 +1499,13 @@ describe("a main failure resolved in a later batch", () => {
     });
     const state = second.get(KEY)!;
     expect(state.flakesByDay["2026-08-20"]).toBe(1);
-    // A flake at one commit is not a catch: nothing was fixed between the
-    // failure and the pass, because there is nothing between them.
+    // A flake at one commit is not a new real test failure: nothing was
+    // fixed between the failure and the pass, because there is nothing
+    // between them.
     expect(state.mainCatches).toBe(0);
   });
 
-  it("is a catch when a later commit passes", () => {
+  it("is a new real test failure when a later commit passes", () => {
     const context = emptyContext();
     const first = foldObservations([saw("fail", { commit: "c1" })], {
       context,
@@ -1538,7 +1543,8 @@ describe("a main failure resolved in a later batch", () => {
 describe("a failure seen from many places at once", () => {
   it("is environmental, and credits nobody, when the sources are near", () => {
     // Five sources failing within the breadth window is the environment
-    // breaking, not the test catching five separate changes.
+    // breaking, not the test having five separate new real test
+    // failures.
     const sources = ["main", "a", "b", "c", "d"];
     const folded = foldObservations(
       sources.map((source) =>
@@ -1581,7 +1587,8 @@ describe("a failure seen from many places at once", () => {
     const state = folded.get(KEY)!;
     expect(state.failuresByDay["2026-08-01"]).toBe(1);
     expect(state.failuresByDay["2026-08-20"]).toBe(3);
-    // Four sources in all, but never four at once, so each is a catch.
+    // Four sources in all, but never four at once, so each is a new real
+    // test failure.
     expect(state.prCatches).toBe(4);
   });
 });
@@ -1643,7 +1650,7 @@ describe("a failure the default branch was already failing", () => {
     // Nothing tells a failure the default branch's code caused from one
     // its environment did while that branch is the one failing, so the
     // branches it reaches meanwhile say nothing either way, and the
-    // breakage is the default branch's one catch.
+    // breakage is the default branch's one new real test failure.
     const state = foldObservations(
       breakage(["a", "b", "c", "d", "e", "f"], []),
     ).get(KEY)!;
@@ -1720,8 +1727,8 @@ describe("a run that newly breaks a crowd of tests", () => {
     );
   }
 
-  /** Each test's catches, wherever they happened. */
-  function catchesOf(
+  /** Each test's new real test failures, wherever they happened. */
+  function newRealTestFailuresOf(
     folded: Map<string, IdentityState>,
     tests: readonly TestIdentity[],
   ): number[] {
@@ -1737,7 +1744,7 @@ describe("a run that newly breaks a crowd of tests", () => {
     // nothing about any one of them.
     const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
     const folded = foldObservations(failing(crowd));
-    expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+    expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
     for (const test of crowd) {
       const state = folded.get(testIdentityKey(test))!;
       expect(state.failuresByDay["2026-08-20"]).toBe(1);
@@ -1748,9 +1755,10 @@ describe("a run that newly breaks a crowd of tests", () => {
 
   it("credits each of them when the crowd is one short", () => {
     const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES - 1);
-    expect(catchesOf(foldObservations(failing(crowd)), crowd)).toEqual(
-      crowd.map(() => 1),
-    );
+    expect(newRealTestFailuresOf(foldObservations(failing(crowd)), crowd))
+      .toEqual(
+        crowd.map(() => 1),
+      );
   });
 
   it("counts an identity the run failed twice once", () => {
@@ -1759,7 +1767,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...failing(crowd),
       ...failing(crowd.slice(0, 1)),
     ]);
-    expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 1));
+    expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 1));
   });
 
   it("does not count what the default branch was already failing", () => {
@@ -1771,8 +1779,8 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...red.map((test) => saw("fail", { test, commit: "m1" })),
       ...failing([...red, ...fresh], { commit: "c2" }),
     ]);
-    expect(catchesOf(folded, fresh)).toEqual([1]);
-    expect(catchesOf(folded, red)).toEqual(red.map(() => 0));
+    expect(newRealTestFailuresOf(folded, fresh)).toEqual([1]);
+    expect(newRealTestFailuresOf(folded, red)).toEqual(red.map(() => 0));
   });
 
   it("does not count a test that disagreed with itself there", () => {
@@ -1784,7 +1792,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       ),
       ...failing([...flaky, ...fresh]),
     ]);
-    expect(catchesOf(folded, fresh)).toEqual([1]);
+    expect(newRealTestFailuresOf(folded, fresh)).toEqual([1]);
   });
 
   it("counts what each source saw apart", () => {
@@ -1796,7 +1804,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...failing(crowd.slice(0, half)),
       ...failing(crowd.slice(half), { place: "local", source: "someone" }),
     ]);
-    expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 1));
+    expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 1));
   });
 
   it("counts each run on one workstation at one commit apart", () => {
@@ -1808,14 +1816,14 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...failing(crowd, { ...local, startedAt: "2026-08-20T01:00:00.000Z" }),
       ...failing(later, { ...local, startedAt: "2026-08-20T09:00:00.000Z" }),
     ]);
-    expect(catchesOf(folded, [...crowd, ...later])).toEqual(
+    expect(newRealTestFailuresOf(folded, [...crowd, ...later])).toEqual(
       [...crowd, ...later].map(() => 1),
     );
   });
 
   it("does not count a failure the environment explains", () => {
     // Failing on enough sources at once reads as the environment, which
-    // is no catch whatever its run did.
+    // is no new real test failure whatever its run did.
     const shared = crowdOf(MASS_FAILURE_MIN_IDENTITIES, "shared");
     const fresh = crowdOf(1, "fresh");
     const elsewhere = ["a", "b", "c", "d"].flatMap((source) =>
@@ -1825,7 +1833,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...elsewhere,
       ...failing([...shared, ...fresh]),
     ]);
-    expect(catchesOf(folded, fresh)).toEqual([1]);
+    expect(newRealTestFailuresOf(folded, fresh)).toEqual([1]);
   });
 
   it("counts what one source saw at each commit apart", () => {
@@ -1835,7 +1843,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       ...failing(crowd.slice(0, half), { commit: "c1" }),
       ...failing(crowd.slice(half), { commit: "c2" }),
     ]);
-    expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 1));
+    expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 1));
   });
 
   it("reaches the part of a run that arrives in a later batch", () => {
@@ -1847,7 +1855,7 @@ describe("a run that newly breaks a crowd of tests", () => {
       context: parseContext(serializeContext(context)),
       prior: first,
     });
-    expect(catchesOf(second, last)).toEqual([0]);
+    expect(newRealTestFailuresOf(second, last)).toEqual([0]);
   });
 
   describe("on the default branch", () => {
@@ -1857,7 +1865,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         ...crowd.map((test) => saw("fail", { test, commit: "c1" })),
         ...crowd.map((test) => saw("pass", { test, commit: "c2" })),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
       expect(folded.get(testIdentityKey(crowd[0]!))!.pendingMain).toEqual([]);
     });
 
@@ -1867,7 +1875,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         ...crowd.map((test) => saw("fail", { test, commit: "c1" })),
         ...crowd.map((test) => saw("pass", { test, commit: "c2" })),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 1));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 1));
     });
 
     it("keeps the breakage a crowd while the branch goes on failing", () => {
@@ -1880,7 +1888,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         ...crowd.map((test) => saw("fail", { test, commit: "c2", seed: 2 })),
         ...crowd.map((test) => saw("pass", { test, commit: "c3", seed: 2 })),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
     });
 
     it("credits none of them when a later run fixes them", () => {
@@ -1897,7 +1905,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         crowd.map((test) => saw("pass", { test, commit: "c2" })),
         { prior: stored },
       );
-      expect(catchesOf(second, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(second, crowd)).toEqual(crowd.map(() => 0));
     });
 
     it("judges a breakage after a pass in another order by its own run", () => {
@@ -1911,7 +1919,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         ...crowd.map((test) => saw("fail", { test, commit: "c2", seed: 2 })),
         ...crowd.map((test) => saw("pass", { test, commit: "c3", seed: 2 })),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
 
       const lone = foldObservations([
         ...crowd.map((test) => saw("fail", { test, commit: "c0", seed: 1 })),
@@ -1919,12 +1927,12 @@ describe("a run that newly breaks a crowd of tests", () => {
         saw("fail", { test: alone, commit: "c2", seed: 2 }),
         saw("pass", { test: alone, commit: "c3", seed: 2 }),
       ]);
-      expect(catchesOf(lone, [alone])).toEqual([1]);
+      expect(newRealTestFailuresOf(lone, [alone])).toEqual([1]);
     });
 
     it("judges a breakage by its own order after a crowd in another", () => {
       // The next day's order broke a crowd, and the day's order then
-      // broke one test alone, which is that test's catch.
+      // broke one test alone, which is that test's new real test failure.
       const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
       const alone = crowd[0]!;
       const at = (hour: number) =>
@@ -1939,7 +1947,7 @@ describe("a run that newly breaks a crowd of tests", () => {
         saw("fail", { test: alone, commit: "c1", seed: 1, startedAt: at(3) }),
         saw("pass", { test: alone, commit: "c2", seed: 1, startedAt: at(4) }),
       ]);
-      expect(catchesOf(folded, [alone])).toEqual([1]);
+      expect(newRealTestFailuresOf(folded, [alone])).toEqual([1]);
     });
 
     it("counts a crowd its order newly broke past a failure in another", () => {
@@ -1961,7 +1969,7 @@ describe("a run that newly breaks a crowd of tests", () => {
           saw("pass", { test, commit: "c3", seed: 1, startedAt: at(3) })
         ),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
     });
 
     it("keeps a crowd a crowd when the next day's order first sees it", () => {
@@ -1996,7 +2004,7 @@ describe("a run that newly breaks a crowd of tests", () => {
           })
         ),
       ]);
-      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+      expect(newRealTestFailuresOf(folded, crowd)).toEqual(crowd.map(() => 0));
     });
 
     it("does not count what it was already failing", () => {
@@ -2012,8 +2020,8 @@ describe("a run that newly breaks a crowd of tests", () => {
           saw("pass", { test, commit: "c3" })
         ),
       ]);
-      expect(catchesOf(folded, fresh)).toEqual([1]);
-      expect(catchesOf(folded, red)).toEqual(red.map(() => 0));
+      expect(newRealTestFailuresOf(folded, fresh)).toEqual([1]);
+      expect(newRealTestFailuresOf(folded, red)).toEqual(red.map(() => 0));
     });
   });
 });
@@ -2130,7 +2138,9 @@ describe("the two windows the context ages on", () => {
     trimContext(context, past);
     expect(context.outcomesAtCommit.size).toBe(0);
     expect(context.failures.size).toBe(
-      CATCH_BREADTH_WINDOW_DAYS > SAME_COMMIT_REACH_DAYS ? 1 : 0,
+      NEW_REAL_TEST_FAILURE_BREADTH_WINDOW_DAYS > SAME_COMMIT_REACH_DAYS
+        ? 1
+        : 0,
     );
   });
 });
@@ -2192,8 +2202,8 @@ describe("a rerun that lands after the window would have let go", () => {
     // Aging happens once per batch and after it, so an entry past the
     // span survives until the next batch arrives. A pass and a failure
     // at one commit is disagreement however far apart they land, and
-    // there is no change between them for a catch to be about, so the
-    // later answer is the better one and is left as it is.
+    // there is no change between them for a new real test failure to be
+    // about, so the later answer is the better one and is left as it is.
     const context = emptyContext();
     const first = foldObservations([saw("pass", { commit: "c0" })], {
       context,
@@ -2208,5 +2218,129 @@ describe("a rerun that lands after the window would have let go", () => {
     const state = late.get(KEY)!;
     expect(state.flakesByDay["2026-08-30"]).toBe(1);
     expect(state.mainCatches).toBe(0);
+  });
+});
+
+describe("the day a new real test failure is dated to", () => {
+  it("counts each new real test failure on its own day, beside the totals", () => {
+    const state = stateFrom([
+      saw("pass", { day: "2026-08-19", commit: "c0" }),
+      saw("fail", { commit: "c1", place: "pr", source: "fix-writes" }),
+      saw("fail", { commit: "c2", place: "pr", source: "tidy-up" }),
+    ]);
+    expect(state.newRealTestFailureDays).toEqual({
+      "2026-08-20": {
+        local: 0,
+        pr: 2,
+        main: 0,
+        sources: ["fix-writes", "tidy-up"],
+      },
+    });
+    expect(state.prCatches).toBe(2);
+  });
+
+  it("dates a new real test failure on main to the first failure the fix ended", () => {
+    // One breakage, one new real test failure, dated to where the
+    // breakage entered, which is the day a later reader divides the
+    // history by.
+    const state = stateFrom([
+      saw("fail", { day: "2026-08-18", commit: "c0" }),
+      saw("fail", { day: "2026-08-19", commit: "c1" }),
+      saw("pass", { commit: "c2" }),
+    ]);
+    expect(Object.keys(state.newRealTestFailureDays)).toEqual(["2026-08-18"]);
+    expect(state.newRealTestFailureDays["2026-08-18"]!.main).toBe(1);
+  });
+});
+
+describe("moveHistory()", () => {
+  /** A state holding something on each of two days. */
+  function twoDays(): IdentityState {
+    return {
+      ...emptyState(),
+      newRealTestFailureDays: {
+        "2026-08-10": { local: 1, pr: 0, main: 0, sources: ["ianh"] },
+        "2026-08-14": { local: 0, pr: 1, main: 0, sources: ["fix"] },
+      },
+      runsByDay: { "2026-08-10": 4, "2026-08-14": 5 },
+      failuresByDay: { "2026-08-10": 1 },
+      flakesByDay: { "2026-08-14": 1 },
+      costByDay: {
+        "2026-08-10": { ...samplesOf([40]), rule: COST_RULE },
+        "2026-08-14": { ...samplesOf([50]), rule: COST_RULE },
+      },
+      pendingMain: [{ day: "2026-08-14", commit: "c9", source: "main" }],
+      lastMainByOrder: [{ seed: 20260814, outcome: "fail" }],
+    };
+  }
+
+  it("moves the days it is asked to and leaves the rest", () => {
+    const from = twoDays();
+    const into = emptyState();
+    moveHistory(from, into, (day) => day < "2026-08-12");
+    expect(Object.keys(into.newRealTestFailureDays)).toEqual(["2026-08-10"]);
+    expect(into.runsByDay).toEqual({ "2026-08-10": 4 });
+    expect(into.failuresByDay).toEqual({ "2026-08-10": 1 });
+    expect(into.localCatches).toBe(1);
+    expect(into.lastCatch).toBe("2026-08-10");
+    expect(Object.keys(from.newRealTestFailureDays)).toEqual(["2026-08-14"]);
+    expect(from.runsByDay).toEqual({ "2026-08-14": 5 });
+    expect(from.pendingMain).toHaveLength(1);
+    expect(from.localCatches).toBe(0);
+    expect(from.prCatches).toBe(1);
+    // Some of the history is still here, and so is what main last said.
+    expect(from.lastMainByOrder).toEqual([{ seed: 20260814, outcome: "fail" }]);
+    expect(into.lastMainByOrder).toBeUndefined();
+  });
+
+  it("adds a moved day to what the other state holds for it", () => {
+    const into: IdentityState = {
+      ...emptyState(),
+      newRealTestFailureDays: {
+        "2026-08-10": { local: 0, pr: 2, main: 0, sources: ["fix"] },
+      },
+      runsByDay: { "2026-08-10": 6 },
+      costByDay: { "2026-08-10": { ...samplesOf([60]), rule: COST_RULE } },
+    };
+    moveHistory(twoDays(), into, () => true);
+    expect(into.newRealTestFailureDays["2026-08-10"]).toEqual({
+      local: 1,
+      pr: 2,
+      main: 0,
+      sources: ["fix", "ianh"],
+    });
+    expect(into.runsByDay["2026-08-10"]).toBe(10);
+    expect(into.costByDay["2026-08-10"]).toEqual({
+      ...mergeSamples(samplesOf([60]), samplesOf([40])),
+      rule: COST_RULE,
+    });
+    expect(into.localCatches + into.prCatches).toBe(4);
+    expect(into.sources).toEqual(["fix", "ianh"]);
+  });
+
+  it("keeps the day it holds where the moved one was sealed by other rules", () => {
+    const into: IdentityState = {
+      ...emptyState(),
+      costByDay: { "2026-08-10": { ...samplesOf([60]), rule: COST_RULE } },
+    };
+    const from = twoDays();
+    from.costByDay["2026-08-10"] = { ...samplesOf([40]), rule: COST_RULE + 1 };
+    moveHistory(from, into, () => true);
+    expect(into.costByDay["2026-08-10"]).toEqual({
+      ...samplesOf([60]),
+      rule: COST_RULE,
+    });
+    expect(from.costByDay).toEqual({});
+  });
+
+  it("hands over what main last said once nothing is left behind", () => {
+    const from = twoDays();
+    const into = emptyState();
+    moveHistory(from, into, () => true);
+    expect(into.lastMainByOrder).toEqual([{ seed: 20260814, outcome: "fail" }]);
+    expect(from.lastMainByOrder).toBeUndefined();
+    expect(into.pendingMain).toEqual([
+      { day: "2026-08-14", commit: "c9", source: "main" },
+    ]);
   });
 });

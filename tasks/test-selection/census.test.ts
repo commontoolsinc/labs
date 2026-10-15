@@ -161,7 +161,8 @@ describe("what a lane must run whatever the score says", () => {
 
   it("leaves a gate the corpus already knows to the score", () => {
     // A gate is a test of the tree like any other: what it is worth is
-    // what decides, so a gate that catches nothing stops being paid for.
+    // what decides, so a gate that has no new real test failures stops
+    // being paid for.
 
     const gates = suite({
       id: "repo-gates",

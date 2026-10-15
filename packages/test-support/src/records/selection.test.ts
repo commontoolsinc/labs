@@ -571,7 +571,7 @@ describe("selection", () => {
         }, "entry"),
       ],
       [
-        "a last catch that is not a day",
+        "a last new real test failure that is not a day",
         withField("inputs", {
           catches: 0,
           sources: 0,

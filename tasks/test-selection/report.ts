@@ -196,8 +196,11 @@ export interface PullRequestView {
    */
   flakes: ReadonlyMap<string, FlakeEvidence | undefined>;
 
-  /** The weighted catches behind each identity the store knows. */
-  catches: ReadonlyMap<string, number>;
+  /**
+   * The weighted new real test failures behind each identity the store
+   * knows.
+   */
+  newRealTestFailures: ReadonlyMap<string, number>;
 
   /**
    * The invocation unit each identity the store knows lives in, as
@@ -219,7 +222,7 @@ export function unknownPullRequest(): PullRequestView {
     unschedulable: new Set(),
     crowded: false,
     flakes: new Map(),
-    catches: new Map(),
+    newRealTestFailures: new Map(),
     units: new Map(),
   };
 }
@@ -331,8 +334,8 @@ export interface RenameSuggestion {
   from: TestIdentity;
   to: TestIdentity;
 
-  /** The weighted catches the bridge would bring back. */
-  catches: number;
+  /** The weighted new real test failures the bridge would bring back. */
+  newRealTestFailures: number;
 
   /** The line to append to the alias file, exactly as it must be written. */
   aliasLine: string;
@@ -458,9 +461,9 @@ export function selectionOf(
  *
  * A test that both passed and failed in this run produces nothing
  * either. That is the test disagreeing with itself at one commit, which
- * is what the scorer calls flake evidence rather than a catch, and
- * calling it a first failure would say the change broke something that
- * broke on its own.
+ * is what the scorer calls flake evidence rather than a new real test
+ * failure. Calling it a first failure would say the change broke
+ * something that broke on its own.
  *
  * Nor does a test the pull request's own run failed. This comment
  * carries what a later run found that the pull request's run could not
@@ -723,21 +726,21 @@ function subsequenceShare(left: string, right: string): number {
 
 /**
  * The renames that discarded history, each with the line that brings it
- * back and the catches that line is worth.
+ * back and the new real test failures that line is worth.
  *
- * A rename is never inferred into the alias file: this suggests a line
- * and says what it would restore, and somebody appends it. Three things
- * have to hold before one is offered, because a wrong bridge silently
- * credits one test with another's record and the whole score rests on
- * catch attribution. The departing test must have caught something, or
- * there is nothing to bring back. The arriving name must be one the
- * store has never seen, or it is not a new name at all. And the pairing
- * must be clear: alike past `RENAME_SIMILARITY`, and ahead of every
- * other candidate by `RENAME_MARGIN`, because two candidates the same
- * distance away is a question rather than an answer, and an arrival two
- * departures both point at answers for neither. And the unit the
- * departing test lived in has to have run here, or its absence is a
- * suite that did not run rather than a test that left.
+ * A rename is never inferred into the alias file: this suggests a line and says
+ * what it would restore, and somebody appends it. Three things have to hold
+ * before one is offered, because a wrong bridge silently credits one test with
+ * another's record and the whole score rests on attributing each new real test
+ * failure to the right test. The departing test must have had new real test
+ * failures, or there is nothing to bring back. The arriving name must be one
+ * the store has never seen, or it is not a new name at all. And the pairing
+ * must be clear: alike past `RENAME_SIMILARITY`, and ahead of every other
+ * candidate by `RENAME_MARGIN`, because two candidates the same distance away
+ * is a question rather than an answer, and an arrival two departures both point
+ * at answers for neither. And the unit the departing test lived in has to have
+ * run here, or its absence is a suite that did not run rather than a test that
+ * left.
  *
  * At most `RENAME_SUGGESTIONS` are offered. A change that ends a whole
  * area produces as many departures as it removed tests, and a wall of
@@ -746,7 +749,8 @@ function subsequenceShare(left: string, right: string): number {
 export function renames(input: ReportInput): RenameSuggestion[] {
   const ranHere = unitsThatRan(input);
   const gone = [...input.previous.keys()].filter((key) =>
-    !input.current.has(key) && (input.pullRequest.catches.get(key) ?? 0) > 0 &&
+    !input.current.has(key) &&
+    (input.pullRequest.newRealTestFailures.get(key) ?? 0) > 0 &&
     ranHere.has(input.pullRequest.units.get(key) ?? "")
   );
   const arrived = [...input.current.keys()].filter((key) =>
@@ -773,7 +777,7 @@ export function renames(input: ReportInput): RenameSuggestion[] {
     suggestions.push({
       from,
       to: best.test,
-      catches: input.pullRequest.catches.get(key)!,
+      newRealTestFailures: input.pullRequest.newRealTestFailures.get(key)!,
       aliasLine: aliasLineFor(from, best.test, input.day),
     });
   }
@@ -1092,8 +1096,8 @@ export function renderReport(
     out.push("### A rename that discarded a test's history");
     out.push("");
     out.push(
-      "A test's score is built on what it has caught, over unbounded " +
-        "history, so a renamed test drops to the floor. A line in " +
+      "A test's score is built on its new real test failures, over " +
+        "unbounded history, so a renamed test drops to the floor. A line in " +
         `\`${ALIAS_DIRECTORY}/\`, in the file named after the test's file, ` +
         "bridges the two halves. A rename is never inferred, so this is a " +
         "suggestion rather than a change: append the line if the pairing " +
@@ -1104,7 +1108,8 @@ export function renderReport(
       out.push(
         `- ${shownIdentity(rename.from)} appears to have become ` +
           `${shownIdentity(rename.to)}, which would bring back ` +
-          `${rename.catches.toFixed(1)} weighted catches.`,
+          `${rename.newRealTestFailures.toFixed(1)} weighted new real test ` +
+          "failures.",
       );
       out.push("");
       out.push("  ```json");
