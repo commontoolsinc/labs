@@ -3115,8 +3115,8 @@ export class RuntimeProcessor {
    * someone else's space. Opening the root of this runtime's identity's own
    * Home also starts the worker's housekeeping over Home, as
    * `handleEnsureHomePatternRunning()` does: the adoption of legacy space
-   * entries, the private inbox ensure and the share intake, each once per
-   * worker. It returns without waiting for any of them.
+   * entries, the private inbox ensure, the profile root repair and the share
+   * intake, each once per worker. It returns without waiting for any of them.
    *
    * @throws The server's refusal when this runtime's identity may not read
    *   the space, whether or not a root is still held from before.
