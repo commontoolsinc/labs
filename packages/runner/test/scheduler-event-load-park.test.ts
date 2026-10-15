@@ -8,6 +8,7 @@ import type {
   MemorySpace,
 } from "../src/storage/interface.ts";
 import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
+import { transactionFailureMessage } from "../src/storage/transaction-errors.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
@@ -421,7 +422,8 @@ describe("event dispatch parks on in-flight closure loads", () => {
   it("drops once when one required load fails authorization and another fails otherwise", async () => {
     // The authorization failure arrives first. The other document may yet
     // hold what the closure reads, so the event drops as it does for any
-    // failure but an authorization one.
+    // failure but an authorization one, and the drop names that other
+    // failure: the authorization one alone would not have dropped it.
 
     const { runtime, tx } = env;
     const unreadableDoc = runtime.getCell<string>(
@@ -445,6 +447,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
     let handlerRuns = 0;
     let callbackRuns = 0;
     let callbackStatus: string | undefined;
+    let callbackReason: string | undefined;
     const handler: EventHandler = () => {
       handlerRuns++;
     };
@@ -467,7 +470,11 @@ describe("event dispatch parks on in-flight closure loads", () => {
       true,
       (commitTx) => {
         callbackRuns++;
-        callbackStatus = commitTx.status().status;
+        const status = commitTx.status();
+        callbackStatus = status.status;
+        callbackReason = status.status === "error"
+          ? transactionFailureMessage(status.error)
+          : undefined;
       },
     );
     await parked;
@@ -485,6 +492,9 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(handlerRuns).toBe(0);
     expect(callbackRuns).toBe(1);
     expect(callbackStatus).toBe("error");
+    expect(callbackReason).toContain("memory client closed");
+    expect(callbackReason).not.toContain("unauthorized");
+    expect(callbackReason).toContain(unreachable.key);
     await runtime.idle();
     expect(callbackRuns).toBe(1);
   });

@@ -260,6 +260,12 @@ function isReactivityLog(value: unknown): value is ReactivityLog {
     Array.isArray(candidate.writes);
 }
 
+/** Whether `error` reports a load its principal is not authorized to read. */
+function isAuthorizationLoadFailure(error: unknown): boolean {
+  return error instanceof ReplicaLoadFailureError &&
+    error.failure.failureClass === "authorization";
+}
+
 function normalizeRegistrationArgs(
   dependenciesOrOptions?: SchedulerRegistrationInput | SchedulerRegisterOptions,
   options: SchedulerRegisterOptions = {},
@@ -530,9 +536,11 @@ export class Scheduler {
   #wakeShaper = new WakeShaper();
 
   /**
-   * Head event parked on in-flight document loads. Keyed by event id; released
-   * by `loadsSettled()`, which either re-queues execution on success or drops
-   * the at-most-once event on an explicit load failure.
+   * Head event parked on in-flight document loads, keyed by event id. The
+   * park ends once every load it waits on has settled: with no failure among
+   * them — or, for a client event, none but `authorization`-class failures —
+   * execution is re-queued, and otherwise `#failHeadEventLoadPark()` drops a
+   * client event and defers a served one.
    */
   #headEventLoadPark: {
     eventId: string;
@@ -3790,11 +3798,12 @@ export class Scheduler {
     // Each key is waited for on its own, so that every failed load is seen,
     // in the order the failures arrive, once all of them have settled.
     const manager = this.runtime.storageManager;
+    const loadsSettled = manager.loadsSettled?.bind(manager);
     const failures: unknown[] = [];
-    const settled = manager.loadsSettled === undefined
+    const settled = loadsSettled === undefined
       ? Promise.resolve()
       : Promise.all(keys.map((key) =>
-        manager.loadsSettled!([key]).catch((error: unknown) => {
+        loadsSettled([key]).catch((error: unknown) => {
           failures.push(error);
         })
       ));
@@ -3870,27 +3879,19 @@ export class Scheduler {
    * class among them still drops the event, since that document may yet
    * hold what the closure reads.
    *
-   * `errors` holds every failed load's error, in the order they failed;
-   * the first is the one reported.
+   * `errors` holds every failed load's error, in the order they failed. A
+   * served deferral reports the first; a client drop reports the first of
+   * another class than `authorization`, the one that decided it.
    */
   #failHeadEventLoadPark(
     event: QueuedEvent,
     errors: readonly unknown[],
   ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const error = errors[0];
-    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
-      failureClass: "unknown" as const,
-      recoveryEpoch: "untyped",
-      permanentEvidence: false,
-    };
-    if (
-      event.served === undefined &&
-      errors.every((each) =>
-        each instanceof ReplicaLoadFailureError &&
-        each.failure.failureClass === "authorization"
-      )
-    ) {
+    const error = event.served === undefined
+      ? errors.find((each) => !isAuthorizationLoadFailure(each))
+      : errors[0];
+    if (error === undefined) {
       this.#releaseHeadEventLoadPark(event.id);
       return;
     }
@@ -3901,11 +3902,17 @@ export class Scheduler {
     if (event.served === undefined) {
       this.#dropEvent(
         event,
-        `Event dropped: required replica load failed before dispatch (${detail})`,
+        `Event dropped: required replica load failed before dispatch ` +
+          `(${keys}: ${detail})`,
       );
       this.queueExecution();
       return;
     }
+    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
+      failureClass: "unknown" as const,
+      recoveryEpoch: "untyped",
+      permanentEvidence: false,
+    };
     // The head's debug record names the failing doc keys and error;
     // `events.loadParkDeferrals` counts every head and barrier deferral, while
     // the durable checkpoint and terminal attention surface persistent failure.
