@@ -104,6 +104,51 @@ describe("schema", () => {
       });
       expect(parseRecordLine(line)).toBeUndefined();
     });
+
+    describe("for a record naming a file", () => {
+      const pattern = (n: string): string =>
+        JSON.stringify({ ...RECORD, test: { k: "pattern", s: "patterns", n } });
+      const filed = (file: string): string =>
+        JSON.stringify({ ...RECORD, file });
+
+      it("keeps a pattern test named by a path inside the repository", () => {
+        expect(parseRecordLine(pattern("packages/patterns/a.test.tsx"))?.test.n)
+          .toBe("packages/patterns/a.test.tsx");
+      });
+
+      it("returns undefined for a pattern test named by a path that climbs out", () => {
+        expect(
+          parseRecordLine(pattern("../../tmp/root_1/pkg/main.test.tsx")),
+        ).toBeUndefined();
+        expect(parseRecordLine(pattern("packages/../../a.test.tsx")))
+          .toBeUndefined();
+      });
+
+      it("returns undefined for a pattern test named by an absolute path", () => {
+        expect(parseRecordLine(pattern("/tmp/root_1/main.test.tsx")))
+          .toBeUndefined();
+      });
+
+      it("keeps a unit test whose name reads like an absolute path", () => {
+        const line = JSON.stringify({
+          ...RECORD,
+          test: { k: "unit", s: "dashboard", n: "/bench renders" },
+        });
+        expect(parseRecordLine(line)?.test.n).toBe("/bench renders");
+      });
+
+      it("returns undefined for a file outside the repository", () => {
+        expect(parseRecordLine(filed("../fixture/add.test.ts")))
+          .toBeUndefined();
+        expect(parseRecordLine(filed("/tmp/fixture/add.test.ts")))
+          .toBeUndefined();
+      });
+
+      it("keeps a file whose name merely starts with two dots", () => {
+        expect(parseRecordLine(filed("packages/x/..hidden.test.ts"))?.file)
+          .toBe("packages/x/..hidden.test.ts");
+      });
+    });
   });
 
   describe("testIdentityKey()", () => {
