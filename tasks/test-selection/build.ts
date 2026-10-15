@@ -459,8 +459,11 @@ export function readReport(
       // is, is asked of the identity the lane wrote, so no line in the
       // alias file decides whether a measurement is scored as a test.
       if (isLaneMeasurement(record.test)) {
+        // Only a passing batch on a lane's runner says what a unit's hooks
+        // take, for the reasons only such an execution says what a test
+        // costs.
         if (
-          record.outcome === "pass" &&
+          record.outcome === "pass" && where.place !== "local" &&
           hooksMeasurement(record.test.n) !== undefined
         ) {
           addDuration(durations, record.test.n, day, record.durationMs);

@@ -466,19 +466,19 @@ function squaredError(
  * The correction is read far outside the range it was fitted over: a suite
  * whose every batch anybody has seen held six seconds of tests may be
  * charged thousands the first time a lane packs it whole. Inside a narrow
- * range what a batch spends apart from its tests dominates and the slope
- * is noise, so it is fitted only where at least `MIN_CORRECTION_SAMPLES`
- * batches disagree by `MIN_CORRECTION_SPAN_SECONDS` about what their tests
- * took. A fit that comes out at zero says a batch grows no dearer the more
- * of the suite it holds, which would let a lane pack the suite without
- * limit, and a manifest carrying a correction of zero is refused whole.
- * Either way the correction is one, which is the reading that needs no
- * evidence, and the other two are fitted to what the batches spent beyond
- * their tests.
+ * range what a batch spends apart from its tests and hooks dominates and
+ * the slope is noise, so it is fitted only where at least
+ * `MIN_CORRECTION_SAMPLES` batches disagree by `MIN_CORRECTION_SPAN_SECONDS`
+ * about what their tests and hooks took. A fit that comes out at zero says
+ * a batch grows no dearer the more of the suite it holds, which would let a
+ * lane pack the suite without limit, and a manifest carrying a correction
+ * of zero is refused whole. Either way the correction is one, which is the
+ * reading that needs no evidence, and the other two are fitted to what the
+ * batches spent beyond their tests and hooks.
  *
  * Batches that open one unit for each pass cannot say whether what they
- * spent beyond their tests was the pass's or the unit's, and the unit
- * carries it then: that errs high for a lane packing more units than
+ * spent beyond their tests and hooks was the pass's or the unit's, and the
+ * unit carries it then: that errs high for a lane packing more units than
  * those batches held, where the pass would err low.
  */
 export function fitSuite(batches: readonly BatchObservation[]): SuiteFit {

@@ -350,12 +350,13 @@ export function aroundIn(corpus: readonly ManifestEntry[]): Around {
 /**
  * What a unit's selections in a lane take: a unit's runner runs it as many
  * times as the most any selection in it asks for, and every selection in
- * it each time, along with every test around one of them.
+ * it each time, along with every test around one of them and the unit's
+ * hooks.
  */
 interface UnitRun {
   /**
    * The own costs of the selections and the tests around them, each test
-   * counted once, added together.
+   * counted once, and what the unit's hooks take, added together.
    */
   once: number;
 
@@ -392,13 +393,14 @@ function addedBy(
  */
 export interface SuiteTests {
   /**
-   * The own costs of the selections and the tests around them, once for each
-   * time their unit runs.
+   * The own costs of the selections and the tests around them, and what
+   * their units' hooks take, once for each time their unit runs.
    */
   ran: number;
 
   /**
-   * What the unit taking longest in each pass takes, first pass first. A
+   * What the unit taking longest in each pass takes, its hooks included,
+   * first pass first. A
    * unit runs in as many of the first passes as it runs times, so no pass
    * takes longer than the one before it.
    */

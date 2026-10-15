@@ -1242,9 +1242,10 @@ A suite's three figures are fitted to what its batches spent by least squares:
 `overhead` for each pass, `unitOverhead` for each time a pass opened a unit, and
 `correction` for each second of its units' tests and their hooks, none of them
 below zero. The correction is fitted only from at least `MIN_CORRECTION_SAMPLES`
-batches whose tests' times span at least `MIN_CORRECTION_SPAN_SECONDS`, and only
-where it comes out above zero; otherwise it is one, and the other two are fitted
-to what the batches spent beyond their tests. The fit is what a batch of its
+batches whose tests and hooks took times spanning at least
+`MIN_CORRECTION_SPAN_SECONDS`, and only where it comes out above zero; otherwise
+it is one, and the other two are fitted to what the batches spent beyond their
+tests and hooks. The fit is what a batch of its
 shape spends on average. The packer charges a batch the fit, except that it charges
 the batch's tests no less than what the longest unit of each pass takes, added
 together, since a pass does not finish before its longest unit does. So a lane

@@ -290,6 +290,23 @@ describe("selection", () => {
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
     });
 
+    it("reads a unit's hooks whatever the unit is named", () => {
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      object.calibration.suites = {
+        unit: { overhead: 3, correction: 1, unitOverhead: 2, unitHooks: {} },
+      };
+      const text = JSON.stringify(object).replace(
+        '"unitHooks":{}',
+        '"unitHooks":{"__proto__":4,"constructor":5}',
+      );
+      const hooks = parseManifest(text)?.calibration.suites.unit?.unitHooks;
+      expect(Object.hasOwn(hooks ?? {}, "__proto__")).toBe(true);
+      expect(Object.entries(hooks ?? {})).toEqual([
+        ["__proto__", 4],
+        ["constructor", 5],
+      ]);
+    });
+
     it("refuses a unit's hooks it cannot read as a duration", () => {
       // The packer charges them each time a pass opens the unit, so one
       // that will not read is a body this reader cannot read.

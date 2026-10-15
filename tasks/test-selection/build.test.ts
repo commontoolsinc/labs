@@ -548,6 +548,21 @@ describe("build", () => {
       expect([...read.surfaces.keys()]).toEqual([]);
     });
 
+    it("keeps nothing a workstation measured of a unit's hooks", () => {
+      // A workstation is another machine, faster or slower by however it
+      // differs, so what it measured is no evidence of what a lane spends.
+      const local = context({ env: "local", branch: "fix-writes" });
+      delete local.ci;
+      const name = hooksMeasurementName("pattern-integration", true, UNIT);
+      const read = readReport(
+        stored(LOCAL_NAME, local, [
+          record({ test: { k: "gate", s: "ci", n: name }, durationMs: 3500 }),
+        ]),
+        NO_ALIASES,
+      );
+      expect([...read.durations.keys()]).toEqual([]);
+    });
+
     it("counts a lane measurement it had to decline", () => {
       // A lane whose run the fold cannot place records what it measured
       // like any other lane. Counting what was declined is what tells a
