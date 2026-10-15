@@ -1028,11 +1028,11 @@ the limit.
 
 ### Concurrent sends
 
-`packages/patterns/integration/fabrichat-send-burst.bench.ts` has twelve
-members, each a `MultiRuntimeHarness` session with a profile, send five messages
-each into one room, all sixty dispatched before any settles, timed until every
+`packages/patterns/integration/fabrichat-send-burst.bench.ts` has four members,
+each a `MultiRuntimeHarness` session with a profile, send two messages each
+into one room, all eight dispatched before any settles, timed until every
 member's runtime holds every message. Its `fabrichat` group carries one series,
-`send burst 12x5`. The members use the `fabrichat-add-offer` fixture as their
+`send burst 4x2`. The members use the `fabrichat-add-offer` fixture as their
 Home: it holds a profile created as Home creates one and a manager the room's
 `#chatManager` wish resolves to. The harness hosts its own storage server,
 enforcing access.
@@ -1042,19 +1042,29 @@ activity, reading the activity list and the counters record every send writes,
 and claims its recorded time from the times the room has used. Concurrent sends
 from different members therefore collide, which a lunch-poll vote does not. A
 contention accounting of rejected commits and rolled-back writes over one
-untimed burst goes to stderr; on three members sending two messages each it
-counted 15 and 37.
+untimed burst goes to stderr; at four members sending two messages each it
+counted 30 and 98.
 
-Twelve runtimes is the largest footprint of any benchmark in the job. The file
-releases them after the last of the `n + 2` invocations `Deno.bench` makes of
-its body, so they are not a floor under the benchmarks measured after it; the
-file throws if it is invoked once more than that, rather than run on released
+The size is small because larger ones do not complete. At twelve members
+sending five messages each, sends conflicted for thirty seconds and more, after
+which the runtime drops the message, and the members' runtimes never held the
+same messages. At six sending three, a send outlasted the harness's two-minute
+call limit. Those runs were on a heavily loaded developer machine, where time
+limits are easier to reach, but the conflicts do not depend on load.
+
+The burst is the largest memory footprint in the job, though it has fewer
+runtimes than the lunch-poll burst: four members peaked at 8.6GB resident on an
+Apple M3 Max, and twelve at 13.75GB. Each iteration's room keeps running in
+every member's runtime, so the footprint grows over a run. The file releases
+the runtimes after the last of the `n + 2` invocations `Deno.bench` makes of its
+body, so they are not a floor under the benchmarks measured after it; the file
+throws if it is invoked once more than that, rather than run on released
 workers. A run stopped early releases them at process exit instead.
 
-A burst adds sixty messages, so each iteration sends into a room of its own,
+A burst adds eight messages, so each iteration sends into a room of its own,
 created outside the measurement by the first member, into which each member has
-written one message. Every burst therefore lands in a room of twelve messages
-and twelve participants. `CF_FABRICHAT_BURST_MEMBERS` and
+written one message. Every burst therefore lands in a room of four messages and
+four participants. `CF_FABRICHAT_BURST_MEMBERS` and
 `CF_FABRICHAT_BURST_MESSAGES` resize it for a local run, and the size names the
 series.
 

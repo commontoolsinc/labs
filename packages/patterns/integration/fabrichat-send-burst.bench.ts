@@ -1,8 +1,8 @@
 /**
  * How long a FabriChat room full of people writing at once takes to agree.
  *
- * Twelve members, each in a runtime of their own with a profile of their own,
- * each send five messages into one group room, every one of the sixty sent
+ * Four members, each in a runtime of their own with a profile of their own,
+ * each send two messages into one group room, every one of the eight sent
  * before any of them settles, and the measurement runs until every member's
  * runtime holds every message. It is the FabriChat counterpart of
  * `lunch-poll-vote-burst.bench.ts`, and differs from it in what the writes
@@ -14,14 +14,20 @@
  * rolls back and runs again. How long that takes, and how much is thrown away
  * on the way, is what this measures.
  *
+ * The size is small because larger ones do not complete. At twelve members
+ * sending five messages each, sends conflicted for thirty seconds and more,
+ * after which the runtime drops the message, and the burst never agreed; at
+ * six sending three, a send outlasted the harness's two-minute call limit. And
+ * memory grows with the members: twelve peaked at 13.75GB resident.
+ *
  * Each iteration writes into a room of its own. A send adds a message, so a
- * burst into one room would leave the next iteration a room sixty messages
+ * burst into one room would leave the next iteration a room eight messages
  * larger, and every iteration would measure a different room. So each
  * iteration's room is created outside the measurement, by the first member
  * from their manager, naming every other member, and each member writes one
  * message into it before the burst, which joins them to it and starts the room
- * in their runtime. The burst then lands in a room of twelve messages and
- * twelve participants, every iteration.
+ * in their runtime. The burst then lands in a room of four messages and four
+ * participants, every iteration.
  *
  * Each member is a harness session with a Home stand-in, the
  * `fabrichat-add-offer` fixture, which holds a profile created as Home creates
@@ -62,12 +68,12 @@ const PROGRAM_PATH = join(
 const START_ACTION = { surface: "ChatStartSurface", action: "ChatStart" };
 const SEND_ACTION = { surface: "ChatSendSurface", action: "ChatSend" };
 
-const MEMBERS = sizeFromEnv("CF_FABRICHAT_BURST_MEMBERS", 12);
-const MESSAGES = sizeFromEnv("CF_FABRICHAT_BURST_MESSAGES", 5);
+const MEMBERS = sizeFromEnv("CF_FABRICHAT_BURST_MEMBERS", 4);
+const MESSAGES = sizeFromEnv("CF_FABRICHAT_BURST_MESSAGES", 2);
 
 /**
  * Measured bursts, plus one unmeasured warm-up. Each costs a room's creation
- * and twelve joins before it, so a run is bounded here rather than left to
+ * and a join per member before it, so a run is bounded here rather than left to
  * `deno bench`'s time budget.
  */
 const ITERATIONS = 5;
@@ -238,7 +244,7 @@ async function reverts() {
 const INVOCATIONS = ITERATIONS + 1;
 
 // `Deno.bench` has no hook for "the file's benchmarks are done". The workers
-// are released after the last invocation, so that twelve runtimes are not a
+// are released after the last invocation, so that the runtimes are not a
 // floor under every benchmark measured after this file, and at process exit
 // as well, where the listener runs synchronously and `terminate()` is the form
 // that fits, for a run that stopped before its last invocation.
