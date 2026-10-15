@@ -72,6 +72,14 @@ import type {
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import type { HarnessTaskTag } from "./task-classification.ts";
+import {
+  AUTHOR_TOOL_GUIDANCE,
+  LOOM_COMMANDS_TOOL_GUIDANCE,
+  LOOM_RETRIEVAL_TOOL_GUIDANCE,
+  PIECES_TOOL_GUIDANCE,
+  RESOLVE_PIECE_TOOL_GUIDANCE,
+  toolGuidanceContextMessages,
+} from "./tool-guidance.ts";
 import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 
 /**
@@ -427,8 +435,9 @@ export interface EstablishHarnessSessionContextOptions {
  * Brings up everything a run holds before its first model turn, and returns
  * the context messages announcing it: the skill registry and any preloaded
  * skills, the well-known grants of the session's space, host-supplied input
- * cells, the guidance for selecting a piece target, and, for a run whose host
- * opted in to `weaver_action`, the guidance for using the Weaver's commands.
+ * cells, the guidance for selecting a piece target, for a run whose host
+ * opted in to `weaver_action` the guidance for using the Weaver's commands,
+ * and the guidance for using the tools the session's backings carry.
  *
  * The three differ in how they fail, and deliberately. A missing skills root
  * simply yields no messages. Grants are best-effort: a session that will not
@@ -513,6 +522,14 @@ const establishContextMessages = async (
     messages.push(WEAVER_COMMAND_GUIDANCE);
   }
   messages.push(REVISION_VERIFICATION_GUIDANCE);
+  const toolGuidance = toolGuidanceContextMessages({
+    fabricSessionAvailable: engine.fabricSessionAvailable,
+    loomCommandsAvailable: engine.config.loomCommands !== undefined,
+    loomRetrievalAvailable: engine.config.loomRetrieval !== undefined,
+  });
+  for (const message of toolGuidance) {
+    messages.push(message);
+  }
   return messages;
 };
 
@@ -522,17 +539,30 @@ const establishContextMessages = async (
  * act on them, and any other task that it may hold some. Piece targeting
  * itself belongs to authoring, as does revision verification, where a
  * pattern's output can be inspected; the Weaver's commands, which read as well
- * as change the person's application, belong to finding and acting. Every
- * other message passes through.
+ * as change the person's application, belong to finding and acting. So does
+ * each block of tool guidance: writing and running patterns to authoring,
+ * reading and acting on pieces to work on them, and the host's commands and
+ * retrieval to finding and acting; resolving a named piece belongs to
+ * finding, acting and work on pieces. Every other message passes through.
  */
 export const orientContextMessages = (
   messages: readonly string[],
   tags: ReadonlySet<HarnessTaskTag>,
 ): string[] => {
   const author = tags.has("author");
+  const findsOrActs = tags.has("act") || tags.has("find");
   const withheld = new Set([
-    ...(author ? [] : [REVISION_VERIFICATION_GUIDANCE]),
-    ...(tags.has("act") || tags.has("find") ? [] : [WEAVER_COMMAND_GUIDANCE]),
+    ...(author ? [] : [REVISION_VERIFICATION_GUIDANCE, AUTHOR_TOOL_GUIDANCE]),
+    ...(tags.has("pieces") ? [] : [PIECES_TOOL_GUIDANCE]),
+    // Authoring carries the same rule inside piece targeting.
+    ...(!author && (findsOrActs || tags.has("pieces"))
+      ? []
+      : [RESOLVE_PIECE_TOOL_GUIDANCE]),
+    ...(findsOrActs ? [] : [
+      WEAVER_COMMAND_GUIDANCE,
+      LOOM_COMMANDS_TOOL_GUIDANCE,
+      LOOM_RETRIEVAL_TOOL_GUIDANCE,
+    ]),
   ]);
   return messages.flatMap((message) =>
     message === PIECE_TARGETING_GUIDANCE

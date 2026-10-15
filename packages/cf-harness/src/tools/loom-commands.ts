@@ -328,7 +328,7 @@ export const listCommandsTool: HarnessToolDefinition<
     title: "List Commands",
     effectClass: "read",
     description:
-      `List the commands this run's host lets it run on the person's data, each as a signature line \`name(param: type, optional?: type = default) -> {output fields}  [effect, target]\` with its title: an enum reads a|b|c, an array T[], a nested object {...}; target loom means it takes a loomId. Name commands in detail for their full description and JSON schema. ${LOOM_COMMANDS_EFFECT_NOTICE} Commands this run may not run are not listed.`,
+      `List the commands this run's host lets it run on the person's data, each as a signature line \`name(param: type, optional?: type = default) -> {output fields}  [effect, target]\` with its title; name commands in detail for their full description and JSON schema.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -677,7 +677,7 @@ export const runCommandTool: HarnessToolDefinition<
     // something.
     effectClass: "write",
     description:
-      `Run commands list_commands showed, as the agent: one call as {command, args, loomId?, expectedVersion?}, or up to ${RUN_COMMAND_BATCH_LIMIT} independent calls as {calls: [...]}, run concurrently and answered in order. Pass loomId for a command targeting a loom, and expectedVersion to refuse a stale write. An unlisted name returns unknown_command with the nearest names, and nothing is sent. Args the host refuses come back executed with outcome code bad-args and the signature: correct the call and resend. An executed call returns its outcome (ok, code, mayHaveLanded, completed) and its answer as an entry measured against this run's confidentiality ceiling: admitted with a handle a structured result can name, or withheld with no content. not_granted means this run may not run it: do not retry; if the person should, offer it in your result. ${LOOM_COMMAND_UNTRUSTED_NOTICE}`,
+      `Run commands list_commands showed, as the agent: one call as {command, args, loomId?, expectedVersion?}, or up to ${RUN_COMMAND_BATCH_LIMIT} independent calls as {calls: [...]}. Each executed call returns its outcome (ok, code, mayHaveLanded, completed) and its answer, admitted with a handle or withheld under this run's confidentiality ceiling; an unlisted name returns unknown_command and sends nothing.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,

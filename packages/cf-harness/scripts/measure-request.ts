@@ -1,0 +1,195 @@
+#!/usr/bin/env -S deno run --allow-read
+
+/**
+ * Measure the first model request a batch run sends, for each task tag.
+ *
+ * Renders the openai-codex request body through
+ * `OpenAICodexResponsesClient.complete()` with a capturing fetch, so the bytes
+ * are exactly what the provider serializes. The tools are the ones a recorded
+ * run was granted, through `builtinToolDescriptorForRuntime`; the system
+ * prompt is `buildCfHarnessBatchSystemPrompt` for each tag; the context
+ * messages are what `establishHarnessSessionContext` opens a fabric-backed run
+ * with that holds loom commands and retrieval, fitted to the tag by
+ * `orientContextMessages`. The host's own parts (its additional instructions,
+ * result schema and grants message) and the task are copied from the recorded
+ * run, so every tag is measured against one ask and only the tag differs.
+ *
+ * `fallback` is a run with no tags, which gets all of the guidance.
+ *
+ * Usage:
+ *   deno run --allow-read scripts/measure-request.ts <recorded-artifact-dir>
+ */
+
+import { buildCfHarnessBatchSystemPrompt } from "../src/cli.ts";
+import type { HarnessSubagentProfile } from "../src/contracts/subagent.ts";
+import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import { pieceTargetingContextMessages } from "../src/piece-targeting.ts";
+import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
+import { orientContextMessages } from "../src/session-assembly.ts";
+import type { HarnessTaskTag } from "../src/task-classification.ts";
+import { toolGuidanceContextMessages } from "../src/tool-guidance.ts";
+import {
+  BUILTIN_TOOLS,
+  builtinToolDescriptorForRuntime,
+} from "../src/tools/registry.ts";
+
+const TAGS: readonly (HarnessTaskTag | "fallback")[] = [
+  "respond",
+  "find",
+  "act",
+  "pieces",
+  "author",
+  "fallback",
+];
+
+const ADDITIONAL = "\nAdditional instructions:\n";
+const SCHEMA = "Result schema (JSON):\n";
+
+const bytes = (text: string): number =>
+  new TextEncoder().encode(text).byteLength;
+
+const readJson = (path: string): unknown =>
+  JSON.parse(Deno.readTextFileSync(path));
+
+/** The request body `complete()` sends for `transcript` and `tools`. */
+const captureBody = async (
+  transcript: HarnessTranscriptMessage[],
+  tools: Parameters<OpenAICodexResponsesClient["complete"]>[0]["tools"],
+): Promise<string> => {
+  let body = "";
+  const client = new OpenAICodexResponsesClient({
+    transportRetries: 0,
+    credentialResolver: {
+      resolve: () =>
+        Promise.resolve({
+          type: "oauth",
+          providerId: "openai-codex",
+          accessToken: "x",
+          refreshToken: "x",
+          expiresAt: Date.now() + 60_000,
+          accountId: "acct",
+        }),
+    },
+    fetchFn: (_input, init) => {
+      body = String(init?.body);
+      const completed = {
+        type: "response.completed",
+        response: {
+          id: "r",
+          status: "completed",
+          output: [{
+            type: "message",
+            id: "m",
+            role: "assistant",
+            content: [{ type: "output_text", text: "ok" }],
+          }],
+        },
+      };
+      return Promise.resolve(
+        new Response(`data: ${JSON.stringify(completed)}\n\n`, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        }),
+      );
+    },
+  });
+  await client.complete({
+    model: "gpt-6.1-sol",
+    transcript,
+    tools,
+    nativeModelToolIds: [],
+    runId: "run-fixed",
+  });
+  return body;
+};
+
+const main = async (dir: string): Promise<void> => {
+  const policy = readJson(`${dir}/policy-snapshot.json`) as {
+    parentTools: { allowedToolIds: BuiltinToolId[] };
+    subagents: { allowedProfiles: HarnessSubagentProfile[] };
+  };
+  const recorded = readJson(`${dir}/transcript.json`) as {
+    role: string;
+    content: string;
+  }[];
+  const system = recorded[0].content;
+  const additional = system.slice(
+    system.indexOf(ADDITIONAL) + ADDITIONAL.length,
+  );
+  const schema = JSON.parse(
+    system.slice(system.indexOf(SCHEMA) + SCHEMA.length).split("\n")[0],
+  );
+  const grants = recorded.find((message) =>
+    message.role === "user" && message.content.startsWith("Granted references")
+  )?.content;
+  const task = recorded.findLast((message, index) =>
+    message.role === "user" &&
+    (recorded[index + 1]?.role ?? "assistant") === "assistant"
+  )!.content;
+  const allowedToolIds = policy.parentTools.allowedToolIds;
+  const tools = BUILTIN_TOOLS.filter((tool) =>
+    allowedToolIds.includes(tool.descriptor.toolId)
+  ).map((tool) =>
+    builtinToolDescriptorForRuntime(tool, {
+      kind: "runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+    }, {
+      cfcEnforcementMode: "enforce-explicit",
+      browserHost: false,
+      subagentProfiles: policy.subagents.allowedProfiles,
+    })
+  );
+  const opened = [
+    ...(grants !== undefined ? [grants] : []),
+    ...pieceTargetingContextMessages([]),
+    REVISION_VERIFICATION_GUIDANCE,
+    ...toolGuidanceContextMessages({
+      fabricSessionAvailable: true,
+      loomCommandsAvailable: true,
+      loomRetrievalAvailable: true,
+    }),
+  ];
+  const rows = [];
+  for (const tag of TAGS) {
+    const tags = tag === "fallback" ? undefined : new Set([tag]);
+    const transcript: HarnessTranscriptMessage[] = [
+      {
+        role: "system",
+        content: buildCfHarnessBatchSystemPrompt({
+          systemPrompt: additional,
+          structuredResult: {
+            path: "/unused/agent-result.json",
+            sandboxPath: "/workspace/agent-result.json",
+            schema,
+          },
+          allowedToolIds,
+          patternIndex: {} as never,
+          ...(tags !== undefined ? { taskTags: tags } : {}),
+        }),
+      },
+      ...(tags === undefined ? opened : orientContextMessages(opened, tags))
+        .map((content) => ({ role: "user" as const, content })),
+      { role: "user", content: task },
+    ];
+    const body = await captureBody(transcript, tools);
+    const parsed = JSON.parse(body);
+    rows.push({
+      tag,
+      toolsBytes: bytes(JSON.stringify(parsed.tools)),
+      instructionsBytes: bytes(parsed.instructions),
+      inputBytes: bytes(JSON.stringify(parsed.input)),
+      totalBytes: bytes(body),
+    });
+  }
+  console.log(JSON.stringify({ toolCount: tools.length, rows }, null, 1));
+};
+
+if (import.meta.main) {
+  if (Deno.args.length !== 1) {
+    console.error("usage: measure-request.ts <recorded-artifact-dir>");
+    Deno.exit(2);
+  }
+  await main(Deno.args[0]);
+}

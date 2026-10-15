@@ -294,7 +294,7 @@ export const isRunPatternToolSuccessOutput = (
 /** The module every Common Fabric pattern imports the runtime from. */
 export const RUNTIME_MODULE_SPECIFIER = "commonfabric";
 
-/** The import line a pattern opens with, as the tool description states it. */
+/** The import line a pattern opens with, as the authoring guidance states it. */
 export const RUNTIME_MODULE_IMPORT_LINE =
   `import { Default, NAME, pattern, UI } from "${RUNTIME_MODULE_SPECIFIER}";`;
 
@@ -350,7 +350,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    `Compile and run a Common Fabric pattern in the configured space; returns a reference to its live result cell. Give your own sourceText or the patternId of a pattern search_patterns found. Import runtime APIs from "${RUNTIME_MODULE_SPECIFIER}", as in ${RUNTIME_MODULE_IMPORT_LINE} (no package named after the product resolves), and published components from "cf:pattern:<patternId>". The run's confidentiality ceiling bounds cell reads: a shared db.query result withholds its whole array, row count included, unless the ceiling admits every row; declare it per session (PerSession<> on the result type, or { scope: "session" } on the query) to filter rows under the ceiling instead. Bound every query with a LIMIT (a few hundred suits a view): each result row is written as its own document, and a labeled result keys rows by position, so a change rewrites displaced rows and a projection or table change rewrites them all. An aggregate (count(*), sum(), GROUP BY) needs no LIMIT. A pattern composing another must expose and render the composed one's error branch and row count under its own result, or the run answers over figures from a failed read and the result carries an outputConcerns entry naming the unread output. A served-store query may still be pending when this call answers: pending counts and rows are placeholders, not data, so expose pending with the error branch and counts. The host returns pending and hasError from the declared top-level outputs when the release fit admits them. If pending, reread the held resultRef; do not author a replacement page to wait. If a settled filtered result is empty, compare it with a count without the uncertain predicate and present both, naming the filter. The piece stays out of the space's piece list; assign_slug names and lists it.`,
+    `Compile and run a Common Fabric pattern in the configured space, given source that imports its runtime APIs from "${RUNTIME_MODULE_SPECIFIER}" or a published patternId; returns a reference to its live result cell, with the values resultSchema asks for.`,
   effectClass: "side-effect",
   inputSchema: RUN_PATTERN_INPUT_SCHEMA,
   outputSchema: {

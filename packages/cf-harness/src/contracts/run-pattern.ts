@@ -33,8 +33,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
   properties: {
     sourceText: {
       type: "string",
-      description:
-        "Pattern source (TypeScript/TSX), at most 256 KiB. Return a durable result object directly; a whole-result derived wrapper is a known smell, not a deterministic failure: after the run the harness checks the actual pattern pointer and refuses a piece materialized under a session-only identity.",
+      description: "Pattern source (TypeScript/TSX), at most 256 KiB.",
     },
     patternId: {
       type: "string",
@@ -44,19 +43,18 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
     description: {
       type: "string",
       description:
-        'One line on what the pattern does, e.g. "Totals an invoice\'s line items and applies a discount". Source you wrote that runs successfully is queued for the pattern index only when this is filled in; the result does not confirm publication.',
+        "One line on what the pattern does; source that runs successfully is queued for the pattern index only when this is filled in.",
     },
     hashtags: {
       type: "array",
       items: { type: "string" },
-      description:
-        'Words someone searching for this capability would type, e.g. ["invoice", "arithmetic"].',
+      description: "Words someone searching for this capability would type.",
     },
     inputs: {
       type: "object",
       additionalProperties: true,
       description:
-        'A string that is wholly an LLM-friendly link (e.g. "/of:fid1:abc.../path") passes as a live cell reference; anything else as plain JSON.',
+        "Named arguments: a string that is wholly a handle token or LLM-friendly link passes as a live cell reference, anything else as plain JSON.",
     },
     resultSchema: {
       anyOf: [
@@ -64,7 +62,7 @@ export const RUN_PATTERN_INPUT_SCHEMA = {
         { type: "object", additionalProperties: true },
       ],
       description:
-        'Pass it to read computed values such as counts or rows; without it value is omitted. A successful run returns resultRef, with pending/hasError when the release fit admits them. Only fields the schema models return: an inert one (number, boolean, enum or const string) as itself, anything else as a reference token to that position for describe_handle or a later run_pattern. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. $NAME, $UI and other rendering keys need not be declared. When policy refuses the release, value is withheld, valueError names why and the input carrying the refused label, and resultRef can still be passed on by reference.',
+        "JSON Schema of the result fields to read back as `value`; without it value is omitted.",
     },
   },
   // Exactly one of `sourceText` and `patternId` is required, which is a

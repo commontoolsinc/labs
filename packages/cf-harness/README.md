@@ -2056,6 +2056,23 @@ the Weaver command guidance, and `act` the browser guidance. The tool allow-list
 does not narrow, so a task given too few tags can still reach what it needs; a
 run with no classification carries all of the orientation.
 
+A tool descriptor is a contract: its name, its parameters with one-line
+descriptions, and a sentence or two on what the tool does and returns. The
+descriptors are the same bytes for every task, which keeps them in the prefix
+every request shares. The rules for using a tool are guidance in
+`src/tool-guidance.ts`, opened as context messages for the tools the session's
+backings carry and fitted to the tags with the rest of the orientation: `author`
+gets writing, running and naming patterns (the confidentiality ceiling, a
+query's `LIMIT`, a composed pattern's error branch, pending results,
+`resultSchema`), research and `pattern-author` delegation; `pieces` gets reading
+and acting on pieces (verbs, `fill`, `rowLabelReads`, research handles); `find`
+and `act` get the host's commands (`loomId`, `expectedVersion`, batching,
+`not_granted`) and how loom retrieval withholds a row; `find`, `act` and
+`pieces` get when to resolve a named piece, which `author` has inside piece
+targeting. A rule needed only once it fires is left to the tool's refusal or
+result, which explains itself. A subagent whose profile holds `run_pattern`
+carries its rules in its own system prompt.
+
 Opening research has a durable `openingResearch` checkpoint in `run-state.json`.
 The driver records pending intent before invocation, then records whether a kit
 was returned together with the sanitized handoff and tool-output identity. After

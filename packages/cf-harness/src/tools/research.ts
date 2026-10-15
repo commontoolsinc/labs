@@ -108,7 +108,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
   toolId: "research",
   title: "Research Common Fabric",
   description:
-    "Research Common Fabric docs, skills, indexed pieces and available data for the user goal: orient for an initial approach, answer (default) for a question; both can inspect source and return code or invocations. Build on prior findings with followUpTo, asking for what remains unclear rather than commissioning another whole app. Prefer composing existing pieces with a small reusable addition. The result names a research handle (a cfh:v: token) holding the findings: name it in followUpTo, or in a delegate_task goal so a child with describe_handle (pattern-author) reads it instead of researching again. Does not search the web.",
+    "Research Common Fabric docs, skills, indexed pieces and available data for a task (orient) or a question (answer, the default); returns findings, code or invocations, and a research handle (a cfh:v: token) holding them. Does not search the web.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -117,8 +117,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         type: "string",
         minLength: 3,
         maxLength: 20_000,
-        description:
-          "The task to orient to or question to investigate, with its constraints.",
+        description: "The task or question, with its constraints.",
       },
       purpose: {
         type: "string",
@@ -129,8 +128,7 @@ export const researchToolDescriptor: HarnessToolDescriptor = {
         type: "string",
         minLength: 1,
         maxLength: 500,
-        description:
-          "A research handle to start from: its held bindings count as described and its unchanged sources as cited.",
+        description: "A research handle whose findings this one builds on.",
       },
     },
     required: ["task"],
