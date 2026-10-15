@@ -25,7 +25,7 @@ import {
 /** One index coordinator stages distinct physical instances at shared scoped addresses. */
 describe("collection index serving", () => {
   for (const mode of ["group", "key"] as const) {
-    for (const scope of ["user", "session"] as const) {
+    for (const scope of ["user"] as const) {
       it(`stages ${mode} index ownership and member setup for both ${scope} identities`, async () => {
         const signer = await Identity.fromPassphrase(
           `index-serving-${mode}-${scope}`,
@@ -52,7 +52,7 @@ describe("collection index serving", () => {
           const actors = await Promise.all([
             Identity.fromPassphrase("index-serving-alice"),
             Identity.fromPassphrase(
-              scope === "session" ? "index-serving-alice" : "index-serving-bob",
+              "index-serving-bob",
             ),
           ]);
           const identities: ScopeKeyIdentity[] = [];
@@ -116,11 +116,7 @@ describe("collection index serving", () => {
             }
           }
           expect(identities[0].sessionId).not.toBe(identities[1].sessionId);
-          if (scope === "session") {
-            expect(identities[0].principal).toBe(identities[1].principal);
-          } else {
-            expect(identities[0].principal).not.toBe(identities[1].principal);
-          }
+          expect(identities[0].principal).not.toBe(identities[1].principal);
           const indexNames: string[] = [];
           const memberNames: string[] = [];
           const keysNames: string[] = [];

@@ -98,7 +98,7 @@ describe("list-coordinator-instances", () => {
       flatMap,
     ]] as const
   ) {
-    for (const scope of ["user", "session"] as const) {
+    for (const scope of ["user"] as const) {
       it(`sets up the same named ${scope}-scoped ${name} child for both serving identities`, async () => {
         const signer = await Identity.fromPassphrase(
           "list-coordinator-instances",
@@ -125,7 +125,7 @@ describe("list-coordinator-instances", () => {
         const actors = await Promise.all([
           Identity.fromPassphrase("map-alice"),
           Identity.fromPassphrase(
-            scope === "session" ? "map-alice" : "map-bob",
+            "map-bob",
           ),
         ]);
         const identities = actors.map((actor, index) => ({
@@ -196,11 +196,7 @@ describe("list-coordinator-instances", () => {
             }
           }
           expect(identities[0].sessionId).not.toBe(identities[1].sessionId);
-          if (scope === "session") {
-            expect(identities[0].principal).toBe(identities[1].principal);
-          } else {
-            expect(identities[0].principal).not.toBe(identities[1].principal);
-          }
+          expect(identities[0].principal).not.toBe(identities[1].principal);
           const coordinator = builtin(
             inputs,
             () => {},

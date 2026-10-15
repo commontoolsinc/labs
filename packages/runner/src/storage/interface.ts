@@ -347,6 +347,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   setSharedMemoryConnection?(enabled: boolean): void;
 
+  /** Keeps session-scoped documents in the local replica when enabled. */
+  setLocalSessionDocuments?(enabled: boolean): void;
+
   /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
    * (federation site table). Optional: managers without remote resolution

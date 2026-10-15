@@ -576,7 +576,7 @@ describe("editWithRetry absence reconciliation", () => {
     }
   });
 
-  it("reconciles the served transaction's user and session instances", async () => {
+  it("reconciles the served transaction's user instance", async () => {
     const actor = await Identity.fromPassphrase(
       "absence reconciliation served actor",
     );
@@ -608,20 +608,11 @@ describe("editWithRetry absence reconciliation", () => {
         undefined,
         "user",
       );
-      const sessionCell = actorRuntime.getCell<{ value: number }>(
-        space,
-        "served-identity-session",
-        valueSchema,
-        undefined,
-        "session",
-      );
       const seed = actorRuntime.edit();
       userCell.withTx(seed).set({ value: 11 });
-      sessionCell.withTx(seed).set({ value: 22 });
       expect((await seed.commit().settled).error).toBeUndefined();
       await actorStorage.synced();
       const userId = userCell.getAsNormalizedFullLink().id;
-      const sessionId = sessionCell.getAsNormalizedFullLink().id;
       await actorRuntime.dispose();
       actorRuntime = undefined;
       await actorStorage.close();
@@ -657,18 +648,11 @@ describe("editWithRetry absence reconciliation", () => {
         scope: "user",
         path: [],
       }, { trackReadWithoutLoad: true });
-      tx.read({
-        space,
-        id: sessionId,
-        type: "application/json",
-        scope: "session",
-        path: [],
-      }, { trackReadWithoutLoad: true });
 
       const provider = servingStorage.open(space);
       const absences = provider.unexaminedAbsences!(tx.tx);
       expect(absences.map((absence) => absence.id).sort()).toEqual(
-        [userId, sessionId].sort(),
+        [userId],
       );
       // Each names the actor's instance, the way a load for it is keyed.
       for (const absence of absences) {
@@ -699,28 +683,17 @@ describe("editWithRetry absence reconciliation", () => {
         ).toBeDefined();
       }
       await Promise.all(loads);
-      expect(provider.presentCount!(absences)).toBe(2);
+      expect(provider.presentCount!(absences)).toBe(1);
       expect(
         (provider.replica.getDocument(userId, "user", actorIdentity)?.value as
           | { value?: number }
           | undefined)?.value,
       ).toBe(11);
-      expect(
-        (provider.replica.getDocument(
-          sessionId,
-          "session",
-          actorIdentity,
-        )?.value as { value?: number } | undefined)?.value,
-      ).toBe(22);
-      // Both loads are keyed under the ACTOR's instance. The serving
-      // replica holds no record at all for its OWN instance of either
-      // document.
+      // The load names the actor's instance; the serving replica has no
+      // record for its own instance of the document.
       const replica = provider.replica as SpaceReplica;
       expect(
         replica.accessForTestingOnly.hasDocumentRecord(userId, "user"),
-      ).toBe(false);
-      expect(
-        replica.accessForTestingOnly.hasDocumentRecord(sessionId, "session"),
       ).toBe(false);
       tx.abort("inspection only");
     } finally {
