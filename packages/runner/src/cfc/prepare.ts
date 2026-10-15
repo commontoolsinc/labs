@@ -6115,7 +6115,7 @@ type FloorEvidence = {
    * Addresses the floor walked from the root of their documents through every
    * link on the way (`resolveValueThroughLinks`): the sources of the links
    * whose evidence it derived (`linkedSourceEvidence`), and the ancestor
-   * links' walks that found nothing at the floor path.
+   * links' walks to the floor path, whether they found a value there or not.
    */
   readonly walks: readonly CfcAddress[];
 
