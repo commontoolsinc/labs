@@ -247,12 +247,12 @@ piece with recorded source history whose current source cannot be restored is
 still refused.
 
 A caller that decided to follow on the strength of what it inspected pins the
-follow to the source state it read, so a piece whose source something else
-changed in between is left as it is. The pins cover the pattern and the source
-log, not the piece's data: an edit to its stored data alone does not refuse the
-follow. `--expect <identity>#<symbol>` names the pattern the piece must still
-run, and `--expect-revision <revision>` the revision its source log must still
-end at, or `none` for a log that must still be empty; both are what
+follow to the source state it read, so a piece whose source changed in between
+is left as it is. The pins cover the pattern and the source log, not the piece's
+data: an edit to its stored data alone does not refuse the follow.
+`--expect <identity>#<symbol>` names the pattern the piece must still run, and
+`--expect-revision <revision>` the revision its source log must still end at, or
+`none` for a log that must still be empty; both are what
 `cf piece inspect --pattern-identity --json` reports, as `patternIdentity` and
 `symbol`, and as a `revisionId` that is absent for an empty log. Every source
 transition appends a revision, so the revision pin refuses one that left the
