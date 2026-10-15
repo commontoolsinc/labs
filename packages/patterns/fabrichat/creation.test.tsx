@@ -630,14 +630,13 @@ export default pattern(() => {
           accepting.rooms.length === 0
         ),
       },
-      // A space's own chat is refused: its space is the social space it
-      // belongs to, which the catalog doesn't list as a room.
+      // A container conversation needs its root's explicit declaration.
       { assertion: assert(() => entriesOf(acceptCatalog).length === 2) },
       { action: action_accept_own_chat },
       {
         assertion: assert(() =>
           reasonOf(acceptRequests, "a-own") ===
-            "The room is a social space's own chat, which isn't listed among chats." &&
+            "The room needs its container's chat declaration." &&
           codeOf(acceptRequests, "a-own") === "space-own-chat" &&
           entriesOf(acceptCatalog).length === 2
         ),

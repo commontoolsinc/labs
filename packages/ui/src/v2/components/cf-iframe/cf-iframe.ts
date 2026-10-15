@@ -26,7 +26,10 @@ import {
  * @attr {string} src - String representation of HTML content to load within an iframe
  * @prop {object} bridge - Explicit capability bridge
  * @prop {object} context - Convenience cell context
- * @prop {object} resourceKinds - Explicit kinds for opaque context resources
+ * @prop {object} resourceKinds - Explicit kinds for opaque context resources.
+ *   A name marked `presence` grants the guest the presence room of that
+ *   context cell's field, where it publishes and hears ephemeral status such
+ *   as pointers, and grants none of the cell's data.
  *
  * @event {CustomEvent} load - The iframe was successfully loaded
  * @event {CustomEvent} fix - Dispatched when user clicks "Fix" on an error modal

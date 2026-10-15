@@ -14,7 +14,7 @@ import {
   recordReferencedArgumentFields,
 } from "../../src/cfc/reference-initialization.ts";
 import type { NormalizedFullLink } from "../../src/link-types.ts";
-import { areLinksSame } from "../../src/link-utils.ts";
+import { areLinksSame } from "../../src/link-equality.ts";
 import { runtimeWritePolicyAuthorization } from "../../src/cfc/types.ts";
 import { Runtime } from "../../src/runtime.ts";
 import { StorageManager } from "../../src/storage/cache.deno.ts";

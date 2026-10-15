@@ -93,6 +93,10 @@ import {
   MentionableArraySchema,
   MentionableSchema,
 } from "../../core/mentionable.ts";
+import {
+  type PresenceFailureCategory,
+  presenceFailureCategory,
+} from "../../core/presence-failure.ts";
 import { runtimeContext, spaceContext } from "../../runtime-context.ts";
 import {
   type CFTheme,
@@ -144,8 +148,6 @@ import {
   CARET_FACET,
   caretFacetOf,
   participantFromRecord,
-  type PresenceFailureCategory,
-  presenceFailureCategory,
 } from "./presence-facets.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */

@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { spy } from "@std/testing/mock";
 
+import type { JSONSchemaObj, JSONValue } from "@commonfabric/api";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
@@ -15,23 +16,26 @@ import {
   applyChangeSet,
   type ChangeSet,
   compactChangeSet,
+  diffAndAppend,
   diffAndUpdate,
   normalizeAndDiff,
   schemaIfcOverlapsPath,
   writeAuthorizationCoversPath,
 } from "../src/data-updating.ts";
 import {
-  areLinksSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isPrimitiveCellLink,
   isSigilLink,
   parseLink,
 } from "../src/link-utils.ts";
+import { areLinksSame } from "../src/link-equality.ts";
 import { Runtime } from "../src/runtime.ts";
+import { resolveSchema } from "../src/schema.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 import { toURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -1060,6 +1064,39 @@ describe("data-updating", () => {
       expect(long.recognitions / 200).toBeGreaterThan(0);
       expect(long.recognitions / 200).toBeLessThanOrEqual(17);
     });
+
+    for (const representation of ["inline", "reference"] as const) {
+      it(`expands snapshot defaults in a document link's ${representation} schema before writing`, () => {
+        const snapshot = runtime.getImmutableCell(space, { answer: 42 });
+        let schema: JSONSchemaObj = {
+          type: "object",
+          default: snapshot.getAsLink() as JSONValue,
+        };
+        if (representation === "reference") {
+          const decomposed = decomposeSchema(schema);
+          for (const [hash, document] of decomposed.documents) {
+            registerSchemaDocument(hash, document);
+          }
+          schema = { $ref: decomposed.rootRef };
+        }
+        const target = runtime.getCell(
+          space,
+          `snapshot schema default ${representation}`,
+          undefined,
+          tx,
+        );
+        const document = runtime.getCell(space, "schema default document");
+        const id = document.getAsNormalizedFullLink().id;
+        target.set(linkRefFrom({ id, schema }));
+
+        const stored = parseLink(target.getRaw());
+        expect(stored?.id).toBe(id);
+        expect(resolveSchema(stored?.schema)).toEqual({
+          type: "object",
+          default: { answer: 42 },
+        });
+      });
+    }
 
     it("replaces a stored link whose path does not parse with a write redirect", () => {
       const aliased = runtime.getCell<{ v: number }>(
@@ -2336,6 +2373,125 @@ describe("data-updating", () => {
 
       expect(value[7].label).toBe("changed");
       expect(value[8].label).toBe("entry-8");
+    });
+  });
+
+  describe("diffAndAppend", () => {
+    /**
+     * Commits `stored` as the list `name`, then appends `appended` to it with
+     * `diffAndAppend()`. Returns how many link envelopes the append asked
+     * `Object.keys()` about, the paths it wrote in the list's document, and
+     * the list as read back once the append commits.
+     */
+    const appendTo = async (
+      name: string,
+      stored: unknown[],
+      appended: unknown[],
+    ) => {
+      const list = runtime.getCell<unknown[]>(space, name);
+      const seed = runtime.edit();
+      list.withTx(seed).set(stored);
+      expect((await seed.commit().settled).error).toBeUndefined();
+
+      const appendTx = runtime.edit();
+      const link = list.getAsNormalizedFullLink();
+      const current = appendTx.readValueOrThrow(link) as unknown[];
+      let recognitions: number;
+      {
+        using keys = spy(Object, "keys");
+        diffAndAppend(runtime, appendTx, link, current, appended);
+        recognitions =
+          keys.calls.filter(({ args: [value] }) =>
+            isObjectOrArray(value) && Object.hasOwn(value, "/")
+          ).length;
+      }
+      const written = [...getTransactionWriteDetails(appendTx, space)]
+        .filter(({ address }) => address.id === link.id)
+        .map(({ address }) => address.path.join("/"));
+      expect((await appendTx.commit().settled).error).toBeUndefined();
+      return { recognitions, written, value: list.get() };
+    };
+
+    /** `size` distinct cells, for a list of links. */
+    const cellsFor = (name: string, size: number) =>
+      Array.from(
+        { length: size },
+        (_, index) => runtime.getCell(space, `${name}: item ${index}`),
+      );
+
+    it("recognizes as many links appending to 200 links as to 20", async () => {
+      // A stored link the walk descended into would be recognized once per
+      // element, so the longer list would cost ten times as many. The lower
+      // bound fails the case if links stop being envelopes `Object.keys()`
+      // enumerates, rather than letting it pass on a count of zero.
+      const shortItems = cellsFor("append to 20", 21);
+      const longItems = cellsFor("append to 200", 201);
+      const short = await appendTo(
+        "append to 20",
+        shortItems.slice(0, 20),
+        [shortItems[20]],
+      );
+      const long = await appendTo(
+        "append to 200",
+        longItems.slice(0, 200),
+        [longItems[200]],
+      );
+
+      expect(short.value).toHaveLength(21);
+      expect(long.value).toHaveLength(201);
+      expect(long.recognitions).toBe(short.recognitions);
+      expect(long.recognitions).toBeGreaterThan(0);
+    });
+
+    it("writes the length and the appended elements and nothing else", async () => {
+      const { written, value } = await appendTo(
+        "append writes the tail",
+        [{ label: "a" }, "b"],
+        ["c", "d"],
+      );
+
+      expect(written.toSorted()).toEqual([
+        "value/2",
+        "value/3",
+        "value/length",
+      ]);
+      expect(value).toEqual([{ label: "a" }, "b", "c", "d"]);
+    });
+
+    it("keeps a hole in the stored array a hole", async () => {
+      // deno-lint-ignore no-explicit-any
+      const sparse: any[] = new Array(3);
+      sparse[0] = 1;
+      sparse[2] = 3;
+      const { written, value } = await appendTo(
+        "append keeps holes",
+        sparse,
+        [4],
+      );
+
+      expect(written.toSorted()).toEqual(["value/3", "value/length"]);
+      expect(value).toHaveLength(4);
+      expect(1 in value).toBe(false);
+      expect(value[3]).toBe(4);
+    });
+
+    it("writes a hole among the appended values as an explicit undefined", async () => {
+      // deno-lint-ignore no-explicit-any
+      const appended: any[] = new Array(2);
+      appended[1] = "c";
+      const { written, value } = await appendTo(
+        "append fills appended holes",
+        ["a"],
+        appended,
+      );
+
+      expect(written.toSorted()).toEqual([
+        "value/1",
+        "value/2",
+        "value/length",
+      ]);
+      expect(value).toHaveLength(3);
+      expect(value[2]).toBe("c");
     });
   });
 });

@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-08-12
+archived: 2026-10-13
+reason: "Completed lazy materialization implementation; current semantics live in the feature contract."
+---
+
 # Lazy, schema-observing cell materialization
 
 Status: built end to end and on by default behind `lazyMaterialization`. What
@@ -5,9 +12,9 @@ remains is removing the flag and the eager path for lift arguments; handler
 materialization is settled under Stage 5.
 
 Switch retirement is optional work for the flag owner. The separate
-[lazy materialization fast-follow record](../history/plans/lazy-materialization-fast-follow.md)
+[lazy materialization fast-follow record](lazy-materialization-fast-follow.md)
 contains the dated investigation and measurement evidence. Current read semantics
-are described in the [feature contract](../features/lazy-cell-materialization.md).
+are described in the [feature contract](../../features/lazy-cell-materialization.md).
 This document retains the view and snapshot design and its implementation record.
 
 `Cell.get()` materializes everything its schema selects, in one pass, before the
@@ -31,17 +38,17 @@ argument that did not resolve.
 Mark a parent checkbox complete only after all of its child checks pass. Keep
 this plan updated in the same commits as the implementation. When the final
 stage lands, archive it under `docs/history/plans/` following
-[`../README.md`](../README.md).
+[`../README.md`](../../README.md).
 
 ## What the runtime does today
 
 Four mechanisms carry the current behavior. The design below reuses all four.
 
 **Eager, schema-driven materialization.** `Cell.get()`
-([`cell.ts`](../../packages/runner/src/cell.ts)) calls `validateAndTransform`
-([`schema.ts`](../../packages/runner/src/schema.ts)), which reads the whole
+([`cell.ts`](../../../packages/runner/src/cell.ts)) calls `validateAndTransform`
+([`schema.ts`](../../../packages/runner/src/schema.ts)), which reads the whole
 document value in one shot and hands it to `SchemaObjectTraverser`
-([`traverse.ts`](../../packages/runner/src/traverse.ts)). The traverser walks
+([`traverse.ts`](../../../packages/runner/src/traverse.ts)). The traverser walks
 the _data's_ own properties and, for each one, narrows the schema by that key.
 Properties the schema does not select are skipped without descent, via the
 `emptyProperties` / `missingProperty` marker schemas that make
@@ -50,7 +57,7 @@ prunes. What it does not do is defer: everything the schema _does_ select is
 built.
 
 **A schema-less lazy proxy.** `createQueryResultProxy`
-([`query-result-proxy.ts`](../../packages/runner/src/query-result-proxy.ts)) is
+([`query-result-proxy.ts`](../../../packages/runner/src/query-result-proxy.ts)) is
 the existing lazy view. It resolves links per access, records container reads as
 non-recursive shape reads (`SHAPE_READ`) and value reads as recursive, wraps
 array methods, and exposes `toCell`. It is reached from two places:
@@ -61,7 +68,7 @@ defaults, cannot mint `Cell`s for `asCell` fields, and cannot tell a reader that
 the data has stopped matching.
 
 **Schema narrowing already exists.** `ContextualFlowControl.schemaAtPath`
-([`cfc.ts`](../../packages/runner/src/cfc.ts)) narrows a schema by a path,
+([`cfc.ts`](../../../packages/runner/src/cfc.ts)) narrows a schema by a path,
 resolves `$ref`, and caches per interned schema. That is the narrowing a view
 applies to an ordinary container child. It does not decide a combinator: the
 view defers `anyOf`, `oneOf` and `allOf` to the eager traverser at the position
@@ -71,7 +78,7 @@ on the eager path — type check plus required-key presence, no descent — and
 nothing in the view is decided by it.
 
 **The "argument did not resolve" path.** `readJavaScriptArgument`
-([`runner.ts`](../../packages/runner/src/runner.ts)) computes `isValidArgument`
+([`runner.ts`](../../../packages/runner/src/runner.ts)) computes `isValidArgument`
 as `argument !== undefined`. When it is false the action skips the body, writes
 an undefined result through the ordinary result path, and logs at info level —
 the run is a non-event, not a failure. This is the disposition a schema refusal
@@ -81,7 +88,7 @@ Two boundaries worth naming because they bound the win:
 
 - **Loading is unaffected.** The query selector that decides which documents the
   server ships is the cell's own schema, taken in `syncCell`
-  ([`v2.ts`](../../packages/runner/src/storage/v2.ts)), independent of `.get()`.
+  ([`v2.ts`](../../../packages/runner/src/storage/v2.ts)), independent of `.get()`.
   Laziness saves local traversal, allocation, freezing, and reactive read
   registration. It does not, by itself, save network. Narrowing the sync
   selector to what a reader touches is a separate, later piece of work.
@@ -110,7 +117,7 @@ single non-recursive read of the container at `link`. Reading a property `p`:
 Point 5 is load-bearing and not incidental. A refusal must leave behind the
 dependency that will re-trigger the reader when the missing data arrives. The
 existing read path already records the activity before it inspects the value
-([`v2-transaction.ts`](../../packages/runner/src/storage/v2-transaction.ts)), so
+([`v2-transaction.ts`](../../../packages/runner/src/storage/v2-transaction.ts)), so
 a read of an absent path registers; the lazy view must make sure it issues that
 read rather than short-circuiting on the container's key set.
 
@@ -169,7 +176,7 @@ nothing else. Nothing else is evaluated whole: a property default and a
 nullable array-item substitute answer for what the view rejects at the
 container, and what fails deeper refuses where it is touched. The feature
 contract lists those as
-[deliberate divergences](../features/lazy-cell-materialization.md#where-a-view-deliberately-diverges),
+[deliberate divergences](../../features/lazy-cell-materialization.md#where-a-view-deliberately-diverges),
 and `packages/patterns/integration/topics-lazy-lookup-reruns.test.ts` holds the
 cost they avoid.
 
@@ -252,7 +259,7 @@ Disposition of a refusal:
 
 Lazy materialization is a mode on the transaction, not an argument threaded
 through every call. `TransactionWrapper`
-([`extended-storage-transaction.ts`](../../packages/runner/src/storage/extended-storage-transaction.ts))
+([`extended-storage-transaction.ts`](../../../packages/runner/src/storage/extended-storage-transaction.ts))
 is the existing shape for a transaction that changes read behavior —
 `createNonReactiveTransaction` is the precedent — and the mode belongs alongside
 it, with a scoped `runWithLazyMaterialization(fn)` helper mirroring
@@ -269,7 +276,7 @@ off before `writeJavaScriptActionResult`. Result writing, diffing, and the
 scheduler's own reads keep eager semantics.
 
 The per-transaction read cache on `Cell.get()`
-([`cell.ts`](../../packages/runner/src/cell.ts)) keys on a `variant` string; the
+([`cell.ts`](../../../packages/runner/src/cell.ts)) keys on a `variant` string; the
 mode joins it, so an eager and a lazy read of the same view do not share an
 entry.
 
@@ -301,7 +308,7 @@ declares less should not traverse more.
       `test/cell-schema-read-width.bench.ts`. It uses fresh transactions and the
       same declared schema in both eager and lazy modes, verifies every result,
       and reports journal activity separately from timing. The
-      [baseline report](../history/development/performance/2026-09-11-lazy-scalar-read-width.md)
+      [baseline report](../development/performance/2026-09-11-lazy-scalar-read-width.md)
       records the measured workload and its limits. Re-run it after per-access
       implementation changes.
 
@@ -458,17 +465,17 @@ diffing and the scheduler's own reads keep eager semantics.
 - [x] The reads taken up to the refusal stay registered, including the one that
       failed, so the node runs again when its inputs change.
 - [x] Handlers materialize eagerly, by decision rather than by omission. The
-      [fast-follow](../history/plans/lazy-materialization-fast-follow.md) built and measured a
+      [fast-follow](lazy-materialization-fast-follow.md) built and measured a
       lazy bound-context prototype and deferred it: a view narrows the read
       log a handler's commit is checked against, and its measured win is
       confined to a shape the collection guidance already steers away from.
-      The [record](../history/development/performance/2026-09-11-lazy-handler-context-prototype.md)
+      The [record](../development/performance/2026-09-11-lazy-handler-context-prototype.md)
       names the conditions for taking it up again.
 
 ### Stage 6 — Rollout
 
 - [x] `lazyMaterialization` registered in
-      [`../development/EXPERIMENTAL_OPTIONS.md`](../development/EXPERIMENTAL_OPTIONS.md),
+      [`../development/EXPERIMENTAL_OPTIONS.md`](../../development/EXPERIMENTAL_OPTIONS.md),
       reachable by `EXPERIMENTAL_LAZY_MATERIALIZATION` or
       `RuntimeOptions.experimental`.
 - [x] Landed default-off with both suites green.
@@ -488,17 +495,17 @@ diffing and the scheduler's own reads keep eager semantics.
       read of such a link used to answer `undefined`.
       `gideon-tests/proxy-length-repro` pins it.
 - [ ] Owner-led: decide whether and when to remove the default-on flag. The
-      [fast-follow plan](../history/plans/lazy-materialization-fast-follow.md) supplies evidence;
+      [fast-follow plan](lazy-materialization-fast-follow.md) supplies evidence;
       its completion does not depend on this optional retirement.
 
 ## Testing
 
 Follow
-[`../development/unit-test-coding-style.md`](../development/unit-test-coding-style.md)
+[`../development/unit-test-coding-style.md`](../../development/unit-test-coding-style.md)
 for shape, and
-[`../development/waiting-in-tests.md`](../development/waiting-in-tests.md) for
+[`../development/waiting-in-tests.md`](../../development/waiting-in-tests.md) for
 anything that waits — no polls, no sleeps, no retry loops. The gates in
-[`../../AGENTS.md`](../../AGENTS.md) that do not run under `deno task check`
+[`../../AGENTS.md`](../../../AGENTS.md) that do not run under `deno task check`
 (`check-no-waitfor`, `check-docs`, `check-skill-facts`, and the dependency
 checks) all apply.
 
@@ -541,7 +548,7 @@ the Stage 5 gate asserts the change deliberately rather than discovering it.
 **Proxy-hostile consumers.** Code that freezes, structurally clones, or
 `preventExtensions` a materialized value will now hit a proxy that refuses those
 operations. `snapshotQueryResult`
-([`query-result-proxy.ts`](../../packages/runner/src/query-result-proxy.ts)) is
+([`query-result-proxy.ts`](../../../packages/runner/src/query-result-proxy.ts)) is
 the existing escape and should be the documented answer. Auditing the consumers
 that survive to the result-writing boundary is part of Stage 5.
 
@@ -589,7 +596,7 @@ slipping past a prepared boundary is untested.
 - Narrowing the **sync selector** so the server ships only what a reader
   touches. That is the larger win for genuinely huge data and depends on this
   work landing first; it belongs with
-  [shaped reads and verb results](shaped-reads-and-verb-results.md).
+  [shaped reads and verb results](../../plans/shaped-reads-and-verb-results.md).
 - Making **handlers** lazy: Stage 5 records the decision to keep them eager.
 - Replacing the schema-less `createQueryResultProxy`. It remains the view for an
   absent or `true` schema, and the lazy view delegates to it.
