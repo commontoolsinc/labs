@@ -422,13 +422,13 @@ Deno.test("memberTestTask accepts a directory path as well as a URL", async () =
     // must find the manifest rather than quietly reporting none.
     assertEquals(await memberTestTask("./packages/probe", dir), "deno test");
     assertEquals(
-      await memberTestTask("./packages/probe", new URL(`file://${dir}/`)),
+      await memberTestTask("./packages/probe", path.toFileUrl(`${dir}/`)),
       "deno test",
     );
     // Without the trailing slash a member resolves beside the directory
     // rather than inside it, which reads as a member with no manifest.
     assertEquals(
-      await memberTestTask("./packages/probe", new URL(`file://${dir}`)),
+      await memberTestTask("./packages/probe", path.toFileUrl(dir)),
       "deno test",
     );
   } finally {

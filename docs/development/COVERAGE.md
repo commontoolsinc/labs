@@ -902,10 +902,10 @@ Three things read them:
 
 - The test-selection publisher collects each measured set's figure as a
   coverage baseline, against the commit the record's context names, from the
-  objects it folds. It takes them from a push to `main` that the fork flag
-  does not mark, the same rule its fold uses for a run of the default branch,
-  and keeps one per set per commit, the later run's where two measured the
-  same commit. It carries the previous manifest's baselines forward and
+  objects it folds. It takes them from a run of the head of `main` that the
+  fork flag does not mark, the same rule its fold uses for a run of the
+  default branch, and keeps one per set per commit, the later run's where
+  two measured the same commit. It carries the previous manifest's baselines forward and
   drops any older than `LOCAL_COVERAGE_BASELINE_DAYS`.
   `tasks/test-selection/baselines.ts` is where that happens.
 - The dashboard's coverage debt tile
