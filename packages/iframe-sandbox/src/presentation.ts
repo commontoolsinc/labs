@@ -4,7 +4,7 @@ export interface IframePresentation {
   readonly css: string;
 
   /** Root `data-*` attributes used by the stylesheet's selectors. */
-  readonly attributes: Readonly<Record<string, string>>;
+  readonly attributes: Readonly<Record<`data-${string}`, string>>;
 
   /** Stylesheet URLs, subject to the guest's Content Security Policy. */
   readonly stylesheets: readonly string[];
