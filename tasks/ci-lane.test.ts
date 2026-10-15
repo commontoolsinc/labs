@@ -874,6 +874,35 @@ describe("how many lanes the full run asks for", () => {
     expect(await fullLanes(options, deps)).toBe(4);
   });
 
+  /** What `fullLanes` answers, and what it said on the error stream. */
+  async function saying(deps: LaneDeps) {
+    const error = console.error;
+    const said: string[] = [];
+    console.error = (line: string) => said.push(line);
+    try {
+      return { lanes: await fullLanes(options, deps), said: said.join("\n") };
+    } finally {
+      console.error = error;
+    }
+  }
+
+  it("says when the cap holds back a measured run", async () => {
+    // Two tests to a lane, and two lanes more than the cap allows.
+    const capped = await saying(
+      corpus((FULL_LANES_MAX + 2) * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
+    );
+    expect(capped.lanes).toBe(FULL_LANES_MAX);
+    expect(capped.said).toContain(
+      `needs more than ${FULL_LANES_MAX} lanes and takes ${FULL_LANES_MAX}`,
+    );
+    // And says nothing of the cap where the run fits under it.
+    const fits = await saying(
+      corpus(FULL_LANES_MAX * 2, FULL_LANE_BUDGET_SECONDS * 0.45),
+    );
+    expect(fits.lanes).toBe(FULL_LANES_MAX);
+    expect(fits.said).not.toContain("needs more than");
+  });
+
   /**
    * A corpus with the shapes that make packing hard: several suites, the
    * measured skew the plan document records with a tenth of the tests
@@ -1046,21 +1075,13 @@ describe("how many lanes the full run asks for", () => {
       { length: FULL_LANES_MAX + 10 },
       (_, i) => suite({ id: `suite-${i}`, units: [`s${i}/one.test.ts`] }),
     );
-    const error = console.error;
-    const said: string[] = [];
-    console.error = (line: string) => said.push(line);
-    let lanes: number;
-    try {
-      lanes = await fullLanes(options, {
-        topology: () => Promise.resolve(suites),
-        manifest: () => Promise.resolve({ absent: "the store is gone" }),
-      });
-    } finally {
-      console.error = error;
-    }
+    const { lanes, said } = await saying({
+      topology: () => Promise.resolve(suites),
+      manifest: () => Promise.resolve({ absent: "the store is gone" }),
+    });
     expect(lanes).toBe(FULL_LANES_MAX);
-    expect(said.join("\n")).toContain(
-      `needs ${FULL_LANES_MAX + 10} lanes and takes ${FULL_LANES_MAX}`,
+    expect(said).toContain(
+      `needs more than ${FULL_LANES_MAX} lanes and takes ${FULL_LANES_MAX}`,
     );
   });
 
