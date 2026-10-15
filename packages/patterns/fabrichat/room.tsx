@@ -226,15 +226,18 @@ export interface ParticipantChipOutput {
  * One participant, shown by their profile, with a control that starts a direct
  * chat with them. The control shows for someone other than the viewer, whose
  * profile attests a principal, to a viewer with a profile. Whether the viewer
- * has a manager is not read here: the chip's display is stored in the room's
- * space, and a manager whose data carries a label the room's space does not
- * admit would make it refused, as would any read of the wish that finds the
- * manager. So a viewer whose Home has no manager sees the control, and its
- * click reaches no one. It names the participant to the manager by their
- * profile, bound as the control's `name`, which crosses into the click's event
- * as the profile's own cell; the manager reads whom it names from the
- * profile's `represents-principal` label, and offers the room through the
- * share inbox the profile points at.
+ * has a manager is not read here. The chip's display is a computed cell in the
+ * room's space, and the viewer's manager lives in their Home's space: a
+ * computed that reads labeled data from another space is held to what the
+ * room's space admits, which a manager carrying its person's `PersonalSpace`
+ * label does not fit, so a display that read the manager would be refused. So
+ * the control shows while the viewer's `#chatManager` wish has yet to find a
+ * manager, and to a viewer whose Home has none, and a click then reaches no
+ * one. It names the participant to the manager by their profile, bound as the
+ * control's `name`, which crosses into the click's event as the profile's own
+ * cell; the manager reads whom it names from the profile's
+ * `represents-principal` label, and offers the room through the share inbox
+ * the profile points at.
  */
 export const ParticipantChip = pattern<
   ParticipantChipInput,
