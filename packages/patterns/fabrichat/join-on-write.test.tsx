@@ -261,7 +261,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     activity: setup.activity,
     counters: setup.counters,
     canJoin: true,
-    joinRoom: counted,
+    manager: { joinRoom: counted },
     self,
   } as RowArg);
 

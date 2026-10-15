@@ -45,12 +45,12 @@ const commit = (localSeq: number, extra: Record<string, unknown>) =>
     ...extra,
   }) as never;
 
-Deno.test("rejects a commit with no operations, observation, or preconditions", async () => {
+Deno.test("rejects a commit with no operations, reads, or preconditions", async () => {
   await withEngine((engine) => {
     assertThrows(
       () => applyCommit(engine, { sessionId: "s:a", commit: commit(1, {}) }),
       Error,
-      "requires at least one operation",
+      "requires operations, reads, or preconditions",
     );
   });
 });

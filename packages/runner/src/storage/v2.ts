@@ -2,13 +2,11 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import {
   cloneIfNecessary,
   hashStringOf,
+  isDeepFrozen,
   isKeyableObjectOrArray,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
-import {
-  hasDataUriScheme,
-  valueFromDataUri,
-} from "@commonfabric/data-model/codec-data-uri";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
   verifySchemaDocument,
   walkSchemaDocumentClosure,
@@ -37,6 +35,7 @@ import {
   type ClientCommit,
   type CommitClass,
   type CommitPrecondition,
+  commitPreconditionValueHash,
   DEFAULT_BRANCH,
   type DocumentPath,
   type EntityDocument,
@@ -91,6 +90,11 @@ import {
 import { encodePointer, parsePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import type { Cancel } from "../cancel.ts";
+import {
+  hasInlineCellScheme,
+  inlineCellValue,
+  isImmutableCellId,
+} from "../immutable-cell.ts";
 import {
   diagnosticPrefix,
   type PendingCommitContext,
@@ -369,7 +373,7 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 }
 
 /**
- * Identity of one data-URI pull: the URI, the schema it was read against, the
+ * Identity of one immutable-document pull: the URI, the schema it was read against, the
  * path into it, where it lives, and the identity resolving its linked cells.
  *
  * The result is a hash rather than those parts joined together. A data URI
@@ -1206,6 +1210,123 @@ const compactDependencyGroup = <
   compact(root, observed, false);
 };
 
+/**
+ * The most reads one dependency group — one document at one basis — may
+ * carry on the wire. Past it, `coarsenCommitReads` replaces the group's
+ * reads with one recursive read at their common prefix, and a shallow read
+ * there beside it when the group held one.
+ *
+ * A commit names every path a transaction read (03-commit-model.md §3.4),
+ * one `ConfirmedRead` or `PendingRead` per path, and the server refuses a
+ * message past `MAX_UNTRUSTED_MESSAGE_SLOTS`. A pattern setup that runs
+ * inside its own commit — a source swap, `runSyncedWithCommit` — reads
+ * every document its program touches, and on a board of nine hundred
+ * members that was 58 paths on each member's document: 139,441 reads over
+ * 40,095 documents, a 17 MB message, refused. The lossless compaction
+ * (`compactCommitReads`) cannot fold those, since the members' container
+ * was not read in full.
+ *
+ * Applied to the OUTGOING message only. The replica keeps the lossless
+ * set for everything it decides locally — a pending layer's `read` flag,
+ * and `intendedSplicePaths`, which takes a recursive read at an array's
+ * ancestor as the transaction having read that array; a prefix read minted
+ * here would claim splices on arrays the transaction never read.
+ *
+ * The coarser set is a stronger precondition. The engine's
+ * `patchOverlapsRead` matches a touched leaf and a recursive read's path by
+ * prefix in either direction, so whatever overlapped a read under the
+ * prefix overlaps the prefix. A shallow read's rule is different — a
+ * touched path at or ABOVE the read, with a key add/remove injecting its
+ * parent, so an indexed removal at `list/0` is matched by a shallow read
+ * under `list/1` through the injected `list` — which a recursive read at
+ * `list/1` never sees; so a group that held any shallow read keeps a
+ * shallow read at the prefix beside the recursive one. The cost is
+ * conflicting with disjoint writes to the same document, and a retry.
+ */
+const MAX_READS_PER_DEPENDENCY_GROUP = 16;
+
+const commonDocumentPathPrefix = (
+  paths: readonly (readonly string[])[],
+): DocumentPath => {
+  let prefix: readonly string[] = paths[0] ?? [];
+  for (const path of paths) {
+    let length = 0;
+    while (
+      length < prefix.length && length < path.length &&
+      prefix[length] === path[length]
+    ) {
+      length++;
+    }
+    prefix = prefix.slice(0, length);
+    if (prefix.length === 0) break;
+  }
+  return toDocumentPath([...prefix]);
+};
+
+type WireRead =
+  | ClientCommit["reads"]["confirmed"][number]
+  | ClientCommit["reads"]["pending"][number];
+
+const commitReadDependencyKey = (read: WireRead): string =>
+  "seq" in read
+    ? `confirmed:${normalizeCellScope(read.scope)}:${read.id}:${read.seq}`
+    : `pending:${normalizeCellScope(read.scope)}:${read.id}:${
+      localSeqKey(read.localSeq)
+    }:${read.basisSeq}`;
+
+const coarsenWideReadGroup = <Read extends WireRead>(
+  group: readonly Read[],
+): Read[] => {
+  if (group.length <= MAX_READS_PER_DEPENDENCY_GROUP) return [...group];
+  const prefix = commonDocumentPathPrefix(group.map((read) => read.path));
+  const { nonRecursive: _shallow, ...statement } = group[0];
+  const coarsened: Read[] = [];
+  if (group.some((read) => read.nonRecursive === true)) {
+    coarsened.push({ ...statement, path: prefix, nonRecursive: true } as Read);
+  }
+  coarsened.push({ ...statement, path: prefix } as Read);
+  return coarsened;
+};
+
+/**
+ * The commit's reads as the wire carries them: each dependency group past
+ * `MAX_READS_PER_DEPENDENCY_GROUP` coarsened to its prefix. Returns the
+ * input itself when nothing coarsens, so a caller can tell.
+ */
+export const coarsenCommitReads = (
+  reads: ClientCommit["reads"],
+): ClientCommit["reads"] => {
+  const coarsen = <Read extends WireRead>(list: Read[]): Read[] => {
+    const grouped = new Map<string, Read[]>();
+    for (const read of list) {
+      const key = commitReadDependencyKey(read);
+      const group = grouped.get(key);
+      if (group === undefined) grouped.set(key, [read]);
+      else group.push(read);
+    }
+    if (
+      [...grouped.values()].every((g) =>
+        g.length <= MAX_READS_PER_DEPENDENCY_GROUP
+      )
+    ) {
+      return list;
+    }
+    return [...grouped.values()].flatMap((group) =>
+      coarsenWideReadGroup(group)
+    );
+  };
+  const confirmed = coarsen(reads.confirmed);
+  const pending = coarsen(reads.pending);
+  return confirmed === reads.confirmed && pending === reads.pending
+    ? reads
+    : { confirmed, pending };
+};
+
+const coarsenCommitForWire = (commit: ClientCommit): ClientCommit => {
+  const reads = coarsenCommitReads(commit.reads);
+  return reads === commit.reads ? commit : { ...commit, reads };
+};
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -1322,6 +1443,12 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
 };
 
 /**
+ * What `selectorSchemaForLink()` returned for each deep-frozen reader schema,
+ * by that schema's interned instance.
+ */
+const selectorSchemasForLinks = new WeakMap<object, JSONSchema>();
+
+/**
  * The selector schema a link target is asked for. Where the reader's schema
  * takes a handle at the link (`asCell` at its root, or at the root of an
  * `anyOf`/`oneOf` branch), the outermost handle boundary comes off, so the
@@ -1330,11 +1457,33 @@ const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
  * than as a reference it delivered once. Inner boundaries stay, as they do
  * on the handle's own schema, and a schema that takes no handle is asked for
  * as it is.
+ *
+ * A deep-frozen schema gets the interned result, the same one on every call
+ * and for every schema equal to it: each sync of a link's target normalizes a
+ * selector over the result, which interns it, and a schema built per sync
+ * would be hashed whole per sync. A schema that is not deep-frozen gets a
+ * schema of its own each time and is left as it was.
  */
-function selectorSchemaForLink(
+export function selectorSchemaForLink(
   schema: JSONSchema | undefined,
 ): JSONSchema | false {
   if (!isObjectOrArray(schema)) return schema ?? false;
+  if (!isDeepFrozen(schema)) return withoutOuterHandles(schema);
+  const interned = internSchema(schema);
+  let remembered = selectorSchemasForLinks.get(interned);
+  if (remembered === undefined) {
+    remembered = internSchema(withoutOuterHandles(interned));
+    selectorSchemasForLinks.set(interned, remembered);
+  }
+  return remembered;
+}
+
+/**
+ * Helper for `selectorSchemaForLink()`, which returns `schema` rebuilt
+ * without its outermost handle boundary, at its root and at the root of each
+ * `anyOf`/`oneOf` branch.
+ */
+function withoutOuterHandles(schema: JSONSchemaObj): JSONSchemaObj {
   const unwrapped = unwrapOuterHandle(schema);
   const branches = (key: "anyOf" | "oneOf"): Partial<JSONSchemaObj> => {
     const list = unwrapped[key];
@@ -1425,7 +1574,7 @@ export class StorageManager implements IStorageManager {
   #docPullKicks = new Set<string>();
 
   /**
-   * Data URIs whose linked targets this manager has already pulled, keyed by a
+   * Immutable documents whose linked targets this manager has already pulled, keyed by a
    * hash of the URI, schema, path, space, and scope. Per manager rather than
    * per process: a hit skips the pull, and a manager that inherited another
    * manager's hit would leave its own replica without those documents.
@@ -1435,13 +1584,13 @@ export class StorageManager implements IStorageManager {
   );
 
   /**
-   * What a data URI is worth knowing per sync, by the URI: the hash of the id
-   * and the value it decodes to. A plan's inputs document is synced under
+   * What a legacy data URI is worth knowing per sync, by the URI: the hash of the id
+   * and the value it decodes to. An immutable document can be synced under
    * each schema its node reads through and again on every pre-sync wave, and
    * hashing and decoding tens of kilobytes of URI on each would cost more than
    * the sync. An entry weighs its URI, which it keeps alive as its key, and
    * the value decoded from it, taken as the payload's bytes several times
-   * over; a URI too large for a share of the budget is not kept at all.
+   * over. Native snapshots bypass this decoded-value cache; a URI too large for a share of the budget is not kept at all.
    */
   #dataUriMemo = new LRUCache<string, { idHash: string; value: unknown }>({
     capacity: DATA_URI_SYNC_CACHE_MAX,
@@ -1469,6 +1618,7 @@ export class StorageManager implements IStorageManager {
 
   /** What `setSharedMemoryConnection()` last declared. */
   #sharedMemoryConnection = false;
+  #localSessionDocuments: boolean | undefined;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
 
@@ -1897,6 +2047,17 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  setLocalSessionDocuments(enabled: boolean): void {
+    if (
+      this.#localSessionDocuments !== undefined &&
+      this.#localSessionDocuments !== enabled
+    ) {
+      throw new Error("Session document policy is already configured");
+    }
+    this.#localSessionDocuments = enabled;
+  }
+
   /** See `IStorageManager.setSharedMemoryConnection`. */
   setSharedMemoryConnection(enabled: boolean): void {
     if (enabled !== this.#sharedMemoryConnection && this.#providers.size > 0) {
@@ -2076,6 +2237,7 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         scopeKeyIdentity: () => this.scopeKeyIdentity(),
+        localSessionDocuments: () => this.#localSessionDocuments === true,
         // Phase 5's producer-side foreign-scoped-read refusal: only a
         // serving manager sets a home space, and only its FOREIGN
         // providers refuse (see Options.servingHomeSpace).
@@ -2577,7 +2739,7 @@ export class StorageManager implements IStorageManager {
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
-    if (hasDataUriScheme(id)) {
+    if (hasInlineCellScheme(id)) {
       return false;
     }
     const instance = this.#foreignInstanceKey(scope, identity);
@@ -2856,8 +3018,8 @@ export class StorageManager implements IStorageManager {
       throw new Error("No space set");
     }
 
-    if (hasDataUriScheme(id)) {
-      return this.#syncDataURICell(
+    if (hasInlineCellScheme(id)) {
+      return this.#syncImmutableCell(
         cell,
         space,
         id,
@@ -3027,7 +3189,7 @@ export class StorageManager implements IStorageManager {
     address: { space: MemorySpace; id: URI; scope?: CellScope },
     identity: ScopeKeyIdentity,
   ): Promise<void> {
-    if (hasDataUriScheme(address.id)) return;
+    if (hasInlineCellScheme(address.id)) return;
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
@@ -3148,7 +3310,7 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.#resolveCrossSpace(resolve));
   }
 
-  async #syncDataURICell<T>(
+  async #syncImmutableCell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3156,7 +3318,7 @@ export class StorageManager implements IStorageManager {
     scope: CellScope | undefined,
     identity: ScopeKeyIdentity,
   ): Promise<Cell<T>> {
-    const memo = this.#dataUri(id);
+    const memo = this.#immutableValue(id);
     const cacheKey = dataURISyncKey({
       id,
       idHash: memo.idHash,
@@ -3168,7 +3330,7 @@ export class StorageManager implements IStorageManager {
     });
     let work = this.#dataURISyncs.get(cacheKey);
     if (work === undefined) {
-      work = this.#syncDataURILinkTargets(
+      work = this.#syncImmutableLinkTargets(
         cell,
         space,
         id,
@@ -3183,11 +3345,14 @@ export class StorageManager implements IStorageManager {
     return cell;
   }
 
-  /** The memo entry for the data URI `id`, decoded and hashed on first use. */
-  #dataUri(id: string): { idHash: string; value: unknown } {
+  /** Returns the native snapshot or a legacy value decoded and hashed on first use. */
+  #immutableValue(id: string): { idHash: string; value: unknown } {
+    if (isImmutableCellId(id)) {
+      return { idHash: id, value: inlineCellValue(id) };
+    }
     let entry = this.#dataUriMemo.get(id);
     if (entry === undefined) {
-      entry = { idHash: hashStringOf(id), value: valueFromDataUri(id) };
+      entry = { idHash: hashStringOf(id), value: inlineCellValue(id as URI) };
       if (dataUriMemoWeight(id) <= DATA_URI_MEMO_MAX_ENTRY_WEIGHT) {
         this.#dataUriMemo.put(id, entry);
       }
@@ -3195,7 +3360,7 @@ export class StorageManager implements IStorageManager {
     return entry;
   }
 
-  async #syncDataURILinkTargets<T>(
+  async #syncImmutableLinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
@@ -3237,8 +3402,9 @@ export class StorageManager implements IStorageManager {
    * linked document onto `promises`, under the schema a read at the link's
    * place in `schema` would cross it with: the reader's sub-schema, which the
    * link's own schema cannot widen (`combineSchemaForLink`). Each link goes
-   * through `#syncLinkTarget`, which crosses a link into a data-URI document
-   * locally rather than sending it. `seen` holds the objects already walked. A served per-instance run's
+   * through `#syncLinkTarget`, which crosses a link into an immutable document
+   * locally rather than sending it. `seen` holds the current ancestors; completed
+   * visits are memoized by value, base, schema, and principal context. A served run's
    * `identity` names that principal's instance of each scoped target
    * (server-execution v2 stage A), as `syncCell` does for a stored
    * document.
@@ -3250,6 +3416,7 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity?: ScopeKeyIdentity,
+    completed = new WeakMap<object, Set<string>>(),
   ): void {
     if (value === null || value === undefined || seen.has(value)) {
       return;
@@ -3257,72 +3424,99 @@ export class StorageManager implements IStorageManager {
     if (typeof value !== "object") {
       return;
     }
+    const context = JSON.stringify([
+      base.id,
+      base.space,
+      base.scope,
+      base.path,
+      hashStringOf(schema),
+      identity,
+    ]);
+    if (completed.get(value)?.has(context)) return;
     seen.add(value);
-
-    if (isPrimitiveCellLink(value)) {
-      // A position the reader declares a stream names a document that holds
-      // no value a read uses, whatever the link's own schema says of it.
-      if (ContextualFlowControl.declaresStream(schema)) return;
-      const link = parseLinkPrimitive(value, base);
-      if (link.id === undefined) return;
-      this.#syncLinkTarget(
-        { ...link, id: link.id },
-        base,
-        combineOptionalSchema(schema, link.schema),
-        promises,
-        seen,
-        identity,
-      );
-      return;
-    }
-
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        const item = value[i];
-        const itemSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          item,
+    let succeeded = true;
+    // A shared frozen node can occur under different schemas and origins.
+    // Guard ancestors, not all previously visited identities: each occurrence
+    // must contribute the reads its own schema requests.
+    try {
+      if (isPrimitiveCellLink(value)) {
+        // A position the reader declares a stream names a document that holds
+        // no value a read uses, whatever the link's own schema says of it.
+        if (ContextualFlowControl.declaresStream(schema)) return;
+        const link = parseLinkPrimitive(value, base);
+        if (link.id === undefined) return;
+        this.#syncLinkTarget(
+          { ...link, id: link.id },
           base,
-          itemSchema,
+          combineOptionalSchema(schema, link.schema),
           promises,
           seen,
           identity,
+          completed,
         );
+        return;
       }
-      return;
-    }
 
-    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
-    // held inside a `FabricInstance` reconstructed from the data URI is never
-    // found here and its target document is never synced — the later read
-    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
-    // leaf.)
-    if (isKeyableObjectOrArray(value)) {
-      for (const key of Object.keys(value)) {
-        const child = value[key];
-        if (!isObjectOrArray(child)) {
-          continue;
+      if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) {
+          const item = value[i];
+          const itemSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            item,
+            base,
+            itemSchema,
+            promises,
+            seen,
+            identity,
+            completed,
+          );
         }
-        const childSchema = schema
-          ? ContextualFlowControl.getSchemaAtPath(schema, [key])
-          : undefined;
-        this.#collectLinkedCellSyncs(
-          child,
-          base,
-          childSchema,
-          promises,
-          seen,
-          identity,
-        );
+        return;
+      }
+
+      // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+      // held inside a `FabricInstance` reconstructed from the data URI is never
+      // found here and its target document is never synced — the later read
+      // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+      // leaf.)
+      if (isKeyableObjectOrArray(value)) {
+        for (const key of Object.keys(value)) {
+          const child = value[key];
+          if (!isObjectOrArray(child)) {
+            continue;
+          }
+          const childSchema = schema
+            ? ContextualFlowControl.getSchemaAtPath(schema, [key])
+            : undefined;
+          this.#collectLinkedCellSyncs(
+            child,
+            base,
+            childSchema,
+            promises,
+            seen,
+            identity,
+            completed,
+          );
+        }
+      }
+    } catch (error) {
+      succeeded = false;
+      throw error;
+    } finally {
+      seen.delete(value);
+      if (succeeded) {
+        let contexts = completed.get(value);
+        if (contexts === undefined) completed.set(value, contexts = new Set());
+        contexts.add(context);
       }
     }
   }
 
   /**
    * Syncs the document `link` names under `schema`, the schema a read
-   * crosses the link with. A link into a data-URI document is walked
+   * crosses the link with. A link into an immutable document is walked
    * locally instead: the walk descends the link's path through the
    * document's value, and a link it meets on the way is followed with the
    * rest of the path appended, so a stand-in holding a caller's cell at
@@ -3338,12 +3532,13 @@ export class StorageManager implements IStorageManager {
     promises: Promise<unknown>[],
     seen: Set<unknown>,
     identity: ScopeKeyIdentity | undefined,
+    completed: WeakMap<object, Set<string>>,
   ): void {
     const space = link.space ?? base.space!;
     // A handle with no declared value shape transfers only its
     // address. Loading its target requires a read through that handle.
     if (
-      !hasDataUriScheme(link.id) && link.overwrite !== "redirect" &&
+      !hasInlineCellScheme(link.id) && link.overwrite !== "redirect" &&
       isUnknownCellSchema(schema)
     ) return;
     // A link that declares a stream names a document that holds no value: a
@@ -3352,10 +3547,10 @@ export class StorageManager implements IStorageManager {
     // delivers nothing and costs a root carrying that schema per stream.
     if (ContextualFlowControl.declaresStream(schema)) return;
     const scope = normalizeCellScope(link.scope as CellScope | undefined);
-    if (hasDataUriScheme(link.id)) {
+    if (hasInlineCellScheme(link.id)) {
       const dataBase: NormalizedLink = { space, id: link.id, scope, path: [] };
       const segments = link.path.map((segment) => segment.toString());
-      let target: unknown = this.#dataUri(link.id).value;
+      let target: unknown = this.#immutableValue(link.id).value;
       for (let i = 0; i < segments.length; i++) {
         if (isPrimitiveCellLink(target)) {
           const inner = parseLinkPrimitive(target, dataBase);
@@ -3375,6 +3570,7 @@ export class StorageManager implements IStorageManager {
             promises,
             seen,
             identity,
+            completed,
           );
           return;
         }
@@ -3391,6 +3587,7 @@ export class StorageManager implements IStorageManager {
         promises,
         seen,
         identity,
+        completed,
       );
       return;
     }
@@ -3457,6 +3654,8 @@ type OpenedSpaceSession = {
 };
 
 type ProviderOptions = {
+  /** Whether session documents live only in the owning runtime. */
+  localSessionDocuments?: () => boolean;
   as: Signer;
   space: MemorySpace;
   settings: IRemoteStorageProviderSettings;
@@ -3943,6 +4142,7 @@ class Provider
     this.options.routeState.generation++;
     this.#routeAbort = new AbortController();
     const replacement = this.#createReplica();
+    previous.transferLocalSessionStateTo(replacement);
     this.replica = replacement;
     for (const subscription of this.#operationSubscriptions) {
       subscription.cancel?.();
@@ -4326,6 +4526,14 @@ export class SpaceReplica
   >();
 
   /**
+   * Local-only commit verdicts for origin preconditions. An entry starts
+   * false and becomes true on acceptance; callers await its outcome before
+   * checking it. Kept for this replica's lifetime because no server commit
+   * row can validate a later reference to a local origin.
+   */
+  readonly #localSessionCommitAccepted = new Map<number, boolean>();
+
+  /**
    * Server verdict promises superseded by a local rejection. Kept _out_ of
    * `#commitPromises` so `synced()` never blocks on a verdict the server may
    * withhold indefinitely; `close()`/`closeNow()` drain the set after client
@@ -4372,6 +4580,7 @@ export class SpaceReplica
   /** The store read-through this replica serves misses from (see
    * ProviderOptions.storeReadThrough). */
   readonly #storeReadThrough: () => StoreReadThrough | undefined;
+  readonly #localSessionDocuments: () => boolean;
 
   /** See ProviderOptions.loadCrossings. */
   readonly #loadCrossings:
@@ -4545,15 +4754,15 @@ export class SpaceReplica
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
 
   /**
-   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
-   * overlay entries exist only in this process — the client never pushes them —
-   * so a _pushed_ commit whose read basis names one can _never_ have that
-   * dependency resolve server-side. `#commitOperations()` refuses such an
-   * export loudly; membership ends when the speculative commit settles
-   * (retirement/withdrawal drops its pending layers first, so no stack names a
-   * seq after it leaves this set).
+   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6),
+   * each with the promise its settlement resolves: overlay entries exist only
+   * in this process — the client never pushes them — so a _pushed_ commit whose
+   * read basis names one can _never_ have that dependency resolve server-side.
+   * `#commitOperations()` refuses such an export loudly; membership ends when
+   * the speculative commit settles (retirement/withdrawal drops its pending
+   * layers first, so no stack names a seq after it leaves this map).
    */
-  readonly #speculativeLocalSeqs = new Set<number>();
+  readonly #speculativeLocalSeqs = new Map<number, Promise<void>>();
 
   /**
    * The overlay destination's retirement _wake_ for origin accepts
@@ -4636,6 +4845,8 @@ export class SpaceReplica
 
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
+    this.#localSessionDocuments = options.localSessionDocuments ??
+      (() => false);
     this.#subscription = options.subscription;
     this.#onAccessChange = options.onAccessChange;
     this.#onSessionReplaced = options.onSessionReplaced;
@@ -5649,6 +5860,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
+    if (this.#isLocalSessionDocument({ scope }, identity)) return true;
     const key = this.#docKeyOf({ id, scope }, identity);
     const record = this.#docs.get(key);
     return this.#delivered.has(key) ||
@@ -5796,6 +6008,23 @@ export class SpaceReplica
         ...new Set(record.pending.map((entry) => entry.localSeq)),
       ],
     };
+  }
+
+  /** @inheritDoc */
+  whenSpeculationSettled(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined {
+    const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
+    const standing = new Set<Promise<void>>();
+    for (const entry of record?.pending ?? []) {
+      const settled = this.#speculativeLocalSeqs.get(entry.localSeq);
+      if (settled !== undefined) standing.add(settled);
+    }
+    return standing.size === 0
+      ? undefined
+      : Promise.all(standing).then(() => {});
   }
 
   /** ISpaceReplica.ackedSeqOf (server-execution v2 Phase 2,
@@ -6218,6 +6447,9 @@ export class SpaceReplica
   async pull(
     entries: [WatchAddress, SchemaPathSelector | undefined][],
   ): Promise<Result<Unit, PullError>> {
+    entries = entries.filter(([address]) =>
+      !this.#isLocalSessionDocument(address)
+    );
     if (entries.length === 0) {
       return { ok: {} };
     }
@@ -6594,6 +6826,15 @@ export class SpaceReplica
       )
       : undefined;
 
+    // A speculative layer is registered before it is applied, so that a
+    // durable read made from a notification below already reads past it.
+    const speculationSettled = options?.speculative === true
+      ? Promise.withResolvers<void>()
+      : undefined;
+    if (speculationSettled !== undefined) {
+      this.#speculativeLocalSeqs.set(localSeq, speculationSettled.promise);
+    }
+
     for (const operation of operations) {
       this.#applyPending(operation, localSeq, commit.reads, identity);
     }
@@ -6621,7 +6862,7 @@ export class SpaceReplica
       verdict,
       identity,
     );
-    if (options?.speculative !== true) {
+    if (speculationSettled === undefined) {
       // Durable sealed commits (the wave's) join the synced() barrier
       // and the ordered-push outcome map as any commit does. A CLIENT
       // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
@@ -6641,15 +6882,15 @@ export class SpaceReplica
         this.#commitPromises.delete(settled);
       });
     } else {
-      // Track the speculative seq for the export refusal (speculation.md
-      // §6, RULED 2026-08-13): while any pending stack carries this
-      // layer, a pushed commit's read basis naming it is refused in
-      // commitOperations. Settlement (retirement or withdrawal) drops
-      // the pending layers before `settled` resolves, so removal here
-      // never races a stack that still names the seq.
-      this.#speculativeLocalSeqs.add(localSeq);
-      settled.catch(() => {}).finally(() => {
+      // The speculative seq stays tracked for the export refusal
+      // (speculation.md §6, RULED 2026-08-13): while any pending stack
+      // carries this layer, a pushed commit's read basis naming it is
+      // refused in commitOperations. Settlement (retirement or
+      // withdrawal) drops the pending layers before `settled` resolves,
+      // so removal here never races a stack that still names the seq.
+      settled.then(() => {}, () => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
+        speculationSettled.resolve();
       });
     }
     return { localSeq, commit, settled };
@@ -6864,6 +7105,25 @@ export class SpaceReplica
     } finally {
       this.#settleInFlightCommit(localSeq);
     }
+  }
+
+  /** Carries confirmed local session state into a fresh route replica. */
+  transferLocalSessionStateTo(replacement: SpaceReplica): void {
+    if (!this.#localSessionDocuments()) return;
+    const prefix = `${this.instanceKey("session")}\0`;
+    for (const [key, record] of this.#docs) {
+      if (!key.startsWith(prefix)) continue;
+      replacement.#docs.set(key, {
+        confirmed: record.confirmed,
+        pending: [],
+      });
+    }
+    // Pending origins remain rejected in the replacement: the route reset
+    // cancels their writes. Sequence numbers cannot be reused by new commits.
+    for (const [seq, accepted] of this.#localSessionCommitAccepted) {
+      replacement.#localSessionCommitAccepted.set(seq, accepted);
+    }
+    replacement.#nextLocalSeq = this.#nextLocalSeq;
   }
 
   reset(): void {
@@ -7199,6 +7459,16 @@ export class SpaceReplica
     }
   }
 
+  /** Returns whether an address is held only in this replica. */
+  #isLocalSessionDocument(
+    address: { scope?: CellScope; scopeKey?: ScopeKey },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#localSessionDocuments() && address.scope === "session" &&
+      this.instanceKey("session", identity, address.scopeKey) ===
+        this.instanceKey("session");
+  }
+
   async #commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
@@ -7207,6 +7477,36 @@ export class SpaceReplica
     commitOptions?: NativeCommitOptions,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
+    for (const pin of activePreconditions) {
+      if (
+        pin.kind === "origin-committed" || !this.#isLocalSessionDocument(pin)
+      ) continue;
+      const record = this.#docs.get(
+        this.#docKeyOf({ id: pin.id as URI, scope: pin.scope }),
+      );
+      const document = this.#visibleDocument(pin.id as URI, pin.scope);
+      const failed = pin.kind === "entity-absent"
+        ? (record?.confirmed.seq ?? 0) > 0 || (record?.pending.length ?? 0) > 0
+        : (document && Object.hasOwn(document, "value")
+          ? commitPreconditionValueHash(document.value!)
+          : null) !== pin.valueHash;
+      if (failed) {
+        const rejection: StorageTransactionRejected =
+          pin.kind === "entity-absent"
+            ? {
+              name: "PreconditionFailedError",
+              message: "Local session document already exists",
+              precondition: "receipt-exists",
+            }
+            : this.#makeLocalRejection({
+              localSeq: this.#nextLocalSeq,
+              reads: { confirmed: [], pending: [] },
+              operations: [],
+            }, "Local session value changed");
+        if (source !== undefined) notifyCommitRejected(source, rejection);
+        return { error: rejection };
+      }
+    }
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
@@ -7224,7 +7524,7 @@ export class SpaceReplica
         localSeq,
         reads: this.#readsOverLocalFolds(
           operations,
-          this.#buildReads(source, localSeq),
+          this.#buildReads(source, localSeq, undefined, activePreconditions),
         ),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
@@ -7485,6 +7785,28 @@ export class SpaceReplica
       commit,
       source,
     );
+    const remoteOperations = commit.operations.filter((operation) =>
+      !("id" in operation && this.#isLocalSessionDocument(operation))
+    );
+    const remotePreconditions = commit.preconditions?.filter((pin) =>
+      pin.kind === "origin-committed"
+        ? !this.#localSessionCommitAccepted.has(pin.originLocalSeq)
+        : !this.#isLocalSessionDocument(pin)
+    );
+    const remoteReads = {
+      confirmed: commit.reads.confirmed.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+      pending: commit.reads.pending.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+    };
+    const localOnly = this.#localSessionDocuments() &&
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
+    // Record local origins before the first rejection checkpoint: a later
+    // guard must validate their failed verdict without contacting the server.
+    if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
     const telemetry = this.#getTelemetry();
     const pushOpId = `push:${this.#space}:${localSeq}`;
     try {
@@ -7526,6 +7848,105 @@ export class SpaceReplica
             sealed,
             { pushed: true },
           );
+        }
+      }
+      // A local session read can depend on a mixed commit awaiting its
+      // verdict or local application. Promote that dependency before its
+      // consumer can replace the confirmed base.
+      if (this.#localSessionDocuments()) {
+        const origins = (commit.preconditions ?? []).flatMap((pin) =>
+          pin.kind === "origin-committed" ? [pin.originLocalSeq] : []
+        );
+        const localOrigins = origins.filter((seq) =>
+          this.#localSessionCommitAccepted.has(seq)
+        );
+        // An origin can itself be waiting for local session dependencies
+        // before it reaches the server. Its guarded write must follow it.
+        const dependencies = new Set<number>(origins);
+        for (const read of commit.reads.pending) {
+          if (!localOnly && !this.#isLocalSessionDocument(read)) continue;
+          for (
+            const seq of Array.isArray(read.localSeq)
+              ? read.localSeq
+              : [read.localSeq]
+          ) dependencies.add(seq);
+        }
+        // A blind write still follows earlier writes to the same local
+        // document. Waiting preserves promotion order without making the
+        // blind write depend on those writes being accepted.
+        for (const operation of operations) {
+          if (!this.#isLocalSessionDocument(operation)) continue;
+          const record = this.#docs.get(this.#docKeyOf(operation));
+          for (const pending of record?.pending ?? []) {
+            if (pending.localSeq < localSeq) dependencies.add(pending.localSeq);
+          }
+        }
+        if (dependencies.size > 0) {
+          await Promise.all(
+            [...dependencies].map(async (seq) => {
+              await this.#commitOutcomeBySeq.get(seq);
+              await this.whenApplied(seq);
+            }),
+          );
+        }
+        if (this.#closed) {
+          const rejection = this.#makeLocalRejection(
+            commit,
+            "memory replica closed before local session commit settled",
+          );
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const failedOrigin = localOrigins.find((seq) =>
+          !this.#localSessionCommitAccepted.get(seq)
+        );
+        if (failedOrigin !== undefined) {
+          const rejection: StorageTransactionRejected = {
+            name: "PreconditionFailedError",
+            message:
+              `Local origin commit not committed: localSeq ${failedOrigin}`,
+            precondition: "origin-committed",
+          };
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        const rejection = inFlight && this.#preSendRejection(inFlight);
+        if (rejection) {
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
+          );
+        }
+        commit = {
+          ...commit,
+          reads: remoteReads,
+          operations: remoteOperations,
+          preconditions: remotePreconditions,
+        };
+        if (localOnly) {
+          this.#confirmPending(localSeq, operations, {
+            seq: localSeq,
+            branch: DEFAULT_BRANCH,
+            revisions: [],
+          }, "authored");
+          this.#localSessionCommitAccepted.set(localSeq, true);
+          return { ok: {} };
         }
       }
       // Strategy 1: a commit whose read set lands on a still-catching-up id.
@@ -7627,7 +8048,7 @@ export class SpaceReplica
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
           const applied = await session.transact(
-            wireCommit,
+            coarsenCommitForWire(wireCommit),
             () => this.#markRouteWriteIssued(routeSources),
           );
           const settled = this.#settleAccept(
@@ -7659,7 +8080,7 @@ export class SpaceReplica
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
         const verdict = session.transact(
-          wireCommit,
+          coarsenCommitForWire(wireCommit),
           () => this.#markRouteWriteIssued(routeSources),
         );
         const outcome = await Promise.race([
@@ -8123,7 +8544,7 @@ export class SpaceReplica
       if (
         read.space !== this.#space ||
         (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id) ||
+        hasInlineCellScheme(read.id) ||
         // Content-addressed documents cannot change, so their reads carry no
         // commit-time concurrency precondition.
         read.id.startsWith("cid:") ||
@@ -8261,14 +8682,18 @@ export class SpaceReplica
     // The reading run's identity (a served per-instance seal): each read's
     // pending layers and confirmed seq come from THAT instance's record.
     identity?: ScopeKeyIdentity,
+    preconditions: readonly CommitPrecondition[] = [],
   ): ClientCommit["reads"] {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
-    if (!source) {
+    const localPreconditions = preconditions
+      .filter((pin) => pin.kind !== "origin-committed")
+      .filter((pin) => this.#isLocalSessionDocument(pin, identity));
+    if (!source && localPreconditions.length === 0) {
       return { confirmed, pending };
     }
 
-    const reads = getDirectTransactionReadActivities(source);
+    const reads = source ? getDirectTransactionReadActivities(source) : [];
     if (!reads) {
       throw new Error(
         "Memory v2 commit tracking requires source.getReadActivities(); " +
@@ -8279,7 +8704,9 @@ export class SpaceReplica
     // For a blind UI-input write, handleCellSet threads the cell's PARENT address
     // here; its `ignoreReadForCommit` reads are dropped below and replaced by one
     // nonRecursive read at this parent (emitted after the loop).
-    const structuralTarget = getBlindStructuralTarget(source);
+    const structuralTarget = source
+      ? getBlindStructuralTarget(source)
+      : undefined;
 
     // Pending bases belong to a document instance and the speculative-layer
     // policy. Every path read in this synchronous build shares that same stack.
@@ -8400,7 +8827,14 @@ export class SpaceReplica
       }
     };
 
-    for (const read of this.#commitReadActivities(source, reads)) {
+    // A local value pin consumes the same pending state as a document read,
+    // so rejection of that state also rejects the guarded write.
+    for (const pin of localPreconditions) {
+      pushCommitRead(pin.id as URI, pin.scope, toCommitReadPath([]), false);
+    }
+    for (
+      const read of source ? this.#commitReadActivities(source, reads) : []
+    ) {
       const scope = normalizeCellScope(read.scope);
       pushCommitRead(
         read.id as URI,
@@ -8710,11 +9144,26 @@ export class SpaceReplica
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    const pushed = MemoryV2Client.isPushedSync(sync);
     // No read during a frame's integration — the differential checkout's
     // snapshot, the arrived-cfc hydration — starts a store read-through:
     // that would integrate a second frame from inside this one.
     this.#frameApplyDepth += 1;
     try {
+      if (this.#localSessionDocuments()) {
+        sync = {
+          ...sync,
+          upserts: sync.upserts.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          removes: sync.removes.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+          crossings: sync.crossings?.filter((entry) =>
+            !this.#isLocalSessionDocument(entry)
+          ),
+        };
+      }
       this.#applySessionSyncFrame(sync, type);
     } catch (error) {
       this.#completeThroughLost = true;
@@ -8723,7 +9172,7 @@ export class SpaceReplica
       this.#frameApplyDepth -= 1;
       this.#frameTouchedKeys = undefined;
     }
-    if (MemoryV2Client.isPushedSync(sync)) {
+    if (pushed) {
       this.#completeThroughSeq = Math.max(this.#completeThroughSeq, sync.toSeq);
     }
     // The frame's crossings name documents in other spaces: their loads
@@ -9817,10 +10266,17 @@ export class SpaceReplica
       : undefined;
     // Each operation's document, in the wire commit's order: an elision
     // report names operations by that index.
-    const operationKeys = this.#touchedOf(operations, identity).map((
+    const operationKeys = this.#touchedOf(
+      operations.filter((operation) =>
+        !this.#isLocalSessionDocument(operation, identity)
+      ),
+      identity,
+    ).map((
       address,
     ) => this.#docKeyOf(address));
     for (const [key, { id, scope, scopeKey }] of keys.entries()) {
+      const local = this.#isLocalSessionDocument({ scope, scopeKey }, identity);
+      const acceptedSeq = local ? localSeq : applied.seq;
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
@@ -9853,15 +10309,15 @@ export class SpaceReplica
       // copy of it: a transaction loads the confirmed document by identity,
       // and one that writes over a mutable root changes it in place, leaving
       // no difference from what it loaded to commit.
-      const elidedHere = applied.elidedOpIndexes !== undefined &&
+      const elidedHere = !local && applied.elidedOpIndexes !== undefined &&
         operationKeys.every((operationKey, index) =>
           operationKey !== key || applied.elidedOpIndexes!.includes(index)
         );
       const computed = record.pending[lastPendingIndex]!;
       if (elidedHere && computed.read === true) {
-        if (computed.op !== "delete" && record.confirmed.seq < applied.seq) {
+        if (computed.op !== "delete" && record.confirmed.seq < acceptedSeq) {
           record.confirmed = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             cloneIfNecessary(computed.value) as EntityDocument,
             coverClass,
           );
@@ -9895,12 +10351,12 @@ export class SpaceReplica
       let promoted: ConfirmedVersion | undefined;
       let reusedSuffix: PendingMaterializedPrefix[] | undefined;
 
-      const previousWave = record.confirmed.seq === applied.seq
+      const previousWave = record.confirmed.seq === acceptedSeq
         ? previousConfirmed.localWavePromotion
         : undefined;
       if (
         coverClass === "derived" &&
-        (record.confirmed.seq < applied.seq || previousWave !== undefined)
+        (record.confirmed.seq < acceptedSeq || previousWave !== undefined)
       ) {
         // One wave can accept several local contributions to this document.
         // Their shared seq covers all of them only after each has promoted.
@@ -9917,7 +10373,7 @@ export class SpaceReplica
             scope,
           });
         }
-        promoted = confirmedVersion(applied.seq, value, coverClass);
+        promoted = confirmedVersion(acceptedSeq, value, coverClass);
         const lastApplied = entries.at(-1)!.localSeq;
         const earlierPending = record.pending.some((entry) =>
           entry.localSeq !== localSeq && entry.localSeq < lastApplied
@@ -9925,7 +10381,7 @@ export class SpaceReplica
         promoted.localWavePromotion = earlierPending
           ? { base, entries }
           : { base: value, entries: [] };
-      } else if (record.confirmed.seq < applied.seq) {
+      } else if (record.confirmed.seq < acceptedSeq) {
         if (firstPendingIndex === 0) {
           const prefix = materializedVersionThroughPending(
             record,
@@ -9934,7 +10390,7 @@ export class SpaceReplica
           );
           const cache = ensurePendingMaterializationCache(record);
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             prefix.value,
             coverClass,
           );
@@ -9944,7 +10400,7 @@ export class SpaceReplica
           }
         } else {
           promoted = confirmedVersion(
-            applied.seq,
+            acceptedSeq,
             applyPendingVersion(record.confirmed.value, pending, {
               space: this.#space,
               id,
@@ -10564,9 +11020,10 @@ const toRejectedError = (
     // Scoped descriptors cross current protocol boundaries structurally.
     // Message-only errors retain default-scope recovery for every named read.
     const toConflicts = (details: unknown): IConflictError["conflict"][] => {
-      const { of, scope } = (details ?? {}) as {
+      const { of, scope, seq } = (details ?? {}) as {
         of?: unknown;
         scope?: unknown;
+        seq?: unknown;
       };
       return typeof of === "string"
         ? [{
@@ -10574,6 +11031,7 @@ const toRejectedError = (
           the: DOCUMENT_MIME,
           of: of as Entity,
           ...(isCellScope(scope) ? { scope } : {}),
+          ...(typeof seq === "number" ? { seq } : {}),
         }]
         : [];
     };

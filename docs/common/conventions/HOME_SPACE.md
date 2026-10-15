@@ -123,9 +123,15 @@ links the profile there, and a host holding only the profile space's DID
 reaches the profile as it reaches any space's root.
 
 A profile space whose genesis reserved no root, which is every profile space
-created before the create passed `root: true`, can get its profile as its root
-from `cf profile repair-root`, run by an operator across a store or by the
-person over their own Home's profiles (the
+created before the create passed `root: true`, gets its profile as its root when
+its owner next brings Home up, if Home lists the profile and the space has no
+root or one the repair below replaces. A runtime worker's bring-up of Home repairs each
+profile that Home lists and that the worker's identity owns, once per worker, as
+part of the housekeeping it starts beside the private inbox ensure
+(`PiecesController.repairProfileRoots()`). Home opens without waiting for the
+repair, and a failure is logged and tried again at the worker's next bring-up of
+Home. `cf profile repair-root` makes the same repair, run by an operator across a
+store or by the person over their own Home's profiles (the
 [CLI README](../../../packages/cli/README.md) describes running it). The repair
 links the existing profile as the space cell's `defaultPattern` where the space
 has no root, and where its root is one a space-root ensure created and nothing
@@ -297,6 +303,27 @@ pattern is created and the handler runs again; a serving runtime creates none.
 [Built-in Targets](wish.md#built-in-targets) describes both.
 [`docs/common/capabilities/agent.md`](../capabilities/agent.md) describes the
 request side.
+
+## Social-space collection
+
+Home's `sharedSpaces` interface separates collection observations and offer
+receipts from registration and membership commands. Patterns discover individual
+roles through `#default/sharedSpaces/<role>` with `scope: ["~"]`; host consumers
+use the narrow projections in `@commonfabric/home-schemas`. The backing catalog
+keeps its stable identity, and the flat catalog fields remain aliases.
+
+The **Social spaces** tab lists saved and archived looms, chats, and other kinds
+without fetching their roots. Search and filters belong to the current session.
+Archive puts a space away and restore saves it again; both compare the revision
+the rendered control showed and leave space access unchanged. Unfamiliar states
+remain visible in **Other states**. An unavailable collection has an explicit
+notice rather than an empty list. Ordinary space navigation opens a listed
+space using the runtime's configured routing.
+
+This collection is independent of the navigation list, routing hints, favorites,
+and browser recents. See [the catalog interface](../../features/shared-space-catalog.md)
+for its command payloads, observation states, privacy boundary, and completion
+rules.
 
 ## Chat Manager
 

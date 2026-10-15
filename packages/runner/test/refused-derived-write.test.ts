@@ -10,6 +10,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { defer } from "@commonfabric/utils/defer";
 
 import { ACLManager } from "../src/acl-manager.ts";
+import { readConfirmed } from "../src/confirmed-read.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
@@ -200,6 +201,22 @@ describe("refused derived write", () => {
     const stored = ownerRuntime.getCell<number>(space, "derived");
     await stored.sync();
     expect(stored.get()).toBeUndefined();
+  });
+
+  it("reads a kept value as unconfirmed, beside the source it was computed from read as confirmed", async () => {
+    const { readerRuntime, space, derived } = await readerDerives(
+      2,
+      (n: number) => n * 2,
+    );
+    const source = readerRuntime.getCell<number>(space, "source");
+    await source.sync();
+
+    expect(
+      readConfirmed(readerRuntime, space, (tx) => derived.withTx(tx).get()),
+    )
+      .toEqual({ value: 4, confirmed: false });
+    expect(readConfirmed(readerRuntime, space, (tx) => source.withTx(tx).get()))
+      .toMatchObject({ value: 2, confirmed: true });
   });
 
   it("stores the whole document written over a kept value once the principal may write", async () => {

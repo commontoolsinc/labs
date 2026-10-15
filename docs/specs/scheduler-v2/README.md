@@ -780,6 +780,17 @@ Implemented behavior:
   their handler's piece must load asynchronously. The event and any
   handler-result pieces are recorded under the sending transaction's
   speculation lineage.
+- A queued event runs the handler registered for its stream when it
+  dispatches, which is not the one it was queued with once its piece has
+  replaced its graph. Off a serving runtime, while the piece, or a piece that
+  instantiated it, is changing pattern, from its watcher seeing the pointer
+  move until the piece runs the incoming pattern or keeps the one it ran, the
+  head event for it waits in its position (`Runner.pendingPatternChangeFor`),
+  and then runs the handler of the pattern the piece settled on, or is dropped
+  when that pattern registered none for the stream. An event that reaches the
+  head after its piece replaced its graph, holding a handler of the replaced
+  graph that nothing re-registered, is dropped the same way; a stopped piece's
+  handler still runs.
 - The per-(stream, handler) backlog cap (`MAX_EVENT_BACKLOG_PER_STREAM`) is a
   collapse policy, not a hard ceiling. At the cap, a minted-id send collapses
   last-wins into the last pending same-origin entry, so a same-origin flood
@@ -936,9 +947,8 @@ when that kind is a record. Every property is left admissible, which is what
 keeps a link position honest, since the spelling that would name one is
 `asCell` and `["cell"]` asserts a writable handle on a document nothing can be
 written through. A value with no container kind of its own — a scalar, or a
-link, whose kind is its target's — goes undeclared. A `data:` link is the one
-link that is described: it carries its value inside its own identifier and the
-write inlines it, so the receipt holds that value rather than a link to it, and
+link, whose kind is its target's — goes undeclared. An immutable `snapshot:` or Fabric `data:` link is described: the
+write expands it to its value, so the receipt holds that value rather than a link to it, and
 the description is taken after the same inlining. None of this constrains a
 later write: the create-only mark means the value the schema describes is the
 only value that document ever holds. A verb's *declared* result type is a

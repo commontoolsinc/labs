@@ -2,10 +2,8 @@
  * Finds a recursion that instantiates its declaration without end, as
  * `Nest<T[]>` inside `Nest<T>` does, for a reading that writes out what it
  * reads: the schema generator's reading of a type under no type parameter
- * bindings, and the contract overlay of a handler's event and state
- * (`ts-transformers`). Such a reading ends a recursion where it meets a type it
- * has read already, which this one never does: each level is a new
- * instantiation. It keeps the types it is read within and asks
+ * bindings. Such a reading ends a recursion where it meets a type it has read
+ * already, which this one never does: each level is a new instantiation. It keeps the types it is read within and asks
  * `cutsExpansion()` before it descends further. Every reading made inside a
  * recursion of its own declaration spends one budget, which a reading under
  * bindings, whose recursion the generator ends by its shape, spends too
@@ -15,9 +13,7 @@
  * of one declaration rather than every type: a bound on depth alone writes out
  * every level up to it. A finite chain that recurses through one declaration
  * more than the cut allows is cut too. The schema generator reports what it
- * leaves unread; the overlay marks every cell past its cut opaque, which is
- * what reading the remainder in full would give a cell no use reaches. Neither
- * refuses anything. The writer-policy reading (`writer-policy.ts`) writes
+ * leaves unread, and refuses nothing. The writer-policy reading (`writer-policy.ts`) writes
  * nothing out and can refuse a schema on its answer, so it is bounded by depth
  * and by count instead.
  */

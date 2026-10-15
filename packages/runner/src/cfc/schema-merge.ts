@@ -1314,19 +1314,141 @@ function schemaPolicyGraph(
   return { ifc: schema.ifc, ref: schema.$ref, children };
 }
 
+/** One step of a `resolvedSchemaPolicyGraph()` walk, and the walk above it. */
+type PolicyGraphVisit = {
+  /** The document the schema sits in. */
+  root: JSONSchema;
+
+  /** The schema walked. */
+  schema: JSONSchema;
+
+  /** The step this one was reached from, if any. */
+  parent: PolicyGraphVisit | undefined;
+};
+
+/**
+ * The logical path a subschema reached through `keyword` describes, below the
+ * value at `path`: a property's name, `*` for array items and for the rest of
+ * a record that names no property, and an index for a tuple position. A
+ * keyword that leaves the value where it was keeps `path`. Any other keyword,
+ * and anything below an unknown path, describes no single path: `undefined`.
+ */
+const policyGraphChildPath = (
+  path: readonly string[] | undefined,
+  parent: JSONSchemaObj,
+  keyword: string,
+  key: string | undefined,
+  index: number | undefined,
+): readonly string[] | undefined => {
+  if (path === undefined) return undefined;
+  switch (keyword) {
+    case "properties":
+      return key === undefined ? undefined : [...path, key];
+    case "items":
+      return [...path, "*"];
+    case "prefixItems":
+      return index === undefined ? undefined : [...path, String(index)];
+    case "additionalProperties":
+      return parent.properties === undefined ||
+          (isObjectOrArray(parent.properties) &&
+            Object.keys(parent.properties).length === 0)
+        ? [...path, "*"]
+        : undefined;
+    case "anyOf":
+    case "oneOf":
+    case "allOf":
+      return path;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * The policy declarations of `schema`, a schema in the document `root` that
+ * describes the value at `path`, at the positions they apply to: every
+ * reference is followed to what it names, and a definition map is reached
+ * only through a reference, so two spellings of one policy, one inlining what
+ * the other names by reference, yield the same graph. A subschema at a path
+ * `omits` names is left out, with everything beneath it. `active` is the
+ * chain of schemas being walked; a reference back into it is recorded as a
+ * recursion rather than followed.
+ */
+function resolvedSchemaPolicyGraph(
+  schema: JSONSchema,
+  root: JSONSchema,
+  path: readonly string[] | undefined,
+  omits: (path: readonly string[]) => boolean,
+  active: PolicyGraphVisit | undefined,
+): SchemaPolicyGraph | undefined {
+  if (!isObjectNotArray(schema)) return undefined;
+  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
+    if (cursor.root === root && cursor.schema === schema) {
+      return { ifc: schema.ifc, ref: "#recursive", children: [] };
+    }
+  }
+  // A claim beside a reference overlays the referenced body's claims of the
+  // same kind and keeps the others, as the merge reads them.
+  const resolved = typeof schema.$ref === "string"
+    ? resolveKeepingBodyClaims(schema as JSONSchemaObj, root) ?? schema
+    : schema;
+  if (!isObjectNotArray(resolved)) return undefined;
+  const childRoot = resolved !== schema
+    ? cfcSchemaResolvedRoot(resolved, resolveCfcSchemaRefRoot(schema, root))
+    : root;
+  const nextActive: PolicyGraphVisit = { root, schema, parent: active };
+  const children: SchemaPolicyGraph["children"] = [];
+  forEachSubschema(resolved, (child, keyword, key, index) => {
+    const childPath = policyGraphChildPath(path, resolved, keyword, key, index);
+    if (childPath !== undefined && omits(childPath)) return;
+    const policy = resolvedSchemaPolicyGraph(
+      child,
+      childRoot,
+      childPath,
+      omits,
+      nextActive,
+    );
+    if (policy !== undefined) children.push({ keyword, key, index, policy });
+  }, { includeUnused: true, visitBooleans: true });
+  // A reference left unresolved is kept, so that it compares by what it says.
+  const ref = resolved === schema ? schema.$ref : undefined;
+  if (
+    resolved.ifc === undefined && ref === undefined && children.length === 0
+  ) {
+    return undefined;
+  }
+  children.sort((left, right) =>
+    utf8Compare(left.keyword, right.keyword) ||
+    utf8Compare(left.key ?? "", right.key ?? "") ||
+    (left.index ?? -1) - (right.index ?? -1)
+  );
+  return { ifc: resolved.ifc, ref, children };
+}
+
 /**
  * Whether two envelopes declare the same policies at the same positions: the
- * same `ifc` claims and reference edges, whatever the public value shapes,
- * defaults and inert nested definition maps around them. A `cid:` reference
- * compares as the document it names, and a claim spelled as a member holding
- * `undefined` as no claim.
+ * same `ifc` claims wherever a value can sit, whatever the public value
+ * shapes, defaults and definition layouts around them. A reference, local or
+ * `cid:`, compares as what it names, so a definition no reference reaches
+ * declares nothing. A claim spelled as a member holding `undefined` compares
+ * as no claim. Positions at a logical path `omits` names, and everything
+ * beneath them, are not compared; a position whose path the walk cannot tell
+ * is compared whatever `omits` says.
  */
 export const cfcSchemaPoliciesEqual = (
   left: JSONSchema,
   right: JSONSchema,
+  omits: (path: readonly string[]) => boolean = () => false,
 ): boolean =>
-  hashStringOf(withoutUndefinedMembers(schemaPolicyGraph(left))) ===
-    hashStringOf(withoutUndefinedMembers(schemaPolicyGraph(right)));
+  hashStringOf(
+    withoutUndefinedMembers(
+      resolvedSchemaPolicyGraph(left, left, [], omits, undefined),
+    ),
+  ) ===
+    hashStringOf(
+      withoutUndefinedMembers(
+        resolvedSchemaPolicyGraph(right, right, [], omits, undefined),
+      ),
+    );
 
 /**
  * `value` with every object member holding `undefined` removed, recursively.

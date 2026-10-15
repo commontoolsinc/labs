@@ -67,6 +67,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { isDefaultLibrarySourceFile } from "../typescript/default-library.ts";
+import { CFC_POLICY_OF_BRAND } from "../typescript/value-annotation.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import {
   getScopeBrand,
@@ -111,8 +112,6 @@ const WRITER_POLICY_ALIAS_NAMES: ReadonlySet<string> = new Set([
 /** The property `AnyOf<X>` is as a type (`@commonfabric/api/cfc`). */
 const CFC_ANY_OF_BRAND = "__ct_cfc_any_of__";
 
-/** The property `PolicyOf<Rules>` is as a type (`@commonfabric/api/cfc`). */
-const CFC_POLICY_OF_BRAND = "__ct_cfc_policy_of__";
 /**
  * What the literal reader returns for syntax it does not evaluate, so that the
  * type paired with that syntax is read in its place. `undefined` is a value it
@@ -232,17 +231,19 @@ const isCellCapabilityKind = (kind: WrapperKind): boolean =>
   CELL_CAPABILITY_KIND_MAP[kind];
 
 /**
- * The scope wrapper `typeNode` names by its spelling, bare or qualified, with
- * the reference that names it.
+ * The scope wrapper `typeNode` names by its spelling, bare or qualified, read
+ * through parentheses as a wrapper is (`resolveWrapperNode()`), with the
+ * reference that names it.
  */
 export const resolveScopeWrapperNode = (
   typeNode: ts.TypeNode | undefined,
 ): ResolvedScopeWrapper | undefined => {
-  if (!typeNode || !ts.isTypeReferenceNode(typeNode)) {
+  const node = typeNode && unwrapTypeParentheses(typeNode);
+  if (!node || !ts.isTypeReferenceNode(node)) {
     return undefined;
   }
-  const scope = scopeForWrapperName(entityNameRight(typeNode.typeName).text);
-  return scope === undefined ? undefined : { scope, node: typeNode };
+  const scope = scopeForWrapperName(entityNameRight(node.typeName).text);
+  return scope === undefined ? undefined : { scope, node };
 };
 
 const applyScopeToAsCellEntry = (
@@ -1722,7 +1723,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     }
 
     // Keep schema-hint propagation behavior aligned with type-based wrapper formatting.
-    let childContext = this.#cellValueContext(context);
+    let childContext = context;
     const hintsNode = context.typeNode ?? context.hintsNode;
     if (context.schemaHints && hintsNode) {
       const hint = context.schemaHints.get(hintsNode);
@@ -1796,7 +1797,7 @@ export class CommonFabricFormatter implements TypeFormatter {
 
     return this.#applyWrapperSemantics(
       innerSchema,
-      this.#cellKind(wrapperKind, context),
+      wrapperKind,
     );
   }
 
@@ -2290,7 +2291,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Check for schema hints on the current typeNode and propagate to child context.
     // This allows identity-only/property-only array access patterns to avoid
     // materializing full item schemas while preserving the wrapper on the array.
-    let childContext = this.#cellValueContext(context);
+    let childContext = context;
     const hintsNode = context.typeNode ?? context.hintsNode;
     if (context.schemaHints && hintsNode) {
       const hint = context.schemaHints.get(hintsNode);
@@ -2347,7 +2348,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Apply wrapper semantics (asCell/asOpaque) to the inner schema
     return this.#applyWrapperSemantics(
       innerSchema,
-      this.#cellKind(wrapperKind, context),
+      wrapperKind,
     );
   }
 
@@ -4827,28 +4828,6 @@ export class CommonFabricFormatter implements TypeFormatter {
    */
   #isUndefinedType(type: ts.Type): boolean {
     return (type.flags & ts.TypeFlags.Undefined) !== 0;
-  }
-
-  /**
-   * `wrapperKind`, the kind of a cell a reading reaches, as its schema
-   * declares it: opaque where the reading's cells are
-   * (`GenerationContext.cellsOpaque`), unless its brand is authoritative, as a
-   * stream's or a SQLite handle's is (`isCellCapabilityKind()`).
-   */
-  #cellKind(wrapperKind: WrapperKind, context: GenerationContext): WrapperKind {
-    return context.cellsOpaque && isCellCapabilityKind(wrapperKind)
-      ? "OpaqueCell"
-      : wrapperKind;
-  }
-
-  /**
-   * `context` for reading the value a cell holds: the reading's cells being
-   * opaque (`GenerationContext.cellsOpaque`) reaches the cells it reads, not
-   * those inside one, as the contract overlay narrows a cell's capability and
-   * leaves its value as written.
-   */
-  #cellValueContext(context: GenerationContext): GenerationContext {
-    return context.cellsOpaque ? { ...context, cellsOpaque: false } : context;
   }
 
   /**

@@ -260,6 +260,15 @@ Persist meaningful intent at interaction boundaries: place an object, finish a
 drag, claim an entity, change a durable material, or end a turn. Interpolate
 between accepted snapshots inside Babylon.js.
 
+A transform that other people should see while it changes and that nobody
+needs afterwards, such as each visitor's camera or an object held mid-drag,
+travels through a presence room instead of a Cell. A room holds each member's
+latest record and stores nothing, so publishing from the render loop is what
+it is for. It orders nothing between members and keeps no history: whatever
+must be agreed on or must survive stays a Cell write.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
+
 The iframe CSP does not grant arbitrary network access. Prefer procedural
 geometry and materials in a self-contained guest. If a scene needs external
 models or textures, include them as supported pattern data rather than fetching
@@ -344,6 +353,11 @@ deno fmt packages/patterns/babylon-shared-scene
 deno check packages/patterns/babylon-shared-scene/guest.ts
 deno task cf check packages/patterns/babylon-shared-scene/main.tsx --no-run
 ```
+
+Launch the pattern with the steps under
+[Verify](./iframe-pattern-guide.md#verify) in the plain DOM guide, substituting
+this pattern's path, a space label, and a slug. Those steps start local
+servers, create the space, and sign the browser in as its owner.
 
 Verify in a real browser that WebGL renders, picking and camera controls work,
 shared updates reconcile without recreating the Engine, concurrent additions

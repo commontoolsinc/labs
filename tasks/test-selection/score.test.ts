@@ -465,6 +465,45 @@ describe("score", () => {
     });
   });
 
+  describe("a rerun of a commit inside a stretch of failures", () => {
+    it("reads a green rerun in the same batch as a flake too", () => {
+      const state = stateFrom([
+        saw("fail", { commit: "c0", day: "2026-08-19" }),
+        saw("fail", { commit: "c1" }),
+        saw("pass", {
+          commit: "c1",
+          day: "2026-08-21",
+          startedAt: "2026-08-21T00:00:00.000Z",
+        }),
+      ]);
+      expect(state.mainCatches).toBe(0);
+      expect(state.flakesByDay).toEqual({ "2026-08-20": 1 });
+      expect(state.pendingMain).toEqual([]);
+    });
+
+    it("reads a green rerun of a later failing commit as a flake", () => {
+      // The rerun passed where the commit failed before, so the stretch
+      // ends in the test disagreeing with itself rather than in a fix.
+      const prior = new Map<string, IdentityState>();
+      const context = emptyContext();
+      foldObservations([
+        saw("fail", { commit: "c0", day: "2026-08-19" }),
+        saw("fail", { commit: "c1" }),
+      ], { prior, context });
+      foldObservations([
+        saw("pass", {
+          commit: "c1",
+          day: "2026-08-21",
+          startedAt: "2026-08-21T00:00:00.000Z",
+        }),
+      ], { prior, context });
+      const state = prior.get(KEY)!;
+      expect(state.mainCatches).toBe(0);
+      expect(state.flakesByDay).toEqual({ "2026-08-20": 1 });
+      expect(state.pendingMain).toEqual([]);
+    });
+  });
+
   describe("the order a run's tests were shuffled into", () => {
     it("reads a pass and a failure at one commit in two orders as no flake", () => {
       // An order-dependent test passes in one order and fails in another.
@@ -499,19 +538,22 @@ describe("score", () => {
 
     it("credits no catch to a failure on main that a new order ended", () => {
       // The order moved on and the test stopped failing, which says
-      // nothing about whether any change fixed it.
+      // nothing about whether any change fixed it, so the failure goes on
+      // waiting for a run in its own order.
       const state = stateFrom([
         saw("fail", { day: "2026-08-19", commit: "c0", seed: 20260819 }),
         saw("pass", { commit: "c1", seed: 20260820 }),
       ]);
       expect(state.mainCatches).toBe(0);
-      expect(state.pendingMain).toEqual([]);
+      expect(state.pendingMain.map((pending) => pending.seed)).toEqual([
+        20260819,
+      ]);
       expect(flakeRate(state, "2026-08-20")).toBe(0);
     });
 
     it("judges a failure in the pass's order beside one in another", () => {
-      // An older failure in another order is dropped, and does not take
-      // the same-order failure after it down with it.
+      // The failure in another order does not take the same-order failure
+      // after it down with it, and the stretch the pass ends takes it too.
       const state = stateFrom([
         saw("fail", { day: "2026-08-19", commit: "c0", seed: 20260819 }),
         saw("fail", { day: "2026-08-20", commit: "c1", seed: 20260820 }),
@@ -520,6 +562,146 @@ describe("score", () => {
       expect(state.mainCatches).toBe(1);
       expect(state.lastCatch).toBe("2026-08-20");
       expect(state.pendingMain).toEqual([]);
+    });
+
+    it("credits one catch to a breakage failing in two orders", () => {
+      // The run under the next day's seed saw the breakage the day's push
+      // did. The fix that ends it in the day's order ends it in both, so
+      // the next day's first push, passing in the other order, credits
+      // nothing more.
+      const state = stateFrom([
+        saw("fail", { commit: "c1", seed: 20260820 }),
+        saw("fail", {
+          commit: "c1",
+          seed: 20260821,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("pass", {
+          commit: "c2",
+          seed: 20260820,
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+        saw("pass", {
+          commit: "c3",
+          seed: 20260821,
+          day: "2026-08-21",
+          startedAt: "2026-08-21T08:00:00.000Z",
+        }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-20");
+      expect(state.pendingMain).toEqual([]);
+    });
+
+    it("reads main as failing in its own order after a pass in another", () => {
+      // An order-dependent test can fail in the day's order and pass in
+      // the next day's. A pull request failing it in the day's order
+      // learned nothing `main` did not already show.
+      const state = stateFrom([
+        saw("fail", { commit: "c1", seed: 20260820 }),
+        saw("pass", {
+          commit: "c1",
+          seed: 20260821,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("fail", {
+          commit: "c2",
+          seed: 20260820,
+          place: "pr",
+          source: "branch",
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+      ]);
+      expect(state.prCatches).toBe(0);
+    });
+
+    it("leaves a pull request's catch alone after a failure in another order", () => {
+      const state = stateFrom([
+        saw("pass", { commit: "c1", seed: 20260820 }),
+        saw("fail", {
+          commit: "c1",
+          seed: 20260821,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("fail", {
+          commit: "c2",
+          seed: 20260820,
+          place: "pr",
+          source: "branch",
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+      ]);
+      expect(state.prCatches).toBe(1);
+    });
+
+    it("leaves other orders waiting when a pass finds only aged failures", () => {
+      // The pass's own order holds only a failure older than any window
+      // a state keeps, so it judges nothing, and the failure in the other
+      // order is still there for a pass in its own.
+      const state = stateFrom([
+        saw("fail", {
+          commit: "c0",
+          seed: 20260101,
+          day: "2026-01-01",
+          startedAt: "2026-01-01T00:00:00.000Z",
+        }),
+        saw("fail", { commit: "c1", seed: 20260821 }),
+        saw("pass", {
+          commit: "c2",
+          seed: 20260101,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("pass", {
+          commit: "c3",
+          seed: 20260821,
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-20");
+      expect(state.pendingMain).toEqual([]);
+    });
+
+    it("judges a failure in its own order after a pass in another", () => {
+      // The run of `main` under the next day's seed lands between the
+      // day's pushes. Its pass leaves the day's failures waiting, so a
+      // rerun of the failing push still reads as the flake it is, and a
+      // later push in that order still credits a catch.
+      const prior = new Map<string, IdentityState>();
+      const context = emptyContext();
+      const fold = (observation: Observation) =>
+        foldObservations([observation], { prior, context });
+      fold(saw("fail", { commit: "c1", seed: 20260820 }));
+      fold(saw("pass", {
+        commit: "c1",
+        seed: 20260821,
+        startedAt: "2026-08-20T11:00:00.000Z",
+      }));
+      fold(saw("pass", {
+        commit: "c1",
+        seed: 20260820,
+        startedAt: "2026-08-20T12:00:00.000Z",
+      }));
+      const rerun = prior.get(KEY)!;
+      expect(rerun.flakesByDay["2026-08-20"]).toBe(1);
+      expect(rerun.mainCatches).toBe(0);
+      expect(rerun.pendingMain).toEqual([]);
+
+      const later = stateFrom([
+        saw("fail", { commit: "c1", seed: 20260820 }),
+        saw("pass", {
+          commit: "c1",
+          seed: 20260821,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("pass", {
+          commit: "c2",
+          seed: 20260820,
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+      ]);
+      expect(later.mainCatches).toBe(1);
+      expect(later.pendingMain).toEqual([]);
     });
 
     it("still credits a catch to a failure a later commit in one order ended", () => {
@@ -1572,6 +1754,105 @@ describe("a run that newly breaks a crowd of tests", () => {
         { prior: stored },
       );
       expect(catchesOf(second, crowd)).toEqual(crowd.map(() => 0));
+    });
+
+    it("judges a breakage after a pass in another order by its own run", () => {
+      // A pass in another order leaves what was waiting where it is, and
+      // what it left is not part of the breakage that follows.
+      const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
+      const alone = crowd[0]!;
+      const folded = foldObservations([
+        saw("fail", { test: alone, commit: "c0", seed: 1 }),
+        ...crowd.map((test) => saw("pass", { test, commit: "c1", seed: 2 })),
+        ...crowd.map((test) => saw("fail", { test, commit: "c2", seed: 2 })),
+        ...crowd.map((test) => saw("pass", { test, commit: "c3", seed: 2 })),
+      ]);
+      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+
+      const lone = foldObservations([
+        ...crowd.map((test) => saw("fail", { test, commit: "c0", seed: 1 })),
+        ...crowd.map((test) => saw("pass", { test, commit: "c1", seed: 2 })),
+        saw("fail", { test: alone, commit: "c2", seed: 2 }),
+        saw("pass", { test: alone, commit: "c3", seed: 2 }),
+      ]);
+      expect(catchesOf(lone, [alone])).toEqual([1]);
+    });
+
+    it("judges a breakage by its own order after a crowd in another", () => {
+      // The next day's order broke a crowd, and the day's order then
+      // broke one test alone, which is that test's catch.
+      const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
+      const alone = crowd[0]!;
+      const at = (hour: number) =>
+        `2026-08-20T${String(hour).padStart(2, "0")}:00:00.000Z`;
+      const folded = foldObservations([
+        ...crowd.map((test) =>
+          saw("pass", { test, commit: "c0", seed: 1, startedAt: at(1) })
+        ),
+        ...crowd.map((test) =>
+          saw("fail", { test, commit: "c0", seed: 2, startedAt: at(2) })
+        ),
+        saw("fail", { test: alone, commit: "c1", seed: 1, startedAt: at(3) }),
+        saw("pass", { test: alone, commit: "c2", seed: 1, startedAt: at(4) }),
+      ]);
+      expect(catchesOf(folded, [alone])).toEqual([1]);
+    });
+
+    it("counts a crowd its order newly broke past a failure in another", () => {
+      // One test was failing alone in the next day's order. The day's
+      // order then broke it with a crowd, which credits none of them.
+      const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
+      const alone = crowd[0]!;
+      const at = (hour: number) =>
+        `2026-08-20T${String(hour).padStart(2, "0")}:00:00.000Z`;
+      const folded = foldObservations([
+        ...crowd.map((test) =>
+          saw("pass", { test, commit: "c0", seed: 1, startedAt: at(0) })
+        ),
+        saw("fail", { test: alone, commit: "c1", seed: 2, startedAt: at(1) }),
+        ...crowd.map((test) =>
+          saw("fail", { test, commit: "c2", seed: 1, startedAt: at(2) })
+        ),
+        ...crowd.map((test) =>
+          saw("pass", { test, commit: "c3", seed: 1, startedAt: at(3) })
+        ),
+      ]);
+      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
+    });
+
+    it("keeps a crowd a crowd when the next day's order first sees it", () => {
+      // The day's order broke a crowd, and its fix landed the next day,
+      // after the next day's order had seen the same breakage.
+      const crowd = crowdOf(MASS_FAILURE_MIN_IDENTITIES);
+      const at = (day: number, hour: number) =>
+        `2026-08-${day}T${String(hour).padStart(2, "0")}:00:00.000Z`;
+      const folded = foldObservations([
+        ...crowd.map((test) =>
+          saw("fail", { test, commit: "c1", seed: 1, startedAt: at(20, 1) })
+        ),
+        ...crowd.map((test) =>
+          saw("fail", { test, commit: "c1", seed: 2, startedAt: at(20, 11) })
+        ),
+        ...crowd.map((test) =>
+          saw("fail", {
+            test,
+            commit: "c2",
+            seed: 2,
+            day: "2026-08-21",
+            startedAt: at(21, 1),
+          })
+        ),
+        ...crowd.map((test) =>
+          saw("pass", {
+            test,
+            commit: "c3",
+            seed: 2,
+            day: "2026-08-21",
+            startedAt: at(21, 2),
+          })
+        ),
+      ]);
+      expect(catchesOf(folded, crowd)).toEqual(crowd.map(() => 0));
     });
 
     it("does not count what it was already failing", () => {

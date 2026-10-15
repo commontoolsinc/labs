@@ -145,7 +145,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-hover-reveal` | Content whose `actions` slot appears on hover or focus (see [cf-hover-reveal](#cf-hover-reveal)) | |
 | `cf-hscroll` | Horizontal scroll container | |
 | `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
-| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, or service capabilities | |
+| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, service, or presence-room capabilities | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
 | `cf-input-otp` | One-time-password input with individual digit fields | |
@@ -417,6 +417,11 @@ the policy placeholder in the same places. The exceptions:
   nothing otherwise. A nested render does not verify text integrity, so under
   an authorship boundary the piece's own text shows whether or not it carries
   the required endorsement.
+
+Showing a piece bound to `cf-render` (full, its exported tile or chip, or the
+default tile) opens it the way navigating to it does, so a view computed for
+the viewer renders, and the piece keeps running after the display goes, as an
+opened one does. The default chip only names the piece and opens nothing.
 
 `cf-picker` shows each of its `$items` through a `cf-render` of its own, so
 each item passes the same gates as a piece bound to `cf-render`, with the same

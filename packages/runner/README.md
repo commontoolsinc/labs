@@ -396,8 +396,8 @@ inference.
 > patterns, declared defaults (`Default<>`) become schema defaults and the
 > initial state is written to storage when the piece is instantiated. Without
 > that instantiation write, a schema `default` stays **virtual** — readable, but
-> backed by a read-only `data:` document — so writing through a nested cell it
-> materialized throws `ReadOnlyAddressError`, links resolve against stored
+> backed by a read-only `snapshot:` document — so writing through a nested cell
+> it materialized throws `ReadOnlyAddressError`, links resolve against stored
 > values only, and nested-path subscriptions see `undefined`. The examples below
 > therefore seed initial state with an explicit `runtime.edit()` transaction
 > before mutating through nested cells or resolving links.
@@ -461,7 +461,7 @@ const userCell = runtime.getCell(
 );
 
 // Schema defaults are readable immediately — but they are VIRTUAL (backed
-// by a read-only data: document), so seed the cell with a real write
+// by a read-only snapshot: document), so seed the cell with a real write
 // before mutating through nested cells.
 const seed = runtime.edit();
 userCell.withTx(seed).set({
@@ -977,6 +977,11 @@ For a space-scoped child, resume waits for the parent transaction to commit and
 retains the parent demand root across cold loading. Parent teardown cancels only
 the start it owns; a replacement or independently started child keeps running.
 Scoped serving children resume through their per-actor program coordinator.
+
+A handler creating a tracked child prepares the deferred source verifier before
+setting up its result graph. The creation revision retains the source verified
+in that setup transaction, including when the parent's compiled module loaded
+without loading the compiler.
 
 ## Service Architecture
 

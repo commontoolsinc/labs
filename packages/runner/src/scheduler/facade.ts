@@ -9,7 +9,6 @@ import type { Cancel } from "../cancel.ts";
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import {
-  areNormalizedLinksSame,
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-utils.ts";
@@ -101,8 +100,10 @@ import {
 import {
   addSchedulerEventHandler,
   dropQueuedEvent,
+  endPatternChangeWaits,
   endPieceStartWaits,
   eventHandlerImplementations,
+  EventHandlerRegistry,
   isHeadEventParked as isHeadEventParkedState,
   processPullQueuedEventDuringExecute,
   queueSchedulerEvent,
@@ -312,7 +313,7 @@ export {
 
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
-  #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
+  #eventHandlers = new EventHandlerRegistry();
   readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason, quiet) =>
       this.#dropEvent(event, reason, { quiet }),
@@ -510,6 +511,12 @@ export class Scheduler {
 
   /** Set once `endPieceStartWaits()` has run; no new wait begins after it. */
   #pieceStartWaitsEnded = false;
+
+  /** The heads held for their piece's pattern change. */
+  readonly #patternChangeWaits = new Set<QueuedEvent>();
+
+  /** Set once `endPatternChangeWaits()` has run; no head is held after it. */
+  #patternChangeWaitsEnded = false;
 
   /**
    * The single wake-shaping choke point: holds renderer-originated input events
@@ -1772,16 +1779,13 @@ export class Scheduler {
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
-    for (const [link, handler] of this.#eventHandlers) {
-      if (areNormalizedLinksSame(link, eventLink)) {
-        return shaperInstanceGroupKey(
-          (handler as {
-            schedulerObservationIdentity?: SchedulerObservationIdentity;
-          }).schedulerObservationIdentity,
-        );
-      }
-    }
-    return undefined;
+    const handler = this.#eventHandlers.get(eventLink);
+    if (handler === undefined) return undefined;
+    return shaperInstanceGroupKey(
+      (handler as {
+        schedulerObservationIdentity?: SchedulerObservationIdentity;
+      }).schedulerObservationIdentity,
+    );
   }
 
   /**
@@ -1861,6 +1865,18 @@ export class Scheduler {
   endPieceStartWaits(): void {
     this.#pieceStartWaitsEnded = true;
     endPieceStartWaits(this.#eventQueueState);
+  }
+
+  /**
+   * Ends the wait of every queued event held for its piece's pattern change,
+   * each then dispatching as it would have without the wait. A runtime being
+   * disposed calls this before it waits for the scheduler to go idle: such a
+   * wait can be held by a pattern load that only the disposal's later
+   * cancellation of the piece would release.
+   */
+  endPatternChangeWaits(): void {
+    this.#patternChangeWaitsEnded = true;
+    endPatternChangeWaits({ patternChangeWaits: this.#patternChangeWaits });
   }
 
   onConsole(fn: ConsoleHandler): void {
@@ -2608,6 +2624,7 @@ export class Scheduler {
     // left as it was rather than crashing a disposal.
     this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
     this.endPieceStartWaits();
+    this.endPatternChangeWaits();
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
@@ -3317,7 +3334,11 @@ export class Scheduler {
       this.#eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
+      eventHandlers: this.#eventHandlers,
       eventQueue: this.#eventQueue,
+      trackBackgroundTask: (work) => this.trackBackgroundTask(work),
+      patternChangeWaits: this.#patternChangeWaits,
+      patternChangeWaitsEnded: () => this.#patternChangeWaitsEnded,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),
@@ -3371,8 +3392,8 @@ export class Scheduler {
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.release(originTx, queuedEvent);
       },
-      dropEvent: (queuedEvent, reason) => {
-        this.#dropEvent(queuedEvent, reason);
+      dropEvent: (queuedEvent, reason, options) => {
+        this.#dropEvent(queuedEvent, reason, options);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
         this.#lineage.recordEvent(originTx, queuedEvent);
@@ -3766,12 +3787,21 @@ export class Scheduler {
       `event ${event.id} parks on ${keys.length} loading document(s)`,
       keys,
     ]);
-    const settled = this.runtime.storageManager.loadsSettled?.(keys) ??
-      Promise.resolve();
-    settled.then(
-      () => this.#releaseHeadEventLoadPark(event.id),
-      (error) => this.#failHeadEventLoadPark(event, error),
-    );
+    // Each key is waited for on its own, so that every failed load is seen,
+    // in the order the failures arrive, once all of them have settled.
+    const manager = this.runtime.storageManager;
+    const failures: unknown[] = [];
+    const settled = manager.loadsSettled === undefined
+      ? Promise.resolve()
+      : Promise.all(keys.map((key) =>
+        manager.loadsSettled!([key]).catch((error: unknown) => {
+          failures.push(error);
+        })
+      ));
+    settled.then(() => {
+      if (failures.length === 0) this.#releaseHeadEventLoadPark(event.id);
+      else this.#failHeadEventLoadPark(event, failures);
+    });
   }
 
   #releaseHeadEventLoadPark(eventId: string): void {
@@ -3827,20 +3857,47 @@ export class Scheduler {
    * children rather than later arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
-   * the drop keeps today's shape — the same split events.ts makes for a
-   * piece-load failure.
+   * a failed load drops the event — the same split events.ts makes for a
+   * piece-load failure — with one exception: when every failed load
+   * failed with an `authorization`-class failure, the park releases as
+   * completed loads do. The event's principal cannot read those
+   * documents, waiting does not change that, and the closure reads them
+   * as absent whether or not a load of them happened to be in flight
+   * when the event reached the head. So the handler runs, once, against
+   * what this replica holds, exactly as it would have with no load in
+   * flight; the settled generations the release records keep the next
+   * preflight from parking on those loads again. A failure of any other
+   * class among them still drops the event, since that document may yet
+   * hold what the closure reads.
+   *
+   * `errors` holds every failed load's error, in the order they failed;
+   * the first is the one reported.
    */
-  #failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
+  #failHeadEventLoadPark(
+    event: QueuedEvent,
+    errors: readonly unknown[],
+  ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const keys = this.#headEventLoadPark.keys.join(", ");
-    this.#headEventLoadPark = null;
-    this.#headEventLoadParkHistory = null;
-    const detail = error instanceof Error ? error.message : String(error);
+    const error = errors[0];
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
       failureClass: "unknown" as const,
       recoveryEpoch: "untyped",
       permanentEvidence: false,
     };
+    if (
+      event.served === undefined &&
+      errors.every((each) =>
+        each instanceof ReplicaLoadFailureError &&
+        each.failure.failureClass === "authorization"
+      )
+    ) {
+      this.#releaseHeadEventLoadPark(event.id);
+      return;
+    }
+    const keys = this.#headEventLoadPark.keys.join(", ");
+    this.#headEventLoadPark = null;
+    this.#headEventLoadParkHistory = null;
+    const detail = error instanceof Error ? error.message : String(error);
     if (event.served === undefined) {
       this.#dropEvent(
         event,

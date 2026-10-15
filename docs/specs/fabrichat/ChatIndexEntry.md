@@ -14,10 +14,10 @@ interface ChatIndexEntry {
   /** A direct room's other member, by principal. */
   counterpart?: string;
 
-  /** When this user's catalog admitted it. */
+  /** When first listed for this user, using catalog admission for discovery. */
   since: FabricEpochNsec;
 
-  /** The revision of the room's entry in this user's catalog. */
+  /** The opaque revision of the membership or discovery source. */
   revision?: string;
 }
 ```
@@ -46,13 +46,16 @@ interface ChatIndexEntry {
   member, which is the key `direct` is indexed by. It is a principal and not a
   profile, because a person can have several profiles, and one conversation with
   a person must not split along them.
-- **`since`** is when the room entered this user's catalog: when they created or
-  accepted it, or when the room offered to them was admitted. It comes from the
-  clock of the handler that admitted it, at whatever resolution the system
+- **`since`** is the room's listing time for this user. Discovery uses the
+  source catalog entry's admission time; explicit membership uses its first
+  recorded join time, preserved across forgetting and restoration. It comes
+  from the corresponding handler's clock, at whatever resolution the system
   provides (see the [timing side-channel
   mitigations](../sandboxing/TIMING_SIDE_CHANNELS.md)).
-- **`revision`** is the revision of the room's entry in the catalog the manager
-  lists it from, which a request to [`forget`](ChatManagerOutput.md) the room
-  names, so that a choice made since by another client is not overridden.
+- **`revision`** is the opaque token supplied by the manager's `rooms` view
+  for the room's individual membership or discovery source. A request to
+  [`forget`](ChatManagerOutput.md) uses that listed entry's revision, so that a
+  choice made since by another client is not overridden. Direct mappings and
+  act outcomes may omit the revision even when the room is listed.
 
 An entry is private to its user, like everything in the home space.
