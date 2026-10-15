@@ -1091,13 +1091,14 @@ export async function runBatch(
       }
       for (const marked of await readWholeRuns(batchSpool)) {
         for (const [file, names] of Object.entries(marked.tests)) {
-          for (const name of names) {
-            const location = batch.suite.locate({
-              test: { k: marked.kind, s: marked.scope, n: name },
-              file,
-            });
-            if (location?.level === "unit") register(location.unit, [name]);
-          }
+          // A file is placed by the kind and scope its tests record under
+          // and the file itself, so one that registered no test still says
+          // its unit holds none.
+          const location = batch.suite.locate({
+            test: { k: marked.kind, s: marked.scope, n: names[0] ?? file },
+            file,
+          });
+          if (location?.level === "unit") register(location.unit, names);
         }
       }
       for (const record of collected.hooks) {

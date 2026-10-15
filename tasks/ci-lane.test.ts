@@ -4165,6 +4165,19 @@ describe("what a batch reads of what a whole run registered", () => {
     ).toEqual(new Map([[UNIT, new Set(["renders", "clicks"])]]));
   });
 
+  it("gives the unit an empty set where its files registered nothing", async () => {
+    // A run that registered no test at all still says its unit holds none,
+    // so every name the manifest lists for it reads as one the tree does
+    // not hold.
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "bakery",
+        tests: { "packages/bakery/a.browser.test.ts": [] },
+      }),
+    ).toEqual(new Map([[UNIT, new Set()]]));
+  });
+
   it("gives no unit a mark whose records would belong to none", async () => {
     expect(
       await registeredBy({
