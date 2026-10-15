@@ -1005,10 +1005,12 @@ export interface ManagerJoinState {
 
 /**
  * Tells the viewer's manager the viewer has joined the room. The manager's
- * own event checks its private catalog and leaves an already listed room
- * unchanged, so catalog reads stay in the manager's event. A room's acts send
- * it an event once they have recorded what the viewer wrote, saying whether
- * that was a message or a reaction, which it passes on.
+ * own event checks its private catalog, so catalog reads stay in the
+ * manager's event. For an already listed room it changes no membership, and
+ * brings the title its catalog lists the room under up to the room's, except
+ * for a join marked `messageAct`, which leaves the title as it is. A room's
+ * acts send it an event once they have recorded what the viewer wrote, saying
+ * whether that was a message or a reaction, which it passes on.
  *
  * The manager is read here, as a value, rather than by what the room stores:
  * a stream bound to a manager that isn't there still reads as present, so
