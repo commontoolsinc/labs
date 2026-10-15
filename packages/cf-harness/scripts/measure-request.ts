@@ -105,7 +105,22 @@ const captureBody = async (
   return body;
 };
 
-const main = async (dir: string): Promise<void> => {
+/** One tag's first-request size, in bytes, by part of the request. */
+export interface RequestSizeRow {
+  tag: HarnessTaskTag | "fallback";
+  toolsBytes: number;
+  instructionsBytes: number;
+  inputBytes: number;
+  totalBytes: number;
+}
+
+/**
+ * The first request a batch run sends for each tag, measured against the run
+ * recorded in `dir`.
+ */
+export const measureRequest = async (
+  dir: string,
+): Promise<{ toolCount: number; rows: RequestSizeRow[] }> => {
   const policy = readJson(`${dir}/policy-snapshot.json`) as {
     parentTools: { allowedToolIds: BuiltinToolId[] };
     subagents: { allowedProfiles: HarnessSubagentProfile[] };
@@ -151,7 +166,7 @@ const main = async (dir: string): Promise<void> => {
       loomRetrievalAvailable: true,
     }),
   ];
-  const rows = [];
+  const rows: RequestSizeRow[] = [];
   for (const tag of TAGS) {
     const tags = tag === "fallback" ? undefined : new Set([tag]);
     const transcript: HarnessTranscriptMessage[] = [
@@ -183,7 +198,7 @@ const main = async (dir: string): Promise<void> => {
       totalBytes: bytes(body),
     });
   }
-  console.log(JSON.stringify({ toolCount: tools.length, rows }, null, 1));
+  return { toolCount: tools.length, rows };
 };
 
 if (import.meta.main) {
@@ -191,5 +206,5 @@ if (import.meta.main) {
     console.error("usage: measure-request.ts <recorded-artifact-dir>");
     Deno.exit(2);
   }
-  await main(Deno.args[0]);
+  console.log(JSON.stringify(await measureRequest(Deno.args[0]), null, 1));
 }
