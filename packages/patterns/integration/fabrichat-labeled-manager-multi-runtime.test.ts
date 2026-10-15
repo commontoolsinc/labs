@@ -115,5 +115,13 @@ describe("fabrichat labeled manager across runtimes", () => {
         piece: room,
       }),
     ).toEqual({ status: "done", delivery: "noticed" });
+
+    // Nothing the room keeps in its space reads her manager either, so the
+    // policy gate refused none of the room's own commits on the way: a
+    // computed there that read the manager, as whether to show a chip's
+    // direct-chat control once did, would carry its label into the room's
+    // space and be refused.
+    const counts = await ada.loggerCounts();
+    expect(counts.cfc?.["write-policy-gate"]?.total ?? 0).toBe(0);
   });
 });

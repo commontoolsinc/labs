@@ -3,6 +3,8 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
+import type { IframePresentation } from "./presentation.ts";
+
 // Diagram of the messages between the Host environment, the intermediary outer
 // frame, and the guest in the inner frame.
 //
@@ -15,6 +17,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 //         ├─────LOAD-DOCUMENT────►│                        │
 //         │                       ├────────srcdoc─────────►│
 //         │◄─────────LOAD─────────┤                        │
+//         ├─────PRESENTATION─────►├─────PRESENTATION───────►│
 //         │                       │                        │
 //         ├──────────────────ORDERED──────────────────────►│
 //         ├──────────────────PORT (transferred)───────────►│
@@ -28,10 +31,10 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 //
 // The host and the guest hold the two ends of a `MessagePort` and every
 // capability request, response, and event crosses on it. The outer frame
-// carries the CSP and loads documents; it relays nothing that protocol says.
+// carries the CSP, loads documents, and forwards host presentation snapshots
+// to the guest. Capability traffic crosses the port directly.
 //
-// The one thing it does pass along is whatever the guest posts to it, which it
-// forwards without reading. A guest has a port for everything it means to say,
+// The outer frame also forwards whatever the guest posts to it without reading. A guest has a port for everything it means to say,
 // so a message arriving by that route is about the port itself: an alarm from
 // a guest that could not use it, a request from a guest that has none, or the
 // flush marker below. It is not a second way to talk.
@@ -96,12 +99,18 @@ export function flushNonce(): string {
 export enum IPCHostMessageType {
   // Host instructing the outer frame to load a new document.
   LoadDocument = "load-document",
+  /** Host presentation changes within the current guest document. */
+  Presentation = "presentation",
 }
 
 /** A message from the host to the outer frame. */
 export type IPCHostMessage = {
   type: IPCHostMessageType.LoadDocument;
   data: string;
+  presentation?: IframePresentation | null;
+} | {
+  type: IPCHostMessageType.Presentation;
+  data: IframePresentation | null;
 };
 
 export enum IPCGuestMessageType {
