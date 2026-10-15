@@ -220,6 +220,50 @@ describe("cf-iframe cell bridge", () => {
     });
   });
 
+  it("subscribes a keyed path of a resource with the resource's schema for the worker to narrow", () => {
+    const subscriptions: CellRef[] = [];
+    const stateSchema = {
+      type: "object",
+      properties: {
+        shapes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { x: { type: "number" }, y: { type: "number" } },
+          },
+        },
+      },
+    } as const;
+    const runtime = runtimeStub({
+      [$conn]: () => ({
+        request: () => Promise.resolve({}),
+        subscribe: (cell: CellHandle<unknown>) => {
+          subscriptions.push(cell.ref());
+          return Promise.resolve();
+        },
+        unsubscribe: () => Promise.resolve(),
+        peersOf: () => [],
+        signal: { aborted: false },
+      }),
+    });
+    const context = new CellHandle(runtime, {
+      ...ref,
+      schema: {
+        type: "object",
+        properties: { state: stateSchema },
+      },
+    }, { value: { state: { shapes: [] } } });
+    const state = createCellContextBridge(context).resources.state.cell!;
+
+    const cancel = state.key!("shapes").sink!(() => {}, () => {});
+    cancel();
+
+    expect(subscriptions.at(-1)).toMatchObject({
+      path: ["state", "shapes"],
+      keyedFrom: { depth: 1, schema: stateSchema },
+    });
+  });
+
   it("adapts plain object properties without a runtime connection", async () => {
     const runtime = runtimeStub({
       [$conn]: () => ({
