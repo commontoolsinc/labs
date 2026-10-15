@@ -191,6 +191,16 @@ export type SetProfileInboxEvent = {
   // to the piece's value shape, so the handler is handed a value instead of
   // the link it stores.
   inbox?: Cell<ShareInboxPiece>;
+
+  /** When true, the pointer is set only while the profile points at no inbox. */
+  ifUnset?: boolean;
+
+  /**
+   * When present, the pointer is set only while the profile points at this
+   * inbox, by a comparison of links that reads only link shape.
+   */
+  // Spelled `Cell<…>` for the reason `inbox` is.
+  replacing?: Cell<ShareInboxPiece>;
 };
 
 /**
@@ -215,8 +225,10 @@ export type InboxPointable = {
  * inbox it is. Call it from a handler, with `profile` bound as a value of type
  * {@link InboxPointable}, so that the pointer is read as a typed link.
  *
- * The read and the `setInbox` it leads to are two transactions in two spaces,
- * so a pointer set between them is replaced.
+ * The read here and the `setInbox` it leads to are two transactions in two
+ * spaces, so the event carries `ifUnset` and `setInbox` checks the pointer
+ * again in the transaction that writes it: a pointer something else sets in
+ * between is kept.
  */
 export function pointAtInboxIfUnset(
   profile: InboxPointable | undefined,
@@ -229,7 +241,7 @@ export function pointAtInboxIfUnset(
   const inbox = holder?.piece?.resolveAsCell();
   if (inbox === undefined || profile === undefined) return;
   if (profile.inbox?.piece !== undefined) return;
-  profile.setInbox?.send({ inbox });
+  profile.setInbox?.send({ inbox, ifUnset: true });
 }
 
 /**
@@ -239,8 +251,9 @@ export function pointAtInboxIfUnset(
  * when the profile points at another inbox or at none. Call it as
  * {@link pointAtInboxIfUnset} is called, and for `replaced`, a typed link.
  *
- * The read and the `setInbox` it leads to are two transactions in two spaces,
- * so a pointer set between them is replaced.
+ * The event carries `replacing`, so `setInbox` checks the pointer again in the
+ * transaction that writes it, for the reason {@link pointAtInboxIfUnset}
+ * gives.
  */
 export function pointAtInboxInPlaceOf(
   profile: InboxPointable | undefined,
@@ -253,7 +266,7 @@ export function pointAtInboxInPlaceOf(
   if (inbox === undefined || profile === undefined) return;
   const pointer = profile.inbox?.piece;
   if (pointer === undefined || !equals(pointer, replaced)) return;
-  profile.setInbox?.send({ inbox });
+  profile.setInbox?.send({ inbox, replacing: replaced });
 }
 
 type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
@@ -771,10 +784,26 @@ const setBio = handler<
 // as sent, and an event without one clears the pointer (the owner retired
 // their inbox). No shape check here: the event's schema admits a cell link
 // and nothing else, and the runtime refuses an event that is not one.
+//
+// An event carrying `ifUnset` or `replacing` writes only while the pointer
+// meets it. The pointer is read here, in the transaction that writes it, so a
+// pointer another writer commits meanwhile makes this commit stale, and the
+// handler runs again over it. A sender's own check of the pointer is a
+// transaction of its own and guards nothing here.
 const setInbox = handler<
   SetProfileInboxEvent,
   { inbox: Writable<ProfileInbox> }
 >((event, state) => {
+  if (event.ifUnset === true || event.replacing !== undefined) {
+    const held = state.inbox.get()?.piece;
+    if (event.ifUnset === true && held !== undefined) return;
+    if (
+      event.replacing !== undefined &&
+      (held === undefined || !equals(held, event.replacing))
+    ) {
+      return;
+    }
+  }
   state.inbox.set(event.inbox === undefined ? {} : { piece: event.inbox });
 });
 

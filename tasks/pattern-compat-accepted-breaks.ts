@@ -1325,4 +1325,24 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
         "taking home's part of the break once its roll-forward was measured: \"assuming the contract breakage can be automatically handled the way the previous one was, then that's okay\"",
     },
   },
+  {
+    // A FOURTH entry for the picker, naming only baselines the three above
+    // leave out. The profile's `setInbox` event gained the optional `ifUnset`
+    // and `replacing`. The picker's `legacyDefaultProfile` is an alternative of
+    // a stored profile or nothing, and the proof compares alternatives without
+    // the allowance it gives a property, so it reads the recorded event's open
+    // `ifUnset` and `replacing` as values the candidate refuses. A stream
+    // stores no event, so no stored profile reads differently.
+    pattern: "system/profile-picker.tsx",
+    baselines: [
+      "20261003T212417Z-QOwHYWA4c0a5_EXX",
+      "20261003T224736Z-AqiiUAQdhla5O1JZ",
+      "20261005T223959Z-cCzYHQilWH6ZuIbl",
+      "20261011T194332Z-UgB9t6TQSh9a5lyT",
+    ],
+    paths: ["argument.legacyDefaultProfile"],
+    reason:
+      "the profile's `setInbox` event gained optional `ifUnset` and `replacing`, which the recorded event left open; a stream stores no event, so every stored profile reads as before",
+    record: "docs/history/profile-set-inbox-conditions-break.md",
+  },
 ];

@@ -253,6 +253,8 @@ type ProfileInbox = {
 
 type SetProfileInboxEvent = {
   inbox?: Cell<ShareInboxPiece>;
+  ifUnset?: boolean;
+  replacing?: Cell<ShareInboxPiece>;
 };
 ```
 
@@ -293,7 +295,12 @@ uses the host it read the profile from. The pointer holds no secret, since it
 only says where to knock and the inbox decides what it keeps, and it is
 owner-protected, written only through `setInbox`, which takes the link alone
 (`{ inbox: <link> }`) and stores it as `piece`, or nothing (`{}`) to clear the
-pointer. A profile with no inbox holds a pointer without `piece`; a stored
+pointer. Two optional conditions make the write conditional, checked in the
+transaction that writes it: `ifUnset: true` sets the pointer only while the
+profile points at no inbox, and `replacing: <link>` only while it points at
+the inbox that link names. A sender that points a profile only when it has no
+pointer sends `ifUnset`, since its own read of the pointer is a transaction of
+its own and guards nothing. A profile with no inbox holds a pointer without `piece`; a stored
 profile predating the pointer has no `inbox` property.
 
 The link sits under `piece` rather than being the stored value itself because
