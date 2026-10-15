@@ -4,8 +4,17 @@
 `schemas.tsx` defines its public contract and re-exports the participant
 roster's types from `participants.tsx`, which also holds the roster's one
 writer, `addParticipant`. The shared inputs are `title`, `panels`,
-`presentation`, `participants`, `chatRoom`, and `meeting`; `hiddenPanels` and
-`privatePanels` belong to one user, and `viewerState` to one session.
+`presentation`, `participants`, `chatRoom`, `meeting`, and `style`;
+`hiddenPanels` and `privatePanels` belong to one user, and `viewerState` to one
+session.
+
+`style` is a `PerSpace` value: null, or `{id, mode}` where `id` is a portable
+catalog identifier and `mode` is `native`, `light`, or `dark`.
+`setStyle({style})` validates and replaces the pair in one write; null clears it
+for every participant. The identifier uses `[a-z][a-z0-9-]{0,63}`. Viewers
+interpret catalog identifiers and fall back locally when a style is unknown.
+Hover previews remain ephemeral viewer state and send no action. Space WRITE or
+OWNER authority admits changes; READ viewers observe them.
 
 A panel is a `piece`, `document`, or HTTP(S) `url`. Piece and document targets
 are native cell references. Their complete space, scope, document, and path
@@ -323,6 +332,8 @@ or overwrite its contents to adopt it.
 Run and attach all thirteen tests when deploying or updating source:
 
 ```sh
+deno task cf test packages/patterns/loom/style.test.tsx
+deno task cf test packages/patterns/loom/style-refusals.test.tsx
 deno task cf test packages/patterns/loom/main.test.tsx
 deno task cf test packages/patterns/loom/presentation-refusals.test.tsx
 deno task cf test packages/patterns/loom/multi-user.test.tsx
@@ -339,6 +350,8 @@ deno task cf test packages/patterns/loom/meeting.test.tsx
 
 deno task cf piece new packages/patterns/loom/main.tsx \
   --root packages/patterns \
+  --test packages/patterns/loom/style.test.tsx \
+  --test packages/patterns/loom/style-refusals.test.tsx \
   --test packages/patterns/loom/main.test.tsx \
   --test packages/patterns/loom/presentation-refusals.test.tsx \
   --test packages/patterns/loom/multi-user.test.tsx \
