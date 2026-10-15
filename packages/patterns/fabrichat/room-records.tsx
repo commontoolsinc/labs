@@ -1223,7 +1223,8 @@ const performMessageAct = (
     const replyCell = (event?.replyTo?.message ?? state.message ?? fromComposer)
       ?.resolveAsCell();
     const shownIn = event?.replyTo?.shownIn ?? state.shownIn ?? "main";
-    // Only a reply reads the messages, to find its target among them.
+    // Only a reply looks up a message, so a plain send builds no entry for
+    // any message already in the room.
     const target = replyCell === undefined
       ? undefined
       : entryFor(messageEntries(messages), replyCell);
