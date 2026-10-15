@@ -2492,7 +2492,8 @@ describe("setup/start", () => {
     const third = await compileReceiptPattern(runtime, "v3");
     await runtime.runSynced(resultCell, initial, {});
     const started: unknown[] = [];
-    using _start = stub(runtime.runner, "start", (cell) => {
+    // A receipt's start answers for its own commit, so it is this one.
+    using _start = stub(runtime.runner, "startWithCommit", (cell) => {
       started.push(cell);
       return Promise.resolve(true);
     });
@@ -2579,6 +2580,43 @@ describe("setup/start", () => {
           `piece-start commit piece-instantiate/${cell.sourceURI} failed, ` +
             "so the started graph's setup writes did not land: " +
             refusal.message,
+        );
+        expect(runtime.runner.isRunning(cell)).toBe(false);
+      } finally {
+        intercepted.restore();
+      }
+    });
+
+    it("rejects when the start it joins has already committed the piece's setup", async () => {
+      // A plain start of a piece stopped here installs its graph, and makes
+      // the commit, before it returns, so this call joins a start whose
+      // commit is already under way.
+
+      const cell = await stoppedPiece("startWithCommit joined");
+      const refusal = commitRefusal("injected refusal of the start commit");
+      const intercepted = interceptPieceStartCommit(runtime, { refusal });
+      try {
+        const plain = runtime.start(cell);
+        await expect(runtime.runner.startWithCommit(cell)).rejects.toThrow(
+          refusal.message,
+        );
+        await plain;
+      } finally {
+        intercepted.restore();
+      }
+    });
+
+    it("rejects when the start follows a link to a piece whose setup commit is refused", async () => {
+      const cell = await stoppedPiece("startWithCommit link target");
+      const link = runtime.getCell(space, "startWithCommit link");
+      const pointing = runtime.edit();
+      link.withTx(pointing).setRaw(cell.getAsLink());
+      expect((await pointing.commit().settled).error).toBeUndefined();
+      const refusal = commitRefusal("injected refusal of the start commit");
+      const intercepted = interceptPieceStartCommit(runtime, { refusal });
+      try {
+        await expect(runtime.runner.startWithCommit(link)).rejects.toThrow(
+          `piece-start commit piece-instantiate/${cell.sourceURI} failed`,
         );
         expect(runtime.runner.isRunning(cell)).toBe(false);
       } finally {

@@ -474,6 +474,11 @@ type StartAttempt = {
   // instead of running a second resolution pipeline. Assigned by start() once
   // the pipeline promise exists.
   settled?: Promise<boolean>;
+  // The settlements of the commits the graphs this attempt installed made of
+  // their setup writes, for `startWithCommit()`. Recorded on the attempt
+  // rather than by document, so a caller that joins the attempt late, or one
+  // whose start followed a link to the piece, finds them all the same.
+  instantiationCommits?: PieceInstantiationSettlement[];
   // The pattern keys this attempt has read inherited authority for. The walk
   // runs again from the top after the read, and must not read again for a
   // grant the durable metadata does not carry.
@@ -2409,17 +2414,6 @@ export class Runner {
    * readiness gate or a wave that a closing serving loop may abandon.
    */
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
-
-  /**
-   * Collectors of the settlements of self-minted piece instantiations, by the
-   * key of the piece instantiated. A `startWithCommit()` call holds one for
-   * its piece while its start runs, and hands each settlement it collects back
-   * to its caller.
-   */
-  #pieceInstantiationCollectors = new Map<
-    string,
-    Set<(settlement: PieceInstantiationSettlement) => void>
-  >();
 
   /**
    * Results this runner prepared, so a later start of the same result can reuse
@@ -4729,12 +4723,58 @@ export class Runner {
    * before instantiation.
    */
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.#joinOrBeginStart(resultCell).settled;
+  }
+
+  /**
+   * Like `start()`, except the returned promise also waits for the commit of
+   * the setup writes of the graph the start installs, through the one retry a
+   * recoverable refusal takes, and rejects when that commit failed. `start()`
+   * resolves before the commit settles, and reports its failure only to the
+   * log and to `Runtime.pieceStartCommitFailureObserver`.
+   *
+   * The commit waited for is the one the start this call runs or joins makes,
+   * whichever document a link from `resultCell` leads it to. A failed commit
+   * retires the graph it set up, so a rejection says the piece is not running
+   * here. A piece that was already running installs nothing, and this waits
+   * for nothing then: a graph its pattern watcher swaps in later commits its
+   * setup the way `start()`'s does. On a runtime that seals into a serving
+   * wave, the commit settles with the wave, so an action feeding that wave
+   * cannot wait for it here.
+   *
+   * @throws Error naming the failed piece-start commit, with storage's
+   * verdict, or whatever else cut the commit short, as its `cause`.
+   */
+  async startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    const { attempt, settled } = this.#joinOrBeginStart(resultCell);
+    const started = await settled;
+    const commits = attempt.instantiationCommits ?? [];
+    for (const failure of await Promise.all(commits)) {
+      if (failure === undefined) continue;
+      throw new Error(
+        `piece-start commit ${failure.actionId} failed, so the started ` +
+          "graph's setup writes did not land: " +
+          transactionFailureMessage(failure.error),
+        { cause: failure.error },
+      );
+    }
+    return started;
+  }
+
+  /**
+   * Helper for `start()` and `startWithCommit()`, which returns the current
+   * in-flight start attempt for `resultCell`'s document, or begins one, along
+   * with its outcome.
+   */
+  #joinOrBeginStart<T>(
+    resultCell: Cell<T>,
+  ): { attempt: StartAttempt; settled: Promise<boolean> } {
     const startKey = this.#getDocKey(resultCell);
     const inFlight = this.#inFlightStartsByDoc.get(startKey);
     if (
       inFlight?.settled !== undefined && this.#isStartAttemptCurrent(inFlight)
     ) {
-      return inFlight.settled;
+      return { attempt: inFlight, settled: inFlight.settled };
     }
     const attempt: StartAttempt = {
       lifecycleEpoch: this.#lifecycleEpoch,
@@ -4769,60 +4809,11 @@ export class Runner {
         });
       attempt.settled = settled;
       this.#inFlightStartsByDoc.set(startKey, attempt);
-      return settled;
+      return { attempt, settled };
     } catch (error) {
       this.#finishStartAttempt(attempt);
-      return Promise.reject(error);
+      return { attempt, settled: Promise.reject(error) };
     }
-  }
-
-  /**
-   * Like `start()`, except the returned promise also waits for the commit of
-   * the setup writes of each graph this call instantiates for `resultCell`'s
-   * document, through the one retry a recoverable refusal takes, and rejects
-   * when one of them failed. `start()` resolves before that commit settles,
-   * and reports its failure only to the log and to
-   * `Runtime.pieceStartCommitFailureObserver`.
-   *
-   * A failed commit retires the graph it set up, so a rejection says the
-   * piece is not running here. A piece that was already running instantiates
-   * nothing, and this waits for nothing then: a graph its pattern watcher
-   * swaps in later commits its setup the way `start()`'s does. On a runtime
-   * that seals into a serving wave, the commit settles with the wave, so an
-   * action feeding that wave cannot wait for it here.
-   *
-   * @throws Error naming the failed piece-start commit, with storage's
-   * verdict, or whatever else cut the commit short, as its `cause`.
-   */
-  async startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    const key = this.#getDocKey(resultCell);
-    const settlements: PieceInstantiationSettlement[] = [];
-    const collect = (settlement: PieceInstantiationSettlement) => {
-      settlements.push(settlement);
-    };
-    let collectors = this.#pieceInstantiationCollectors.get(key);
-    if (collectors === undefined) {
-      collectors = new Set();
-      this.#pieceInstantiationCollectors.set(key, collectors);
-    }
-    collectors.add(collect);
-    let started: boolean;
-    try {
-      started = await this.start(resultCell);
-    } finally {
-      collectors.delete(collect);
-      if (collectors.size === 0) this.#pieceInstantiationCollectors.delete(key);
-    }
-    for (const failure of await Promise.all(settlements)) {
-      if (failure === undefined) continue;
-      throw new Error(
-        `piece-start commit ${failure.actionId} failed, so the started ` +
-          "graph's setup writes did not land: " +
-          transactionFailureMessage(failure.error),
-        { cause: failure.error },
-      );
-    }
-    return started;
   }
 
   /**
@@ -5196,6 +5187,8 @@ export class Runner {
    * @param resultCell - The result cell to start
    * @param options.tx - Transaction to use for initial setup (optional)
    * @param options.givenPattern - Pattern to use instead of looking up by ID
+   * @param options.onInitialCommit - Receives the settlement of the commit the
+   * initial instantiation makes of its own transaction, when it makes one
    * @returns The exact cancel registration installed for this start
    */
   #startCore<T = any>(
@@ -5211,6 +5204,7 @@ export class Runner {
       awaitSyncBeforeInitialRun?: boolean;
       // See RunnerRunOptions.parentPieceRootId.
       parentPieceRootId?: string;
+      onInitialCommit?: (settlement: PieceInstantiationSettlement) => void;
     } = {},
   ): Cancel {
     const {
@@ -5686,12 +5680,6 @@ export class Runner {
           commitWork.finally(() =>
             this.#pendingPieceInstantiationSettlements.delete(commitWork)
           );
-          for (
-            const collect of this.#pieceInstantiationCollectors.get(pieceKey) ??
-              []
-          ) {
-            collect(commitWork);
-          }
           commitSettlement = commitWork;
         }
       }
@@ -6275,7 +6263,8 @@ export class Runner {
           },
         };
       }
-      instantiatePattern(pattern, useTx);
+      const settlement = instantiatePattern(pattern, useTx);
+      if (settlement !== undefined) options.onInitialCommit?.(settlement);
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
@@ -6716,6 +6705,12 @@ export class Runner {
     }
 
     const resolvedPattern = this.#resolveToPattern(pattern);
+    // Holds the list rather than the attempt, which the registration's
+    // closures would otherwise keep for as long as the piece runs.
+    const instantiationCommits = attempt.instantiationCommits ??= [];
+    const recordInitialCommit = (settlement: PieceInstantiationSettlement) => {
+      instantiationCommits.push(settlement);
+    };
 
     // Fast path for pieces prepared in the current runtime via setup()/run() or
     // explicitly restarted after stop(). Those writes are already present
@@ -6737,6 +6732,7 @@ export class Runner {
         attempt.installedRegistration = this.#startCore(rootCell, {
           ...attempt.options,
           givenPattern: resolvedPattern,
+          onInitialCommit: recordInitialCommit,
         });
       } catch (err) {
         return Promise.reject(err);
@@ -6792,6 +6788,7 @@ export class Runner {
         attempt.installedRegistration = this.#startCore(rootCell, {
           ...attempt.options,
           givenPattern: resolvedPattern,
+          onInitialCommit: recordInitialCommit,
           schedulerRehydration: this.#schedulerRehydrationOptions(
             rootCell,
             // Resumed from a synced state (it just awaited
