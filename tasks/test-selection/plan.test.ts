@@ -22,6 +22,7 @@ import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
 import type { WithheldReason } from "@commonfabric/test-support/records";
 import { sampleEntry, sampleManifest } from "./testing.ts";
 import {
+  FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
   LANE_BUDGET_SECONDS,
   LANES,
@@ -1310,9 +1311,18 @@ describe("plan", () => {
               overhead: 9,
               correction: 0.8,
               unitOverhead: 2,
+              unitHooks: {
+                "packages/workspace-unit/0.test.ts": 6,
+                "packages/workspace-unit/4.test.ts": 2.5,
+              },
             },
             "runner-unit": { overhead: 4, correction: 0.4, unitOverhead: 1 },
-            "cli-core": { overhead: 21, correction: 1.2, unitOverhead: 0 },
+            "cli-core": {
+              overhead: 21,
+              correction: 1.2,
+              unitOverhead: 0,
+              unitHooks: { "packages/cli-core/3.test.ts": 11 },
+            },
           },
           prologue: 0,
         },
@@ -1340,6 +1350,65 @@ describe("plan", () => {
       }
       expect(result.lanes.some((lane) => lane.selections.length > 0))
         .toBe(true);
+    });
+
+    it("charges a unit's hooks through the correction each time a pass opens it", () => {
+      // Three units of one test each, the first of them run twice: four
+      // openings at the per-unit charge, the first unit's hooks twice and
+      // the second's once, through a correction of two, and four seconds
+      // of tests through it too.
+      const manifest = sampleManifest({
+        entries: entries(3, (i) => ({
+          cost: 1,
+          unit: `packages/memory/test/${i}.test.ts`,
+        })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": {
+              overhead: 0,
+              correction: 2,
+              unitOverhead: 1,
+              unitHooks: {
+                "packages/memory/test/0.test.ts": 4,
+                "packages/memory/test/1.test.ts": 3,
+              },
+            },
+          },
+          prologue: 0,
+        },
+      });
+      const held = manifest.entries.map((entry, i) => ({
+        entry,
+        repeats: i === 0 ? 2 : 1,
+      }));
+      expect(suiteCharge(manifest, "workspace-unit", held))
+        .toBeCloseTo(4 * 1 + 2 * (2 * 4 + 3) + 2 * 4, 6);
+    });
+
+    it("leaves a unit's hooks out of what a lane pays before it runs anything", () => {
+      // They are time of the kind a unit's tests take, and a suite's
+      // fixed charge would otherwise be the hooks of whichever unit the
+      // manifest happened to list first.
+      const manifest = sampleManifest({
+        entries: entries(2, () => ({ suite: "workspace-unit" })),
+        calibration: {
+          setupCost: {},
+          suites: {
+            "workspace-unit": {
+              overhead: 9,
+              correction: 1,
+              unitOverhead: 2,
+              unitHooks: Object.fromEntries(
+                entries(2, () => ({})).map((entry) => [entry.unit, 300]),
+              ),
+            },
+          },
+          prologue: 0,
+        },
+      });
+      expect(fixedCharges({ manifest, capabilities: new Map() }))
+        .toEqual({ "workspace-unit": 11 });
     });
 
     it("charges nothing for a suite a lane holds nothing of", () => {
@@ -2259,13 +2328,21 @@ describe("running everything", () => {
 describe("how many lanes the full run needs", () => {
   const capabilities = NO_CAPABILITIES;
 
-  function count(manifest: Manifest, overrides: Partial<PlanInput> = {}) {
+  function counted(
+    manifest: Manifest,
+    overrides: Partial<PlanInput> = {},
+    most?: number,
+  ) {
     return fullLaneCount({
       manifest,
       capabilities,
       wholeUnits: NO_WHOLE_UNITS,
       ...overrides,
-    });
+    }, most);
+  }
+
+  function count(manifest: Manifest, overrides: Partial<PlanInput> = {}) {
+    return counted(manifest, overrides).lanes;
   }
 
   it("takes one lane for work that fits in one", () => {
@@ -2299,17 +2376,15 @@ describe("how many lanes the full run needs", () => {
     expect(count(manifest, { budgetSeconds: 100 })).toBe(6);
   });
 
-  it("drops lanes the repeat count over-estimated, and keeps an overrun", () => {
-    // The starting figure charges every execution the packer was asked
-    // for, and the packer gives up runs rather than putting a lane past
-    // its bound, so it can land above the fewest lanes that hold the
-    // run. A search that only climbed would keep whatever it overshot
-    // by, which costs the default branch a job per commit for each lane.
+  it("takes no lanes for runs the packer gives up, and keeps an overrun", () => {
+    // Every execution asked for comes to more lanes than the packing
+    // needs, because the packer gives up runs rather than putting a lane
+    // past its budget. A lane taken for each of those runs would cost
+    // the default branch a job per commit.
     //
-    // The identity costing more than a whole lane is what makes this
-    // worth measuring against the overrun rather than against zero: its
-    // overrun is there at every count, so a shrink that waited for zero
-    // would never run.
+    // The identity costing more than a whole lane runs past its budget at
+    // every count, so a count that waited for no lane to run long would
+    // take every lane it was allowed.
     const manifest = sampleManifest({
       entries: [
         ...entries(20, () => ({ cost: 1, repeats: 10 })),
@@ -2321,13 +2396,12 @@ describe("how many lanes the full run needs", () => {
     });
     const lanes = count(manifest, { budgetSeconds: 100 });
     // Every execution asked for comes to 200 seconds beside the one
-    // vast test, which the estimate divides into far more lanes than
-    // the packing needs.
-    const estimate = Math.ceil(
+    // vast test, which divides into more lanes than the packing needs.
+    const everyRun = Math.ceil(
       manifest.entries.reduce((t, e) => t + e.cost * e.repeats, 0) / 100,
     );
-    expect(estimate).toBeGreaterThan(lanes);
-    // And what it settled on is a packing no smaller count matches.
+    expect(everyRun).toBeGreaterThan(lanes);
+    // And one lane fewer runs longer.
     const overrunAt = (count: number) =>
       plan({
         manifest,
@@ -2344,10 +2418,8 @@ describe("how many lanes the full run needs", () => {
   it("adds lanes while each one still buys something", () => {
     // The fewest lanes the raw work could fit in is not enough lanes,
     // because a lane loses part of its budget to the overhead of the
-    // suite it opens. The search has to climb past that starting point,
-    // and this is the case that makes it: three lanes hold eight tests
-    // of a ninth of a budget each only if their overheads are free, and
-    // they are not.
+    // suite it opens: three lanes hold eight tests of a ninth of a
+    // budget each only if their overheads are free, and they are not.
     const manifest = sampleManifest({
       entries: entries(24, () => ({ cost: FULL_LANE_BUDGET_SECONDS / 9 })),
       calibration: {
@@ -2377,12 +2449,121 @@ describe("how many lanes the full run needs", () => {
     expect(packed.overBudgetSeconds).toBe(0);
   });
 
+  /**
+   * Five suites, each costing half of a lane of `budget` to open, and two
+   * lanes of tests in each, so the run needs twenty lanes. While every
+   * lane is crowded, work that fits nowhere goes to the shortest lane and
+   * opens its suite there again, so a lane added can cost more than the
+   * budget it brings.
+   */
+  function crowding(budget: number): Manifest {
+    const suites = ["a", "b", "c", "d", "e"];
+    return sampleManifest({
+      entries: suites.flatMap((suite) =>
+        Array.from(
+          { length: 40 },
+          (_, i) =>
+            sampleEntry({ k: "unit", s: suite, n: `case ${i}` }, {
+              suite,
+              unit: `${suite}/case-${i}.test.ts`,
+              cost: budget / 20,
+            }),
+        )
+      ),
+      calibration: {
+        setupCost: {},
+        suites: Object.fromEntries(
+          suites.map((suite) => [suite, {
+            overhead: budget / 2,
+            correction: 1,
+            unitOverhead: 0,
+          }]),
+        ),
+        prologue: 0,
+      },
+    });
+  }
+
+  /** Seconds the lanes of a full run run past `budget`, added up. */
+  function overrunAt(manifest: Manifest, budget: number, lanes: number) {
+    return plan({
+      manifest,
+      mandatory: new Map(),
+      capabilities,
+      wholeUnits: NO_WHOLE_UNITS,
+      policy: "everything",
+      budgetSeconds: budget,
+      lanes,
+    }).lanes.reduce(
+      (total, lane) => total + Math.max(0, lane.projectedSeconds - budget),
+      0,
+    );
+  }
+
+  it("finds the count past lanes that add to the overrun", () => {
+    // Ten lanes run past their budgets by less in all than eleven do, so
+    // counting up a lane at a time from ten would stop there, with every
+    // lane long.
+    const budget = 1000;
+    const manifest = crowding(budget);
+    expect(overrunAt(manifest, budget, 11))
+      .toBeGreaterThan(overrunAt(manifest, budget, 10));
+    expect(counted(manifest, { budgetSeconds: budget }, 100))
+      .toEqual({ lanes: 20, capped: false });
+    expect(overrunAt(manifest, budget, 20)).toBe(0);
+    expect(overrunAt(manifest, budget, 19)).toBeGreaterThan(0);
+  });
+
+  it("says the cap binds wherever it is short of what the run needs", () => {
+    // One lane runs past its budget by less in all than six do, so a
+    // count judged against the overrun at a cap of six would take one.
+    const budget = 1000;
+    const manifest = crowding(budget);
+    expect(overrunAt(manifest, budget, 1))
+      .toBeLessThan(overrunAt(manifest, budget, 6));
+    for (const most of [1, 6, 10, 19]) {
+      expect(counted(manifest, { budgetSeconds: budget }, most))
+        .toEqual({ lanes: most, capped: true });
+    }
+    expect(counted(manifest, { budgetSeconds: budget }, 20))
+      .toEqual({ lanes: 20, capped: false });
+  });
+
+  it("takes what the run needs where the cap allows it", () => {
+    // Three lanes' worth of work, in tests small enough to divide evenly.
+    const manifest = sampleManifest({
+      entries: entries(FULL_LANE_BUDGET_SECONDS * 3, () => ({ cost: 1 })),
+    });
+    expect(counted(manifest, {}, 2)).toEqual({ lanes: 2, capped: true });
+    expect(counted(manifest, {}, 3)).toEqual({ lanes: 3, capped: false });
+    expect(counted(manifest, {}, 4)).toEqual({ lanes: 3, capped: false });
+  });
+
+  it("gives a lane apiece to tests only an empty lane can hold", () => {
+    // Each costs more than a lane's budget and less than its bound, which
+    // a lane holding nothing else may run up to.
+    const manifest = sampleManifest({
+      entries: entries(3, () => ({
+        cost: (FULL_LANE_BUDGET_SECONDS + FULL_LANE_BOUND_SECONDS) / 2,
+      })),
+    });
+    expect(counted(manifest)).toEqual({ lanes: 3, capped: false });
+  });
+
+  it("gives a lane apiece to tests no lane can hold", () => {
+    // Each runs past the bound wherever it goes, and two in one lane run
+    // past it twice over.
+    const manifest = sampleManifest({
+      entries: entries(3, () => ({ cost: FULL_LANE_BOUND_SECONDS * 2 })),
+    });
+    expect(counted(manifest)).toEqual({ lanes: 3, capped: false });
+    expect(counted(manifest, {}, 2)).toEqual({ lanes: 2, capped: true });
+  });
+
   it("stops rather than chasing work no number of lanes can fit", () => {
-    // The search has to reach its stopping rule to be tested by this, so
-    // the corpus has to be one where lanes are still worth adding for a
-    // while and then stop being. A single oversized identity would cap
-    // the search at one lane before the loop ran at all, and the case
-    // would pass with the rule deleted.
+    // The vast test runs past its lane's budget at every count, so a
+    // count that waited for every lane to fit would take every lane it
+    // was allowed.
     const manifest = sampleManifest({
       entries: [
         ...entries(20, () => ({ cost: 100 })),
@@ -2393,8 +2574,6 @@ describe("how many lanes the full run needs", () => {
       ],
     });
     const lanes = count(manifest);
-    // Adding lanes past this buys nothing, because what is left over
-    // budget is one identity no lane can hold.
     const at = (n: number) =>
       plan({
         manifest,
@@ -2404,16 +2583,12 @@ describe("how many lanes the full run needs", () => {
         policy: "everything",
         lanes: n,
       });
-    const overrun = (result: ReturnType<typeof plan>) =>
-      result.lanes.reduce(
-        (total, lane) =>
-          total + Math.max(0, lane.projectedSeconds - result.budgetSeconds),
-        0,
-      );
-    expect(overrun(at(lanes))).toBeGreaterThan(0);
-    expect(overrun(at(lanes + 1))).toBeGreaterThan(overrun(at(lanes)) - 1);
-    // And it did reach the rule rather than stopping at the cap.
-    expect(lanes).toBeGreaterThan(1);
+    // The one lane past its budget holds the vast test alone.
+    const over = at(lanes).lanes.filter((lane) =>
+      lane.projectedSeconds > FULL_LANE_BUDGET_SECONDS
+    );
+    expect(over.map((lane) => lane.selections.length)).toEqual([1]);
+    expect(at(lanes - 1).overflowed).toBeGreaterThan(0);
     expect(lanes).toBeLessThan(manifest.entries.length);
   });
 

@@ -235,6 +235,7 @@ export function measuredCost(
       const tests = testsOf(
         entries.map((entry) => ({ entry, repeats: entry.repeats })),
         around,
+        fitted,
       );
       const units = new Set(entries.map((entry) => entry.unit)).size;
       return chargedTests(fitted.correction, tests) +
