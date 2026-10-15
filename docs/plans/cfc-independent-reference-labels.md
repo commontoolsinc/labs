@@ -506,15 +506,14 @@ specification does not require.
   the refusal is not a verdict: a reactive writer takes its bounded retries, a
   client that delivers its own events reports the refused commit after one
   attempt, and a served event is deferred as a commit-preparation delivery
-  failure: held at the head of its stream, retried on input, and covered for
-  attention once its failed-state budget is spent. A
-  floor's failure over a plain value is a verdict on the same terms, the
-  documents being those whose stored labels the flow join read; it is not one
-  where the flow join also weighed the flow of external content, which no
-  document holds. Where several contributions miss one floor, the refusal is a
-  verdict only when every one of them is decided that way, and a source whose
-  stored labels name a schema document the transaction could not read decides
-  nothing.
+  failure, held at the head of its stream, retried on input, and covered for
+  attention once its failed-state budget is spent. A floor's failure over a
+  plain value is a verdict on the same terms, the documents being those whose
+  stored labels the flow join read; it is not one where the flow join also
+  weighed the flow of external content, which no document holds. Where several
+  contributions miss one floor, the refusal is a verdict only when every one
+  of them is decided that way, and a source whose stored labels name a schema
+  document the transaction could not read decides nothing.
 - A reference written at a concrete floor path whose schema mints the floor's
   atom is held to the source's evidence, where the mint used to credit it.
   The store keeps no stamp at a slot holding a reference, so a floor the mint
