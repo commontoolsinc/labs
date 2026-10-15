@@ -307,8 +307,7 @@ Rules:
   default covers everything it cannot classify.
 
 Below the URI layer nothing routes on the scheme: storage and the memory
-engine treat `URI` as an opaque string key (only `data:` URIs get special
-routing), so computed docs flow as ordinary documents. The scheme is learned
+engine treat `URI` as an opaque string key (`snapshot:` and Fabric `data:` URIs are read locally), so computed docs flow as ordinary documents. The scheme is learned
 only by the URI codecs (`uri-utils.ts`, `fabric-import-specifier.ts`,
 `fabric-ref-resolution.ts`) and read by the engine's drop policy via
 `entityKindOfIdString`.

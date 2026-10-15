@@ -416,6 +416,112 @@ export const IFRAME_PATTERN = {
     }
   });
 
+  it("grants a presence room as a second context name for the cell whose field it follows", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-presence-",
+    });
+    try {
+      const contract = resolve(directory, "contract.ts");
+      const guest = resolve(directory, "guest.ts");
+      const out = resolve(directory, "main.tsx");
+      await Deno.writeTextFile(
+        contract,
+        `${contractPrefix}
+export const IFRAME_PATTERN = {
+  name: "Cursors",
+  outputScope: "user",
+  presence: { cursors: "state", ["__proto__"]: "output" },
+} as const;
+`,
+      );
+      await Deno.writeTextFile(guest, "document.body.textContent = 'guest';\n");
+
+      const result = await generate(contract, guest, out);
+      expect(result.code, decoder.decode(result.stderr)).toBe(0);
+      const generated = await Deno.readTextFile(out);
+      expect(generated).toContain(
+        '"cursors": Writable<Default<IframeStateData, typeof DEFAULT_STATE>>;',
+      );
+      expect(generated).toContain('["cursors"]: state,');
+      expect(generated).toContain('["cursors"]: "presence",');
+      expect(generated).toContain(
+        '"__proto__": Writable<Default<IframeOutputData, typeof DEFAULT_OUTPUT>>;',
+      );
+      expect(generated).toContain('["__proto__"]: output,');
+      expect(generated).toContain('["__proto__"]: "presence",');
+
+      // The wrapper is only as good as its compile: the context names one
+      // cell twice, and the kind `presence` has to be one `cf-iframe` takes.
+      const check = await runDeno((lockPath) => [
+        "run",
+        "--allow-all",
+        "--frozen=true",
+        "--lock",
+        lockPath,
+        resolve(ROOT, "packages/cli/launcher.ts"),
+        "check",
+        out,
+        "--root",
+        directory,
+        "--no-run",
+      ]);
+      expect(check.code, decoder.decode(check.stderr)).toBe(0);
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
+  for (
+    const [presence, message] of [
+      [
+        `{ state: "state" }`,
+        `Presence room name "state" must be non-empty and distinct from input, state, output, and every database.`,
+      ],
+      [
+        `{ app: "state" }`,
+        `Presence room name "app" must be non-empty and distinct from input, state, output, and every database.`,
+      ],
+      [
+        `{ cursors: "input" }`,
+        `Presence room "cursors" must name "state" or "output", the resource whose field it follows.`,
+      ],
+    ]
+  ) {
+    it(`writes no wrapper for the presence rooms ${presence}`, async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "pattern-iframe-presence-refused-",
+      });
+      try {
+        const contract = resolve(directory, "contract.ts");
+        const guest = resolve(directory, "guest.ts");
+        const out = resolve(directory, "main.tsx");
+        await Deno.writeTextFile(
+          contract,
+          `${contractPrefix}
+export const IFRAME_PATTERN = {
+  name: "Cursors",
+  databases: { app: { tables: {} } },
+  presence: ${presence},
+} as const;
+`,
+        );
+        await Deno.writeTextFile(
+          guest,
+          "document.body.textContent = 'guest';\n",
+        );
+
+        const result = await generate(contract, guest, out);
+        expect(result.code).not.toBe(0);
+        expect(decoder.decode(result.stderr)).toContain(message);
+        await expect(Deno.lstat(out)).rejects.toBeInstanceOf(
+          Deno.errors.NotFound,
+        );
+      } finally {
+        await removeDirectory(directory);
+      }
+    });
+  }
+
   it("bundles D3, Phaser, and Babylon.js guests", async () => {
     const frameworks = [
       {

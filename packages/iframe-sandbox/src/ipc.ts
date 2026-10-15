@@ -1,6 +1,6 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
-import type { FabricValue } from "@commonfabric/data-model";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 // Diagram of the messages between the Host environment, the intermediary outer
@@ -187,9 +187,53 @@ export type BridgeError = {
  */
 export const BRIDGE_READ_REFUSED = "read-refused";
 
+/**
+ * The code of the bridge error a `presence` resource's sink fails with when
+ * the host has no presence relay to join. Joining again finds the same host.
+ */
+export const BRIDGE_PRESENCE_UNSUPPORTED = "presence-unsupported";
+
+/**
+ * The code of the bridge error a `presence` resource's sink fails with when
+ * the relay refused the join or a publication, such as a record past the
+ * relay's size bound. The error's message is the relay's.
+ */
+export const BRIDGE_PRESENCE_REFUSED = "presence-refused";
+
+/**
+ * The code of the bridge error a `presence` resource's sink fails with when
+ * the host lost the room for any other reason.
+ */
+export const BRIDGE_PRESENCE_DISCONNECTED = "presence-disconnected";
+
+/** One member of a presence room, at its latest record. */
+export type BridgePresenceParticipant = {
+  /** Relay-assigned id of the membership; a member that rejoins has another. */
+  participantId: string;
+
+  /** Display name the member published. */
+  name: string;
+
+  /** What the member published, by facet name. A peer wrote every value. */
+  facets: Record<string, FabricPlainObject>;
+};
+
+/** One delivery of a `presence` resource's sink. */
+export type BridgePresenceEvent =
+  /** The room as it stands, on joining it and on each rejoin. */
+  | {
+    kind: "snapshot";
+    participantId: string;
+    participants: BridgePresenceParticipant[];
+  }
+  /** A member's first record, or the one replacing its last. */
+  | { kind: "upsert"; participant: BridgePresenceParticipant }
+  /** A member gone. */
+  | { kind: "remove"; participantId: string };
+
 export type BridgeResourceDescriptor = {
   name: string;
-  kind: "cell" | "stream" | "sqlite" | "service";
+  kind: "cell" | "stream" | "sqlite" | "service" | "presence";
   operations: string[];
   methods: string[];
   schema?: FabricValue;

@@ -154,6 +154,8 @@ describe("prompt-loop run_pattern model boundary", () => {
   describe("scrubBareFabricIdentifiers()", () => {
     it("replaces bare tagged hashes, DIDs, and data URIs with the placeholder", () => {
       const hash = "A".repeat(43);
+      expect(scrubBareFabricIdentifiers(`at snapshot:${hash}:${hash}`))
+        .toBe("at [fabric-id]");
       expect(scrubBareFabricIdentifiers(
         `Could not resolve "/fid1:${hash}/missing.ts".`,
       )).toBe('Could not resolve "/[fabric-id]/missing.ts".');
@@ -167,6 +169,8 @@ describe("prompt-loop run_pattern model boundary", () => {
 
     it("leaves schemed link forms and handle tokens untouched", () => {
       const hash = "B".repeat(43);
+      expect(scrubBareFabricIdentifiers(`snapshot:${hash}:${"-".repeat(43)}`))
+        .toBe("[fabric-id]");
       const schemed = `/of:fid1:${hash}/items/0`;
       const computed = `computed:fid1:${hash}`;
       const token = "cfh:a:abcde";

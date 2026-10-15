@@ -38,7 +38,7 @@ few recurring across the rows that received them.
 **A plan's inputs cell recomposes every schema.** `#bindNodeIO` hands the
 bound inputs to `getImmutableCell()`, which rewrites each link's
 content-addressed schema reference into its recomposed form before minting
-the `data:` id. The rewrite stays: a traversal accepts a reference-form
+the `snapshot:` id. The rewrite stays: a traversal accepts a reference-form
 schema only where the space it is reading persists that schema's closure,
 and no write has stored the links a plan binds, so a link inside the inputs
 cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
@@ -272,7 +272,10 @@ where the pre-sync was no longer the whole cost.
       `null`, so two positions of a graph sharing one schema object derive
       other ids than two positions holding equal ones. The thirty-row
       room's counts and profile shares are in
-      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md).
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing.md),
+      and the shares once the pre-sync held a node's bindings, when the
+      binding walk fell from 2.1–3.6% of the samples to 0.9–1.2%, are in
+      [`../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md`](../history/development/performance/2026-10-13-pattern-schema-narrowing-remeasured.md).
 - [x] A schema derived for a sync or a binding is derived once per schema
       it is derived from, and interned, so `internSchema()` is given an
       object it has seen: it hashes the whole of any other, whether or not
