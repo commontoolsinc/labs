@@ -376,6 +376,45 @@ export default pattern<{panels: Writable<Writable<unknown>[]>}>(({panels}) => ({
     });
 
     describe("instance members", () => {
+      describe("getRegisteredPieces()", () => {
+        it("reads later commits through a controller for a registered piece in another space", async () => {
+          const foreignPieces = new PiecesController(
+            createSession({
+              identity: signer,
+              spaceDid: await runtime.createSpace(),
+            }),
+            runtime,
+          );
+          const foreignPiece = await foreignPieces.runPersistent(
+            valuePattern(),
+            { value: 7 },
+            "foreign-registered-piece",
+          );
+          await pieces.add([foreignPiece]);
+          const active = await pieces.getActivePiece(foreignPiece);
+          expect(active).toBeDefined();
+          expect(address(active!.resolveAsCell())).toEqual(
+            address(foreignPiece),
+          );
+          const listed = (await pieces.getRegisteredPieces()).find((entry) =>
+            entry.id === pieceId(foreignPiece)
+          );
+          expect(listed).toBeDefined();
+          expect(listed!.pieces().getSpace()).toBe(foreignPieces.getSpace());
+          expect(await listed!.result.get(["value"])).toBe(7);
+
+          const argument = await foreignPieces.getArgument(foreignPiece);
+          const edited = await runtime.editWithRetry((tx) =>
+            argument.withTx(tx).key("value").set(8)
+          );
+          expect(edited.error).toBeUndefined();
+          await runtime.idle();
+          await pieces.synced();
+
+          expect(await listed!.result.get(["value"])).toBe(8);
+        });
+      });
+
       describe("remove()", () => {
         it("refuses to unlink a computed default root through member removal", async () => {
           const root = await installComputedRegistry("noop");
