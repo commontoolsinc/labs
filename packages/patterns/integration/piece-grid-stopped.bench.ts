@@ -237,14 +237,21 @@ interface Session {
 
 async function openSession(target: GridFixture): Promise<Session> {
   const browser = await Browser.launch({ headless: true });
-  const page = await browser.newPage();
-  const pageErrors: string[] = [];
-  page.addEventListener("pageerror", (event) => {
-    pageErrors.push(event.detail.message);
-  });
-  await page.goto(`${env.FRONTEND_URL}${target.spaceDid}/${target.gridId}`);
-  await waitForPieceView(page, target.spaceDid, target.gridId);
-  return { browser, page, pageErrors };
+  // The caller closes the browser once it holds the session, so a failure
+  // before that closes it here.
+  try {
+    const page = await browser.newPage();
+    const pageErrors: string[] = [];
+    page.addEventListener("pageerror", (event) => {
+      pageErrors.push(event.detail.message);
+    });
+    await page.goto(`${env.FRONTEND_URL}${target.spaceDid}/${target.gridId}`);
+    await waitForPieceView(page, target.spaceDid, target.gridId);
+    return { browser, page, pageErrors };
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
 }
 
 /** Signs in and waits until every tile shows its note's body. */
