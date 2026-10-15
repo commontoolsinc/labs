@@ -250,6 +250,15 @@ contention, unnecessary commits, and feedback between the simulation and its
 authoritative model. Interpolate locally between accepted states and persist
 only meaningful actions such as spawning, claiming, scoring, or ending a turn.
 
+State that other players should see while it happens and that nobody needs
+afterwards, such as where each player is right now, travels through a presence
+room instead of a Cell. A room holds each player's latest record and stores
+nothing, so publishing a position from the game loop is what it is for. It
+orders nothing between players and keeps no history: a score, a claim, or
+anything two players must agree on stays a Cell write.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
+
 Generate textures and simple audio locally when practical. The iframe CSP does
 not allow arbitrary network fetches, so do not load assets from a CDN. For
 larger assets, include data files through the supported pattern program rather

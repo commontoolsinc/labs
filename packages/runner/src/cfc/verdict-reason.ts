@@ -54,8 +54,10 @@
 // It also closes a hole the other direction had: `invalidateCfc` takes an
 // arbitrary caller string, so with terminal-by-default a caller could inject
 // prose and choose its own disposition. Verdicts are minted only inside
-// `prepare.ts`; caller prose is untagged and therefore retryable, which is the
-// safe answer for a transaction whose prepared state a caller just disturbed.
+// `prepare.ts`, and `invalidateCfc` records a caller's string through
+// `untaggedReason`, so caller text is never a verdict and is therefore
+// retryable, which is the safe answer for a transaction whose prepared state a
+// caller just disturbed.
 //
 // The token rides inside the reason string, like
 // `CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON`: the message is the only channel
@@ -104,3 +106,15 @@ export const plainReason = (reason: string): string =>
   isVerdictReason(reason)
     ? reason.slice(CFC_VERDICT_REASON.length + 2)
     : reason;
+
+/**
+ * The reason with every verdict tag removed from its front, so that it is not a
+ * verdict however many times a producer tagged it. For a reason recorded by
+ * anything other than `prepare.ts`, which alone decides that a refusal is
+ * terminal.
+ */
+export const untaggedReason = (reason: string): string => {
+  let text = reason;
+  while (isVerdictReason(text)) text = plainReason(text);
+  return text;
+};

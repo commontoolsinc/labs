@@ -3,9 +3,12 @@ import { expect } from "@std/expect";
 
 import type { NormalizedFullLink } from "../src/link-types.ts";
 import {
+  nodeBindingInputsWeight,
   NodeBindingMemo,
   type NodeBindingSubject,
 } from "../src/node-binding-memo.ts";
+import { ImmutableCellStore } from "../src/immutable-cell.ts";
+import type { URI } from "../src/sigil-types.ts";
 import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 
 const SPACE = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
@@ -45,6 +48,31 @@ function memo(): NodeBindingMemo<{ n: number }> {
 
 describe("node-binding-memo", () => {
   describe("bindingFor()", () => {
+    it("evicts native inputs by payload weight despite their compact identifiers", () => {
+      const store = new ImmutableCellStore();
+      try {
+        const first = store.create({ payload: "a".repeat(10_000) });
+        const second = store.create({ payload: "b".repeat(10_000) });
+        const bindings = new NodeBindingMemo<URI>({
+          capacity: 100,
+          maxWeight: 30_000,
+          weigh: nodeBindingInputsWeight,
+        });
+        const a = subject();
+        const b = subject();
+        bindings.bindingFor(a, () => first.id);
+        bindings.bindingFor(b, () => second.id);
+        expect(first.id.length + second.id.length).toBeLessThan(300);
+        expect(bindings.size).toBe(1);
+        expect(bindings.takeBindingFor(a, () => "of:evicted"))
+          .toBe("of:evicted");
+        expect(bindings.takeBindingFor(b, () => "of:missing"))
+          .toBe(second.id);
+      } finally {
+        store.dispose();
+      }
+    });
+
     it("returns the binding it holds for a subject it has bound", () => {
       const bindings = memo();
       const bound = subject();

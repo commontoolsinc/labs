@@ -70,6 +70,13 @@ path captures only the touched index — so a recursive reader of a shifted sibl
 re-trigger via the (also leaf-only) reader-dirty index. That would be a silent
 stale read.
 
+A segment is an index because the container above it is an array, not because
+of how it is written. A plain object may be keyed by strings written as
+non-negative integers — ids, counters, timestamps — and an `add` or a `remove`
+at such a key shifts no sibling. Its leaf path is the whole of what it changed,
+and the parent injection of §2 reports the key-set change to a shape reader as
+it does for any other key, so leaf-only matching has no blind spot there.
+
 This is safe because **the runner never emits an indexed-array
 `add`/`remove`/`move`**. `buildArrayPatchCandidates`
 (runner `storage/v2-transaction.ts`) encodes every array change as one of three
@@ -86,13 +93,42 @@ reader-dirty index handle conservatively:
 engine as a `splice` or whole-array `replace` on the array path — never as an
 indexed structural op.
 
+Which array a write is diffed against is decided by `findArrayPatchPath`
+(runner `storage/v2-transaction.ts`), from the document the commit started from
+and the one it leaves. A write beneath an element both documents hold is diffed
+against the deepest array above it. A write beneath an element one document
+lacks is a change to the array that gains or loses that element, and is diffed
+there: an element that arrives holding a nested array, or a record with an
+array inside it, reaches the engine in one of the three shapes above, on the
+array that holds the element. An array that arrives beneath a new key of a
+plain object is sent whole, as an `add` at its own path.
+
+With no array above it, a write is diffed at the path it was made at, and that
+holds for a key written as an integer, inside the range of array indices or
+past it, and for a key named `length`: beneath a plain object each is a key of
+that object. So a record keyed by ids or counters keeps the per-key granularity
+of §1, and a mergeable op at such a key (an `increment`, a first `append`)
+travels alone, with no `replace` of the record beside it to undo it.
+
+One case is sent coarser. The engine creates a container the stored document
+lacks as it applies an `add` beneath it, and shapes it by the segment that
+follows: an array for an index inside the range or for `-`, an object for
+anything else (`01-data-model.md` §6.2). Where the commit holds a plain object
+at a path the starting document lacks, and a segment that would make the
+engine create an array follows it, the generator sends that object whole, as
+one `add` at its path.
+
 Because the safety of leaf-only matching *depends* on this — and it is a
 whole-system property of the producer rather than something the engine enforces —
 it is guarded two ways:
 
 - a runtime assertion, `assertNoIndexedArrayStructuralOps`, runs at the sole
   patch-generator chokepoint (`buildPatchOperation`) and throws if a future
-  regression ever emits an indexed-array `add`/`remove`/`move`; and
+  regression ever emits an indexed-array `add`/`remove`/`move`. It reads the
+  container off the two documents the patch was diffed between: an op is
+  refused where its last segment is written as an index and the path above
+  that segment holds an array in either document, and an op at a key of a
+  plain object passes however the key is written; and
 - a generator test (`packages/runner/test/memory-v2-native-commit.test.ts`,
   "v2 patch generator never emits indexed-array add/remove/move") drives every
   array idiom through real cell writes and asserts the emitted ops.

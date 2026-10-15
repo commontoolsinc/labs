@@ -79,6 +79,12 @@ const typed = (text: string, requestId?: string) => ({
   ...(requestId === undefined ? {} : { requestId }),
 });
 
+/** A message of the room's records, as an event names it. */
+function messageOf(cell: unknown): Writable<MessageRecord>;
+function messageOf(cell: unknown): unknown {
+  return cell;
+}
+
 const stored = (messages: Cell<MessagesValue>): MessageRecord[] =>
   messages.get() as MessageRecord[];
 
@@ -165,16 +171,6 @@ export default pattern(() => {
     myProfile: bobProfile,
     ...rowRecords,
   } as RowArg);
-  const aliceOnSecond = FabriChatMessageRow({
-    message: messages.key(1),
-    myProfile: aliceProfile,
-    ...rowRecords,
-  } as RowArg);
-  const aliceOnThird = FabriChatMessageRow({
-    message: messages.key(2),
-    myProfile: aliceProfile,
-    ...rowRecords,
-  } as RowArg);
   // The thread-only reply that the replies below send first.
   const bobOnThreadReply = FabriChatMessageRow({
     message: messages.key(3),
@@ -188,9 +184,10 @@ export default pattern(() => {
         assertion: assert(() =>
           alice.about.kind === "group" && alice.about.title === "Team" &&
           alice.about.createdAt === undefined &&
-          alice.about.policy.get().maxWindowCount === 100 &&
-          alice.about.policy.get().proposedTimeMaxAgeNsec.value ===
-            600_000_000_000n
+          alice.about.policy.get()?.maxWindowCount === 100 &&
+          alice.about.policy.get()?.proposedTimeMaxAgeNsec.value ===
+            600_000_000_000n &&
+          alice.about.policy.get()?.ownersMayObliterate === true
         ),
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
@@ -288,12 +285,8 @@ export default pattern(() => {
         }),
       },
 
-      // Deletion: only the sender's, and the deleted text stays in history.
-      {
-        action: aliceOnSecond.deleteMessage,
-        event: {},
-        trustedUi: deleteGesture,
-      },
+      // Deletion keeps the deleted text in history; `members.test.tsx`
+      // covers who may delete someone else's message.
       {
         action: bobOnSecond.deleteMessage,
         event: {},
@@ -318,11 +311,12 @@ export default pattern(() => {
         assertion: assert(() => typeof stored(messages)[1]?.body === "object"),
       },
 
-      // Obliteration in a group room by its OWNER, which this lane's user is;
+      // Obliteration in a group room, whose policy lets its OWNERs
+      // obliterate, by its OWNER, which this lane's user is;
       // `members.test.tsx` covers a member who isn't.
       {
-        action: aliceOnThird.obliterateMessage,
-        event: {},
+        action: alice.obliterateMessage,
+        event: { requestId: "o-third", message: messageOf(messages.key(2)) },
         trustedUi: obliterateGesture,
       },
       {

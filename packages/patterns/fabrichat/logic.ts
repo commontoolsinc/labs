@@ -204,6 +204,12 @@ export interface ViewPlace {
   replies: number;
 
   /**
+   * The newest `sentAt` among the messages the thread it roots holds besides
+   * it; absent when it roots none.
+   */
+  latestReplyAt?: bigint;
+
+  /**
    * The key of the root of the thread the message is in; absent for a message
    * in no thread.
    */
@@ -218,16 +224,26 @@ export const viewPlaces = (
   items: readonly ViewItem[],
 ): Record<string, ViewPlace> => {
   const roots = threadRoots(items);
-  const replies = new Map<string, number>();
-  for (const root of roots.values()) {
-    replies.set(root, (replies.get(root) ?? 0) + 1);
+  const replies = new Map<string, { count: number; latestAt: bigint }>();
+  for (const item of items) {
+    const root = roots.get(item.key);
+    if (root === undefined) continue;
+    const known = replies.get(root);
+    replies.set(root, {
+      count: (known?.count ?? 0) + 1,
+      latestAt: known === undefined || item.sentAt > known.latestAt
+        ? item.sentAt
+        : known.latestAt,
+    });
   }
   return Object.fromEntries(
     items.map((item): [string, ViewPlace] => {
       const thread = roots.get(item.key);
+      const own = replies.get(item.key);
       return [item.key, {
         inMain: isInMain(item),
-        replies: replies.get(item.key) ?? 0,
+        replies: own?.count ?? 0,
+        ...(own === undefined ? {} : { latestReplyAt: own.latestAt }),
         ...(thread === undefined ? {} : { thread }),
       }];
     }),

@@ -17,7 +17,7 @@ import {
   shallowFabricFromConvertibleJsObjectElseUndefined,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
+
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { stringTupleKey } from "@commonfabric/utils/string-tuple-key";
@@ -99,6 +99,7 @@ import {
 } from "./storage/reactivity-log.ts";
 import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import { toURI } from "./uri-utils.ts";
+import { isInlineCellId } from "./immutable-cell.ts";
 
 const diffLogger = getLogger("normalizeAndDiff", {
   enabled: false,
@@ -575,6 +576,14 @@ export interface DiffWalkState {
    * position held before.
    */
   writtenKinds?: Map<string, boolean>;
+
+  /**
+   * An array this walk writes whose first `length` elements are the stored
+   * array's own, carried through by reference by an append
+   * (`diffAndAppend()`). The array branch passes over each of those that is
+   * still the stored element at its index, without descending into it.
+   */
+  carried?: { array: readonly unknown[]; length: number };
 }
 
 /**
@@ -614,14 +623,6 @@ export function diffAndUpdate(
   options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
-  const readOptions: DiffAndUpdateOptions = {
-    ...options,
-    meta: {
-      ...options?.meta,
-      ...markReadAsAttemptedWrite,
-      ...allowMutableTransactionRead,
-    },
-  };
   // A builder artifact -- a module, a handler, a pattern, the factory carrying
   // a module's members -- has no fabric representation, so the runtime replaces
   // it with its encodable form before the value reaches the data model. This is
@@ -634,20 +635,108 @@ export function diffAndUpdate(
   // names without reading a member of it. Each member read on one resolves
   // through this transaction and is recorded on it as a dependency the commit
   // has to check.
-  const anchored: NonNullable<DiffWalkState["anchored"]> = [];
-  const state: DiffWalkState = {
-    seen: new Map(),
-    nextAnchorId: anchorIds,
-    anchored,
-    writtenKinds: new Map(),
-  };
-  const changes = normalizeAndDiff(
+  return writeWalked(
     runtime,
     tx,
     link,
     flattenBuilderArtifacts(newValue, {
       isLeaf: isCellResultForDereferencing,
     }),
+    context,
+    options,
+    anchorIds,
+  );
+}
+
+/**
+ * Writes the array `existing` with `appended` added after its last element,
+ * as `diffAndUpdate()` writes the combined array, without walking what
+ * `existing` already holds.
+ *
+ * `existing` is the array the transaction read at `link`. Its elements are
+ * carried through by reference, so each one the walk finds still stored at
+ * its index is stepped past without being normalized or descended into, and
+ * nothing is written below the old length. Copying and stepping past them is
+ * the only work an append does per stored element. A hole in `existing` stays
+ * a hole.
+ *
+ * @param existing - The array stored at `link`, as the transaction read it.
+ * @param appended - The values to add after it.
+ * @param anchorIds - As for `diffAndUpdate()`.
+ * @returns Whether any changes were made.
+ */
+export function diffAndAppend(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  existing: readonly unknown[],
+  appended: readonly unknown[],
+  context?: unknown,
+  anchorIds?: () => string | number,
+): boolean {
+  // Only the appended values can hold a builder artifact or a query result:
+  // what `existing` holds came out of storage. They are replaced as in
+  // `diffAndUpdate()`.
+  const flattened = flattenBuilderArtifacts(appended, {
+    isLeaf: isCellResultForDereferencing,
+  }) as readonly unknown[];
+  const combined = new Array(existing.length + flattened.length);
+  existing.forEach((element, i) => {
+    combined[i] = element;
+  });
+  // Indexed rather than `forEach`, so a hole among the appended values is
+  // stored as an explicit `undefined`, as any other written element is.
+  for (let i = 0; i < flattened.length; i++) {
+    combined[existing.length + i] = flattened[i];
+  }
+  return writeWalked(
+    runtime,
+    tx,
+    link,
+    combined,
+    context,
+    undefined,
+    anchorIds,
+    { array: combined, length: existing.length },
+  );
+}
+
+/**
+ * Helper for `diffAndUpdate()` and `diffAndAppend()`, which walks `newValue`,
+ * already rid of builder artifacts, against what `link` holds and applies the
+ * changes the walk finds.
+ */
+function writeWalked(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  newValue: unknown,
+  context: unknown,
+  options: DiffAndUpdateOptions | undefined,
+  anchorIds: (() => string | number) | undefined,
+  carried?: DiffWalkState["carried"],
+): boolean {
+  const readOptions: DiffAndUpdateOptions = {
+    ...options,
+    meta: {
+      ...options?.meta,
+      ...markReadAsAttemptedWrite,
+      ...allowMutableTransactionRead,
+    },
+  };
+  const anchored: NonNullable<DiffWalkState["anchored"]> = [];
+  const state: DiffWalkState = {
+    seen: new Map(),
+    nextAnchorId: anchorIds,
+    anchored,
+    writtenKinds: new Map(),
+    carried,
+  };
+  const changes = normalizeAndDiff(
+    runtime,
+    tx,
+    link,
+    newValue,
     context,
     readOptions,
     state,
@@ -747,7 +836,7 @@ export function scopedArgumentInitializationTargets(
   });
   if (
     blocked || container.pendingHopDoc || container.scope !== "space" ||
-    isFabricDataUri(container.id)
+    isInlineCellId(container.id)
   ) return [];
   // Reads which slots exist; the writes it leads to land in those slots.
   const value = tx.readValueOrThrow(container, {
@@ -783,7 +872,7 @@ export function initializeScopedArgumentSlots(
   const container = resolveLink(runtime, tx, argumentLink, "value", {
     onScopeBlocked: () => blocked = true,
   });
-  if (blocked || container.pendingHopDoc || isFabricDataUri(container.id)) {
+  if (blocked || container.pendingHopDoc || isInlineCellId(container.id)) {
     return;
   }
   const options = {
@@ -1626,14 +1715,29 @@ export function normalizeAndDiff(
     }
   }
 
-  // The incoming value's link, parsed once for every check below that asks
-  // whether the value is a link or where it points, and `undefined` where it
-  // is not a sigil link.
-  const newValueLink = isPrimitiveCellLink(newValue)
+  // The incoming value's link, shared by every check below. Only a schema
+  // rewrite changes the value and requires a fresh parse.
+  let newValueLink = isPrimitiveCellLink(newValue)
     ? parseLink(newValue, link)
     : undefined;
 
-  // Check for links that are data: URIs and inline them, by calling
+  // Ordinary document links can carry immutable values in schema defaults.
+  // Expand those before the writer decomposes their schemas into durable docs.
+  if (
+    newValueLink?.schema !== undefined &&
+    !isInlineCellId(newValueLink.id)
+  ) {
+    const inlined = findAndInlineDataUriLinks(newValue);
+    if (inlined !== newValue) {
+      newValue = attachCfcLabelViewToSigilLink(
+        inlined,
+        cfcLabelViewForPrimitiveLink(newValue),
+      );
+      newValueLink = parseLink(newValue, link);
+    }
+  }
+
+  // Expand native snapshot and portable Fabric data-URI links by calling
   // normalizeAndDiff on the contents of the link. This re-entry REPLACES the
   // value (the link's contents, not the link), so anchoring eligibility
   // deliberately does not carry over: inlined content in an array slot stores
@@ -1641,9 +1745,9 @@ export function normalizeAndDiff(
   // links) stored it.
   //
   // The re-entry hands on what `findAndInlineDataUriLinks` produced, so the
-  // check accepts exactly the media type that call inlines: this codec's
-  // own. A `data:` URI of any other media type stores as an ordinary link.
-  if (newValueLink !== undefined && isFabricDataUri(newValueLink.id)) {
+  // check accepts native snapshots and the Fabric codec's data URIs. Other
+  // `data:` media types store as ordinary links.
+  if (newValueLink !== undefined && isInlineCellId(newValueLink.id)) {
     return normalizeAndDiff(
       runtime,
       tx,
@@ -1958,8 +2062,12 @@ export function normalizeAndDiff(
   // the objects inside them.
   //
   // An element carried through UNTOUCHED from the stored array diffs to
-  // NOTHING -- returned here without descending. This is load-bearing for
-  // the mergeable collection ops (`push`/`addUnique`) twice over: their
+  // NOTHING -- returned here without descending. An append
+  // (`diffAndAppend()`) passes over the elements it carried in the array
+  // branch below, before they reach this point; this guard holds the same
+  // for a walk that carries a stored element without declaring it. Either
+  // way the outcome is load-bearing for the mergeable collection ops
+  // (`push`/`addUnique`) twice over: their
   // array read is excluded from the commit's conflict set (see
   // docs/features/mergeable-collection-writes.md), which is only safe
   // while the op emits no writes below the tail, so (1) the element itself
@@ -1977,10 +2085,9 @@ export function normalizeAndDiff(
   // values whose canonical form does not exist yet.
   //
   // Atomic `FabricSpecialObject`s are excluded from this guard: an untouched
-  // special-object prefix element re-emits its identical stored instance
-  // from the instance branch below, and the mergeable invariant for those
-  // elements rests on the write layer eliding that identical write from the
-  // journal rather than on this guard.
+  // special-object element that reaches this point re-emits its identical
+  // stored instance from the instance branch below, and the write layer
+  // elides that identical write from the journal.
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
@@ -2060,11 +2167,35 @@ export function normalizeAndDiff(
       });
     }
 
+    // The elements an append carried through from the stored array. Each one
+    // still stored at its index would diff to nothing, so it is passed over
+    // unwalked. Diffing an equal element retains the commit basis of any
+    // pending write to its document, and every carried element lives in the
+    // array's one document, so a single retain stands for all of them.
+    const carriedLength = state.carried?.array === newValue
+      ? state.carried.length
+      : 0;
+    let retainedCarried = false;
+
     for (let i = 0; i < newValue.length; i++) {
       const inNew = i in newValue;
       const inCur = currentArray ? i in currentArray : false;
 
       if (!inNew && !inCur) continue; // hole→hole: no change
+
+      if (
+        i < carriedLength && inNew && inCur &&
+        Object.is(newValue[i], currentArray![i])
+      ) {
+        if (!retainedCarried) {
+          tx.retainPendingWriteElision?.(toMemorySpaceAddress({
+            ...link,
+            path: [...link.path, i.toString()],
+          }));
+          retainedCarried = true;
+        }
+        continue;
+      }
 
       if (!inNew && inCur) {
         // value→hole: emit an explicit delete (a plain `undefined` write

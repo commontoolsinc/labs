@@ -63,7 +63,11 @@ room's newest messages from its `messages`
 through windows it opens there, and never asks for the whole conversation at
 once. Both are in `[VIEWS]` (see [views a host draws
 itself](../../common/components/COMPONENTS.md#views-a-host-draws-itself)). A
-client that renders VDOM shows the adapter's `[UI]`.
+thread is read the same way, through a window whose `root` is the thread's
+root. A client that sends only to a view's top-level streams sends to the
+room's own `openWindow` and `closeWindow`, which are the message list's (see
+[`ChatRoomOutput`](ChatRoomOutput.md#facts)). A client that renders VDOM shows
+the adapter's `[UI]`.
 
 A client that draws natively MUST:
 
@@ -76,8 +80,12 @@ A client that draws natively MUST:
   change, so a changed name shows on everything the person sent. A profile that
   can't be read shows as a neutral placeholder (see
   [`ChatProfile.md`](ChatProfile.md#when-a-profile-cant-be-read)).
+- **Show the room's title as the room holds it**, from `about.title`, read when
+  drawn and redrawn when it changes, since any member can change it. A direct
+  room with no title is shown by its other member.
 - **Identify people by their profile links**, compared with `equals()`, and
-  never by display name.
+  never by display name. The reader's own is the room's `viewer.profile`, the
+  same link a message the reader sent holds as its `authorProfile`.
 - **Show members from the room's space.** A room's `participants` are its
   space's participants, as claims, plus its authors. None of them is proof that
   someone can read the room. To name each of them, and to tell which one is the
@@ -105,7 +113,9 @@ A client that draws natively MUST:
   sender, its history, and its reactions.
 - **Show replies where they say they are shown**: the main conversation and each
   thread, derived from `replyTo` as [`ChatReply`](ChatReply.md#the-two-views)
-  states, with flat threads.
+  states, with flat threads. A thread's reply count and latest reply time are
+  the room's `messages.threads` (see
+  [`ChatThreadSummary`](ChatThreadSummary.md)).
 - **Show a room it can't read as unreadable**, and nothing more (see
   [`FabriChatPlacement.md`](FabriChatPlacement.md#viewers-who-arent-members)).
 
@@ -128,6 +138,12 @@ gesture on the reviewed surface its policy names:
 | remove a reaction | room | `deleteReaction` | `ChatReactSurface` |
 | start a conversation | manager | `openDirect`, `createGroup` | `ChatStartSurface` |
 | add a member | room | `addMember` | `ChatAddMemberSurface` |
+| retitle a room | room | `setTitle` | `ChatRetitleSurface` |
+
+Which of editing, deleting, and obliterating the room takes on each message,
+from the reader, is in the room's `messageRights`, decided by the same rules the
+room admits those acts by. A client reads it there rather than deciding for
+itself, since the room refuses any other silently.
 
 A client that draws natively sends `addMember` through
 [the sanctioned issuing path](#the-sanctioned-issuing-path) on
@@ -147,6 +163,15 @@ room's `participantPrincipals`, the principals the room's `participantEntries`
 hold. It is a best-effort set to leave out, not an access list: someone who
 has been added but has never joined isn't among them, and neither is a
 participant whose profile the reader can't read.
+
+A client that draws natively retitles a room the same way: it sends `setTitle`
+through the sanctioned issuing path on `ChatRetitleSurface`, finds it in
+`[VIEWS]` beside `titleRequests`, where each retitle's outcome is recorded under
+its `requestId`, and checks that the title has some text in it before sending
+(see
+[`ChatRoomOutput`](ChatRoomOutput.md#settitlerequestid-string-title-string)).
+Any member who can write in the room may retitle it, in a group room or a
+direct one, but not a space's own chat, which is shown by its space's name.
 
 A client sends to the room's own streams, never through a placement or an
 adapter.
