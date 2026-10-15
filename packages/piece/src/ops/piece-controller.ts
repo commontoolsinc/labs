@@ -1,5 +1,9 @@
 import type { CellKind, FabricValue, LinkScope } from "@commonfabric/api";
-import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
+import {
+  debugStr,
+  fabricAwareEqual,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -4310,12 +4314,23 @@ export class PieceController<T = unknown> {
    * this call adopts whatever it finds as its own expectation, so a writer
    * landing between a caller's proof and this read would have its change
    * silently written over. With it, such a piece is refused by name.
+   *
+   * `expectedRevision` pins the revision head the same way, `null` naming a
+   * piece whose source log is empty. Every source transition appends a
+   * revision, so a caller that proved what a piece's log holds pins every
+   * transition with it, including one that leaves the pattern as it was: a
+   * detach, or an edit back to the same source. A pattern changed by a write
+   * that is no source transition leaves the head alone, which is what the
+   * pattern pin is for. Either pin refuses with
+   * {@link PieceSourceChangedError}, before the change is prepared and again
+   * when the piece moves inside the write.
    */
   async changeSource(
     action: PieceSourceAction,
     options: {
       confirmedChange?: PreparedPieceSourceChange;
       expectedPattern?: { identity: string; symbol: string };
+      expectedRevision?: string | null;
     } = {},
   ): Promise<PieceSourceActionResult> {
     if (!isPieceSourceAction(action)) {
@@ -4362,6 +4377,21 @@ export class PieceController<T = unknown> {
           `${pinned.symbol} this change was proved against.`,
       );
     }
+    const pinnedRevision = options.expectedRevision;
+    if (
+      pinnedRevision !== undefined && expected.revisionId !== pinnedRevision
+    ) {
+      throw new PieceSourceChangedError(
+        `The piece's source log ${sourceLogState(expected.revisionId)}, but ` +
+          `this change was proved against one that ` +
+          `${sourceLogState(pinnedRevision)}.`,
+      );
+    }
+    // What a pinned caller proved the piece runs: past the checks above it is
+    // the snapshot's pattern, which a move inside the write is refused off.
+    const proved = pinned === undefined && pinnedRevision === undefined
+      ? undefined
+      : expected.pattern;
 
     const confirmed = options.confirmedChange;
     if (
@@ -4768,7 +4798,7 @@ export class PieceController<T = unknown> {
           };
         }
       }
-      throw pinnedSourceMoved(error, pinned);
+      throw pinnedSourceMoved(error, proved);
     }
   }
 
@@ -5572,6 +5602,16 @@ function isOverridableArgumentCompatibilityError(error: unknown): boolean {
 
 function pieceSourceErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Helper for `changeSource()`'s revision pin, which says where a source log
+ * stands: empty, or ending at the revision `revisionId` names.
+ */
+function sourceLogState(revisionId: string | null): string {
+  return revisionId === null
+    ? "is empty"
+    : debugStr`ends at revision $quote${revisionId}`;
 }
 
 function pieceSourceTransition(
