@@ -354,19 +354,27 @@ address unless the runtime writes receipts, which it does with commit
 preconditions or server execution on. For `ensured`, the client then reads the
 profile's `inbox.piece`, through the typed link `inboxPieceLinkSchema` in
 `packages/piece/src/ops/private-inbox.ts`, for the reason every reader of the
-pointer does, as "Creating or adopting it" says, and waits for its own view of
-the pointer to name an inbox.
+pointer does, as "Creating or adopting it" says, and waits for the pointer to
+name an inbox.
 
 Under server execution, the serving runtime runs Home's handler, writes the
 receipt and runs `PrivateInboxAnswering`, as part of Home, so it is the
 serving runtime's answers the receipt links to. A client whose runtime runs
-Home too computes them as well, over its own view of the profiles, and reads
-its own answer until the served one arrives. A client's runtime can also
-settle before the served pointer write reaches it, so a read taken once that
-runtime has settled can still find `pending` while the served answer is
-already `ensured`, and the next read after that write arrives finds
-`ensured`. A client subscribed to the receipt, as `requestPrivateInboxOf()`
-is, is handed that next value when it comes, so it needs no read of its own.
+Home too computes them as well, as a speculative preview over its own view,
+which shows the server's writes with that runtime's previews of Home's
+handlers over them. That view can pair values from different moments, and an
+answer computed over it can be one the server never gives: `not-held` for a
+profile pointing at the inbox Home holds. So a client reads the answer, and
+then the profile's pointer, past its own speculation, as `readDurable()` does
+(see [Transaction Commit](transaction-commit.md)). It reads again on each
+change its subscription to the receipt delivers, and once the speculation
+layers over what it read have settled, since a write arriving beneath a layer
+changes nothing the subscription sees. A client's runtime can also settle
+before the served pointer write reaches it, so a read taken once that runtime
+has settled can still find `pending` while the served answer is already
+`ensured`, and the next read after that write arrives finds `ensured`. A
+client subscribed to the receipt, as `requestPrivateInboxOf()` is, reads
+again when that write arrives.
 
 `requestPrivateInboxOf()` in `packages/piece/src/ops/private-inbox.ts` is the
 host's implementation of that client. It returns `ensured` with the inbox,

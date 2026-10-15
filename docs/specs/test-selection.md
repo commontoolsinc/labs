@@ -527,6 +527,14 @@ absent. A process that died before it could say what it registered shows
 nothing, and an identity it left unrecorded withdraws the excusal like any
 other.
 
+A test file that an `error` or `unhandledrejection` event reached before any of
+its hooks or tests began shows nothing either. Either can stop a module part way
+through loading, after it registered some of its tests and before it registered
+the rest. A unit of several files that one process runs, such as a package's
+browser tests, is shown only by a mark its runner leaves after loading every
+file and running every test, since a file that never loaded registered nothing.
+[The record spec](test-records.md) says what each writes.
+
 The rule is per invocation and not per set of them. A consumer that runs
 an identity several times, or that reaches one unit through several
 commands, has several invocations whose records arrive in one place, and

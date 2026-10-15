@@ -693,9 +693,19 @@ transaction consumed and what it names stay the same set — the
 verify-durable and name-durable pairing again, one shape wider. A
 document still short of its authoritative value re-derives reactively
 once that value lands, which is the recovery path §6's refusal
-message names. Two callers carry the mark. One is the direct SQLite
-capability's exec, an authored write with no reactive run around it.
-The other is the runner's piece start.
+message names. The direct SQLite capability's exec carries the mark,
+an authored write with no reactive run around it, and so does the
+runner's piece start.
+
+A host read that must not report this runtime's preview carries it
+too, on a read-only transaction: `readConfirmed()` and `readDurable()`
+(`confirmed-read.ts`). Such a reader learns when to read again from a
+subscription, which sees the ordinary view, and a standing layer hides
+two changes to the durable view from it: a write arriving beneath the
+layer, and the layer's retirement over an equal value. The replica's
+`whenSpeculationSettled()` resolves once the layers standing over a
+document have settled, and `readDurable()` hands it back for what it
+read, so the reader reads again then as well.
 
 A piece start mints its own transaction, instantiates the pattern's
 nodes into it, and commits it fire-and-forget as sanctioned
