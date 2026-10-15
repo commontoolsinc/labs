@@ -179,10 +179,11 @@ profile itself.
   These choices are independent of the catalog's container membership.
 - **`sharedSpaceCatalog`** is that catalog
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
-  stored. A standalone room's catalog `title` is its title when the entry was
-  registered, a display hint the catalog doesn't refresh: a client reads a
-  room's current title from the room. Membership checks belong to the manager's
-  Home-space handling. A room sends
+  stored. A standalone room's catalog `title` is a display hint: the room's
+  title as the manager last heard of it, refreshed when it handles `accept` or
+  `joinRoom` for the room. A client reads a room's current title from the
+  room. Membership checks belong to the manager's Home-space handling. A room
+  sends
   [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput) after a
   successful message or reaction without reading this private catalog.
 - **`direct`** holds, for each counterpart principal, the entry of the direct
@@ -438,14 +439,16 @@ counts its viewer writing in it (see
 opening the room's page.
 
 - **Admitted:** without a reviewed gesture, as for `accept`.
-- **Effect:** for a room this user's chats list already, nothing. Otherwise
-  what `accept` does with no `counterpart` and without `keepArchived`: records
-  an entry in `rooms`, putting a forgotten room back, and adds this user's
-  profile to the room's participants once it has resolved. One case differs: a
-  direct room this user created, which `accept` refuses, is listed again, and
-  its entry in `direct` stays as it is. Sending it again changes nothing, so a
-  caller MAY send it each time the user enters the room, without first reading
-  whether their chats list it.
+- **Effect:** for a room this user's chats list already, nothing but to bring
+  the title its catalog entry holds up to the room's, where the two differ,
+  leaving the entry's revision and membership as they are. Otherwise what
+  `accept` does with no `counterpart` and without `keepArchived`: records an
+  entry in `rooms`, putting a forgotten room back, and adds this user's profile
+  to the room's participants once it has resolved. One case differs: a direct
+  room this user created, which `accept` refuses, is listed again, and its entry
+  in `direct` stays as it is. Sending it again changes nothing, so a caller MAY
+  send it each time the user enters the room, without first reading whether
+  their chats list it.
 - **Outcome:** `done` with the entry, or `refused` for the reasons `accept`
   gives, other than that this user created a direct room. Without a
   `requestId`, a join of a room this user's chats list already records no

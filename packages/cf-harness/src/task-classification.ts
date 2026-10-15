@@ -39,7 +39,21 @@ export interface HarnessTaskClassification {
 
   /** Wall time the classification took, model call included. */
   durationMs: number;
+
+  /**
+   * Why a fallback was taken: no model to ask, a model answer naming no tag,
+   * a failed model call, or a model call that did not answer within
+   * {@link TASK_CLASSIFICATION_MODEL_BOUND_MS}. Absent on the other paths.
+   */
+  fallbackReason?: "no-model" | "no-tag" | "model-error" | "timeout";
 }
+
+/**
+ * How long the model path may take before the task gets every tag. Tags only
+ * narrow the orientation a run starts with, so waiting longer than this for
+ * them costs the run more than starting with all of it does.
+ */
+export const TASK_CLASSIFICATION_MODEL_BOUND_MS = 5_000;
 
 /** What the classifier reads about a run besides the task text. */
 export type TaskClassificationContext =
@@ -61,8 +75,9 @@ const LOOKUP =
 const EXPLICIT_LOOKUP = /\b(?:find|search|look (?:up|for))\b/;
 const URL = /\bhttps?:\/\/\S+/;
 const AUTHOR =
-  /\b(?:make|build|write|create|author|code|design|generate)\b(?:\s+(?:me|us))?\s+(?:a|an|new|some)\b(?!\s+(?:note|loom|reservation|booking|appointment|payment|call)\b)/;
-const DEICTIC = /\b(?:it|this|these)\b(?!\s+(?:week|month|year|loom)\b)/;
+  /\b(?:make|build|write|create|author|code|design|generate)\b(?:\s+(?:me|us))?\s+(?:a|an|new|some)\b(?!\s+(?:new\s+)?(?:note|loom|reservation|booking|appointment|payment|call)\b)/;
+const DEICTIC =
+  /\b(?:it|this|these)\b(?!\s+(?:week|weekend|month|year|loom)\b)/;
 const CONVERSATIONAL =
   /^(?:hi|hey|hello|thanks|thank you|ok|okay|cool|great|nice|yes|no|sure|got it)\b/;
 
@@ -175,38 +190,64 @@ export const classifyTaskByModel = async (
 /**
  * Tags a root task: by rule when one applies, otherwise by one cheap model
  * call, otherwise with every tag, which gives the run all the orientation it
- * would have had without classification. A model failure is a fallback, not
- * a run failure.
+ * would have had without classification. A model failure, or a model call
+ * still unanswered at `modelBoundMs`, is a fallback, not a run failure; the
+ * call is then cancelled through the signal `askModel` was given.
  */
 export const classifyTask = async (
   task: string,
   context: TaskClassificationContext,
-  options: { askModel?: (prompt: string) => Promise<string> } = {},
+  options: {
+    askModel?: (prompt: string, signal: AbortSignal) => Promise<string>;
+    modelBoundMs?: number;
+  } = {},
 ): Promise<HarnessTaskClassification> => {
   const started = performance.now();
   const classified = (
     tags: ReadonlySet<HarnessTaskTag>,
     path: HarnessTaskClassification["path"],
+    fallbackReason?: HarnessTaskClassification["fallbackReason"],
   ): HarnessTaskClassification => ({
     type: "cf-harness.task-classification",
     version: 1,
     tags: HARNESS_TASK_TAGS.filter((tag) => tags.has(tag)),
     path,
     durationMs: Math.round(performance.now() - started),
+    ...(fallbackReason !== undefined ? { fallbackReason } : {}),
   });
+  const everyTag = new Set(HARNESS_TASK_TAGS);
   const byRule = classifyTaskByRule(task, context);
   if (byRule !== undefined) return classified(byRule, "rule");
-  if (options.askModel !== undefined) {
-    try {
-      const byModel = await classifyTaskByModel(
-        task,
-        context,
-        options.askModel,
-      );
-      if (byModel !== undefined) return classified(byModel, "model");
-    } catch {
-      // A failed model call leaves the run with full orientation.
-    }
+  const { askModel } = options;
+  if (askModel === undefined) {
+    return classified(everyTag, "fallback", "no-model");
   }
-  return classified(new Set(HARNESS_TASK_TAGS), "fallback");
+  const bound = new AbortController();
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    bound.signal.addEventListener("abort", () => reject(bound.signal.reason));
+  });
+  const timer = setTimeout(
+    () => bound.abort(new DOMException("classification bound", "TimeoutError")),
+    options.modelBoundMs ?? TASK_CLASSIFICATION_MODEL_BOUND_MS,
+  );
+  try {
+    const byModel = await classifyTaskByModel(task, context, (prompt) => {
+      const answer = askModel(prompt, bound.signal);
+      // The bound settles the race when the call ignores cancellation, and
+      // whatever the call does afterwards is no longer awaited.
+      answer.catch(() => {});
+      return Promise.race([answer, timedOut]);
+    });
+    return byModel === undefined
+      ? classified(everyTag, "fallback", "no-tag")
+      : classified(byModel, "model");
+  } catch {
+    return classified(
+      everyTag,
+      "fallback",
+      bound.signal.aborted ? "timeout" : "model-error",
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 };

@@ -73,6 +73,7 @@ import {
   isSharedSpaceCatalog,
   readSharedSpaceCatalog,
   registerSharedSpaceIn,
+  retitleSharedSpaceIn,
   type SharedSpaceCatalogStorage,
   type SharedSpaceEntry,
 } from "../system/shared-space-catalog.ts";
@@ -411,10 +412,33 @@ const recordOutcome = (
 const hostOrigin = (): string => new URL(getPatternEnvironment().apiUrl).origin;
 
 /**
+ * Brings the title registered with the listed room in `space` up to `title`,
+ * the room's own, cut to the length an offer's may run to. The catalog is
+ * written only where the two differ, and the entry's membership and revision
+ * stay as they are. A room with no title leaves the entry's as it is, and so
+ * does an entry of any kind but a room's: a container's entry names the
+ * container, whatever chat it declares.
+ */
+const refreshListedTitle = (
+  catalog: CatalogCell,
+  space: DID,
+  title: string | undefined,
+): void => {
+  if (title === undefined) return;
+  const entry = readSharedSpaceCatalog(catalog).entries[space];
+  if (entry?.kind !== CHAT_ROOM_OFFER_KIND) return;
+  retitleSharedSpaceIn(catalog, {
+    space,
+    title: title.slice(0, OFFER_TITLE_MAX_LENGTH),
+  });
+};
+
+/**
  * Lists the room in `space` in the user's catalog: registers the space, or
  * restores its entry when the entry is archived, unless `restore` is false.
- * An entry in any other state stays as it is. A group room's title, cut to the
- * length an offer's may run to, is registered with it.
+ * An entry in any other state keeps its membership. The room's title, cut to
+ * the length an offer's may run to, is registered with it, or replaces the
+ * one an existing entry holds, as `refreshListedTitle` says.
  */
 const listRoom = (
   catalog: CatalogCell,
@@ -442,7 +466,10 @@ const listRoom = (
         : { title: title.slice(0, OFFER_TITLE_MAX_LENGTH) }),
       ...(since === undefined ? {} : { since }),
     });
-  } else if (entry.state === "archived" && restore) {
+    return;
+  }
+  refreshListedTitle(catalog, space, title);
+  if (entry.state === "archived" && restore) {
     // The restore names the revision this run just read, since no list was
     // shown to observe one: the request, to start a chat or to accept a room,
     // is the person's choice to have the room listed whatever its archive
@@ -1074,11 +1101,23 @@ const performManagerAct = (
   // joining it again changes nothing, and a join that names no request
   // records nothing either: a caller may send one each time the person
   // enters the room.
+  const joinedSpace = spaceOf(room);
   if (
     act === "joinRoom" && event?.requestId === undefined &&
     (membership?.state === "saved" ||
-      (membership === undefined && listsRoomIn(catalog.get(), spaceOf(room))))
+      (membership === undefined && listsRoomIn(catalog.get(), joinedSpace)))
   ) {
+    // Every write in the room sends one of these, so it reads only the room's
+    // `about`, whose links it doesn't follow, and writes the catalog only
+    // where the two titles differ, which a retitle makes them. A room listed
+    // only through a container has no catalog entry, and gets no write.
+    if (isWellFormedDID(joinedSpace)) {
+      refreshListedTitle(
+        catalog,
+        joinedSpace,
+        room.key("about").get()?.title,
+      );
+    }
     return;
   }
 
@@ -1396,7 +1435,7 @@ const performManagerAct = (
     membership?.catalogRevision !== undefined;
   if (catalogManaged) {
     listRoom(catalog, space, {
-      title: kind === "group" ? room.key("about").get()?.title : undefined,
+      title: room.key("about").get()?.title,
       restore,
     });
   }
