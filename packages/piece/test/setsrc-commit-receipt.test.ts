@@ -7,10 +7,13 @@ import {
   getPieceSourceRevisions,
   Runtime,
   type RuntimeProgram,
-  type RuntimeTelemetryEvent,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
+import {
+  commitRefusal,
+  interceptPieceStartCommit,
+} from "../../runner/test/support/intercept-piece-start-commit.ts";
 import { watchMetaReads } from "../../runner/test/support/watch-meta-reads.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -215,37 +218,13 @@ describe("setsrc commit receipt", () => {
       input: {},
       start: false,
     });
-    const refusal = new Error("injected refusal of the piece-start commit");
-    const originalEdit = runtime.edit.bind(runtime);
-    const originalWarn = console.warn;
-    // The install opens read transactions it never commits, so the start's
-    // own transaction is the first one committed after the runner announces
-    // the install. Its commit is refused by aborting it first.
-    let refusing = false;
-    const refuseNextCommit = (event: Event) => {
-      const { marker } = (event as RuntimeTelemetryEvent).detail;
-      if (marker.type !== "runner.piece.install") return;
-      runtime.telemetry.removeEventListener("telemetry", refuseNextCommit);
-      refusing = true;
-      runtime.edit = ((...args: Parameters<Runtime["edit"]>) => {
-        const tx = originalEdit(...args);
-        const commit = tx.commit.bind(tx);
-        tx.commit = (options) => {
-          if (refusing) {
-            refusing = false;
-            runtime.edit = originalEdit;
-            tx.abort(refusal);
-          }
-          return commit(options);
-        };
-        return tx;
-      }) as Runtime["edit"];
-    };
+    const refusal = commitRefusal("injected refusal of the start commit");
+    const intercepted = interceptPieceStartCommit(runtime, { refusal });
     const failures: string[] = [];
     runtime.pieceStartCommitFailureObserver = ({ actionId }) => {
       failures.push(actionId);
     };
-    runtime.telemetry.addEventListener("telemetry", refuseNextCommit);
+    const originalWarn = console.warn;
     console.warn = () => {};
 
     try {
@@ -260,11 +239,11 @@ describe("setsrc commit receipt", () => {
       expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
       expect(receipt.refresh).toEqual({
         status: "failed",
-        warning: expect.stringContaining(refusal.message),
+        warning: `piece-start commit ${failures[0]} failed, so the started ` +
+          `graph's setup writes did not land: ${refusal.message}`,
       });
     } finally {
-      runtime.telemetry.removeEventListener("telemetry", refuseNextCommit);
-      runtime.edit = originalEdit;
+      intercepted.restore();
       runtime.pieceStartCommitFailureObserver = undefined;
       console.warn = originalWarn;
     }

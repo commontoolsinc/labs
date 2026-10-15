@@ -1935,10 +1935,16 @@ export class PiecesController<T = unknown> {
    * In view-scoped mode this synchronizes the name and opaque UI tip; the
    * retained root watch demands server execution, while mounted renderers
    * own local graph registration.
+   *
+   * With `awaitSetupCommit`, the start waits for the commit of the setup
+   * writes of the graph it instantiates, and this rejects when that commit
+   * failed, which leaves the piece stopped. Otherwise such a failure reaches
+   * only the runtime's log; see `Runner.startWithCommit()`.
    */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
     scope?: CellScope,
+    options: { awaitSetupCommit?: boolean } = {},
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
@@ -1956,7 +1962,10 @@ export class PiecesController<T = unknown> {
     }
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece),
+      () =>
+        options.awaitSetupCommit
+          ? this.runtime.startWithCommit(piece)
+          : this.runtime.start(piece),
     );
     await timePiecePhase(
       "startPiece.result.pull",

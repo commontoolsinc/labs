@@ -2110,7 +2110,8 @@ async function resolveSlugSourceCell(
  * starting it, which under the flag runs the graph as speculation while
  * the serving loop serves the derived values — and reports that outcome in
  * the receipt's `refresh`, since the commit is durable whatever the refresh
- * did.
+ * did. A start whose own setup commit fails leaves the piece stopped, so
+ * that is a failed refresh too.
  */
 async function updateOnServer(
   config: PieceConfig,
@@ -2137,7 +2138,7 @@ async function updateOnServer(
   let refresh: PatternUpdateReceipt["refresh"];
   try {
     const cell = await pieces.getPieceCell(receipt.pieceId, false);
-    await pieces.startPiece(cell);
+    await pieces.startPiece(cell, undefined, { awaitSetupCommit: true });
     refresh = { status: "completed" };
   } catch (error) {
     refresh = {

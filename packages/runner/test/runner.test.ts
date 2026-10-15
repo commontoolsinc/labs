@@ -52,6 +52,10 @@ import {
   type URI,
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import {
+  commitRefusal,
+  interceptPieceStartCommit,
+} from "./support/intercept-piece-start-commit.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
@@ -2529,8 +2533,6 @@ describe("setup/start", () => {
   describe("startWithCommit()", () => {
     // Each case starts a piece it stopped, so the start instantiates the
     // graph again and commits its setup writes on a transaction of its own.
-    // The install opens read transactions it never commits, so that one is
-    // the first transaction committed after the runner announces the install.
 
     const stoppedPiece = async (name: string): Promise<Cell<unknown>> => {
       const cell = runtime.getCell(space, name);
@@ -2543,51 +2545,9 @@ describe("setup/start", () => {
       return cell;
     };
 
-    /**
-     * Holds the settlement of the start's commit until `release()`, and
-     * refuses the commit first when given a `refusal`.
-     */
-    const holdStartCommit = (refusal?: Error) => {
-      const gate = Promise.withResolvers<void>();
-      const originalEdit = runtime.edit.bind(runtime);
-      let holding = false;
-      const onInstall = (event: Event) => {
-        const { marker } = (event as RuntimeTelemetryEvent).detail;
-        if (marker.type !== "runner.piece.install") return;
-        runtime.telemetry.removeEventListener("telemetry", onInstall);
-        holding = true;
-        runtime.edit = ((...args: Parameters<Runtime["edit"]>) => {
-          const tx = originalEdit(...args);
-          const commit = tx.commit.bind(tx);
-          tx.commit = (options) => {
-            if (!holding) return commit(options);
-            holding = false;
-            runtime.edit = originalEdit;
-            if (refusal !== undefined) tx.abort(refusal);
-            const receipt = commit(options);
-            return {
-              then: receipt.then,
-              verdict: receipt.verdict,
-              settled: gate.promise.then(() => receipt.settled),
-            };
-          };
-          return tx;
-        }) as Runtime["edit"];
-      };
-      runtime.telemetry.addEventListener("telemetry", onInstall);
-      return {
-        release: () => gate.resolve(),
-        restore: () => {
-          gate.resolve();
-          runtime.telemetry.removeEventListener("telemetry", onInstall);
-          runtime.edit = originalEdit;
-        },
-      };
-    };
-
     it("resolves only once the start's setup commit has landed", async () => {
       const cell = await stoppedPiece("startWithCommit landed");
-      const held = holdStartCommit();
+      const intercepted = interceptPieceStartCommit(runtime, { held: true });
       try {
         let resolved = false;
         const withCommit = runtime.runner.startWithCommit(cell).then(
@@ -2602,19 +2562,18 @@ describe("setup/start", () => {
         await runtime.idle();
         expect(resolved).toBe(false);
 
-        held.release();
+        intercepted.release();
         expect(await withCommit).toBe(true);
         expect(runtime.runner.isRunning(cell)).toBe(true);
       } finally {
-        held.restore();
+        intercepted.restore();
       }
     });
 
     it("rejects with the reason storage refused the start's setup commit, and leaves the piece stopped", async () => {
       const cell = await stoppedPiece("startWithCommit refused");
-      const refusal = new Error("injected refusal of the piece-start commit");
-      const held = holdStartCommit(refusal);
-      held.release();
+      const refusal = commitRefusal("injected refusal of the start commit");
+      const intercepted = interceptPieceStartCommit(runtime, { refusal });
       try {
         await expect(runtime.runner.startWithCommit(cell)).rejects.toThrow(
           `piece-start commit piece-instantiate/${cell.sourceURI} failed, ` +
@@ -2623,7 +2582,7 @@ describe("setup/start", () => {
         );
         expect(runtime.runner.isRunning(cell)).toBe(false);
       } finally {
-        held.restore();
+        intercepted.restore();
       }
     });
   });
