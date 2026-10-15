@@ -3796,6 +3796,24 @@ export class Server {
     });
   }
 
+  /**
+   * Flushes a space's WAL before a separate durable store records completion.
+   * Throws when a reader prevents the full checkpoint.
+   */
+  async flushSpace(space: string): Promise<void> {
+    await this.#withSpacePublicationLock(space, async () => {
+      const engine = await this.#openEngine(space);
+      if (Engine.serverSeq(engine) === 0) {
+        throw new Error("Cannot flush a space without history");
+      }
+      const checkpoint = engine.database.prepare("PRAGMA wal_checkpoint(FULL)")
+        .get<{ busy: number }>();
+      if (checkpoint?.busy !== 0) {
+        throw new Error("Space durability checkpoint could not complete");
+      }
+    });
+  }
+
   async readDocument(
     space: string,
     id: string,
