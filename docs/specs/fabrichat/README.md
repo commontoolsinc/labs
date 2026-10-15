@@ -16,14 +16,10 @@ departs from this design.
   - [`ChatRoomOutput`](ChatRoomOutput.md): what a room offers.
   - [`ChatManagerOutput`](ChatManagerOutput.md): what `#chatManager` resolves
     to.
-- Windows onto a room's messages:
-  - [`ChatMessageWindow`](ChatMessageWindow.md): one window of them.
-  - [`ChatWindowAnchor`](ChatWindowAnchor.md): where a window sits: at either
-    end, or around one message.
 - Records a room holds:
   - [`ChatMessage`](ChatMessage.md)
   - [`ChatMessageList`](ChatMessageList.md): a room's messages: facts, the
-    newest, and each session's windows.
+    newest, and its threads.
   - [`ChatReply`](ChatReply.md): what a reply replies to, and where it's shown.
   - [`ChatThreadSummary`](ChatThreadSummary.md): a thread's reply count and
     latest reply time.
@@ -108,9 +104,7 @@ provide, the document says so, under the heading "Prerequisites".
    [`ChatManagerOutput.md`](ChatManagerOutput.md), named for the roles rather
    than the patterns that fill them.
 6. The records a room holds: [`ChatMessage.md`](ChatMessage.md),
-   [`ChatMessageList.md`](ChatMessageList.md),
-   [`ChatMessageWindow.md`](ChatMessageWindow.md),
-   [`ChatWindowAnchor.md`](ChatWindowAnchor.md), [`ChatReply.md`](ChatReply.md),
+   [`ChatMessageList.md`](ChatMessageList.md), [`ChatReply.md`](ChatReply.md),
    [`ChatThreadSummary.md`](ChatThreadSummary.md),
    [`ChatReaction.md`](ChatReaction.md), [`ChatRoomAbout.md`](ChatRoomAbout.md),
    [`ChatRoomPolicy.md`](ChatRoomPolicy.md), and
@@ -193,8 +187,7 @@ provide, the document says so, under the heading "Prerequisites".
 9. **The protocol surface is UI-free.** The contracts, and the records they
    offer, hold data and take requests. None of them carries rendering state,
    such as a draft, a reply being composed, or a scroll position: that belongs
-   to whatever draws the chat. A client's requests to read, such as its windows,
-   are part of the protocol.
+   to whatever draws the chat.
 
 ## Social spaces
 
@@ -227,11 +220,6 @@ With a member set:
 
 ## Known quirks, accepted for now
 
-- **Window requests are refused silently.** A room records the outcome of
-  each message act and each add where only its sender reads it
-  (`messageRequests` and `addRequests`), but a refused `openWindow` or
-  `closeWindow` leaves no outcome: a session learns of it only by the window's
-  absence (see [`ChatRoomOutput`](ChatRoomOutput.md#streams)).
 - **Crossing creations.** Two managers each keep their own index. If two people
   each start a direct room with the other at the same moment, there are two
   rooms. Each manager records the one it saw first. A tie-break rule is future
@@ -259,10 +247,6 @@ names the ones it needs, and they are gathered here:
   reached by nothing but a notice, and nothing delivers a notice to a principal
   who shares no space with the sender end to end (see
   [`FabriChatManager.md`](FabriChatManager.md#first-contact)).
-- **Scoped sub-patterns and split write policies**, both still to check: a
-  room's handler writing the sending session's own windows, and one message
-  document written by two sets of writers (see
-  [`FabriChatRoom.md`](FabriChatRoom.md#prerequisites)).
 - **Native reviewed acts as trusted gestures.** A client that draws natively
   issues a reviewed act through the sanctioned path
   ([host embedding](../../features/host-embedding.md#10-native-reviewed-controls),
@@ -328,9 +312,8 @@ design, as below.
 ### Writers and labels
 
 - **Every record names its writers.** Beyond what the design requires of
-  messages and reactions, each of the room's records (the title a member set,
-  and each session's windows) has a write policy naming the handler that
-  writes it, so no other code can write it, even code a member runs in the
+  messages and reactions, the title a member set has a write policy naming
+  the handler that writes it, so no other code can write it, even code a member runs in the
   room's space. A message's policy names the send handlers, `commitEdit`,
   `commitDelete`, and `commitObliterate`, and a reaction's the two reaction
   handlers, which is what admits each one's push onto its list and its removal
@@ -377,10 +360,6 @@ design, as below.
   room. So the summaries together cost one walk of the messages rather than one
   per message, and no stored counter can drift from the threads it counts. A
   change to the messages derives them again, as it does `latest`.
-- **Windows.** A window holds links to its messages, which stay live;
-  `hasOlder` and `hasNewer` are as of when the window was set. `commitWindow`
-  writes the windows of the session that sent the event, wherever it runs; an
-  event the server itself emitted has no session, and can't open one.
 - **Notices and offers.** A manager's notice id is `[recipient, requestId]` as
   JSON, and an offer's `id` is the `requestId` alone. An offer reaches the
   recipient's inbox, and their host's share intake vets it and registers the

@@ -1,8 +1,15 @@
+---
+status: historical
+created: 2026-09-29
+archived: 2026-10-15
+reason: "Superseded design; a room offers no message windows to anchor."
+---
+
 # ChatWindowAnchor
 
 Where a window of messages sits in its view of the conversation. A client passes
 one to a message list's `openWindow` (see
-[`ChatMessageList`](ChatMessageList.md#windows)), as `from`.
+[`ChatMessageList`](../../../specs/fabrichat/ChatMessageList.md#windows)), as `from`.
 
 ```ts
 // Shown for illustration only.
@@ -31,10 +38,10 @@ Exactly one of the three keys is present.
   message a link points at, without paging from either end. The message MUST be
   in the view: an `around` that names a message outside it is refused.
 
-A `sentAt` is not unique in the room (see [times](ChatMessage.md#times)), so an
+A `sentAt` is not unique in the room (see [times](../../../specs/fabrichat/ChatMessage.md#times)), so an
 anchor names every message at that time together: a window never starts or
 ends between two messages sent at one time.
 
 A window's `hasOlder` and `hasNewer` (see
-[`ChatMessageWindow`](ChatMessageWindow.md)) say whether there is more on either
+[`ChatMessageWindow`](../../../specs/fabrichat/ChatMessageWindow.md)) say whether there is more on either
 side of wherever it was anchored.

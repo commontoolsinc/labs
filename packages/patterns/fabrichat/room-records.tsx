@@ -14,9 +14,8 @@
  * addressed by a key.
  *
  * Every stream that changes the room's record has a handler of its own, as
- * `FabriChatRoom.md` names them. `commitWindow` writes the sending session's
- * windows, and `commitSetTitle` the title a member last set, a record of its
- * own beside the one the room's creator wrote.
+ * `FabriChatRoom.md` names them. `commitSetTitle` writes the title a member
+ * last set, a record of its own beside the one the room's creator wrote.
  *
  * A handler destructures its state and uses the cells inline, and a helper it
  * shares takes each cell as an argument of its own, never the state or an
@@ -41,20 +40,10 @@ import {
   type Stream,
   type TrustedActionWrite,
   Writable,
-  type WriteAuthorizedBy,
   type WritePolicyAnyOf,
 } from "commonfabric";
 import { isSharedSpaceCatalog } from "../system/shared-space-catalog.ts";
-import {
-  isInMain,
-  isSingleEmoji,
-  type ShownIn,
-  threadView,
-  type ViewItem,
-  type WindowAnchor,
-  windowCount,
-  windowSlice,
-} from "./logic.ts";
+import { isSingleEmoji, type ShownIn, type ViewItem } from "./logic.ts";
 import type { commitStart } from "./manager.tsx";
 import {
   type AboutRecord,
@@ -87,7 +76,6 @@ import {
   type SetTitleOutcome,
   type SetTitleRefusalCode,
   type TitleRecord,
-  type WindowEvent,
 } from "./schemas.tsx";
 
 //
@@ -257,39 +245,6 @@ export type MessagesCell = Writable<MessagesValue>;
 
 /** A link to one stored message. */
 export type MessageCell = Cell<MessageRecord>;
-
-/** A run of consecutive messages from one view of a conversation. */
-export interface ChatMessageWindow {
-  /** The `openWindow` request that set the window as it is now. */
-  requestId: string;
-
-  /** For a thread's window, the thread's root; absent for the main one. */
-  root?: MessageCell;
-
-  /** The messages in the window, oldest first. */
-  messages: MessageCell[];
-
-  /** Whether the view has messages older than the window's first. */
-  hasOlder: boolean;
-
-  /** Whether the view has messages newer than the window's last. */
-  hasNewer: boolean;
-}
-
-/** A session's open windows, by the `windowId` its client chose. */
-export type ChatMessageWindows = Record<string, ChatMessageWindow>;
-
-/** A session's windows onto the messages, written only by `commitWindow`. */
-export type WindowsValue = WriteAuthorizedBy<
-  ChatMessageWindows,
-  typeof commitWindow
->;
-
-/**
- * The cell holding a session's windows, absent until the first opens: only
- * `commitWindow` writes it, so it has no default for anything else to write.
- */
-export type WindowsCell = Writable<WindowsValue>;
 
 /**
  * What a room created by a manager says about itself: written once, by the
@@ -539,21 +494,6 @@ export const canActIn = (
   const level = spaceAccess(messages);
   return myProfile?.get() !== undefined &&
     (level === "WRITE" || level === "OWNER");
-};
-
-/** A `ChatWindowAnchor` as `windowSlice()` takes it, if it is well formed. */
-const anchorOf = (
-  from: WindowEvent["from"] | undefined,
-): WindowAnchor | undefined => {
-  if (from === undefined || from === null) return undefined;
-  if ("before" in from) {
-    return { before: from.before === "end" ? "end" : nsecOf(from.before) };
-  }
-  if ("after" in from) {
-    return { after: from.after === "start" ? "start" : nsecOf(from.after) };
-  }
-  if ("around" in from) return { around: nsecOf(from.around) };
-  return undefined;
 };
 
 //
@@ -1145,75 +1085,6 @@ export const commitDeleteReaction = handler<RoomStreamEvent, ReactionState>(
     );
     if (index >= 0) list.removeByValue(list.key(index));
     refusal?.set("");
-  },
-);
-
-/** What `commitWindow` is bound to. */
-export interface WindowActState {
-  /** Whether the binding opens (or moves) a window, or closes one. */
-  op: "open" | "close";
-
-  /** The room's messages. */
-  messages: MessagesCell;
-
-  /** The session's windows. */
-  windows: WindowsCell;
-}
-
-/** A window request, whose thread root is one of the room's messages. */
-export interface RoomWindowEvent extends Omit<WindowEvent, "root"> {
-  /** The root of the thread to show; absent for the main conversation. */
-  root?: MessageCell;
-}
-
-/**
- * Opens, moves, or closes one of the sending session's windows onto the
- * messages. It changes nothing but that session's windows: repeating a request
- * sets or removes the same window again.
- */
-export const commitWindow = handler<RoomWindowEvent, WindowActState>(
-  (event, { op, messages, windows }) => {
-    const windowId = event?.windowId;
-    if (typeof windowId !== "string" || windowId === "") return;
-    const current = (windows.get() ?? {}) as ChatMessageWindows;
-    if (op === "close") {
-      if (!(windowId in current)) return;
-      windows.set(
-        Object.fromEntries(
-          Object.entries(current).filter(([id]) => id !== windowId),
-        ),
-      );
-      return;
-    }
-    const request = event;
-    if (
-      !(windowId in current) &&
-      Object.keys(current).length >= FABRICHAT_POLICY.maxOpenWindows
-    ) {
-      return;
-    }
-    const entries = messageEntries(messages);
-    const root = request.root?.resolveAsCell();
-    const rootEntry = root === undefined ? undefined : entryFor(entries, root);
-    if (root !== undefined && rootEntry === undefined) return;
-    const view = rootEntry === undefined
-      ? entries.filter(isInMain).sort(compareEntries)
-      : threadView(entries, rootEntry.key);
-    if (view === undefined) return;
-    const anchor = anchorOf(request.from);
-    if (anchor === undefined) return;
-    const count = windowCount(request.count, FABRICHAT_POLICY.maxWindowCount);
-    const slice = windowSlice(view, anchor, count);
-    if (slice === undefined) return;
-    windows.key(windowId).set({
-      requestId: request.requestId,
-      ...(root === undefined ? {} : { root }),
-      messages: view.slice(slice.start, slice.end).map((entry) =>
-        entry.cell.resolveAsCell()
-      ),
-      hasOlder: slice.hasOlder,
-      hasNewer: slice.hasNewer,
-    });
   },
 );
 

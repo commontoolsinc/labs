@@ -10,7 +10,6 @@
 import {
   type Cell,
   computed,
-  equals,
   NAME,
   pattern,
   spaceAccess,
@@ -47,9 +46,6 @@ export interface PlacedMessageList {
 
   /** The newest messages of the main conversation. */
   latest?: { messages?: Cell<PlacedMessage>[]; hasOlder?: boolean };
-
-  /** The reading session's windows. */
-  windows?: Record<string, { messages?: Cell<PlacedMessage>[] }>;
 }
 
 /**
@@ -93,7 +89,7 @@ export interface FabriChatPlacementView {
   /** The room's participants. */
   participants: ProfileCell[];
 
-  /** Reactions on the newest messages and on the session's windows. */
+  /** Reactions on the newest messages. */
   reactionTallies: PlacedTallies[];
 }
 
@@ -147,20 +143,7 @@ const FabriChatPlacement = pattern<
   const messages = computed(() => isMember ? room.get()?.messages : undefined);
   const reactionTallies = computed((): PlacedTallies[] => {
     const list = isMember ? room.get()?.messages : undefined;
-    const shown = [
-      ...(list?.latest?.messages ?? []),
-      ...Object.values(list?.windows ?? {}).flatMap((window) =>
-        window?.messages ?? []
-      ),
-    ];
-    const distinct = shown.reduce<Cell<PlacedMessage>[]>(
-      (found, message) =>
-        found.some((known) => equals(known, message))
-          ? found
-          : [...found, message],
-      [],
-    );
-    return distinct.map((message) => ({
+    return (list?.latest?.messages ?? []).map((message) => ({
       message,
       tallies: reactionTalliesOf(message.get()?.reactions ?? [], viewer),
     }));

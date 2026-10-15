@@ -29,12 +29,8 @@ interface ChatRoomOutput {
   /** Adds a profile to those who joined the room, once. */
   addParticipant: Stream<{ profile: Cell<ChatProfile> }>;
 
-  /** The room's messages: facts, the newest, and this session's windows. */
+  /** The room's messages: facts, the newest, and its threads. */
   messages: ChatMessageList;
-
-  /** `messages.openWindow` and `messages.closeWindow`, at the top level. */
-  openWindow: ChatMessageList["openWindow"];
-  closeWindow: ChatMessageList["closeWindow"];
 
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
@@ -136,10 +132,9 @@ it.
 ## Membership
 
 The room space's access list is the room's membership, and a member is any
-principal it admits. Every action on a room, reading a window of its messages
-included, appends an event in the room's space, which needs WRITE. A member with
-only READ can read the newest messages, through the room's `messages.latest`,
-which needs no event, but can't open other windows, send, or react.
+principal it admits. Every action on a room appends an event in the room's
+space, which needs WRITE. A member with only READ can read the messages, which
+needs no event, but can't send or react.
 
 A room keeps no membership of its own. Who is in its space, and with what
 access, is the space's business: its access list changes through the space's
@@ -170,8 +165,8 @@ space.
   never does.
 - **Messages.** The room holds its [`ChatMessage`](ChatMessage.md)s, in the
   order it recorded them, each identified by its cell. A client reads the
-  newest of them from `messages`, and the rest through windows (see
-  [`ChatMessageList`](ChatMessageList.md#windows)), a window at a time. An
+  newest of them from `messages`, and the rest from the stored messages
+  themselves (see [`ChatMessageList`](ChatMessageList.md#reading-the-rest)). An
   obliterated message stays as a tombstone. A message is labeled `authored-by`
   the principal who last wrote it. A message changes only through
   `editMessage`, `deleteMessage`, and `obliterateMessage`, and is never removed.
@@ -214,15 +209,7 @@ space.
 - **`messages`** is a [`ChatMessageList`](ChatMessageList.md): how many messages
   the room holds, the span of their times, `latest`, the newest messages of
   the main conversation, and `threads`, each thread's reply count and latest
-  reply time, which every member can read, a READ member included. It also
-  holds the reading session's own windows onto the messages, and the streams
-  that open and close them.
-- **`openWindow`** and **`closeWindow`** are `messages.openWindow` and
-  `messages.closeWindow` themselves, the same streams offered again at the
-  room's top level, for a client that sends only to a view's own streams. A
-  window either one opens is in `messages.windows`, so such a client reads a
-  thread, or pages the main conversation, through the room alone (see
-  [`ChatMessageList`](ChatMessageList.md#windows)).
+  reply time, which every member can read, a READ member included.
 - **`canSend`** says whether the reader can send, edit, delete, and react right
   now: their access is WRITE or OWNER, and their profile resolves. It lets a
   client tell a READ member why their gestures would be refused before they
@@ -280,30 +267,25 @@ client:
 
 - **`PerSpace`**: one instance for the whole room, the same for everyone the
   room's space admits. That is nearly everything: `about`, the messages,
-  `recentActivity` and `recentActivityExpiredThrough`, `participants` and
-  `roster`, and the streams. These are the room: a link to the room names them,
+  `participants` and `roster`, and the streams. These are the room: a link to the room names them,
   and passing the link around, to another component or another person, passes
   the room.
 - **`PerSession`**: one instance per memory session in the room's space. That is
-  `messages.windows`, the windows a session has opened onto the messages (see
-  [`ChatMessageList`](ChatMessageList.md#scope)), and `participantEntries` and
-  `participantPrincipals`, which each session derives under its own access.
-  Passing the room's link to someone else never passes a session's windows:
-  they read their own.
+  `participantEntries` and `participantPrincipals`, which each session derives
+  under its own access, and `messageRefusal`, why the session's latest message
+  act was refused. Passing the room's link to someone else passes none of
+  them: they read their own.
 - **`PerUser`**: one instance per user, which follows them across sessions.
-  That is only `addRequests`, `messageRequests`, and `titleRequests`, the
-  outcomes of the reader's own adds, message acts, and retitles. No one else
-  reads them.
+  That is only `addRequests` and `titleRequests`, the outcomes of the reader's
+  own adds and retitles. No one else reads them.
 - **Computed for each reader**: `canSend`, `canAdd`, `viewer`, and
   `messageRights`. Each is derived when it's read, from the reader's own access
   and profile, so each reader sees their own answer, and it needs no instance
   and no write. A placement carries `canSend` and `canAdd` as well.
 
 Some values are derived when they're read, and stored nowhere, so reading them
-needs no instance of anything: `participants` and `roster`, and in `messages`,
-everything but `windows`. A session's windows come into being with its first
-`openWindow`, so a READ member, who can't write, never has any, and can still
-read `messages.latest`.
+needs no instance of anything: `participants`, `roster`, and everything in
+`messages`.
 
 ## Streams
 
@@ -366,8 +348,7 @@ These rules hold for every stream:
   refused is recorded where only the sending session reads it, in
   `messageRefusal`, which the room's own composer shows until an act takes
   effect. An add's outcome is recorded in `addRequests`, and a retitle's in
-  `titleRequests`, each `refused` with a reason and a code. A refused
-  `openWindow` or `closeWindow` records nothing. A client still checks an event against the
+  `titleRequests`, each `refused` with a reason and a code. A client still checks an event against the
   stream's rules before sending it (see
   [`clients.md`](clients.md#writing-the-reviewed-gesture-requirement)).
 - A refused event is spent: it is not retried.
@@ -652,9 +633,7 @@ gesture of its own, records its outcome, and is in `[VIEWS]`.
 - **`[UI]`** is the room's own rendering, with its reviewed surfaces. An
   adapter's rendering embeds it, so a composer is always the room's own surface.
 - **`[VIEWS]`** holds a `room` group with the facts and streams above, for hosts
-  that draw natively. It includes `messages`, through whose link a client
-  reaches its own windows and their streams, `openWindow` and `closeWindow`,
-  the same streams at the group's top level, `canSend`, `viewer`,
+  that draw natively. It includes `messages`, `canSend`, `viewer`,
   `messageRights`, `messageRefusal`, `addMember` with `canAdd` and
   `addRequests`, and `setTitle` with `titleRequests`. A client uses it to show
   a room outside any container. Inside a container, it reads the placement's
@@ -675,8 +654,8 @@ these, and an implementation MUST state its choice for each in its rooms'
   said completely.
 - **Obliteration by OWNERs.** Whether an OWNER may obliterate messages,
   anyone's (`ownersMayObliterate`), in a direct room as in a group room.
-- **The limits on message windows**: how many messages a window holds
-  (`maxWindowCount`), and how many a session can have open (`maxOpenWindows`).
+- **How many of the newest messages `messages.latest` holds**
+  (`maxWindowCount`).
 
 An implementation may make these configurable, per room or otherwise, and how it
 does so is its own business (see

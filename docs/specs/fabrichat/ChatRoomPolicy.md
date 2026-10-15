@@ -26,7 +26,7 @@ interface ChatRoomPolicy {
   /** How long an entry stays in `recentActivity`, in ns. */
   recentActivityWindowNsec: FabricDurationNsec;
 
-  /** The most messages a message window holds. */
+  /** How many of the newest messages `messages.latest` holds. */
   maxWindowCount: number;
 
   /** The most message windows a session can have open. */
@@ -35,10 +35,11 @@ interface ChatRoomPolicy {
 ```
 
 A plain object, with every key present. A room enforces `ownersMayObliterate`
-and `deletionIsObliteration`, and bounds its windows by `maxWindowCount` and
-`maxOpenWindows`; it states `keepsHistory`, `proposedTimeMaxAgeNsec`,
-`proposedTimeMaxLeadNsec`, and `recentActivityWindowNsec` for the policy's
-shape, and reads none of them. Each duration is a
+and `deletionIsObliteration`, and holds `maxWindowCount` of its newest
+messages in `messages.latest`; it states `keepsHistory`,
+`proposedTimeMaxAgeNsec`, `proposedTimeMaxLeadNsec`,
+`recentActivityWindowNsec`, and `maxOpenWindows` for the policy's shape, and
+reads none of them. Each duration is a
 [`FabricDurationNsec`](../space-model-formal-spec/1-fabric-values.md): an exact
 count of nanoseconds, held as a `bigint`.
 
@@ -79,11 +80,11 @@ The policy document is labeled `authored-by` the principal who wrote it (see
   **`recentActivityWindowNsec`**: stated and read by nothing. A sender
   proposes no time, and the room keeps no activity log (see
   [times](ChatMessage.md#times)).
-- **`maxWindowCount`**: the most messages a message window holds (see
-  [`ChatMessageList`](ChatMessageList.md#limits)). A request for more gets this
-  many.
-- **`maxOpenWindows`**: the most message windows a session can have open at
-  once. Opening one more is refused.
+- **`maxWindowCount`**: how many of the newest messages of the main
+  conversation `messages.latest` holds (see
+  [`ChatMessageList`](ChatMessageList.md#fields)).
+- **`maxOpenWindows`**: stated and read by nothing. A room offers no message
+  windows.
 
 ## When it changes
 

@@ -59,15 +59,12 @@ A client that draws natively reads a placement's `chat` group, which the adapter
 a container holds re-exports, or a room's `room` group for a room shown outside
 any container, and drives the manager through its `chats` group. It reads a
 room's newest messages from its `messages`
-([`ChatMessageList`](ChatMessageList.md)), and the rest a window at a time,
-through windows it opens there, and never asks for the whole conversation at
-once. Both are in `[VIEWS]` (see [views a host draws
+([`ChatMessageList`](ChatMessageList.md)), and the rest from the room's stored
+messages themselves, each a cell, deriving a thread from their `replyTo` (see
+[reading the rest](ChatMessageList.md#reading-the-rest)). Both are in `[VIEWS]`
+(see [views a host draws
 itself](../../common/components/COMPONENTS.md#views-a-host-draws-itself)). A
-thread is read the same way, through a window whose `root` is the thread's
-root. A client that sends only to a view's top-level streams sends to the
-room's own `openWindow` and `closeWindow`, which are the message list's (see
-[`ChatRoomOutput`](ChatRoomOutput.md#facts)). A client that renders VDOM shows
-the adapter's `[UI]`.
+client that renders VDOM shows the adapter's `[UI]`.
 
 A client that draws natively MUST:
 
@@ -97,8 +94,8 @@ A client that draws natively MUST:
 - **Offer any single emoji as a reaction** (see
   [`ChatReaction`](ChatReaction.md)), and show any that others have used, even
   ones the client wouldn't offer itself.
-- **Follow the room through its messages**: `messages.latest`, `messages.count`,
-  and the windows it has open, which stay live as the messages in them change.
+- **Follow the room through its messages**: `messages.latest` and
+  `messages.count`, which stay current as messages arrive.
 - **Use each message's cell as its identity**, compared with `equals()`, and
   never its `sentAt`, which is not unique (see
   [times](ChatMessage.md#times)).

@@ -1,7 +1,7 @@
 /**
  * A FabriChat room shared by two people, each in a runtime of their own with
  * an identity of their own: each one's message, and each one's reaction,
- * reaches the other, and each one's windows stay their own session's.
+ * reaches the other.
  */
 import {
   type AddIntegrity,
@@ -14,10 +14,7 @@ import {
 } from "commonfabric";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
-import FabriChatRoom, {
-  type ChatRoomOutput,
-  FabriChatRoomCore,
-} from "./room.tsx";
+import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_REACT_ACTION,
   CHAT_REACT_SURFACE,
@@ -51,7 +48,6 @@ interface Records {
 
 /** What every session receives from the setup. */
 interface Setup {
-  shared: ChatRoomOutput;
   records: Records;
 }
 
@@ -66,17 +62,7 @@ const reactionsOnFirst = (messages: Cell<MessagesValue>): number => {
   return ((first?.reactions?.get() ?? []) as ChatReaction[]).length;
 };
 
-// The ids of a session's windows, as the room's output offers them.
-const windowIds = (windows: unknown): string[] => {
-  const cell = windows as { get?: () => unknown } | undefined;
-  const value = typeof cell?.get === "function" ? cell.get() : windows;
-  return Object.keys((value ?? {}) as Record<string, unknown>);
-};
-
-// One room instance both sessions share, for the windows: its default export
-// resolves no profile here, and opening a window needs none.
 export const setup = pattern(() => ({
-  shared: FabriChatRoom({}),
   records: {
     messages: Writable.of<MessagesValue>([] as MessagesValue),
   },
@@ -96,21 +82,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
         action: room.composerSend,
         event: typed("Hello from Alice"),
         trustedUi: sendGesture,
-      },
-      // A window Alice's session opens is hers alone.
-      {
-        action: setup.shared.messages.openWindow,
-        event: {
-          requestId: "alice-w",
-          windowId: "alice-w",
-          from: { before: "end" },
-          count: 10,
-        },
-      },
-      {
-        assertion: assert(() =>
-          windowIds(setup.shared.messages.windows).includes("alice-w")
-        ),
       },
       { label: "alice-sent" },
       { await: "bob-reacted" },
@@ -150,11 +121,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   return {
     [TESTS]: [
       { await: "alice-sent" },
-      {
-        assertion: assert(() =>
-          !windowIds(setup.shared.messages.windows).includes("alice-w")
-        ),
-      },
       {
         assertion: assert(() =>
           bodies(setup.records.messages) === "Hello from Alice"

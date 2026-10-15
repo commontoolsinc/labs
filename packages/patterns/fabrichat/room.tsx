@@ -58,7 +58,6 @@ import {
   commitSendReaction,
   commitSetTitle,
   commitThreadSend,
-  commitWindow,
   compareEntries,
   type ComposerState,
   entryFor,
@@ -75,14 +74,11 @@ import {
   ownersMayObliterateBy,
   ownersMayObliterateIn,
   type RoomStreamEvent,
-  type RoomWindowEvent,
   type SetTitleEvent,
   type StoredAbout,
   tellManagerJoined,
   TITLE_KEY,
   type TitlesCell,
-  type WindowsCell,
-  type WindowsValue,
 } from "./room-records.tsx";
 import { bodyText, FabriChatMessageRow } from "./message-row.tsx";
 import {
@@ -823,7 +819,7 @@ export interface ChatThreadSummary {
   latestReplyAt: FabricEpochNsec;
 }
 
-/** A room's messages: facts, the newest, and this session's windows. */
+/** A room's messages: facts, the newest, and its threads. */
 export interface ChatMessageList {
   /** How many messages the room holds, obliterated tombstones included. */
   count: number;
@@ -848,15 +844,6 @@ export interface ChatMessageList {
    * of the main conversation that roots none has no entry.
    */
   threads: ChatThreadSummary[];
-
-  /** This session's open windows, by the `windowId` its client chose. */
-  windows: PerSession<WindowsCell>;
-
-  /** Opens a window, or moves one already open. */
-  openWindow: Stream<RoomWindowEvent>;
-
-  /** Closes a window. */
-  closeWindow: Stream<RoomWindowEvent>;
 }
 
 /** Who is reading a room. */
@@ -940,15 +927,6 @@ export interface ChatRoomView {
 
   /** The room's messages. */
   messages: ChatMessageList;
-
-  /**
-   * The message list's `openWindow`, here as well for a client that sends only
-   * to a view's own streams, as it reads a thread through a window.
-   */
-  openWindow: Stream<RoomWindowEvent>;
-
-  /** The message list's `closeWindow`, here as well, as `openWindow` is. */
-  closeWindow: Stream<RoomWindowEvent>;
 
   /** Whether this reader can send, edit, delete, and react. */
   canSend: boolean;
@@ -1163,7 +1141,6 @@ export const FabriChatRoomCore = pattern<
     self,
   });
   const alsoToMain = new Writable.perSession(false);
-  const windows = new Writable.perSession<WindowsValue>();
 
   const entries = computed(() => messageEntries(messages));
   // Every message's place in the views, derived once for the whole list. Each
@@ -1390,17 +1367,12 @@ export const FabriChatRoomCore = pattern<
       refusal,
     }),
   };
-  const openWindow = commitWindow({ op: "open", messages, windows });
-  const closeWindow = commitWindow({ op: "close", messages, windows });
   const messageList = {
     count,
     oldestAt,
     newestAt,
     latest,
     threads,
-    windows,
-    openWindow,
-    closeWindow,
   };
   const view = {
     about: aboutView,
@@ -1410,8 +1382,6 @@ export const FabriChatRoomCore = pattern<
     participantPrincipals,
     addParticipant: join,
     messages: messageList,
-    openWindow,
-    closeWindow,
     canSend,
     viewer,
     messageRights,
@@ -1694,8 +1664,6 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       participantPrincipals: room.participantPrincipals,
       addParticipant: room.addParticipant,
       messages: room.messages,
-      openWindow: room.openWindow,
-      closeWindow: room.closeWindow,
       canSend: room.canSend,
       viewer: room.viewer,
       messageRights: room.messageRights,

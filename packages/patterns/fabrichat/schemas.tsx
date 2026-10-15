@@ -102,13 +102,6 @@ export const isPrincipalDID = (value: unknown): value is DID =>
 /** Nanoseconds in one millisecond, the handler clock's unit. */
 export const NSEC_PER_MSEC = 1_000_000n;
 
-/**
- * Nanoseconds in one tick of the handler clock. A handler's clock reads to the
- * second, so a reading `t` stands for every time from `t` up to, but not
- * including, `t + CLOCK_TICK_NSEC`.
- */
-export const CLOCK_TICK_NSEC = 1_000_000_000n;
-
 /** The nanoseconds a recorded time holds. */
 export const nsecOf = (time: FabricEpochNsec): bigint => time.value;
 
@@ -305,33 +298,6 @@ export interface ChatRoomAbout {
    * space's own chat, which no one created as a room.
    */
   record?: Cell<AboutRecord>;
-}
-
-/** Where a window of messages sits in its view. */
-export type ChatWindowAnchor =
-  | { before: FabricEpochNsec | "end" }
-  | { after: FabricEpochNsec | "start" }
-  | { around: FabricEpochNsec };
-
-/**
- * A request that opens, moves, or closes a window. Opening names where the
- * window sits and how many messages it holds; closing names only the window.
- */
-export interface WindowEvent {
-  /** Chosen by the client; shown in the window once an open is fulfilled. */
-  requestId: string;
-
-  /** The window to set or close, chosen by the client. */
-  windowId: string;
-
-  /** The root of the thread to show; absent for the main conversation. */
-  root?: Cell<ChatMessage>;
-
-  /** Where the window sits; required to open one. */
-  from?: ChatWindowAnchor;
-
-  /** The most messages to show, capped by the room's `maxWindowCount`. */
-  count?: number;
 }
 
 //

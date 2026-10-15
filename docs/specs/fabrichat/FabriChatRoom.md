@@ -42,11 +42,8 @@ owner's own space, so a reader that space refuses reads no principal from it.
 Both are derived per session, so each session reads instances of its own,
 derived under its own access.
 
-The `PerSession` values in the contract are `messages.windows`, the session's
-windows, kept as a `PerSession` keyed collection, `participantEntries`, and
-`participantPrincipals`.
-The windows come into being with the session's first `openWindow`, so a session
-that only reads, as a READ member's does, has none.
+The `PerSession` values in the contract are `participantEntries`,
+`participantPrincipals`, and `messageRefusal`.
 
 The room's `[UI]` keeps its composer's state, the draft and the reply being
 composed, as a `PerSession` value of its own, so two placements of the same room
@@ -165,12 +162,6 @@ changes nothing; a refusal writes nothing else. A request already there changes 
 `canSend` is computed for each viewer from their access and whether their
 profile resolves.
 
-The message list keeps `windows` as a `PerSession` keyed collection, and
-fulfills `openWindow` and `closeWindow` by setting and removing entries in it.
-The room offers those same two streams at its top level as well. A
-window is a computed selection over the record, so it stays live as the messages
-in it change.
-
 ## Configuration
 
 [`ChatRoomOutput`](ChatRoomOutput.md#implementation-defined-behavior) leaves
@@ -187,13 +178,13 @@ built at first. The first build fixes each setting at an initial value:
 | How far before the clock a proposed time is accepted | `proposedTimeMaxAgeNsec` | 10 minutes |
 | How far after the clock a proposed time is accepted | `proposedTimeMaxLeadNsec` | 10 seconds |
 | How long an entry stays in `recentActivity` | `recentActivityWindowNsec` | 10 minutes |
-| The most messages a window holds | `maxWindowCount` | 100 |
-| The most windows a session can have open | `maxOpenWindows` | 50 |
+| How many of the newest messages `messages.latest` holds | `maxWindowCount` | 100 |
+| The most message windows a session can have open | `maxOpenWindows` | 50 |
 
 These are the first build's values. Once the configuration exists, rooms can
-differ from them. The room reads `ownersMayObliterate`, `deletionIsObliteration`,
-`maxWindowCount`, and `maxOpenWindows`; the other keys are stated for the
-policy's shape, which a user's Home carries, and read by nothing. `ownersMayObliterate` is there for a group room with many
+differ from them. The room reads `ownersMayObliterate`,
+`deletionIsObliteration`, and `maxWindowCount`; the other keys are stated for
+the policy's shape, which a user's Home carries, and read by nothing. `ownersMayObliterate` is there for a group room with many
 OWNERs; a direct room is set up without it, and its two people each obliterate
 only their own messages. The room's kind picks which policy document
 `about.policy` links, one stating `ownersMayObliterate` and one not, unless
@@ -213,13 +204,6 @@ source of truth for what the room allows.
   room as the space's root
   ([custom space roots](../../features/custom-space-roots.md)), and declares
   the space's kind ([space kinds](../../features/space-kinds.md)).
-- **Per-session state written by a handler.** `windows` is a `PerSession` cell
-  linked from the room's `PerSpace` message list, a nesting the scoped-cell
-  design provides across a `Cell` boundary (see [scoped cell
-  instances](../scoped-cell-instances.md)). `openWindow`'s handler has to write
-  the instance belonging to the session that sent the event, including when the
-  handler runs somewhere other than that session's client. Whether the runtime
-  does that today is still to check.
 - **Once-only delivery.** The room keeps no memory of the events it has acted
   on, so it relies on the runtime delivering each durable stream entry to its
   handler exactly once, and deduplicating a client's re-sent append at its

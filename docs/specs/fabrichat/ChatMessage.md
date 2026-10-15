@@ -2,8 +2,8 @@
 
 One message in a room ([`ChatRoomOutput`](ChatRoomOutput.md)), with its
 reactions. A client reads a room's newest messages from its
-[`ChatMessageList`](ChatMessageList.md), and the rest through its session's
-[windows](ChatMessageList.md#windows).
+[`ChatMessageList`](ChatMessageList.md), and the rest from the stored messages
+themselves.
 
 ```ts
 // Shown for illustration only.
