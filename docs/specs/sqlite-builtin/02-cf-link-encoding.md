@@ -125,11 +125,16 @@ and is **driven by the typed `db.query<Row>` schema**:
    then yields `undefined` rather than crashing the whole query). This step
    converts the string to the link **object** that the runtime's link resolution
    recognizes — link resolution does not recognize a JSON string.
-3. When the consumer reads `q.result[i].<col>` under its own `<Row>` schema, the
+3. Load each distinct linked document into the reading runtime's replica before
+   the result is written. A labeled result takes each link's label from its
+   source's stored CFC metadata, so the source has to be present to the write
+   whichever runtime wrote it; a row read where its linked document was never
+   held would otherwise be refused.
+4. When the consumer reads `q.result[i].<col>` under its own `<Row>` schema, the
    `asCell` marker rehydrates that sigil object into a live `Cell<T>`, carrying
    the column's declared element schema so downstream `.get()`/`.key()` are
    typed.
-4. Untyped reads return the raw sigil-link **string** unchanged; a consumer can
+5. Untyped reads return the raw sigil-link **string** unchanged; a consumer can
    decode it on demand with `decodeCfLinkValue` (which `JSON.parse`s and
    reconstructs a `Cell` via `runtime.getCellFromLink`). Non-link columns pass
    through unchanged either way.

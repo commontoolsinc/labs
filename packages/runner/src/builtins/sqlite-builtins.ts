@@ -56,6 +56,7 @@ import {
 } from "../executor/wave.ts";
 import { speculationRunContextOf } from "../speculation/overlay-destination.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
+import { type CellLink, isCellLink, parseLink } from "../link-utils.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cfcLabelViewFromMetadata } from "../cfc/label-view-state.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
@@ -432,6 +433,27 @@ function decodeRowLinkColumns(
     }
     return out ?? row;
   });
+}
+
+/**
+ * The links {@link decodeRowLinkColumns} decoded into `rows`, one per document
+ * they point at, however many rows or columns name it.
+ */
+function decodedRowLinks(
+  rows: readonly unknown[],
+  cols: readonly string[],
+): CellLink[] {
+  const links = new Map<string, CellLink>();
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    for (const c of cols) {
+      const value = (row as Record<string, unknown>)[c];
+      if (!isCellLink(value)) continue;
+      const { space, id } = parseLink(value);
+      links.set(`${space}\0${id}`, value);
+    }
+  }
+  return [...links.values()];
 }
 
 interface ResultColumn {
@@ -1603,6 +1625,16 @@ export function sqliteQuery(
             // OBJECTS so a typed consumer's asCell schema rehydrates them to live
             // Cells (Piece A). Untyped queries (no rowSchema) keep raw strings.
             const rows = decodeRowLinkColumns(res.rows, linkCols);
+            // Every linked document is loaded before the rows are written: a
+            // labeled write of a link persists the label its source carries,
+            // so a source another runtime wrote has to be in this replica
+            // for the settle's prepare to find it.
+            await Promise.all(
+              decodedRowLinks(rows, linkCols).map((link) =>
+                runtime.getCellFromLink(link).sync()
+              ),
+            );
+            if (cancelled.signal.aborted) return;
             // CFC read-labeling (per-column static `ifc`): when the db declares
             // `ifc`, the server returns each result column's TRUE origin; map it to
             // the column's confidentiality and write the rows under a schema that
