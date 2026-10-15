@@ -4736,7 +4736,7 @@ export class SpaceReplica
    * the speculative commit settles (retirement/withdrawal drops its pending
    * layers first, so no stack names a seq after it leaves this map).
    */
-  readonly #speculativeLocalSeqs = new Map<number, Promise<unknown>>();
+  readonly #speculativeLocalSeqs = new Map<number, Promise<void>>();
 
   /**
    * The overlay destination's retirement _wake_ for origin accepts
@@ -5988,7 +5988,7 @@ export class SpaceReplica
     identity?: ScopeKeyIdentity,
   ): Promise<void> | undefined {
     const record = this.#docs.get(this.#docKeyOf({ id, scope }, identity));
-    const standing = new Set<Promise<unknown>>();
+    const standing = new Set<Promise<void>>();
     for (const entry of record?.pending ?? []) {
       const settled = this.#speculativeLocalSeqs.get(entry.localSeq);
       if (settled !== undefined) standing.add(settled);
@@ -6847,8 +6847,9 @@ export class SpaceReplica
       // commitOperations. Settlement (retirement or withdrawal) drops
       // the pending layers before `settled` resolves, so removal here
       // never races a stack that still names the seq.
-      this.#speculativeLocalSeqs.set(localSeq, settled.catch(() => {}));
-      settled.catch(() => {}).finally(() => {
+      const quiet = settled.then(() => {}, () => {});
+      this.#speculativeLocalSeqs.set(localSeq, quiet);
+      quiet.finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
       });
     }

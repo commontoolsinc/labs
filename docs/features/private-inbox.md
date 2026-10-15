@@ -351,8 +351,8 @@ address unless the runtime writes receipts, which it does with commit
 preconditions or server execution on. For `ensured`, the client then reads the
 profile's `inbox.piece`, through the typed link `inboxPieceLinkSchema` in
 `packages/piece/src/ops/private-inbox.ts`, for the reason every reader of the
-pointer does, as "Creating or adopting it" says, and waits for its own view of
-the pointer to name an inbox.
+pointer does, as "Creating or adopting it" says, and waits for the pointer to
+name an inbox.
 
 Under server execution, the serving runtime runs Home's handler, writes the
 receipt and runs `PrivateInboxAnswering`, as part of Home, so it is the
@@ -370,8 +370,8 @@ changes nothing the subscription sees. A client's runtime can also settle
 before the served pointer write reaches it, so a read taken once that runtime
 has settled can still find `pending` while the served answer is already
 `ensured`, and the next read after that write arrives finds `ensured`. A
-client subscribed to the receipt, as `requestPrivateInboxOf()` is, is handed
-that next value when it comes, so it needs no read of its own.
+client subscribed to the receipt, as `requestPrivateInboxOf()` is, reads
+again when that write arrives.
 
 `requestPrivateInboxOf()` in `packages/piece/src/ops/private-inbox.ts` is the
 host's implementation of that client. It returns `ensured` with the inbox,
