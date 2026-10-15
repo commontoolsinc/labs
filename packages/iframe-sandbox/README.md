@@ -88,7 +88,8 @@ A host can set `.presentation` to `{ css, attributes, stylesheets }` on
 `data-*` attributes to strings, and `stylesheets` lists external stylesheet
 URLs. The guest's Content Security Policy governs stylesheet and font loads.
 Head meta policies are activated before presentation is installed; a policy that
-refuses the inline bootstrap also disables presentation updates.
+refuses the inline bootstrap prevents both initial presentation and live
+updates.
 
 Presentation is installed before the guest's scripts run. Replacing it updates
 the current document without reloading its source or capability bridge. Setting
