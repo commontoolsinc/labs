@@ -576,6 +576,22 @@ export class SpeculationOverlayDestination
     return createTransactionCommitReceipt(this.#sealSpeculative(tx));
   }
 
+  /**
+   * Whether a seal of `tx` now would drop its writes: a speculative run on a
+   * closed overlay, and an event-handler run that the late-echo rule finds
+   * jobless by its ancestry. The seal makes the same checks again when it
+   * runs, so a run that turns jobless after this was asked is dropped there.
+   */
+  discards(tx: IExtendedStorageTransaction): boolean {
+    const context = speculationRunContextOf(tx);
+    if (context?.kind !== "derivation" && context?.kind !== "event-handler") {
+      return false;
+    }
+    if (this.#closed) return true;
+    return context.kind === "event-handler" && context.eventId !== undefined &&
+      this.#joblessByAncestry(context.eventId, context.parentEventId);
+  }
+
   async #sealSpeculative(
     tx: IExtendedStorageTransaction,
   ): Promise<Result<Unit, CommitError>> {
