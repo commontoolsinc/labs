@@ -1938,8 +1938,8 @@ export interface TransactionSealDestination {
    * Whether `seal` would drop `tx`'s writes rather than accept them, were
    * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
    * pass for a transaction this returns `true` for: writes that reach no
-   * store and no reader cross no boundary. Absent, every transaction's writes
-   * are accepted.
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
    */
   discards?(tx: IExtendedStorageTransaction): boolean;
 

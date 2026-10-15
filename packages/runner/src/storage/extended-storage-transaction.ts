@@ -3120,12 +3120,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * captured before the commit carries. A second pass finds the transaction
    * prepared and does nothing.
    *
-   * Two states take none of it. A transaction that is no longer open cannot
-   * commit, and everything here reaches storage through it: the flow probe
-   * reads stored metadata, and `prepareCfc` reads and writes the derived
+   * Three states take none of it. A transaction that is no longer open
+   * cannot commit, and everything here reaches storage through it: the flow
+   * probe reads stored metadata, and `prepareCfc` reads and writes the derived
    * label map. A read-only transaction is skipped because `commit()` skips
    * the whole step for one, so both call sites reach the same answer about
-   * it; a transaction that admits no writes has nothing to stamp anyway.
+   * it; a transaction that admits no writes has nothing to stamp anyway. And
+   * a transaction its seal destination discards reaches the enforcement
+   * ladder unprepared, since `commit()` skips the ladder for one too: its
+   * writes reach no store and no reader.
    */
   prepareForCommit(): void {
     if (!this.#needsCfcPreparation()) return;
@@ -3175,11 +3178,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   /**
    * Whether this transaction's seal destination drops its writes rather than
-   * sealing them. Neither preparation nor the commit's enforcement runs the
-   * boundary pass for such a transaction: its writes reach no store and no
+   * sealing them. The preparation a commit makes, `prepareForCommit()` and
+   * its cooperative form, skips the boundary pass for such a transaction, and
+   * the commit skips its enforcement: the writes reach no store and no
    * reader. Such a run can also have read state no commit would see, as a
    * speculative run does once its intent's echo has retired and before the
    * authoritative writes arrive, and the pass would refuse what it read there.
+   * `prepareCfc()` still runs the pass, for a caller that asks for the verdict
+   * and its digest outright.
    */
   #discardedBySealDestination(): boolean {
     return this.#sealDestination?.discards?.(this) === true;
