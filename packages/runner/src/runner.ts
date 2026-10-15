@@ -1115,15 +1115,17 @@ function samePatternRef(
 /**
  * Whether the pattern pointer or the setup-completion marker on `resultCell`
  * names a pattern other than `entryRef`, which is what makes a setup of
- * `entryRef` there re-stage the stored argument. Neither stamped reads as
- * `false`.
+ * `entryRef` there re-stage the stored argument. Each falls back to
+ * `sessionRef`, the session-side pointer a keyless piece has in place of
+ * both, as setup's own reading does. None of the three reads as `false`.
  */
 function storedUnderAnotherPattern(
   resultCell: Cell<unknown>,
   entryRef: { identity: string; symbol: string },
+  sessionRef: { identity: string; symbol: string } | undefined,
 ): boolean {
-  const pointer = getPatternIdentityRef(resultCell);
-  const marker = getPatternSetupIdentityRef(resultCell);
+  const pointer = getPatternIdentityRef(resultCell) ?? sessionRef;
+  const marker = getPatternSetupIdentityRef(resultCell) ?? sessionRef;
   return (pointer !== undefined && !samePatternRef(pointer, entryRef)) ||
     (marker !== undefined && !samePatternRef(marker, entryRef));
 }
@@ -9770,7 +9772,13 @@ export class Runner {
                 patternIdentityKey(entryRef),
               ]);
             }
-            if (storedUnderAnotherPattern(resultCell, entryRef)) {
+            if (
+              storedUnderAnotherPattern(
+                resultCell,
+                entryRef,
+                this.#sessionPatternPointer(resultCell),
+              )
+            ) {
               restaged.push(argumentCell);
             }
           }
