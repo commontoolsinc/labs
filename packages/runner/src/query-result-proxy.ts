@@ -12,6 +12,7 @@ import { resolveLinkTracingDereferences } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type Runtime } from "./runtime.ts";
+import { getTransactionForChildCells } from "./storage/extended-storage-transaction.ts";
 import {
   type IExtendedStorageTransaction,
   type IReadOptions,
@@ -427,7 +428,14 @@ function createViewProxy<T>(
   // behind a stream holds no value to read.
   if (ContextualFlowControl.declaresStream(link.schema)) {
     return remember(
-      createCell(runtime, link, tx, false, "stream", cfcLabelView) as T,
+      createCell(
+        runtime,
+        link,
+        getTransactionForChildCells(tx),
+        false,
+        "stream",
+        cfcLabelView,
+      ) as T,
     );
   }
 
@@ -447,7 +455,14 @@ function createViewProxy<T>(
   // schema to lose the asCell stream information.
   if (isStreamValue(value)) {
     return remember(
-      createCell(runtime, link, tx, false, "stream", cfcLabelView) as T,
+      createCell(
+        runtime,
+        link,
+        getTransactionForChildCells(tx),
+        false,
+        "stream",
+        cfcLabelView,
+      ) as T,
     );
   }
 
@@ -646,7 +661,14 @@ function createViewProxy<T>(
         // transaction has finished still names its cell.
         if (prop === toCell) {
           return () =>
-            createCell(runtime, link, tx, false, undefined, cfcLabelView);
+            createCell(
+              runtime,
+              link,
+              getTransactionForChildCells(tx),
+              false,
+              undefined,
+              cfcLabelView,
+            );
         }
 
         verifyKind();
