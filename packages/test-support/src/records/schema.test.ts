@@ -5,7 +5,7 @@ import {
   buildObjectBody,
   ciObjectName,
   datePartition,
-  isMainPush,
+  isMainRun,
   localObjectName,
   objectNameSlug,
   parseContextLine,
@@ -248,7 +248,7 @@ describe("schema", () => {
     });
   });
 
-  describe("isMainPush()", () => {
+  describe("isMainRun()", () => {
     const ci = {
       workflowRunId: "1",
       runAttempt: 1,
@@ -260,17 +260,28 @@ describe("schema", () => {
     const pushed: RunContext = { ...CONTEXT, env: "ci", ci };
 
     it("returns true for a push to main the fork flag does not mark", () => {
-      expect(isMainPush(pushed)).toBe(true);
+      expect(isMainRun(pushed)).toBe(true);
       const { fork: _, ...unmarked } = ci;
-      expect(isMainPush({ ...pushed, ci: unmarked })).toBe(true);
+      expect(isMainRun({ ...pushed, ci: unmarked })).toBe(true);
+    });
+
+    it("returns true for a scheduled or dispatched run of main", () => {
+      for (const event of ["schedule", "workflow_dispatch"]) {
+        expect(isMainRun({ ...pushed, ci: { ...ci, event } })).toBe(true);
+      }
     });
 
     it("returns false for any other run", () => {
-      expect(isMainPush({ ...pushed, ci: { ...ci, fork: true } })).toBe(false);
-      expect(isMainPush({ ...pushed, ci: { ...ci, event: "pull_request" } }))
+      expect(isMainRun({ ...pushed, ci: { ...ci, fork: true } })).toBe(false);
+      expect(
+        isMainRun({ ...pushed, ci: { ...ci, event: "schedule", fork: true } }),
+      ).toBe(false);
+      expect(isMainRun({ ...pushed, ci: { ...ci, event: "pull_request" } }))
         .toBe(false);
-      expect(isMainPush({ ...pushed, branch: "topic" })).toBe(false);
-      expect(isMainPush(CONTEXT)).toBe(false);
+      const { event: _, ...eventless } = ci;
+      expect(isMainRun({ ...pushed, ci: eventless })).toBe(false);
+      expect(isMainRun({ ...pushed, branch: "topic" })).toBe(false);
+      expect(isMainRun(CONTEXT)).toBe(false);
     });
   });
 

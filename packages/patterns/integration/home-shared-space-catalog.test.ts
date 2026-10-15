@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { stub } from "@std/testing/mock";
 
@@ -78,8 +79,8 @@ async function compileHome(runtime: Runtime, revision?: string) {
   const program = await resolveLocalProgram(
     (resolver) => runtime.harness.resolve(resolver),
     {
-      main: new URL("../system/home.tsx", import.meta.url).pathname,
-      root: new URL("..", import.meta.url).pathname,
+      main: fromFileUrl(new URL("../system/home.tsx", import.meta.url)),
+      root: fromFileUrl(new URL("..", import.meta.url)),
     },
   );
   if (revision !== undefined) {
@@ -564,11 +565,13 @@ describe("Home shared-space catalog", () => {
         const program = await resolveLocalProgram(
           (resolver) => runtime.harness.resolve(resolver),
           {
-            main: new URL(
-              "./fixtures/home-catalog-commands/main.tsx",
-              import.meta.url,
-            ).pathname,
-            root: new URL("..", import.meta.url).pathname,
+            main: fromFileUrl(
+              new URL(
+                "./fixtures/home-catalog-commands/main.tsx",
+                import.meta.url,
+              ),
+            ),
+            root: fromFileUrl(new URL("..", import.meta.url)),
           },
         );
         const compiled = await runtime.patternManager.compilePattern(program, {

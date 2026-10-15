@@ -16,10 +16,12 @@ import {
 import {
   batchMeasurementName,
   excusedMeasurementName,
+  hooksMeasurementName,
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
   laneMeasurementName,
 } from "../lane-measurement.ts";
+import { samplesOf } from "./score.ts";
 import {
   MIN_CORRECTION_SAMPLES,
   MIN_CORRECTION_SPAN_SECONDS,
@@ -976,6 +978,51 @@ describe("calibrate", () => {
       });
       expect(fitted.suites).toEqual({});
       expect(Object.keys(fitted.suitesWithCoverage ?? {})).toEqual(["s"]);
+    });
+
+    it("charges each unit's hooks at their ninetieth percentile, in the fit run the same way", () => {
+      // Ten openings of `oven` over two days, the slowest of them nine
+      // seconds: the ninetieth is the ninth slowest, eight seconds, read as
+      // the bound of the bucket it was counted in. `icing` was measured
+      // only with coverage off, so the coverage-on fit names no hooks for
+      // it, and a suite with no batches is given no fit for its hooks.
+      const fitted = calibrate(
+        {
+          setup: new Map(),
+          batches: [
+            observed({ ran: 40, spent: 92, units: 4 }),
+            observed({ ran: 40, spent: 150, units: 4, measured: true }),
+          ],
+        },
+        {
+          [hooksMeasurementName("s", true, "oven")]: {
+            "2026-08-19": samplesOf([1000, 2000, 3000, 4000, 5000]),
+            "2026-08-20": samplesOf([6000, 7000, 7500, 8000, 9000]),
+          },
+          [hooksMeasurementName("s", false, "icing")]: {
+            "2026-08-20": samplesOf([500]),
+          },
+          [hooksMeasurementName("unbatched", false, "oven")]: {
+            "2026-08-20": samplesOf([500]),
+          },
+        },
+      );
+      expect(fitted.suitesWithCoverage?.s?.unitHooks?.oven)
+        .toBeCloseTo(8, 0);
+      expect(fitted.suitesWithCoverage?.s?.unitHooks?.oven)
+        .toBeGreaterThanOrEqual(8);
+      expect(Object.keys(fitted.suitesWithCoverage?.s?.unitHooks ?? {}))
+        .toEqual(["oven"]);
+      expect(fitted.suites.s?.unitHooks?.icing).toBeCloseTo(0.5, 1);
+      expect(fitted.suites.unbatched).toBeUndefined();
+    });
+
+    it("names no hooks in a fit no unit of which has measured any", () => {
+      const fitted = calibrate({
+        setup: new Map(),
+        batches: [observed({ ran: 40, spent: 92, units: 4 })],
+      });
+      expect(fitted.suites.s).not.toHaveProperty("unitHooks");
     });
 
     it("carries no coverage figure for a suite run only without", () => {
