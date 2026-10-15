@@ -21,7 +21,7 @@ left behind; they are not migrated.
 
 | Record | Why it exists | Why it goes |
 | --- | --- | --- |
-| `requests`, the request memory | The room acts on a sender's `requestId` at most once, against a served handler running an event twice (`ChatRoomOutput.md`, "Streams"). | The runtime delivers one durable stream entry to its handler exactly once as a completed run (`docs/specs/server-side-execution/events.md`, "One entry, one COMPLETED delivery"). |
+| `requests`, the request memory | The room acts on a sender's `requestId` at most once, against a served handler running an event twice, and against a client re-submitting an append its process no longer remembers (`ChatRoomOutput.md`, "Streams"; `FabriChatRoom.md`, "Redelivery ends"). | The runtime covers both. One durable stream entry is delivered to its handler exactly once as a completed run, and admission enforces `eventId` uniqueness above the stream's watermark, with a re-sent append a durable outbox row deduped at the target's `eventId` horizon (`docs/specs/server-side-execution/events.md`, "One entry, one COMPLETED delivery" and §4). |
 | The replay check in a send | A send whose memo expired finds the message it made instead of overwriting it. | Same as above: there is no second run to guard against. |
 | `usedTimes` | Every recorded time is unique in the room (`ChatMessage.md`, "Unique times"), so `t<sentAt>` can serve as a message's key in the views. | A key minted from a timestamp is the user-land id `docs/common/patterns/primitives.md` rules out. A message is identified by its cell. |
 | The proposed-time window | A client proposes `sentAt` from its own clock, and the room records it within a window. | No client proposes a time. The room's own controls send text, and the handler stamps it. |
@@ -75,7 +75,10 @@ not touch (`about`, `titles`, the participant roster).
 
 - **Identity is the cell.** A handler is handed the message or reaction it acts
   on, and writes through it. Finding an item in a list is the exception, and
-  `.remove(item)` removes the elements that `.equals()` it.
+  `removeByValue(item)` removes the elements whose link matches it. It is the
+  mergeable removal, resolved against durable state, so an unreact and a
+  react on one message at the same moment both land; `remove()` reads the list
+  and sets it whole, and one of the two would clobber the other.
 - **Order is the list's order.** The conversation reads in the order messages
   were pushed. `sentAt` is the handler clock, shown to people, and not unique;
   nothing sorts or keys by it.
@@ -112,7 +115,9 @@ document.
 
 Removing an element writes `/*`, which the element's own policy governs, so a
 list needs no policy of its own, and an element's policy has to name every
-handler that removes it. Which person a handler acts for is the handler's check,
+handler that removes it. The spike removed with `remove()`; the rewrite uses
+`removeByValue()`, and stage 1 confirms the gate reads a mergeable removal the
+same way. Which person a handler acts for is the handler's check,
 not the label's: the label decides which code may write, and unreact compares
 the reaction's `authored-by` principal with `currentPrincipal()` itself, as
 edit and delete compare the author's profile today.
@@ -163,7 +168,7 @@ helper never touches. So:
 | `commitDelete` | the target; the sender's profile | the target |
 | `commitObliterate` | the target; the sender's profile and access; the room's policy | the target |
 | `commitSendReaction` | the target's reaction list | pushes onto it |
-| `commitDeleteReaction` | the reaction it is handed | removes it from its list |
+| `commitDeleteReaction` | the reaction it is handed; the message's `reactions` link | removes the reaction from that list |
 
 A reply's target, and an act's target, is checked to be one of the room's
 messages by identity. With an inline body and no `elementById` on the list, the
@@ -230,6 +235,14 @@ which this plan does not touch.
   own place instead of looking it up by a time key. `places` keyed by
   `t<sentAt>`, `viewKeyOf()`, `timeKeyOf()`, and `openThreadKey` go; the open
   thread is `composer.thread`, a cell.
+- **The message facts.** `messages.count`, `messages.oldestAt`,
+  `messages.newestAt`, and `messages.latest` stay. Under list order, `oldestAt`
+  is the first message's `sentAt` and `newestAt` the last's, with no sort.
+  `latest` is still the newest `maxWindowCount` messages of the main
+  conversation, so that policy field is still read. Home's recorded contract
+  embeds `ChatRoomLink` with `messages.count` and `messages.newestAt` (the
+  narrowed link `ChatIndexEntry.md` describes), so those two keep their names
+  and types.
 - **Windows.** `openWindow`, `closeWindow`, `ChatMessageWindow`, and
   `ChatWindowAnchor` page by `sentAt`, which is no longer unique. Nothing sends
   `openWindow` outside the specs and tests. **Proposal:** remove them; a
@@ -238,8 +251,9 @@ which this plan does not touch.
   record, and Home is a required pattern whose contract may not break without a
   ruling (`tasks/pattern-break-registry-guards.ts`). **Proposal:** keep its
   shape in this plan, with `proposedTimeMaxAgeNsec`, `proposedTimeMaxLeadNsec`,
-  `recentActivityWindowNsec`, `keepsHistory`, `maxWindowCount`, and
-  `maxOpenWindows` read by nothing, and retire them in a change of their own.
+  `recentActivityWindowNsec`, `keepsHistory`, and `maxOpenWindows` read by
+  nothing, and retire them in a change of their own. `maxWindowCount` is still
+  read, by `latest`.
 
 ## Consumers
 
@@ -251,7 +265,7 @@ which this plan does not touch.
   `requests`, the outcomes of `createGroup` and the rest, are a different
   record and stay.
 - **`system/home.tsx`, `loom/main.tsx`.** Unchanged, given the `ChatRoomPolicy`
-  proposal.
+  proposal and the message facts Home's contract embeds.
 - **Loom's `loom-daemon/loom-chats.ts`.** Reads `messages` as a list of cells
   holding `{ body, sentAt, authorProfile }` and keys each by its entity id;
   that shape stays. Nothing else in loom (`origin/main` at `1f3f6a1fe`) reads a
@@ -283,6 +297,7 @@ Home and the default app may not appear in either list, which the
 obliterated messages), `ChatReaction.md` (address and uniqueness),
 `ChatRoomOutput.md` (streams, the rules that hold for every stream, recorded
 times, `recentActivity`, `messageRequests`), `ChatMessageList.md` (windows),
+`ChatThreadSummary.md` (`latestReplyAt` no longer identifies a reply),
 `FabriChatRoom.md` (stored records, writers, prerequisites), `clients.md`
 (proposed times, following a room, unacknowledged sends), and `README.md`.
 `ChatRoomActivity.md`, `ChatMessageWindow.md`, and `ChatWindowAnchor.md`
@@ -307,6 +322,14 @@ describe surfaces this plan removes, and are archived.
 - Whether a pushed reaction list created by the send, under
   `TrustedActionWrite`, admits the reaction handlers' pushes as the spike's
   `WriteAuthorizedBy` version does. Stage 1 answers it first.
+- Whether the write-policy gate reads a `removeByValue()` as it read the
+  spike's `remove()`: a refusal at `/*` for an element whose policy does not
+  name the handler.
+- Whether an admitted rewrite by someone other than the author relabels the
+  element with the new writer, which obliteration by an OWNER rests on. The
+  spike refused such a rewrite and never admitted one;
+  `owner-obliteration.test.tsx` exercises it on today's records, which are the
+  same document kind, so stage 1's tests cover it on the new shape.
 - The contract-gate route: 55 accepted-break pairs, or a new path.
 - Whether the room's output should offer the session's refusal text at all, or
   whether the refused act's absence from the room is enough for a client that
