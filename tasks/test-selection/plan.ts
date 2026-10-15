@@ -1556,9 +1556,10 @@ export interface FullLaneCount {
 }
 
 /**
- * How many lanes the full run takes: the fewest, up to `most`, at which
- * nothing mandatory overflows, so that each identity either fits a lane's
- * budget or runs alone in a lane of its own.
+ * How many lanes the full run takes: the fewest at which a bisection
+ * finds that nothing mandatory overflows, so that each identity either
+ * fits a lane's budget or runs alone in a lane of its own, or `most`
+ * where even that many lanes overflow.
  *
  * A pull request has a fixed number of lanes, so each one works out its
  * own share and no job sits ahead of them. `main` cannot: the number

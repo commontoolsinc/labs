@@ -176,8 +176,9 @@ way a change's lanes do. What travels through job outputs is only the
 lane count and the `--full` that tells each lane to run everything, never
 which lane runs which test.
 
-The count is the fewest lanes at which nothing mandatory overflows, or
-`FULL_LANES_MAX` where even that many lanes overflow. An identity
+The count is the fewest lanes at which a bisection, described below,
+finds that nothing mandatory overflows, or `FULL_LANES_MAX` where even
+that many lanes overflow. An identity
 overflows when no lane can hold even one run of it and no lane is empty
 to run it alone. So unless the cap holds the run back, every identity
 either fits inside a lane's budget or runs alone, and the only lanes past
