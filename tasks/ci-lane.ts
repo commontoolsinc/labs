@@ -84,6 +84,7 @@ import {
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
+  type FullLaneCount,
   fullLaneCount,
   type Plan,
   plan,
@@ -2066,13 +2067,17 @@ export async function fullLanes(
 ): Promise<number> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
   const { manifest, changed } = await read(options, deps);
-  const needed = fullLanesNeeded(suites, manifest, changed, options.full);
-  const lanes = Math.min(needed, FULL_LANES_MAX);
-  if (needed > lanes) {
+  const { lanes, capped } = fullLanesNeeded(
+    suites,
+    manifest,
+    changed,
+    options.full,
+  );
+  if (capped) {
     console.error(
-      `ci-lane: the full run needs ${needed} lanes and takes ` +
-        `${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane may ` +
-        `run past its budget`,
+      `ci-lane: the full run needs more than ${FULL_LANES_MAX} lanes and ` +
+        `takes ${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane ` +
+        `may run past its budget`,
     );
   }
   const { laid } = planOver({
@@ -2122,13 +2127,13 @@ export function describeFullLanes(laid: Plan, prologue: number): void {
   ], console.error);
 }
 
-/** How many lanes the full run would take with no cap on them. */
+/** How many lanes the full run takes, up to `FULL_LANES_MAX`. */
 function fullLanesNeeded(
   suites: readonly Suite[],
   manifest: Manifest | undefined,
   changed: ReadonlySet<string>,
   full: boolean,
-): number {
+): FullLaneCount {
   const seen = pricedOver({ suites, manifest, changed, full });
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
@@ -2161,14 +2166,17 @@ function fullLanesNeeded(
       capabilities: capabilitiesBySuite(suites),
       wholeUnits: wholeUnits(suites),
     });
-    const lanes = Math.max(1, running.length, byCost);
+    const wanted = Math.max(1, running.length, byCost.lanes);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
-        `count is ${lanes} — ${running.length} suites with anything to ` +
-        `run, and ${byCost} from packing the stand-ins — rather than a ` +
-        `projection from costs nobody has measured`,
+        `count is ${wanted} — ${running.length} suites with anything to ` +
+        `run, and ${byCost.lanes} from packing the stand-ins — rather ` +
+        `than a projection from costs nobody has measured`,
     );
-    return lanes;
+    return {
+      lanes: Math.min(wanted, FULL_LANES_MAX),
+      capped: byCost.capped || wanted > FULL_LANES_MAX,
+    };
   }
   return fullLaneCount({
     manifest: seen.manifest,
