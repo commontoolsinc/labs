@@ -887,9 +887,11 @@ describe("extended-storage-transaction", () => {
     /**
      * Commits the link the boundary pass refuses, prepared first as the
      * scheduler prepares a handler's transaction, and returns the result with
-     * the write-policy refusals the runtime reported meanwhile.
+     * the write-policy refusals the runtime reported meanwhile. `between` runs
+     * after the preparation and before the commit, where the destination's
+     * answer can change.
      */
-    const commitLink = async () => {
+    const commitLink = async (between: () => void = () => {}) => {
       const refusedBefore = policyRefusals();
       const tx = serving.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
@@ -897,6 +899,7 @@ describe("extended-storage-transaction", () => {
         serving.getCell(space, "discarded-source", undefined, tx),
       );
       serving.prepareTxForCommit(tx);
+      between();
       const result = await tx.commit().settled;
       return { result, refused: policyRefusals() - refusedBefore };
     };
@@ -917,6 +920,35 @@ describe("extended-storage-transaction", () => {
 
       expect(result.error).toBeUndefined();
       expect(refused).toBe(0);
+      expect(sealed).toBe(1);
+    });
+
+    it("refuses the link at commit when the destination discarded it at preparation but seals it now", async () => {
+      // The overlay prunes its memory of terminal intents, so a run it would
+      // have dropped at preparation can be one it seals at commit. The commit
+      // asks again, and runs the pass the preparation skipped.
+      discards = true;
+
+      const { result, refused } = await commitLink(() => {
+        discards = false;
+      });
+
+      expect(result.error?.name).toBe("CfcCommitRefusalError");
+      expect(result.error?.message).toContain("missing link source metadata");
+      expect(refused).toBeGreaterThan(0);
+      expect(sealed).toBe(0);
+    });
+
+    it("hands the destination a link the pass refused at preparation, when the destination discards it at commit", async () => {
+      // The pass ran at preparation and reported its refusal. The commit does
+      // not fail on that verdict: the destination drops the writes, so the
+      // refused link reaches no store and no reader.
+      const { result, refused } = await commitLink(() => {
+        discards = true;
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(refused).toBeGreaterThan(0);
       expect(sealed).toBe(1);
     });
   });

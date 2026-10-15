@@ -1947,6 +1947,12 @@ export interface TransactionSealDestination {
    * pass for a transaction this returns `true` for: writes that reach no
    * store and no reader cross no boundary. Absent, the commit treats no
    * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   *
+   * The answer is for the moment it is asked and binds nothing: a destination
+   * may answer differently later, in either direction, and `seal` decides for
+   * itself when it runs. A commit therefore asks again right before it seals,
+   * in the same synchronous stretch as the seal's own decision, rather than
+   * trusting what a preparation ahead of it was told.
    */
   discards?(tx: IExtendedStorageTransaction): boolean;
 

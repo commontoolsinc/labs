@@ -3186,6 +3186,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    * authoritative writes arrive, and the pass would refuse what it read there.
    * `prepareCfc()` still runs the pass, for a caller that asks for the verdict
    * and its digest outright.
+   *
+   * The destination answers for the moment it is asked, so `#commit()` asks
+   * again instead of trusting the answer a preparation ahead of it got. A
+   * destination that said `true` then and says `false` now, as the
+   * speculation overlay does once it has pruned the intent from its bounded
+   * memory, gets the pass at commit. One that says `true` now is handed the
+   * transaction with no `await` between its answer and its seal, so nothing
+   * changes between the two. The other way round, a destination that said
+   * `false` at preparation and says `true` now has had the pass run and
+   * report what it refused; the commit does not fail on that verdict, and
+   * hands the destination the transaction, whose writes go nowhere.
    */
   #discardedBySealDestination(): boolean {
     return this.#sealDestination?.discards?.(this) === true;
