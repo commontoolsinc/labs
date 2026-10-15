@@ -11020,9 +11020,10 @@ const toRejectedError = (
     // Scoped descriptors cross current protocol boundaries structurally.
     // Message-only errors retain default-scope recovery for every named read.
     const toConflicts = (details: unknown): IConflictError["conflict"][] => {
-      const { of, scope } = (details ?? {}) as {
+      const { of, scope, seq } = (details ?? {}) as {
         of?: unknown;
         scope?: unknown;
+        seq?: unknown;
       };
       return typeof of === "string"
         ? [{
@@ -11030,6 +11031,7 @@ const toRejectedError = (
           the: DOCUMENT_MIME,
           of: of as Entity,
           ...(isCellScope(scope) ? { scope } : {}),
+          ...(typeof seq === "number" ? { seq } : {}),
         }]
         : [];
     };
