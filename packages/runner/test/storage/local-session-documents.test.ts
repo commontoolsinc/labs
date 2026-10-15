@@ -7,12 +7,16 @@ import {
   commitPreconditionValueHash,
 } from "@commonfabric/memory/v2";
 
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+
 import { Runtime } from "../../src/runtime.ts";
 import { getCommitLocalSeq } from "../../src/storage/commit-identity.ts";
 import { restrictToLocalReads } from "../../src/storage/local-read-policy.ts";
 import { EmulatedStorageManager } from "../../src/storage/v2-emulate.ts";
+import type { SpaceReplica } from "../../src/storage/v2.ts";
 import {
   newSharedServer,
+  testPrincipalSessionOpenAuthFactory,
   TestStorageManager,
 } from "../memory-v2-test-utils.ts";
 
@@ -79,6 +83,300 @@ describe("local-session-documents", () => {
       expect(cell.get()).toBe(3);
       await storage.synced();
       expect(connections).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
+
+  for (const serverExecution of [false, true]) {
+    it(`refuses conflicting execution modes on a shared manager (${serverExecution})`, async () => {
+      const storage = EmulatedStorageManager.emulate({ as: signer });
+      const first = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: { serverExecution },
+      });
+      let second: Runtime | undefined;
+      try {
+        expect(() => {
+          second = new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager: storage,
+            experimental: { serverExecution: !serverExecution },
+          });
+        }).toThrow("Session document policy is already configured");
+        storage.setLocalSessionDocuments(!serverExecution);
+      } finally {
+        await second?.dispose();
+        await first.dispose();
+        await storage.close();
+      }
+    });
+  }
+
+  it("preserves session documents and local origins across a route replacement", async () => {
+    let connections = 0;
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("https://default.test"),
+    }, {
+      create() {
+        connections++;
+        throw new Error("Local state must not open a connection");
+      },
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+      experimental: { serverExecution: false, commitPreconditions: true },
+    });
+    try {
+      const cell = runtime.getCell<number>(
+        space,
+        "route-count",
+        undefined,
+        undefined,
+        "session",
+      );
+      const seed = runtime.edit();
+      cell.withTx(seed).set(1);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const originLocalSeq = getCommitLocalSeq(seed.tx, space)!;
+      const previous = storage.open(space).replica;
+      expect(storage.registerSpaceHostDetailed(space, "https://hinted.test"))
+        .toEqual({ accepted: true });
+      await storage.crossSpaceSettled();
+      expect(storage.open(space).replica).not.toBe(previous);
+      expect(cell.get()).toBe(1);
+      const guarded = runtime.edit();
+      guarded.addCommitPrecondition!(space, {
+        kind: "origin-committed",
+        originLocalSeq,
+      });
+      cell.withTx(guarded).set(2);
+      expect((await guarded.commit().settled).error).toBeUndefined();
+      expect(getCommitLocalSeq(guarded.tx, space)).toBeGreaterThan(
+        originLocalSeq,
+      );
+      expect(cell.get()).toBe(2);
+      expect(connections).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
+
+  it("rejects a guard on an early-rejected local origin without sending it", async () => {
+    const server = newSharedServer();
+    const repairing = Promise.withResolvers<void>();
+    const repaired = Promise.withResolvers<void>();
+    let sends = 0;
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("https://default.test"),
+    }, {
+      async create(space, signer, options) {
+        const client = await MemoryV2Client.connect({
+          transport: MemoryV2Client.loopback(server),
+        });
+        const session = await client.mount(
+          space,
+          options,
+          testPrincipalSessionOpenAuthFactory(signer),
+        );
+        session.transact = (commit) => {
+          sends++;
+          return Promise.reject({
+            name: "ConflictError",
+            message: "controlled rejection",
+            readyToRetry: () => {
+              repairing.resolve();
+              return repaired.promise.then(() => {
+                (storage.open(space).replica as SpaceReplica)
+                  .accessForTestingOnly
+                  .noteCaughtUpLocalSeq(commit.localSeq);
+              });
+            },
+          });
+        };
+        return { client, session };
+      },
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+      experimental: { serverExecution: false, commitPreconditions: true },
+    });
+    try {
+      const session = runtime.getCell<number>(
+        space,
+        "rejected-count",
+        undefined,
+        undefined,
+        "session",
+      );
+      const shared = runtime.getCell<number>(space, "rejected-shared");
+      const parent = runtime.edit();
+      session.withTx(parent).set(1);
+      shared.withTx(parent).set(1);
+      const parentCommit = parent.commit();
+      await repairing.promise;
+      const child = runtime.edit();
+      session.withTx(child).set(session.withTx(child).get() + 1);
+      const childCommit = child.commit();
+      const originLocalSeq = getCommitLocalSeq(child.tx, space)!;
+      repaired.resolve();
+      expect((await parentCommit.settled).error?.name).toBe("ConflictError");
+      expect((await childCommit.settled).error?.name).toBe("ConflictError");
+      const guarded = runtime.edit();
+      guarded.addCommitPrecondition!(space, {
+        kind: "origin-committed",
+        originLocalSeq,
+      });
+      session.withTx(guarded).set(3);
+      expect((await guarded.commit().settled).error?.name).toBe(
+        "PreconditionFailedError",
+      );
+      expect(sends).toBe(1);
+    } finally {
+      repaired.resolve();
+      await runtime.dispose();
+      await storage.close();
+      await server.close();
+    }
+  });
+
+  for (const serverExecution of [false, true]) {
+    for (const stale of [false, true]) {
+      it(`validates shared reads used by a session write (${serverExecution}, stale ${stale})`, async () => {
+        const server = newSharedServer();
+        const writerStorage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const readerStorage = EmulatedStorageManager.connectTo(server, {
+          as: signer,
+        });
+        const writer = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: writerStorage,
+        });
+        const reader = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager: readerStorage,
+          experimental: { serverExecution, commitPreconditions: true },
+        });
+        try {
+          const seed = writer.edit();
+          writer.getCell<number>(space, "shared-read", undefined, seed).set(1);
+          expect((await seed.commit().settled).error).toBeUndefined();
+          const shared = reader.getCell<number>(space, "shared-read");
+          if (!stale) await shared.sync();
+          const tx = reader.edit();
+          expect(shared.withTx(tx).get()).toBe(stale ? undefined : 1);
+          const local = reader.getCell<number>(
+            space,
+            "shared-read-output",
+            undefined,
+            undefined,
+            "session",
+          );
+          local.withTx(tx).set(2);
+          expect((await tx.commit().settled).error?.name).toBe(
+            stale ? "ConflictError" : undefined,
+          );
+          expect(local.get()).toBe(stale ? undefined : 2);
+          if (!stale) {
+            const guarded = reader.edit();
+            guarded.addCommitPrecondition!(space, {
+              kind: "origin-committed",
+              originLocalSeq: getCommitLocalSeq(tx.tx, space)!,
+            });
+            local.withTx(guarded).set(3);
+            expect((await guarded.commit().settled).error).toBeUndefined();
+            expect(local.get()).toBe(3);
+          }
+        } finally {
+          await reader.dispose();
+          await writer.dispose();
+          await readerStorage.close();
+          await writerStorage.close();
+          await server.close();
+        }
+      });
+    }
+  }
+
+  it("rejects a waiting blind session write when its route is replaced", async () => {
+    const started = Promise.withResolvers<void>();
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("https://default.test"),
+    }, {
+      create(_space, _signer, _options, signal) {
+        started.resolve();
+        return new Promise((_, reject) => {
+          const abort = () => reject(signal?.reason ?? new Error("aborted"));
+          if (signal?.aborted) abort();
+          else signal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+      experimental: { serverExecution: false },
+    });
+    try {
+      const local = runtime.getCell<number>(
+        space,
+        "waiting-local",
+        undefined,
+        undefined,
+        "session",
+      );
+      const seed = runtime.edit();
+      local.withTx(seed).set(1);
+      expect((await seed.commit().settled).error).toBeUndefined();
+      const replica = storage.open(space).replica;
+      const id = local.getAsNormalizedFullLink().id;
+      const mixed = replica.commitNative!({
+        operations: [
+          {
+            op: "set",
+            id,
+            type: "application/json",
+            scope: "session",
+            value: { value: 2 },
+          },
+          {
+            op: "set",
+            id: "of:waiting-shared",
+            type: "application/json",
+            scope: "space",
+            value: { value: 3 },
+          },
+        ],
+      });
+      await started.promise;
+      const blind = replica.commitNative!({
+        operations: [
+          {
+            op: "set",
+            id,
+            type: "application/json",
+            scope: "session",
+            value: { value: 4 },
+          },
+        ],
+      });
+      expect(local.get()).toBe(4);
+      expect(storage.registerSpaceHostDetailed(space, "https://hint.test"))
+        .toEqual({ accepted: true });
+      await storage.crossSpaceSettled();
+      expect((await mixed).error?.name).toBe("ConflictError");
+      expect((await blind).error?.name).toBe("ConflictError");
+      expect(local.get()).toBe(1);
     } finally {
       await runtime.dispose();
       await storage.close();

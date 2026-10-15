@@ -347,7 +347,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   setSharedMemoryConnection?(enabled: boolean): void;
 
-  /** Keeps session-scoped documents in the local replica when enabled. */
+  /**
+   * Keeps session-scoped documents in the local replica when enabled.
+   * Repeated configuration must agree across runtimes sharing this manager.
+   * @throws If a different policy has already been configured.
+   */
   setLocalSessionDocuments?(enabled: boolean): void;
 
   /**

@@ -32,9 +32,15 @@ Documents also carry a **scope key**. `PerUser`/`PerSession` cells
 revisions by `scope_key` derived from the session's principal
 (`v2/engine.ts`). Isolation by partition, not by discipline.
 
+With server execution disabled, session documents live only in the owning
+runtime's local replica. Their reads and writes open no server connection,
+and their values are not persisted in the space's SQLite database. Space and
+user documents still synchronize. With server execution enabled, session
+documents synchronize too, so the serving runtime can read and derive them.
+
 ## The commit protocol: optimistic concurrency via read sets
 
-A client ships each transaction as a `ClientCommit`
+A client sends the synchronized part of a transaction as a `ClientCommit`
 (`packages/memory/v2.ts`):
 
 ```ts
@@ -50,6 +56,15 @@ ClientCommit {
   // observations, branch/merge fields, ...)
 }
 ```
+
+In client-execution mode, transactions whose reads and writes are entirely
+session-scoped settle locally. A session write that consumes shared state still
+sends those shared reads for server validation. Mixed
+transactions send their space/user operations and reads while keeping session
+operations and reads local. Their optimistic session writes settle with the
+server verdict: rejection rolls them back and rejects dependent local writes.
+Local origin and value preconditions are checked by the replica; the server
+validates the synchronized portion described below.
 
 A `patch` operation is itself a small language: alongside the
 diff-generated ops (`replace`, `add`, `remove`, `move`, `splice`) it
@@ -108,7 +123,12 @@ Offline-tolerant by construction, within a session's lifetime.
 
 ## Subscriptions: watches over schema-shaped graphs
 
-The read side mirrors the reactive model. Over one WebSocket, a client opens
+Local session reads in client-execution mode subscribe to replica changes
+without registering server graph watches. A local write or rollback notifies
+reactive readers through the same sink/trigger machinery.
+
+For synchronized documents, the read side mirrors the reactive model. Over one
+WebSocket, a client opens
 a session per space (`hello` → `session.open`, then `transact` /
 `graph.query` / `session.watch.set` / `session.watch.add` / `session.ack`).
 

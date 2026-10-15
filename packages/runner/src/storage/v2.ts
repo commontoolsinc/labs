@@ -1618,7 +1618,7 @@ export class StorageManager implements IStorageManager {
 
   /** What `setSharedMemoryConnection()` last declared. */
   #sharedMemoryConnection = false;
-  #localSessionDocuments = false;
+  #localSessionDocuments: boolean | undefined;
   #eventAppendQueueStore?: EventAppendQueueStore;
   #eventAppendPacing?: EventAppendPacing | false;
 
@@ -2049,6 +2049,12 @@ export class StorageManager implements IStorageManager {
 
   /** @inheritDoc */
   setLocalSessionDocuments(enabled: boolean): void {
+    if (
+      this.#localSessionDocuments !== undefined &&
+      this.#localSessionDocuments !== enabled
+    ) {
+      throw new Error("Session document policy is already configured");
+    }
     this.#localSessionDocuments = enabled;
   }
 
@@ -2231,7 +2237,7 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         scopeKeyIdentity: () => this.scopeKeyIdentity(),
-        localSessionDocuments: () => this.#localSessionDocuments,
+        localSessionDocuments: () => this.#localSessionDocuments === true,
         // Phase 5's producer-side foreign-scoped-read refusal: only a
         // serving manager sets a home space, and only its FOREIGN
         // providers refuse (see Options.servingHomeSpace).
@@ -4136,6 +4142,7 @@ class Provider
     this.options.routeState.generation++;
     this.#routeAbort = new AbortController();
     const replacement = this.#createReplica();
+    previous.transferLocalSessionStateTo(replacement);
     this.replica = replacement;
     for (const subscription of this.#operationSubscriptions) {
       subscription.cancel?.();
@@ -7074,6 +7081,25 @@ export class SpaceReplica
     }
   }
 
+  /** Carries confirmed local session state into a fresh route replica. */
+  transferLocalSessionStateTo(replacement: SpaceReplica): void {
+    if (!this.#localSessionDocuments()) return;
+    const prefix = `${this.instanceKey("session")}\0`;
+    for (const [key, record] of this.#docs) {
+      if (!key.startsWith(prefix)) continue;
+      replacement.#docs.set(key, {
+        confirmed: record.confirmed,
+        pending: [],
+      });
+    }
+    // Pending origins remain rejected in the replacement: the route reset
+    // cancels their writes. Sequence numbers cannot be reused by new commits.
+    for (const [seq, accepted] of this.#localSessionCommitAccepted) {
+      replacement.#localSessionCommitAccepted.set(seq, accepted);
+    }
+    replacement.#nextLocalSeq = this.#nextLocalSeq;
+  }
+
   reset(): void {
     // Every unsettled in-flight commit's optimistic pending write is about to
     // be wiped by #docs.clear(); locally reject each so its pushCommit
@@ -7728,6 +7754,28 @@ export class SpaceReplica
       commit,
       source,
     );
+    const remoteOperations = commit.operations.filter((operation) =>
+      !("id" in operation && this.#isLocalSessionDocument(operation))
+    );
+    const remotePreconditions = commit.preconditions?.filter((pin) =>
+      pin.kind === "origin-committed"
+        ? !this.#localSessionCommitAccepted.has(pin.originLocalSeq)
+        : !this.#isLocalSessionDocument(pin)
+    );
+    const remoteReads = {
+      confirmed: commit.reads.confirmed.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+      pending: commit.reads.pending.filter((read) =>
+        !this.#isLocalSessionDocument(read)
+      ),
+    };
+    const localOnly = this.#localSessionDocuments() &&
+      remoteOperations.length === 0 && !remotePreconditions?.length &&
+      remoteReads.confirmed.length === 0 && remoteReads.pending.length === 0;
+    // Record local origins before the first rejection checkpoint: a later
+    // guard must validate their failed verdict without contacting the server.
+    if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
     const telemetry = this.#getTelemetry();
     const pushOpId = `push:${this.#space}:${localSeq}`;
     try {
@@ -7775,23 +7823,12 @@ export class SpaceReplica
       // verdict or local application. Promote that dependency before its
       // consumer can replace the confirmed base.
       if (this.#localSessionDocuments()) {
-        const remoteOperations = commit.operations.filter((operation) =>
-          !("id" in operation && this.#isLocalSessionDocument(operation))
-        );
-        const remotePreconditions = commit.preconditions?.filter((pin) =>
-          pin.kind === "origin-committed"
-            ? !this.#localSessionCommitAccepted.has(pin.originLocalSeq)
-            : !this.#isLocalSessionDocument(pin)
-        );
         const origins = (commit.preconditions ?? []).flatMap((pin) =>
           pin.kind === "origin-committed" ? [pin.originLocalSeq] : []
         );
         const localOrigins = origins.filter((seq) =>
           this.#localSessionCommitAccepted.has(seq)
         );
-        const localOnly = remoteOperations.length === 0 &&
-          !remotePreconditions?.length;
-        if (localOnly) this.#localSessionCommitAccepted.set(localSeq, false);
         // An origin can itself be waiting for local session dependencies
         // before it reaches the server. Its guarded write must follow it.
         const dependencies = new Set<number>(origins);
@@ -7819,6 +7856,20 @@ export class SpaceReplica
               await this.#commitOutcomeBySeq.get(seq);
               await this.whenApplied(seq);
             }),
+          );
+        }
+        if (this.#closed) {
+          const rejection = this.#makeLocalRejection(
+            commit,
+            "memory replica closed before local session commit settled",
+          );
+          notifyRejectionSources(rejection);
+          return await this.#finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            rejection,
+            { pushed: false },
           );
         }
         const failedOrigin = localOrigins.find((seq) =>
@@ -7853,14 +7904,7 @@ export class SpaceReplica
         }
         commit = {
           ...commit,
-          reads: {
-            confirmed: commit.reads.confirmed.filter((read) =>
-              !this.#isLocalSessionDocument(read)
-            ),
-            pending: commit.reads.pending.filter((read) =>
-              !this.#isLocalSessionDocument(read)
-            ),
-          },
+          reads: remoteReads,
           operations: remoteOperations,
           preconditions: remotePreconditions,
         };

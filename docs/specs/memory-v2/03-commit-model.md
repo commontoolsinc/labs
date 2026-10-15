@@ -45,8 +45,9 @@ just a JSON subset.
 
 ## 3.2 Transaction Structure
 
-A transaction groups one or more operations into an atomic unit. All operations
-succeed or all fail.
+A transaction groups operations and their validation requirements into an atomic
+unit. All operations succeed or all fail; a validation-only transaction carries
+no operations.
 
 ```typescript
 // Shown at module scope.
@@ -57,8 +58,13 @@ interface Transaction {
 }
 ```
 
-A transaction MUST contain at least one operation. Validation of all reads
-happens before any writes are applied.
+A transaction MUST contain operations, reads, or preconditions, unless it is a
+server wave carrying outbound appends. A validation-only transaction
+checks its reads and records a commit verdict without creating document revisions.
+Client-executed session writes use this form when their shared reads require
+server validation but their writes remain local. Validation of all reads happens
+before any writes are applied. Client rollout of local session storage requires
+servers that admit validation-only commits.
 
 ## 3.3 Client State: Confirmed and Pending
 
