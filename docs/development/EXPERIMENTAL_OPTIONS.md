@@ -767,13 +767,18 @@ holds the measurements and the conditions for revisiting.
   documents. `serverExecution: true` always synchronizes them, regardless of
   this flag.
 - **Added by:** Bernhard Seefeld (#8919).
-- **Purpose:** in client-execution mode, keep session documents in their owning
-  replica. Session reads create no remote watches, and outgoing commits omit
-  session operations and read dependencies. Transactions whose reads, writes,
-  and preconditions are entirely local settle without opening a connection.
+- **Purpose:** in client-execution mode, keep the replica's own session instance
+  local. Its reads create no remote watches, and outgoing commits omit its
+  operations and read dependencies. Explicitly named foreign session instances
+  use server reads and admission; they are not treated as locally absent.
+  Transactions whose reads, writes, and preconditions are entirely local settle
+  without opening a connection.
   Shared reads still require server validation, even when all writes are local.
   Mixed commits roll back session writes on rejection. Runtimes sharing a
   storage manager must agree on the effective session-storage policy.
+- **Toolshed:** publishes the deployment's flag for clients but keeps its own
+  webhook runtime's session documents synchronized, so their values remain in
+  the server store across runtime recreation.
 - **Rollout:** deploy memory-server support for validation-only commits before
   enabling the flag. Older servers reject session writes that require shared-read
   validation. Leave the flag off until that support is deployed.

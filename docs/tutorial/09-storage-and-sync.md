@@ -34,12 +34,15 @@ revisions by `scope_key` derived from the session's principal
 
 Session documents synchronize by default. With the experimental
 [`localSessionDocuments`](../development/EXPERIMENTAL_OPTIONS.md#localsessiondocuments)
-flag enabled and server execution disabled, they live only in the owning
-runtime's local replica. A transaction whose reads, writes, and preconditions
-are entirely local needs no server connection. Session values are not persisted
-in the space's SQLite database. Space and user documents still synchronize.
+flag enabled and server execution disabled, the runtime's own session instance
+lives only in its local replica. Explicit foreign-instance reads still go to the
+server for admission and loading. A transaction whose reads, writes, and
+preconditions are entirely local needs no server connection. Values of the local
+session instance are not persisted in the space's SQLite database. Space and
+user documents still synchronize.
 Server execution always synchronizes session documents so the serving runtime
-can read and derive them.
+can read and derive them. Toolshed's webhook runtime keeps its session state
+synchronized even when the deployment enables local session storage for clients.
 
 ## The commit protocol: optimistic concurrency via read sets
 

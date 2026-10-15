@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import {
   type ClientCommit,
   commitPreconditionValueHash,
+  resolveScopeKey,
 } from "@commonfabric/memory/v2";
 
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -83,6 +84,98 @@ describe("local-session-documents", () => {
       expect(cell.get()).toBe(3);
       await storage.synced();
       expect(connections).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
+
+  it("synchronizes foreign session instances while keeping its own instance local", async () => {
+    let connections = 0;
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("https://default.test"),
+    }, {
+      create() {
+        connections++;
+        throw new Error("Foreign instance reached the server connection");
+      },
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+      experimental: { localSessionDocuments: true, serverExecution: false },
+    });
+    try {
+      const cell = runtime.getCell<number>(
+        space,
+        "instances",
+        undefined,
+        undefined,
+        "session",
+      );
+      const id = cell.getAsNormalizedFullLink().id;
+      const own = runtime.scopeKeyIdentity;
+      const foreign = { ...own, sessionId: "another-session" };
+      const ownKey = resolveScopeKey("session", own);
+      const foreignKey = resolveScopeKey("session", foreign);
+      const replica = storage.open(space).replica as SpaceReplica;
+      expect(replica.hasLocalDocumentCoverage(id, "session", own)).toBe(true);
+      expect(replica.hasLocalDocumentCoverage(id, "session", foreign)).toBe(
+        false,
+      );
+      expect((await replica.sync(id, undefined, "session", ownKey)).error)
+        .toBeUndefined();
+      expect(connections).toBe(0);
+      const tx = runtime.edit();
+      cell.withTx(tx).set(1);
+      expect((await tx.commit().settled).error).toBeUndefined();
+      replica.accessForTestingOnly.applySessionSync({
+        type: "sync",
+        fromSeq: 0,
+        toSeq: 5,
+        upserts: [ownKey, foreignKey].map((scopeKey) => ({
+          branch: "",
+          id,
+          scope: "session",
+          scopeKey,
+          seq: 5,
+          doc: { value: 2 },
+        })),
+        removes: [],
+      }, "integrate");
+      expect(cell.get()).toBe(1);
+      expect(replica.getDocument(id, "session", foreign)?.value).toBe(2);
+      expect(replica.hasLocalDocumentCoverage(id, "session", foreign)).toBe(
+        true,
+      );
+      replica.accessForTestingOnly.applySessionSync({
+        type: "sync",
+        fromSeq: 5,
+        toSeq: 6,
+        upserts: [],
+        removes: [ownKey, foreignKey].map((scopeKey) => ({
+          branch: "",
+          id,
+          scope: "session",
+          scopeKey,
+        })),
+      }, "integrate");
+      expect(cell.get()).toBe(1);
+      expect(replica.getDocument(id, "session", foreign)).toBeUndefined();
+      expect(storage.registerSpaceHostDetailed(space, "https://hinted.test"))
+        .toEqual({ accepted: true });
+      await storage.crossSpaceSettled();
+      const replacement = storage.open(space).replica as SpaceReplica;
+      expect(replacement).not.toBe(replica);
+      expect(cell.get()).toBe(1);
+      expect(replacement.hasLocalDocumentCoverage(id, "session", foreign)).toBe(
+        false,
+      );
+      expect(
+        (await replacement.sync(id, undefined, "session", foreignKey)).error,
+      ).toBeDefined();
+      expect(connections).toBe(1);
     } finally {
       await runtime.dispose();
       await storage.close();

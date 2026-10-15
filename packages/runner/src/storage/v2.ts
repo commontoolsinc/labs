@@ -5860,7 +5860,7 @@ export class SpaceReplica
     scope?: CellScope,
     identity?: ScopeKeyIdentity,
   ): boolean {
-    if (this.#isLocalSessionDocument({ scope })) return true;
+    if (this.#isLocalSessionDocument({ scope }, identity)) return true;
     const key = this.#docKeyOf({ id, scope }, identity);
     const record = this.#docs.get(key);
     return this.#delivered.has(key) ||
@@ -7434,8 +7434,13 @@ export class SpaceReplica
   }
 
   /** Returns whether an address is held only in this replica. */
-  #isLocalSessionDocument(address: { scope?: CellScope }): boolean {
-    return this.#localSessionDocuments() && address.scope === "session";
+  #isLocalSessionDocument(
+    address: { scope?: CellScope; scopeKey?: ScopeKey },
+    identity?: ScopeKeyIdentity,
+  ): boolean {
+    return this.#localSessionDocuments() && address.scope === "session" &&
+      this.instanceKey("session", identity, address.scopeKey) ===
+        this.instanceKey("session");
   }
 
   async #commitOperations(
@@ -8657,7 +8662,7 @@ export class SpaceReplica
     const pending: PendingCommitRead[] = [];
     const localPreconditions = preconditions
       .filter((pin) => pin.kind !== "origin-committed")
-      .filter((pin) => this.#isLocalSessionDocument(pin));
+      .filter((pin) => this.#isLocalSessionDocument(pin, identity));
     if (!source && localPreconditions.length === 0) {
       return { confirmed, pending };
     }
@@ -10237,14 +10242,14 @@ export class SpaceReplica
     // report names operations by that index.
     const operationKeys = this.#touchedOf(
       operations.filter((operation) =>
-        !this.#isLocalSessionDocument(operation)
+        !this.#isLocalSessionDocument(operation, identity)
       ),
       identity,
     ).map((
       address,
     ) => this.#docKeyOf(address));
     for (const [key, { id, scope, scopeKey }] of keys.entries()) {
-      const local = this.#isLocalSessionDocument({ scope });
+      const local = this.#isLocalSessionDocument({ scope, scopeKey }, identity);
       const acceptedSeq = local ? localSeq : applied.seq;
       const record = this.#record(id, scope, undefined, scopeKey);
       const pendingIndexes = record.pending.flatMap((entry, index) =>

@@ -29,9 +29,12 @@ space < user < session
 `space` is the broadest scope. `session` is the narrowest scope.
 
 When a runtime enables `localSessionDocuments` with server execution disabled,
-session-scoped documents live in its local replica. Session reads do not register remote watches, and
-session values and read dependencies are omitted from outgoing commits. Local
-writes still notify reactive readers. A transaction that also writes space or
+its own session instance lives in its local replica. Reads of that instance
+register no remote watches, and its values and read dependencies are omitted
+from outgoing commits. Explicitly named foreign session instances retain server
+reads and admission; coverage checks do not treat an unloaded foreign instance
+as locally absent. Local writes still notify reactive readers. A transaction
+that also writes space or
 user state settles its session writes with that transaction's server verdict.
 Later session writes wait for earlier pending writes to finish applying locally.
 Origin preconditions naming local-only commits are checked against their local
