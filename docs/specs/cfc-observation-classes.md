@@ -312,11 +312,12 @@ machinery marker (`machineryRead`) is one the RUNTIME issued while wiring an
 operation up or plumbing a result, and no pattern or handler code runs inside
 a marked scope. §4.6.3's reference-identity row is about a read the
 computation made and then did something with; what a wiring probe does with
-the reference it finds is write that same reference into another slot, and
-the link write carries the source document's label to that slot as an
-`origin:"link"` entry. The pointer's protection therefore arrives pointwise
-at the destination without the flow stamp, and joining it into the stamp as
-well spreads it over every other path the wiring transaction wrote.
+the reference it finds is write that same reference into another slot. A reader
+that follows the reference from there consumes the labels of what it reaches
+at the document that stores them (spec §8.2.4), so the protection of the
+referenced content does not ride on the wiring transaction's flow stamp, and
+joining the probed slot's label into that stamp would only spread it over
+every other path the wiring transaction wrote.
 `forEachFlowObservation` skips a marked probe alongside a trace-covered one,
 so such a read consumes nothing; a marked read that materializes content is
 unaffected and keeps consuming its ordinary labels.
@@ -337,17 +338,21 @@ over their prior slots, and each of the three then differs in what it reads
 outside that scope. `filter` reads every predicate result there, and `flatMap`
 reads every child result there, so membership and content in those two still
 depend on reads that taint. `map` reads no element value anywhere: it
-republishes references, so the link-origin entry at each output slot is the
-whole of an element's protection in its output.
+republishes references, so what protects an element in its output is the
+element's own label, at the element.
 
-That entry is what makes the exclusion sound, and it does not come from any
-read. `list.set(members)` writes a link per member, and the link write mints
-the source document's own label at the slot the link lands in, so a reader
-reaching an element through the container consumes it there.
+That is what makes the exclusion sound, and it does not come from any read.
+`list.set(members)` writes a link per member, and the slot the link lands in
+stores the reference's own label and nothing of the member's (spec §8.12.8),
+so a reader reaching an element through the container dereferences the slot
+and consumes the element's label where it is stored.
 `cfc-template-population.test.ts` measures that over a labeled element, beside
 the case that measures the marked probe adding nothing on top;
 `cfc-reference-identity-reads.test.ts` measures the same route for a wiring
-read that carries one reference onward.
+read that carries one reference onward, and that after an unmarked probe at the
+same position, which adds the holder's pointer label to the writing attempt's
+join, the slot still stores nothing of the source and the dereference still
+reaches the source's label.
 
 ## 7. Observation ceiling (LLM path) and render
 

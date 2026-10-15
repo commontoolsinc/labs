@@ -209,7 +209,9 @@ consumes inbound views, redacting the outbound copies is safe.
   classification table as data (no transform yet). Each is small and
   independently shippable, in that order. _Implementation note (2026-07-09):
   shipped — `MetaField` drops `"cfc"` (fail-closed at `handleCellGet`), the
-  persist loop re-derives the source's stored label map per link write while
+  persist loop derives a link slot's label from worker-authoritative sources
+  (the link schema and the restriction the written handle carries, reading the
+  source's stored labels only to bind a `CurrentPrincipal` reader) while
   the IPC ingress stops consuming inbound views, all main-thread-facing view
   copies redact `Caveat.source`, and the §2 table lives at
   `runner/src/cfc/label-field-classification.ts`._
@@ -225,8 +227,9 @@ consumes inbound views, redacting the outbound copies is safe.
   shipped — the transform lives in `runner/src/cfc/label-representation.ts`
   and runs in `prepareBoundaryCommit`'s persist loop for cross-space-eligible
   entries (link-origin entries when the link source's space differs from the
-  target's — covering the re-derived view AND the carried in-value sigil
-  `cfcLabelView`; flow-derived stamps when `deriveFlowJoin` consumed a
+  target's — covering what the link schema declares and the restriction the
+  carried in-value sigil `cfcLabelView` holds at its root; flow-derived stamps,
+  the join stamp at a link slot among them, when `deriveFlowJoin` consumed a
   labeled foreign observation; ambiguity fails toward protection). Same-form
   matching landed in `atomEntails` (read gating digests the candidate) and
   `matchAtomPattern` (concrete patterns digest-match; variables refuse fresh
