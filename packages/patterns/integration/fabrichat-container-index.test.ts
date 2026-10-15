@@ -726,5 +726,13 @@ describe("fabrichat-container-index", () => {
     expect(refusals).toEqual([]);
     expect(entries.get()).toHaveLength(1);
     expect(entries.get()[0].room.equals(room)).toBe(true);
+    // `equals()` resolves links, so the stored link is read as written: it
+    // names the room's own document, not the link-only one on the way.
+    const stored = manager.key("rooms").resolveAsCell().key(0).key("room")
+      .getRaw() as { "/": { "link@1": { id: string } } };
+    expect(stored["/"]["link@1"].id).toBe(room.getAsNormalizedFullLink().id);
+    expect(stored["/"]["link@1"].id).not.toBe(
+      output.getAsNormalizedFullLink().id,
+    );
   });
 });
