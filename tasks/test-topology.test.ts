@@ -374,6 +374,16 @@ describe("reading the topology as a whole", () => {
     }
   });
 
+  it("names no suite with a space, which a hooks measurement's name ends its suite at", () => {
+    // A lane's measurement of a unit's hooks names the suite and then the
+    // unit, and is read back by splitting at the first separator after
+    // the suite, which holds a space. A suite id holding a space could
+    // put that separator inside the suite.
+    for (const suite of suites) {
+      expect([suite.id, suite.id.includes(" ")]).toEqual([suite.id, false]);
+    }
+  });
+
   it("gives every measured set a member with lines a report can name", async () => {
     // The coverage gate fails a forced set whose reports name no line of
     // its member, which is sound only where the member has a line a

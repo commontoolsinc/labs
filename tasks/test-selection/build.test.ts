@@ -35,7 +35,10 @@ import {
   serializeManifest,
 } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
-import { excusedMeasurementName } from "../lane-measurement.ts";
+import {
+  excusedMeasurementName,
+  hooksMeasurementName,
+} from "../lane-measurement.ts";
 import {
   CATCH_RULE,
   COST_RULE,
@@ -522,6 +525,44 @@ describe("build", () => {
       ]);
     });
 
+    it("keeps what a unit's hooks took in a passing batch, by the measurement's name", () => {
+      // A batch that went red stopped part way, so what it says about a
+      // unit's hooks is left out, as a failed test's duration is.
+      const name = hooksMeasurementName("pattern-integration", true, UNIT);
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record({ test: { k: "gate", s: "ci", n: name }, durationMs: 3500 }),
+          record({ test: { k: "gate", s: "ci", n: name }, durationMs: 4000 }),
+          record({
+            test: { k: "gate", s: "ci", n: name },
+            outcome: "fail",
+            durationMs: 900,
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      expect(read.durations).toEqual(
+        new Map([[name, new Map([["2026-08-20", [3500, 4000]]])]]),
+      );
+      expect(read.observations).toEqual([]);
+      expect([...read.surfaces.keys()]).toEqual([]);
+    });
+
+    it("keeps nothing a workstation measured of a unit's hooks", () => {
+      // A workstation is another machine, faster or slower by however it
+      // differs, so what it measured is no evidence of what a lane spends.
+      const local = context({ env: "local", branch: "fix-writes" });
+      delete local.ci;
+      const name = hooksMeasurementName("pattern-integration", true, UNIT);
+      const read = readReport(
+        stored(LOCAL_NAME, local, [
+          record({ test: { k: "gate", s: "ci", n: name }, durationMs: 3500 }),
+        ]),
+        NO_ALIASES,
+      );
+      expect([...read.durations.keys()]).toEqual([]);
+    });
+
     it("counts a lane measurement it had to decline", () => {
       // A lane whose run the fold cannot place records what it measured
       // like any other lane. Counting what was declined is what tells a
@@ -608,6 +649,38 @@ describe("build", () => {
       );
       for (const report of reports) streamed.add([report]);
       expect(streamed.finish().states).toEqual(whole.states);
+    });
+
+    it("carries what units' hooks took into the next run, inside the cost window", () => {
+      // A day's sample is counted by bucket, so what this run reads adds
+      // to what the aggregate held of the same day, and a day past the
+      // window stops deciding what the packer charges.
+      const name = hooksMeasurementName("pattern-integration", true, UNIT);
+      const carried = emptyAggregate("2026-08-20");
+      carried.hooks = {
+        [name]: {
+          "2026-08-20": samplesOf([3000]),
+          "2026-08-01": samplesOf([60_000]),
+        },
+      };
+      const fold = new Fold(carried, NO_ALIASES, "2026-08-20");
+      fold.add([
+        stored(CI_NAME, context(), [
+          record({ test: { k: "gate", s: "ci", n: name }, durationMs: 3500 }),
+        ]),
+      ]);
+      expect(fold.finish().aggregate.hooks).toEqual({
+        [name]: { "2026-08-20": samplesOf([3000, 3500]) },
+      });
+    });
+
+    it("drops a unit whose every day has left the cost window", () => {
+      const name = hooksMeasurementName("pattern-integration", true, UNIT);
+      const carried = emptyAggregate("2026-08-20");
+      carried.hooks = { [name]: { "2026-08-01": samplesOf([3000]) } };
+      expect(
+        new Fold(carried, NO_ALIASES, "2026-08-20").finish().aggregate.hooks,
+      ).toEqual({});
     });
 
     it("gives every identity the aggregate scores a surface", () => {
@@ -1241,6 +1314,19 @@ describe("build", () => {
       ];
       expect(parseAggregate(JSON.stringify(aggregate))?.lanes)
         .toEqual(aggregate.lanes);
+    });
+
+    it("carries what units' hooks took, dropping a day it cannot count with", () => {
+      const name = hooksMeasurementName("pattern-integration", false, UNIT);
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.hooks = { [name]: { "2026-08-20": samplesOf([3000, 3500]) } };
+      expect(parseAggregate(JSON.stringify(aggregate))?.hooks)
+        .toEqual(aggregate.hooks);
+      const object = JSON.parse(JSON.stringify(aggregate));
+      object.hooks[name]["2026-08-19"] = { lowest: -1, counts: [1] };
+      object.hooks.other = "not a unit's days";
+      expect(parseAggregate(JSON.stringify(object))?.hooks)
+        .toEqual(aggregate.hooks);
     });
 
     it("drops a stored batch that does not say how many passes it made", () => {
