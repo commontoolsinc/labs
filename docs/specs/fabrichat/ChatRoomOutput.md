@@ -430,9 +430,11 @@ These rules hold for every stream:
   nothing for a sender with no manager. It sends `joinRoom` in an event of its
   own, once the write has landed, so the write reads nothing of the manager. A
   manager in a person's Home can carry a confidentiality label, such as their
-  `PersonalSpace`, that the room's space doesn't admit, and a write that read
-  it would be refused; such a manager can keep the join from happening, never
-  the write.
+  `PersonalSpace`, that the room's space doesn't admit, and anything the room
+  stores that read it would be refused. So what the room stores about joining
+  says only whether the room is one a manager can take the sender into, and
+  only the join's own event, which writes nothing in the room's space, reads
+  whether the sender has a manager: such a manager is still told of the join.
 - A refusal writes nothing to the room's shared record. The sender's outcome
   is recorded where only they read it: in `messageRequests` for a message
   act, in `addRequests` for an add, and in `titleRequests` for a retitle, each

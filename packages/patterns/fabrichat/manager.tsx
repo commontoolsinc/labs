@@ -1705,9 +1705,16 @@ const FoundRoom = pattern<FoundRoomInput, FoundRoomOutput>(
       scope: computed(() => isWellFormedDID(space) ? [space] : []),
     });
     const standalone = computed(() => kind === CHAT_ROOM_OFFER_KIND);
+    // The room is the document its root or declaration finally reaches. A
+    // declaration may reach it through a document holding only a link, as a
+    // Loom root's ensured room is reached through the handler's output for
+    // it; that document stores no labels, so a link to it gives a labeled
+    // list nothing to carry, and the room's own labels are what a link to
+    // the room carries.
     return {
       room: computed(() =>
-        standalone ? root.result : root.result?.key("chatRoom").get()
+        (standalone ? root.result : root.result?.key("chatRoom").get())
+          ?.resolveAsCell()
       ),
     };
   },

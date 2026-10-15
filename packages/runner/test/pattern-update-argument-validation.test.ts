@@ -879,7 +879,7 @@ describe("pattern update validates the stored argument", () => {
     // whose `schema` meta is missing reads back schema-less, which costs
     // `getResultCellWithSourceSchema` its type, `durableSourceContract` its
     // "write destination has no durable schema contract" precondition, and
-    // `derivePersistedLinkLabel` its same-transaction hatch.
+    // `linkedSourceEvidence` its same-transaction hatch.
     const { cell } = await setupVintage(
       openArgument("v1"),
       { count: 7 },

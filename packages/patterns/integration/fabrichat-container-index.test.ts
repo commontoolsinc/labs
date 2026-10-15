@@ -8,9 +8,15 @@ import { fromFileUrl } from "@std/path";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
-import { type Cell, Runtime, sendEvent } from "@commonfabric/runner";
+import {
+  type Cell,
+  Runtime,
+  sendEvent,
+  writeResultSchemaMeta,
+} from "@commonfabric/runner";
 import {
   markRendererTrustedEvent,
+  readStoredCfcMetadata,
   reviewedActionProvenance,
 } from "@commonfabric/runner/cfc";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -624,5 +630,109 @@ describe("fabrichat-container-index", () => {
       entries: {},
       offers: {},
     });
+  });
+
+  it("lists a declared chat reached through a document holding only a link while the list carries a label", async () => {
+    // A Loom root's `ensureChatRoom` declares its room this way: the room the
+    // handler makes is reached through the handler's output for it, a
+    // document holding only a link to the room and no CFC metadata of its
+    // own. The room, a pattern's result, carries `schema` metadata and no
+    // label of its own at its root.
+
+    const refusals: string[] = [];
+    runtime.scheduler.onError((error: Error) => {
+      refusals.push(error?.message ?? String(error));
+    });
+    const social = await runtime.createSpace({ spaceKind: "loom" });
+    let tx = runtime.edit();
+    const room = runtime.getCell(social, "ensured conversation", undefined, tx);
+    room.set({ about: { kind: "group", title: "Loom chat" } });
+    writeResultSchemaMeta(room, {
+      type: "object",
+      properties: { about: { type: "object" } },
+    });
+    const output = runtime.getCell(social, "handler output", undefined, tx);
+    output.setRaw(room.getAsLink());
+    const container = runtime.getCell(social, "container", undefined, tx);
+    container.set({ chatRoom: output });
+    runtime.getSpaceCell(social, undefined, tx).key("defaultPattern").set(
+      container,
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    const readTx = runtime.edit();
+    expect(
+      readStoredCfcMetadata(readTx, output.getAsNormalizedFullLink()),
+    ).toBeUndefined();
+
+    tx = runtime.edit();
+    const catalog = runtime.getCell(home, "catalog", undefined, tx);
+    catalog.set({
+      entries: {
+        [social]: {
+          space: social,
+          host: "http://localhost:8000",
+          kind: "loom",
+          state: "saved",
+          revision: "1:initial",
+          since: 123,
+        },
+      },
+      offers: {},
+    });
+    // A label on `direct` labels the list without reaching the room.
+    const direct = runtime.getCell(
+      home,
+      "direct",
+      {
+        type: "object",
+        ifc: {
+          confidentiality: [{
+            type: "https://commonfabric.org/cfc/atom/PersonalSpace",
+            owner: home,
+          }],
+        },
+      } as const,
+      tx,
+    );
+    direct.set({});
+    const program = await resolveLocalProgram(
+      (resolver) => runtime.harness.resolve(resolver),
+      {
+        main: fromFileUrl(new URL("../fabrichat/manager.tsx", import.meta.url)),
+        root: fromFileUrl(new URL("..", import.meta.url)),
+      },
+    );
+    const pattern = await runtime.patternManager.compilePattern({
+      ...program,
+      mainExport: "FabriChatManagerCore",
+    }, { space: home, tx });
+    const manager = runtime.run(
+      tx,
+      pattern,
+      { sharedSpaceCatalog: catalog, direct },
+      runtime.getCell(home, "manager", undefined, tx),
+    );
+    runtime.prepareTxForCommit(tx);
+    expect((await tx.commit().settled).error).toBeUndefined();
+    await runtime.idle();
+    await manager.pull();
+    await runtime.idle();
+
+    const entries = manager.key("rooms").asSchema<Entry[]>(entriesSchema);
+    const rooms = manager.key("rooms").resolveAsCell()
+      .getAsNormalizedFullLink();
+    expect(readStoredCfcMetadata(readTx, rooms)).toBeDefined();
+    expect(refusals).toEqual([]);
+    expect(entries.get()).toHaveLength(1);
+    expect(entries.get()[0].room.equals(room)).toBe(true);
+    // `equals()` resolves links, so the stored link is read as written: it
+    // names the room's own document, not the link-only one on the way.
+    const stored = manager.key("rooms").resolveAsCell().key(0).key("room")
+      .getRaw() as { "/": { "link@1": { id: string } } };
+    expect(stored["/"]["link@1"].id).toBe(room.getAsNormalizedFullLink().id);
+    expect(stored["/"]["link@1"].id).not.toBe(
+      output.getAsNormalizedFullLink().id,
+    );
   });
 });

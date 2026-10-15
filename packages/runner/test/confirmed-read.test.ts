@@ -301,4 +301,70 @@ describe("confirmed-read", () => {
     );
     expect(read).toEqual({ value: undefined, confirmed: false });
   });
+
+  it("returns a confirmed read of a document whose absence a push delivered", async () => {
+    const absent = await loaded("never-written");
+
+    const read = readConfirmed(
+      reader,
+      space,
+      (tx) => absent.withTx(tx).get()?.n,
+    );
+    expect(read).toEqual({ value: undefined, confirmed: true });
+  });
+
+  it("returns an unconfirmed read of a document in another space, though this space holds a confirmed document of the same id", async () => {
+    // A cause names the same id in every space, so this space's replica
+    // holds a delivered document of that id too.
+    const other = (await Identity.fromPassphrase("confirmed read other")).did();
+    await write("elsewhere", 1);
+    const tx = writer.edit();
+    writer.getCell<Note>(other, "elsewhere", noteSchema, tx).set({ n: 2 });
+    expect((await tx.commit().settled).error).toBeUndefined();
+    const here = await loaded("elsewhere");
+    const there = reader.getCell<Note>(other, "elsewhere", noteSchema);
+    await there.sync();
+    expect(there.getAsNormalizedFullLink().id).toBe(
+      here.getAsNormalizedFullLink().id,
+    );
+
+    const read = (from: typeof space) =>
+      readConfirmed(reader, from, (readTx) => there.withTx(readTx).get()?.n);
+    expect(read(space)).toEqual({ value: 2, confirmed: false });
+    expect(read(other)).toEqual({ value: 2, confirmed: true });
+  });
+
+  it("returns an unconfirmed read of a document a local wave promotion holds, though a push covers the wave's sequence", async () => {
+    const before = await write("waved", 1);
+    const waved = await loaded("waved");
+    // Pushes past the wave's sequence, so only the promotion keeps the
+    // document from reading as confirmed.
+    const advance = await loaded("advance");
+    const advanced = arrival(advance, 2);
+    await write("advance", 1);
+    await write("advance", 2);
+    await advanced;
+
+    const replica = reader.storageManager.open(space).replica;
+    const sealed = replica.sealNative!(
+      {
+        operations: [{
+          op: "set",
+          id: waved.getAsNormalizedFullLink().id,
+          type: "application/json",
+          value: { value: { n: 9 } },
+        }],
+      },
+      undefined,
+      Promise.resolve({ committed: { seq: before + 1 } }),
+    );
+    expect(await sealed.settled).toEqual({ ok: {} });
+
+    const read = readConfirmed(
+      reader,
+      space,
+      (tx) => waved.withTx(tx).get()?.n,
+    );
+    expect(read).toEqual({ value: 9, confirmed: false });
+  });
 });

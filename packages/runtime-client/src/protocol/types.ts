@@ -867,6 +867,12 @@ export type InitializationData = {
      */
     serverExecution?: boolean;
 
+    /**
+     * Keep session documents local when server execution is disabled.
+     * Defaults to off.
+     */
+    localSessionDocuments?: boolean;
+
     /** Global default for server-selected view replication. */
     viewScopedReplication?: boolean;
 
