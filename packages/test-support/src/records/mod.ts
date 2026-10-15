@@ -2,7 +2,7 @@ export {
   buildObjectBody,
   ciObjectName,
   datePartition,
-  isMainPush,
+  isMainRun,
   isSeed,
   localObjectName,
   objectNameSlug,
@@ -104,6 +104,7 @@ export {
   isRelativeSourcePath,
   JUnitParseError,
   parseJUnit,
+  readJUnit,
   recordedCases,
 } from "./junit.ts";
 export type { IngestJUnitOptions, JUnitCase } from "./junit.ts";

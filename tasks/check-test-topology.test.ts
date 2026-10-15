@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { dirname, fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import {
   candidateSurfaces,
@@ -17,6 +18,9 @@ import {
 import { AliasResolver } from "@commonfabric/test-support/records";
 import type { Suite } from "./test-topology/suite.ts";
 import { loadTopology } from "./test-topology.ts";
+
+/** The repository this file belongs to, whose own tree some cases check. */
+const REPOSITORY = dirname(dirname(fromFileUrl(import.meta.url)));
 
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
@@ -502,9 +506,10 @@ describe("the workflow half of the drift guard", () => {
   it("finds no step recording by hand in this repository's workflows", async () => {
     // The lanes run every test and gate the topology declares, so the
     // workflows this repository ships record nothing of their own.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-    const suites = await loadTopology(root);
-    expect(checkWorkflows(suites, await workflowRecords(root))).toEqual([]);
+    const suites = await loadTopology(REPOSITORY);
+    expect(checkWorkflows(suites, await workflowRecords(REPOSITORY))).toEqual(
+      [],
+    );
   });
 
   it("fails a step no suite claims", () => {
@@ -951,7 +956,6 @@ describe("reading a run's gathered artifacts", () => {
     // A lane's artifact holds a record for every test the lane ran, and
     // a mapping gone wrong leaves each of those unclaimed. Both are more
     // than one function call can take as arguments.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const dir = await Deno.makeTempDir({ prefix: "large-" });
     const count = 500_000;
     try {
@@ -962,7 +966,7 @@ describe("reading a run's gathered artifacts", () => {
         Array.from({ length: count }, (_, at) => `bakes ${at}`),
       );
       const { findings } = await check({
-        root,
+        root: REPOSITORY,
         store: { records: [dir], commit: "c0ffee" },
       });
       const unclaimed = findings.filter((finding) =>
@@ -1062,7 +1066,6 @@ describe("reading a run's gathered artifacts", () => {
     // Each named path is a part of the run. One that arrived cannot
     // answer for one that did not, so summing them and asking whether
     // anything came back would validate a corpus only partly read.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const dir = await Deno.makeTempDir({ prefix: "partial-" });
     try {
       await Deno.mkdir(`${dir}/present`);
@@ -1077,7 +1080,7 @@ describe("reading a run's gathered artifacts", () => {
       );
       const missing = `${dir}/never-downloaded`;
       const { findings } = await check({
-        root,
+        root: REPOSITORY,
         store: { records: [`${dir}/present`, missing], commit: "c0ffee" },
       });
       expect(
@@ -1098,13 +1101,12 @@ describe("reading a run's gathered artifacts", () => {
     // guard with nothing to judge. It says so once: reporting every unit
     // the topology holds as never recorded would bury that line in
     // thousands of its own making.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const empty = await Deno.makeTempDir({ prefix: "no-records-" });
     const missing = `${empty}/never-downloaded`;
     try {
       for (const at of [empty, missing]) {
         const { findings } = await check({
-          root,
+          root: REPOSITORY,
           store: { records: [at], commit: "c0ffee" },
         });
         expect(
@@ -1294,7 +1296,6 @@ describe("running the check and saying what it found", () => {
   });
 
   it("runs the store half against the records it is given", async () => {
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const at = await Deno.makeTempFile({ suffix: ".ndjson" });
     await Deno.writeTextFile(
       at,
@@ -1302,7 +1303,7 @@ describe("running the check and saying what it found", () => {
     );
     try {
       const { findings } = await check({
-        root,
+        root: REPOSITORY,
         store: { records: [at], commit: "c1" },
       });
       expect(
@@ -1318,20 +1319,20 @@ describe("running the check and saying what it found", () => {
   it("exits zero over a tree it accounts for and one over a tree it does not", async () => {
     // A surface nobody registered has to stop a build; a guard that only
     // printed would be a log line nobody reads.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const log = console.log;
     const err = console.error;
     console.log = () => {};
     console.error = () => {};
     try {
-      expect(await main([], root)).toBe(0);
+      expect(await main([], REPOSITORY)).toBe(0);
       const at = await Deno.makeTempFile({ suffix: ".ndjson" });
       await Deno.writeTextFile(
         at,
         recordsAt("c1"),
       );
       try {
-        expect(await main(["--commit", "c1", "--records", at], root)).toBe(1);
+        expect(await main(["--commit", "c1", "--records", at], REPOSITORY))
+          .toBe(1);
       } finally {
         await Deno.remove(at);
       }
@@ -1345,12 +1346,11 @@ describe("running the check and saying what it found", () => {
     // A usage mistake is not a topology defect, and reporting it as one
     // sends somebody looking through the tree for a surface nobody
     // registered. The exit status is what tells the two apart.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
     const said: string[] = [];
     const err = console.error;
     console.error = (line: string) => said.push(line);
     try {
-      expect(await main(["--records", "a.ndjson"], root)).toBe(2);
+      expect(await main(["--records", "a.ndjson"], REPOSITORY)).toBe(2);
     } finally {
       console.error = err;
     }
@@ -1360,8 +1360,7 @@ describe("running the check and saying what it found", () => {
 
   it("accounts for this repository's own tree", async () => {
     // The check the repository runs on itself, run the way it runs it.
-    const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-    const { findings, suites } = await check({ root });
+    const { findings, suites } = await check({ root: REPOSITORY });
     expect(findings.filter((finding) => finding.fails)).toEqual([]);
     expect(suites).toBeGreaterThan(0);
   });

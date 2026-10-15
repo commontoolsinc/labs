@@ -923,7 +923,7 @@ export async function publish(
     // capability, starting a runner, or loading a module, and a lane
     // packed to its budget runs past the bound it is packed to finish
     // inside.
-    calibration: calibrate(observed),
+    calibration: calibrate(observed, folded.aggregate.hooks),
   });
   // What the coverage gate compares a pull request against. The full run on
   // `main` writes the counts as measurements, which the fold passes over,

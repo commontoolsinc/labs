@@ -117,16 +117,58 @@ export interface IdentityState {
    */
   costByDay: Record<string, DaySamples>;
 
-  /** The outcome of the most recent `main` run this identity appeared in. */
-  lastMainOutcome?: "pass" | "fail" | "skip";
+  /**
+   * The outcome of the most recent `main` run this identity appeared in,
+   * in each of the last `MAIN_ORDERS_KEPT` orders `main` ran it in, the
+   * most recent last. See `lastMainIn`.
+   */
+  lastMainByOrder?: MainOutcomes;
 
   /**
-   * Failures on `main` that no later `main` run has judged yet. A
-   * failure that the next `main` run passes was fixed by the change
-   * between them, which makes it a catch unless it arrived in a crowd;
-   * one that is still failing is the same breakage continuing, and waits.
+   * Failures on `main` that no later `main` run in their order has judged
+   * yet. A failure that a later `main` run in its order passes was fixed
+   * by the change between them, which makes it a catch unless it arrived
+   * in a crowd; one that is still failing is the same breakage
+   * continuing, and waits.
    */
   pendingMain: Array<PendingMainFailure>;
+}
+
+/** What `main` last said about one identity, in each order it ran it in. */
+export type MainOutcomes = Array<{ seed?: number; outcome: "pass" | "fail" }>;
+
+/**
+ * How many orders `main` is remembered in. It runs in two at once: the
+ * day's, and the next day's in the daily run of every suite under that
+ * day's seed.
+ */
+const MAIN_ORDERS_KEPT = 2;
+
+/**
+ * What `main` last said about an identity in one order, or, where it has
+ * not run the identity in that order, in whichever order it ran it last.
+ * A test that depends on its order can be failing in one and passing in
+ * the other, so what `main` says in another order says nothing about this
+ * one while this one has an answer of its own.
+ */
+export function lastMainIn(
+  outcomes: MainOutcomes | undefined,
+  seed: number | undefined,
+): "pass" | "fail" | undefined {
+  return (outcomes?.find((held) => held.seed === seed) ?? outcomes?.at(-1))
+    ?.outcome;
+}
+
+/** `outcomes` with what `main` said in one order as its most recent. */
+function withMainOutcome(
+  outcomes: MainOutcomes | undefined,
+  seed: number | undefined,
+  outcome: "pass" | "fail",
+): MainOutcomes {
+  return [
+    ...(outcomes ?? []).filter((held) => held.seed !== seed),
+    seed === undefined ? { outcome } : { seed, outcome },
+  ].slice(-MAIN_ORDERS_KEPT);
 }
 
 /** A failure on `main` waiting for a later `main` run to judge it. */
@@ -154,7 +196,7 @@ export interface PendingMainFailure {
  * values are not ordered and nothing but equality is asked of them; an
  * aggregate carrying none was written before the stamps began.
  */
-export const CATCH_RULE = 1;
+export const CATCH_RULE = 2;
 
 /** A fresh, empty history. */
 export function emptyState(): IdentityState {
@@ -211,13 +253,17 @@ const LONGEST_WINDOW_DAYS = Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS);
  * Judges the failures on `main` that were waiting for a later `main` run.
  * A failure the next run still shows is the same breakage continuing, so
  * it keeps waiting and nothing new is learned. A failure the next run
- * does not show is a flake when that run is at the same commit in the
- * same order, and a catch when it is at a later commit in the same
- * order. A pass in a different order is neither, and the failures in
- * other orders are dropped: an order-dependent test stops failing when
- * the order moves on, so the pass says nothing about whether a change
- * fixed anything. Failures in the pass's own order are judged whatever
- * else is waiting beside them.
+ * does not show is a flake when that run is at the commit of any of
+ * them in the same order, or `disagreed` says the test also failed at
+ * the pass's point, and a catch when it is at a later commit in the same
+ * order. A pass judges only the failures in its own order: an
+ * order-dependent test stops failing when the order moves on, so a pass
+ * in another order says nothing about whether a change fixed anything.
+ * A pass with no failure in its own order leaves every failure waiting,
+ * for a run in its own order or until `trimWindows` ages it out. A pass
+ * that judges any of them ends the stretch, and every failure in other
+ * orders goes with it, since they are the same breakage seen in another
+ * order.
  * Nothing separates a failure a change fixed from one that healed
  * itself, so a failure that healed itself in one order is credited as a
  * catch as well. A breakage that arrived in a crowd is no catch however
@@ -227,21 +273,47 @@ const LONGEST_WINDOW_DAYS = Math.max(CHURN_WINDOW_DAYS, FLAKE_WINDOW_DAYS);
 function resolvePendingMain(
   state: IdentityState,
   observation: Observation,
+  disagreed: boolean,
 ): void {
-  if (state.pendingMain.length === 0) return;
   if (observation.outcome === "fail") return;
+  const inOrder = state.pendingMain.filter((pending) =>
+    pending.seed === observation.seed
+  );
+  if (inOrder.length === 0) return;
   // A failure nothing has judged inside the longest window a state keeps
   // is one the default branch has carried for that long, and crediting a
   // catch for it now would credit the test with a fix it did not find.
   // `trimWindows` ages these by the same window, and applies it too late
   // to answer this on its own: a fold resolves every observation it
-  // reads before it ages anything.
-  const live = state.pendingMain.filter((pending) =>
-    daysBetween(pending.day, observation.day) <= LONGEST_WINDOW_DAYS &&
-    pending.seed === observation.seed
+  // reads before it ages anything. A pass that finds only those in its
+  // order judges nothing, so it drops them and leaves the other orders
+  // waiting.
+  const live = inOrder.filter((pending) =>
+    daysBetween(pending.day, observation.day) <= LONGEST_WINDOW_DAYS
   );
+  if (live.length === 0) {
+    state.pendingMain = state.pendingMain.filter((pending) =>
+      pending.seed !== observation.seed
+    );
+    return;
+  }
   state.pendingMain = [];
-  if (live.length === 0) return;
+  const here = live.find((pending) => pending.commit === observation.commit);
+  if (here !== undefined) {
+    // The same commit, passing now and failing before, is the test
+    // disagreeing with itself there, wherever that commit sits in the
+    // stretch. The two runs can arrive in separate batches, so the
+    // same-commit check that catches this within one batch does not see
+    // it, and dropping the pending failure silently would lose the flake
+    // as well as the catch.
+    bump(state.flakesByDay, here.day);
+    return;
+  }
+  // A pass at a point where the test also failed, with no failure there
+  // waiting, is one whose failure was read as the test disagreeing with
+  // itself and counted then. It ends the stretch as a flake rather than
+  // a fix.
+  if (disagreed) return;
   // One breakage, one catch. A test that stays red across several runs on
   // the default branch has one thing wrong with it, and the change that
   // makes it green fixed that one thing; crediting every run it failed
@@ -251,15 +323,6 @@ function resolvePendingMain(
   const first = live.reduce((earliest, pending) =>
     pending.day < earliest.day ? pending : earliest
   );
-  if (first.commit === observation.commit) {
-    // The same commit, passing now and failing before, is the test
-    // disagreeing with itself there. The two runs can arrive in separate
-    // batches, so the same-commit check that catches this within one
-    // batch does not see it, and dropping the pending failure silently
-    // would lose the flake as well as the catch.
-    bump(state.flakesByDay, first.day);
-    return;
-  }
   if (first.crowded === true) return;
   creditCatch(state, "main", first.day, first.source);
 }
@@ -616,7 +679,7 @@ export function foldObservations(
   const brokenOnMain = (
     key: string,
     observation: Observation,
-    lastMain: IdentityState["lastMainOutcome"],
+    lastMain: "pass" | "fail" | undefined,
   ): boolean => {
     const here = mainAtCommit.get(`${key} ${pointOf(observation)}`);
     return here === "fail" || (here === undefined && lastMain === "fail");
@@ -634,22 +697,24 @@ export function foldObservations(
   // arrive.
   //
   // What each run newly broke rides along: on the default branch, an
-  // identity whose previous run there did not fail; anywhere else, one
-  // the default branch was not already failing. Whether another rule sets a
+  // identity whose previous run there in its order did not fail; anywhere
+  // else, one the default branch was not already failing. Whether another rule sets a
   // failure aside needs the whole batch, so `crowded` asks that later.
   const crowds = context.crowds;
-  const lastMainOf = new Map<string, "pass" | "fail">();
+  const lastMainOf = new Map<string, MainOutcomes>();
   for (const observation of observations) {
     // A skip is a test that deliberately did not run, so it agrees with
     // nothing and contradicts nothing; counting it as disagreement would
     // read a skip beside a failure as the test disagreeing with itself.
     if (observation.outcome === "skip") continue;
     const key = testIdentityKey(observation.test);
-    const lastMain = lastMainOf.has(key)
-      ? lastMainOf.get(key)
-      : states.get(key)?.lastMainOutcome;
+    const said = lastMainOf.get(key) ?? states.get(key)?.lastMainByOrder;
+    const lastMain = lastMainIn(said, observation.seed);
     if (observation.place === "main") {
-      lastMainOf.set(key, observation.outcome);
+      lastMainOf.set(
+        key,
+        withMainOutcome(said, observation.seed, observation.outcome),
+      );
     }
     if (
       observation.outcome === "fail" &&
@@ -738,7 +803,7 @@ export function foldObservations(
 
     // A skip is a test that deliberately did not run. It says nothing
     // about the test and nothing about the change, so it does not reach
-    // `lastMainOutcome` either: a test skipped on the default branch has
+    // `lastMainByOrder` either: a test skipped on the default branch has
     // not been shown to be fixed, and the last run that did execute it is
     // the last thing known about it. A failure elsewhere therefore goes
     // on being read as the default branch's, and is not credited to the
@@ -746,10 +811,19 @@ export function foldObservations(
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
-    const lastMain = state.lastMainOutcome;
+    const lastMain = lastMainIn(state.lastMainByOrder, observation.seed);
+    // Whether `main` has run this identity in this order, which decides
+    // whether what it last said is about this order or about another.
+    const ownOrder = state.lastMainByOrder?.some((held) =>
+      held.seed === observation.seed
+    ) === true;
     if (observation.place === "main") {
-      resolvePendingMain(state, observation);
-      state.lastMainOutcome = observation.outcome;
+      resolvePendingMain(state, observation, disagreed(key, observation));
+      state.lastMainByOrder = withMainOutcome(
+        state.lastMainByOrder,
+        observation.seed,
+        observation.outcome,
+      );
     }
     if (observation.outcome === "pass") continue;
 
@@ -762,11 +836,19 @@ export function foldObservations(
     if (environmental(key, day, observation.source)) continue;
     if (observation.place === "main") {
       // Whether this was a catch depends on what the next `main` run
-      // says, so it waits. A failure continuing a breakage already
-      // waiting is part of that breakage, crowd and all.
+      // says, so it waits. A failure continuing a breakage, which `main`
+      // has not passed since in this order, is part of that breakage,
+      // crowd and all. Where `main` has not run it in this order, what it
+      // continues is the breakage in whichever order `main` last ran it.
+      // A failure after a pass begins a breakage of its own.
       const waiting = state.pendingMain;
-      const inCrowd = waiting.length > 0
-        ? waiting.some((pending) => pending.crowded === true)
+      const continued = lastMain === "fail"
+        ? waiting.findLast((pending) =>
+          !ownOrder || pending.seed === observation.seed
+        )
+        : undefined;
+      const inCrowd = continued !== undefined
+        ? continued.crowded === true
         : crowded(observation);
       waiting.push({
         day,
@@ -984,20 +1066,21 @@ export function readCostsForward(state: IdentityState): void {
       continue;
     }
     if (held.counts === undefined) days[day] = readSlowest(held);
-    else if (!isCounted(held)) days[day] = emptySamples();
+    else if (!isDaySamples(held)) days[day] = emptySamples();
   }
 }
 
 /**
- * Whether a day stored by bucket holds figures this can count with: a
- * bucket index and a count per bucket, each a whole number and none
- * negative. A day that does not is read as a day with nothing in it,
- * for the reason a day that is not a record is.
+ * Whether a stored day is one counted by bucket that holds figures this can
+ * count with: a bucket index and a count per bucket, each a whole number
+ * and none negative. A day that does not is read as a day with nothing in
+ * it, for the reason a day that is not a record is.
  */
-function isCounted(held: DaySamples): boolean {
-  const whole = (value: number) => Number.isInteger(value) && value >= 0;
-  return whole(held.lowest) && Array.isArray(held.counts) &&
-    held.counts.every(whole);
+export function isDaySamples(held: unknown): held is DaySamples {
+  const whole = (value: unknown) =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return isObjectOrArray(held) && whole(held.lowest) &&
+    Array.isArray(held.counts) && held.counts.every(whole);
 }
 
 /**

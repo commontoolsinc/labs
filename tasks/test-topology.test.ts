@@ -22,7 +22,7 @@ import { MEASURED_BATCH_SUFFIX } from "./lane-measurement.ts";
 import { serverExecutionCiLane } from "./server-execution-ci.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 
-const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const root = path.dirname(path.dirname(path.fromFileUrl(import.meta.url)));
 const suites = await loadTopology(root);
 
 /** The Deno subcommands a suite's runner is allowed to be. */
@@ -371,6 +371,16 @@ describe("reading the topology as a whole", () => {
     for (const suite of suites) {
       expect([suite.id, suite.id.endsWith(MEASURED_BATCH_SUFFIX)])
         .toEqual([suite.id, false]);
+    }
+  });
+
+  it("names no suite with a space, which a hooks measurement's name ends its suite at", () => {
+    // A lane's measurement of a unit's hooks names the suite and then the
+    // unit, and is read back by splitting at the first separator after
+    // the suite, which holds a space. A suite id holding a space could
+    // put that separator inside the suite.
+    for (const suite of suites) {
+      expect([suite.id, suite.id.includes(" ")]).toEqual([suite.id, false]);
     }
   });
 
