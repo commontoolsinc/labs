@@ -232,13 +232,14 @@ describe("meeting-rooms", () => {
       const configured = stub(
         Database.prototype,
         "exec",
-        function (this: Database, sql: string) {
-          execute.call(this, sql);
+        function (this: Database, ...args: Parameters<Database["exec"]>) {
+          const result = execute.apply(this, args);
           if (this.path === path) {
             waits.push(
               Number(this.prepare("PRAGMA busy_timeout").get()?.timeout),
             );
           }
+          return result;
         },
       );
       try {
