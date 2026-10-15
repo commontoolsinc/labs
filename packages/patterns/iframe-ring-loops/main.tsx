@@ -47,6 +47,7 @@ import {
   type RingSetup,
   type RingView,
   ringViews,
+  uniqueCells,
   validLayoutOf,
 } from "./model.ts";
 
@@ -93,7 +94,7 @@ export interface RingLoopsOutput {
 
   /**
    * Place several notes in one call, all by the same author. Nothing is placed
-   * unless every cell named is valid.
+   * unless every cell named is valid, and a cell named twice is placed once.
    */
   addNotes: Stream<AddNotesEvent, AddNotesResult>;
 
@@ -157,7 +158,7 @@ interface AddNotesEvent extends Attribution {
 
 /** How many notes `addNotes` placed. */
 interface AddNotesResult {
-  /** How many notes were placed. */
+  /** How many cells received a note, counting a cell named twice once. */
   placed: number;
 
   /** How many of those replaced a note already in the cell. */
@@ -306,7 +307,10 @@ const addNotes = handler<AddNotesEvent, NoteVerbState, AddNotesResult>(
     const layout = ringLayoutOf(setup);
     // Every cell is checked ahead of the first write, so one bad cell leaves
     // the rings as they were.
-    const cells = event.notes.map((spec) => cellOf(layout, spec));
+    const cells = uniqueCells(
+      layout,
+      event.notes.map((spec) => cellOf(layout, spec)),
+    );
     const author = authorOf(event, viewerName, output.color);
     const notes = state.key("notes");
     const replaced =

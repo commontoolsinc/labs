@@ -139,6 +139,9 @@ let scheduledThrough = 0;
 let animationFrame: number | undefined;
 let tempoDraft: number | undefined;
 let volumeDraft: number | undefined;
+// The muted rings as the last mute click left them, until the store confirms
+// that write, so that a second click builds on the first.
+let mutedDraft: readonly string[] | undefined;
 let clearArmed = false;
 // Writes on their way to the shared state, by cell key. They are drawn and
 // played ahead of the stored notes until the write settles.
@@ -415,7 +418,7 @@ function viewerName(): string {
 
 /** Returns the identifiers of the rings this user has silenced. */
 function mutedRingIds(): Set<string> {
-  return new Set(output.get()?.mutedRingIds ?? []);
+  return new Set(mutedDraft ?? output.get()?.mutedRingIds ?? []);
 }
 
 /** Returns the stored notes with the writes still on their way applied. */
@@ -1036,8 +1039,17 @@ function rebuildRingRows(): void {
     mute.addEventListener("click", () => {
       const muted = mutedRingIds();
       if (!muted.delete(ring.id)) muted.add(ring.id);
+      const next = [...muted];
+      mutedDraft = next;
       clearError();
-      void output.key("mutedRingIds").set([...muted]).catch(showError);
+      refresh();
+      // Writes to one cell go out in order, so the last click's list lands
+      // last; the draft stands until the store has it.
+      void output.key("mutedRingIds").set(next).then(() => output.pull())
+        .catch(showError).finally(() => {
+          if (mutedDraft === next) mutedDraft = undefined;
+          refresh();
+        });
     }, { signal });
 
     row.addEventListener("pointerenter", () => {

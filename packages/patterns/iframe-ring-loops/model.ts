@@ -485,6 +485,20 @@ export function cellOf(layout: RingLayout, spec: NoteSpec): Cell {
   return { ringIndex, step: spec.step, lane: spec.lane };
 }
 
+/** Returns `cells` with each cell kept once, in the order first named. */
+export function uniqueCells(
+  layout: RingLayout,
+  cells: readonly Cell[],
+): Cell[] {
+  const seen = new Set<string>();
+  return cells.filter((cell) => {
+    const key = cellKey(layout.rings[cell.ringIndex].id, cell.step, cell.lane);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Returns the name to show for whoever placed `note`. */
 export function authorNameOf(note: PlacedNote): string {
   return note.authorName?.trim() || "Someone";
@@ -954,12 +968,17 @@ export function freshPresses(
 }
 
 /**
- * Returns `name` as a presence record carries it: trimmed, `Guest` where
- * blank, and cut to 60 code points so that the relay, which refuses longer
- * names, takes it.
+ * Returns `name` as a presence record carries it, in a form the relay takes:
+ * without the control characters and lone surrogates it refuses, trimmed,
+ * `Guest` where nothing is left, and cut to 60 code points.
  */
 export function presenceName(name: string): string {
-  return [...(name.trim() || "Guest")].slice(0, MAX_PRESENCE_NAME).join("");
+  const printable = [...name].filter((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint > 0x1f && !(codePoint >= 0x7f && codePoint <= 0x9f) &&
+      !(codePoint >= 0xd800 && codePoint <= 0xdfff);
+  }).join("").trim();
+  return [...(printable || "Guest")].slice(0, MAX_PRESENCE_NAME).join("");
 }
 
 /** Returns the highest press number in `presses`, or `undefined` for none. */

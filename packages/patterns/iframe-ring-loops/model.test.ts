@@ -56,6 +56,7 @@ import {
   timeOfStep,
   toggleEdit,
   type Transport,
+  uniqueCells,
   validLayoutOf,
   withPress,
 } from "./model.ts";
@@ -308,6 +309,14 @@ describe("model", () => {
     it("throws a `RangeError` naming the last lane for a lane outside the band", () => {
       expect(() => cellOf(layout, { ring: "bass", step: 0, lane: 5 }))
         .toThrow("from 0 to 4");
+    });
+  });
+
+  describe("uniqueCells()", () => {
+    it("returns each cell once, in the order first named", () => {
+      const a = { ringIndex: 0, step: 1, lane: 0 };
+      const b = { ringIndex: 2, step: 4, lane: 3 };
+      expect(uniqueCells(layout, [a, b, { ...a }, b])).toEqual([a, b]);
     });
   });
 
@@ -770,6 +779,16 @@ describe("model", () => {
 
     it("returns `Guest` for a blank name", () => {
       expect(presenceName(" ")).toBe("Guest");
+    });
+
+    it("drops the control characters and lone surrogates the relay refuses", () => {
+      expect(presenceName("\u0007Ada\u0085 Lovelace\ud800")).toBe(
+        "Ada Lovelace",
+      );
+    });
+
+    it("returns `Guest` for a name of nothing but refused characters", () => {
+      expect(presenceName("\u0001\udc00")).toBe("Guest");
     });
 
     it("cuts a long name to 60 code points, keeping a character whole", () => {
