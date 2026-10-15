@@ -84,6 +84,19 @@ describe("whole-run", () => {
       }
     });
 
+    it("throws where the spool cannot be read", async () => {
+      // A spool that is there and cannot be listed is not one that holds
+      // no marks, and reading it as that would vouch for nothing silently.
+      const parent = await Deno.makeTempDir();
+      try {
+        const spool = join(parent, "a-file");
+        await Deno.writeTextFile(spool, "");
+        await expect(readWholeRuns(spool)).rejects.toThrow();
+      } finally {
+        await Deno.remove(parent, { recursive: true });
+      }
+    });
+
     it("returns nothing for a spool that does not exist", async () => {
       const parent = await Deno.makeTempDir();
       try {
