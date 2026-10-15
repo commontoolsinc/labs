@@ -160,7 +160,18 @@ export class CFVScroll extends BaseElement {
 
   private _scrollContainer: HTMLElement | null = null;
   private _mutationObserver: MutationObserver | null = null;
+  /**
+   * Whether the reader was at the bottom when they last scrolled. Only a
+   * scroll changes it, so content overflowing before the first snap does not
+   * read as the reader having scrolled up.
+   */
   private _wasAtBottom = true;
+  /**
+   * Whether the next snap is the first since this element connected. The
+   * first jumps rather than animates: a history that opens at its end should
+   * already be there, not scroll down through every message to reach it.
+   */
+  private _firstSnap = true;
 
   constructor() {
     super();
@@ -194,6 +205,9 @@ export class CFVScroll extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    // A disconnected element loses its scroll position, so it opens afresh.
+    this._wasAtBottom = true;
+    this._firstSnap = true;
     // Set up scroll listener after element is ready
     this.updateComplete.then(() => {
       if (this.scrollContainer) {
@@ -203,6 +217,11 @@ export class CFVScroll extends BaseElement {
         );
       }
       this.setupMutationObserver();
+      // The observer sees only later changes, and content is often already
+      // slotted when the element connects: a renderer builds a subtree before
+      // inserting it, so a history whose messages are ready on first render
+      // arrives whole. Snap to whatever is there now.
+      this.snapIfFollowing();
     });
     // Listen for cf-chat-updated events
     this.addEventListener("cf-chat-updated", this._handleChatUpdate);
@@ -221,16 +240,25 @@ export class CFVScroll extends BaseElement {
   }
 
   private _handleChatUpdate = () => {
-    if (this.snapToBottom && this._wasAtBottom) {
-      // Use requestAnimationFrame to ensure DOM has updated
-      requestAnimationFrame(() => {
-        this.scrollToBottom();
-      });
-    }
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => this.snapIfFollowing());
   };
+
+  /**
+   * With `snapToBottom` set and the reader at the bottom, scroll to the
+   * bottom: instantly the first time content overflows, smoothly after.
+   */
+  private snapIfFollowing() {
+    const container = this.scrollContainer;
+    if (!this.snapToBottom || !this._wasAtBottom || !container) return;
+    if (container.scrollHeight <= container.clientHeight) return;
+    this.scrollToBottom(!this._firstSnap);
+    this._firstSnap = false;
+  }
 
   private handleScroll = () => {
     this.updateScrollState();
+    this._wasAtBottom = this._atEnd;
     this.emit("cf-scroll", {
       scrollTop: (this.scrollContainer as HTMLElement)?.scrollTop || 0,
       scrollHeight: (this.scrollContainer as HTMLElement)?.scrollHeight || 0,
@@ -245,11 +273,6 @@ export class CFVScroll extends BaseElement {
       .scrollContainer as HTMLElement;
     this._atStart = scrollTop <= 0;
     this._atEnd = scrollTop + clientHeight >= scrollHeight - 1;
-
-    // Track if user was at bottom for snapToBottom behavior
-    if (this.snapToBottom) {
-      this._wasAtBottom = this._atEnd;
-    }
   }
 
   override render() {
@@ -322,13 +345,8 @@ export class CFVScroll extends BaseElement {
     this.cleanupMutationObserver();
 
     this._mutationObserver = new MutationObserver(() => {
-      // Only auto-scroll if user was at bottom when content changed
-      if (this._wasAtBottom) {
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-          this.scrollToBottom();
-        });
-      }
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => this.snapIfFollowing());
     });
 
     // Observe changes to the slotted content
