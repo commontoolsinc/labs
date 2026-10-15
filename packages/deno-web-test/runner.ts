@@ -130,17 +130,18 @@ export class Runner {
         (total, file) => total + file.tests.length,
         0,
       );
-      if (ran === registered) {
-        markWholeRun({
-          kind: "browser",
-          scope,
-          tests: Object.fromEntries(
-            this.results.map((file) => [
-              repositoryRelativePath(file.fileName),
-              file.tests.map((test) => test.name),
-            ]),
-          ),
-        });
+      // A file inside no repository is no test of one, so it has no place
+      // in the mark either, and a run of only such files leaves none.
+      const tests = Object.fromEntries(
+        this.results.flatMap((file) => {
+          const path = repositoryRelativePath(file.fileName);
+          return path === undefined
+            ? []
+            : [[path, file.tests.map((test) => test.name)]];
+        }),
+      );
+      if (ran === registered && Object.keys(tests).length > 0) {
+        markWholeRun({ kind: "browser", scope, tests });
       }
 
       const summary = summarize(this.results);
