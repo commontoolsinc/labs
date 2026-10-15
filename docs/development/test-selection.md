@@ -1493,24 +1493,26 @@ rerun recorded, and which tests' units did not fit. A pull request's lanes
 rerun nothing, unless the pull request is labelled `ci: full`, which runs its
 lanes as the full run.
 
-A lane decides all of this from the records its batches gathered rather
-than from what a command exited with. A runner that failed only on
-identities a flake rate excuses has told the run nothing it should stop
-for, and a runner that exited zero having run none of its unit has. So a
-unit that recorded nothing fails the lane, and an excusal holds only for
-an invocation that accounted for every identity it was asked to run that
-the tree holds. The lane reads what the tree holds from the name maps the
-registration preload leaves in the spool. An identity a unit's processes
-did not register, nor any test inside it, is absent where everything the
-map holds that encloses it is a `describe`, known as one by a leaf the
-map holds inside it. Such an identity is one the manifest carries from a
-rename or from a branch, and the lane's job summary lists it apart from
-the identities that withdraw an excusal. A registered test records the
-steps its body names as it runs, which no map holds, so an identity
-beneath a registered test shows nothing; so does one beneath a
-`describe` the map holds no leaf inside, and any identity of a unit whose
-processes left no name map. An identity any of those leaves unrecorded
-withdraws the excusal.
+A lane decides all of this from the records its batches gathered rather than
+from what a command exited with. A runner that failed only on identities a flake
+rate excuses has told the run nothing it should stop for, and a runner that
+exited zero having run none of its unit has. So a unit that recorded nothing
+fails the lane, and an excusal holds only for an invocation that accounted for
+every identity it was asked to run that the tree holds. The lane reads what the
+tree holds from the name maps the registration preload leaves in the spool. An
+identity a unit's processes did not register, nor any test inside it, is absent
+where everything the map holds that encloses it is a `describe`, known as one by
+a leaf the map holds inside it. Such an identity is one the manifest carries
+from a rename or from a branch, and the lane's job summary lists it apart from
+the identities that withdraw an excusal. A registered test records the steps its
+body names as it runs, which no map holds, so an identity beneath a registered
+test shows nothing; so does one beneath a `describe` the map holds no leaf
+inside, and any identity of a unit whose processes left no name map. A name map
+the preload marked as interrupted, because an `error` or `unhandledrejection`
+event reached its file before the file's hooks and tests began, shows nothing
+either. An identity any of those leaves unrecorded withdraws the excusal. A
+package's browser tests, which run as one unit, are read from the mark the
+browser test runner leaves once it has loaded every file and run every test.
 
 ## What the dashboard shows
 

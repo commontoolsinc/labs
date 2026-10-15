@@ -1947,6 +1947,12 @@ export interface TransactionSealDestination {
    * pass for a transaction this returns `true` for: writes that reach no
    * store and no reader cross no boundary. Absent, the commit treats no
    * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   *
+   * The answer is for the moment it is asked and binds nothing: a destination
+   * may answer differently later, in either direction, and `seal` decides for
+   * itself when it runs. A commit therefore asks again right before it seals,
+   * in the same synchronous stretch as the seal's own decision, rather than
+   * trusting what a preparation ahead of it was told.
    */
   discards?(tx: IExtendedStorageTransaction): boolean;
 
@@ -3506,6 +3512,23 @@ export interface ISpaceReplica extends ISpace {
     coverClass?: CommitClass;
     pendingLocalSeqs: number[];
   };
+
+  /**
+   * Resolves once every client speculation layer standing over the document
+   * now (entries sealed `speculative: true` — speculation.md §1) has settled,
+   * by retirement or withdrawal; `undefined` when none stands. A layer sealed
+   * after the call is not waited for.
+   *
+   * A layer masks the document's durable state, so a change to that state
+   * beneath it changes nothing visible and notifies nothing, and neither does
+   * its retirement over a durable value equal to its own. A reader of the
+   * durable view waits on this to learn of either.
+   */
+  whenSpeculationSettled?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined;
 
   /**
    * The store seq a local commit's accept committed at (speculation.md

@@ -59,12 +59,15 @@ const SIZES = [10, 30, 100, 300];
  *
  * A room is seeded a message at a time, each a trusted send through a member's
  * runtime that waits for the room to record it before the next member writes,
- * so seeding time grows with the size, and each size seeds two rooms. The
- * sizes above the limit are declared and skipped rather than left out, so the
- * curve they belong to is written down and running them is one setting:
- * `CF_FABRICHAT_SCALE_LIMIT` raises it.
+ * so seeding time grows with the size, and each size seeds two rooms. On the
+ * runner the Benchmarks workflow uses, a hundred-message room takes about seven
+ * minutes to seed and over a minute and a half to load, and a send into it
+ * does not settle within the browser driver's five-minute bound, so the
+ * default stops below it. The sizes above the limit are declared and skipped
+ * rather than left out, so the curve they belong to is written down and
+ * running them is one setting: `CF_FABRICHAT_SCALE_LIMIT` raises it.
  */
-const DEFAULT_SCALE_LIMIT = 100;
+const DEFAULT_SCALE_LIMIT = 30;
 
 const SCALE_LIMIT = sizeFromEnv(
   "CF_FABRICHAT_SCALE_LIMIT",

@@ -4796,6 +4796,15 @@ export class Runtime {
   }
 
   /**
+   * Starts a piece and waits for the commit of the setup writes of the graph
+   * it instantiates, rejecting when that commit failed; see
+   * `Runner.startWithCommit()`.
+   */
+  startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.runner.startWithCommit(resultCell);
+  }
+
+  /**
    * The host explicitly known to serve a space, if any: the seed map
    * wins, then runtime-learned hints (site table). Undefined means
    * "no per-space fact" — callers choose their own default (storage

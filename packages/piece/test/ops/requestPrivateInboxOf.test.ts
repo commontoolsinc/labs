@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
+import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   type Cell,
   type ExperimentalOptions,
@@ -8,7 +9,10 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+} from "@commonfabric/runner/storage/cache.deno";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 import { installCustomRoot } from "../install-custom-root.ts";
 import {
@@ -67,17 +71,19 @@ function addressOf(cell: Cell<unknown>): { space: string; id: string } {
 }
 
 describe("requestPrivateInboxOf()", () => {
-  let storage: ReturnType<typeof StorageManager.emulate>;
+  let server: MemoryV2Server.Server;
+  let storage: EmulatedStorageManager;
   let runtime: Runtime;
   let controller: PiecesController;
   let home: Cell<unknown>;
 
   /**
-   * Opens a runtime with the `experimental` options given over new storage,
-   * with Home installed as its space's root.
+   * Opens a runtime with the `experimental` options given over a new storage
+   * server, with Home installed as its space's root.
    */
   async function openRuntime(experimental: ExperimentalOptions): Promise<void> {
-    storage = StorageManager.emulate({ as: identity });
+    server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
+    storage = EmulatedStorageManager.connectTo(server, { as: identity });
     runtime = new Runtime({
       apiUrl: new URL("https://home.example"),
       storageManager: storage,
@@ -95,6 +101,7 @@ describe("requestPrivateInboxOf()", () => {
   async function closeRuntime(): Promise<void> {
     await controller.dispose();
     await storage.close();
+    await server.close();
   }
 
   beforeEach(() => openRuntime({ serverExecution: false }));
@@ -189,6 +196,155 @@ describe("requestPrivateInboxOf()", () => {
     const outcome = await request.outcome;
     expect("inbox" in outcome ? addressOf(outcome.inbox) : undefined)
       .toEqual(addressOf(inbox));
+  });
+
+  describe("under client speculation", () => {
+    // A runtime under server execution shows its own speculative runs'
+    // writes over what the server holds (speculation.md §1). Each case seals
+    // such a layer straight into the replica once the request is waiting on
+    // Home's answer, since Home's handler runs here and a commit reading a
+    // layer is refused. A second runtime then writes the durable value, which
+    // arrives beneath the layer as the server's writes do. Each foreign write
+    // also bumps `marker`, which no layer masks, so that the case can wait
+    // for the write to arrive.
+
+    let writer: Runtime | undefined;
+    let writerStorage: EmulatedStorageManager | undefined;
+    let marker: Cell<{ n: number }>;
+
+    beforeEach(async () => {
+      marker = await documentIn(identity.did(), { n: 0 }) as Cell<
+        { n: number }
+      >;
+    });
+
+    afterEach(async () => {
+      await writer?.dispose();
+      await writerStorage?.close();
+      writer = undefined;
+      writerStorage = undefined;
+    });
+
+    /**
+     * Seals a speculative layer over `cell`'s document, showing `value` in
+     * place of what the document holds, and returns what retires it.
+     */
+    function speculate(cell: Cell<unknown>, value: unknown): () => Promise<
+      void
+    > {
+      const { space, id, scope } = cell.resolveAsCell()
+        .getAsNormalizedFullLink();
+      const { replica } = storage.open(space);
+      const verdict = Promise.withResolvers<
+        { withdrawn: { message: string; superseded: true } }
+      >();
+      const sealed = replica.sealNative!(
+        {
+          operations: [{
+            op: "set",
+            id,
+            type: "application/json",
+            value: { ...replica.getDocument(id, scope), value } as never,
+          }],
+        },
+        undefined,
+        verdict.promise,
+        { speculative: true },
+      );
+      return async () => {
+        verdict.resolve({
+          withdrawn: { message: "retired", superseded: true },
+        });
+        await sealed.settled;
+      };
+    }
+
+    /**
+     * Has a second runtime set `cell`'s document to `value`, and resolves
+     * once that write has arrived here.
+     */
+    async function writeElsewhere(
+      cell: Cell<unknown>,
+      value: unknown,
+    ): Promise<void> {
+      writerStorage ??= EmulatedStorageManager.connectTo(server, {
+        as: identity,
+      });
+      writer ??= new Runtime({
+        apiUrl: new URL("https://home.example"),
+        storageManager: writerStorage,
+      });
+      const target = writer.getCellFromLink(cell.getAsNormalizedFullLink());
+      const bumped = writer.getCellFromLink(marker.getAsNormalizedFullLink());
+      await Promise.all([target.sync(), bumped.sync()]);
+      const next = (marker.get()?.n ?? 0) + 1;
+      const arrived = Promise.withResolvers<void>();
+      const cancel = marker.sink((current) => {
+        if (current?.n === next) arrived.resolve();
+      });
+      await writer.editWithRetry((tx) => {
+        target.withTx(tx).set(value as never);
+        bumped.withTx(tx).set({ n: next } as never);
+      });
+      await arrived.promise.finally(cancel);
+    }
+
+    it("returns Home's answer as stored, not a speculative one shown over it", async () => {
+      const inbox = await documentIn(identity.did(), { name: "inbox" });
+      const profile = await documentIn(identity.did(), {
+        inbox: { piece: inbox },
+      });
+      const answer = home.key("answer" as never) as Cell<unknown>;
+      const request = startRequest(profile);
+      await runtime.scheduler.idleWithPendingCommits();
+      const retire = speculate(answer, { status: "not-held" });
+      await runtime.idle();
+
+      expect(request.settled()).toBe(false);
+      await writeElsewhere(answer, { status: "ensured" });
+      await retire();
+      const outcome = await request.outcome;
+      expect(outcome.status).toBe("ensured");
+      expect("inbox" in outcome ? addressOf(outcome.inbox) : undefined)
+        .toEqual(addressOf(inbox));
+    });
+
+    it("returns the stored answer once a speculative one equal to it retires", async () => {
+      const inbox = await documentIn(identity.did(), { name: "inbox" });
+      const profile = await documentIn(identity.did(), {
+        inbox: { piece: inbox },
+      });
+      const answer = home.key("answer" as never) as Cell<unknown>;
+      const request = startRequest(profile);
+      await runtime.scheduler.idleWithPendingCommits();
+      const retire = speculate(answer, { status: "ensured" });
+      await runtime.idle();
+
+      expect(request.settled()).toBe(false);
+      await writeElsewhere(answer, { status: "ensured" });
+      await retire();
+      expect((await request.outcome).status).toBe("ensured");
+    });
+
+    it("returns the inbox the profile's stored pointer names, not a speculative one", async () => {
+      const inbox = await documentIn(identity.did(), { name: "inbox" });
+      const shown = await documentIn(identity.did(), { name: "shown" });
+      const profile = await documentIn(identity.did(), {});
+      await setHome("answer", { status: "ensured" });
+      const request = startRequest(profile);
+      await runtime.scheduler.idleWithPendingCommits();
+      const retire = speculate(profile, {
+        inbox: { piece: shown.getAsLink() },
+      });
+      await runtime.idle();
+
+      expect(request.settled()).toBe(false);
+      await writeElsewhere(profile, { inbox: { piece: inbox.getAsLink() } });
+      await retire();
+      const outcome = await request.outcome;
+      expect("inbox" in outcome ? addressOf(outcome.inbox) : undefined)
+        .toEqual(addressOf(inbox));
+    });
   });
 
   it("returns `unlisted`, `unpointable` and `not-held` as Home answers them", async () => {
