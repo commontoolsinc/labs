@@ -697,19 +697,21 @@ starts the worker's housekeeping over Home, once per worker:
 - ensuring the user's private inbox
   ([private inbox](private-inbox.md));
 - making each profile Home lists, in a space the user owns, the root of its
-  space (`PiecesController.repairProfileRoots()`, described in
+  space where the space has no root, or has only one that a space-root ensure
+  created and nothing was added to. It leaves any other root alone
+  (`PiecesController.repairProfileRoots()`, described in
   [Home space](../common/conventions/HOME_SPACE.md));
 - starting the share intake over Home's inboxes
   (`PiecesController.startShareIntake()`).
 
-The call returns without waiting for the housekeeping, and a step that fails
-is logged and run again at the worker's next bring-up of Home.
-`RuntimeClient.idle()` waits for it. The housekeeping runs only in a worker
-that brings Home up: no server process does it for a user. Where no host ever
-brings a user's Home up, their Home and profiles stay as they are, and the cost
-is not theirs alone. Other people's hosts read a user's profiles, and a profile
-that is not its space's root is one a host holding only the profile space's
-DID cannot reach.
+The call returns once the adoption has settled, without waiting for the other
+steps, and a step that fails is logged and run again at the worker's next
+bring-up of Home. `RuntimeClient.idle()` waits for all of them. The
+housekeeping runs only in a worker that brings Home up: no server process does
+it for a user. Where no host ever brings a user's Home up, their Home and
+profiles stay as they are, and the cost is not theirs alone. Other people's
+hosts read a user's profiles, and a profile that is not its space's root is
+one a host holding only the profile space's DID cannot reach.
 
 Two other requests bring Home up as a side effect: `createSpace()`, and
 `getSpaceRootPattern()` for the user's own Home DID unless it passes
