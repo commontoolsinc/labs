@@ -14,6 +14,7 @@ import {
 import type { WorkflowRun } from "./ci-check-lib.ts";
 import { MAIN_REPORT_MARKER } from "./test-selection/report.ts";
 import type { Suite } from "./test-topology/suite.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import type { TestRecord } from "@commonfabric/test-support/records";
 
 import type { ManifestFetch } from "./test-selection/store.ts";
@@ -24,6 +25,7 @@ import { buildZip } from "./zip-testing.ts";
 import {
   committedAt,
   coverageOfRun,
+  firstCoverageAt,
   isReportable,
   main,
   manifestView,
@@ -675,6 +677,44 @@ describe("post-main-report", () => {
       expect(view.selected.has(testIdentityKey(proves))).toBe(false);
     });
 
+    it("counts a gate the packing chose among what it reached", () => {
+      // A gate is in no lane, and the packing chose it all the same.
+
+      const measured: Suite = {
+        ...suites[0]!,
+        measured: [{
+          member: "packages/bakery",
+          reachedBy: ["packages/bakery/"],
+          units: [bakeryUnit],
+        }],
+      };
+      const gate = {
+        k: "gate",
+        s: "bakery",
+        n: "coverage-gate workspace-unit",
+      };
+      const withGate = {
+        ...manifest,
+        entries: [
+          ...manifest.entries,
+          sampleEntry(gate, {
+            suite: "coverage-gate",
+            unit: "workspace-unit/packages/bakery",
+            score: 0.9,
+          }),
+        ],
+      };
+      const topology = [measured, coverageGateSuite([measured])];
+      expect(
+        manifestView(withGate, topology, new Set(["packages/bakery/src/x.ts"]))
+          .selected.has(testIdentityKey(gate)),
+      ).toBe(true);
+      expect(
+        manifestView(withGate, topology, new Set(["docs/README.md"]))
+          .selected.has(testIdentityKey(gate)),
+      ).toBe(false);
+    });
+
     it("carries the flake counts and the catches behind every entry", () => {
       const view = manifestView(manifest, suites, new Set());
       expect(view.flakes.get(testIdentityKey(kneads)))
@@ -897,13 +937,21 @@ describe("post-main-report", () => {
   });
 
   describe("reportsFromArtifacts()", () => {
-    it("returns each attempt's records apart, and none of the coverage upload's", async () => {
+    it("returns each attempt's records apart, the coverage upload's among them", async () => {
       // A lane re-run is two artifacts, and what one attempt excused is
-      // only an excusal of what that attempt failed.
+      // only an excusal of what that attempt failed. The coverage upload
+      // carries the record of each coverage gate the run judged.
 
+      const gate = {
+        line: "record" as const,
+        test: { k: "gate", s: "bakery", n: "coverage-gate workspace-unit" },
+        outcome: "fail" as const,
+        durationMs: 3,
+      };
       const zips: Record<number, Uint8Array> = {
         5: await recordsZip([excusing("kneads"), record("kneads", "fail")]),
         7: await recordsZip([record("kneads", "fail")]),
+        9: await recordsZip([gate]),
       };
       const original = globalThis.fetch;
       globalThis.fetch = ((input: string | URL | Request) => {
@@ -929,7 +977,111 @@ describe("post-main-report", () => {
         ).toEqual([
           [excusing("kneads"), record("kneads", "fail")],
           [record("kneads", "fail")],
+          [gate],
         ]);
+      } finally {
+        globalThis.fetch = original;
+      }
+    });
+  });
+
+  describe("firstCoverageAt()", () => {
+    /**
+     * Answers GitHub's API as a store holding, at commit `abc`, one push
+     * run whose artifacts are `uploads`, with `zips` behind them.
+     */
+    function answering(
+      uploads: { id: number; name: string }[],
+      zips: Record<number, Uint8Array>,
+      asked: string[],
+    ): typeof fetch {
+      return ((input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        asked.push(url);
+        if (url.includes("/workflows/")) {
+          // Newest first, as GitHub lists them: a later push of the same
+          // commit, and the run that measured it first.
+          return Promise.resolve(Response.json({
+            workflow_runs: url.includes("head_sha=abc")
+              ? [
+                { id: 4, created_at: "2026-09-02T00:00:00Z" },
+                { id: 3, created_at: "2026-09-01T00:00:00Z" },
+                { id: 2, created_at: "2026-08-31T00:00:00Z" },
+              ]
+              : [],
+          }));
+        }
+        const run = Number(url.match(/runs\/(\d+)\/artifacts/)?.[1]);
+        if (!Number.isNaN(run)) {
+          // The earliest run was cancelled before it uploaded coverage.
+          const held = run === 2 ? [] : run === 4 ? [uploads[0]!] : uploads;
+          return Promise.resolve(Response.json({
+            total_count: held.length,
+            artifacts: held.map((upload) => ({
+              ...upload,
+              size_in_bytes: 1,
+              expired: false,
+            })),
+          }));
+        }
+        const id = Number(url.match(/artifacts\/(\d+)\/zip/)?.[1]);
+        return Promise.resolve(
+          zips[id] === undefined
+            ? new Response("missing", { status: 404 })
+            : new Response(zips[id] as BodyInit, { status: 200 }),
+        );
+      }) as typeof fetch;
+    }
+
+    it("reads the first coverage upload of the earliest push run to make one", async () => {
+      // A re-run uploads again, and so does a later push of the commit, and
+      // every reader takes the first, so that all of them read the same
+      // figures however often the commit is run.
+
+      const figures = (uncovered: number) => ({
+        groups: new Map(),
+        sets: new Map([["workspace-unit/packages/bakery", uncovered]]),
+        cold: false,
+      });
+      const zips: Record<number, Uint8Array> = {
+        5: await recordsZip(coverageRecords(figures(4))),
+        9: await recordsZip(coverageRecords(figures(6))),
+      };
+      const asked: string[] = [];
+      const original = globalThis.fetch;
+      globalThis.fetch = answering(
+        [
+          { id: 9, name: "test-records-coverage-a2" },
+          { id: 7, name: "test-records-tests-1-a1" },
+          { id: 5, name: "test-records-coverage-a1" },
+        ],
+        zips,
+        asked,
+      );
+      try {
+        expect(await firstCoverageAt("abc")).toEqual({
+          figures: figures(4),
+          startedAt: "2026-09-01T00:00:00Z",
+        });
+      } finally {
+        globalThis.fetch = original;
+      }
+      // The run is looked up whatever its status: its coverage is uploaded
+      // before it finishes.
+      expect(asked[0]).toContain("event=push");
+      expect(asked[0]).not.toContain("status=");
+    });
+
+    it("finds nothing where the run has uploaded no coverage yet", async () => {
+      const original = globalThis.fetch;
+      globalThis.fetch = answering(
+        [{ id: 7, name: "test-records-tests-1-a1" }],
+        {},
+        [],
+      );
+      try {
+        expect(await firstCoverageAt("abc")).toBeUndefined();
+        expect(await firstCoverageAt("def")).toBeUndefined();
       } finally {
         globalThis.fetch = original;
       }

@@ -306,13 +306,16 @@ jobs:
       - tests
     runs-on: ubuntu-latest
     timeout-minutes: *job-timeout
-    # The coverage gate reads the pull request's description as it stands,
-    # which is where an acceptance is written.
+    # The coverage gates read the pull request's description as it stands,
+    # which is where an acceptance is written, and on a push read what the
+    # parent commit's run measured from that run's artifacts.
     permissions:
+      actions: read
       contents: read
       pull-requests: read
-    # The coverage report writes the run's coverage figures into this spool as
-    # measurements, which the shipping step sends to the record store.
+    # The coverage gates write the record of each gate they judge into this
+    # spool, and the coverage report writes the run's coverage figures into it
+    # as measurements. The shipping step sends both to the record store.
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
@@ -364,23 +367,46 @@ jobs:
           deno task check-test-topology --commit "$GITHUB_SHA"
           --records test-records-artifacts
 
-      # Coverage measured through a failing run says nothing about whether the
-      # change was tested, so a run whose tests did not pass is reported
-      # rather than gated. The description is read as it stands rather than
-      # from the event, since a re-run repeats the event it was started by,
-      # and an acceptance written after the push is what a re-run is for.
+      # Each coverage gate the lanes' plan chose is judged and recorded, on
+      # every run: the records are what score the gates. Only a pull request
+      # can fail for one, and only for a set its change reaches. Coverage
+      # measured through a failing run says nothing about whether the change
+      # was tested, so a run whose tests did not pass is reported rather than
+      # gated. The description is read as it stands rather than from the
+      # event, since a re-run repeats the event it was started by, and an
+      # acceptance written after the push is what a re-run is for. A push
+      # reads the description of the pull request it merged, so that a rise
+      # that pull request accepted is not recorded as a failure.
       - name: 🔎 Hold the measured sets to their baselines
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() }}
         timeout-minutes: *work-timeout
         env:
           BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+          FULL: ${{ needs.plan-full.outputs.args == '--full' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JOB_RESULTS: ${{ toJSON(needs) }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          body=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')
-          args=(--base "origin/$BASE_REF" --reports lane-coverage
-            --body "$body" --comment coverage-comment.json --pr "$PR_NUMBER")
+          if [[ "$EVENT" == pull_request ]]; then
+            body=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')
+            args=(--base "origin/$BASE_REF" --body "$body"
+              --comment coverage-comment.json --pr "$PR_NUMBER")
+            if [[ "$FULL" == true ]]; then
+              args+=(--full)
+            fi
+          else
+            # Nothing a gate finds fails the default branch, so a description
+            # it cannot read leaves its gates judged as though nothing were
+            # accepted, and says so.
+            if ! body=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].body // ""'); then
+              echo "::warning::The description of the pull request this push merged could not be read, so no rise is accepted."
+              body=""
+            fi
+            args=(--full --default-branch --body "$body")
+          fi
+          args+=(--reports lane-coverage)
           if [[ "$(jq -r '.tests.result' <<< "$JOB_RESULTS")" != success ]]; then
             args+=(--tests-failed)
           fi
@@ -407,13 +433,14 @@ jobs:
         timeout-minutes: *work-timeout
         run: deno run -A tasks/coverage-report.ts --reports lane-coverage
 
-      # The run's coverage measurements, for the dashboard's trend and the
-      # test-selection publisher, which read them from the record store, and
-      # for the run report, which reads them from this run's artifacts. Only
-      # a push ships them, because every reader takes a figure from a push to
-      # main alone. This job runs no test, so it ships nothing else.
+      # The record of each coverage gate this run judged, for the
+      # test-selection publisher, which scores them, and for the run report,
+      # which reads them from this run's artifacts. A push ships the run's
+      # coverage measurements beside them, for the dashboard's trend and the
+      # publisher's baselines; only a push writes those, because every reader
+      # takes a figure from a push to main alone.
       - name: 📤 Ship test records
-        if: ${{ !cancelled() && github.event_name == 'push' }}
+        if: ${{ !cancelled() }}
         uses: ./.github/actions/test-records-ship
         with:
           artifact: coverage

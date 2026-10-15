@@ -87,6 +87,7 @@ import {
   type CrowdingSuite,
   type FullLaneCount,
   fullLaneCount,
+  type GateChoice,
   type Plan,
   plan,
   type Selection,
@@ -105,12 +106,15 @@ import {
 } from "./test-selection/census.ts";
 import {
   type CoverageGateSelection,
+  coverageGateSelection,
   measuredMembersOf,
+  measuresSuite,
+} from "./test-selection/coverage.ts";
+import {
   measuredSetDirectory,
   measuredSetName,
   measuredSets,
-  measuresSuite,
-} from "./test-selection/coverage.ts";
+} from "./test-topology/coverage-gates.ts";
 import type {
   Manifest,
   ManifestEntry,
@@ -1703,11 +1707,13 @@ const WITHHELD_REASONS: Record<WithheldReason, string> = {
  * withheld, since a change touching what a failing test covers is very
  * likely a fix and must be allowed to prove itself. Saying which of them
  * that happened to is the difference between "this did not run" and
- * "this ran because you touched it".
+ * "this ran because you touched it". An identity in `judged` comes back
+ * too, because a coverage gate the plan chose runs the whole of its set.
  */
 export function describeWithheld(
   withheld: Manifest["withheld"],
   mandatory: ReadonlyMap<string, SelectionReason>,
+  judged: ReadonlySet<string> = new Set(),
 ): void {
   if (withheld.length === 0) return;
   const lines = [
@@ -1717,11 +1723,15 @@ export function describeWithheld(
     "| --- | --- | --- | --- |",
   ];
   for (const entry of withheld) {
-    const back = mandatory.has(testIdentityKey(entry.test));
+    const key = testIdentityKey(entry.test);
+    const back = mandatory.has(key)
+      ? "yes, the change reaches it"
+      : judged.has(key)
+      ? "yes, a coverage gate the plan chose runs its set"
+      : "no";
     lines.push(
-      `| ${testIdentityKey(entry.test)} | ${entry.suite} | ` +
-        `${WITHHELD_REASONS[entry.reason]} | ` +
-        `${back ? "yes, the change reaches it" : "no"} |`,
+      `| ${key} | ${entry.suite} | ${WITHHELD_REASONS[entry.reason]} | ` +
+        `${back} |`,
     );
   }
   say(lines);
@@ -2008,6 +2018,13 @@ export interface PlanOver {
 
   /** What the tree holds, packed into the run's lanes. */
   laid: Plan;
+
+  /**
+   * The measured sets the change reached, and those whose gates the plan
+   * chose, which are the sets the lanes measure and the verdicts the job
+   * joining them reaches.
+   */
+  coverage: CoverageGateSelection;
 }
 
 /**
@@ -2020,6 +2037,16 @@ export interface PlanOver {
  * differ by here. Under `everything` every identity is required, so the
  * exclusions and the value, density and exploration passes have nothing
  * left to act on and the packer behaves the same way for both.
+ *
+ * A suite is priced as measured when the run measures it, and a pull
+ * request measures the suites of the gates its plan chose, which pricing
+ * has to know before the plan is packed. So the plan is packed first with
+ * no suite priced as measured, which is the answer wherever it chooses no
+ * gate. Where it chose some, it is packed again with those gates' suites
+ * priced as measured and only their gates offered, and again with fewer
+ * for as long as it then chooses no gate of some of those suites. The
+ * suites it may choose from shrink each time, so this ends, and it ends
+ * with every suite priced the way the lanes will run it.
  */
 export function planOver(input: {
   suites: readonly Suite[];
@@ -2028,35 +2055,62 @@ export function planOver(input: {
   full: boolean;
   lanes: number;
 }): PlanOver {
-  const seen = pricedOver(input);
+  const read = census(input.suites, input.manifest, input.changed);
+  const packed = (
+    gates: readonly GateChoice[],
+    measured: ReadonlySet<string>,
+  ) => {
+    const seen = pricedForRun(
+      read,
+      input.suites,
+      (suite) => input.full || measured.has(suite),
+    );
+    return {
+      seen,
+      laid: plan({
+        manifest: seen.manifest,
+        mandatory: seen.mandatory,
+        capabilities: capabilitiesBySuite(input.suites),
+        wholeUnits: wholeUnits(input.suites),
+        lanes: input.lanes,
+        gates,
+        ...(input.full ? { policy: "everything" as const } : {}),
+      }),
+    };
+  };
+  const judging = new Map(
+    read.gates.map((gate) => [testIdentityKey(gate.entry.test), gate.judges]),
+  );
+  let gates = read.gates;
+  let measured = new Set<string>();
+  let { seen, laid } = packed(gates, measured);
+  for (;;) {
+    const chosen = new Set(
+      laid.gates.flatMap((gate) => {
+        const suite = judging.get(testIdentityKey(gate.entry.test));
+        return suite === undefined ? [] : [suite];
+      }),
+    );
+    if (
+      input.full ||
+      (chosen.size === measured.size &&
+        [...chosen].every((suite) => measured.has(suite)))
+    ) {
+      break;
+    }
+    measured = chosen;
+    gates = gates.map((gate) =>
+      gate.reached && !chosen.has(gate.judges)
+        ? { ...gate, reached: false }
+        : gate
+    );
+    ({ seen, laid } = packed(gates, measured));
+  }
   return {
     seen,
-    laid: plan({
-      manifest: seen.manifest,
-      mandatory: seen.mandatory,
-      capabilities: capabilitiesBySuite(input.suites),
-      wholeUnits: wholeUnits(input.suites),
-      lanes: input.lanes,
-      ...(input.full ? { policy: "everything" as const } : {}),
-    }),
+    laid,
+    coverage: coverageGateSelection(input.suites, read.gates, laid.gates),
   };
-}
-
-/**
- * Helper for `planOver` and the full run's lane count, which reads a
- * tree against a manifest and prices it the way the run prices it.
- */
-function pricedOver(input: {
-  suites: readonly Suite[];
-  manifest: Manifest | undefined;
-  changed: ReadonlySet<string>;
-  full: boolean;
-}): PricedCensus {
-  return pricedForRun(
-    census(input.suites, input.manifest, input.changed),
-    input.suites,
-    input.full,
-  );
 }
 
 /** What every lane of a run works out before taking its own share. */
@@ -2180,7 +2234,11 @@ function fullLanesNeeded(
   changed: ReadonlySet<string>,
   full: boolean,
 ): FullLaneCount {
-  const seen = pricedOver({ suites, manifest, changed, full });
+  const seen = pricedForRun(
+    census(suites, manifest, changed),
+    suites,
+    () => full,
+  );
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
     // arithmetic over a figure this invented, and the answer would be
@@ -2203,7 +2261,9 @@ function fullLanesNeeded(
     // have all been renamed away carries what the units it lost cost
     // onto every stand-in, and a count that assumed the bare figure
     // would be out by that whole multiple.
+    // A suite of gates holds verdicts, which no lane runs.
     const running = suites.filter((suite) => {
+      if (suite.judges !== undefined) return false;
       const unavailable = unavailableUnits(suite);
       return suite.units.some((unit) => !unavailable.has(unit));
     });
@@ -2249,7 +2309,11 @@ export async function runLane(
   // no child of it inherits the token except through the capability.
   const githubToken = takeGithubToken();
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  const { seen, fetched, laid } = await lanePlan(options, suites, deps);
+  const { seen, fetched, laid, coverage } = await lanePlan(
+    options,
+    suites,
+    deps,
+  );
   const mine = laid.lanes.find((lane) => lane.lane === options.lane);
   if (mine === undefined) {
     // A lane outside the run it belongs to. Taking an empty share
@@ -2303,7 +2367,17 @@ export async function runLane(
       },
       laid.budgetSeconds,
     );
-    describeWithheld(laid.withheld, seen.mandatory);
+    describeWithheld(
+      laid.withheld,
+      seen.mandatory,
+      new Set(
+        laid.lanes.flatMap((lane) =>
+          lane.selections
+            .filter((selection) => selection.reason === "coverage-gate")
+            .map((selection) => testIdentityKey(selection.entry.test))
+        ),
+      ),
+    );
   }
   if (options.dryRun) return true;
   const stop = deps.stop?.() ?? new LaneStop();
@@ -2372,8 +2446,9 @@ export async function runLane(
   // short by whatever that test would have reached.
   const failedUnits = new Set<string>();
   // What a failure here is allowed not to fail the run for. A pull
-  // request holds these back rather than running them, so the set is
-  // empty there and the whole of this is the full run's.
+  // request holds these back rather than running them, unless a coverage
+  // gate its plan chose runs their units, so on a pull request this is
+  // only those.
   const nonGating = new Set(
     laid.nonGating.map((entry) => testIdentityKey(entry.test)),
   );
@@ -2401,7 +2476,7 @@ export async function runLane(
         workDir,
         spool,
         env,
-        batchCoverage(options, batch.suite.id, seen.coverage),
+        batchCoverage(options, batch.suite.id, coverage),
         stop,
       );
       for (const conflict of result.conflicts) conflicts.push(conflict);
@@ -2547,14 +2622,14 @@ export async function runLane(
       ),
     ]);
   }
-  describeCoverage(seen.coverage, converted.reports, marked);
+  describeCoverage(coverage, converted.reports, marked);
   return ok;
 }
 
 /**
- * Says what the coverage gate is doing, and what this lane measured for
- * it. A change that reached a set and is not being gated says why here,
- * so that a set the cap left unforced is visible rather than absent.
+ * Says which coverage gates the plan chose, and what this lane measured for
+ * them. A gate the change reached and the plan did not choose is named
+ * here too, so that a set nothing measured is visible rather than absent.
  */
 export function describeCoverage(
   gate: CoverageGateSelection,
@@ -2562,18 +2637,27 @@ export function describeCoverage(
   marked: readonly string[] = [],
 ): void {
   if (
-    gate.reached.length === 0 && reports.length === 0 && marked.length === 0
+    gate.reached.length === 0 && gate.sets.length === 0 &&
+    reports.length === 0 && marked.length === 0
   ) {
     return;
   }
   const lines = ["## Coverage", ""];
-  if (gate.off !== undefined) {
-    lines.push(`No measured set is forced: ${gate.off}.`, "");
-    lines.push("Reached, and not forced:", "");
-    for (const ref of gate.reached) lines.push(`- ${measuredSetName(ref)}`);
-  } else if (gate.sets.length > 0) {
-    lines.push("Measured sets this change reaches, run whole and scored:", "");
-    for (const ref of gate.sets) lines.push(`- ${measuredSetName(ref)}`);
+  const chosen = new Set(gate.sets.map(measuredSetName));
+  if (chosen.size > 0) {
+    lines.push("Measured sets whose gates the plan chose, run whole:", "");
+    for (const name of chosen) lines.push(`- ${name}`);
+  }
+  const passedOver = gate.reached.map(measuredSetName)
+    .filter((name) => !chosen.has(name));
+  if (passedOver.length > 0) {
+    if (chosen.size > 0) lines.push("");
+    lines.push(
+      "Measured sets the change reaches whose gates the plan did not " +
+        "choose, which nothing measures:",
+      "",
+    );
+    for (const name of passedOver) lines.push(`- ${name}`);
   }
   if (reports.length > 0) {
     // A report belonging to a set is named as the set, so one summary
@@ -2581,7 +2665,7 @@ export function describeCoverage(
     // suite wrote and no set is scored from, which only the full run's
     // merge reads.
     const named = new Map(
-      gate.reached.map((
+      [...gate.reached, ...gate.sets].map((
         ref,
       ) => [measuredSetDirectory(ref), measuredSetName(ref)]),
     );

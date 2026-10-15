@@ -49,12 +49,13 @@ import {
 } from "./ci-lane.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
+import { measuredCostLines } from "./test-selection/coverage.ts";
 import {
-  measuredCostLines,
+  coverageGateIdentity,
   measuredSetName,
   type MeasuredSetRef,
   measuredSets,
-} from "./test-selection/coverage.ts";
+} from "./test-topology/coverage-gates.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
 import { calibrationHealth, healthLines } from "./test-selection/health.ts";
 import { nearestBaseline, nearestOnBranch } from "./coverage-gate.ts";
@@ -159,8 +160,8 @@ export function dialLines(): string[] {
 }
 
 /**
- * Each measured set and its baseline, then every workspace member that
- * carries no set and the reason it does not.
+ * Each measured set, its baseline and its gate's score, then every
+ * workspace member that carries no set and the reason it does not.
  *
  * The two halves answer the two questions somebody brings here: what am I
  * being compared against, and why is my package not gated. The baseline
@@ -181,6 +182,12 @@ export async function coverageLines(
     1,
     maxOf([...names, ...ungated].map((name) => name.length)),
   );
+  const entries = new Map(
+    (manifest?.entries ?? []).map((entry) => [
+      testIdentityKey(entry.test),
+      entry,
+    ]),
+  );
   const lines: string[] = [];
   for (const [index, ref] of sets.entries()) {
     const baseline = await nearestBaseline(
@@ -193,9 +200,13 @@ export async function coverageLines(
       ? "no baseline yet"
       : `${baseline.uncoveredLines} uncovered lines at ${baseline.commit}`;
     const units = ref.set.units.length;
+    const gate = entries.get(testIdentityKey(coverageGateIdentity(ref)));
+    const scored = gate === undefined
+      ? "its gate has no record yet"
+      : `its gate scores ${gate.score.toFixed(3)}`;
     lines.push(
       `${pad(names[index]!, width)}  ${units} ` +
-        `${units === 1 ? "unit" : "units"}, against ${against}`,
+        `${units === 1 ? "unit" : "units"}, against ${against}; ${scored}`,
     );
   }
   for (const member of ungated) {
@@ -401,6 +412,12 @@ export function planLines(
       lines.push(`    ${count} by ${reason}`);
     }
   }
+  for (const gate of laid.gates) {
+    lines.push(
+      `gate ${testIdentityKey(gate.entry.test)} by ${gate.reason}, run in ` +
+        `whatever lanes hold what it judges`,
+    );
+  }
   if (laid.overBudgetSeconds > 0) {
     lines.push(
       `the mandatory set alone puts a lane ` +
@@ -434,11 +451,21 @@ export function verdictFor(
   test: TestIdentity,
 ): PlanVerdict & { corpus: Manifest } {
   const { laid } = planned;
-  const corpus = planned.seen.manifest;
+  // A gate is no lane's work, so the corpus the lanes were packed from does
+  // not hold it, and it is added back for the identity being explained.
+  const corpus: Manifest = {
+    ...planned.seen.manifest,
+    entries: [
+      ...planned.seen.manifest.entries,
+      ...planned.seen.gates.map((gate) => gate.entry),
+    ],
+  };
   const key = testIdentityKey(test);
-  const taken = laid.lanes.flatMap((lane) => lane.selections).find((
-    selection,
-  ) => testIdentityKey(selection.entry.test) === key);
+  const taken = [
+    ...laid.lanes.flatMap((lane) => lane.selections),
+    ...laid.gates,
+  ]
+    .find((selection) => testIdentityKey(selection.entry.test) === key);
   // The corpus travels with the verdict so that whatever explains this
   // identity explains it against the same set the verdict came from. A
   // reader given the published manifest instead would be told there is
@@ -503,9 +530,16 @@ export function verifyLines(
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
       enumerated.add(`${suite.id}\t${unit}`);
-      if (!held.has(`${suite.id}\t${unit}`)) {
-        missing.push(`${suite.id}: ${unit}`);
-      }
+      if (held.has(`${suite.id}\t${unit}`)) continue;
+      // A gate is no lane's work, so a gate nothing has recorded is not run
+      // as unknown; it waits at the floor of the score for its first record.
+      missing.push(
+        suite.judges === undefined
+          ? `no identity for ${suite.id}: ${unit}, so every lane runs it as ` +
+            `unknown`
+          : `no record of the gate ${suite.id}: ${unit}, so a change is ` +
+            `offered it at the floor of the score`,
+      );
     }
   }
   const stale = [...held].filter((key) => !enumerated.has(key)).sort();
@@ -515,9 +549,7 @@ export function verifyLines(
     `${enumerated.size} units enumerated, ${manifest.entries.length} ` +
     `identities in the manifest`,
   ];
-  for (const unit of missing.sort()) {
-    lines.push(`  no identity for ${unit}, so every lane runs it as unknown`);
-  }
+  for (const line of missing.sort()) lines.push(`  ${line}`);
   for (const key of stale) {
     const [suite, unit] = key.split("\t") as [string, string];
     lines.push(

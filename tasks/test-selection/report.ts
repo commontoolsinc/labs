@@ -41,7 +41,6 @@ import {
   COVERAGE_COMMENT_LINES,
   EXCLUDED_FROM_COVERAGE_GATE,
   FLAKE_WINDOW_DAYS,
-  LOCAL_COVERAGE_MAX_SETS,
   RENAME_MARGIN,
   RENAME_SIMILARITY,
   RENAME_SUGGESTIONS,
@@ -301,7 +300,8 @@ export interface CoverageRise {
 /** Which route let a measured set's rise reach the default branch. */
 export type MeasuredSetRoute =
   | "excluded"
-  | "over-the-cap"
+  | "not-chosen"
+  | "unplanned"
   | "elsewhere"
   | "gated";
 
@@ -319,9 +319,6 @@ export interface MeasuredSetRise {
 
   /** Present for `excluded`: the reason the exclusion list gives. */
   reason?: string;
-
-  /** Present for `over-the-cap`: how many measured sets were reached. */
-  touched?: number;
 }
 
 /** A test this change added which has already disagreed with itself. */
@@ -395,12 +392,13 @@ export interface ReportInput {
   touched: ReadonlySet<string>;
 
   /**
-   * The measured sets the change reached, and whether the coverage gate
-   * ran over them. Worked out from the declarations by the same function
-   * the gate runs, so the note and the gate cannot come to different
-   * answers about which sets were gated.
+   * The measured sets the change reached, and those whose gates the plan
+   * over its pull request's manifest chose, by the same packing the lanes
+   * and the gate ran, so the note and the gate cannot come to different
+   * answers about which sets were measured. Which were chosen is absent
+   * where no manifest was resolved for that run.
    */
-  coverageGate: { reached: readonly string[]; ran: boolean };
+  coverageGate: { reached: readonly string[]; chosen?: readonly string[] };
 
   /** The day the comment is written, which dates an alias line. */
   day: string;
@@ -602,13 +600,13 @@ export function coverageRise(input: ReportInput): CoverageRise | undefined {
  * Each measured set whose number rose, and what let the rise past the
  * coverage gate.
  *
- * Three of the four are the ways a rise reaches the default branch with
- * the gate never having had an opinion, and they call for different
- * things: nothing, a look at the exclusion list, and a look at the
- * change respectively. The fourth is the state where the gate did
+ * Four of the five are the ways a rise reaches the default branch with
+ * the gate never having had an opinion: the member is excluded, the plan
+ * did not choose the set's gate, no plan can say whether it did, and the
+ * change did not reach the set. The fifth is the state where the gate did
  * measure the set and passed it, which means the two measurements
  * disagree and is worth saying plainly rather than describing as one of
- * the other three.
+ * the others.
  */
 export function measuredSetRises(input: ReportInput): MeasuredSetRise[] {
   // A change that touched no source at all could not have moved which
@@ -617,7 +615,7 @@ export function measuredSetRises(input: ReportInput): MeasuredSetRise[] {
   if (input.touched.size === 0) return [];
   const before = input.coverageBefore.sets;
   const after = input.coverage.sets;
-  const { reached, ran } = input.coverageGate;
+  const { reached, chosen } = input.coverageGate;
   const rises: MeasuredSetRise[] = [];
   for (const [set, lines] of after) {
     const was = before.get(set);
@@ -633,13 +631,14 @@ export function measuredSetRises(input: ReportInput): MeasuredSetRise[] {
       to: lines,
       route: excluded !== undefined
         ? "excluded"
-        : !ran && reached.length > 0
-        ? "over-the-cap"
-        : ran && reached.includes(set)
+        : !reached.includes(set)
+        ? "elsewhere"
+        : chosen === undefined
+        ? "unplanned"
+        : chosen.includes(set)
         ? "gated"
-        : "elsewhere",
+        : "not-chosen",
     };
-    if (rise.route === "over-the-cap") rise.touched = reached.length;
     if (rise.route === "excluded") rise.reason = excluded;
     rises.push(rise);
   }
@@ -881,9 +880,8 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "tests, and this was not one of them.",
   "crowded-out": "This pull request did not run it, and nothing about " +
     "this test decided that. The tests that had to run, which are the " +
-    "ones the change's edits reach, the ones the coverage gate forces, and " +
-    "the ones the store has never seen, left no room in the lanes for " +
-    "anything else.",
+    "ones the change's edits reach and the ones the store has never seen, " +
+    "left no room in the lanes for anything else.",
   "withheld-unit": "This pull request did not run it: its unit runs as " +
     "a whole, and the store holds back another test in that unit as too " +
     "flaky to judge a change by, so a pull request runs the unit only " +
@@ -931,10 +929,13 @@ const ROUTE_PROSE: Record<MeasuredSetRoute, string> = {
   excluded: "The member is on `EXCLUDED_FROM_COVERAGE_GATE`, so it carries " +
     "no measured set and nothing gates it. The exclusion list is what to " +
     "look at.",
-  "over-the-cap": "The change reached more measured sets than " +
-    `\`LOCAL_COVERAGE_MAX_SETS\` (${LOCAL_COVERAGE_MAX_SETS}) ` +
-    "allows, so the coverage gate did not run at all. There is nothing " +
-    "to do about the gate; the rise itself is the thing to look at.",
+  "not-chosen": "The change reached this set, and the plan for its pull " +
+    "request did not choose the set's coverage gate, so nothing measured " +
+    "the set there. The rise itself is the thing to look at.",
+  unplanned: "The change reached this set, and no manifest could be " +
+    "resolved for its pull request's run, so whether that run chose the " +
+    "set's coverage gate cannot be said. The rise itself is the thing to " +
+    "look at.",
   elsewhere: "The change did not touch this member, so the gate had " +
     "nothing to compare and something elsewhere moved which lines this " +
     "set's tests reach. The change is what to look at.",
@@ -1066,9 +1067,6 @@ export function renderReport(
       );
       if (rise.reason !== undefined) {
         out.push(`  The list gives the reason: ${rise.reason}`);
-      }
-      if (rise.touched !== undefined) {
-        out.push(`  The change reached ${rise.touched} measured sets.`);
       }
     }
   }

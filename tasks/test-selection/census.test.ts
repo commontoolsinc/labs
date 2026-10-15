@@ -10,6 +10,7 @@ import {
   type ManifestEntry,
 } from "./manifest.ts";
 import type { Suite } from "../test-topology/suite.ts";
+import { coverageGateSuite } from "../test-topology/coverage-gates.ts";
 import { loadTopology } from "../test-topology.ts";
 
 /**
@@ -18,7 +19,7 @@ import { loadTopology } from "../test-topology.ts";
  * directory, and the paths the topology reads are the repository's.
  */
 const REPOSITORY = dirname(dirname(dirname(fromFileUrl(import.meta.url))));
-import { UNMEASURED_COST_SECONDS } from "./policy.ts";
+import { UNMEASURED_COST_SECONDS, VALUE_FLOOR } from "./policy.ts";
 
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
@@ -258,18 +259,26 @@ describe("the identity a unit nothing has recorded stands on", () => {
 
   it("gives the whole topology as many stand-ins as it has units", async () => {
     // The property above, over the repository's real suites rather than
-    // over a pair built to show it.
+    // over a pair built to show it. A gate's unit is a verdict rather than
+    // lane work, so it is offered as a gate and never stands in.
     const suites = await loadTopology(REPOSITORY);
     const seen = census(suites, undefined, new Set());
-    const available = suites.reduce(
-      (total, suite) =>
-        total + suite.units.length -
-        suite.unavailable.filter((entry) => entry.leafName === undefined)
-          .length,
-      0,
-    );
+    const available = suites
+      .filter((suite) => suite.judges === undefined)
+      .reduce(
+        (total, suite) =>
+          total + suite.units.length -
+          suite.unavailable.filter((entry) => entry.leafName === undefined)
+            .length,
+        0,
+      );
+    const gates = suites
+      .filter((suite) => suite.judges !== undefined)
+      .reduce((total, suite) => total + suite.units.length, 0);
+    expect(gates).toBeGreaterThan(0);
     expect(seen.manifest.entries.length).toBe(available);
     expect(new Set(seen.mandatory.keys()).size).toBe(available);
+    expect(seen.gates).toHaveLength(gates);
   });
 });
 
@@ -515,7 +524,7 @@ describe("an entry whose unit its suite has re-grained", () => {
   });
 });
 
-describe("what a measured set makes mandatory", () => {
+describe("what a measured set's gate offers a change", () => {
   const measured = suite({
     id: "workspace-unit",
     units: [
@@ -532,6 +541,12 @@ describe("what a measured set makes mandatory", () => {
       ],
     }],
   });
+  const suites = [measured, coverageGateSuite([measured])];
+  const gateIdentity = {
+    k: "gate",
+    s: "bakery",
+    n: "coverage-gate workspace-unit",
+  };
 
   const manifest = manifestOf([
     {
@@ -548,59 +563,63 @@ describe("what a measured set makes mandatory", () => {
     },
   ]);
 
-  it("requires every unit of a set the change reaches", () => {
+  it("offers the gate of a set the change reaches, and forces nothing", () => {
     const seen = census(
-      [measured],
+      suites,
       manifest,
       new Set(["packages/bakery/src/oven.ts"]),
     );
-    expect([...seen.mandatory.values()]).toEqual([
-      "coverage-gate",
-      "coverage-gate",
+    expect(seen.mandatory.size).toBe(0);
+    expect(seen.gates).toHaveLength(1);
+    expect(seen.gates[0]!.reached).toBe(true);
+    expect(seen.gates[0]!.judges).toBe("workspace-unit");
+    expect([...seen.gates[0]!.members].sort()).toEqual([
+      testIdentityKey({ k: "unit", s: "bakery", n: "glaze" }),
+      testIdentityKey({ k: "unit", s: "bakery", n: "proof" }),
     ]);
-    expect(seen.coverage.sets).toHaveLength(1);
   });
 
-  it("leaves a member the change did not reach alone", () => {
-    const seen = census(
-      [measured],
-      manifest,
-      new Set(["packages/bakery/src/oven.ts"]),
-    );
-    expect(
-      seen.mandatory.has(
-        testIdentityKey({ k: "unit", s: "bakery", n: "rack" }),
-      ),
-    ).toBe(false);
+  it("does not offer the gate of a set the change does not reach", () => {
+    const seen = census(suites, manifest, new Set(["docs/README.md"]));
+    expect(seen.mandatory.size).toBe(0);
+    expect(seen.gates.map((gate) => gate.reached)).toEqual([false]);
   });
 
-  it("says the change touched a test file rather than reached a set", () => {
-    // Both hold for a changed test file inside a measured set, and the
-    // diff naming the unit outright is the more exact answer.
+  it("requires a changed test file inside a set, and nothing beside it", () => {
     const seen = census(
-      [measured],
+      suites,
       manifest,
       new Set(["packages/bakery/glaze.test.ts"]),
     );
-    expect(
-      seen.mandatory.get(
-        testIdentityKey({ k: "unit", s: "bakery", n: "glaze" }),
-      ),
-    ).toBe("changed");
-    expect(
-      seen.mandatory.get(
-        testIdentityKey({ k: "unit", s: "bakery", n: "proof" }),
-      ),
-    ).toBe("coverage-gate");
+    expect([...seen.mandatory]).toEqual([
+      [testIdentityKey({ k: "unit", s: "bakery", n: "glaze" }), "changed"],
+    ]);
+    expect(seen.gates[0]!.reached).toBe(true);
   });
 
-  it("requires nothing for a change that reaches no set", () => {
-    const seen = census([measured], manifest, new Set(["docs/README.md"]));
-    expect(seen.mandatory.size).toBe(0);
-    expect(seen.coverage.sets).toEqual([]);
+  it("keeps a gate out of the entries the lanes are packed from", () => {
+    const recorded = manifestOf([...manifest.entries, {
+      suite: "coverage-gate",
+      unit: "workspace-unit/packages/bakery",
+      test: gateIdentity,
+      score: 0.6,
+    }]);
+    const seen = census(suites, recorded, new Set());
+    expect(
+      seen.manifest.entries.some((entry) => entry.suite === "coverage-gate"),
+    ).toBe(false);
+    expect(seen.gates[0]!.entry.test).toEqual(gateIdentity);
+    expect(seen.gates[0]!.entry.score).toBe(0.6);
   });
 
-  it("requires nothing where the cap turned the gate off", () => {
+  it("offers a gate nothing has recorded at the floor, under its identity", () => {
+    const seen = census(suites, manifest, new Set());
+    expect(seen.gates[0]!.entry.test).toEqual(gateIdentity);
+    expect(seen.gates[0]!.entry.score).toBe(VALUE_FLOOR);
+    expect(seen.unmeasured).toBe(0);
+  });
+
+  it("offers every gate a change reaches, however many there are", () => {
     const many = suite({
       id: "workspace-unit",
       units: [
@@ -615,16 +634,15 @@ describe("what a measured set makes mandatory", () => {
       })),
     });
     const seen = census(
-      [many],
+      [many, coverageGateSuite([many])],
       manifestOf(["a", "b", "c"].map((name) => ({
         unit: `packages/${name}/one.test.ts`,
-        test: { k: "unit", s: "bakery", n: name },
+        test: { k: "unit", s: name, n: name },
       }))),
       new Set(["packages/a/x.ts", "packages/b/x.ts", "packages/c/x.ts"]),
     );
     expect(seen.mandatory.size).toBe(0);
-    expect(seen.coverage.off).toBeDefined();
-    expect(seen.coverage.reached).toHaveLength(3);
+    expect(seen.gates.map((gate) => gate.reached)).toEqual([true, true, true]);
   });
 });
 
@@ -634,12 +652,8 @@ describe("what a run charges a suite it measures", () => {
   const oven = suite({ id: "oven-unit" });
   const glaze = suite({ id: "glaze-unit" });
 
-  /** A census whose coverage gate scores the sets over `gated`. */
-  function seenGating(gated: readonly Suite[]) {
-    const refs = gated.map((gatedSuite) => ({
-      suite: gatedSuite.id,
-      set: { member: "packages/bakery", reachedBy: [], units: [] },
-    }));
+  /** A census of no tests, under the fits above. */
+  function seenGating() {
     const manifest = manifestOf([]);
     return {
       manifest: {
@@ -652,12 +666,16 @@ describe("what a run charges a suite it measures", () => {
       },
       mandatory: new Map(),
       unmeasured: 0,
-      coverage: { sets: refs, reached: refs },
+      gates: [],
     };
   }
 
-  it("charges a suite the gate measures what it costs with coverage on", () => {
-    const priced = pricedForRun(seenGating([oven]), [oven, glaze], false);
+  it("charges a suite the run measures what it costs with coverage on", () => {
+    const priced = pricedForRun(
+      seenGating(),
+      [oven, glaze],
+      (id) => id === "oven-unit",
+    );
     expect(priced.manifest.calibration.suites["oven-unit"]).toEqual(
       instrumented,
     );
@@ -668,18 +686,18 @@ describe("what a run charges a suite it measures", () => {
     ]);
   });
 
-  it("charges a suite no set measures what it costs without", () => {
-    const priced = pricedForRun(seenGating([]), [oven, glaze], false);
+  it("charges a suite the run does not measure what it costs without", () => {
+    const priced = pricedForRun(seenGating(), [oven, glaze], () => false);
     expect(priced.manifest.calibration.suites["oven-unit"]).toEqual(plain);
   });
 
   it("carries no coverage fits for a reader to apply a second time", () => {
-    const priced = pricedForRun(seenGating([]), [oven, glaze], true);
+    const priced = pricedForRun(seenGating(), [oven, glaze], () => true);
     expect(priced.manifest.calibration.suitesWithCoverage).toBeUndefined();
   });
 
   it("charges every suite the full run measures its coverage-on cost", () => {
-    const priced = pricedForRun(seenGating([]), [oven, glaze], true);
+    const priced = pricedForRun(seenGating(), [oven, glaze], () => true);
     expect(priced.manifest.calibration.suites["oven-unit"]).toEqual(
       instrumented,
     );
