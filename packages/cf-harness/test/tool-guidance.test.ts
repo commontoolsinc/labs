@@ -18,6 +18,7 @@ import {
   LOOM_COMMANDS_TOOL_GUIDANCE,
   LOOM_RETRIEVAL_TOOL_GUIDANCE,
   PIECES_TOOL_GUIDANCE,
+  RESEARCH_TOOL_GUIDANCE,
   RESOLVE_PIECE_TOOL_GUIDANCE,
   toolGuidanceContextMessages,
 } from "../src/tool-guidance.ts";
@@ -133,6 +134,7 @@ describe("tool-guidance", () => {
     expect(guidance).toContain(LOOM_COMMANDS_TOOL_GUIDANCE);
     expect(guidance).toContain(LOOM_RETRIEVAL_TOOL_GUIDANCE);
     expect(guidance).toContain(RESOLVE_PIECE_TOOL_GUIDANCE);
+    expect(guidance).toContain(RESEARCH_TOOL_GUIDANCE);
     expect(guidance).not.toContain(AUTHOR_TOOL_GUIDANCE);
     expect(guidance).not.toContain(PIECES_TOOL_GUIDANCE);
   });
@@ -142,7 +144,7 @@ describe("tool-guidance", () => {
     expect(guidance).toContain(AUTHOR_TOOL_GUIDANCE);
     expect(guidance).toContain("Bound every query with a LIMIT");
     expect(guidance).toContain("An aggregate (count(*), sum(), GROUP BY)");
-    expect(guidance).toContain("followUpTo");
+    expect(guidance).toContain(RESEARCH_TOOL_GUIDANCE);
     expect(guidance).not.toContain(LOOM_COMMANDS_TOOL_GUIDANCE);
     expect(guidance).not.toContain(PIECES_TOOL_GUIDANCE);
   });
@@ -161,6 +163,7 @@ describe("tool-guidance", () => {
     expect(guidance).toContain("`fill`");
     expect(guidance).toContain(RESOLVE_PIECE_TOOL_GUIDANCE);
     expect(guidance).not.toContain(AUTHOR_TOOL_GUIDANCE);
+    expect(guidance).not.toContain(RESEARCH_TOOL_GUIDANCE);
     expect(guidance).not.toContain(LOOM_COMMANDS_TOOL_GUIDANCE);
   });
 
@@ -180,6 +183,7 @@ describe("tool-guidance", () => {
       loomRetrievalAvailable: true,
     })).toEqual([
       AUTHOR_TOOL_GUIDANCE,
+      RESEARCH_TOOL_GUIDANCE,
       PIECES_TOOL_GUIDANCE,
       RESOLVE_PIECE_TOOL_GUIDANCE,
       LOOM_RETRIEVAL_TOOL_GUIDANCE,

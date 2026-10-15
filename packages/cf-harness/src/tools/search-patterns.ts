@@ -125,7 +125,7 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
   toolId: "search_patterns",
   title: "Search Patterns",
   description:
-    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Returns each pattern's id, kind, evidence quality, description, import specifier and match ratio; the leading results also carry argument and result shapes, never source. Run one with run_pattern's patternId.",
+    "Search the pattern index for published Common Fabric patterns by hashtag or free text. Returns each pattern's id, kind, evidence quality, description, import specifier and match ratio; the leading results may also carry argument and result shapes, never source. Run one with run_pattern's patternId.",
   effectClass: "read",
   inputSchema: {
     type: "object",

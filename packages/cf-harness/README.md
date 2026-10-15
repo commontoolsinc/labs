@@ -2064,7 +2064,8 @@ every request shares. The rules for using a tool are guidance in
 backings carry and fitted to the tags with the rest of the orientation: `author`
 gets writing, running and naming patterns (the confidentiality ceiling, a
 query's `LIMIT`, a composed pattern's error branch, pending results,
-`resultSchema`), research and `pattern-author` delegation; `pieces` gets reading
+`resultSchema`) and `pattern-author` delegation; `author` and `find` get
+building on research (`followUpTo`, naming the handle); `pieces` gets reading
 and acting on pieces (verbs, `fill`, `rowLabelReads`, research handles); `find`
 and `act` get the host's commands (`loomId`, `expectedVersion`, batching,
 `not_granted`) and how loom retrieval withholds a row; `find`, `act` and

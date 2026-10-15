@@ -350,7 +350,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    `Compile and run a Common Fabric pattern in the configured space, given source that imports its runtime APIs from "${RUNTIME_MODULE_SPECIFIER}" or a published patternId; returns a reference to its live result cell, with the values resultSchema asks for.`,
+    `Compile and run a Common Fabric pattern in the configured space, given source that imports its runtime APIs from "${RUNTIME_MODULE_SPECIFIER}" or a published patternId; returns a reference to its live result cell and, when released, the values resultSchema selects.`,
   effectClass: "side-effect",
   inputSchema: RUN_PATTERN_INPUT_SCHEMA,
   outputSchema: {

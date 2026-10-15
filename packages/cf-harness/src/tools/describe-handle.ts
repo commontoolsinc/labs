@@ -353,7 +353,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report a handle's referent's shape and CFC labels, never its data: a cell's recorded schema and path, a piece's verbs, a SQLite database's tables and fill, a research handle's findings, or another held referent's kind and provenance.",
+    "Report a handle's referent's shape and CFC labels, never its data except a research handle's findings: a cell's recorded schema and path, a piece's verbs, a SQLite database's tables and fill, or another held referent's kind and provenance.",
   effectClass: "read",
   inputSchema: {
     type: "object",

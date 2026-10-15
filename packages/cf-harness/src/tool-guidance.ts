@@ -51,9 +51,12 @@ export const AUTHOR_TOOL_GUIDANCE = [
   "Writing and running patterns:",
   RUN_PATTERN_GUIDANCE,
   "- A run_pattern piece stays out of the space's piece list until assign_slug names and lists it. Name one after verifying a settled result and a UI; pending reads and data-only results cannot be named, and pure computation stays unnamed. A slug already taken gets a counter appended, so read the address from the receipt.",
-  "- Research orients for an initial approach or answers a question. Build on prior findings by naming the research handle in followUpTo, asking for what remains unclear rather than commissioning another whole app, and prefer composing existing pieces with a small reusable addition. Name the handle in a delegate_task goal too, so a child with describe_handle reads it instead of researching again.",
   '- Authoring a pattern goes through the "pattern-author" delegate_task profile, which preloads the pattern skills when the registry carries them. It runs what it wrote and returns a reference to the result cell, never source, to assign_slug or wire into run_pattern; you never compile anything yourself. Keep one delegation to one buildable piece so its compile/fix loop fits the child turn budget, and name in the goal the words the capability should be findable under in the pattern index. It declares its own return contract, so give it no returnSchema.',
 ].join("\n");
+
+/** How to build on research, for a task that may research a question. */
+export const RESEARCH_TOOL_GUIDANCE =
+  "Research orients for an initial approach or answers a question. Build on prior findings by naming the research handle in followUpTo, asking for what remains unclear rather than commissioning another whole app, and prefer composing existing pieces with a small reusable addition. Name the handle in a delegate_task goal too, so a child with describe_handle reads it instead of researching again.";
 
 /** How to read and act on the pieces a run holds. */
 export const PIECES_TOOL_GUIDANCE = [
@@ -95,7 +98,12 @@ export const toolGuidanceContextMessages = (
   backing: ToolGuidanceBacking,
 ): string[] => [
   ...(backing.fabricSessionAvailable
-    ? [AUTHOR_TOOL_GUIDANCE, PIECES_TOOL_GUIDANCE, RESOLVE_PIECE_TOOL_GUIDANCE]
+    ? [
+      AUTHOR_TOOL_GUIDANCE,
+      RESEARCH_TOOL_GUIDANCE,
+      PIECES_TOOL_GUIDANCE,
+      RESOLVE_PIECE_TOOL_GUIDANCE,
+    ]
     : []),
   ...(backing.loomCommandsAvailable ? [LOOM_COMMANDS_TOOL_GUIDANCE] : []),
   ...(backing.loomRetrievalAvailable ? [LOOM_RETRIEVAL_TOOL_GUIDANCE] : []),
