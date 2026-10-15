@@ -322,7 +322,8 @@ export async function unexportFromAgentConfigs(
  * Points every installed harness's configuration that carries a
  * variable with one value at another, returning what each one's update
  * did. A configuration carrying any other value, or none, is left as it
- * is and not reported.
+ * is and not reported; one that does not parse is reported, since it may
+ * carry the old value.
  */
 export async function reexportFromAgentConfigs(
   name: string,
@@ -340,9 +341,13 @@ export async function reexportFromAgentConfigs(
     )
   ) {
     const read = await readConfig(path);
-    if (read.kind !== "config") continue;
-    const block = envBlock(read.config);
-    if (block === undefined || block[name] !== from) continue;
+    if (read.kind === "missing") continue;
+    const block = read.kind === "config" ? envBlock(read.config) : undefined;
+    if (read.kind === "unreadable" || block === undefined) {
+      updates.push({ harness: harness.name, path, outcome: "unreadable" });
+      continue;
+    }
+    if (block[name] !== from) continue;
     const wrote = await write(
       path,
       { ...read.config, env: { ...block, [name]: to } },

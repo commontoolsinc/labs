@@ -1592,6 +1592,43 @@ describe("test-records-key", () => {
       );
     });
 
+    it("keeps a legacy key a link in the shared directory points at", async () => {
+      await legacyInstall();
+      const shared = join(home, "commonfabric");
+      const legacyKey = join(home, "common-fabric", "test-records-key.json");
+      await Deno.mkdir(shared);
+      await Deno.symlink(legacyKey, join(shared, "test-records-key.json"));
+
+      await requestCommand(deps);
+
+      expect(await Deno.readTextFile(legacyKey)).toBe(KEY_TEXT);
+      expect(
+        await Deno.readTextFile(join(shared, "test-records-key.json")),
+      ).toBe(KEY_TEXT);
+    });
+
+    it("reports a move whose old name cannot be removed", async () => {
+      await legacyInstall();
+      const legacy = join(home, "common-fabric");
+      await Deno.chmod(legacy, 0o500);
+      try {
+        await expect(requestCommand(deps)).rejects.toThrow(
+          `Cannot move ${join(legacy, "test-records-key.json")}`,
+        );
+      } finally {
+        await Deno.chmod(legacy, 0o700);
+      }
+
+      // The next run finds both names on one file and finishes the move.
+      await requestCommand(deps);
+      await expect(Deno.stat(legacy)).rejects.toThrow(Deno.errors.NotFound);
+      expect(
+        await Deno.readTextFile(
+          join(home, "commonfabric", "test-records-key.json"),
+        ),
+      ).toBe(KEY_TEXT);
+    });
+
     it("stops, leaving the install where it was, when a move fails", async () => {
       await legacyInstall();
       const shared = join(home, "commonfabric");

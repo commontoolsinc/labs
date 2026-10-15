@@ -1131,11 +1131,11 @@ async function spoolCount(root: string): Promise<number | undefined> {
   }
 }
 
-/** Whether two paths name the same file. */
+/** Whether two paths name the same file, neither through a link. */
 async function sameFile(a: string, b: string): Promise<boolean> {
-  const [first, second] = await Promise.all([Deno.stat(a), Deno.stat(b)]);
-  return first.ino !== null && first.ino === second.ino &&
-    first.dev === second.dev;
+  const [first, second] = await Promise.all([Deno.lstat(a), Deno.lstat(b)]);
+  return first.isFile && second.isFile && first.ino !== null &&
+    first.ino === second.ino && first.dev === second.dev;
 }
 
 /**
@@ -1144,25 +1144,27 @@ async function sameFile(a: string, b: string): Promise<boolean> {
  * replaced it.
  */
 async function moveFile(from: string, to: string): Promise<void> {
-  if (!await exists(from)) return;
-  await Deno.mkdir(dirname(to), { recursive: true });
   try {
-    await Deno.link(from, to);
+    if (!await exists(from)) return;
+    await Deno.mkdir(dirname(to), { recursive: true });
+    try {
+      await Deno.link(from, to);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+      // A move stopped between the link and the removal leaves both
+      // names on one file, which finishing the move resolves.
+      if (!await sameFile(from, to)) {
+        console.log(`Both ${from} and ${to} exist; ${from} was left alone.`);
+        return;
+      }
+    }
+    await Deno.remove(from);
   } catch (error) {
-    if (!(error instanceof Deno.errors.AlreadyExists)) {
-      throw new KeyToolError(
-        `Cannot move ${from} to ${to}: ${reason(error)}\n` +
-          "Move it there yourself and run the command again.",
-      );
-    }
-    // A move stopped between the link and the removal leaves both names
-    // on one file, which finishing the move resolves.
-    if (!await sameFile(from, to)) {
-      console.log(`Both ${from} and ${to} exist; ${from} was left alone.`);
-      return;
-    }
+    throw new KeyToolError(
+      `Cannot move ${from} to ${to}: ${reason(error)}\n` +
+        "Move it there yourself and run the command again.",
+    );
   }
-  await Deno.remove(from);
   console.log(`Moved ${from} to ${to}`);
 }
 

@@ -422,7 +422,7 @@ describe("test-records-agent-config", () => {
       });
     });
 
-    it("leaves any other value, and a file it cannot read, alone", async () => {
+    it("leaves any other value alone and reports a file it cannot read", async () => {
       await install();
       const text = JSON.stringify({ env: { [VARIABLE]: "/elsewhere.json" } });
       await Deno.writeTextFile(config, text);
@@ -434,8 +434,17 @@ describe("test-records-agent-config", () => {
       await Deno.writeTextFile(config, "{ not json");
       expect(
         await reexportFromAgentConfigs(VARIABLE, KEY, MOVED, env, harnesses),
-      ).toEqual([]);
+      ).toEqual([
+        { harness: "Test Harness", path: config, outcome: "unreadable" },
+      ]);
       expect(await Deno.readTextFile(config)).toBe("{ not json");
+
+      await Deno.writeTextFile(config, JSON.stringify({ env: [] }));
+      expect(
+        await reexportFromAgentConfigs(VARIABLE, KEY, MOVED, env, harnesses),
+      ).toEqual([
+        { harness: "Test Harness", path: config, outcome: "unreadable" },
+      ]);
     });
 
     it("reports an update that stood down as changed", async () => {

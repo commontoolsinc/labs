@@ -168,7 +168,8 @@ The key file and the delivery identity live in `~/.config/commonfabric/`
 workstation that holds them in the
 `~/.config/common-fabric/` directory is moved by whichever key tool
 command runs next there. The files go to the new directory, the profile
-line and the harness entries this tool wrote are rewritten to name it,
+line this tool wrote, and every harness entry naming the old path, are
+rewritten to name it,
 and the old directory is removed once it is empty. A shell started
 before the move still names the old path, and the uploader follows that
 path to the key's new place. A file that already exists in the new
