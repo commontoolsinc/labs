@@ -65,7 +65,7 @@ import {
   entryFor,
   FABRICHAT_POLICY,
   isOwnerOf,
-  type JoinRoomRequest,
+  type JoiningManager,
   type MessageCell,
   messageEntries,
   type MessageEntry,
@@ -226,11 +226,16 @@ export interface ParticipantChipOutput {
  * One participant, shown by their profile, with a control that starts a direct
  * chat with them. The control shows for someone other than the viewer, whose
  * profile attests a principal, to a viewer with a profile. Whether the viewer
- * has a manager is not read here: the chip's display is stored in the room's
- * space, and a manager whose data carries a label the room's space does not
- * admit would make it refused. It names the participant to the manager by their profile,
- * bound as the control's `name`, which crosses into the click's event as the
- * profile's own cell; the manager reads whom it names from the profile's
+ * has a manager is not read here. The chip's display is a computed cell in the
+ * room's space, and the viewer's manager lives in their Home's space: a
+ * computed that reads labeled data from another space is held to what the
+ * room's space admits, which a manager carrying its person's `PersonalSpace`
+ * label does not fit, so a display that read the manager would be refused. So
+ * the control shows while the viewer's `#chatManager` wish has yet to find a
+ * manager, and to a viewer whose Home has none, and a click then reaches no
+ * one. It names the participant to the manager by their profile, bound as the
+ * control's `name`, which crosses into the click's event as the profile's own
+ * cell; the manager reads whom it names from the profile's
  * `represents-principal` label, and offers the room through the share inbox
  * the profile points at.
  */
@@ -330,7 +335,7 @@ export interface OfferRoomRequest {
  * The part of the viewer's manager a room reaches: what it tells a member it
  * admits through, and what it tells of the viewer joining it.
  */
-export interface RoomManager {
+export interface RoomManager extends JoiningManager {
   /** Offers the room to a member, and records how it told them. */
   offerRoom: Stream<OfferRoomRequest>;
 
@@ -342,9 +347,6 @@ export interface RoomManager {
    * the profiles attesting it.
    */
   people: PerSession<Record<string, ProfileCell[]>>;
-
-  /** Makes a room the viewer has joined one of their chats. */
-  joinRoom?: Stream<JoinRoomRequest>;
 }
 
 /** Each of the viewer's adds' outcomes, by its `requestId`. */

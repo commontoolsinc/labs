@@ -4,8 +4,11 @@ import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import type { Cell } from "../src/cell.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { readConfirmed } from "../src/confirmed-read.ts";
+import type {
+  IExtendedStorageTransaction,
+  SealedCommitVerdict,
+} from "../src/storage/interface.ts";
+import { readConfirmed, readDurable } from "../src/confirmed-read.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { SessionSync } from "@commonfabric/memory/v2";
@@ -366,5 +369,143 @@ describe("confirmed-read", () => {
       (tx) => waved.withTx(tx).get()?.n,
     );
     expect(read).toEqual({ value: 9, confirmed: false });
+  });
+
+  describe("readDurable()", () => {
+    /**
+     * Seals a speculative layer over the reader's `note`, showing `value` in
+     * place of what the note holds, and returns what settles it.
+     */
+    function speculate(note: Cell<Note>, value: Note): {
+      settle: (verdict: SealedCommitVerdict) => Promise<void>;
+    } {
+      const { id, scope } = note.getAsNormalizedFullLink();
+      const replica = readerManager.open(space).replica;
+      const verdict = Promise.withResolvers<SealedCommitVerdict>();
+      const sealed = replica.sealNative!(
+        {
+          operations: [{
+            op: "set",
+            id,
+            type: "application/json",
+            value: { ...replica.getDocument(id, scope), value },
+          }],
+        },
+        undefined,
+        verdict.promise,
+        { speculative: true },
+      );
+      return {
+        settle: async (outcome) => {
+          verdict.resolve(outcome);
+          await sealed.settled;
+        },
+      };
+    }
+
+    const retirement: SealedCommitVerdict = {
+      withdrawn: { message: "retired", superseded: true },
+    };
+
+    it("returns the value stored beneath a speculation layer", async () => {
+      await write("masked", 1);
+      const masked = await loaded("masked");
+      speculate(masked, { n: 5 });
+
+      expect(masked.get()?.n).toBe(5);
+      expect(readDurable(reader, (tx) => masked.withTx(tx).get()?.n).value)
+        .toBe(1);
+    });
+
+    it("returns a write that arrived beneath a speculation layer", async () => {
+      await write("beneath", 1);
+      await write("beside", 1);
+      const beneath = await loaded("beneath");
+      const beside = await loaded("beside");
+      speculate(beneath, { n: 5 });
+
+      // `beside` changes in the same commit, and no layer masks it.
+      const delivered = arrival(beside, 2);
+      const tx = writer.edit();
+      writer.getCell<Note>(space, "beneath", noteSchema, tx).set({ n: 2 });
+      writer.getCell<Note>(space, "beside", noteSchema, tx).set({ n: 2 });
+      expect((await tx.commit().settled).error).toBeUndefined();
+      await delivered;
+
+      expect(beneath.get()?.n).toBe(5);
+      expect(readDurable(reader, (tx) => beneath.withTx(tx).get()?.n).value)
+        .toBe(2);
+    });
+
+    it("returns the stored value from a notification the layer's own seal delivers", async () => {
+      await write("notified", 1);
+      const notified = await loaded("notified");
+      const seen: (number | undefined)[] = [];
+      let sealing = false;
+      const replica = readerManager.open(space).replica as SpaceReplica;
+      const cancel = replica.sinkDocument(
+        notified.getAsNormalizedFullLink().id,
+        () => {
+          if (!sealing) return;
+          seen.push(
+            readDurable(reader, (tx) => notified.withTx(tx).get()?.n).value,
+          );
+        },
+      );
+      sealing = true;
+      speculate(notified, { n: 5 });
+      sealing = false;
+      cancel();
+
+      expect(seen).toEqual([1]);
+    });
+
+    it("returns `speculationSettled` resolving once the layer over what it read retires, and not before", async () => {
+      await write("retiring", 1);
+      const retiring = await loaded("retiring");
+      const layer = speculate(retiring, { n: 5 });
+
+      const read = readDurable(
+        reader,
+        (tx) => retiring.withTx(tx).get()?.n,
+      );
+      let settled = false;
+      read.speculationSettled?.then(() => settled = true);
+      await reader.idle();
+
+      expect(read.speculationSettled).toBeDefined();
+      expect(settled).toBe(false);
+      await layer.settle(retirement);
+      await read.speculationSettled;
+      expect(retiring.get()?.n).toBe(1);
+    });
+
+    it("returns `speculationSettled` resolving once the layer over what it read is withdrawn", async () => {
+      await write("withdrawn", 1);
+      const withdrawn = await loaded("withdrawn");
+      const layer = speculate(withdrawn, { n: 5 });
+
+      const read = readDurable(
+        reader,
+        (tx) => withdrawn.withTx(tx).get()?.n,
+      );
+      await layer.settle({ withdrawn: { message: "dropped" } });
+
+      expect(read.speculationSettled).toBeDefined();
+      await read.speculationSettled;
+
+      expect(withdrawn.get()?.n).toBe(1);
+    });
+
+    it("returns no `speculationSettled` when no layer stands over what it read", async () => {
+      await write("plain", 1);
+      await write("covered", 1);
+      const plain = await loaded("plain");
+      const covered = await loaded("covered");
+      speculate(covered, { n: 5 });
+
+      const read = readDurable(reader, (tx) => plain.withTx(tx).get()?.n);
+      expect(read).toEqual({ value: 1 });
+    });
   });
 });
