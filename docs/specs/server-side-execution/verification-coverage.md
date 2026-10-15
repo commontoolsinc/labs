@@ -3933,9 +3933,10 @@ Delta 2026-10-15 — a late echo is dropped before its commit is prepared:
   whose metadata lives on the result document it names, and the pass
   refused the link in the owner's runtime alone.
 - Instrument: `packages/runner/test/extended-storage-transaction.test.ts`
-  ("a seal destination that discards the transaction") — a link the
-  pass refuses is handed to a destination that discards it without the
-  refusal; `packages/runner/test/speculation-intent-listener.test.ts`
+  ("a seal destination that discards the transaction") — a write the
+  pass refuses, to a reserved CFC grant document, is handed to a
+  destination that discards it without the refusal;
+  `packages/runner/test/speculation-intent-listener.test.ts`
   ("whether a run is discarded, asked before it seals") — a late
   grandchild of a terminal intent is discarded, one of an outstanding
   intent is not, and every speculative run is once the overlay closes.
