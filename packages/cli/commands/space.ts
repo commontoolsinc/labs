@@ -54,6 +54,7 @@ import {
 
 import { buildSpaceInviteCommand } from "./space-invites.ts";
 import { hasJsonArgument } from "../lib/json-output.ts";
+import { shellQuote } from "../lib/shell-quote.ts";
 import {
   buildCreateSpaceCommand,
   buildRecreateRootCommand,
@@ -431,12 +432,14 @@ export const space = new Command()
           // the network. The port offset separates it from a local production
           // server; only the host binding keeps it off the network entirely.
           `serve it (NOT the live store — note the host and port):\n` +
-          `  HOST=127.0.0.1 MEMORY_DIR="${toFileUrl(`${targetDir}/`).href}" ` +
+          `  HOST=127.0.0.1 MEMORY_DIR=${
+            shellQuote(toFileUrl(`${targetDir}/`).href)
+          } ` +
           `./scripts/start-local-dev.sh --port-offset 10\n\n` +
           `then, per attempt (stop the server before resetting — a reset ` +
           `cannot reach a process that already holds the store open):\n` +
-          `  cf space verify ${targetDir}\n` +
-          `  cf space reset  ${targetDir}`,
+          `  cf space verify ${shellQuote(targetDir)}\n` +
+          `  cf space reset  ${shellQuote(targetDir)}`,
       );
     });
   })
