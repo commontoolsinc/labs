@@ -1023,8 +1023,11 @@ the last. A
 fresh room per send would multiply each size's seeding by five, and against
 sizes a factor of three or more apart that growth stays well inside one step of
 the curve.
-Sizes above 100 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
-the limit.
+Sizes above 30 are declared and skipped; `CF_FABRICHAT_SCALE_LIMIT` raises
+the limit. On the Benchmarks workflow's runner a hundred-message room takes
+about seven minutes to seed and over a minute and a half to load, and a send
+into it does not settle within the browser driver's five-minute bound, which
+fails the run.
 
 ### Concurrent sends
 
