@@ -52,10 +52,13 @@ import { openSqliteHarnessChatSessionStore } from "../src/sqlite-session-store.t
 import { resolveHandleToken } from "../src/handle-table.ts";
 import type { ReadPieceSourceToolSuccessOutput } from "../src/tools/piece-source.ts";
 import {
+  assignSlugTool,
   type AssignSlugToolErrorOutput,
   type AssignSlugToolSuccessOutput,
   namedPieceUrl,
 } from "../src/tools/assign-slug.ts";
+import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import type { HarnessToolContext } from "../src/tools/types.ts";
 import type { RunPatternToolSuccessOutput } from "../src/tools/run-pattern.ts";
 import type {
   SandboxCommandRequest,
@@ -497,6 +500,22 @@ describe("assign-slug", () => {
   });
 
   describe("assignSlugTool", () => {
+    it("returns an error naming the missing fabric session to a run without one", async () => {
+      const output = await assignSlugTool.invoke(
+        {
+          nextOutputId: (toolId: string) =>
+            createToolOutputId("run-no-fabric", toolId, 1),
+        } as unknown as HarnessToolContext,
+        { token: "cfh:a:unused", slug: "unnamed" },
+      );
+
+      expect(output).toMatchObject({
+        status: "error",
+        message:
+          "assign_slug requires a fabric session; run without one cannot name pieces",
+      });
+    });
+
     it("preserves an operational read failure without registering or naming the piece", async () => {
       await linkDefaultPattern();
       const engine = createEngine();
