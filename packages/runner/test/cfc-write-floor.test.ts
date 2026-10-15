@@ -23,7 +23,10 @@ import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { CfcWriteFloorMode, IFCLabel } from "../src/cfc/mod.ts";
 import { prepareBoundaryCommit } from "../src/cfc/prepare.ts";
 import { recordReferencedArgumentFields } from "../src/cfc/reference-initialization.ts";
-import type { LabelMapEntry } from "../src/cfc/types.ts";
+import {
+  type LabelMapEntry,
+  runtimeWritePolicyAuthorization,
+} from "../src/cfc/types.ts";
 import { isVerdictReason, plainReason } from "../src/cfc/verdict-reason.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -1747,6 +1750,63 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
 
     for (const held of [true, false]) {
+      it(`rejects a link into a floored list that reaches its value through a stored reference to ${held ? "a held bare document as `CfcCommitRefusalError`" : "a document it does not hold as a retryable `StorageTransactionAborted`"}`, async () => {
+        // The listed reference's source holds, at the linked path, a
+        // reference committed before this transaction, so the evidence the
+        // floor weighs is the document that reference reaches, which only
+        // the walk from the source visits.
+
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = makeRuntime({
+          storageManager,
+          cfcWriteFloor: "enforce",
+        });
+        try {
+          if (held) {
+            await HELD_SOURCES["a bare document"](runtime, "wf-stored-far");
+          }
+          const seed = runtime.edit();
+          const far = runtime.getCell(
+            signer.did(),
+            "wf-stored-far",
+            undefined,
+            seed,
+          );
+          runtime.getCell<{ x: unknown }>(
+            signer.did(),
+            "wf-stored-near",
+            undefined,
+            seed,
+          ).set({ x: far });
+          expect((await seed.commit().settled).error).toBeUndefined();
+          const tx = runtime.edit();
+          const near = runtime.getCell<{ x: unknown }>(
+            signer.did(),
+            "wf-stored-near",
+            undefined,
+            tx,
+          );
+          const sink = runtime.getCell(
+            signer.did(),
+            "wf-stored-sink",
+            LIST_FLOOR_SCHEMA,
+            tx,
+          );
+          sink.set({ items: [near.key("x") as unknown as string] });
+          tx.prepareCfc();
+          const error = (await tx.commit().settled).error;
+          expect(error?.name).toBe(
+            held ? "CfcCommitRefusalError" : "StorageTransactionAborted",
+          );
+          expect(error?.message).toContain("write floor failed at /items/0");
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    }
+
+    for (const held of [true, false]) {
       it(`rejects a link at a floored field to ${held ? "a held document without the atom as `CfcCommitRefusalError`" : "a document the transaction does not hold as a retryable `StorageTransactionAborted`"}`, async () => {
         const storageManager = StorageManager.emulate({ as: signer });
         const runtime = makeRuntime({
@@ -1942,6 +2002,58 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         tx.prepareCfc();
         const error = (await tx.commit().settled).error;
         expect(error?.name).toBe("StorageTransactionAborted");
+        expect(error?.message).toContain("write floor failed at /out");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a plain value at a floored field as a retryable `StorageTransactionAborted` when the transaction observed external content", async () => {
+      // Under flow labels `persist` the flow join also weighs the flow of the
+      // external content the transaction observed, which no document holds,
+      // so no document the floor could read again decides the miss.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = makeRuntime({
+        storageManager,
+        cfcWriteFloor: "enforce",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedLabeledDoc(runtime, "wf-plain-external-input", "plain", {});
+        const tx = runtime.edit();
+        const input = runtime.getCell<string>(
+          signer.did(),
+          "wf-plain-external-input",
+          undefined,
+          tx,
+        );
+        const sink = runtime.getCell(
+          signer.did(),
+          "wf-plain-external-sink",
+          FLOOR_SCHEMA,
+          tx,
+        );
+        sink.set({ out: input.get() });
+        tx.recordCfcExternalContentObservation({
+          source: {
+            space: signer.did(),
+            id: "of:wf-plain-external-content",
+            scope: "space",
+            path: [],
+          },
+          flow: { confidentiality: [], integrity: [] },
+          consumed: { confidentiality: [], integrity: [] },
+          locations: [],
+          labeledSpaces: [],
+          sources: [],
+        }, runtimeWritePolicyAuthorization);
+        tx.prepareCfc();
+        const error = (await tx.commit().settled).error;
+        expect(error?.name).toBe("StorageTransactionAborted");
+        expect((error as { reason?: Error } | undefined)?.reason?.message)
+          .toBe("cfc-refusal-not-a-verdict");
         expect(error?.message).toContain("write floor failed at /out");
       } finally {
         await runtime.dispose();
