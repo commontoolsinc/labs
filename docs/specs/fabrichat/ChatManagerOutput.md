@@ -261,7 +261,7 @@ These rules hold for every stream:
   to them through the share inbox it points at (see [offers](#offers)).
 
 Finds the direct room this user shares with a person, or creates it. This is an
-outward act when it creates a room.
+outward act when it creates a room, or offers one it finds.
 
 - **Admitted:** as a trusted gesture on `ChatStartSurface`.
 - **Effect:** if `direct` has an entry for `counterpart`, that entry is the
