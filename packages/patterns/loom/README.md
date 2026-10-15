@@ -11,10 +11,12 @@ session.
 `style` is a `PerSpace` value: null, or `{id, mode}` where `id` is a portable
 catalog identifier and `mode` is `native`, `light`, or `dark`.
 `setStyle({style})` validates and replaces the pair in one write; null clears it
-for every participant. The identifier uses `[a-z][a-z0-9-]{0,63}`. Viewers
-interpret catalog identifiers and fall back locally when a style is unknown.
-Hover previews remain ephemeral viewer state and send no action. Space WRITE or
-OWNER authority admits changes; READ viewers observe them.
+for every participant. Invalid initial selections are exposed as null; invalid
+confirmation events are refused without changing the stored choice. The
+identifier uses `[a-z][a-z0-9-]{0,63}`. Viewers interpret catalog identifiers
+and fall back locally when a style is unknown. Hover previews remain ephemeral
+viewer state and send no action. Space WRITE or OWNER authority admits changes;
+READ viewers observe them.
 
 A panel is a `piece`, `document`, or HTTP(S) `url`. Piece and document targets
 are native cell references. Their complete space, scope, document, and path
@@ -329,7 +331,7 @@ owner-authorized workflow. A root without `bindMeeting` is unsupported for that
 workflow: a caller must not infer support from an absent key, replace the root,
 or overwrite its contents to adopt it.
 
-Run and attach all thirteen tests when deploying or updating source:
+Run and attach all fifteen tests when deploying or updating source:
 
 ```sh
 deno task cf test packages/patterns/loom/style.test.tsx

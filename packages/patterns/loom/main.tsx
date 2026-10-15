@@ -376,21 +376,26 @@ const bindMeeting = handler<
   reply?.set({ status: "bound", key });
 });
 
+/** The portable appearance a viewer can consume, or no style. */
+function normalizedStyle(selected: LoomStyle): LoomStyle {
+  if (
+    selected === null || !selected || typeof selected.id !== "string" ||
+    /^[a-z][a-z0-9-]{0,63}$/.exec(selected.id)?.[0] !== selected.id ||
+    !["native", "light", "dark"].includes(selected.mode)
+  ) {
+    return null;
+  }
+  return { id: selected.id, mode: selected.mode };
+}
+
 /** Validates and replaces the confirmed appearance in one write. */
 const setStyle = handler<{ style: LoomStyle }, { style: Writable<LoomStyle> }>(
-  ({ style: selected }, { style }) => {
-    if (
-      selected !== null && (
-        !selected || typeof selected.id !== "string" ||
-        /^[a-z][a-z0-9-]{0,63}$/.exec(selected.id)?.[0] !== selected.id ||
-        !["native", "light", "dark"].includes(selected.mode)
-      )
-    ) {
+  (event, { style }) => {
+    const selected = normalizedStyle(event.style);
+    if (event.style !== null && selected === null) {
       throw new Error("Invalid Loom style identifier or mode");
     }
-    style.set(
-      selected === null ? null : { id: selected.id, mode: selected.mode },
-    );
+    style.set(selected);
   },
 );
 
@@ -869,7 +874,7 @@ export default pattern<LoomInput, LoomOutput>(
         </cf-theme>
       ),
       title,
-      style,
+      style: computed(() => normalizedStyle(style.get())),
       panels,
       presentation,
       pieceRegistry,

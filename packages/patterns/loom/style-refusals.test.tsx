@@ -4,6 +4,7 @@ import { action, assert, pattern, TESTS } from "commonfabric";
 import Loom from "./main.tsx";
 
 export default pattern(() => {
+  const invalidSeed = Loom({ style: { id: "../outside", mode: "dark" } });
   const loom = Loom({ style: { id: "quiet-paper", mode: "native" } });
   const invalid = action(() =>
     loom.setStyle.send({
@@ -23,6 +24,7 @@ export default pattern(() => {
     expectRuntimeErrors: 3,
     allowConsoleErrors: true,
     [TESTS]: [
+      { assertion: assert(() => invalidSeed.style === null) },
       { assertion: assert(() => loom.style?.id === "quiet-paper") },
       { action: invalid },
       { action: tooLong },
