@@ -280,7 +280,7 @@
             "asCell": [
               "cell"
             ],
-            "description": "The entry as the room stored it, labeled `authored-by` the principal\nwhose event it records. Optional to accept, as a room's readers do, a room\nthat doesn't link it; every `FabriChatRoom` does."
+            "description": "The entry as the room stored it, labeled `authored-by` the principal\nwhose event it records. Every `FabriChatRoom` links it; it is optional so\nthat a reader holding a room that doesn't still accepts that room."
           },
           "requestId": {
             "description": "The `requestId` of the event it records.",
@@ -828,7 +828,7 @@
           },
           "record": {
             "$ref": "#/$defs/ChatRoomActivityRecord",
-            "description": "The entry as the room stored it, labeled `authored-by` the principal\nwhose event it records. Optional to accept, as a room's readers do, a room\nthat doesn't link it; every `FabriChatRoom` does."
+            "description": "The entry as the room stored it, labeled `authored-by` the principal\nwhose event it records. Every `FabriChatRoom` links it; it is optional so\nthat a reader holding a room that doesn't still accepts that room."
           },
           "requestId": {
             "description": "The `requestId` of the event it records.",
