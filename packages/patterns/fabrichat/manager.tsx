@@ -27,7 +27,10 @@
  * the room's participants. A notice is queued for each other member offered
  * nothing: one the request names only by principal, or whose profiles point at
  * no inbox. A member someone adds to a room later, from the room, is offered
- * it the same way, through `offerRoom`.
+ * it the same way, through `offerRoom`. A direct room's counterpart who got a
+ * notice instead is offered the room the same way once a later start with
+ * them names a profile of theirs pointing at an inbox, until they join it, and
+ * the notice is withdrawn.
  *
  * The people the user's rooms list, each by the principal their profile
  * attests, are what the manager's rendering offers to name a new group's
@@ -810,6 +813,45 @@ const createRoom = (
 };
 
 /**
+ * Helper for `openDirect`, which offers `room`, a direct room it found, to
+ * `counterpart` through the share inbox `profile` points at, as `offerRooms`
+ * offers a new one, when the room was offered them nothing: a notice for them
+ * of the room is still waiting. The offer replaces each such notice, so they
+ * are withdrawn. A counterpart the room's roster lists has joined the room
+ * already, and is offered nothing, and so is one whose profile points at no
+ * inbox, whose notice stays.
+ */
+const reofferDirect = (
+  state: ManagerActState,
+  requestId: string,
+  room: Cell<ChatRoomLink>,
+  counterpart: string,
+  profile: Cell<ChatManagerProfile> | undefined,
+): void => {
+  const notices = state.outgoingNotices.get() ?? [];
+  const waiting = notices.filter((notice) =>
+    notice.recipient === counterpart && equals(notice.room, room)
+  );
+  if (waiting.length === 0) return;
+  if (profile === undefined || inboxPointerOf(profile) === undefined) return;
+  const joined = (room.key("roster").get() ?? []).some((member) =>
+    principalOf(member, "represents-principal") === counterpart
+  );
+  const space = spaceOf(room);
+  const from = currentPrincipal();
+  if (joined || !isWellFormedDID(space) || from === undefined) return;
+  state.outgoingNotices.set(
+    notices.filter((notice) => !waiting.includes(notice)),
+  );
+  offerToMember(
+    offerEnvelope(requestId, space, "", from),
+    room,
+    { recipient: counterpart, profiles: [profile] },
+    state,
+  );
+};
+
+/**
  * Performs one manager act: finding or creating a direct room, creating a
  * group room, offering a room to a member added to it, accepting a room,
  * forgetting one, or reporting a notice delivered. Each act's outcome is
@@ -949,6 +991,7 @@ const performManagerAct = (
           ),
         );
       }
+      reofferDirect(state, requestId, known.room, counterpart, profile);
       recordOutcome(state, requestId, { status: "done", entry: known });
       return;
     }
