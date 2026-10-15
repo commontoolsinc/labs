@@ -3173,12 +3173,27 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /**
+   * Whether this transaction's seal destination drops its writes rather than
+   * sealing them. Neither preparation nor the commit's enforcement runs the
+   * boundary pass for such a transaction: its writes reach no store and no
+   * reader. Such a run can also have read state no commit would see, as a
+   * speculative run does once its intent's echo has retired and before the
+   * authoritative writes arrive, and the pass would refuse what it read there.
+   */
+  #discardedBySealDestination(): boolean {
+    return this.#sealDestination?.discards?.(this) === true;
+  }
+
   /** Settles relevance before choosing how to drive the boundary checks. */
   #needsCfcPreparation(): boolean {
     if (this.tx.status().status !== "ready") {
       return false;
     }
     if (this.isReadOnly()) {
+      return false;
+    }
+    if (this.#discardedBySealDestination()) {
       return false;
     }
     if (this.#cfcState.enforcementMode === "disabled") {
@@ -4073,7 +4088,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (readOnly) {
       this.tx.clearReadOnly?.();
     }
-    if (!readOnly) {
+    const discarded = this.#discardedBySealDestination();
+    if (!readOnly && !discarded) {
       // Before the CFC probes and the prepared-digest recheck: writes added
       // here must precede any prepare, and the dedupe set makes this a
       // no-op for transactions prepareCfc() already covered.
