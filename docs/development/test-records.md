@@ -453,6 +453,14 @@ builds the preload argument and those permissions together, given the
 invocation's own flags, the spool, the repository root, and the skip
 list where there is one.
 
+The preload also listens for the `error` and `unhandledrejection` events,
+without handling them. Either event before a file's hooks and tests begin can
+mean the file's module stopped part way through loading, after registering only
+some of its tests, so the preload marks that file's names as interrupted. A lane
+then does not read them as everything the file holds. The preload registers a
+`Deno.test.beforeAll` hook of its own, which Deno runs once the module has
+settled, to know when that is.
+
 It grants the reads as one `--allow-read` list and the write as one
 `--allow-write` list, and leaves out a list for a permission the flags
 already hold everywhere. Deno merges two path lists for one permission,

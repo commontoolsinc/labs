@@ -4098,6 +4098,97 @@ describe("glaze", () => {
   });
 });
 
+describe("what a batch reads of what a whole run registered", () => {
+  const UNIT = "packages/bakery#browser-test";
+
+  /**
+   * Runs a batch of one unit that holds every file of a package's browser
+   * tests, whose process leaves the mark `run` describes.
+   */
+  async function registeredBy(run: Record<string, unknown>) {
+    const dir = await Deno.makeTempDir({ prefix: "lane-whole-run-" });
+    const mark = JSON.stringify(run);
+    const batch = {
+      suite: suite({
+        id: "workspace-unit",
+        units: [UNIT],
+        locate: (record) =>
+          record.test.k === "browser" && record.test.s === "bakery"
+            ? { level: "unit" as const, unit: UNIT }
+            : undefined,
+        command: (_units, context) =>
+          Promise.resolve([{
+            command: [
+              Deno.execPath(),
+              "eval",
+              `const dir = Deno.env.get("CF_TEST_RECORDS_DIR");
+               Deno.mkdirSync(dir, { recursive: true });
+               Deno.writeTextFileSync(\`\${dir}/whole-run-fixture.json\`, ${
+                JSON.stringify(mark)
+              });`,
+            ],
+            cwd: context.root,
+          }]),
+      }),
+      units: [{ unit: UNIT, skip: [] }],
+      runs: new Map([[UNIT, 1]]),
+      projected: 0,
+    };
+    const log = console.log;
+    console.log = () => {};
+    try {
+      return (await runBatch(
+        batch,
+        { root: REPOSITORY } as LaneOptions,
+        dir,
+        undefined,
+        {},
+      )).registered;
+    } finally {
+      console.log = log;
+      await Deno.remove(dir, { recursive: true });
+    }
+  }
+
+  it("gives the unit its records belong to every name the mark holds", async () => {
+    // One process runs every file of the unit, so its mark says what the
+    // whole unit registered.
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "bakery",
+        tests: {
+          "packages/bakery/a.browser.test.ts": ["renders"],
+          "packages/bakery/b.browser.test.ts": ["clicks"],
+        },
+      }),
+    ).toEqual(new Map([[UNIT, new Set(["renders", "clicks"])]]));
+  });
+
+  it("gives the unit an empty set where its files registered nothing", async () => {
+    // A run that registered no test at all still says its unit holds none,
+    // so every name the manifest lists for it reads as one the tree does
+    // not hold.
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "bakery",
+        tests: { "packages/bakery/a.browser.test.ts": [] },
+      }),
+    ).toEqual(new Map([[UNIT, new Set()]]));
+  });
+
+  it("gives no unit a mark whose records would belong to none", async () => {
+    expect(
+      await registeredBy({
+        kind: "browser",
+        scope: "pantry",
+        tests: { "packages/pantry/a.browser.test.ts": ["renders"] },
+      }),
+    ).toEqual(new Map());
+  });
+});
+
 describe("what a lane does with the batches it was given", () => {
   const UNIT = "packages/bakery/test/glaze.test.ts";
 

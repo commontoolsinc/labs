@@ -47,6 +47,7 @@ import {
   FragmentWriter,
   NAME_SEPARATOR,
   readRegistrations,
+  readWholeRuns,
   recordsDir,
   type TestIdentity,
   testIdentityKey,
@@ -941,16 +942,23 @@ export async function runBatch(
 
   /**
    * The names this batch's test processes registered over every execution,
-   * by the repository-relative file that registered them, as
-   * `readRegistrations()` reads them. That file is the unit for a suite
-   * whose units are files. A file whose processes left no name map is not
-   * here.
+   * by unit. A unit that is one file is here by the names
+   * `readRegistrations()` reads for that file. A unit of several files that
+   * one process runs, such as a package's browser tests, is here by the
+   * mark its runner leaves on running every test of every file. A unit
+   * whose processes said neither is not here.
    */
   registered: Map<string, Set<string>>;
 }> {
   const records: TestRecord[] = [];
   const passedOver: TestRecord[] = [];
   const registered = new Map<string, Set<string>>();
+  /** Adds `names` to what `unit` registered. */
+  const register = (unit: string, names: Iterable<string>): void => {
+    const known = registered.get(unit);
+    if (known === undefined) registered.set(unit, new Set(names));
+    else for (const name of names) known.add(name);
+  };
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
@@ -1079,9 +1087,19 @@ export async function runBatch(
       }
       for (const conflict of collected.conflicts) conflicts.push(conflict);
       for (const [file, names] of await readRegistrations(batchSpool)) {
-        const known = registered.get(file);
-        if (known === undefined) registered.set(file, names);
-        else for (const name of names) known.add(name);
+        register(file, names);
+      }
+      for (const marked of await readWholeRuns(batchSpool)) {
+        for (const [file, names] of Object.entries(marked.tests)) {
+          // A file is placed by the kind and scope its tests record under
+          // and the file itself, so one that registered no test still says
+          // its unit holds none.
+          const location = batch.suite.locate({
+            test: { k: marked.kind, s: marked.scope, n: names[0] ?? file },
+            file,
+          });
+          if (location?.level === "unit") register(location.unit, names);
+        }
       }
       for (const record of collected.hooks) {
         const location = batch.suite.locate(record);
