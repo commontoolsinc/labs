@@ -24,7 +24,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { toUnpaddedBase64url } from "@commonfabric/utils/base64url";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectOrArray, isPlainObject } from "@commonfabric/utils/types";
 
 import type { CellScope } from "../builder/types.ts";
 import {
@@ -392,14 +392,33 @@ type ActivitySnapshot = {
  * whose digest may never be computed: a value the hash refuses throws here,
  * where the snapshot is taken. The hash is kept by the frozen object, so a
  * `meta` many reads share costs one lookup per read.
+ *
+ * A plain object with no string-keyed property is frozen and not hashed. The
+ * hash reads no symbol-keyed property, so such an object hashes as the empty
+ * record, which it admits. A `meta` holding only the runtime's read markers is
+ * one, and most reads carry a `meta` of their own, so hashing each would keep
+ * a hash beside every read of every snapshot and admit nothing.
  */
 function sealJournalMembers(members: object): void {
   for (const key in members) {
     const member = (members as Record<string, unknown>)[key];
     const kind = typeof member;
     if (kind === "string" || kind === "number" || kind === "boolean") continue;
-    hashOf(deepFreeze(member) as FabricValue);
+    const frozen = deepFreeze(member);
+    if (isEmptyPlainRecord(frozen)) continue;
+    hashOf(frozen as FabricValue);
   }
+}
+
+/**
+ * Helper for `sealJournalMembers()`: whether `value` is an object whose
+ * prototype is `Object.prototype` and which has no string-keyed property of
+ * its own, enumerable or not. The hash refuses an object without a prototype,
+ * so one of those is not empty in the sense the hash admits.
+ */
+function isEmptyPlainRecord(value: unknown): boolean {
+  return isPlainObject(value, false) &&
+    Object.getOwnPropertyNames(value).length === 0;
 }
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
