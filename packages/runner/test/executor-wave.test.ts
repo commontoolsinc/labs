@@ -4557,12 +4557,17 @@ describe("stage D seal-into-wave", () => {
           return originalStamp(tx, info);
         }) as typeof offRuntime.stampServerRun;
 
+      // The refused read is at a seq above `0`: a revision another writer
+      // moved past, which off the flag means another client raced. A read
+      // claiming the document absent recovers in either posture.
       const conflicted = witness.cell.getAsNormalizedFullLink().id;
+      const conflict = { space, the: "application/json", of: conflicted };
       const staleRead = {
         name: "ConflictError" as const,
-        message: `stale confirmed read: ${conflicted} at seq 0 ` +
-          "conflicted with seq 1",
-        conflict: { space, the: "application/json", of: conflicted },
+        message: `stale confirmed read: ${conflicted} at seq 1 ` +
+          "conflicted with seq 2",
+        conflict: { ...conflict, seq: 1 },
+        conflicts: [{ ...conflict, seq: 1 }],
         readyToRetry: () => Promise.resolve(),
       };
       let refusals = 0;

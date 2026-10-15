@@ -407,6 +407,27 @@ const refusalNamesOnlyPolicyManifests = (error: CommitError): boolean => {
 };
 
 /**
+ * Whether a commit refusal is a stale confirmed read whose every conflicting
+ * read claimed its document absent: each read is at seq `0`, the basis a
+ * replica records for a document it holds no revision of. The transaction
+ * read documents its replica had not loaded, or had loaded before anything
+ * was written there, and once the catch-up has loaded them a fresh run reads
+ * them as present. A refusal that names any read at a later seq is a stale
+ * read over a revision another writer moved past, and one whose conflicts
+ * carry no seq is not known to be either.
+ */
+const refusalClaimsOnlyAbsence = (error: CommitError): boolean => {
+  if (
+    error.name !== "ConflictError" ||
+    !error.message.startsWith("stale confirmed read")
+  ) {
+    return false;
+  }
+  const conflicts = error.conflicts ?? [];
+  return conflicts.length > 0 && conflicts.every(({ seq }) => seq === 0);
+};
+
+/**
  * The digests of the module policies a run of `pattern` can install, which
  * are those its schemas name, its nodes' and its nested patterns' included.
  */
@@ -5426,17 +5447,20 @@ export class Runner {
             registrations.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
           // `refusal` is how the commit was lost: its basis to the serving
-          // side, a policy manifest install to another participant, or
-          // neither, which is terminal. One retry is enough for a lost
-          // install: a manifest never changes once present, so once the
-          // catch-up has loaded it the install reads it as present and writes
-          // nothing, and the same refusal cannot recur. A named piece's run
-          // start takes up to `PIECE_RUN_START_MAX_RETRIES` instead, because
-          // its refusal may also name the piece's own documents, whose basis
-          // other writers can keep moving.
+          // side, a policy manifest install to another participant, an
+          // absence claim over documents the store holds, or none of these,
+          // which is terminal. One retry is enough for a lost install: a
+          // manifest never changes once present, so once the catch-up has
+          // loaded it the install reads it as present and writes nothing, and
+          // the same refusal cannot recur. It is enough for an absence claim
+          // as well, since the retry reads each named document at the
+          // revision the catch-up loaded instead of claiming it absent. A
+          // named piece's run start takes up to `PIECE_RUN_START_MAX_RETRIES`
+          // instead, because its refusal may also name the piece's own
+          // documents, whose basis other writers can keep moving.
           const recoverInstantiationOnce = async (
             error: unknown,
-            refusal: "basis" | "manifest" | "terminal",
+            refusal: "absence" | "basis" | "manifest" | "terminal",
           ) => {
             if (!exactNodesAreCurrent()) {
               // A stop, a runtime cycle, or a newer instantiation retired
@@ -5468,6 +5492,9 @@ export class Runner {
                 ? "was refused over a policy manifest another participant " +
                   "installed; loading the manifest, and instantiating once " +
                   "more if it loads"
+                : refusal === "absence"
+                ? "claimed documents absent that the store holds; loading " +
+                  "them, and instantiating once more if they load"
                 : "lost its basis to the serving side; re-instantiating once " +
                   "from the caught-up view"),
               error,
@@ -5499,15 +5526,22 @@ export class Runner {
             ) {
               return;
             }
-            // A retry reads the manifest the catch-up loaded. One that could
-            // not be loaded would read as absent and be installed again, so
+            // A retry reads the documents the catch-up loaded. One that could
+            // not be loaded would read as absent again, a manifest to be
+            // installed again or a document to be claimed absent again, so
             // the start fails here, with the reason the load gave.
-            if (refusal === "manifest" && unloaded.length > 0) {
+            if (
+              (refusal === "manifest" || refusal === "absence") &&
+              unloaded.length > 0
+            ) {
               this.#reportPieceStartCommitFailure(
                 instantiateActionId,
                 new Error(
-                  `piece-start commit ${instantiateActionId} lost a policy ` +
-                    "manifest install, and its catch-up could not load " +
+                  `piece-start commit ${instantiateActionId} ` +
+                    (refusal === "manifest"
+                      ? "lost a policy manifest install"
+                      : "claimed documents absent that the store holds") +
+                    ", and its catch-up could not load " +
                     unloaded.map(({ id }) => id).join(", "),
                   {
                     cause: unloaded.length === 1
@@ -5540,8 +5574,14 @@ export class Runner {
                   await recoverInstantiationOnce(error, "manifest");
                   return;
                 }
-                // A stale read recovers only where a serving side supplies the
-                // view the retry reads.
+                // So does a claim of absence over documents the store holds,
+                // for the reason `refusalClaimsOnlyAbsence` gives.
+                if (refusalClaimsOnlyAbsence(error)) {
+                  await recoverInstantiationOnce(error, "absence");
+                  return;
+                }
+                // Any other stale read recovers only where a serving side
+                // supplies the view the retry reads.
                 if (
                   this.#runtime.experimental.serverExecution === true &&
                   isStaleReadConflict(error)
@@ -7578,7 +7618,8 @@ export class Runner {
   /**
    * Prepares a named piece's run for another attempt after its start
    * transaction was refused over a policy manifest another participant
-   * installed first. Resolves `"retry"` when the caller should run it again,
+   * installed first, or over documents it claimed absent that the store
+   * holds. Resolves `"retry"` when the caller should run it again,
    * `"terminal"` when the caller's failure arm should run as it does for any
    * other refusal, and `"settled"` when the start was stopped or the runtime
    * torn down during the wait, so there is nothing left to report.
@@ -7591,7 +7632,10 @@ export class Runner {
    * lands the setup, so this is the retry `Runtime.editWithRetry()` gives any
    * other retrying writer: wait for the refusal's catch-up, then prepare the
    * run from the start, where the install reads the manifest as present.
-   * Every other refusal stays terminal, a stale read over the piece's own
+   * A start that read documents its replica had not loaded is refused the
+   * same way ({@link refusalClaimsOnlyAbsence}), and after the catch-up has
+   * loaded them the run from the start reads them as present. Every other
+   * refusal stays terminal, a stale read over a revision of the piece's own
    * documents included: whether a re-commit converges against a serving
    * side's derived writes is a different question, which
    * `#catchUpAndStartOnStaleRead()` answers by committing nothing.
@@ -7614,8 +7658,9 @@ export class Runner {
     // the registry, so the registration check also covers a canceled token
     // and a newer lifecycle epoch.
     const key = this.#getDocKey(resultCell);
+    const manifest = refusalNamesPolicyManifest(error);
     if (
-      !refusalNamesPolicyManifest(error) ||
+      (!manifest && !refusalClaimsOnlyAbsence(error)) ||
       installedRegistration === undefined ||
       this.#cancels.get(key) !== installedRegistration
     ) {
@@ -7626,8 +7671,11 @@ export class Runner {
     this.#registerPendingDeferredStart(key, ownership);
     logger.info(
       "piece-start-commit-retrying",
-      "piece-run start lost a policy manifest install to another " +
-        "participant; running it again once storage has caught up",
+      "piece-run start " +
+        (manifest
+          ? "lost a policy manifest install to another participant"
+          : "claimed documents absent that the store holds") +
+        "; running it again once storage has caught up",
       resultCell.getAsNormalizedFullLink().id,
       error,
     );
@@ -7683,8 +7731,10 @@ export class Runner {
    * CLIENT raced, and the cross-tab mutex semantics own that story — the OFF
    * arm of a commit-gated start stays terminal. A named piece's run refused
    * over a policy manifest another participant installed first is not that
-   * story either: `#retryPieceRunStart()` runs it again in a fresh
-   * transaction, under either arm, when this recovery declines.
+   * story either, and neither is one whose every conflicting read claimed a
+   * document absent that the store holds: `#retryPieceRunStart()` runs those
+   * again in a fresh transaction, under either arm, when this recovery
+   * declines.
    *
    * WHAT stays terminal. Only the engine's stale-read family recovers —
    * `stale confirmed read` and its `stale pending read` sibling

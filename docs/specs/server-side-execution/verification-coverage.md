@@ -7333,7 +7333,23 @@ supply; OW29/OW32/OW34 closed):
     piece's own documents is the stale read it would be without the
     manifest. The start loads the manifests its pattern names before it
     instantiates, so this retry answers only a manifest installed after
-    those loads. Explicit wave
+    those loads. A refusal whose every conflicting read claimed its
+    document absent — a confirmed read at seq 0, the basis a replica
+    records for a document it holds no revision of — is the other
+    exception in every posture. The start read documents the store holds
+    that its loads had not brought in, which is a document its pre-sync
+    never named or one it loaded before anything was written there, so a
+    catch-up that loads them repairs the commit with no serving side, and
+    a catch-up that cannot load one fails the start with the load's
+    reason. The start's pre-sync is meant to name everything a start
+    reads; this retry is what keeps a document it misses from costing more
+    than a round trip. A refusal that names any read at a later seq is a
+    stale read over a revision another writer moved past, and stays
+    terminal with the flag off. With the flag off, a named piece's run
+    start, which runs in a transaction of its own, runs again for either
+    exception within its `PIECE_RUN_START_MAX_RETRIES` budget; with it
+    on, the deferred start's catch-up-and-start takes every stale read
+    first. Explicit wave
     abandon is classified separately and warned without incrementing the
     serving runtime's structure-load-failure observer. A recoverable failure
     is warned on the same terms while its one retry is outstanding, and is
@@ -7350,7 +7366,15 @@ supply; OW29/OW32/OW34 closed):
     `cfc-policy-manifest-shared-install.test.ts`, by a second participant
     starting a piece whose per-user part carries the policy, together with a
     refusal over the piece's own documents beside the manifest staying
-    terminal. And OW46's
+    terminal. The absence exception is pinned in
+    `piece-start-unloaded-read.test.ts`, by a runtime whose loads never
+    bring in the document a nested instance's setup reads through a slot
+    its stored argument carries, with a catch-up that cannot load that
+    document failing the start with the load's reason; the flag-OFF
+    terminal companion refuses a read at seq 1. The named piece's run
+    start is pinned in `cfc-policy-manifest-shared-install.test.ts`, by a
+    refusal claiming absence that runs the start again beside a read at a
+    later seq that stays terminal. And OW46's
     `structure-load-stuck` counter is BLIND here: it fires 6× per run
     in BOTH arms and in the reds names only the HOST's space, because
     it counts deferred structure loads of DEMANDED roots and this
