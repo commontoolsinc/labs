@@ -184,6 +184,19 @@ const storedSlots = async (
   }));
 };
 
+/**
+ * A room's argument document, which holds what the room stores. It is found
+ * through the piece's metadata, since what the room's output offers is
+ * computed from it rather than linked to it.
+ */
+const roomArgument = (room: Cell<unknown>): Cell<unknown> => {
+  const argument = room.getArgumentCell<unknown>();
+  if (argument === undefined) {
+    throw new Error("A FabriChat room has an argument document");
+  }
+  return argument;
+};
+
 /** The slots of `after` that `before` holds too, in `after`'s order. */
 const kept = (
   after: readonly StoredSlot[],
@@ -262,7 +275,7 @@ describe("FabriChat update rehearsal", () => {
     manager: await storedSlots(runtime, manager.key("requests")),
     rooms: await Promise.all(
       [directRoom, room].map((each) =>
-        storedSlots(runtime, each.key("recentActivity"))
+        storedSlots(runtime, roomArgument(each))
       ),
     ),
     // Kept per user, outside the room's argument.
