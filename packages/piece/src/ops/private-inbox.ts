@@ -188,7 +188,9 @@ const answerSchema = {
  * changes as Home's holder and the profile's pointer do. This subscribes to
  * the receipt, through the link, and settles on the first answer that is not
  * `pending`; for `ensured`, it then reads the inbox from the profile's pointer,
- * waiting for this runtime's view of it to name one. Returns `unavailable`,
+ * waiting for it to name one. It reads both past this runtime's own
+ * speculation, so under server execution it settles on what the server wrote,
+ * never on this runtime's preview of Home's answer. Returns `unavailable`,
  * sending nothing, for a Home without the stream, and `abandoned` once
  * `signal` aborts: sending nothing when it has aborted already, and otherwise
  * at whatever point it is waiting, Home's handling of a request already sent
