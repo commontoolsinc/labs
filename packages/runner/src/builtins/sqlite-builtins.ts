@@ -449,8 +449,8 @@ function decodedRowLinks(
     for (const c of cols) {
       const value = (row as Record<string, unknown>)[c];
       if (!isCellLink(value)) continue;
-      const { space, id } = parseLink(value);
-      links.set(`${space}\0${id}`, value);
+      const { space, id, scope } = parseLink(value);
+      links.set(`${space}\0${id}\0${scope ?? ""}`, value);
     }
   }
   return [...links.values()];
@@ -1628,10 +1628,11 @@ export function sqliteQuery(
             // Every linked document is loaded before the rows are written: a
             // labeled write of a link persists the label its source carries,
             // so a source another runtime wrote has to be in this replica
-            // for the settle's prepare to find it.
+            // for the settle's prepare to find it. A load that fails leaves
+            // the source absent, and the prepare's refusal names it.
             await Promise.all(
               decodedRowLinks(rows, linkCols).map((link) =>
-                runtime.getCellFromLink(link).sync()
+                runtime.getCellFromLink(link).sync().catch(() => undefined)
               ),
             );
             if (cancelled.signal.aborted) return;
