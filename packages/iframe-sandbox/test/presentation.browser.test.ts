@@ -17,6 +17,7 @@ function report(id: string) {
 /** Returns HTML which reports its effective style and retained input. */
 function guest(id: string) {
   return `<!doctype html><html data-skin="authored"><head>
+    <noscript><p id="noscript-fallback">Enable scripting</p></noscript>
     <style>body { color: var(--example-ink); }</style></head><body>
     <input value="initial"><script>
     const input = document.querySelector('input');
@@ -27,6 +28,7 @@ function guest(id: string) {
         color: getComputedStyle(document.body).color,
         skin: document.documentElement.getAttribute('data-skin'),
         caption: document.documentElement.getAttribute('data-caption'),
+        fallback: String(!!document.querySelector('#noscript-fallback')),
         mode: document.compatMode, input: input.value, incarnation, startupInk,
         fontToken: getComputedStyle(document.documentElement).getPropertyValue('--example-font').trim(),
         fonts: document.querySelector('link[rel="stylesheet"]')?.getAttribute('href') ?? ''
@@ -64,6 +66,7 @@ for (const outerFrameUrl of [undefined, "/outer-frame.html"]) {
       expect(initial.skin).toBe("host");
       expect(initial.caption).toBe("</script><b>text</b>");
       expect(initial.mode).toBe("CSS1Compat");
+      expect(initial.fallback).toBe("false");
       expect(initial.fonts).toBe(fontURL);
       expect(initial.fontToken).toBe("fixture");
       const changed = report(id);

@@ -49,12 +49,24 @@ Deno.test("cf-iframe inherits live presentation across a shadow root and support
       stylesheets: [],
     });
     expect(await changed).toBe("next");
+    const overridden = report(id);
+    element.presentation = {
+      css: ":root { --example-ink: explicit; }",
+      attributes: {},
+      stylesheets: [],
+    };
+    expect(await overridden).toBe("explicit");
+    provider.setValue({
+      css: ":root { --example-ink: latest; }",
+      attributes: {},
+      stylesheets: [],
+    });
     const cleared = report(id);
     element.presentation = null;
     expect(await cleared).toBe("");
     const inherited = report(id);
     element.presentation = undefined;
-    expect(await inherited).toBe("next");
+    expect(await inherited).toBe("latest");
   } finally {
     host.remove();
   }

@@ -158,9 +158,13 @@ function toHost(data) {
  * Installs presentation in the guest realm and accepts updates from its parent.
  * Serialized into each guest's head, before the guest's own scripts and styles.
  * @param {import('./presentation.ts').IframePresentation | null} initial
+ * @param {[string, string][]} authoredAttributes
  */
-function guestPresentation(initial) {
+function guestPresentation(initial, authoredAttributes) {
   const root = document.documentElement;
+  for (const [name, value] of authoredAttributes) {
+    root.setAttribute(name, value);
+  }
   const sheet = document.createElement("style");
   /** @type {HTMLLinkElement[]} */
   const links = [];
@@ -217,13 +221,21 @@ function guestPresentation(initial) {
  */
 function presentedDocument(html, presentation) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  const bootstrap = doc.createElement("script");
-  // Escaping `<` keeps payload text inside the script's JavaScript literal.
-  const value = JSON.stringify(presentation).replaceAll("<", "\\u003c");
-  bootstrap.textContent = `(${guestPresentation.toString()})(${value});`;
-  doc.head.prepend(bootstrap);
+  // The parser supplies document metadata only. Serializing its tree would
+  // change noscript content because DOMParser parses with scripting disabled.
+  const attributes = Array.from(
+    doc.documentElement.attributes,
+    ({ name, value }) => [name, value],
+  );
+  const payload = JSON.stringify([presentation, attributes]).replaceAll(
+    "<",
+    "\\u003c",
+  );
+  const bootstrap = `(${guestPresentation.toString()})(...${payload});`;
   const doctype = doc.doctype
     ? new XMLSerializer().serializeToString(doc.doctype)
     : "";
-  return doctype + doc.documentElement.outerHTML;
+  // A leading script creates the head; the original html/head tags merge into
+  // that document. Keep the original markup so the guest's parser owns it.
+  return doctype + "<script>" + bootstrap + "</scr" + "ipt>" + html;
 }
