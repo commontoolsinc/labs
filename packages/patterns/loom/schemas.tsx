@@ -165,7 +165,7 @@ export type BindMeetingResult =
 export interface BindMeetingRequest {
   key: string;
 
-  /** A PortableMeetingIdentity validated from its JSON event payload. */
+  /** Raw portable identity evidence that bindMeeting validates. */
   portableIdentity?: JSONValue;
 
   reply?: Writable<BindMeetingResult>;

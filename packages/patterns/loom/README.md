@@ -287,10 +287,10 @@ without binding the key. Unrecognized stored state, including extra fields
 without a key or a malformed stored key, receives `{status: "invalid-state"}`
 and stays intact. Extra metadata alongside a valid key stays intact on replay,
 enrichment, or conflict, including unknown fields inside an existing portable
-identity. A request for portable evidence cannot overwrite malformed or
-unsupported stored portable evidence: it receives `{status: "invalid-state"}`. A
-legacy replay omitting portable evidence still confirms the legacy key and
-preserves that stored metadata.
+identity. A valid same-key request for portable evidence receives
+`{status: "invalid-state"}` for malformed or unsupported stored portable
+evidence and leaves it intact. A legacy replay omitting portable evidence still
+confirms the legacy key and preserves that stored metadata.
 
 A request whose `reply` is the association cell itself changes nothing and
 receives no response, since any response written there would replace the
