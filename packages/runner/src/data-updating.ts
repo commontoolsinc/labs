@@ -517,6 +517,14 @@ export interface DiffWalkState {
    * position held before.
    */
   writtenKinds?: Map<string, boolean>;
+
+  /**
+   * An array this walk writes whose first `length` elements are the stored
+   * array's own, carried through by reference by an append
+   * (`diffAndAppend()`). The array branch passes over each of those that is
+   * still the stored element at its index, without descending into it.
+   */
+  carried?: { array: readonly unknown[]; length: number };
 }
 
 /**
@@ -556,14 +564,6 @@ export function diffAndUpdate(
   options?: DiffAndUpdateOptions,
   anchorIds?: () => string | number,
 ): boolean {
-  const readOptions: DiffAndUpdateOptions = {
-    ...options,
-    meta: {
-      ...options?.meta,
-      ...markReadAsAttemptedWrite,
-      ...allowMutableTransactionRead,
-    },
-  };
   // A builder artifact -- a module, a handler, a pattern, the factory carrying
   // a module's members -- has no fabric representation, so the runtime replaces
   // it with its encodable form before the value reaches the data model. This is
@@ -576,20 +576,108 @@ export function diffAndUpdate(
   // names without reading a member of it. Each member read on one resolves
   // through this transaction and is recorded on it as a dependency the commit
   // has to check.
-  const anchored: NonNullable<DiffWalkState["anchored"]> = [];
-  const state: DiffWalkState = {
-    seen: new Map(),
-    nextAnchorId: anchorIds,
-    anchored,
-    writtenKinds: new Map(),
-  };
-  const changes = normalizeAndDiff(
+  return writeWalked(
     runtime,
     tx,
     link,
     flattenBuilderArtifacts(newValue, {
       isLeaf: isCellResultForDereferencing,
     }),
+    context,
+    options,
+    anchorIds,
+  );
+}
+
+/**
+ * Writes the array `existing` with `appended` added after its last element,
+ * as `diffAndUpdate()` writes the combined array, without walking what
+ * `existing` already holds.
+ *
+ * `existing` is the array the transaction read at `link`. Its elements are
+ * carried through by reference, so each one the walk finds still stored at
+ * its index is stepped past without being normalized or descended into, and
+ * nothing is written below the old length. Copying and stepping past them is
+ * the only work an append does per stored element. A hole in `existing` stays
+ * a hole.
+ *
+ * @param existing - The array stored at `link`, as the transaction read it.
+ * @param appended - The values to add after it.
+ * @param anchorIds - As for `diffAndUpdate()`.
+ * @returns Whether any changes were made.
+ */
+export function diffAndAppend(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  existing: readonly unknown[],
+  appended: readonly unknown[],
+  context?: unknown,
+  anchorIds?: () => string | number,
+): boolean {
+  // Only the appended values can hold a builder artifact or a query result:
+  // what `existing` holds came out of storage. They are replaced as in
+  // `diffAndUpdate()`.
+  const flattened = flattenBuilderArtifacts(appended, {
+    isLeaf: isCellResultForDereferencing,
+  }) as readonly unknown[];
+  const combined = new Array(existing.length + flattened.length);
+  existing.forEach((element, i) => {
+    combined[i] = element;
+  });
+  // Indexed rather than `forEach`, so a hole among the appended values is
+  // stored as an explicit `undefined`, as any other written element is.
+  for (let i = 0; i < flattened.length; i++) {
+    combined[existing.length + i] = flattened[i];
+  }
+  return writeWalked(
+    runtime,
+    tx,
+    link,
+    combined,
+    context,
+    undefined,
+    anchorIds,
+    { array: combined, length: existing.length },
+  );
+}
+
+/**
+ * Helper for `diffAndUpdate()` and `diffAndAppend()`, which walks `newValue`,
+ * already rid of builder artifacts, against what `link` holds and applies the
+ * changes the walk finds.
+ */
+function writeWalked(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  newValue: unknown,
+  context: unknown,
+  options: DiffAndUpdateOptions | undefined,
+  anchorIds: (() => string | number) | undefined,
+  carried?: DiffWalkState["carried"],
+): boolean {
+  const readOptions: DiffAndUpdateOptions = {
+    ...options,
+    meta: {
+      ...options?.meta,
+      ...markReadAsAttemptedWrite,
+      ...allowMutableTransactionRead,
+    },
+  };
+  const anchored: NonNullable<DiffWalkState["anchored"]> = [];
+  const state: DiffWalkState = {
+    seen: new Map(),
+    nextAnchorId: anchorIds,
+    anchored,
+    writtenKinds: new Map(),
+    carried,
+  };
+  const changes = normalizeAndDiff(
+    runtime,
+    tx,
+    link,
+    newValue,
     context,
     readOptions,
     state,
@@ -1915,8 +2003,12 @@ export function normalizeAndDiff(
   // the objects inside them.
   //
   // An element carried through UNTOUCHED from the stored array diffs to
-  // NOTHING -- returned here without descending. This is load-bearing for
-  // the mergeable collection ops (`push`/`addUnique`) twice over: their
+  // NOTHING -- returned here without descending. An append
+  // (`diffAndAppend()`) passes over the elements it carried in the array
+  // branch below, before they reach this point; this guard holds the same
+  // for a walk that carries a stored element without declaring it. Either
+  // way the outcome is load-bearing for the mergeable collection ops
+  // (`push`/`addUnique`) twice over: their
   // array read is excluded from the commit's conflict set (see
   // docs/features/mergeable-collection-writes.md), which is only safe
   // while the op emits no writes below the tail, so (1) the element itself
@@ -1934,10 +2026,9 @@ export function normalizeAndDiff(
   // values whose canonical form does not exist yet.
   //
   // Atomic `FabricSpecialObject`s are excluded from this guard: an untouched
-  // special-object prefix element re-emits its identical stored instance
-  // from the instance branch below, and the mergeable invariant for those
-  // elements rests on the write layer eliding that identical write from the
-  // journal rather than on this guard.
+  // special-object element that reaches this point re-emits its identical
+  // stored instance from the instance branch below, and the write layer
+  // elides that identical write from the journal.
   if (
     state.nextAnchorId !== undefined &&
     isArrayElement &&
@@ -2017,11 +2108,35 @@ export function normalizeAndDiff(
       });
     }
 
+    // The elements an append carried through from the stored array. Each one
+    // still stored at its index would diff to nothing, so it is passed over
+    // unwalked. Diffing an equal element retains the commit basis of any
+    // pending write to its document, and every carried element lives in the
+    // array's one document, so a single retain stands for all of them.
+    const carriedLength = state.carried?.array === newValue
+      ? state.carried.length
+      : 0;
+    let retainedCarried = false;
+
     for (let i = 0; i < newValue.length; i++) {
       const inNew = i in newValue;
       const inCur = currentArray ? i in currentArray : false;
 
       if (!inNew && !inCur) continue; // hole→hole: no change
+
+      if (
+        i < carriedLength && inNew && inCur &&
+        Object.is(newValue[i], currentArray![i])
+      ) {
+        if (!retainedCarried) {
+          tx.retainPendingWriteElision?.(toMemorySpaceAddress({
+            ...link,
+            path: [...link.path, i.toString()],
+          }));
+          retainedCarried = true;
+        }
+        continue;
+      }
 
       if (!inNew && inCur) {
         // value→hole: emit an explicit delete (a plain `undefined` write
