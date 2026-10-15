@@ -197,8 +197,7 @@ const answerSchema = {
  * going on regardless.
  *
  * @throws When the send fails, when Home's handling of it fails or writes no
- *   receipt, when a read of its answer or of the profile's pointer fails, or
- *   when Home answers with a status this host does not know.
+ *   receipt, or when Home answers with a status this host does not know.
  */
 export async function requestPrivateInboxOf(
   runtime: Runtime,
@@ -282,7 +281,7 @@ function untilAborted<T>(
  * it, which can mix values from different moments. It reads again on each
  * change a subscription to `cell` delivers, and once the speculation layers
  * over what it read have settled, since a change beneath a layer delivers
- * nothing. Rejects when a read, or `pick`, throws.
+ * nothing.
  */
 function firstPicked<T, R>(
   runtime: Runtime,
@@ -290,33 +289,26 @@ function firstPicked<T, R>(
   pick: (value: Readonly<T>) => R | undefined,
   signal?: AbortSignal,
 ): Promise<R | undefined> {
-  const { promise, resolve, reject } = Promise.withResolvers<R | undefined>();
+  const { promise, resolve } = Promise.withResolvers<R | undefined>();
   // Where `sink()`'s cancel is kept: a callback can run before it returns.
   const subscription: { cancel?: Cancel } = {};
   let settled = false;
-  const finish = () => {
+  const settle = (picked: R | undefined) => {
+    if (settled) return;
     settled = true;
     signal?.removeEventListener("abort", abandon);
     subscription.cancel?.();
-  };
-  const settle = (picked: R | undefined) => {
-    if (settled) return;
-    finish();
     resolve(picked);
   };
   const abandon = () => settle(undefined);
   const check = () => {
     if (settled) return;
-    let read;
-    try {
-      read = readDurable(runtime, (tx) => pick(cell.withTx(tx).get()));
-    } catch (error) {
-      finish();
-      reject(error);
-      return;
-    }
-    if (read.value !== undefined) settle(read.value);
-    else read.speculationSettled?.then(check);
+    const { value, speculationSettled } = readDurable(
+      runtime,
+      (tx) => pick(cell.withTx(tx).get()),
+    );
+    if (value !== undefined) settle(value);
+    else speculationSettled?.then(check);
   };
   if (signal?.aborted) {
     abandon();

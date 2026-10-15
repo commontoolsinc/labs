@@ -6794,6 +6794,15 @@ export class SpaceReplica
       )
       : undefined;
 
+    // A speculative layer is registered before it is applied, so that a
+    // durable read made from a notification below already reads past it.
+    const speculationSettled = options?.speculative === true
+      ? Promise.withResolvers<void>()
+      : undefined;
+    if (speculationSettled !== undefined) {
+      this.#speculativeLocalSeqs.set(localSeq, speculationSettled.promise);
+    }
+
     for (const operation of operations) {
       this.#applyPending(operation, localSeq, commit.reads, identity);
     }
@@ -6821,7 +6830,7 @@ export class SpaceReplica
       verdict,
       identity,
     );
-    if (options?.speculative !== true) {
+    if (speculationSettled === undefined) {
       // Durable sealed commits (the wave's) join the synced() barrier
       // and the ordered-push outcome map as any commit does. A CLIENT
       // SPECULATION entry joins NEITHER (speculation.md §1: the overlay
@@ -6841,16 +6850,15 @@ export class SpaceReplica
         this.#commitPromises.delete(settled);
       });
     } else {
-      // Track the speculative seq for the export refusal (speculation.md
-      // §6, RULED 2026-08-13): while any pending stack carries this
-      // layer, a pushed commit's read basis naming it is refused in
-      // commitOperations. Settlement (retirement or withdrawal) drops
-      // the pending layers before `settled` resolves, so removal here
-      // never races a stack that still names the seq.
-      const quiet = settled.then(() => {}, () => {});
-      this.#speculativeLocalSeqs.set(localSeq, quiet);
-      quiet.finally(() => {
+      // The speculative seq stays tracked for the export refusal
+      // (speculation.md §6, RULED 2026-08-13): while any pending stack
+      // carries this layer, a pushed commit's read basis naming it is
+      // refused in commitOperations. Settlement (retirement or
+      // withdrawal) drops the pending layers before `settled` resolves,
+      // so removal here never races a stack that still names the seq.
+      settled.then(() => {}, () => {}).finally(() => {
         this.#speculativeLocalSeqs.delete(localSeq);
+        speculationSettled.resolve();
       });
     }
     return { localSeq, commit, settled };

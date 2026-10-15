@@ -371,6 +371,29 @@ describe("confirmed-read", () => {
         .toBe(2);
     });
 
+    it("returns the stored value from a notification the layer's own seal delivers", async () => {
+      await write("notified", 1);
+      const notified = await loaded("notified");
+      const seen: (number | undefined)[] = [];
+      let sealing = false;
+      const replica = readerManager.open(space).replica as SpaceReplica;
+      const cancel = replica.sinkDocument(
+        notified.getAsNormalizedFullLink().id,
+        () => {
+          if (!sealing) return;
+          seen.push(
+            readDurable(reader, (tx) => notified.withTx(tx).get()?.n).value,
+          );
+        },
+      );
+      sealing = true;
+      speculate(notified, { n: 5 });
+      sealing = false;
+      cancel();
+
+      expect(seen).toEqual([1]);
+    });
+
     it("returns `speculationSettled` resolving once the layer over what it read retires, and not before", async () => {
       await write("retiring", 1);
       const retiring = await loaded("retiring");
