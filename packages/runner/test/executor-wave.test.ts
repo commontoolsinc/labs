@@ -4681,13 +4681,13 @@ describe("stage D seal-into-wave", () => {
     expect(witness.instantiations()).toBe(4);
   });
 
-  // A refusal claiming `id` absent: a confirmed read of it at seq 0, as the
-  // engine names one.
-  const absenceOf = (id: string) => ({
+  // A refusal claiming `id` in `inSpace` absent: a confirmed read of it at
+  // seq 0, as the engine names one.
+  const absenceOf = (id: string, inSpace: MemorySpace = space) => ({
     name: "ConflictError" as const,
     message: `stale confirmed read: ${id} at seq 0 conflicted with seq 1`,
-    conflict: { space, the: "application/json", of: id, seq: 0 },
-    conflicts: [{ space, the: "application/json", of: id, seq: 0 }],
+    conflict: { space: inSpace, the: "application/json", of: id, seq: 0 },
+    conflicts: [{ space: inSpace, the: "application/json", of: id, seq: 0 }],
     readyToRetry: () => Promise.resolve(),
   });
 
@@ -4774,6 +4774,30 @@ describe("stage D seal-into-wave", () => {
     expect(attempts).toBe(2);
     expect(failures).toEqual([repeated]);
     expect(witness.instantiations()).toBe(3);
+  });
+
+  it("reinstantiates a piece again for a document of another space under an id an earlier round loaded", async () => {
+    // A document is its space, scope and id together, so the same id in
+    // another space names a document no earlier round loaded.
+
+    const foreign = (await Identity.fromPassphrase(
+      "wave piece instantiate absence foreign space",
+    )).did() as MemorySpace;
+    seedGenesisAcl(await server.engineForSpace(foreign), foreign);
+    const witness = await stoppedWitnessPiece(
+      "wave-piece-instantiate-absence-spaces",
+    );
+    const id = witness.cell.getAsNormalizedFullLink().id;
+    const rounds = [absenceOf(id), absenceOf(id, foreign)];
+
+    const { attempts, failures } = await startRefusingInstantiations(
+      witness,
+      (attempt) => rounds[attempt - 1],
+    );
+
+    expect(failures).toEqual([]);
+    expect(attempts).toBe(3);
+    expect(witness.instantiations()).toBe(4);
   });
 
   it("tears down once its rounds over documents claimed absent are spent", async () => {

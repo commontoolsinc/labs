@@ -183,7 +183,7 @@ import {
   ignoreReadForScheduling,
 } from "./scheduler.ts";
 import { deriveEventKey } from "./scheduler/event-identity.ts";
-import { entityKey } from "./scheduler/keys.ts";
+import { entityKey, entityNameKey } from "./scheduler/keys.ts";
 import { CooperativeYield } from "./scheduler/cooperative-yield.ts";
 import {
   InSpaceTargetUnresolved,
@@ -432,14 +432,15 @@ const refusalClaimsOnlyAbsence = (error: CommitError): boolean => {
 };
 
 /**
- * The documents a commit refusal names, each keyed by its scope and id, so
- * that a later refusal claiming absent only documents an earlier catch-up
- * loaded can be told from one that reached documents not yet loaded.
+ * The documents a commit refusal names, each keyed by its space, scope and
+ * id, so that a later refusal claiming absent only documents an earlier
+ * catch-up loaded can be told from one that reached documents not yet
+ * loaded.
  */
 const conflictKeys = (error: CommitError): string[] =>
   error.name === "ConflictError"
-    ? (error.conflicts ?? []).map(({ of, scope }) =>
-      `${scope ?? "space"} ${of}`
+    ? (error.conflicts ?? []).map(({ space, of, scope }) =>
+      entityNameKey({ space, id: of, scope })
     )
     : [];
 
