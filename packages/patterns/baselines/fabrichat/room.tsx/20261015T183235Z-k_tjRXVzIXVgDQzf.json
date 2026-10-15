@@ -200,7 +200,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitSend"
                   ]
@@ -219,7 +219,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitComposerSend"
                   ]
@@ -238,7 +238,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitThreadSend"
                   ]
@@ -257,7 +257,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitReply"
                   ]
@@ -276,7 +276,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitEdit"
                   ]
@@ -295,7 +295,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitDelete"
                   ]
@@ -314,7 +314,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitObliterate"
                   ]
@@ -348,7 +348,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -367,7 +367,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -406,7 +406,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/manager.tsx",
-              "moduleIdentity": "wI91ySAb81Q4JhjWeImnF1fF_sVy-X4Ai5UW2btosXI",
+              "moduleIdentity": "4O2STeYyGzK0AV7SZnhOHYnAEqhlttQMy8WbyooY5KA",
               "path": [
                 "commitStart"
               ]
@@ -456,7 +456,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/room-records.tsx",
-              "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+              "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
               "path": [
                 "commitSetTitle"
               ]
@@ -635,13 +635,6 @@
       },
       "ChatMessageList": {
         "properties": {
-          "closeWindow": {
-            "$ref": "#/$defs/RoomWindowEvent",
-            "asCell": [
-              "stream"
-            ],
-            "description": "Closes a window."
-          },
           "count": {
             "description": "How many messages the room holds, obliterated tombstones included.",
             "type": "number"
@@ -675,32 +668,18 @@
             "description": "The oldest message's `sentAt`; absent while there are none.",
             "type": "FabricEpochNsec"
           },
-          "openWindow": {
-            "$ref": "#/$defs/RoomWindowEvent",
-            "asCell": [
-              "stream"
-            ],
-            "description": "Opens a window, or moves one already open."
-          },
           "threads": {
             "description": "Every thread in the room that holds a reply, oldest root first. A message\nof the main conversation that roots none has no entry.",
             "items": {
               "$ref": "#/$defs/ChatThreadSummary"
             },
             "type": "array"
-          },
-          "windows": {
-            "$ref": "#/$defs/WindowsValue",
-            "description": "This session's open windows, by the `windowId` its client chose."
           }
         },
         "required": [
           "count",
           "latest",
-          "threads",
-          "windows",
-          "openWindow",
-          "closeWindow"
+          "threads"
         ],
         "type": "object"
       },
@@ -728,40 +707,6 @@
           "canEdit",
           "canDelete",
           "canObliterate"
-        ],
-        "type": "object"
-      },
-      "ChatMessageWindow": {
-        "properties": {
-          "hasNewer": {
-            "description": "Whether the view has messages newer than the window's last.",
-            "type": "boolean"
-          },
-          "hasOlder": {
-            "description": "Whether the view has messages older than the window's first.",
-            "type": "boolean"
-          },
-          "messages": {
-            "description": "The messages in the window, oldest first.",
-            "items": {
-              "$ref": "#/$defs/MessageRecord"
-            },
-            "type": "array"
-          },
-          "requestId": {
-            "description": "The `openWindow` request that set the window as it is now.",
-            "type": "string"
-          },
-          "root": {
-            "$ref": "#/$defs/MessageRecord",
-            "description": "For a thread's window, the thread's root; absent for the main one."
-          }
-        },
-        "required": [
-          "requestId",
-          "messages",
-          "hasOlder",
-          "hasNewer"
         ],
         "type": "object"
       },
@@ -918,13 +863,6 @@
             "description": "Whether this reader can send, edit, delete, and react.",
             "type": "boolean"
           },
-          "closeWindow": {
-            "$ref": "#/$defs/RoomWindowEvent",
-            "asCell": [
-              "stream"
-            ],
-            "description": "The message list's `closeWindow`, here as well, as `openWindow` is."
-          },
           "deleteMessage": {
             "$ref": "#/$defs/RoomStreamEvent",
             "asCell": [
@@ -968,13 +906,6 @@
               "stream"
             ],
             "description": "Reduces a message to a tombstone."
-          },
-          "openWindow": {
-            "$ref": "#/$defs/RoomWindowEvent",
-            "asCell": [
-              "stream"
-            ],
-            "description": "The message list's `openWindow`, here as well for a client that sends only\nto a view's own streams, as it reads a thread through a window."
           },
           "participantEntries": {
             "description": "One entry for each of `participants`, in their order: the profile, and the\nprincipal its `represents-principal` label attests, absent where it\nattests none or the label can't be read where the list is derived. Like\n`participants`, it is not proof of access.",
@@ -1048,8 +979,6 @@
           "participantPrincipals",
           "addParticipant",
           "messages",
-          "openWindow",
-          "closeWindow",
           "canSend",
           "viewer",
           "messageRights",
@@ -1106,63 +1035,6 @@
           "latestReplyAt"
         ],
         "type": "object"
-      },
-      "ChatWindowAnchor": {
-        "anyOf": [
-          {
-            "properties": {
-              "before": {
-                "anyOf": [
-                  {
-                    "type": "FabricEpochNsec"
-                  },
-                  {
-                    "enum": [
-                      "end"
-                    ],
-                    "type": "string"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "before"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "after": {
-                "anyOf": [
-                  {
-                    "type": "FabricEpochNsec"
-                  },
-                  {
-                    "enum": [
-                      "start"
-                    ],
-                    "type": "string"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "after"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "around": {
-                "type": "FabricEpochNsec"
-              }
-            },
-            "required": [
-              "around"
-            ],
-            "type": "object"
-          }
-        ]
       },
       "JoinRoomEvent": {
         "properties": {
@@ -1269,35 +1141,6 @@
         },
         "type": "object"
       },
-      "RoomWindowEvent": {
-        "properties": {
-          "count": {
-            "description": "The most messages to show, capped by the room's `maxWindowCount`.",
-            "type": "number"
-          },
-          "from": {
-            "$ref": "#/$defs/ChatWindowAnchor",
-            "description": "Where the window sits; required to open one."
-          },
-          "requestId": {
-            "description": "Chosen by the client; shown in the window once an open is fulfilled.",
-            "type": "string"
-          },
-          "root": {
-            "$ref": "#/$defs/MessageRecord",
-            "description": "The root of the thread to show; absent for the main conversation."
-          },
-          "windowId": {
-            "description": "The window to set or close, chosen by the client.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "windowId"
-        ],
-        "type": "object"
-      },
       "SentReaction": {
         "$ref": "#/$defs/ChatReaction",
         "ifc": {
@@ -1322,7 +1165,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -1341,7 +1184,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
+                  "moduleIdentity": "8C7qRInxo-Cea_-gMVdQ91KieJvi5gZGG5oxx5FEvQ0",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -1455,24 +1298,6 @@
           "shownIn"
         ],
         "type": "object"
-      },
-      "WindowsValue": {
-        "additionalProperties": {
-          "$ref": "#/$defs/ChatMessageWindow"
-        },
-        "ifc": {
-          "writeAuthorizedBy": {
-            "__ctWriterIdentityOf": {
-              "file": "/packages/patterns/fabrichat/room-records.tsx",
-              "moduleIdentity": "Syyj_GUh_e9ZYhZ2-59ZbIhRR1OdUbsoEgnd6ONx-Ak",
-              "path": [
-                "commitWindow"
-              ]
-            }
-          }
-        },
-        "properties": {},
-        "type": "object"
       }
     },
     "description": "What a room offers everyone its space admits: `ChatRoomOutput`.",
@@ -1531,13 +1356,6 @@
         "description": "Whether this reader can send, edit, delete, and react.",
         "type": "boolean"
       },
-      "closeWindow": {
-        "$ref": "#/$defs/RoomWindowEvent",
-        "asCell": [
-          "stream"
-        ],
-        "description": "The message list's `closeWindow`, here as well, as `openWindow` is."
-      },
       "deleteMessage": {
         "$ref": "#/$defs/RoomStreamEvent",
         "asCell": [
@@ -1581,13 +1399,6 @@
           "stream"
         ],
         "description": "Reduces a message to a tombstone."
-      },
-      "openWindow": {
-        "$ref": "#/$defs/RoomWindowEvent",
-        "asCell": [
-          "stream"
-        ],
-        "description": "The message list's `openWindow`, here as well for a client that sends only\nto a view's own streams, as it reads a thread through a window."
       },
       "participantEntries": {
         "description": "One entry for each of `participants`, in their order: the profile, and the\nprincipal its `represents-principal` label attests, absent where it\nattests none or the label can't be read where the list is derived. Like\n`participants`, it is not proof of access.",
@@ -1664,8 +1475,6 @@
       "participantPrincipals",
       "addParticipant",
       "messages",
-      "openWindow",
-      "closeWindow",
       "canSend",
       "viewer",
       "messageRights",

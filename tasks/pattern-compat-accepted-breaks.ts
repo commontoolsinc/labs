@@ -1350,8 +1350,20 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261014T032931Z-HZkjsOAXJP_gQyA3",
       "20261014T123129Z-VlmPp0bPiXq8MNex",
       "20261014T130013Z-uRhft5bPPY03WmU6",
-      "20261014T140128Z-95MKWhVw3ffYhuDn",
       "20261014T142812Z-p_fHr5eLl9Kdq7am",
+    ],
+    paths: ["argument.messages[]", "result.messageRequests"],
+    reason:
+      "a room's messages are objects pushed onto the list under a policy naming the new handlers, and its per-user act outcomes are gone; rooms holding the keyed records are left behind",
+    record: "docs/history/fabrichat-pushed-messages-break.md",
+  },
+  {
+    // The same break, against the baselines that offered `closeWindow` at the
+    // room's top level, which the proof reports ahead of the per-user act
+    // outcomes they offered too; the room offers no windows.
+    pattern: "fabrichat/room.tsx",
+    baselines: [
+      "20261014T140128Z-95MKWhVw3ffYhuDn",
       "20261014T151858Z-e6AvrFyYi8qb50yc",
       "20261014T152002Z-S3S_T8pKGJ3XD0x_",
       "20261014T162032Z-VqHxNEaxFBSWRpKw",
@@ -1361,9 +1373,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261014T215835Z-JQgYDEHDYD8Vx1AY",
       "20261015T011425Z-mx7tYDWFp1_T-wuZ",
     ],
-    paths: ["argument.messages[]", "result.messageRequests"],
+    paths: ["argument.messages[]", "result.closeWindow"],
     reason:
-      "a room's messages are objects pushed onto the list under a policy naming the new handlers, and its per-user act outcomes are gone; rooms holding the keyed records are left behind",
+      "a room's messages are objects pushed onto the list under a policy naming the new handlers, and its message windows are gone; rooms holding the keyed records are left behind",
     record: "docs/history/fabrichat-pushed-messages-break.md",
   },
   {

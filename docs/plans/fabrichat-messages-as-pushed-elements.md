@@ -1,6 +1,8 @@
 # FabriChat messages as pushed elements
 
-**Status:** stage 1 built, on branch `claude/loom-chat-send-refactor-525c8b`.
+**Status:** stages 1 to 3 built, on branch
+`claude/loom-chat-send-refactor-525c8b` (commonfabric/labs#8931); stage 4's
+rewrites landed with the stages that changed each behavior.
 Written against `main` at `67143bae62` (2026-10-14). The two spikes it rests
 on became `labels.test.tsx`, which drives the real handlers; their findings
 are recorded below. Paths are under `packages/patterns/fabrichat/` unless they
@@ -312,8 +314,8 @@ times, `recentActivity`, `messageRequests`), `ChatMessageList.md` (windows),
 `ChatThreadSummary.md` (`latestReplyAt` no longer identifies a reply),
 `FabriChatRoom.md` (stored records, writers, prerequisites), `clients.md`
 (proposed times, following a room, unacknowledged sends), and `README.md`.
-`ChatRoomActivity.md`, `ChatMessageWindow.md`, and `ChatWindowAnchor.md`
-describe surfaces this plan removes, and are archived.
+`ChatRoomActivity.md`, `ChatMessageVersion.md`, `ChatMessageWindow.md`, and
+`ChatWindowAnchor.md` describe surfaces this plan removes, and are archived.
 
 ## Stages
 
@@ -325,13 +327,18 @@ describe surfaces this plan removes, and are archived.
   request records are gone from the room, the placement, the fixtures, and
   the specs; `messageRefusal` carries the session's refusal. The contract-gate
   route is settled below.
-- [ ] **2. Views.** The room's derivations by reference, rows given their
-  place, windows removed, `message-row.tsx` bindings.
-- [ ] **3. Consumers and gates.** Placement, adapter, manager, integration
-  fixtures and benchmarks, the update rehearsal, and the accepted breaks or the
-  new path, with its decision record.
-- [ ] **4. Specifications.** The rewrites and archives listed above, in the
-  same change as the behavior they describe where a stage changes it.
+- [x] **2. Views.** The views key messages by their entity, which the room
+  derives once and each row reads its own of; the windows, their streams, and
+  the anchor and slice logic are gone, and a client reads past
+  `messages.latest` from the stored messages themselves.
+- [x] **3. Consumers and gates.** The placement, the adapter, the integration
+  fixtures and the send-burst benchmark follow the new shape; the update
+  rehearsal's fixture is refreshed from this branch, since the data the
+  deployed release stored is left behind; the accepted breaks and their
+  decision record are in place.
+- [x] **4. Specifications.** The rewrites listed above landed with the stage
+  that changed each behavior; `ChatRoomActivity.md`, `ChatMessageVersion.md`,
+  `ChatMessageWindow.md`, and `ChatWindowAnchor.md` are archived.
 
 ## Open questions
 
