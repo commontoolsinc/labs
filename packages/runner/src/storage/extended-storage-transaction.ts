@@ -720,6 +720,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
    */
   #cfcServingIdentityPinned = false;
 
+  /**
+   * Write-once pin for the client identity, set on the first call (the
+   * `Runtime`'s, in `edit()`) whatever its value, so that code holding the
+   * transaction cannot name another principal as the one its scoped writes
+   * are keyed by.
+   */
+  #cfcClientIdentityPinned = false;
+
   #cfcModuleDelegationsPinned = false;
 
   /**
@@ -1384,6 +1392,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.#cfcServingIdentityPinned) return;
     this.#cfcServingIdentityPinned = true;
     this.#cfcState.servingIdentity = identity;
+  }
+
+  /**
+   * Sets the client runtime's own identity: the principal its storage session
+   * authenticates as. `undefined` on the serving posture. Write-once, like the
+   * serving identity.
+   */
+  setCfcClientIdentity(identity: string | undefined): void {
+    if (this.#cfcClientIdentityPinned) return;
+    this.#cfcClientIdentityPinned = true;
+    this.#cfcState.clientIdentity = identity;
   }
 
   /**

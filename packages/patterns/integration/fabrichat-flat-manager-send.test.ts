@@ -323,7 +323,7 @@ describe("FabriChat flat manager sends", () => {
       space as Parameters<typeof server.readDocument>[0],
       aclDocId(space) as Parameters<typeof server.readDocument>[1],
     ))?.value;
-    return { space, bobProfile, offers, addRequests, acl };
+    return { space, offers, addRequests, acl };
   };
 
   for (const discovered of [false, true]) {
@@ -418,7 +418,7 @@ describe("FabriChat flat manager sends", () => {
   });
 
   it("offers a room to a member added through a root-private manager's discovered flat bindings", async () => {
-    const { space, bobProfile, offers, acl } = await addBob(true);
+    const { space, offers, acl } = await addBob(true);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
     expect(offers).toHaveLength(1);
@@ -428,42 +428,19 @@ describe("FabriChat flat manager sends", () => {
       room: { "/": { "link@1": { space } } },
     });
 
-    // Root-private setup refuses what the room's space would store of the
-    // manager's data: the picker's list of the people `candidates` reads from
-    // the manager, on each rendering, and the `outcomes` that merge the
-    // manager's verdicts into `addRequests`. This add guard bounds that known
-    // debt and permits no other refusal.
-    const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
-      const people = runtime.getCellFromLink(
-        { ...input.read, path: [] } as Parameters<
-          typeof runtime.getCellFromLink
-        >[0],
-        { type: "array", items: { asCell: ["cell"] } },
-      ).get() as Cell<unknown>[];
-      return people.length === 1 && people[0].equalLinks(bobProfile);
-    };
-    const isPicker = ({ reasons, refusals: details }: Refusal) =>
-      reasons.every((reason) =>
-        /^writer-fit confidentiality misfit for of:\S+ at \/\S* .*PersonalSpace/
-          .test(reason)
-      ) &&
-      details.length > 0 &&
-      details.every(({ target, inputs }) =>
-        target?.space === space && target.scope === "session" &&
-        inputs.length > 0 &&
-        inputs.every((input) =>
-          input.read.space === space && input.read.scope === "session" &&
-          listsBob(input)
-        )
-      );
+    // The picker's list of the people `candidates` reads from the manager
+    // lands in the viewer's own session documents, which may hold the
+    // viewer's personal data (§8.12.4), so rendering it refuses nothing.
+    // Root-private setup refuses the `outcomes` that merge the manager's
+    // verdicts into `addRequests`: the labeled link each verdict makes finds
+    // no source metadata. This add guard bounds that known debt and permits
+    // no other refusal.
     const isOutcomes = ({ reasons }: Refusal) =>
       reasons.length === 1 &&
       /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
         .test(reasons[0]);
     for (const refusal of refusals) expect(refusal.terminal).toBe(true);
-    expect(
-      refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),
-    ).toEqual([]);
+    expect(refusals.filter((refusal) => !isOutcomes(refusal))).toEqual([]);
     expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
   });
 });
