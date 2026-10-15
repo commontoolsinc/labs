@@ -22,7 +22,11 @@ import {
   PrincipalSessionFactory,
 } from "../../../runner/test/support/profile-create-host.ts";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
-import { repairProfileRootsOf } from "../../src/ops/profile-space-root.ts";
+import {
+  inspectProfileSpaceRoot,
+  repairProfileRootsOf,
+  repairProfileSpaceRoot,
+} from "../../src/ops/profile-space-root.ts";
 
 const owner = await Identity.fromPassphrase("profile root housekeeping owner");
 const stranger = await Identity.fromPassphrase(
@@ -215,6 +219,32 @@ describe("profile-space-root", () => {
       await expect(elsewhere.repairProfileRoots()).rejects.toThrow(
         "Only a controller over the identity's Home space",
       );
+    });
+  });
+
+  describe("repairProfileSpaceRoot()", () => {
+    it("commits no link, and rejects, when its signal has aborted", async () => {
+      const listed = await createProfileThroughHome(runtimeAs(owner), "U", {
+        shape: "not-root",
+        hostIsRoot: true,
+      });
+      const runtime = runtimeAs(owner);
+      const controller = controllerOver(runtime, owner, listed.space);
+      const found = await inspectProfileSpaceRoot(controller, listed.id);
+      expect(found.action).toBe("link");
+      const aborted = new AbortController();
+      aborted.abort();
+
+      await expect(
+        repairProfileSpaceRoot(
+          controller,
+          listed.id,
+          found.inspection,
+          aborted.signal,
+        ),
+      ).rejects.toThrow("StorageTransactionAborted");
+
+      expect(await rootIdOf(listed.space)).toBeUndefined();
     });
   });
 

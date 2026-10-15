@@ -83,7 +83,8 @@ adoption of name-only entries, the repair that makes each of the user's profiles
 its space's root (see "Profile" in
 [`HOME_SPACE.md`](../common/conventions/HOME_SPACE.md)), and the share intake's
 start have finished, and the intake has taken up every change it has been told
-of. The ensure has finished once Home's handler has run on the event it sends
+of. A step that fails has finished too: its failure is logged, and `idle()`
+resolves all the same. The ensure has finished once Home's handler has run on the event it sends
 and that run has committed, which under server execution is on the server, after
 the event itself has committed. The shell's
 `commonfabric.viewSettled` waits for its own request to bring Home up as well,

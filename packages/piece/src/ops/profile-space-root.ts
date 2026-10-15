@@ -257,12 +257,14 @@ export async function inspectProfileSpaceRoot(
  *
  * @throws Error when the profile or its space's root changed since the
  *   inspection that produced `expectedInspection`, including a root another
- *   writer links while the repair commits.
+ *   writer links while the repair commits, and when `signal` aborts before
+ *   the link's commit starts, having committed nothing.
  */
 export async function repairProfileSpaceRoot(
   controller: PiecesController,
   id: string,
   expectedInspection: string,
+  signal?: AbortSignal,
 ): Promise<ProfileSpaceRootInspection> {
   const plan = await readPlan(controller, id);
   if (plan.report.inspection !== expectedInspection) {
@@ -288,6 +290,7 @@ export async function repairProfileSpaceRoot(
         },
       }
       : {}),
+    ...(signal === undefined ? {} : { signal }),
   });
   await controller.runtime.storageManager.synced();
   return await inspectProfileSpaceRoot(controller, id);
@@ -354,7 +357,7 @@ async function profilesListedBy(
  *
  * The profiles are taken one at a time, and each is tried whatever became of
  * the ones before it. Once `signal` aborts, or the runtime begins disposal, it
- * repairs nothing more.
+ * starts no further repair commit.
  *
  * @throws AggregateError, once every profile has been tried, holding why each
  *   profile whose inspection or repair failed did so; and whatever reading
@@ -377,7 +380,7 @@ export async function repairProfileRootsOf(
       const found = await inspectProfileSpaceRoot(controller, id);
       if (found.action === "none" || found.owner !== identity) continue;
       if (stopped()) return;
-      await repairProfileSpaceRoot(controller, id, found.inspection);
+      await repairProfileSpaceRoot(controller, id, found.inspection, signal);
     } catch (error) {
       failures.push(error);
     }

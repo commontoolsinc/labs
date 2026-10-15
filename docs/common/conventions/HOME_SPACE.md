@@ -124,7 +124,8 @@ reaches the profile as it reaches any space's root.
 
 A profile space whose genesis reserved no root, which is every profile space
 created before the create passed `root: true`, gets its profile as its root when
-its owner next brings Home up. A runtime worker's bring-up of Home repairs each
+its owner next brings Home up, if Home lists the profile and the space has no
+root or one the repair below replaces. A runtime worker's bring-up of Home repairs each
 profile that Home lists and that the worker's identity owns, once per worker, as
 part of the housekeeping it starts beside the private inbox ensure
 (`PiecesController.repairProfileRoots()`). Home opens without waiting for the

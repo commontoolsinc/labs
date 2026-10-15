@@ -40,6 +40,7 @@ import {
   getPatternSource,
   getPieceSourceSnapshot,
   idStringForEntityAddress,
+  type IExtendedStorageTransaction,
   inSpaceRootCause,
   isCell,
   isLink,
@@ -527,20 +528,23 @@ export class PiecesController<T = unknown> {
    * `options.stillReplaceable` as well, the root linked now must also pass
    * that test, which reads it through the linking transaction. Both checks
    * are read in that transaction, so a root another writer links or changes
-   * meanwhile fails the call rather than being replaced.
+   * meanwhile fails the call rather than being replaced. With
+   * `options.signal`, no commit starts once it has aborted.
    *
    * @param defaultPatternCell - The cell representing the default pattern
    * @throws Error when `options.replacing` no longer names the space's root,
-   *   and when the root it names no longer passes `options.stillReplaceable`.
+   *   when the root it names no longer passes `options.stillReplaceable`, and
+   *   when `options.signal` aborts before the link's commit starts.
    */
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
     options: {
       replacing?: Cell<unknown> | null;
       stillReplaceable?: (root: Cell<unknown>) => boolean;
+      signal?: AbortSignal;
     } = {},
   ): Promise<void> {
-    const { error } = await this.runtime.editWithRetry((tx) => {
+    const link = (tx: IExtendedStorageTransaction) => {
       const spaceCellWithTx = this.#spaceCell.withTx(tx);
       const slot = spaceCellWithTx.key("defaultPattern");
       if (options.replacing !== undefined) {
@@ -566,7 +570,12 @@ export class PiecesController<T = unknown> {
         this.#refuseHomeRoot("replace");
       }
       slot.set(defaultPatternCell.withTx(tx));
-    });
+    };
+    const { error } = await this.runtime.editWithRetry(
+      link,
+      undefined,
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
     if (error) {
       throw new Error(
         `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
@@ -2469,7 +2478,8 @@ export class PiecesController<T = unknown> {
    * Resolves once every listed profile has been tried. Rejects when Home
    * cannot be brought up or its list cannot be read, and, once every profile
    * has been tried, when any one's inspection or repair failed. Once `signal`
-   * aborts, or the runtime begins disposal, it repairs nothing more.
+   * aborts, or the runtime begins disposal, it starts no further repair
+   * commit.
    */
   async repairProfileRoots(signal?: AbortSignal): Promise<void> {
     this.#assertHomeSpace("repair its profiles' roots");
@@ -2477,8 +2487,12 @@ export class PiecesController<T = unknown> {
     await repairProfileRootsOf(
       home,
       this.runtime.userIdentityDID,
+      // Each repair syncs what it reads, so the controller makes no first
+      // sync of its own that nothing would wait for.
       (space) =>
-        new PiecesController({ as: this.#session.as, space }, this.runtime),
+        new PiecesController({ as: this.#session.as, space }, this.runtime, {
+          deferSpaceCellSync: true,
+        }),
       signal,
     );
   }

@@ -979,8 +979,8 @@ export class RuntimeProcessor {
   #profileRootsRepaired: Promise<void> | undefined;
   #shareIntake: Promise<ShareIntake | undefined> | undefined;
   // Aborted as disposal begins, so an inbox ensure still in flight sends
-  // nothing after it, a profile root repair writes nothing after it, and the
-  // share intake stops.
+  // nothing after it, a profile root repair starts no commit after it, and
+  // the share intake stops.
   #disposal = new AbortController();
   #isDisposed = false;
   #disposingPromise: Promise<void> | undefined;
