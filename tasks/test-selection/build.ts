@@ -33,6 +33,7 @@ import {
   type FoldContext,
   foldObservations,
   type IdentityState,
+  isDaySamples,
   mergeSamples,
   type Observation,
   parseContext,
@@ -47,7 +48,7 @@ import {
   value,
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
-import { isLaneMeasurement } from "../lane-measurement.ts";
+import { hooksMeasurement, isLaneMeasurement } from "../lane-measurement.ts";
 import {
   isLaneObservation,
   type LaneObservation,
@@ -146,6 +147,14 @@ export interface AggregateState {
    * names.
    */
   lanes?: LaneObservation[];
+
+  /**
+   * What each unit's hooks took, by the name of the lane measurement that
+   * names the unit and then by day, counted by bucket as a test's
+   * durations are and aged over `COST_WINDOW_DAYS` as the lane
+   * measurements are.
+   */
+  hooks?: Record<string, Record<string, DaySamples>>;
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -308,7 +317,27 @@ export function parseAggregate(value: unknown): AggregateState | undefined {
     states,
     files: files as Record<string, string>,
     ...(lanes === undefined ? {} : { lanes }),
+    ...(isObjectNotArray(state.hooks) ? { hooks: readHooks(state.hooks) } : {}),
   };
+}
+
+/**
+ * Helper for `parseAggregate()`, which reads what a stored aggregate holds
+ * of each unit's hooks, leaving out a day that is not one counted by bucket.
+ */
+function readHooks(
+  stored: Readonly<Record<string, unknown>>,
+): Record<string, Record<string, DaySamples>> {
+  const hooks: Record<string, Record<string, DaySamples>> = {};
+  for (const [name, byDay] of Object.entries(stored)) {
+    if (!isObjectNotArray(byDay)) continue;
+    const days: Record<string, DaySamples> = {};
+    for (const [day, held] of Object.entries(byDay)) {
+      if (isDaySamples(held)) days[day] = held;
+    }
+    hooks[name] = days;
+  }
+  return hooks;
 }
 
 /** The reporting person named by a local submission's object name. */
@@ -357,7 +386,9 @@ export interface ReadReport {
   /**
    * Every passing duration a continuous-integration runner measured, by
    * identity key and then by day. A workstation's are left out, since a
-   * cost predicts what a lane's runner will spend.
+   * cost predicts what a lane's runner will spend. What a unit's hooks took
+   * in a passing batch is here too, by the name of the lane measurement
+   * that names the unit, which no identity key is.
    */
   durations: Map<string, Map<string, number[]>>;
 
@@ -427,7 +458,15 @@ export function readReport(
       // record travels, and this is where that path parts. What a record
       // is, is asked of the identity the lane wrote, so no line in the
       // alias file decides whether a measurement is scored as a test.
-      if (isLaneMeasurement(record.test)) continue;
+      if (isLaneMeasurement(record.test)) {
+        if (
+          record.outcome === "pass" &&
+          hooksMeasurement(record.test.n) !== undefined
+        ) {
+          addDuration(durations, record.test.n, day, record.durationMs);
+        }
+        continue;
+      }
       const test = resolver.resolve(record.test, day);
       const key = testIdentityKey(test);
       // A record with no file names its own identity as the unit, which
@@ -458,15 +497,25 @@ export function readReport(
       // machine, faster or slower by however it differs, so its record
       // counts as evidence about the test and not about its cost.
       if (record.outcome !== "pass" || where.place === "local") continue;
-      let byDay = durations.get(key);
-      if (byDay === undefined) {
-        byDay = new Map();
-        durations.set(key, byDay);
-      }
-      byDay.set(day, [...(byDay.get(day) ?? []), record.durationMs]);
+      addDuration(durations, key, day, record.durationMs);
     }
   }
   return { observations, surfaces, durations, lanes, declinedDays };
+}
+
+/** Helper for `readReport()`, which adds one duration to a key's day. */
+function addDuration(
+  durations: Map<string, Map<string, number[]>>,
+  key: string,
+  day: string,
+  durationMs: number,
+): void {
+  let byDay = durations.get(key);
+  if (byDay === undefined) {
+    byDay = new Map();
+    durations.set(key, byDay);
+  }
+  byDay.set(day, [...(byDay.get(day) ?? []), durationMs]);
 }
 
 /** The invocation unit and suite a record belongs to. */
@@ -799,7 +848,10 @@ interface Contributions {
   /** What the lanes in them measured about themselves. */
   lanes: LaneObservation[];
 
-  /** The passing runs of each identity, by key and then by day. */
+  /**
+   * The passing runs of each identity, by key and then by day, and what
+   * each unit's hooks took, by the name of the lane measurement naming it.
+   */
   samples: Map<string, Map<string, DaySamples>>;
 
   /**
@@ -926,6 +978,13 @@ export class Fold {
     }
     this.#context = parseContext(aggregate.context);
     for (const lane of aggregate.lanes ?? []) this.#held.lanes.push(lane);
+    // Copied, because a day's sample is counted into where it is held.
+    for (const [name, byDay] of Object.entries(aggregate.hooks ?? {})) {
+      this.#held.samples.set(
+        name,
+        new Map(Object.entries(structuredClone(byDay))),
+      );
+    }
     for (const name of aggregate.folded) this.#held.objects.add(name);
     this.#compacted = [...aggregate.compacted];
     this.#catchRule = aggregate.catchRule;
@@ -1146,6 +1205,15 @@ export class Fold {
         compacted: this.#compacted,
         states: Object.fromEntries(this.#states),
         lanes,
+        hooks: Object.fromEntries(
+          [...this.#held.samples].flatMap(([name, byDay]) => {
+            if (hooksMeasurement(name) === undefined) return [];
+            const days = [...byDay].filter(([day]) =>
+              daysBetween(day, this.#today) <= COST_WINDOW_DAYS
+            );
+            return days.length === 0 ? [] : [[name, Object.fromEntries(days)]];
+          }),
+        ),
         files: Object.fromEntries(
           [...this.#held.surfaces]
             .filter(([, surface]) => surface.fromFile)

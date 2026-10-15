@@ -257,6 +257,16 @@ export interface SuiteFit {
   overhead: number;
   correction: number;
   unitOverhead: number;
+
+  /**
+   * Seconds the hooks of each unit lanes have measured them for take, by
+   * unit: what its outermost tests took that no record holds, such as the
+   * setup and teardown its `describe`s declare. Counted with the tests each
+   * time a pass opens the unit, so `correction` applies to it. A unit
+   * not named here, and every unit of a fit carrying no map, is charged
+   * nothing for its hooks.
+   */
+  unitHooks?: Record<string, number>;
 }
 
 /** The fitted numbers a lane's own timing records produced. */
@@ -696,12 +706,33 @@ function parseFits(
       ? 0
       : carried;
     if (!isFiniteNumber(unitOverhead) || unitOverhead < 0) return undefined;
+    const unitHooks = fitted.unitHooks === undefined
+      ? undefined
+      : parseUnitHooks(fitted.unitHooks);
+    if (fitted.unitHooks !== undefined && unitHooks === undefined) {
+      return undefined;
+    }
     return {
       overhead: fitted.overhead,
       correction: fitted.correction,
       unitOverhead,
+      ...(unitHooks === undefined ? {} : { unitHooks }),
     };
   });
+}
+
+/**
+ * Reads a fit's seconds for each unit's hooks, failing whole if any is not
+ * a duration.
+ */
+function parseUnitHooks(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined;
+  const hooks: Record<string, number> = {};
+  for (const [unit, seconds] of Object.entries(value)) {
+    if (!isFiniteNumber(seconds) || seconds < 0) return undefined;
+    hooks[unit] = seconds;
+  }
+  return hooks;
 }
 
 function parseLane(value: unknown): LanePlan | undefined {

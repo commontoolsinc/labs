@@ -277,6 +277,31 @@ describe("selection", () => {
         .toEqual({ overhead: 3, correction: 1, unitOverhead: 0 });
     });
 
+    it("round-trips what each unit's hooks take", () => {
+      const manifest = sampleManifest();
+      manifest.calibration.suites = {
+        unit: {
+          overhead: 3,
+          correction: 1,
+          unitOverhead: 2,
+          unitHooks: { "packages/bakery/oven.test.ts": 8.5 },
+        },
+      };
+      expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
+    });
+
+    it("refuses a unit's hooks it cannot read as a duration", () => {
+      // The packer charges them each time a pass opens the unit, so one
+      // that will not read is a body this reader cannot read.
+      for (const unitHooks of [[], 7, { oven: "slow" }, { oven: -1 }]) {
+        const object = JSON.parse(serializeManifest(sampleManifest()));
+        object.calibration.suites = {
+          unit: { overhead: 3, correction: 1, unitOverhead: 2, unitHooks },
+        };
+        expect(parseManifest(JSON.stringify(object))).toBeUndefined();
+      }
+    });
+
     it("refuses a unit overhead an earlier shape carries unreadably", () => {
       // Absent and unreadable are different, and the difference only
       // arises in a shape whose absent figure has a reading: a fit made

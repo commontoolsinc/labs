@@ -38,6 +38,7 @@ import { stateObjectName, statePrefix } from "./test-selection/store.ts";
 import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
 import {
   batchMeasurementName,
+  hooksMeasurementName,
   laneMeasurementName,
 } from "./lane-measurement.ts";
 import { sampleManifest } from "./test-selection/testing.ts";
@@ -475,6 +476,7 @@ function laneObject(
     batch = true,
     measured = false,
     projected = undefined as number | undefined,
+    hooks = undefined as number | undefined,
     whole = undefined as
       | { spent: number; projected: number; bound: number }
       | undefined,
@@ -527,6 +529,16 @@ function laneObject(
       figure(
         batchMeasurementName("workspace-unit", measured, "projected"),
         projected * 1000,
+      ),
+    ]),
+    ...(hooks === undefined ? [] : [
+      figure(
+        hooksMeasurementName(
+          "workspace-unit",
+          measured,
+          "packages/memory/test/space.test.ts",
+        ),
+        hooks * 1000,
       ),
     ]),
     ...(whole === undefined ? [] : [
@@ -618,6 +630,36 @@ describe("publish()", () => {
     // high for a lane packing more units than that batch held.
     expect(manifest.calibration.suites["workspace-unit"])
       .toEqual({ overhead: 0, correction: 1, unitOverhead: 52 });
+  });
+
+  it("publishes what each unit's hooks take, and keeps them for the next run", async () => {
+    const objects = seed();
+    objects[CI(DAY, "3")] = laneObject("c3", "2026-08-20T03:00:00.000Z", {
+      hooks: 7.5,
+    });
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      suites,
+      noPrevious,
+    );
+    const manifest = await publishedManifest(created);
+    expect(
+      manifest.calibration.suites["workspace-unit"]?.unitHooks?.[
+        "packages/memory/test/space.test.ts"
+      ],
+    ).toBeCloseTo(7.5, 0);
+    const state = [...created.keys()].find((name) => name.includes("/state/"));
+    const aggregate = JSON.parse(await gunzipToText(created.get(state!)!));
+    expect(Object.keys(aggregate.hooks)).toEqual([
+      hooksMeasurementName(
+        "workspace-unit",
+        false,
+        "packages/memory/test/space.test.ts",
+      ),
+    ]);
   });
 
   it("publishes how far the model a lane was packed by was out", async () => {

@@ -462,6 +462,18 @@ export function chargesOf(fitted: SuiteFit | undefined): SuiteFit {
   return fitted ?? { overhead: 0, correction: 1, unitOverhead: 0 };
 }
 
+/**
+ * What the hooks of `unit` take each time it runs, by the suite's fit. A
+ * unit the fit names no hooks for takes nothing for them.
+ */
+export function hooksOf(
+  fitted: Pick<SuiteFit, "unitHooks">,
+  unit: string,
+): number {
+  const hooks = fitted.unitHooks ?? {};
+  return Object.hasOwn(hooks, unit) ? hooks[unit] ?? 0 : 0;
+}
+
 function capabilityCost(manifest: Manifest, capability: string): number {
   return manifest.calibration.setupCost[capability] ?? 0;
 }
@@ -471,14 +483,19 @@ function capabilityCost(manifest: Manifest, capability: string): number {
  * identity's own time and that of the tests around it. It is one
  * identity's lone cost with the time taken out, read through the same
  * function the packer charges by, so that a term added there is in this
- * the moment it is added there.
+ * the moment it is added there. What the hooks of the identity's unit take
+ * is time of the same kind, and is taken out with it, so the charge is the
+ * suite's rather than the unit's.
  */
 function fixedCost(
   manifest: Manifest,
   input: PlanInput,
   entry: ManifestEntry,
 ): number {
-  return loneCost(manifest, input, NOTHING_AROUND, { ...entry, cost: 0 });
+  const fitted = chargesOf(manifest.calibration.suites[entry.suite]);
+  const idle = { entry: { ...entry, cost: 0 }, repeats: 1 };
+  return loneCost(manifest, input, NOTHING_AROUND, idle.entry) -
+    chargedTests(fitted.correction, testsOf([idle], NOTHING_AROUND, fitted));
 }
 
 /** How a lane names one unit of one suite among the units it has opened. */
@@ -631,6 +648,7 @@ export function foldWholeUnits(
 export function testsOf(
   selections: readonly Pick<Selection, "entry" | "repeats">[],
   around: Around,
+  fitted: Pick<SuiteFit, "unitHooks"> = {},
 ): SuiteTests {
   const units = new Map<string, {
     costs: number[];
@@ -641,7 +659,7 @@ export function testsOf(
   for (const { entry, repeats } of selections) {
     const key = openedUnit(entry);
     const unit = units.get(key) ?? {
-      costs: new Array<number>(),
+      costs: [hooksOf(fitted, entry.unit)],
       names: new Set<string>(),
       around: new Map<string, number>(),
       runs: 1,
@@ -718,9 +736,10 @@ export function suiteLoad(
       `${suite} was charged for a selection of ${other.entry.suite}`,
     );
   }
+  const fitted = chargesOf(manifest.calibration.suites[suite]);
   return chargedTests(
-    chargesOf(manifest.calibration.suites[suite]).correction,
-    testsOf(selections, aroundOf(manifest, selections)),
+    fitted.correction,
+    testsOf(selections, aroundOf(manifest, selections), fitted),
   );
 }
 
@@ -737,7 +756,7 @@ export function suiteCharge(
   selections: readonly Pick<Selection, "entry" | "repeats">[],
 ): number {
   const fitted = chargesOf(manifest.calibration.suites[suite]);
-  const tests = testsOf(selections, aroundOf(manifest, selections));
+  const tests = testsOf(selections, aroundOf(manifest, selections), fitted);
   return fitted.overhead * tests.longest.length +
     fitted.unitOverhead * tests.opened +
     chargedTests(fitted.correction, tests);
@@ -755,6 +774,7 @@ function withSelection(
   lane: Filling,
   entry: ManifestEntry,
   repeats: number,
+  fitted: SuiteFit,
 ): {
   held: SuiteTests;
   tests: SuiteTests;
@@ -768,7 +788,7 @@ function withSelection(
     lane.held.get(entry.suite)?.get(entry.unit),
     entry,
     lane.around(entry),
-  );
+  ) + (was === undefined ? hooksOf(fitted, entry.unit) : 0);
   const unit = {
     once: (was?.once ?? 0) + added,
     runs: Math.max(was?.runs ?? 1, repeats),
@@ -811,7 +831,12 @@ function marginalCost(
 ): number {
   const fitted = chargesOf(manifest.calibration.suites[entry.suite]);
   const correction = fitted.correction;
-  const { held, tests, ran, floor } = withSelection(lane, entry, repeats);
+  const { held, tests, ran, floor } = withSelection(
+    lane,
+    entry,
+    repeats,
+    fitted,
+  );
   // Each term is taken past the old charge before the larger is chosen,
   // so that where the loads are the charge, what is added is exactly the
   // identity's own share of them, however large the lane's loads have
@@ -976,7 +1001,12 @@ function place(
 ): Opened {
   const lane = spot.lane;
   const was = lane.unitTime.get(entry.suite)?.get(entry.unit);
-  const { held, tests, unit } = withSelection(lane, entry, repeats);
+  const { held, tests, unit } = withSelection(
+    lane,
+    entry,
+    repeats,
+    chargesOf(input.manifest.calibration.suites[entry.suite]),
+  );
   const suite = !lane.suites.has(entry.suite);
   const names = lane.held.get(entry.suite)?.get(entry.unit) ??
     new Set<string>();
