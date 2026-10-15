@@ -3,7 +3,7 @@ import { setModernCellRepConfig } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { expect } from "@std/expect";
-import { toFileUrl } from "@std/path";
+import { fromFileUrl, toFileUrl } from "@std/path";
 // @ts-types="@types/ws"
 import WebSocket from "ws";
 import { Client as MemoryClient, type SessionPrincipal } from "../v2/client.ts";
@@ -339,9 +339,11 @@ class Toolshed {
     this.child = new Deno.Command(Deno.execPath(), {
       args: [
         "run",
-        `--config=${new URL("../../../deno.jsonc", import.meta.url).pathname}`,
+        `--config=${
+          fromFileUrl(new URL("../../../deno.jsonc", import.meta.url))
+        }`,
         "-A",
-        new URL("./support/routed-toolshed.ts", import.meta.url).pathname,
+        fromFileUrl(new URL("./support/routed-toolshed.ts", import.meta.url)),
         config,
       ],
       stdin: "piped",
@@ -2750,9 +2752,11 @@ finally:
     const child = await new Deno.Command(Deno.execPath(), {
       args: [
         "run",
-        `--config=${new URL("../../../deno.jsonc", import.meta.url).pathname}`,
+        `--config=${
+          fromFileUrl(new URL("../../../deno.jsonc", import.meta.url))
+        }`,
         "-A",
-        new URL("./support/routed-profile.ts", import.meta.url).pathname,
+        fromFileUrl(new URL("./support/routed-profile.ts", import.meta.url)),
         fixture,
       ],
       stdout: "piped",

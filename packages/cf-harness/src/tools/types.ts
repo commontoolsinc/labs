@@ -23,6 +23,7 @@ import type {
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessBrowserHost } from "../contracts/browser-host.ts";
+import type { HarnessSubagentProfile } from "../contracts/subagent.ts";
 import type { HarnessClientActionRequester } from "../client-actions/coordinator.ts";
 import type { HarnessAssignedPiece } from "../contracts/assigned-piece.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
@@ -386,6 +387,9 @@ export interface HarnessToolRun {
 
   /** Whether a browser host carries out the run's browser actions. */
   browserHost?: boolean;
+
+  /** The subagent profiles the run may delegate to. */
+  subagentProfiles?: readonly HarnessSubagentProfile[];
 }
 
 export interface HarnessToolDefinition<Input = unknown, Output = unknown> {

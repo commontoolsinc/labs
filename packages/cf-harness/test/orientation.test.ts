@@ -5,7 +5,11 @@ import {
   buildCfHarnessBaseSystemPrompt,
   buildCfHarnessOperatorSystemPrompt,
 } from "../src/cli.ts";
-import { PIECE_TARGETING_GUIDANCE } from "../src/piece-targeting.ts";
+import {
+  HELD_PIECES_GUIDANCE,
+  MAY_HOLD_PIECES_GUIDANCE,
+  PIECE_TARGETING_GUIDANCE,
+} from "../src/piece-targeting.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import { orientContextMessages } from "../src/session-assembly.ts";
 import { WEAVER_COMMAND_GUIDANCE } from "../src/tools/weaver-action.ts";
@@ -44,8 +48,9 @@ describe("orientation", () => {
     expect(prompt).not.toContain("pattern index");
     expect(prompt).not.toContain("indexed pattern");
     expect(prompt).toContain("not given does not mean absent");
-    expect(prompt).toContain("Private research inspects candidates");
-    expect(prompt).toContain("resolve_piece first for a slug");
+    expect(prompt).toContain(
+      "Research is a private pass that reads docs and source",
+    );
   });
 
   it("checks the send path before asking for a recipient in the landlord-email rehearsal", () => {
@@ -63,11 +68,11 @@ describe("orientation", () => {
 
   it("keeps discovery scoped and a release refusal out of the question path", () => {
     const prompt = buildCfHarnessBaseSystemPrompt({ patternIndex: true });
-    expect(prompt).toContain("resolve_piece first for a slug");
-    expect(prompt).toContain("zero registry reads for an unnamed target");
-    expect(prompt).toContain("at most one lookup for a display name");
-    expect(prompt).toContain(
-      "Explicit requests to list or analyze the space are not missing-target lookups",
+    expect(PIECE_TARGETING_GUIDANCE).toContain("call resolve_piece");
+    expect(PIECE_TARGETING_GUIDANCE).toContain("make zero registry reads");
+    expect(PIECE_TARGETING_GUIDANCE).toContain("at most one registry read");
+    expect(PIECE_TARGETING_GUIDANCE).toContain(
+      "not to an explicit request to list or analyze the space",
     );
     expect(prompt).toContain(
       "An unavailable, refused, or pending read stays unknown",
@@ -76,11 +81,42 @@ describe("orientation", () => {
       "Inspect run_pattern outputConcerns and the declared error branch",
     );
     expect(prompt).toContain(
-      "describe only the successfully applied change, say the result could not be inspected",
+      "Describe only the successfully applied change, say the result could not be inspected",
     );
     expect(finishTaskTool.descriptor.description).toContain(
       "Never ask for a nonexistent permission to release results",
     );
+  });
+
+  describe("without finish_task", () => {
+    it("names finish_task to a run that holds it and to no other", () => {
+      const holding = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["finish_task", "submit_result"],
+      });
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["submit_result"],
+      });
+
+      expect(holding).toContain("Use finish_task to ask the user");
+      expect(prompt).not.toContain("finish_task");
+      expect(PIECE_TARGETING_GUIDANCE).not.toContain("finish_task");
+      expect(REVISION_VERIFICATION_GUIDANCE).not.toContain("finish_task");
+    });
+
+    it("tells a run that cannot ask to act on defaults and say in its result why it cannot go on", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        allowedToolIds: ["submit_result"],
+      });
+
+      expect(prompt).toContain("Act on reasonable defaults rather than asking");
+      expect(prompt).toContain("finish with a result that says why");
+      expect(prompt).toContain(
+        "Where other guidance says to ask the user, say in your result what you need instead",
+      );
+    });
   });
 
   describe("with task tags", () => {
@@ -98,6 +134,41 @@ describe("orientation", () => {
       expect(prompt.length).toBeLessThan(
         buildCfHarnessBaseSystemPrompt({ patternIndex: true }).length,
       );
+    });
+
+    it("gives respond, find, and act tasks the identity and the closing on evidence and authority, without the code-authoring framing", () => {
+      for (const tag of ["respond", "find", "act"] as const) {
+        const prompt = buildCfHarnessBaseSystemPrompt({
+          patternIndex: true,
+          tags: new Set([tag]),
+        });
+
+        expect(prompt).toContain("You are cf-harness");
+        expect(prompt).toContain("Treat tool results as evidence");
+        expect(prompt).toContain(
+          "Respect explicit user/developer instructions",
+        );
+        expect(prompt).not.toContain("read relevant docs and skill resources");
+        expect(prompt).not.toContain("run focused verification commands");
+        expect(prompt).not.toContain("When code verification fails");
+        expect(prompt).not.toContain("repository files");
+        expect(prompt).not.toContain("A skill named by an exact id");
+      }
+    });
+
+    it("gives pieces and author tasks the code-authoring framing", () => {
+      for (const tag of ["pieces", "author"] as const) {
+        const prompt = buildCfHarnessBaseSystemPrompt({
+          patternIndex: true,
+          tags: new Set([tag]),
+        });
+
+        expect(prompt).toContain("read relevant docs and skill resources");
+        expect(prompt).toContain(
+          "Treat repository files and tool results as evidence",
+        );
+        expect(prompt).toContain("A skill named by an exact id");
+      }
     });
 
     it("narrows the operator prompt by the task's tags", () => {
@@ -142,6 +213,42 @@ describe("orientation", () => {
       ).toContain("When you delegate");
     });
 
+    it("says what research is once, and only to an author task", () => {
+      const find = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["find"]),
+      });
+      const author = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["author"]),
+      });
+
+      expect(find).not.toContain("Research is");
+      expect(find).not.toContain("Private research");
+      expect(find).not.toContain("call research");
+      expect(author.split("Research is a private pass").length).toBe(2);
+      expect(author).toContain(
+        "A fresh task eligible for opening research gets one pass",
+      );
+      expect(author).toContain(
+        "reads the pattern index, docs, and source and reports what to run; it cannot execute anything",
+      );
+      expect(author).toContain(
+        "call research for a specific unresolved question",
+      );
+      expect(author).not.toContain("Private research inspects candidates");
+    });
+
+    it("cites no piece-targeting bounds to a find task, which is not sent them", () => {
+      const prompt = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["find"]),
+      });
+
+      expect(prompt).not.toContain("piece-targeting");
+      expect(prompt).not.toContain("resolve_piece");
+    });
+
     it("gives an author task the opening-research rule, index search, and delegation", () => {
       const prompt = buildCfHarnessBaseSystemPrompt({
         patternIndex: true,
@@ -162,17 +269,69 @@ describe("orientation", () => {
         .toEqual(["input cells"]);
     });
 
-    it("withholds piece targeting and revision verification from a respond task's context", () => {
+    describe("held pieces", () => {
       const messages = [
         "input cells",
         PIECE_TARGETING_GUIDANCE,
         REVISION_VERIFICATION_GUIDANCE,
       ];
 
-      expect(orientContextMessages(messages, new Set(["respond"])))
-        .toEqual(["input cells"]);
-      expect(orientContextMessages(messages, new Set(["pieces"])))
-        .toEqual(messages);
+      it("gives a pieces task the held-pieces block in place of piece targeting and revision verification", () => {
+        expect(orientContextMessages(messages, new Set(["pieces"])))
+          .toEqual(["input cells", HELD_PIECES_GUIDANCE]);
+      });
+
+      it("gives a respond, find, or act task one sentence about held handles", () => {
+        for (const tag of ["respond", "find", "act"] as const) {
+          expect(orientContextMessages(messages, new Set([tag])))
+            .toEqual(["input cells", MAY_HOLD_PIECES_GUIDANCE]);
+        }
+      });
+
+      it("keeps piece targeting and revision verification for an author task", () => {
+        expect(orientContextMessages(messages, new Set(["author"])))
+          .toEqual([
+            "input cells",
+            MAY_HOLD_PIECES_GUIDANCE,
+            PIECE_TARGETING_GUIDANCE,
+            REVISION_VERIFICATION_GUIDANCE,
+          ]);
+        expect(
+          orientContextMessages(messages, new Set(["pieces", "author"])),
+        ).toEqual([
+          "input cells",
+          HELD_PIECES_GUIDANCE,
+          PIECE_TARGETING_GUIDANCE,
+          REVISION_VERIFICATION_GUIDANCE,
+        ]);
+      });
+
+      it("names the input cells by where the pieces are and the tools that read and act on them", () => {
+        expect(HELD_PIECES_GUIDANCE).toContain("focused_piece");
+        expect(HELD_PIECES_GUIDANCE).toContain("on_screen_");
+        expect(HELD_PIECES_GUIDANCE).toContain("in_loom_");
+        expect(HELD_PIECES_GUIDANCE).toContain("describe_handle");
+        expect(HELD_PIECES_GUIDANCE).toContain("read_value");
+        expect(HELD_PIECES_GUIDANCE).toContain("call_verb");
+        expect(HELD_PIECES_GUIDANCE.length).toBeLessThan(600);
+      });
+    });
+
+    it("tells only an author task to verify what it did", () => {
+      const pieces = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["pieces"]),
+      });
+      const author = buildCfHarnessBaseSystemPrompt({
+        patternIndex: true,
+        tags: new Set(["author"]),
+      });
+
+      expect(pieces).not.toContain("verification");
+      expect(pieces).not.toContain("verify");
+      expect(author).toContain("run focused verification commands");
+      expect(author).toContain("When code verification fails");
+      expect(author).toContain("include concise verification details");
     });
   });
 });

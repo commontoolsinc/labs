@@ -83,6 +83,19 @@ while its server runs server execution or does not say whether it does, since
 a co-hosted executor's wave commits can reach a push's stamped head before
 their changes reach the push.
 
+`readDurable(runtime, read)` runs `read` the same way, in any space, and
+returns what it read past the speculation overlay: confirmed state with this
+runtime's own pending writes over it, which under server execution is what the
+server wrote rather than this runtime's preview of it. A subscription to a cell
+delivers changes to what the cell shows, which a speculation layer masks, so a
+write that arrives beneath a layer delivers nothing, and neither does the
+layer's retirement over an equal value. `readDurable()` therefore also returns
+`speculationSettled`, present when a layer stood over a document the read
+consumed, which resolves once each such layer has retired or been withdrawn
+(`ISpaceReplica.whenSpeculationSettled()`). A reader waiting for the durable
+view to say something reads again on each change its subscription delivers and
+whenever `speculationSettled` resolves.
+
 Observe `receipt.verdict` when the next step requires knowing the commit's
 fate. Use `receipt.settled` when a retry needs the repaired read basis, when a
 read needs the covered subscription view, or when the caller needs inline

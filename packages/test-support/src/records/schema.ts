@@ -88,7 +88,10 @@ export interface CiContext {
   /** Pull request head commit; `commit` is the ephemeral merge commit. */
   headCommit?: string;
 
-  /** Triggering event, from the trusted payload: "push", "pull_request". */
+  /**
+   * Triggering event, from the trusted payload: "push", "pull_request",
+   * "schedule", "workflow_dispatch".
+   */
   event?: string;
 
   /**
@@ -147,13 +150,17 @@ export interface RunContext {
 }
 
 /**
- * Whether a report ran code the default branch carries: a push to `main`
- * that the fork flag does not mark. The flag also marks a run the relay
- * could not place, so neither kind is a run of the default branch.
+ * Whether a report ran code the default branch carries: a run of the head
+ * of `main` that the fork flag does not mark. A push, a scheduled run and
+ * a run dispatched by hand each check out the head of the branch they
+ * name, where a pull request's run checks out a merge commit no branch
+ * carries. The flag also marks a run the relay could not place, so
+ * neither kind is a run of the default branch.
  */
-export function isMainPush(context: RunContext): boolean {
-  return context.ci?.event === "push" && context.branch === "main" &&
-    context.ci.fork !== true;
+export function isMainRun(context: RunContext): boolean {
+  return ["push", "schedule", "workflow_dispatch"].includes(
+    context.ci?.event ?? "",
+  ) && context.branch === "main" && context.ci?.fork !== true;
 }
 
 const OUTCOMES = new Set(["pass", "fail", "skip"]);

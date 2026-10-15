@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
 import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../../src/config.ts";
 
@@ -1594,7 +1594,7 @@ describe("launch", () => {
       // what an operator who forgot one sees.
       const launcher = new URL("../../console/launch.ts", import.meta.url);
       const run = await new Deno.Command(Deno.execPath(), {
-        args: ["run", "-A", launcher.pathname],
+        args: ["run", "-A", fromFileUrl(launcher)],
         env: {
           ...NAMES_RUNSC,
           CF_IDENTITY: "",

@@ -1134,6 +1134,24 @@ function ownedCellRecordSuffices(
 }
 
 /**
+ * Whether the pattern pointer or the setup-completion marker on `resultCell`
+ * names a pattern other than `entryRef`, which is what makes a setup of
+ * `entryRef` there re-stage the stored argument. Each falls back to
+ * `sessionRef`, the session-side pointer a keyless piece has in place of
+ * both, as setup's own reading does. None of the three reads as `false`.
+ */
+function storedUnderAnotherPattern(
+  resultCell: Cell<unknown>,
+  entryRef: { identity: string; symbol: string },
+  sessionRef: { identity: string; symbol: string } | undefined,
+): boolean {
+  const pointer = getPatternIdentityRef(resultCell) ?? sessionRef;
+  const marker = getPatternSetupIdentityRef(resultCell) ?? sessionRef;
+  return (pointer !== undefined && !samePatternRef(pointer, entryRef)) ||
+    (marker !== undefined && !samePatternRef(marker, entryRef));
+}
+
+/**
  * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
  * both of `#collectResumeOwnedCells`'s skip exits so a console trace names the
  * same things either way: the result cell being resumed and enough about the
@@ -2459,6 +2477,13 @@ export class Runner {
   #independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
   >();
+
+  /**
+   * The patterns a handler's result is set up from. A child one of them
+   * instantiates was made by an event, not by its parent's program, so no
+   * release of the parent re-instantiates it, whichever space it is in.
+   */
+  #handlerResultPatterns = new WeakSet<Pattern>();
 
   /**
    * Registrations a run installed in a transaction refused for a stale basis,
@@ -9000,8 +9025,12 @@ export class Runner {
    * links to directly, and the result document of the piece that owns each,
    * reached through the `result` backlink the linked document carries once
    * it is local. Setup's proof that a supplied link stays compatible reads
-   * both, and the gate that decides whether a run over a stored piece must
-   * name its family first probes them. `argumentCell` is local already.
+   * both, a setup re-staging the argument under another pattern's schema
+   * reads each linked document to judge the slot holding the link, and the
+   * gate that decides whether a run over a stored piece must name its family
+   * first probes them. `argumentCell` is local already. The argument and each
+   * linked document are read, and named, as `identity`, so a scoped argument
+   * is read in the instance that identity's setup reads.
    */
   async #syncStoredArgumentLinkTargets(
     argumentCell: Cell<unknown>,
@@ -9025,7 +9054,7 @@ export class Runner {
       seen.add(value);
       for (const key in value) collect(value[key]);
     };
-    collect(argumentCell.getRawUntyped());
+    collect(argumentCell.withTx(this.#familyReadTx(identity)).getRawUntyped());
     const syncNamed = (cells: readonly Cell<unknown>[]): Promise<void> =>
       Promise.all(
         cells.map((cell) =>
@@ -9039,8 +9068,9 @@ export class Runner {
       ).then(() => {});
     await syncNamed(targets);
     const owners: Cell<unknown>[] = [];
+    const ownerTx = this.#familyReadTx(identity);
     for (const target of targets) {
-      const owner = getMetaLink(target, "result");
+      const owner = getMetaLink(target.withTx(ownerTx), "result");
       if (owner !== undefined) {
         owners.push(
           this.#runtime.getCellFromLink({ ...owner, schema: undefined }),
@@ -9701,6 +9731,13 @@ export class Runner {
    * builtin's own cells, written by an earlier session whose setup of the
    * instance was lost — is local before the parent's start reads it rather
    * than entering that start's commit at sequence zero.
+   *
+   * An instance stored under a pattern other than the one it is planned under
+   * is set up again by its parent's start, and that setup judges every slot
+   * its stored argument holds against the new argument schema — slots no
+   * plan reads among them, such as one a previous version took and this one
+   * does not — through the links those slots hold. Each such instance's
+   * argument links are named the way the root's are, for the same reason.
    */
   async #syncResumeInstanceNodes(
     instances: readonly ResumePatternInstance[],
@@ -9723,6 +9760,9 @@ export class Runner {
       // not plan, or a round with a sync that failed, is not recorded: its
       // own start then walks its argument as before.
       const planned: [familyKey: string, entryKey: string][] = [];
+      // The argument documents of the instances this round finds stored under
+      // another pattern.
+      const restaged: Cell<unknown>[] = [];
       let syncFailed = false;
       const planTx = this.#runtime.edit();
       if (identity !== undefined) planTx.tx.scopeKeyIdentity = identity;
@@ -9758,17 +9798,26 @@ export class Runner {
             );
           }
           if (argumentMetaLink !== undefined) {
-            cells.push(
-              this.#runtime.getCellFromLink({
-                ...argumentMetaLink,
-                schema: undefined,
-              }),
-            );
+            const argumentCell = this.#runtime.getCellFromLink({
+              ...argumentMetaLink,
+              schema: undefined,
+            });
+            cells.push(argumentCell);
+            const entryRef = this.#entryRefForPattern(pattern);
             if (nodes.skipped === 0) {
               planned.push([
                 this.#getFamilyKey(resultCell, identity),
-                patternIdentityKey(this.#entryRefForPattern(pattern)),
+                patternIdentityKey(entryRef),
               ]);
+            }
+            if (
+              storedUnderAnotherPattern(
+                resultCell,
+                entryRef,
+                this.#sessionPatternPointer(resultCell),
+              )
+            ) {
+              restaged.push(argumentCell);
             }
           }
         }
@@ -9790,6 +9839,21 @@ export class Runner {
       );
       logger.time(waveStart, "start", "resumeInstanceNodeSyncWave");
       await this.#syncCrossSpaceReads(plans, identity);
+      // The argument documents arrived with the wave above, so what they link
+      // to can be named now.
+      if (restaged.length > 0) {
+        const argumentLinksStart = performance.now();
+        await Promise.all(
+          restaged.map((argumentCell) =>
+            this.#syncStoredArgumentLinkTargets(argumentCell, identity)
+          ),
+        );
+        logger.time(
+          argumentLinksStart,
+          "start",
+          "resumeInstanceArgumentLinksSync",
+        );
+      }
       if (!syncFailed) {
         for (const [familyKey, entryKey] of planned) {
           this.#presyncNamedInstances.set(familyKey, entryKey);
@@ -11701,7 +11765,7 @@ export class Runner {
     );
   }
 
-  #handleJavaScriptHandlerResult(
+  async #handleJavaScriptHandlerResult(
     tx: IExtendedStorageTransaction,
     resultSchema: JSONSchema | undefined,
     result: any,
@@ -11710,7 +11774,7 @@ export class Runner {
     patternResultCell: Cell<any>,
     addCancel: AddCancel,
     cause: Record<string, any>,
-  ): any {
+  ): Promise<any> {
     const receiptCell = this.#handlingReceiptCell(patternResultCell, cause, tx);
     const receiptsEnabled =
       this.#runtime.experimental.commitPreconditions === true &&
@@ -11874,6 +11938,21 @@ export class Runner {
       undefined,
       resultSchema,
     );
+    this.#handlerResultPatterns.add(resultPattern);
+    if (
+      subPatternNodes(resultPattern).some(({ module }) =>
+        isPattern(module.implementation) &&
+        this.#childSystemOrigin(
+            tx,
+            patternResultCell,
+            module.implementation,
+          ) !== undefined
+      )
+    ) {
+      // A tracked child retains a verified source revision during its setup.
+      // Its compiled module can be loaded without the parser that verifies it.
+      await prepareSourceClosureVerification();
+    }
     // navigateTo result patterns must start after the handler's transaction
     // commits so the navigation target is durable. Every other handler result
     // pattern runs into the canonical result/receipt cell in the handler's
@@ -14202,12 +14281,14 @@ export class Runner {
           rawMetaWriteAuthorization,
         );
       }
-      // Only a child in a space of its own claims one: an in-space nested
-      // node is part of its parent's graph and is re-instantiated from the
-      // parent's program on each release of the parent, so an origin of its
-      // own would be followed twice; a cross-space child outlives the
-      // program that made it and is what a release has to reach.
-      const sourceOrigin = crossSpace && !resumeExisting
+      // A nested node of the parent's own graph claims none: the parent's
+      // program re-instantiates it on each release of the parent, so an
+      // origin of its own would be followed twice. A child in a space of its
+      // own, or one a handler made, outlives the program that made it, and is
+      // what a release has to reach.
+      const outlivesParent = crossSpace ||
+        this.#handlerResultPatterns.has(pattern);
+      const sourceOrigin = outlivesParent && !resumeExisting
         ? this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl)
         : undefined;
       const options = {

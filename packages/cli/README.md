@@ -32,9 +32,11 @@ is an operator's command. It makes each existing profile whose space has no
 profile as its root into that root, across a whole store, so that a host holding
 only a profile space's DID reaches the profile. What a repaired profile is, and
 what it is not, is under "Profile" in
-[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person can
-repair their own profiles without a snapshot, as "A person's own profiles" below
-describes.
+[`HOME_SPACE.md`](../../docs/common/conventions/HOME_SPACE.md). A person's own
+runtime makes the same repair to the profiles their Home lists when it brings
+Home up, as that document says, so the command is for the profiles of people who
+do not open Home again. A person can also run it over their own profiles without
+a snapshot, as "A person's own profiles" below describes.
 
 Which profiles exist comes from `<dir>`, a snapshot of the store's space
 databases, read offline and never written: every link in each Home's profile
@@ -245,6 +247,20 @@ the identity it displaced where its space retains no source for it. The stored
 argument is still checked against the candidate, which no flag waives, and a
 piece with recorded source history whose current source cannot be restored is
 still refused.
+
+A caller that decided to follow on the strength of what it inspected pins the
+follow to the source state it read, so a piece whose source changed in between
+is left as it is. The pins cover the pattern and the source log, not the piece's
+data: an edit to its stored data alone does not refuse the follow.
+`--expect <identity>#<symbol>` names the pattern the piece must still run, and
+`--expect-revision <revision>` the revision its source log must still end at, or
+`none` for a log that must still be empty; both are what
+`cf piece inspect --pattern-identity --json` reports, as `patternIdentity` and
+`symbol`, and as a `revisionId` that is absent for an empty log. Every source
+transition appends a revision, so the revision pin refuses one that left the
+pattern as it was, such as a detach. A piece off either pin is refused before
+anything is written, and the command ends with exit status 3, so a script can
+tell that refusal from a failure.
 
 For a detached profile with the legacy inbox descriptor, the manual migration is
 `cf piece follow --cell <profile> system:system/profile-home.tsx

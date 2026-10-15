@@ -40,6 +40,7 @@ import {
   getPatternSource,
   getPieceSourceSnapshot,
   idStringForEntityAddress,
+  type IExtendedStorageTransaction,
   inSpaceRootCause,
   isCell,
   isLink,
@@ -122,6 +123,7 @@ import {
 } from "./join-visited-room.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { ensurePrivateInboxOf } from "./private-inbox.ts";
+import { repairProfileRootsOf } from "./profile-space-root.ts";
 import { type ShareIntake, startShareIntakeOf } from "./share-intake.ts";
 import { compileProgram } from "./utils.ts";
 export {
@@ -526,20 +528,23 @@ export class PiecesController<T = unknown> {
    * `options.stillReplaceable` as well, the root linked now must also pass
    * that test, which reads it through the linking transaction. Both checks
    * are read in that transaction, so a root another writer links or changes
-   * meanwhile fails the call rather than being replaced.
+   * meanwhile fails the call rather than being replaced. With
+   * `options.signal`, no commit starts once it has aborted.
    *
    * @param defaultPatternCell - The cell representing the default pattern
    * @throws Error when `options.replacing` no longer names the space's root,
-   *   and when the root it names no longer passes `options.stillReplaceable`.
+   *   when the root it names no longer passes `options.stillReplaceable`, and
+   *   when `options.signal` aborts before the link's commit starts.
    */
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
     options: {
       replacing?: Cell<unknown> | null;
       stillReplaceable?: (root: Cell<unknown>) => boolean;
+      signal?: AbortSignal;
     } = {},
   ): Promise<void> {
-    const { error } = await this.runtime.editWithRetry((tx) => {
+    const link = (tx: IExtendedStorageTransaction) => {
       const spaceCellWithTx = this.#spaceCell.withTx(tx);
       const slot = spaceCellWithTx.key("defaultPattern");
       if (options.replacing !== undefined) {
@@ -565,7 +570,12 @@ export class PiecesController<T = unknown> {
         this.#refuseHomeRoot("replace");
       }
       slot.set(defaultPatternCell.withTx(tx));
-    });
+    };
+    const { error } = await this.runtime.editWithRetry(
+      link,
+      undefined,
+      options.signal === undefined ? {} : { signal: options.signal },
+    );
     if (error) {
       throw new Error(
         `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
@@ -858,7 +868,9 @@ export class PiecesController<T = unknown> {
     const piecesCell = await this.getPieceRegistry();
     const pieces = await this.syncPieces(piecesCell);
     return pieces.map((piece) => {
-      const target = piece.resolveAsCell();
+      // The registry names pieces without loading their documents. Controllers
+      // load and mutate those documents after this read snapshot was taken.
+      const target = piece.resolveAsCell().withTx();
       const space = target.getAsNormalizedFullLink().space;
       const controller = space === this.#space ? this : new PiecesController(
         { as: this.#session.as, space },
@@ -2452,6 +2464,35 @@ export class PiecesController<T = unknown> {
       this.runtime,
       home,
       this.runtime.userIdentityDID,
+      signal,
+    );
+  }
+
+  /**
+   * Makes each of the identity's profiles that Home lists its space's root,
+   * where the space has no root or one only a space-root ensure created, as
+   * `repairProfileRootsOf()` does, through a controller over each profile's
+   * space on this controller's runtime. This controller must be over the
+   * identity's Home space.
+   *
+   * Resolves once every listed profile has been tried. Rejects when Home
+   * cannot be brought up or its list cannot be read, and, once every profile
+   * has been tried, when any one's inspection or repair failed. Once `signal`
+   * aborts, or the runtime begins disposal, it starts no further repair
+   * commit.
+   */
+  async repairProfileRoots(signal?: AbortSignal): Promise<void> {
+    this.#assertHomeSpace("repair its profiles' roots");
+    const home = (await this.ensureDefaultPattern()).getCell();
+    await repairProfileRootsOf(
+      home,
+      this.runtime.userIdentityDID,
+      // Each repair syncs what it reads, so the controller makes no first
+      // sync of its own that nothing would wait for.
+      (space) =>
+        new PiecesController({ as: this.#session.as, space }, this.runtime, {
+          deferSpaceCellSync: true,
+        }),
       signal,
     );
   }

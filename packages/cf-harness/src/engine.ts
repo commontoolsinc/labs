@@ -143,6 +143,7 @@ import {
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  type HarnessFailureKind,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
@@ -1740,8 +1741,13 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Records a policy event, and a denial among the run's failures, as
+   * `failureKind` when given.
+   */
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
+    options: { failureKind?: HarnessFailureKind } = {},
   ): Promise<HarnessRunState> {
     const now = this.#now();
     const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
@@ -1751,7 +1757,10 @@ export class CfHarnessEngine {
       policyEvent,
       now,
     );
-    const failure = classifyHarnessPolicyEventFailure(policyEvent);
+    const failure = classifyHarnessPolicyEventFailure(
+      policyEvent,
+      options.failureKind,
+    );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(this.#runState, failure, now);
     }

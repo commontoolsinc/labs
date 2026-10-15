@@ -902,16 +902,18 @@ Three things read them:
 
 - The test-selection publisher collects each measured set's figure as a
   coverage baseline, against the commit the record's context names, from the
-  objects it folds. It takes them from a push to `main` that the fork flag
-  does not mark, the same rule its fold uses for a run of the default branch,
-  and keeps one per set per commit, the later run's where two measured the
-  same commit. It carries the previous manifest's baselines forward and
+  objects it folds. It takes them from a run of the head of `main` that the
+  fork flag does not mark, the same rule its fold uses for a run of the
+  default branch, and keeps one per set per commit, the later run's where
+  two measured the same commit. It carries the previous manifest's baselines forward and
   drops any older than `LOCAL_COVERAGE_BASELINE_DAYS`.
   `tasks/test-selection/baselines.ts` is where that happens.
 - The dashboard's coverage debt tile
   (`packages/dashboard/coverage-debt-history.ts`) takes the `workspace`
-  figure of one `main` run a day, the newest of the day's runs that has one
-  and was not measured on a cold compile cache, and charts the run of them.
+  figure of one `main` run attempt a day, the newest of the day's attempts
+  that has one, was not measured on a cold compile cache, and passed, and
+  charts the run of them. The record store does not say whether an attempt
+  passed, so the tile asks GitHub.
 - The report a `main` run posts on the pull request behind it
   (`tasks/post-main-report.ts`) reads the figures out of the newest coverage
   artifact of the run and of the run before it, and compares the two. A run
