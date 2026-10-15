@@ -542,7 +542,7 @@ const establishContextMessages = async (
  * pattern's output can be inspected; the Weaver's commands, which read as well
  * as change the person's application, belong to finding and acting. So does
  * each block of tool guidance: writing and running patterns to authoring,
- * building on research to authoring and finding,
+ * building on research to authoring, finding and work on pieces,
  * reading and acting on pieces to work on them, and the host's commands and
  * retrieval to finding and acting; resolving a named piece belongs to
  * finding, acting and work on pieces. Every other message passes through.
@@ -556,7 +556,9 @@ export const orientContextMessages = (
   const withheld = new Set([
     ...(author ? [] : [REVISION_VERIFICATION_GUIDANCE, AUTHOR_TOOL_GUIDANCE]),
     ...(tags.has("pieces") ? [] : [PIECES_TOOL_GUIDANCE]),
-    ...(author || tags.has("find") ? [] : [RESEARCH_TOOL_GUIDANCE]),
+    ...(author || tags.has("find") || tags.has("pieces")
+      ? []
+      : [RESEARCH_TOOL_GUIDANCE]),
     // Authoring carries the same rule inside piece targeting.
     ...(!author && (findsOrActs || tags.has("pieces"))
       ? []

@@ -23,7 +23,7 @@ import { RUNTIME_MODULE_IMPORT_LINE } from "./tools/run-pattern.ts";
 const PATTERN_SOURCE_RULES = [
   `- run_pattern takes your own sourceText or the patternId of a pattern search_patterns found. Import runtime APIs from "commonfabric", as in ${RUNTIME_MODULE_IMPORT_LINE} (no package named after the product resolves), and published components from "cf:pattern:<patternId>".`,
   '- The run\'s confidentiality ceiling bounds cell reads: a shared db.query result withholds its whole array, row count included, unless the ceiling admits every row; declare it per session (PerSession<> on the result type, or { scope: "session" } on the query) to filter rows under the ceiling instead.',
-  "- Bound every query with a LIMIT (a few hundred suits a view): each result row is written as its own document, and a labeled result keys rows by position, so a change rewrites displaced rows and a projection or table change rewrites them all. An aggregate (count(*), sum(), GROUP BY) needs no LIMIT.",
+  "- Bound every query with a LIMIT (a few hundred suits a view): each result row is written as its own document keyed on its content, so a changed row is a new document, and a labeled result also keys rows on the projection and the handle's tables, so changing either rewrites them all. An aggregate (count(*), sum(), GROUP BY) needs no LIMIT.",
   "- A pattern composing another must expose and render the composed one's error branch and row count under its own result, or the run answers over figures from a failed read and the result carries an outputConcerns entry naming the unread output.",
 ];
 

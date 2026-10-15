@@ -10,7 +10,8 @@
  * prompt is `buildCfHarnessBatchSystemPrompt` for each tag; the context
  * messages are what `establishHarnessSessionContext` opens a fabric-backed run
  * with that holds loom commands and retrieval, fitted to the tag by
- * `orientContextMessages`. The host's own parts (its additional instructions,
+ * `orientContextMessages`; a run with attached patterns or client actions opens
+ * with more than this measures. The host's own parts (its additional instructions,
  * result schema and grants message) and the task are copied from the recorded
  * run, so every tag is measured against one ask and only the tag differs.
  *
@@ -130,12 +131,14 @@ export const measureRequest = async (
     content: string;
   }[];
   const system = recorded[0].content;
-  const additional = system.slice(
-    system.indexOf(ADDITIONAL) + ADDITIONAL.length,
-  );
-  const schema = JSON.parse(
-    system.slice(system.indexOf(SCHEMA) + SCHEMA.length).split("\n")[0],
-  );
+  const additionalAt = system.indexOf(ADDITIONAL);
+  const additional = additionalAt === -1
+    ? undefined
+    : system.slice(additionalAt + ADDITIONAL.length);
+  const schemaAt = system.indexOf(SCHEMA);
+  const schema = schemaAt === -1
+    ? undefined
+    : JSON.parse(system.slice(schemaAt + SCHEMA.length).split("\n")[0]);
   const grants = recorded.find((message) =>
     message.role === "user" && message.content.startsWith("Granted references")
   )?.content;
@@ -173,14 +176,21 @@ export const measureRequest = async (
       {
         role: "system",
         content: buildCfHarnessBatchSystemPrompt({
-          systemPrompt: additional,
-          structuredResult: {
-            path: "/unused/agent-result.json",
-            sandboxPath: "/workspace/agent-result.json",
-            schema,
-          },
+          ...(additional !== undefined ? { systemPrompt: additional } : {}),
+          ...(schema !== undefined
+            ? {
+              structuredResult: {
+                path: "/unused/agent-result.json",
+                sandboxPath: "/workspace/agent-result.json",
+                schema,
+              },
+            }
+            : {}),
           allowedToolIds,
-          patternIndex: {} as never,
+          // The parent is told about a pattern index when it may search one.
+          ...(allowedToolIds.includes("search_patterns")
+            ? { patternIndex: {} as never }
+            : {}),
           ...(tags !== undefined ? { taskTags: tags } : {}),
         }),
       },

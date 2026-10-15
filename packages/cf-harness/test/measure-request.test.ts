@@ -74,6 +74,19 @@ describe("measure-request", () => {
     expect(new Set(rows.map((row) => row.toolsBytes)).size).toBe(1);
   });
 
+  it("measures a recorded run whose system prompt has no result schema or additional instructions", async () => {
+    Deno.writeTextFileSync(
+      join(dir, "transcript.json"),
+      JSON.stringify([
+        { role: "system", content: "You are cf-harness." },
+        { role: "user", content: "count to 100" },
+        { role: "assistant", content: "" },
+      ]),
+    );
+    const { rows } = await measureRequest(dir);
+    expect(rows).toHaveLength(6);
+  });
+
   it("returns more input bytes for an author task than for a reply, and the most with no tags", async () => {
     const { rows } = await measureRequest(dir);
     const inputOf = (tag: string) =>

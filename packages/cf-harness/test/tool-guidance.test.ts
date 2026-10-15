@@ -162,8 +162,8 @@ describe("tool-guidance", () => {
     expect(guidance).toContain("rowLabelReads");
     expect(guidance).toContain("`fill`");
     expect(guidance).toContain(RESOLVE_PIECE_TOOL_GUIDANCE);
+    expect(guidance).toContain(RESEARCH_TOOL_GUIDANCE);
     expect(guidance).not.toContain(AUTHOR_TOOL_GUIDANCE);
-    expect(guidance).not.toContain(RESEARCH_TOOL_GUIDANCE);
     expect(guidance).not.toContain(LOOM_COMMANDS_TOOL_GUIDANCE);
   });
 
