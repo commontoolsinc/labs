@@ -98,8 +98,10 @@ export function subscribeToThemeCellValues(
  * result over the enclosing `cf-theme`'s theme, or over the defaults when there
  * is none, provides it via context, and sets CSS custom properties on the host
  * so descendants pick up tokens. A nested instance sets only the properties
- * its partial changes, and the rest inherit from the enclosing one; an
- * outermost instance sets them all.
+ * its partial changes, and the rest inherit from the enclosing one. An
+ * outermost instance sets them all, unless a host already has `--cf-theme-*`
+ * tokens in effect by CSS: then it sets only what its partial changes from
+ * the defaults.
  *
  * @element cf-theme
  */
@@ -166,12 +168,30 @@ export class CFThemeProvider extends BaseElement {
     }
   }
 
+  /**
+   * Whether a host has put `--cf-theme-*` tokens in effect around this
+   * element by CSS alone, with no `cf-theme` above to say so through context.
+   */
+  #hostThemed(): boolean {
+    const root = this.getRootNode();
+    const parent = this.parentElement ??
+      (root instanceof ShadowRoot ? root.host : null);
+    return !!parent &&
+      globalThis.getComputedStyle(parent)
+          .getPropertyValue("--cf-theme-color-text").trim() !== "";
+  }
+
   private _recomputeAndApply() {
+    // Under a host's tokens an outermost instance is a tint: it writes what
+    // its partial changes from the defaults, and the host's values stand
+    // wherever the partial is silent.
+    const around = this.#enclosing ??
+      (this.#hostThemed() ? defaultTheme : undefined);
     this._computedTheme = mergeWithDefaultTheme(
       unwrapThemeCellValues(this.theme),
       this.#enclosing,
     );
-    applyThemeToElement(this, this._computedTheme, this.#enclosing);
+    applyThemeToElement(this, this._computedTheme, around);
     this.#setupSubscriptions();
 
     // Manage the matchMedia listener based on the resolved colorScheme

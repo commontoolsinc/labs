@@ -11,6 +11,8 @@ import { CFThemeProvider } from "./index.ts";
 
 const OUTER_FONT = "Georgia";
 const ACCENT = "rgb(1, 2, 3)";
+const HOST_SURFACE = "rgb(9, 9, 9)";
+const HOST_TEXT = "rgb(240, 240, 240)";
 
 /** The value of the custom property `name` in effect at `element`. */
 function token(element: Element, name: string): string {
@@ -95,16 +97,83 @@ Deno.test("a nested theme hands its consumers the outer theme with its own chang
   }
 });
 
-Deno.test("a theme with no cf-theme above it writes the whole theme over a host's tokens", async () => {
+/** A host that sets tokens by CSS alone, as the Weaver does. */
+function cssHost(): HTMLElement {
   const host = document.createElement("div");
+  host.style.setProperty("--cf-theme-color-surface", HOST_SURFACE);
+  host.style.setProperty("--cf-theme-color-text", HOST_TEXT);
   host.style.setProperty("--cf-theme-font-family", OUTER_FONT);
+  host.style.setProperty("font-family", OUTER_FONT);
   document.body.append(host);
-  try {
-    const { content } = await nest({}, { accentColor: ACCENT }, host);
+  return host;
+}
 
-    expect(token(content, "--cf-theme-font-family")).not.toBe(OUTER_FONT);
+Deno.test("a tint outside any cf-theme keeps what a CSS-only host sets and changes only its accent", async () => {
+  const host = cssHost();
+  try {
+    const provider = new CFThemeProvider();
+    provider.theme = { accentColor: ACCENT };
+    const content = document.createElement("div");
+    provider.append(content);
+    host.append(provider);
+    await provider.updateComplete;
+
+    expect(token(content, "--cf-theme-color-surface")).toBe(HOST_SURFACE);
+    expect(token(content, "--cf-theme-color-text")).toBe(HOST_TEXT);
+    expect(token(content, "--cf-theme-font-family")).toBe(OUTER_FONT);
+    expect(getComputedStyle(content).fontFamily).toBe(OUTER_FONT);
     expect(token(content, "--cf-theme-color-primary")).toBe(ACCENT);
+    expect(token(content, "--cf-theme-color-accent")).toBe(ACCENT);
   } finally {
     host.remove();
+  }
+});
+
+Deno.test("a tint outside any cf-theme writes nothing for a color scheme it does not name", async () => {
+  const host = cssHost();
+  try {
+    const provider = new CFThemeProvider();
+    provider.theme = { accentColor: ACCENT };
+    host.append(provider);
+    await provider.updateComplete;
+
+    expect(provider.style.getPropertyValue("color-scheme")).toBe("");
+    expect(provider.style.getPropertyValue("--cf-theme-color-background"))
+      .toBe("");
+  } finally {
+    host.remove();
+  }
+});
+
+Deno.test("a tint that shrinks takes its old changes back off", async () => {
+  const host = cssHost();
+  try {
+    const provider = new CFThemeProvider();
+    provider.theme = { accentColor: ACCENT, fontFamily: "Courier" };
+    host.append(provider);
+    await provider.updateComplete;
+    expect(provider.style.length).toBeGreaterThan(0);
+
+    provider.theme = {};
+    await provider.updateComplete;
+
+    expect(provider.style.length).toBe(0);
+  } finally {
+    host.remove();
+  }
+});
+
+Deno.test("a theme with nothing in effect above it writes the whole theme", async () => {
+  const provider = new CFThemeProvider();
+  provider.theme = { accentColor: ACCENT };
+  document.body.append(provider);
+  try {
+    await provider.updateComplete;
+    expect(provider.style.getPropertyValue("--cf-theme-color-surface"))
+      .not.toBe("");
+    expect(provider.style.getPropertyValue("--cf-theme-color-primary"))
+      .toBe(ACCENT);
+  } finally {
+    provider.remove();
   }
 });
