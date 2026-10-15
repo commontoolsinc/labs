@@ -1113,6 +1113,22 @@ function samePatternRef(
 }
 
 /**
+ * Whether the pattern pointer or the setup-completion marker on `resultCell`
+ * names a pattern other than `entryRef`, which is what makes a setup of
+ * `entryRef` there re-stage the stored argument. Neither stamped reads as
+ * `false`.
+ */
+function storedUnderAnotherPattern(
+  resultCell: Cell<unknown>,
+  entryRef: { identity: string; symbol: string },
+): boolean {
+  const pointer = getPatternIdentityRef(resultCell);
+  const marker = getPatternSetupIdentityRef(resultCell);
+  return (pointer !== undefined && !samePatternRef(pointer, entryRef)) ||
+    (marker !== undefined && !samePatternRef(marker, entryRef));
+}
+
+/**
  * Identity for a sub-pattern node the resume owned-cell walk skipped, shared by
  * both of `#collectResumeOwnedCells`'s skip exits so a console trace names the
  * same things either way: the result cell being resumed and enough about the
@@ -8969,8 +8985,10 @@ export class Runner {
    * links to directly, and the result document of the piece that owns each,
    * reached through the `result` backlink the linked document carries once
    * it is local. Setup's proof that a supplied link stays compatible reads
-   * both, and the gate that decides whether a run over a stored piece must
-   * name its family first probes them. `argumentCell` is local already.
+   * both, a setup re-staging the argument under another pattern's schema
+   * reads each linked document to judge the slot holding the link, and the
+   * gate that decides whether a run over a stored piece must name its family
+   * first probes them. `argumentCell` is local already.
    */
   async #syncStoredArgumentLinkTargets(
     argumentCell: Cell<unknown>,
@@ -9670,6 +9688,13 @@ export class Runner {
    * builtin's own cells, written by an earlier session whose setup of the
    * instance was lost — is local before the parent's start reads it rather
    * than entering that start's commit at sequence zero.
+   *
+   * An instance stored under a pattern other than the one it is planned under
+   * is set up again by its parent's start, and that setup judges every slot
+   * its stored argument holds against the new argument schema — slots no
+   * plan reads among them, such as one a previous version took and this one
+   * does not — through the links those slots hold. Each such instance's
+   * argument links are named the way the root's are, for the same reason.
    */
   async #syncResumeInstanceNodes(
     instances: readonly ResumePatternInstance[],
@@ -9692,6 +9717,9 @@ export class Runner {
       // not plan, or a round with a sync that failed, is not recorded: its
       // own start then walks its argument as before.
       const planned: [familyKey: string, entryKey: string][] = [];
+      // The argument documents of the instances this round finds stored under
+      // another pattern.
+      const restaged: Cell<unknown>[] = [];
       let syncFailed = false;
       const planTx = this.#runtime.edit();
       if (identity !== undefined) planTx.tx.scopeKeyIdentity = identity;
@@ -9727,17 +9755,20 @@ export class Runner {
             );
           }
           if (argumentMetaLink !== undefined) {
-            cells.push(
-              this.#runtime.getCellFromLink({
-                ...argumentMetaLink,
-                schema: undefined,
-              }),
-            );
+            const argumentCell = this.#runtime.getCellFromLink({
+              ...argumentMetaLink,
+              schema: undefined,
+            });
+            cells.push(argumentCell);
+            const entryRef = this.#entryRefForPattern(pattern);
             if (nodes.skipped === 0) {
               planned.push([
                 this.#getFamilyKey(resultCell, identity),
-                patternIdentityKey(this.#entryRefForPattern(pattern)),
+                patternIdentityKey(entryRef),
               ]);
+            }
+            if (storedUnderAnotherPattern(resultCell, entryRef)) {
+              restaged.push(argumentCell);
             }
           }
         }
@@ -9759,6 +9790,21 @@ export class Runner {
       );
       logger.time(waveStart, "start", "resumeInstanceNodeSyncWave");
       await this.#syncCrossSpaceReads(plans, identity);
+      // The argument documents arrived with the wave above, so what they link
+      // to can be named now.
+      if (restaged.length > 0) {
+        const argumentLinksStart = performance.now();
+        await Promise.all(
+          restaged.map((argumentCell) =>
+            this.#syncStoredArgumentLinkTargets(argumentCell, identity)
+          ),
+        );
+        logger.time(
+          argumentLinksStart,
+          "start",
+          "resumeInstanceArgumentLinksSync",
+        );
+      }
       if (!syncFailed) {
         for (const [familyKey, entryKey] of planned) {
           this.#presyncNamedInstances.set(familyKey, entryKey);
