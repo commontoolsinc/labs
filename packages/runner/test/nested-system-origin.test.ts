@@ -3,9 +3,10 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 
+import type { Cell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { PATTERNS_ROUTE_PREFIX } from "../src/pattern-source-scheme.ts";
-import { getPatternSource } from "../src/runner.ts";
+import { getPatternSource, getPieceSourceRevisions } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -94,14 +95,14 @@ describe("a child's origin", () => {
   });
 
   /**
-   * Runs the parent, with `origin` claimed for it or none, and returns the
-   * origin its nested child and its handler-spawned child each record.
+   * Runs the parent, with `origin` claimed for it or none, has it spawn a
+   * child through `verb`, and returns its nested child and that spawned child.
    */
-  async function childOrigins(
+  async function children(
     dir: string,
     origin: string | undefined,
     verb: "spawn" | "spawnAndGo" | "spawnHere" = "spawn",
-  ): Promise<{ nested: string | undefined; spawned: string | undefined }> {
+  ): Promise<{ nested: Cell<unknown>; spawned: Cell<unknown> }> {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -152,6 +153,18 @@ describe("a child's origin", () => {
     await spawnedHandle.sync();
     const spawned = spawnedHandle.resolveAsCell();
     await spawned.sync();
+    return { nested, spawned };
+  }
+
+  /**
+   * Like {@link children}, except it returns the origin each child records.
+   */
+  async function childOrigins(
+    dir: string,
+    origin: string | undefined,
+    verb: "spawn" | "spawnAndGo" | "spawnHere" = "spawn",
+  ): Promise<{ nested: string | undefined; spawned: string | undefined }> {
+    const { nested, spawned } = await children(dir, origin, verb);
     return {
       nested: getPatternSource(nested),
       spawned: getPatternSource(spawned),
@@ -180,6 +193,17 @@ describe("a child's origin", () => {
       nested: undefined,
       spawned: "system:system/child.tsx",
     });
+  });
+
+  it("is recorded ahead of the creation revision for a child a handler makes in the parent's space", async () => {
+    // A handler's run is synchronous, and verifying the source a creation
+    // revision retains parses it, so the child carries its origin alone, and
+    // its first adoption records the baseline.
+
+    const dir = `${PATTERNS_ROUTE_PREFIX}system/`;
+    const { spawned } = await children(dir, PARENT_ORIGIN, "spawnHere");
+    expect(getPatternSource(spawned)).toBe("system:system/child.tsx");
+    expect(getPieceSourceRevisions(spawned)).toEqual([]);
   });
 
   it("is absent under a parent that follows no origin", async () => {

@@ -1628,6 +1628,9 @@ type SetupValidationOptions = {
   /** Mutable source origin recorded with a new piece's creation revision. */
   initialPieceSourceOrigin?: string;
 
+  /** Record the new piece's source origin without its creation revision. */
+  deferCreationRevision?: boolean;
+
   /** Rebuild stored setup state even when patternIdentity already matches. */
   reapplyStoredSetup?: boolean;
 
@@ -2021,6 +2024,12 @@ export type RunnerRunOptions = {
   // alone: what a piece records after it exists is decided by a source
   // transition, never by another run of it.
   sourceOrigin?: string;
+  // Whether a piece this run brings into being records its `sourceOrigin`
+  // alone, leaving its creation revision to its first adoption. A child a
+  // handler makes passes `true`. Writing the revision verifies the source
+  // closure it retains, which parses that source, and a handler's run is
+  // synchronous, with nowhere to load the parser first.
+  deferCreationRevision?: boolean;
   // Whether a piece this run brings into being outside any scheduled action
   // is the acting principal's act, so that what its setup initializes is
   // attributed to them (`CfcTxState.attributedInitialization`); `true` when
@@ -4571,6 +4580,7 @@ export class Runner {
         tx,
         entryRef,
         validationOptions.initialPieceSourceOrigin,
+        validationOptions.deferCreationRevision === true,
       );
     }
     if (validationOptions.pieceSourceTransition !== undefined) {
@@ -8246,6 +8256,7 @@ export class Runner {
           ? {
             initializePieceSourceHistory: true,
             initialPieceSourceOrigin: options.sourceOrigin,
+            deferCreationRevision: options.deferCreationRevision,
           }
           : {}),
       },
@@ -14177,8 +14188,8 @@ export class Runner {
       // origin of its own would be followed twice. A child in a space of its
       // own, or one a handler made, outlives the program that made it, and is
       // what a release has to reach.
-      const outlivesParent = crossSpace ||
-        this.#handlerResultPatterns.has(pattern);
+      const handlerMade = this.#handlerResultPatterns.has(pattern);
+      const outlivesParent = crossSpace || handlerMade;
       const sourceOrigin = outlivesParent && !resumeExisting
         ? this.#childSystemOrigin(instanceTx, parentResultCell, patternImpl)
         : undefined;
@@ -14207,7 +14218,9 @@ export class Runner {
           storedChild,
           {
             ...options,
-            ...(sourceOrigin === undefined ? {} : { sourceOrigin }),
+            ...(sourceOrigin === undefined
+              ? {}
+              : { sourceOrigin, deferCreationRevision: handlerMade }),
           },
         );
       if (childRun.cancelDeferredStart !== undefined) {
@@ -14569,6 +14582,7 @@ function initializePieceSourceHistory(
   tx: IExtendedStorageTransaction,
   pattern: { identity: string; symbol: string },
   origin?: string,
+  deferRevision = false,
 ): void {
   const candidate = resultCell.withTx(tx);
   const existingPattern = getPatternIdentityRef(candidate);
@@ -14593,9 +14607,11 @@ function initializePieceSourceHistory(
   }
   // The creation revision links the retained source, so it waits for a space
   // that holds it: a cross-space child's closure replicates after its run.
-  // The origin is a claim about where the code comes from and stands either
-  // way; a piece carrying one and no revision is followed from a baseline the
-  // first adoption records.
+  // A run that defers it, as a handler's does, leaves it out whatever the
+  // space holds. The origin is a claim about where the code comes from and
+  // stands either way; a piece carrying one and no revision is followed from a
+  // baseline the first adoption records.
+  if (deferRevision) return;
   if (
     readVerifiedSourceClosure(
       runtime,
