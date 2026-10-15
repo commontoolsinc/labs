@@ -634,6 +634,34 @@ describe("score", () => {
       expect(state.prCatches).toBe(1);
     });
 
+    it("leaves other orders waiting when a pass finds only aged failures", () => {
+      // The pass's own order holds only a failure older than any window
+      // a state keeps, so it judges nothing, and the failure in the other
+      // order is still there for a pass in its own.
+      const state = stateFrom([
+        saw("fail", {
+          commit: "c0",
+          seed: 20260101,
+          day: "2026-01-01",
+          startedAt: "2026-01-01T00:00:00.000Z",
+        }),
+        saw("fail", { commit: "c1", seed: 20260821 }),
+        saw("pass", {
+          commit: "c2",
+          seed: 20260101,
+          startedAt: "2026-08-20T11:00:00.000Z",
+        }),
+        saw("pass", {
+          commit: "c3",
+          seed: 20260821,
+          startedAt: "2026-08-20T12:00:00.000Z",
+        }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-20");
+      expect(state.pendingMain).toEqual([]);
+    });
+
     it("judges a failure in its own order after a pass in another", () => {
       // The run of `main` under the next day's seed lands between the
       // day's pushes. Its pass leaves the day's failures waiting, so a

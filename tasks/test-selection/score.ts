@@ -280,17 +280,24 @@ function resolvePendingMain(
     pending.seed === observation.seed
   );
   if (inOrder.length === 0) return;
-  state.pendingMain = [];
   // A failure nothing has judged inside the longest window a state keeps
   // is one the default branch has carried for that long, and crediting a
   // catch for it now would credit the test with a fix it did not find.
   // `trimWindows` ages these by the same window, and applies it too late
   // to answer this on its own: a fold resolves every observation it
-  // reads before it ages anything.
+  // reads before it ages anything. A pass that finds only those in its
+  // order judges nothing, so it drops them and leaves the other orders
+  // waiting.
   const live = inOrder.filter((pending) =>
     daysBetween(pending.day, observation.day) <= LONGEST_WINDOW_DAYS
   );
-  if (live.length === 0) return;
+  if (live.length === 0) {
+    state.pendingMain = state.pendingMain.filter((pending) =>
+      pending.seed !== observation.seed
+    );
+    return;
+  }
+  state.pendingMain = [];
   const here = live.find((pending) => pending.commit === observation.commit);
   if (here !== undefined) {
     // The same commit, passing now and failing before, is the test
