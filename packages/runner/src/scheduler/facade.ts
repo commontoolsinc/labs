@@ -3848,20 +3848,34 @@ export class Scheduler {
    * children rather than later arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
-   * the drop keeps today's shape — the same split events.ts makes for a
-   * piece-load failure.
+   * a failed load drops the event — the same split events.ts makes for a
+   * piece-load failure — with one exception: an `authorization`-class
+   * failure releases the park as a completed load does. The event's
+   * principal cannot read that document, waiting does not change that,
+   * and the closure reads it as absent whether or not a load of it
+   * happened to be in flight when the event reached the head. So the
+   * handler runs, once, against what this replica holds, exactly as it
+   * would have with no load in flight; the settled generations the
+   * release records keep the next preflight from parking on that load
+   * again.
    */
   #failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const keys = this.#headEventLoadPark.keys.join(", ");
-    this.#headEventLoadPark = null;
-    this.#headEventLoadParkHistory = null;
-    const detail = error instanceof Error ? error.message : String(error);
     const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
       failureClass: "unknown" as const,
       recoveryEpoch: "untyped",
       permanentEvidence: false,
     };
+    if (
+      event.served === undefined && failure.failureClass === "authorization"
+    ) {
+      this.#releaseHeadEventLoadPark(event.id);
+      return;
+    }
+    const keys = this.#headEventLoadPark.keys.join(", ");
+    this.#headEventLoadPark = null;
+    this.#headEventLoadParkHistory = null;
+    const detail = error instanceof Error ? error.message : String(error);
     if (event.served === undefined) {
       this.#dropEvent(
         event,
