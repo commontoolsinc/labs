@@ -733,20 +733,25 @@ function themePropertyNames(): string[] {
  * inherits again.
  * @param element - Element to apply theme properties to
  * @param theme - Theme configuration, or `undefined` to inherit
+ * @param inherited - The theme an enclosing `cf-theme` already puts in effect
+ *   around `element`. Only the properties `theme` changes are written; the
+ *   rest are left to inherit, so a later change to the enclosing theme reaches
+ *   them.
  */
 export function applyThemeToElement(
   element: HTMLElement,
   theme: CFTheme | undefined,
+  inherited?: CFTheme,
 ) {
-  if (!theme) {
-    for (const name of themePropertyNames()) {
+  const properties = theme ? themeProperties(theme) : {};
+  const around = inherited ? themeProperties(inherited) : {};
+  for (const name of themePropertyNames()) {
+    const value = properties[name];
+    if (value !== undefined && value !== around[name]) {
+      element.style.setProperty(name, value);
+    } else {
       element.style.removeProperty(name);
     }
-    return;
-  }
-  const properties = themeProperties(theme);
-  for (const [name, value] of Object.entries(properties)) {
-    element.style.setProperty(name, value);
   }
 }
 

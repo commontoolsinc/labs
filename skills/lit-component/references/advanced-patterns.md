@@ -31,10 +31,11 @@ export class CFThemeProvider extends BaseElement {
   _computedTheme: CFTheme = defaultTheme;
 
   private _recomputeAndApply() {
-    // Merge partial theme with defaults (pattern-style support)
-    this._computedTheme = mergeWithDefaultTheme(this.theme);
-    // Apply to self for CSS variable cascade
-    applyThemeToElement(this, this._computedTheme);
+    // Merge the partial theme over the enclosing cf-theme's, or the defaults
+    this._computedTheme = mergeWithDefaultTheme(this.theme, this.#enclosing);
+    // Apply to self for CSS variable cascade: only what differs from the
+    // enclosing theme, which the rest inherit
+    applyThemeToElement(this, this._computedTheme, this.#enclosing);
     // Subscribe to Cell properties for reactive theme updates
     this.#setupSubscriptions();
   }
@@ -60,10 +61,12 @@ export class CFThemeProvider extends BaseElement {
 
 1. **Context providers are invisible:** Use `display: contents` to not affect
    layout
-2. **Merge partial with defaults:** Support both full and pattern-style partial
-   themes
+2. **Merge partial over the enclosing theme:** Support both full and
+   pattern-style partial themes; a nested provider tints the one around it, and
+   only an outermost one starts from the defaults
 3. **Subscribe to Cell properties:** Theme values can be reactive Cells
-4. **Apply to self:** Set CSS variables on the provider element so they cascade
+4. **Apply to self:** Set CSS variables on the provider element so they cascade,
+   and set only those that differ from what already cascades in
 5. **Clean up subscriptions:** Always unsubscribe in `disconnectedCallback()`
 
 **When to use:** Any time you need to provide ambient configuration (theme,

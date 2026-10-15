@@ -1,5 +1,5 @@
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
-import { provide } from "@lit/context";
+import { ContextConsumer, provide } from "@lit/context";
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 
@@ -95,8 +95,11 @@ export function subscribeToThemeCellValues(
  * <cf-theme .theme=${partialTheme}><slot/></cf-theme>
  *
  * The component unwraps CellHandle values inside a partial theme, merges the
- * result with defaults, provides it via context, and sets CSS custom properties
- * on the host so descendants pick up tokens.
+ * result over the enclosing `cf-theme`'s theme, or over the defaults when there
+ * is none, provides it via context, and sets CSS custom properties on the host
+ * so descendants pick up tokens. A nested instance sets only the properties
+ * its partial changes, and the rest inherit from the enclosing one; an
+ * outermost instance sets them all.
  *
  * @element cf-theme
  */
@@ -118,12 +121,32 @@ export class CFThemeProvider extends BaseElement {
 
   #unsubs: Array<() => void> = [];
 
+  /** The enclosing `cf-theme`'s theme, or `undefined` for an outermost one. */
+  #enclosing: CFTheme | undefined;
+
   private _mediaQuery?: MediaQueryList;
   private _onMediaChange = () => this._recomputeAndApply();
   private _onThemePreferenceChanged = () => this._recomputeAndApply();
 
+  constructor() {
+    super();
+    // A provider ignores requests from its own host, so this one is answered
+    // by the enclosing `cf-theme`, if there is one.
+    new ContextConsumer(this, {
+      context: cfThemeContext,
+      subscribe: true,
+      callback: (theme) => {
+        this.#enclosing = theme;
+        if (this.hasUpdated) this._recomputeAndApply();
+      },
+    });
+  }
+
   override connectedCallback(): void {
+    // Reconnected elsewhere, it is outermost unless a provider answers again.
+    this.#enclosing = undefined;
     super.connectedCallback();
+    if (this.hasUpdated) this._recomputeAndApply();
     // Re-resolve when user toggles theme preference (data-theme attribute)
     document.addEventListener(
       "theme-preference-changed",
@@ -146,8 +169,9 @@ export class CFThemeProvider extends BaseElement {
   private _recomputeAndApply() {
     this._computedTheme = mergeWithDefaultTheme(
       unwrapThemeCellValues(this.theme),
+      this.#enclosing,
     );
-    applyThemeToElement(this, this._computedTheme);
+    applyThemeToElement(this, this._computedTheme, this.#enclosing);
     this.#setupSubscriptions();
 
     // Manage the matchMedia listener based on the resolved colorScheme
