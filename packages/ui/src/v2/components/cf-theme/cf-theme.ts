@@ -187,11 +187,13 @@ export class CFThemeProvider extends BaseElement {
     // wherever the partial is silent.
     const around = this.#enclosing ??
       (this.#hostThemed() ? defaultTheme : undefined);
-    this._computedTheme = mergeWithDefaultTheme(
+    const computed = mergeWithDefaultTheme(
       unwrapThemeCellValues(this.theme),
       this.#enclosing,
     );
-    applyThemeToElement(this, this._computedTheme, around);
+    // Styles first: a consumer told of the new theme reads them at once.
+    applyThemeToElement(this, computed, around);
+    this._computedTheme = computed;
     this.#setupSubscriptions();
 
     // Manage the matchMedia listener based on the resolved colorScheme

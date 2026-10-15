@@ -161,6 +161,45 @@ Deno.test("the tools chip's overlay on the document body carries the host's toke
   }
 });
 
+Deno.test("the tools chip's open overlay follows a change to the cf-theme around it", async () => {
+  const provider = new CFThemeProvider();
+  provider.theme = { fontFamily: HOST_FONT };
+  document.body.append(provider);
+  try {
+    await provider.updateComplete;
+    const chip = await mountIn<CFToolsChip>(provider, "cf-tools-chip");
+    chip.open = true;
+    await chip.updateComplete;
+    const overlay = document.querySelector("[data-cf-tools-chip-overlay]")!;
+    expect(token(overlay, "--cf-theme-font-family")).toBe(HOST_FONT);
+
+    provider.theme = { fontFamily: "Courier" };
+    await provider.updateComplete;
+    await chip.updateComplete;
+
+    expect(token(overlay, "--cf-theme-font-family")).toBe("Courier");
+  } finally {
+    provider.remove();
+  }
+});
+
+Deno.test("the tools chip's open overlay follows a theme preference change", async () => {
+  const host = themedHost();
+  try {
+    const chip = await mountIn<CFToolsChip>(host, "cf-tools-chip");
+    chip.open = true;
+    await chip.updateComplete;
+    const overlay = document.querySelector("[data-cf-tools-chip-overlay]")!;
+
+    host.style.setProperty("--cf-theme-color-text", "rgb(1, 1, 1)");
+    document.dispatchEvent(new CustomEvent("theme-preference-changed"));
+
+    expect(token(overlay, "--cf-theme-color-text")).toBe("rgb(1, 1, 1)");
+  } finally {
+    host.remove();
+  }
+});
+
 Deno.test("a primary button with no theme anywhere above it still draws its fill", async () => {
   const button = await mountIn(document.body, "cf-button");
   try {

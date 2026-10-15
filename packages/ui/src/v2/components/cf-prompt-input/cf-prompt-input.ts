@@ -9,6 +9,7 @@ import {
 import type { DID } from "@commonfabric/identity";
 import { BaseElement } from "../../core/base-element.ts";
 import {
+  AmbientThemeWatch,
   applyThemeToElement,
   type CFTheme,
   copyThemeProperties,
@@ -430,6 +431,11 @@ export class CFPromptInput extends BaseElement {
 
   constructor() {
     super();
+    new AmbientThemeWatch(this, () => {
+      if (this._mentionsOverlay) {
+        copyThemeProperties(this, this._mentionsOverlay);
+      }
+    });
     this.placeholder = "";
     this.buttonText = "Send";
     this.disabled = false;

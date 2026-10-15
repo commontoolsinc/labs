@@ -6,6 +6,7 @@ import { property, state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { createCellController } from "../../core/cell-controller.ts";
 import {
+  AmbientThemeWatch,
   applyThemeToElement,
   type CFTheme,
   copyThemeProperties,
@@ -289,6 +290,9 @@ export class CFToolsChip extends BaseElement {
 
   constructor() {
     super();
+    new AmbientThemeWatch(this, () => {
+      if (this.#overlay) copyThemeProperties(this, this.#overlay);
+    });
     this.label = "Tools";
     this.showCount = true;
     this.openOnHover = true;

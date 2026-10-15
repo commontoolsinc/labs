@@ -1,4 +1,5 @@
-import { createContext } from "@lit/context";
+import { ContextConsumer, createContext } from "@lit/context";
+import type { ReactiveController, ReactiveControllerHost } from "lit";
 
 /**
  * Color scheme for dynamic theming (SwiftUI-style)
@@ -788,6 +789,41 @@ export function copyThemeProperties(from: Element, to: HTMLElement) {
     const value = computed.getPropertyValue(name).trim();
     if (value) to.style.setProperty(name, value);
     else to.style.removeProperty(name);
+  }
+}
+
+/**
+ * Calls `onChange` when the theme in effect around `host` may have changed:
+ * the enclosing `cf-theme` provides a new theme, or the user's theme
+ * preference changes. An element that copies the theme onto an overlay
+ * outside its subtree uses it to copy again.
+ */
+export class AmbientThemeWatch implements ReactiveController {
+  #onChange: () => void;
+  #onPreference = () => this.#onChange();
+
+  constructor(
+    host: ReactiveControllerHost & HTMLElement,
+    onChange: () => void,
+  ) {
+    this.#onChange = onChange;
+    host.addController(this);
+    new ContextConsumer(host, {
+      context: cfThemeContext,
+      subscribe: true,
+      callback: () => this.#onChange(),
+    });
+  }
+
+  hostConnected() {
+    document.addEventListener("theme-preference-changed", this.#onPreference);
+  }
+
+  hostDisconnected() {
+    document.removeEventListener(
+      "theme-preference-changed",
+      this.#onPreference,
+    );
   }
 }
 
