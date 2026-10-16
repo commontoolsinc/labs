@@ -77,7 +77,10 @@ Array traversal (`traverse.ts`), `resolveAsCell()` (`cell.ts`), and lazy schema
 views (`schema-view.ts`) all create native snapshots. Their read dependencies
 remain on the original mutable array element. Moving an inline element's value
 behind an immutable ID changes its addressing, not what the computation depends
-on. A link or an explicitly declared cell handle already has its own identity.
+on. `resolveAsCell()` reads the containers on its way to an element for their
+shape alone, so a transaction that resolves a cell inside a document depends on
+that element and on the keys along the path, not on the rest of the document. A
+link or an explicitly declared cell handle already has its own identity.
 
 Traversal snapshots inline object or array elements read as values. An element
 requested as a cell keeps its array-slot address. A context with
