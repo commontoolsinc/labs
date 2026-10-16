@@ -12024,6 +12024,11 @@ export function* prepareBoundaryCommitSteps(
     // `clauseSubsumes` reads a personal space's owner as one of its readers.
     // So an instance holds its own user's personal data, and a personal
     // space owned by anyone else still misfits it.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/68
+    // TODO(mathpirate): The `User` clause admits more than §8.12.4 states at
+    // the pinned specs commit, and runs by default rather than behind a dial,
+    // on the CFC owner's ruling for this case. Remove this marker once the pin
+    // holds that ruling.
     const scopedReader = scope === "user" || scope === "session"
       ? scopedResidencyPrincipal(tx)
       : undefined;
