@@ -1505,23 +1505,26 @@ lanes as the full run.
 A lane decides all of this from the records its batches gathered rather than
 from what a command exited with. A runner that failed only on identities a flake
 rate excuses has told the run nothing it should stop for, and a runner that
-exited zero having run none of its unit has. So a unit that recorded nothing
-fails the lane, and an excusal holds only for an invocation that accounted for
-every identity it was asked to run that the tree holds. The lane reads what the
-tree holds from the name maps the registration preload leaves in the spool. An
-identity a unit's processes did not register, nor any test inside it, is absent
-where everything the map holds that encloses it is a `describe`, known as one by
-a leaf the map holds inside it. Such an identity is one the manifest carries
-from a rename or from a branch, and the lane's job summary lists it apart from
-the identities that withdraw an excusal. A registered test records the steps its
-body names as it runs, which no map holds, so an identity beneath a registered
-test shows nothing; so does one beneath a `describe` the map holds no leaf
-inside, and any identity of a unit whose processes left no name map. A name map
-the preload marked as interrupted, because an `error` or `unhandledrejection`
-event reached its file before the file's hooks and tests began, shows nothing
-either. An identity any of those leaves unrecorded withdraws the excusal. A
-package's browser tests, which run as one unit, are read from the mark the
-browser test runner leaves once it has loaded every file and run every test.
+exited zero having run none of its unit has. So a unit that a pass of its batch
+recorded nothing for fails the lane, and an excusal holds only where every pass
+accounted for every identity it was asked to run that the tree holds. Each pass
+is judged on its own records and its own name maps. A repeated unit whose second
+pass stopped part way is not accounted for by the first pass, which ran it to
+the end. The lane reads what the tree holds from the name maps the registration
+preload leaves in the spool. An identity a unit's processes did not register,
+nor any test inside it, is absent where everything the map holds that encloses
+it is a `describe`, known as one by a leaf the map holds inside it. Such an
+identity is one the manifest carries from a rename or from a branch, and the
+lane's job summary lists it apart from the identities that withdraw an excusal.
+A registered test records the steps its body names as it runs, which no map
+holds, so an identity beneath a registered test shows nothing; so does one
+beneath a `describe` the map holds no leaf inside, and any identity of a unit
+whose processes left no name map. A name map the preload marked as interrupted,
+because an `error` or `unhandledrejection` event reached its file before the
+file's hooks and tests began, shows nothing either. An identity any of those
+leaves unrecorded withdraws the excusal. A package's browser tests, which run as
+one unit, are read from the mark the browser test runner leaves once it has
+loaded every file and run every test.
 
 ## What the dashboard shows
 
@@ -1675,15 +1678,15 @@ itself.
   how many runs failed at the commit and passed at the parent, and the store's
   flake counts for the test. Such a test is not also listed as a first failure.
   Which failures a run excused is a fact about that run: a lane excuses a flaky
-  test's failure only where its batch accounted for every identity it was asked
-  to run that the tree holds, and a run that did not apply the rule excused
-  nothing. The lanes
-  record each identity they excused, and the report reads those records one
-  artifact at a time. Each `test-records-tests-<lane>-a<attempt>` artifact
-  holds one lane's attempt. An identity counts as excused only where every
-  artifact that failed it also excused it, since an attempt that failed it
-  without excusing it failed the run. The manifest supplies only the store's flake counts, and a
-  report that cannot read it gives the note without them.
+  test's failure only where every pass of its batch accounted for every identity
+  that pass was asked to run that the tree holds, and a run that did not apply
+  the rule excused nothing. The lanes record each identity they excused, and the
+  report reads those records one artifact at a time. Each
+  `test-records-tests-<lane>-a<attempt>` artifact holds one lane's attempt. An
+  identity counts as excused only where every artifact that failed it also
+  excused it, since an attempt that failed it without excusing it failed the
+  run. The manifest supplies only the store's flake counts, and a report that
+  cannot read it gives the note without them.
 - **A rename that discarded history**, with the number of catches it
   would bring back and the line to append under
   `tasks/test-identity-aliases/`. Four things have to hold: the
