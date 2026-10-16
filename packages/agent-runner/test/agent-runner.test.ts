@@ -665,6 +665,7 @@ describe("agent runner", () => {
     const recoveryReady = defer<void>();
     const releaseRenewal = defer<void>();
     const executionStarted = defer<ClaimedAgentRun>();
+    const wakeScheduled = defer<void>();
     const held = defer<AgentRunExecution>();
     const original = runnerSide.editWithRetry.bind(runnerSide);
     let delayedRenewal = false;
@@ -701,11 +702,29 @@ describe("agent runner", () => {
     let wake: (() => void) | undefined;
     const runner = await startRunner((run) => {
       executionStarted.resolve(run);
+      // The run ends when it is aborted, so that stopping the runner in
+      // teardown returns even when the case fails before it resolves `held`.
+      run.signal.addEventListener(
+        "abort",
+        () => held.resolve({ outcome: "cancelled" }),
+        { once: true },
+      );
       return held.promise;
     }, {
       runtimeForHost: () => Promise.resolve(runnerSide),
+      // The scan that claims the record schedules the lease's expiry wake
+      // only after the claim's registration completes, and the run starts
+      // without waiting for either. Holding the registration until the
+      // renewal is in flight makes the wake always come after the run has
+      // started. This case does not test registration, so nothing is written.
+      registerRunner: async (entry) => {
+        if (entry?.lastClaimAt !== undefined) await renewalReady.promise;
+      },
       scheduleAt: (at, scheduled) => {
-        if (at.toISOString() === "2026-09-18T12:01:00.000Z") wake = scheduled;
+        if (at.toISOString() === "2026-09-18T12:01:00.000Z") {
+          wake = scheduled;
+          wakeScheduled.resolve();
+        }
         return () => {};
       },
     });
@@ -715,6 +734,7 @@ describe("agent runner", () => {
     clock = new Date("2026-09-18T12:00:30.000Z");
     const renewal = active.renewLease();
     await renewalReady.promise;
+    await wakeScheduled.promise;
     clock = new Date("2026-09-18T12:01:00.000Z");
     wake!();
     await recoveryReady.promise;

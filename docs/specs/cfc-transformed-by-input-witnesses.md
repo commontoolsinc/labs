@@ -187,7 +187,9 @@ included. A destination qualifies only when all of these hold:
 - no reference sits anywhere in its final value, because a pointer the diff
   found in place, such as a write redirect it writes through, is not one the
   writer supplied;
-- the join fits every ceiling declared at or beneath it;
+- the join fits every ceiling declared at or beneath it, each joined with the
+  document's residency clauses (§8.12.4, as `cfc-enforcement-matrix.md` §4
+  describes them);
 - the transaction created the destination, or read no content at or beneath
   it, nor recursively above it. A writer that read its destination can carry a
   value it found there into what it sets, and the diff leaves that value in

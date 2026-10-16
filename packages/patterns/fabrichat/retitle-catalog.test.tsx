@@ -2,13 +2,15 @@
  * A retitle reaching the catalogs a room is listed in. The member who retitles
  * the room tells their manager, as a write in the room does, and their catalog
  * lists the room under the new title at once. Another member's catalog follows
- * when their manager next hears of the room: here, on their next message. A
- * retitle moves the entry's title and nothing else, so its revision and
- * membership stay as they were. A retitle is a write in the room, and writing
- * in a room is joining it, so a member who forgot the room and retitles it has
- * it back among their chats, as a message or a reaction would. An entry that
- * names the room's space as something other than a room, as a container's
- * does, keeps its own title.
+ * when their manager next hears of the room other than by a message or a
+ * reaction: here, when they open it, and their host tells their manager they
+ * joined it. Their next message leaves the title as it is. A retitle moves
+ * the entry's title and nothing else, so its revision and membership stay as
+ * they were. A retitle is a write in the room, and writing in a room is
+ * joining it, so a member who forgot the room and retitles it has it back among
+ * their chats, as a message or a reaction would. An entry that names the
+ * room's space as something other than a room, as a container's does, keeps
+ * its own title.
  */
 import {
   action,
@@ -138,6 +140,20 @@ const listAsContainer = handler<unknown, EntryState>((
   });
 });
 
+/** What `visitRoom` is bound to. */
+interface VisitState {
+  /** The manager's `joinRoom`. */
+  joinRoom: Stream<ManagerStreamEvent>;
+
+  /** The room. */
+  room: Cell<ChatRoomLink>;
+}
+
+/** Tells the manager the user joined the room, as a host does on opening it. */
+const visitRoom = handler<unknown, VisitState>((_event, { joinRoom, room }) => {
+  joinRoom.send({ room });
+});
+
 /** Forgets the room, at the revision its catalog entry holds. */
 const forgetRoom = handler<unknown, EntryState>((
   _event,
@@ -183,6 +199,9 @@ interface ViewerOutput {
 
   /** Has the viewer's manager forget the room. */
   forget: Stream<unknown>;
+
+  /** Tells the viewer's manager they joined the room, as opening it does. */
+  visit: Stream<unknown>;
 
   /** Lists the room's space in the viewer's catalog as a container. */
   listAsContainer: Stream<unknown>;
@@ -248,6 +267,7 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     setTitle: room.setTitle,
     list: listRoom({ catalog, room: self }),
     forget: forgetRoom({ catalog, room: self, forget: manager.forget }),
+    visit: visitRoom({ joinRoom: manager.joinRoom, room: self }),
     listAsContainer: listAsContainer({ catalog, room: self }),
     entryTitle: computed(() => entry?.title),
     entryRevision: computed(() => entry?.revision),
@@ -297,8 +317,8 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   };
 });
 
-// Listed the room before the retitle; his catalog follows on his next
-// message.
+// Listed the room before the retitle; his catalog follows when he opens the
+// room, and not on his next message.
 export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const viewer = Viewer({
     setup,
@@ -320,6 +340,12 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
         event: typed("Sounds good"),
         trustedUi: sendGesture,
       },
+      {
+        assertion: assert(() =>
+          viewer.entryTitle === undefined && viewer.entryState === "saved"
+        ),
+      },
+      { action: viewer.visit, event: {} },
       {
         assertion: assert(() =>
           viewer.entryTitle === "Weekend plans" &&
