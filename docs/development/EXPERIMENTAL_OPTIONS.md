@@ -771,17 +771,22 @@ holds the measurements and the conditions for revisiting.
   local. Its reads create no remote watches, and outgoing commits omit its
   operations and read dependencies. Explicitly named foreign session instances
   use server reads and admission; they are not treated as locally absent.
-  Transactions whose reads, writes, and preconditions are entirely local settle
-  without opening a connection.
-  Shared reads still require server validation, even when all writes are local.
-  Mixed commits roll back session writes on rejection. Runtimes sharing a
-  storage manager must agree on the effective session-storage policy.
+  A commit whose writes are all local settles on the replica without a
+  round trip, whatever it read: a shared read names a document the replica
+  watches, so a write that outdates the read arrives as a frame and re-runs
+  the derivation, which is what a rejected verdict would have done after the
+  same frame. A commit carrying a precondition on a shared document still
+  travels, with no operations, since that precondition is checked against
+  the server's head. Mixed commits roll back session writes on rejection.
+  Runtimes sharing a storage manager must agree on the effective
+  session-storage policy.
 - **Toolshed:** publishes the deployment's flag for clients but keeps its own
   webhook runtime's session documents synchronized, so their values remain in
   the server store across runtime recreation.
 - **Rollout:** deploy memory-server support for validation-only commits before
-  enabling the flag. Older servers reject session writes that require shared-read
-  validation. Leave the flag off until that support is deployed.
+  enabling the flag. Older servers reject a session write that carries a
+  precondition on a shared document. Leave the flag off until that support is
+  deployed.
 - **Removal path:** validate rollback, route replacement, scoped reactivity,
   and the performance benefit with the flag enabled; then graduate local
   session storage for client execution and remove the flag. Server execution
