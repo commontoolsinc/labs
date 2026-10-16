@@ -1209,12 +1209,21 @@ space is stated as read for none of them: one member's reading cannot speak for
 another member's cells. `--space-db` reaches the children as it reaches the
 parent.
 
-The read is one hop wide. A pattern's results are their own cells, linked from
-the piece that names them, and the derived label sits on the cell — so the
-labels of the cells a run's own cells link to are read too, at the path the link
-sits at. The walk descends through the objects and arrays of a value to find
-those links and stops at each: a linked cell's own links belong to that cell,
-not to this one.
+The read follows links. A pattern's results are their own cells, linked from the
+piece that names them, and the derived label sits on the cell — so the labels of
+the cells a run's own cells link to are read too, each under the path that
+reached it, and so are the cells those link to in turn, up to sixteen links out.
+The walk descends through the objects and arrays of a value to find the links. A
+link further out than it follows is recorded unread at its path, and a walk that
+has read four thousand and ninety-six documents for one cell stops and marks
+that cell's labels partial.
+
+Each cell's record also lists the path of every link the walk found, as
+`linkPaths`, whether the link was followed or left unread, and whether or not
+what it reaches carries a label. A reference leaves a label entry of its own
+only where it carries one, so a link to a cell the space holds no label for
+leaves no entry at its path or beneath it. The list is what tells that cell from
+one holding no link.
 
 It descends a bounded way, and what it does not reach it records rather than
 passes over. The bounds sit far above the shape of any document a pattern writes

@@ -3774,6 +3774,14 @@ one check answering to two authorities, which is the shape AUD-15 and AUD-15a
 are already split along. AUD-9 now expresses the six and nothing else; AUD-24
 carries the snapshot as `extends`, and a finding from it renders as ours.
 
+**AUD-25 counts the links the snapshot's reader found.** Each cell record lists
+the path of every link its reader found in the cell, as `linkPaths`, and those
+are the links the check counts. A reference leaves a label entry of its own only
+where it carries a label, so a result that links its rows bare has no such entry
+to count, and the list is what keeps that run from reading as one whose cells
+hold no link. A record that lists no link paths is read by the entries a link's
+own label left.
+
 [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each
 quote to still be in it, so a specification edit that invalidates a check breaks

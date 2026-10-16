@@ -37,11 +37,18 @@ describe("verb-call", () => {
   let piece: NormalizedFullLink;
   let cell: Cell<{ total: number }>;
 
-  beforeEach(async () => {
+  /**
+   * Starts a runtime under `experimental` and creates the counter piece in
+   * it, leaving both for `afterEach()` to close.
+   */
+  const start = async (
+    experimental?: { commitPreconditions?: boolean },
+  ): Promise<void> => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
+      ...(experimental === undefined ? {} : { experimental }),
     });
     const pieces = new PiecesController(
       createSession({
@@ -54,7 +61,9 @@ describe("verb-call", () => {
     const created = await pieces.create(COUNTER_SOURCE, { input: {} });
     cell = created.getCell() as Cell<{ total: number }>;
     piece = cell.getAsNormalizedFullLink();
-  });
+  };
+
+  beforeEach(() => start());
 
   afterEach(async () => {
     await runtime?.dispose();
@@ -119,6 +128,23 @@ describe("verb-call", () => {
         "add: amount must be positive",
       );
       expect(await total()).toBe(0);
+    });
+
+    it("settles with no receipt and no result when the runtime writes no receipt for the handling", async () => {
+      // A handling's outcome is written to its receipt only under
+      // `commitPreconditions`. Without it the handling still commits, and the
+      // call settles on that commit alone: nothing names a receipt, so
+      // nothing is read back as the result, and the write it made stands.
+      await runtime.dispose();
+      await storageManager.close();
+      await start({ commitPreconditions: false });
+
+      const call = await callVerb(runtime, piece, "add", { amount: 3 });
+
+      expect(call).toMatchObject({ status: "settled" });
+      expect(call).not.toHaveProperty("receipt");
+      expect(call).not.toHaveProperty("result");
+      expect(await total()).toBe(3);
     });
   });
 });

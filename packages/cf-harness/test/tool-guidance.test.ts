@@ -167,6 +167,12 @@ describe("tool-guidance", () => {
     expect(guidance).not.toContain(LOOM_COMMANDS_TOOL_GUIDANCE);
   });
 
+  it("tells a pieces task to read the path a verb's parameter points at", () => {
+    const guidance = guidanceFor("pieces");
+    expect(guidance).toContain("Before call_verb, describe the piece");
+    expect(guidance).toContain("read that path with read_value");
+  });
+
   it("gives a respond task no tool guidance", () => {
     expect(guidanceFor("respond")).toEqual("");
   });

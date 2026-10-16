@@ -446,9 +446,11 @@ where the pre-sync was no longer the whole cost.
 - [ ] The remaining label map of a row is its 25 fixed entries, about
       9 KB, of which the `LinkReference` atoms are the largest share: each
       spells its source and its target in full, and on an in-place link
-      entry both restate the link stored beside it. Shrinking that is a
-      change to the atom's registered shape, which the Contextual Flow
-      Control specification owns.
+      entry both restate the link stored beside it.
+      `cfc-independent-reference-labels.md` stops minting the atom, so a
+      slot written after it carries none, and a slot written before keeps
+      its atom until its pointer is replaced; this item closes on a
+      measurement of a freshly written row.
 - [ ] A load of a materialized room still commits for a fifth of its time,
       writing a reader's own instance of every session-scoped derivation
       in a commit of its own: 429 commits of about 400 bytes on the

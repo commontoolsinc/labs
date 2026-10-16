@@ -101,8 +101,8 @@ import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { ContextualFlowControl, declaredSchemaScope } from "./cfc.ts";
 import {
+  cfcAcquisitionViewForDereferenceTraces,
   type CfcLabelView,
-  cfcLabelViewForDereferenceTraces,
   cloneCfcLabelView,
   mergeCfcLabelViews,
   rebaseCfcLabelView,
@@ -3801,7 +3801,10 @@ export class CellImpl<T extends FabricValue>
       "value",
       { markIfcCrossings: true },
     );
-    const dereferenceView = cfcLabelViewForDereferenceTraces(
+    // The handle carries how it was obtained, the restrictions of the slots
+    // the resolution left, and nothing of the document it names: those
+    // labels are read from the document when the handle is followed.
+    const dereferenceView = cfcAcquisitionViewForDereferenceTraces(
       readTx,
       readTx.getCfcState().dereferenceTraces.slice(tracesBefore),
     );
