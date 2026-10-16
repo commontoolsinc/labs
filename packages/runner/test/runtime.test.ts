@@ -312,6 +312,29 @@ describe("runtime", () => {
       expect(immutable.withTx(tx).key("ref").get()).toEqual({ name: "x" });
     });
 
+    it("resolves a linked value through a reference inside an array element", () => {
+      // An object element read by value gets a snapshot of its own, whose
+      // origin is the snapshot it was read out of. That root was minted from
+      // a value no space has stored, so the element's links resolve their
+      // references in the registry as the root's do.
+      const target = runtime.getCell(
+        space,
+        "immutable-target",
+        targetSchema,
+        tx,
+      );
+      target.set({ name: "x" });
+      const link = target.getAsLink({ includeSchema: true });
+
+      const immutable = runtime.getImmutableCell(
+        space,
+        { items: [{ ref: link }] },
+        undefined,
+      );
+      expect(immutable.withTx(tx).key("items").key(0).key("ref").get())
+        .toEqual({ name: "x" });
+    });
+
     it("stores a value linking to such a document and reads it back", async () => {
       const target = runtime.getCell(
         space,

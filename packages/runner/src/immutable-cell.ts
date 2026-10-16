@@ -436,12 +436,20 @@ export function isInlineCellId(id: string): boolean {
 
 /**
  * Whether `id` names a snapshot minted from a value no space has stored: one
- * read out of no stored document, so with no origin. The links inside such a
- * snapshot were never written, so no space holds the closure a reference
- * among their schemas names; the registry that minted the reference does.
+ * read out of no stored document, so with no origin, or an element snapshot
+ * whose chain of origins ends at one rather than at a stored document. The
+ * links inside such a snapshot were never written, so no space holds the
+ * closure a reference among their schemas names; the registry that minted
+ * the reference does.
  */
 export function mintedFromUnstoredValue(id: string): boolean {
-  return isImmutableCellId(id) && immutableSnapshot(id).origin === undefined;
+  while (isImmutableCellId(id)) {
+    const origin = immutableSnapshot(id).origin;
+    if (origin === undefined) return true;
+    if (origin.id === undefined) return false;
+    id = origin.id;
+  }
+  return false;
 }
 
 /** Looks up a runtime-local snapshot without retaining its runtime. */
