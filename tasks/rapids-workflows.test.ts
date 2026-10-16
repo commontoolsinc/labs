@@ -324,6 +324,7 @@ describe("rapids-workflows", () => {
     });
     const green = {
       name: "CI",
+      path: ".github/workflows/deno.yml",
       event: "push",
       conclusion: "success",
       head_branch: "main",
@@ -344,7 +345,8 @@ describe("rapids-workflows", () => {
       expect(allowed(green)).toBe(true);
       const deployed = {
         ...green,
-        name: "Deploy Rapids release",
+        name: `Deploy Rapids ${infraSha}`,
+        path: ".github/workflows/rapids-release.yml",
         event: "workflow_dispatch",
       };
       for (const conclusion of ["failure", "cancelled", "skipped"]) {
@@ -361,7 +363,7 @@ describe("rapids-workflows", () => {
           { head_branch: "feature" },
           { head_repository: { full_name: "contributor/labs" } },
           { event: "pull_request" },
-          { name: "Tomorrow's Test Order" },
+          { path: ".github/workflows/test-order-tomorrow.yml" },
         ]
       ) {
         expect(allowed({ ...green, ...changes })).toBe(false);
@@ -391,17 +393,20 @@ describe("rapids-workflows", () => {
       expect(send.env.GH_TOKEN).toBe("${{ steps.token.outputs.token }}");
       expect(send.env.PRODUCER_RUN).toBe("${{ github.event.workflow_run.id }}");
       if (target === "infra") {
-        expect(send.env.WORKFLOW_NAME).toBe(
-          "${{ github.event.workflow_run.name }}",
+        expect(send.env.WORKFLOW_PATH).toBe(
+          "${{ github.event.workflow_run.path }}",
         );
       }
       for (
-        const name of target === "infra"
-          ? ["CI", "Deploy Rapids release"]
-          : ["CI"]
+        const path of target === "infra"
+          ? [
+            ".github/workflows/deno.yml",
+            ".github/workflows/rapids-release.yml",
+          ]
+          : [".github/workflows/deno.yml"]
       ) {
         const result = await runStep(send, {
-          WORKFLOW_NAME: name,
+          WORKFLOW_PATH: path,
           PRODUCER_RUN: "2468",
         }, {
           gh:
@@ -418,7 +423,7 @@ describe("rapids-workflows", () => {
           `repos/commonfabric/${target}/actions/workflows/${endpoint}/dispatches`,
         ];
         expect(result.calls.split("\n")).toEqual(
-          name === "CI"
+          path === ".github/workflows/deno.yml"
             ? [
               ...request,
               "-f",
