@@ -62,6 +62,7 @@ export const RESEARCH_TOOL_GUIDANCE =
 export const PIECES_TOOL_GUIDANCE = [
   "Reading and acting on pieces:",
   "- describe_handle on a piece lists its verbs: each one's name, author's description, event schema and result schema. call_verb sends one by name with an event satisfying its schema; where the event takes a piece, pass its handle token, never a copy of its fields.",
+  '- Before call_verb, describe the piece; where a parameter\'s description points at a path in the piece ("as `rings` lists it"), read that path with read_value and pass a value it holds.',
   "- read_value reads what the task needs and no more: select one field rather than reading a whole piece. What you read joins the run's context, and its CFC label stays on everything the run produces afterwards.",
   "- A SQLite database describes as `database`: each table's typed columns, the labels they carry, and under `fill` its row count and each column's non-NULL count. Read `fill` before querying: a column counting 0 is NULL on every row, so filtering on it returns nothing; `unread` means not counted, not empty. Read a database with `db.query` over the handle, not as a value.",
   "- A table with `rowLabelReads` has a per-row label rule over those columns: a query must select each by its own name (an alias does not count) or it is refused on the result's `error` rather than as rows; with `rowLabelReadsIncomplete` the rule needs columns not named, so every query is refused.",

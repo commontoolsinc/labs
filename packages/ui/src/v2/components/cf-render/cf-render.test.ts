@@ -1762,6 +1762,22 @@ describe("CFRender piece context menu", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("announces a piece shown in a non-editable island inside an editor", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const event = contextMenuEvent(
+      { tagName: "SPAN", isContentEditable: false } as unknown as EventTarget,
+      {},
+      [{ tagName: "DIV", isContentEditable: true } as unknown as EventTarget],
+    );
+
+    expect(rightClick(element, event)?.pieceId).toBe("of:fid1:piece");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("leaves a shift-held click to the platform menu", () => {
     const element = new CFRender();
     element.cell = createMockCellHandle({ name: "piece" }, {

@@ -5260,6 +5260,13 @@ export class CfHarnessPromptLoop {
           toolId,
           input,
           signal,
+          evaluateToolPolicy(
+            this.engine.getRunState().cfcEnforcementMode,
+            tool.descriptor,
+            "side-effect",
+            promptSlotBinding,
+            input,
+          ).allowed,
         );
       signal?.throwIfAborted();
     } catch (error) {
@@ -5928,7 +5935,8 @@ export class CfHarnessPromptLoop {
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: Record<string, unknown>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    sideEffectsAuthorized: boolean,
   ): Promise<{
     output: Awaited<ReturnType<CfHarnessEngine["invokeBuiltinTool"]>>["output"];
     resultRef: ToolResultRef;
@@ -5936,7 +5944,7 @@ export class CfHarnessPromptLoop {
     const result = await this.engine.invokeBuiltinTool(
       toolId,
       input as unknown as BuiltinToolInputMap[TToolId],
-      signal !== undefined ? { signal } : {},
+      { ...(signal !== undefined ? { signal } : {}), sideEffectsAuthorized },
     );
     return {
       output: result.output,

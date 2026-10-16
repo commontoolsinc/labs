@@ -1,22 +1,20 @@
 // Why: a CFC prepare rejection is not one thing, and only one kind of it may
 // stop the scheduler.
 //
-// A VERDICT is a refusal an immediate re-run reproduces, and two shapes
-// qualify. Policy evaluated this transaction's data and refused it — a
-// writer-fit misfit, an unprivileged write to a protected `cfc` path, an
-// exact-copy or monotonicity violation. Or the input the evaluation needed is
-// absent from stored state the transaction already has, so reading it again
-// returns the same absence — a link source document in hand that carries
-// neither an envelope nor a result schema. Either way re-running recomputes
-// the identical refused write, so a verdict is terminal: never retried,
-// surfaced.
+// A VERDICT is a refusal an immediate re-run reproduces: policy evaluated this
+// transaction's data and refused it — a writer-fit misfit, an unprivileged
+// write to a protected `cfc` path, an exact-copy or monotonicity violation.
+// Re-running recomputes the identical refused write, so a verdict is terminal:
+// never retried, surfaced.
 //
-// The second shape carries an obligation the first does not. It is terminal
-// over the state in hand rather than over the data, so its producer leaves the
-// run DEPENDING on the state that would change the answer. The value arriving
-// there re-triggers the reader, which is a fresh trigger with a fresh budget
-// rather than a retry. A producer that cannot establish that dependency has no
-// verdict to claim.
+// A refusal for want of something stored state does not hold yet is not one,
+// even where reading again returns the same absence. Ending the retries on it
+// is sound only where the run DEPENDS on the state that would change the
+// answer, so that the value arriving there triggers the run again, as a fresh
+// trigger with a fresh budget rather than a retry. Prepare reads stored labels
+// invisibly to reactivity, so a producer has no such dependency to point at:
+// a write floor that finds a linked source's stored labels short of the floor
+// leaves its failure untagged.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not
@@ -45,7 +43,7 @@
 // every reason was a verdict unless marked. A producer audit found that false
 // in both directions — several families are mixed, and several DISCARD an
 // availability reason they received upstream (`verifyWriteFloor` drops
-// `derivePersistedLinkLabel`'s; the `maxConfidentiality` input gate reports
+// `linkedSourceEvidence`'s; the `maxConfidentiality` input gate reports
 // its resolution failures and withholds the tag; the sink-ceiling gate tags
 // its refusal only when its enforce-mode rewrite resolved every module
 // policy, since an unresolved manifest might carry the discharge that admits
@@ -69,11 +67,10 @@
 
 /**
  * Stable machine token marking a CFC prepare reason as a VERDICT — policy
- * evaluated this transaction's data and refused it, or the input it needed is
- * absent from stored state the transaction already has, so re-running
- * recomputes the identical refused write. Emitted into the prepare `reason`
- * (see `prepare.ts`) so it survives into the commit-rejection message, and
- * read at the commit boundary to decide that the rejection is terminal.
+ * evaluated this transaction's data and refused it, so re-running recomputes
+ * the identical refused write. Emitted into the prepare `reason` (see
+ * `prepare.ts`) so it survives into the commit-rejection message, and read at
+ * the commit boundary to decide that the rejection is terminal.
  */
 export const CFC_VERDICT_REASON = "cfc-verdict";
 

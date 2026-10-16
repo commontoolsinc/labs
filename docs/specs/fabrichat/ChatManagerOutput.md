@@ -76,6 +76,7 @@ interface ChatManagerOutput {
     requestId?: string;
     room: Cell<ChatRoomOutput>;
     container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>;
+    messageAct?: boolean;
   }>;
   forget: Stream<{
     requestId: string;
@@ -175,7 +176,7 @@ room's members by principal or by profile itself.
   ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)), as
   stored. A standalone room's catalog `title` is a display hint: the room's
   title as the manager last heard of it, refreshed when it handles `accept` or
-  `joinRoom` for the room. A client reads a room's current title from the
+  `joinRoom` for the room, other than a `joinRoom` marked `messageAct`. A client reads a room's current title from the
   room. Membership checks belong to the manager's Home-space handling. A room
   sends
   [`joinRoom`](#joinroomrequestid-string-room-cellchatroomoutput) after a
@@ -436,6 +437,10 @@ matching declaration is refused with `space-own-chat`.
 - `room: Cell<ChatRoomOutput>` — A link to the room this user has joined.
 - `container?: Cell<{ chatRoom?: Cell<ChatRoomOutput> }>` — The root declaring
   a container conversation. Its `chatRoom` must resolve to `room`.
+- `messageAct?: boolean` — Whether the user joined by sending a message or a
+  reaction in the room. A room marks the `joinRoom` it sends with each of
+  those; absent, the join came some other way, a retitle or the user opening
+  the room among them.
 
 Makes a room this user has joined one of their chats. The caller says what
 happened, that the user entered the room, and the manager decides what that
@@ -447,7 +452,9 @@ opening the room's page.
 - **Admitted:** without a reviewed gesture, as for `accept`.
 - **Effect:** for a room this user's chats list already, nothing but to bring
   the title its catalog entry holds up to the room's, where the two differ,
-  leaving the entry's revision and membership as they are. Otherwise what
+  leaving the entry's revision and membership as they are; with `messageAct`,
+  which arrives with every message and reaction and none of which changes the
+  title, not even that, and the room's `about` goes unread. Otherwise what
   `accept` does with no `counterpart` and without `keepArchived`: records an
   entry in `rooms`, putting a forgotten room back, and adds this user's profile
   to the room's participants once it has resolved. One case differs: a direct

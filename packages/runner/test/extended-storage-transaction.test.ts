@@ -23,6 +23,7 @@ import type {
   IExtendedStorageTransaction,
   TransactionWriteDetail,
 } from "../src/storage/interface.ts";
+import { CFC_GRANT_ID_PREFIX } from "../src/cfc/grants.ts";
 import { RuntimeOwnedStores } from "../src/cfc/runtime-owned-stores.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_RUNTIME_OWNED_STORE,
@@ -822,10 +823,11 @@ describe("extended-storage-transaction", () => {
   });
 
   describe("a seal destination that discards the transaction", () => {
-    // The commit links an unlabeled document into a labeled one, which the
-    // CFC boundary pass refuses for want of the source's metadata. A
-    // destination that drops the writes instead of sealing them leaves the
-    // pass nothing to guard, so the commit seals without running it.
+    // The commit writes a reserved CFC grant document outside `writeCfcGrant`,
+    // which the CFC boundary pass refuses as an unprivileged write to policy
+    // state. A destination that drops the writes instead of sealing them
+    // leaves the pass nothing to guard, so the commit seals without running
+    // it.
 
     /** How many commits the CFC write gate has refused in this process. */
     const policyRefusals = (): number => {
@@ -833,17 +835,12 @@ describe("extended-storage-transaction", () => {
       return typeof cfc === "object" ? cfc["write-policy-gate"]?.total ?? 0 : 0;
     };
 
-    const LABELED = {
-      type: "object",
-      ifc: { confidentiality: ["personal-space"] },
-    } as const satisfies JSONSchema;
-
     let discarding: ReturnType<typeof StorageManager.emulate>;
     let serving: Runtime;
     let discards: boolean;
     let sealed: number;
 
-    beforeEach(async () => {
+    beforeEach(() => {
       discarding = StorageManager.emulate({ as: signer });
       serving = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -867,17 +864,6 @@ describe("extended-storage-transaction", () => {
           return discards ? Promise.resolve({ ok: {} }) : tx.tx.commit();
         },
       });
-      const seed = serving.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
-      serving.getCell(space, "discarded-target", LABELED, seed).set({
-        existing: true,
-      });
-      serving.getCell(space, "discarded-source", undefined, seed).set({
-        title: "plain",
-      });
-      seed.prepareCfc();
-      expect((await seed.commit().settled).ok).toBeDefined();
-      sealed = 0;
     });
     afterEach(async () => {
       await serving?.dispose();
@@ -885,65 +871,72 @@ describe("extended-storage-transaction", () => {
     });
 
     /**
-     * Commits the link the boundary pass refuses, prepared first as the
+     * Commits the write the boundary pass refuses, prepared first as the
      * scheduler prepares a handler's transaction, and returns the result with
      * the write-policy refusals the runtime reported meanwhile. `between` runs
      * after the preparation and before the commit, where the destination's
      * answer can change.
      */
-    const commitLink = async (between: () => void = () => {}) => {
+    const commitRefusedWrite = async (between: () => void = () => {}) => {
       const refusedBefore = policyRefusals();
       const tx = serving.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      serving.getCell(space, "discarded-target", undefined, tx).set(
-        serving.getCell(space, "discarded-source", undefined, tx),
-      );
+      tx.writeOrThrow({
+        space,
+        id: `${CFC_GRANT_ID_PREFIX}discarded-probe` as URI,
+        type: "application/json",
+        path: ["value"],
+      }, { forged: true });
       serving.prepareTxForCommit(tx);
       between();
       const result = await tx.commit().settled;
       return { result, refused: policyRefusals() - refusedBefore };
     };
 
-    it("refuses the link when the destination seals it", async () => {
-      const { result, refused } = await commitLink();
+    it("refuses the write when the destination seals it", async () => {
+      const { result, refused } = await commitRefusedWrite();
 
       expect(result.error?.name).toBe("CfcCommitRefusalError");
-      expect(result.error?.message).toContain("missing link source metadata");
+      expect(result.error?.message).toContain(
+        "unprivileged write to protected runtime surface",
+      );
       expect(refused).toBeGreaterThan(0);
       expect(sealed).toBe(0);
     });
 
-    it("hands the link to the destination, reporting no refusal, when the destination discards it", async () => {
+    it("hands the write to the destination, reporting no refusal, when the destination discards it", async () => {
       discards = true;
 
-      const { result, refused } = await commitLink();
+      const { result, refused } = await commitRefusedWrite();
 
       expect(result.error).toBeUndefined();
       expect(refused).toBe(0);
       expect(sealed).toBe(1);
     });
 
-    it("refuses the link at commit when the destination discarded it at preparation but seals it now", async () => {
+    it("refuses the write at commit when the destination discarded it at preparation but seals it now", async () => {
       // The overlay prunes its memory of terminal intents, so a run it would
       // have dropped at preparation can be one it seals at commit. The commit
       // asks again, and runs the pass the preparation skipped.
       discards = true;
 
-      const { result, refused } = await commitLink(() => {
+      const { result, refused } = await commitRefusedWrite(() => {
         discards = false;
       });
 
       expect(result.error?.name).toBe("CfcCommitRefusalError");
-      expect(result.error?.message).toContain("missing link source metadata");
+      expect(result.error?.message).toContain(
+        "unprivileged write to protected runtime surface",
+      );
       expect(refused).toBeGreaterThan(0);
       expect(sealed).toBe(0);
     });
 
-    it("hands the destination a link the pass refused at preparation, when the destination discards it at commit", async () => {
+    it("hands the destination a write the pass refused at preparation, when the destination discards it at commit", async () => {
       // The pass ran at preparation and reported its refusal. The commit does
       // not fail on that verdict: the destination drops the writes, so the
-      // refused link reaches no store and no reader.
-      const { result, refused } = await commitLink(() => {
+      // refused write reaches no store and no reader.
+      const { result, refused } = await commitRefusedWrite(() => {
         discards = true;
       });
 
