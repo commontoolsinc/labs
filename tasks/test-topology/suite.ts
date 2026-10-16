@@ -232,6 +232,15 @@ export interface Suite {
    */
   measured?: readonly MeasuredSet[];
 
+  /**
+   * What each unit judges, for a suite whose units are verdicts over other
+   * suites' units rather than anything a lane runs. Choosing such a unit
+   * runs every unit it judges, whole, and something outside the lanes
+   * reaches the verdict from what they produced and records it under the
+   * unit's identity. Absent for every suite a lane runs.
+   */
+  judges?: ReadonlyMap<Unit, Judged>;
+
   /** Whether a record belongs to one of this suite's units, or to it. */
   locate(record: LocatableRecord): Location | undefined;
 
@@ -244,6 +253,15 @@ export interface Suite {
     units: readonly UnitRequest[],
     context: CommandContext,
   ): Promise<Invocation[]>;
+}
+
+/** The units of another suite one verdict is reached over, and its name. */
+export interface Judged {
+  suite: string;
+  units: readonly Unit[];
+
+  /** The identity the verdict is recorded under. */
+  identity: TestIdentity;
 }
 
 /**
@@ -285,10 +303,11 @@ export interface MeasuredSet {
   member: string;
 
   /**
-   * The paths a change reaches this set by. Reaching it makes every unit
-   * below mandatory, which is the same declaration vocabulary that
-   * reaches a unit no diff can name, so one mechanism answers "what did
-   * this change touch" wherever the question comes up.
+   * The paths a change reaches this set by. Reaching it lets a plan choose
+   * the set's coverage gate, which runs every unit below. It is the same
+   * declaration vocabulary that reaches a unit no diff can name, so one
+   * mechanism answers "what did this change touch" wherever the question
+   * comes up.
    */
   reachedBy: ReachedBy;
 

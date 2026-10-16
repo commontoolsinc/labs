@@ -78,6 +78,8 @@ import {
   type PricedManifest,
   standIn,
 } from "./test-selection/census.ts";
+import type { CoverageGateSelection } from "./test-selection/coverage.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import {
   type CommandContext,
   denoTestCommand,
@@ -172,10 +174,10 @@ function pricedFor(
       manifest,
       mandatory: new Map(),
       unmeasured: 0,
-      coverage: { sets: [], reached: [] },
+      gates: [],
     },
     suites,
-    full,
+    () => full,
   ).manifest;
 }
 
@@ -1207,7 +1209,7 @@ describe("how many lanes the full run asks for", () => {
     const seen = pricedForRun(
       census(deps.suites, (await deps.manifest()).manifest, new Set()),
       deps.suites,
-      true,
+      () => true,
     );
     const laid = plan({
       manifest: seen.manifest,
@@ -1270,7 +1272,7 @@ describe("how many lanes the full run asks for", () => {
     const seen = pricedForRun(
       census(deps.suites, undefined, new Set()),
       deps.suites,
-      true,
+      () => true,
     );
     expect(seen.manifest.calibration.prologue).toBe(0);
     const laid = plan({
@@ -2290,7 +2292,9 @@ describe("planning a lane the manifest chose", () => {
     for (const lane of [1, 2, 3, 4, 5]) {
       placed += counted(await planned([], lane));
     }
-    const suites = await loadTopology(root);
+    // A gate is a verdict rather than lane work, so no lane places one.
+    const suites = (await loadTopology(root))
+      .filter((suite) => suite.judges === undefined);
     const available = suites.reduce(
       (total, suite) =>
         total + suite.units.length -
@@ -5359,22 +5363,20 @@ describe("what a lane measures", () => {
     root: "/repo",
   };
 
-  const gated = (member: string) =>
-    census(
-      [suite({
-        id: "workspace-unit",
+  /** What a plan choosing the gate over `member`'s set measures. */
+  const gated = (member: string): CoverageGateSelection => {
+    const ref = {
+      suite: "workspace-unit",
+      set: {
+        member,
+        reachedBy: [`${member}/`],
         units: [`${member}/one.test.ts`],
-        measured: [{
-          member,
-          reachedBy: [`${member}/`],
-          units: [`${member}/one.test.ts`],
-        }],
-      })],
-      undefined,
-      new Set([`${member}/src/main.ts`]),
-    ).coverage;
+      },
+    };
+    return { sets: [ref], reached: [ref] };
+  };
 
-  it("measures the members of the sets the gate is scoring", () => {
+  it("measures the members of the sets whose gates the plan chose", () => {
     const coverage = batchCoverage(
       options,
       "workspace-unit",
@@ -5385,7 +5387,7 @@ describe("what a lane measures", () => {
     expect([...coverage!.members!]).toEqual(["packages/bakery"]);
   });
 
-  it("measures nothing in a suite the gate is not scoring", () => {
+  it("measures nothing in a suite whose gates the plan did not choose", () => {
     expect(batchCoverage(options, "runner-unit", gated("packages/bakery")))
       .toBeUndefined();
   });
@@ -5428,7 +5430,7 @@ describe("what a lane measures", () => {
   describe("what it charges a suite it measures", () => {
     const WITHOUT = { overhead: 5, correction: 1, unitOverhead: 0 };
     const WITH = { overhead: 20, correction: 2, unitOverhead: 0 };
-    const suites = [
+    const units = [
       suite({
         id: "workspace-unit",
         units: ["packages/bakery/one.test.ts"],
@@ -5440,7 +5442,16 @@ describe("what a lane measures", () => {
       }),
       suite({ id: "runner-unit", units: ["packages/oven/one.test.ts"] }),
     ];
+    const suites = [...units, coverageGateSuite(units)];
+    const gate = { k: "gate", s: "bakery", n: "coverage-gate workspace-unit" };
     const manifest = manifestOf([
+      {
+        test: gate,
+        suite: "coverage-gate",
+        unit: "workspace-unit/packages/bakery",
+        cost: 0,
+        score: 0.9,
+      },
       {
         test: { k: "unit", s: "bakery", n: "one" },
         unit: "packages/bakery/one.test.ts",
@@ -5481,7 +5492,11 @@ describe("what a lane measures", () => {
       expect(laid.lanes[0]!.projectedSeconds).toBe(80);
     });
 
-    it("charges a pull request's gated suite with coverage on, and the rest without", async () => {
+    /**
+     * A repository whose second commit touches `packages/bakery`, and the
+     * plan a pull request of it packs from `manifest`.
+     */
+    async function reaching(manifest: Manifest) {
       const repo = await Deno.makeTempDir({ prefix: "lane-charged-" });
       const git = (...args: string[]) =>
         new Deno.Command("git", {
@@ -5507,18 +5522,42 @@ describe("what a lane measures", () => {
         await Deno.writeTextFile(`${repo}/packages/bakery/glaze.ts`, "b");
         await git("add", ".");
         await git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "two");
-        const { seen } = await lanePlan(
+        return await lanePlan(
           { ...planning, root: repo, base: "base" },
           suites,
-          deps,
+          { manifest: () => Promise.resolve({ manifest }) },
         );
-        expect(seen.manifest.calibration.suites["workspace-unit"])
-          .toEqual(WITH);
-        expect(seen.manifest.calibration.suites["runner-unit"])
-          .toEqual(WITHOUT);
       } finally {
         await Deno.remove(repo, { recursive: true });
       }
+    }
+
+    it("charges a suite whose gate the plan chose with coverage on, and the rest without", async () => {
+      const { seen, laid, coverage } = await reaching(manifest);
+      expect(laid.gates.map((chosen) => chosen.entry.test)).toEqual([gate]);
+      expect(coverage.sets.map((ref) => ref.set.member))
+        .toEqual(["packages/bakery"]);
+      expect(seen.manifest.calibration.suites["workspace-unit"])
+        .toEqual(WITH);
+      expect(seen.manifest.calibration.suites["runner-unit"])
+        .toEqual(WITHOUT);
+    });
+
+    it("charges a suite whose gate the plan passed over what it costs without", async () => {
+      // Packed with the suite priced as measured, the plan chooses none of
+      // its gates, so it is packed again with the suite priced the way the
+      // lanes will then run it.
+
+      const { seen, laid, coverage } = await reaching({
+        ...manifest,
+        withheld: [{ test: gate, suite: "coverage-gate", reason: "flaky" }],
+      });
+      expect(laid.gates).toEqual([]);
+      expect(coverage.sets).toEqual([]);
+      expect(coverage.reached.map((ref) => ref.set.member))
+        .toEqual(["packages/bakery"]);
+      expect(seen.manifest.calibration.suites["workspace-unit"])
+        .toEqual(WITHOUT);
     });
 
     it("charges a pull request that measures nothing what it costs without", async () => {
@@ -5764,7 +5803,7 @@ describe("what a lane says about coverage", () => {
     expect(lines).toEqual([]);
   });
 
-  it("names the sets it is scoring, and the reports it wrote", () => {
+  it("names the sets whose gates the plan chose, and the reports it wrote", () => {
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -5784,8 +5823,15 @@ describe("what a lane says about coverage", () => {
       console.log = log;
     }
     const text = lines.join("\n");
-    expect(text).toContain("workspace-unit/packages/bakery");
-    expect(text).toContain("workspace-unit/packages__bakery");
+    // The set is named once among those chosen and once as the set its
+    // report belongs to, and its directory is not spelled out.
+    expect(
+      text.split("\n").filter((line) =>
+        line === "- workspace-unit/packages/bakery"
+      ),
+    ).toHaveLength(2);
+    expect(text).toContain("Reports this lane wrote");
+    expect(text).not.toContain("packages__bakery");
   });
 
   it("names a set whose number this run did not stand behind", () => {
@@ -5836,29 +5882,37 @@ describe("what a lane says about coverage", () => {
     expect(text).not.toContain("- workspace-unit/packages__bakery");
   });
 
-  it("says why nothing is forced, and what the change reached", () => {
+  it("names the sets whose gates the plan chose apart from those it did not", () => {
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
+    const ref = (member: string) => ({
+      suite: "workspace-unit",
+      set: {
+        member,
+        reachedBy: [`${member}/`],
+        units: [`${member}/one.test.ts`],
+      },
+    });
     try {
       describeCoverage({
-        sets: [],
-        reached: [{
-          suite: "workspace-unit",
-          set: {
-            member: "packages/bakery",
-            reachedBy: ["packages/bakery/"],
-            units: ["packages/bakery/one.test.ts"],
-          },
-        }],
-        off: "the change reaches 3 measured sets",
+        sets: [ref("packages/cellar")],
+        reached: [ref("packages/bakery"), ref("packages/cellar")],
       }, []);
     } finally {
       console.log = log;
     }
     const text = lines.join("\n");
-    expect(text).toContain("No measured set is forced");
-    expect(text).toContain("workspace-unit/packages/bakery");
+    const chosen = text.indexOf("whose gates the plan chose");
+    const passedOver = text.indexOf("did not choose");
+    expect(chosen).toBeGreaterThanOrEqual(0);
+    expect(passedOver).toBeGreaterThan(chosen);
+    expect(text.slice(chosen, passedOver)).toContain(
+      "workspace-unit/packages/cellar",
+    );
+    expect(text.slice(chosen, passedOver)).not.toContain("packages/bakery");
+    expect(text.slice(passedOver)).toContain("workspace-unit/packages/bakery");
+    expect(text.slice(passedOver)).not.toContain("packages/cellar");
   });
 });
 

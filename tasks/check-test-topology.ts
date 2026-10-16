@@ -505,6 +505,9 @@ export function checkStore(
     }
   }
   for (const suite of suites) {
+    // A gate's verdict is recorded by the job this check runs in, after it
+    // reads the lanes' records, so no gate is among them.
+    if (suite.judges !== undefined) continue;
     // A leaf declared unavailable leaves its unit expected to record,
     // because every other identity in that unit still runs.
     const unavailable = unavailableUnits(suite);

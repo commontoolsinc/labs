@@ -85,7 +85,11 @@ import { loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { planOver } from "./ci-lane.ts";
 import { isLaneMeasurement } from "./lane-measurement.ts";
-import { coverageGateFor, measuredSetName } from "./test-selection/coverage.ts";
+import {
+  coverageGateIdentity,
+  measuredSetName,
+  reachedSets,
+} from "./test-topology/coverage-gates.ts";
 import { placedOnlyMandatory } from "./test-selection/plan.ts";
 import { LANES } from "./test-selection/policy.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
@@ -292,9 +296,11 @@ export interface StoredRun {
  * Every `test-records-*` artifact counts, including a re-run attempt's,
  * so an identity that passed in one attempt and failed in another folds
  * into the test disagreeing with itself rather than into whichever
- * attempt was uploaded last. The coverage artifact holds no test's record
- * and is left to `coverageOfRun`. Undefined where one of them could not be
- * read, because a run read in part reads as a run that ran less.
+ * attempt was uploaded last. The coverage artifact counts too, since it
+ * holds the record of each coverage gate the run judged; the coverage
+ * figures beside them are measurements, which `outcomesOf` passes over and
+ * `coverageOfRun` reads. Undefined where one of them could not be read,
+ * because a run read in part reads as a run that ran less.
  */
 export async function outcomesFromArtifacts(
   runId: number,
@@ -315,8 +321,7 @@ export async function reportsFromArtifacts(
 ): Promise<TestRecord[][] | undefined> {
   const artifacts = (listed ?? await fetchArtifactsForRun(runId))
     .filter((artifact) =>
-      artifact.name.startsWith("test-records-") &&
-      coverageArtifactAttempt(artifact.name) === undefined && !artifact.expired
+      artifact.name.startsWith("test-records-") && !artifact.expired
     );
   const reports: TestRecord[][] = [];
   for (let at = 0; at < artifacts.length; at += ARTIFACTS_AT_ONCE) {
@@ -379,6 +384,64 @@ export async function coverageOfRun(
     .sort((a, b) => b.id - a.id)[0];
   const records = artifact === undefined ? [] : await readArtifact(artifact);
   return coverageFiguresOf(records ?? []);
+}
+
+/**
+ * The coverage figures a push run at `commit` measured, from the first
+ * upload of the earliest such run to make one, and when that run was
+ * created; nothing where no run has, or where what one uploaded cannot be
+ * read.
+ *
+ * A run is read whatever its status. Its coverage artifact is uploaded
+ * whole at the end of its `Status` job, so it is there, and complete, from
+ * then on, while the run goes on attesting and deploying. The earliest
+ * upload rather than the newest, so that every reader asking once one
+ * exists reads the same figures however often the commit is pushed or its
+ * run attempted again. An earlier run is passed over only once it has
+ * finished without uploading, since one still going may yet upload, and
+ * a reader taking a later run's figures meanwhile would read different
+ * figures from one asking after it did.
+ */
+export async function firstCoverageAt(
+  commit: string,
+): Promise<{ figures: CoverageFigures; startedAt: string } | undefined> {
+  const listed: WorkflowRun[] = [];
+  const perPage = 100;
+  for (let page = 1;; page++) {
+    const params = new URLSearchParams({
+      event: "push",
+      branch: DEFAULT_BRANCH,
+      head_sha: commit,
+      per_page: `${perPage}`,
+      page: `${page}`,
+    });
+    const data = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+      `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`,
+    );
+    const found = data.workflow_runs ?? [];
+    for (const run of found) listed.push(run);
+    if (found.length < perPage) break;
+  }
+  const runs = listed.toSorted((a, b) => a.id - b.id);
+  for (const run of runs) {
+    const artifact = (await fetchArtifactsForRun(run.id))
+      .filter((candidate) =>
+        coverageArtifactAttempt(candidate.name) !== undefined &&
+        !candidate.expired
+      )
+      .sort((a, b) => a.id - b.id)[0];
+    if (artifact === undefined) {
+      if (run.status === "completed") continue;
+      return undefined;
+    }
+    const records = await readArtifact(artifact);
+    if (records === undefined) return undefined;
+    return {
+      figures: coverageFiguresOf(records),
+      startedAt: run.created_at,
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -525,6 +588,10 @@ export function manifestView(
     for (const selection of lane.selections) {
       selected.add(testIdentityKey(selection.entry.test));
     }
+  }
+  // A gate is in no lane, and the packing chose it all the same.
+  for (const gate of packed.gates) {
+    selected.add(testIdentityKey(gate.entry.test));
   }
   const withheld = new Map<string, WithheldReason>();
   for (const entry of packed.withheld) {
@@ -756,10 +823,10 @@ export async function main(
     };
   }
 
-  // The same function the gate runs, over the same declarations, so the
-  // note about a rise and the gate that was supposed to catch it cannot
-  // disagree about which sets were gated.
-  const gate = coverageGateFor(suites, changed);
+  // The same declarations the gate reads, and the same packing its plan
+  // chose gates by, so the note about a rise and the gate that was
+  // supposed to catch it cannot disagree about which sets were measured.
+  const reached = reachedSets(suites, changed);
   const uncounted: ReportInput = {
     current,
     previous,
@@ -771,8 +838,20 @@ export async function main(
     coverageBefore: await coverageOfRun(previousRun.id, listedThere),
     touched: coverageGroupsForChangedFiles(changed),
     coverageGate: {
-      reached: gate.reached.map(measuredSetName),
-      ran: gate.off === undefined,
+      reached: reached.map(measuredSetName),
+      // A gate the pull request's run recorded ran there, whatever packing
+      // chose it; a run of every test chooses every gate, which the plan
+      // this packs for a pull request does not.
+      ...(view.manifest
+        ? {
+          chosen: reached
+            .filter((ref) => {
+              const key = testIdentityKey(coverageGateIdentity(ref));
+              return view.selected.has(key) || view.ran?.has(key) === true;
+            })
+            .map(measuredSetName),
+        }
+        : {}),
     },
     day: new Date().toISOString().slice(0, 10),
   };

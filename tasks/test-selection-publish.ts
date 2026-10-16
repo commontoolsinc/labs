@@ -113,6 +113,7 @@ import {
   writtenAhead,
 } from "./test-selection/manifest.ts";
 import { costliestUnschedulable, plan } from "./test-selection/plan.ts";
+import { gatesOf } from "./test-selection/census.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
@@ -972,6 +973,9 @@ export async function publish(
     mandatory: new Map(),
     capabilities,
     wholeUnits: wholeUnits(suites),
+    // The gates of no change, so that none is packed as a lane's work and
+    // none is chosen.
+    gates: gatesOf(suites, manifest.entries, manifest.entries, new Set()),
   });
   // What the packer refused, from the packer, carrying the cost the bound
   // was compared against rather than a raw one that leaves out every

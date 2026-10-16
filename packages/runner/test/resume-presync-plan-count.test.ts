@@ -10,6 +10,11 @@ import type {
   Pattern,
 } from "../src/builder/types.ts";
 import { isPattern } from "../src/builder/types.ts";
+import {
+  getArtifactEntryRef,
+  noteDerivedCopy,
+} from "../src/builder/pattern-metadata.ts";
+import type { NodePlan } from "../src/runner.ts";
 import { getDerivedInternalCellLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { CooperativeYield } from "../src/scheduler/cooperative-yield.ts";
@@ -214,6 +219,13 @@ const SESSION_CELL_TREE_PROGRAM: RuntimeProgram = {
 
 const ITEMS = [{ n: 1 }, { n: 2 }, { n: 3 }];
 
+/** The id of the inputs document `plan` reads, for a plan of a node with one. */
+function inputsDocumentOf(plan: NodePlan | undefined): string | undefined {
+  return plan !== undefined && "inputsCell" in plan
+    ? plan.inputsCell.getAsNormalizedFullLink().id
+    : undefined;
+}
+
 /** The pattern a node instantiates, or undefined for any other node. */
 function childPatternOf(node: Node): Pattern | undefined {
   const module = node.module;
@@ -314,7 +326,12 @@ describe("resume-presync-plan-count", () => {
           badgePattern.nodes.length);
   }
 
-  it("holds no stand-in bindings after a fresh tree starts", async () => {
+  it("holds one binding per node of each instance after a fresh tree starts", async () => {
+    // A node's binding is held once computed, by whichever plan computed
+    // it, so a later plan of the same node finds it. A fresh start binds
+    // every node against the argument its setup wrote, so every binding is
+    // held; one against a stand-in argument, which a later plan never asks
+    // for, is not.
     const author = replica();
     const compiled = await author.patternManager.compilePattern(TREE_PROGRAM, {
       space,
@@ -336,7 +353,107 @@ describe("resume-presync-plan-count", () => {
       ),
     )
       .toEqual([2, 4, 6]);
-    expect(author.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
+    expect(author.runner.accessForTestingOnly.heldNodeBindings).toBe(
+      treePairs(compiled),
+    );
+  });
+
+  it("binds a node once for a plan made after its instantiation", async () => {
+    // A load plans a node in its pre-sync, instantiates it, and may plan it
+    // again: a name-sync of its family that starts after the instantiation,
+    // for one. The binding held by the first plan serves them all.
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(TREE_PROGRAM, {
+      space,
+    });
+    let bindings = 0;
+    author.runner.accessForTestingOnly.nodeBindingRecorder = () => {
+      bindings += 1;
+    };
+    let tx = author.edit();
+    const result = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      "fresh-tree-plan-after-instantiation",
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, result);
+    await tx.commit().settled;
+    await result.pull();
+    await author.settled();
+    const bound = bindings;
+    expect(bound).toBeGreaterThan(0);
+
+    tx = author.edit();
+    for (const node of compiled.nodes) {
+      author.runner.accessForTestingOnly.nodePlan(
+        tx,
+        node,
+        result.withTx(tx),
+        compiled,
+      );
+    }
+    tx.abort();
+    expect(bindings).toBe(bound);
+  });
+
+  it("binds a node once across plans holding its pattern as two objects of one identity", async () => {
+    // A pre-sync plans a nested instance's nodes under the pattern object
+    // embedded in its parent's graph, and the instance's own start under
+    // the object loaded by the pattern's identity. Both hold the same nodes
+    // at the same positions, so a plan under either finds the binding the
+    // other computed.
+    const author = replica();
+    const compiled = await author.patternManager.compilePattern(TREE_PROGRAM, {
+      space,
+    });
+    let bindings = 0;
+    author.runner.accessForTestingOnly.nodeBindingRecorder = () => {
+      bindings += 1;
+    };
+    let tx = author.edit();
+    const result = author.getCell<{ rows: { value: number }[] }>(
+      space,
+      "fresh-tree-pattern-as-two-objects",
+      compiled.resultSchema,
+      tx,
+    );
+    author.run(tx, compiled, { items: ITEMS }, result);
+    await tx.commit().settled;
+    await result.pull();
+    await author.settled();
+    author.runner.accessForTestingOnly.forgetNodeBindings();
+    bindings = 0;
+
+    // A copy of the compiled pattern, down to its nodes, derived from it the
+    // way the runtime derives a copy and so of the same identity.
+    const copy: Pattern = {
+      ...compiled,
+      nodes: compiled.nodes.map((node) => ({ ...node })),
+    };
+    noteDerivedCopy(copy, compiled);
+    expect(getArtifactEntryRef(copy)).toEqual(getArtifactEntryRef(compiled));
+
+    tx = author.edit();
+    const plans = compiled.nodes.map((node) =>
+      author.runner.accessForTestingOnly.nodePlan(
+        tx,
+        node,
+        result.withTx(tx),
+        compiled,
+      )
+    );
+    const again = copy.nodes.map((node) =>
+      author.runner.accessForTestingOnly.nodePlan(
+        tx,
+        node,
+        result.withTx(tx),
+        copy,
+      )
+    );
+    tx.abort();
+    expect(bindings).toBe(compiled.nodes.length);
+    expect(again.map(inputsDocumentOf)).toEqual(plans.map(inputsDocumentOf));
   });
 
   it("plans each node of each instance once on a cold resume", async () => {
@@ -433,8 +550,11 @@ describe("resume-presync-plan-count", () => {
     ).toEqual([[2, "b:1"], [4, "b:2"], [6, "b:3"]]);
 
     expect(bindings).toBe(expectedPairs);
-    // Each node's instantiation took the binding the pre-sync held for it.
-    expect(resumer.runner.accessForTestingOnly.heldNodeBindings).toBe(0);
+    // Each node's instantiation found the binding the pre-sync held for it,
+    // and it is held still.
+    expect(resumer.runner.accessForTestingOnly.heldNodeBindings).toBe(
+      expectedPairs,
+    );
   });
 
   it("mints each derived internal cell's id once across a resume", async () => {
