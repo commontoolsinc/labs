@@ -437,6 +437,11 @@ const resolveStoredCfcMetadata = (
     version: stored.version,
     schemaHash: stored.schemaHash,
     labelMap,
+    // Read as the one value this build knows; any other is an envelope that
+    // says nothing of its stamps' placement.
+    ...(stored.stampPlacement === "committed"
+      ? { stampPlacement: stored.stampPlacement }
+      : {}),
   };
 };
 

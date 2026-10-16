@@ -67,7 +67,11 @@ minted metadata and `cid:` documents. `storedCfcMetadataAppliesToPath` in
 reason: `schema.ts` on a read through an `ifc`-bearing schema
 (`schema-ifc-read`); `cell.ts` on a write through one (`schema-ifc-write`) and
 on a SQLite row label (`sqlite-row-label`); `data-updating.ts` on a link write
-(`link-write`); `schema-ifc.ts` on a link crossing an `ifc`-bearing hop
+whose link schema declares policy, whose handle carries a restriction, or
+whose slot carries stored or arriving policy (`link-write`; a bare pointer is
+recorded as a policy input without forcing relevance, and the flow-label probe
+marks the transaction when the attempt read labeled data); `schema-ifc.ts` on
+a link crossing an `ifc`-bearing hop
 (`schema-ifc-hop`); `cfc/external-ingest.ts` on external ingest; and, inside
 `extended-storage-transaction.ts`, the unprivileged writes to label metadata
 and its siblings, label-metadata and external-content observations, runtime
@@ -183,6 +187,44 @@ content arrives through ordinary reads. For label views,
 class-less confidentiality of every entry resolving at the slot, wildcard
 templates included, and the render path reads them through
 `cfcLabelViewForResolvedTarget` in `packages/html/src/worker/reconciler.ts`.
+
+**What a link write persists.** `linkSlotLabel` in `cfc/prepare.ts` persists
+at the receiving slot the reference's own label as §8.2.3 and §8.12.8 state
+it: the link schema's declarations, the restriction the written handle
+carries at its root, and, where flow labels persist, the creating attempt's
+flow join, stamped at the slot as a pointer-class `structure` entry beside
+the link entry, or carried to the slot by the `*` template of a container the
+transaction stamps as a whole. No evidence atom is minted for the reference:
+§15.4 retires `LinkReference`. The atom stays non-authorable, and one in a
+label stored before the retirement stays what it was, provenance that
+endorses nothing. A writer's stamp at a slot describes the reference the
+committed document holds there in an envelope that says so, with
+`stampPlacement: "committed"`: the runtime re-derives an attempt's labels
+against the committed placement (§8.10.2.2,
+`SpaceReplica.#commitReadActivities`), and writes the member when the
+envelope's stamps at reference slots were all placed that way. A stamp at a
+reference slot of an envelope that does not say it is not an input witness
+(§18.7, `slotStampPlacementUnknown`). The member is beside the ones the
+envelope's version defines, so a reader that predates it reads the envelope
+all the same. Nothing of the source's labels is copied to the slot,
+and the write takes no dependency on the source's envelope. A write floor on
+the slot, including a floor declared under a wildcard on every element of a
+list, resolves the source's current evidence through `linkedSourceEvidence`,
+as §8.2.6 requires, and persists none of it. A stamp the writer's schema mints
+at the slot's path credits no reference written there, since the store keeps
+no stamp at a position holding a reference; a stamp at a container the write
+persists covers the references beneath it. In that evidence the source's
+stored integrity stands as stored, and only the link schema's integrity and
+a schema the transaction writes the source under are gated against
+runtime-minted atoms. A handle's carried view is the reference restrictions
+of the slots its resolution left (`cfcAcquisitionViewForDereferenceTraces`
+in `cfc/label-view-state.ts`, `referenceRestrictionsOf` for the schema
+traversal's crossings), confidentiality alone, and nothing of the document
+it names, whose labels are read from that document when the handle is
+followed; the resolution reads those labels all the same, so that a
+subscription depends on them. The reading attempt's own join reaches a
+written reference through the slot stamp of the writing transaction rather
+than through the handle.
 
 **This runtime does not claim the precise reference profile.** No labs
 document claims it, and the following is not established:
