@@ -420,7 +420,7 @@ export interface Manifest {
   /** ISO 8601 UTC. */
   generatedAt: string;
 
-  /** Seeds the exploration draw, so five lanes draw the same set. */
+  /** Seeds the exploration draw, so every lane draws the same set. */
   seed: string;
 
   /** The `main` commit whose topology was enumerated. */

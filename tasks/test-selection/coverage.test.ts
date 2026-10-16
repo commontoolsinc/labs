@@ -17,7 +17,7 @@ import type { Calibration, ManifestEntry, SuiteFit } from "./manifest.ts";
 import {
   COST_WINDOW_DAYS,
   LANE_BUDGET_SECONDS,
-  LANES,
+  LANES_MAX,
   LOCAL_COVERAGE_MAX_SECONDS,
 } from "./policy.ts";
 import { duration } from "./duration.ts";
@@ -407,9 +407,9 @@ describe("coverage", () => {
           // Two lanes hold the total, but one test's runs all go in one lane.
           expect(costing(LANE_BUDGET_SECONDS)[0]).toContain(
             "workspace-unit/packages/cellar costs more with coverage on " +
-              `than the run's ${LANES} lanes of ${
+              `than the ${LANES_MAX} lanes of ${
                 duration(LANE_BUDGET_SECONDS)
-              } hold`,
+              } a pull request may take hold`,
           );
           expect(costing(LANE_BUDGET_SECONDS / 2, LANE_BUDGET_SECONDS / 2)[0])
             .toContain(
@@ -419,12 +419,12 @@ describe("coverage", () => {
         });
 
         it("says so where the run's lanes cannot hold it", () => {
-          expect(costing(LANE_BUDGET_SECONDS * LANES)[0]).toContain(
+          expect(costing(LANE_BUDGET_SECONDS * LANES_MAX)[0]).toContain(
             "workspace-unit/packages/cellar costs more with coverage on " +
-              `than the run's ${LANES} lanes of ${
+              `than the ${LANES_MAX} lanes of ${
                 duration(LANE_BUDGET_SECONDS)
-              } ` +
-              "hold, past LOCAL_COVERAGE_MAX_SECONDS",
+              } a pull request may take hold, past ` +
+              "LOCAL_COVERAGE_MAX_SECONDS",
           );
         });
       });
@@ -469,20 +469,19 @@ describe("coverage", () => {
             `packages/runner is on EXCLUDED_FROM_COVERAGE_GATE for its ` +
             `size, and its tests now cost ${
               duration(room * 3 + 3 * 30)
-            } with coverage on across 3 lane(s), inside the run's ` +
-            `${LANES} lanes of ${
+            } with coverage on across 3 lane(s), inside the ` +
+            `${LANES_MAX} lanes of ${
               duration(LANE_BUDGET_SECONDS)
-            }, so its line can ` +
-            `come off.`,
+            } a pull request may take, so its line can come off.`,
           ]);
         });
 
         it("is not named where it fits the run only by paying its overhead once", () => {
-          // Charged once, this fits the five lanes' budget exactly. Each
+          // Charged once, this fits the most lanes' budget exactly. Each
           // lane it spreads over pays the thirty again, so it does not.
-          const tests = LANE_BUDGET_SECONDS * LANES - 30;
+          const tests = LANE_BUDGET_SECONDS * LANES_MAX - 30;
           expect(
-            costing(...Array(2 * LANES).fill(tests / (2 * LANES))),
+            costing(...Array(2 * LANES_MAX).fill(tests / (2 * LANES_MAX))),
           ).toEqual([]);
         });
 
@@ -517,11 +516,10 @@ describe("coverage", () => {
             `packages/runner is on EXCLUDED_FROM_COVERAGE_GATE for its ` +
             `size, and its tests now cost ${
               duration(2 * half + 2 * 30 + 2 * unitOverhead)
-            } with coverage on across 2 lane(s), inside the run's ` +
-            `${LANES} lanes of ${
+            } with coverage on across 2 lane(s), inside the ` +
+            `${LANES_MAX} lanes of ${
               duration(LANE_BUDGET_SECONDS)
-            }, so its line can ` +
-            `come off.`,
+            } a pull request may take, so its line can come off.`,
           ]);
         });
 

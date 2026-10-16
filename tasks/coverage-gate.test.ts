@@ -27,7 +27,7 @@ import {
 import type { MeasuredSet, Suite } from "./test-topology/suite.ts";
 import type { CoverageBaseline } from "./test-selection/manifest.ts";
 import type { ManifestFetch } from "./test-selection/store.ts";
-import { sampleManifest } from "./test-selection/testing.ts";
+import { sampleEntry, sampleManifest } from "./test-selection/testing.ts";
 
 /** A suite carrying only what the gate reads. */
 function suite(id: string, measured: MeasuredSet[]): Suite {
@@ -1335,6 +1335,62 @@ describe("coverage-gate", () => {
       expect(said).toContain("no rise");
     });
 
+    it("judges only the gates the plan the lanes were handed chose", async () => {
+      // The set also holds a unit the change does not reach, which runs only
+      // where the gate is chosen. At a scale of nothing the plan chooses
+      // nothing by score, so it chooses no gate and there is nothing to
+      // compare; at a scale of one it chooses the gate.
+      const { root, commit, reports, suites } = await job(10, 6);
+      const other = "packages/bakery/two.test.ts";
+      await Deno.writeTextFile(path.join(root, other), "// another\n");
+      const unit = suite("workspace-unit", [{
+        member: "packages/bakery",
+        reachedBy: ["packages/bakery/"],
+        units: [...suites[0]!.units, other],
+      }]);
+      const topology = [unit, coverageGateSuite([unit])];
+      const manifest = sampleManifest({
+        coverageBaselines: [{
+          suite: "workspace-unit",
+          member: "packages/bakery",
+          commit,
+          createdAt: "2026-09-01T00:00:00.000Z",
+          uncoveredLines: 4,
+        }],
+        entries: [
+          sampleEntry({ k: "unit", s: "workspace-unit", n: "two" }, {
+            suite: "workspace-unit",
+            unit: other,
+            cost: 10,
+          }),
+        ],
+      });
+      const said = async (...extra: string[]) => {
+        const lines: string[] = [];
+        const log = console.log;
+        console.log = (line: string) => lines.push(line);
+        try {
+          const status = await main(
+            ["--base", "HEAD~1", "--reports", reports, ...extra],
+            root,
+            {
+              topology: () => Promise.resolve(topology),
+              manifest: () => Promise.resolve({ manifest }),
+            },
+          );
+          return { status, lines: lines.join("\n") };
+        } finally {
+          console.log = log;
+        }
+      };
+      const none = await said("--scale", "0", "--of", "1");
+      expect(none.status).toBe(0);
+      expect(none.lines).not.toContain("no rise");
+      const chosen = await said("--scale", "1", "--of", "1");
+      expect(chosen.status).toBe(0);
+      expect(chosen.lines).toContain("no rise");
+    });
+
     it("fails a rise, and asks for tests", async () => {
       const { root, commit, reports, suites } = await job(10, 6);
       const lines: string[] = [];
@@ -1856,6 +1912,29 @@ describe("coverage-gate", () => {
           ], "/tmp/root"),
         ).toBeUndefined();
       }
+    });
+
+    it("takes the lane count and the scale the lanes were handed", () => {
+      expect(
+        parseGateArgs(
+          ["--base", "origin/main", "--scale", "2.5", "--of", "7"],
+          "/tmp/root",
+        ),
+      ).toMatchObject({ scale: 2.5, of: 7 });
+      const unsaid = parseGateArgs(["--base", "origin/main"], "/tmp/root");
+      expect(unsaid?.scale).toBeUndefined();
+      expect(unsaid?.of).toBeUndefined();
+      for (const bad of [["--scale", "-1"], ["--scale", ""], ["--of", "0"]]) {
+        expect(parseGateArgs(["--base", "origin/main", ...bad], "/tmp/root"))
+          .toBeUndefined();
+      }
+      // A full run chooses nothing by score, so nothing would honor it.
+      expect(
+        parseGateArgs(
+          ["--base", "origin/main", "--full", "--scale", "2"],
+          "/tmp/root",
+        ),
+      ).toBeUndefined();
     });
 
     it("takes a run of every test, on a pull request or the default branch", () => {
