@@ -87,6 +87,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { withoutEnvelopeStabilityToken } from "../cfc/envelope-stability-reason.ts";
 import { prepareBoundaryCommitSteps } from "../cfc/prepare.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 import {
@@ -4191,7 +4192,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
-        const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
+        // The message is for a person, so it carries neither the verdict tag
+        // nor the envelope-stability token; `reasons` below keeps the token,
+        // which is where a consumer classifies the refusal.
+        const detail = reasons.length > 0
+          ? `: ${withoutEnvelopeStabilityToken(plainReason(reasons[0]))}`
+          : "";
         const plainReasons = reasons.map(plainReason);
         // Pair each detail to a reason that actually refused. A gate records
         // its detail when it decides, which is also how it records an

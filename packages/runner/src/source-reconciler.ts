@@ -34,6 +34,7 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
+import { debugStr, hashStringOf } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
@@ -47,6 +48,7 @@ import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+import { getMetaLink } from "./link-utils.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import {
   classifyPieceOriginString,
@@ -65,13 +67,17 @@ import {
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   samePieceReconciliation,
+  samePieceSourceSnapshot,
   setPieceReconciliation,
 } from "./runner.ts";
 import type { Runtime } from "./runtime.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import { isOversizedRejection } from "./storage/rejection.ts";
+import {
+  isEnvelopeStabilityRefusal,
+  isOversizedRejection,
+} from "./storage/rejection.ts";
 
 /**
  * What went wrong, as a reason a record can carry: a thrown error, or the
@@ -110,6 +116,12 @@ const logger = getLogger("runner.source-reconcile", {
  * - `updated`: the piece adopted new source.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
+ * - `rejected`: the write that adopts the origin's source was refused for
+ *   good — by the store as too large, or by a stored envelope whose claim the
+ *   candidate's schema changes or weakens — which neither a retry nor a grant
+ *   gets past. This runtime does not propose that source again until the
+ *   candidate, the piece's source state, or its stored argument changes, or
+ *   the space's memory session is replaced.
  * - `unavailable`: the origin's current source could not be adopted this
  *   time — it could not be reached, the write that adopts it did not commit,
  *   or the piece changed underneath the attempt and the write it was going to
@@ -122,6 +134,7 @@ export type ReconcileOutcome =
   | "migrated"
   | "updated"
   | "incompatible"
+  | "rejected"
   | "unavailable";
 
 /**
@@ -146,6 +159,7 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
+  rejected: { outcome: "refused", reason: "apply-failed" },
   detached: undefined,
   unusable: undefined,
 };
@@ -230,26 +244,63 @@ type OriginClaim = {
   origin: string;
 };
 
-/**
- * Why a write did not commit, as a reason a record can carry, and whether the
- * store refused it for standing for more than it admits in one message.
- */
-type CommitFailure = { detail: string; oversized: boolean };
-
-/**
- * An adoption the store refused as too large: the piece ran `running` and the
- * origin offered `candidate`.
- */
-type OversizedAdoption = {
-  running: { identity: string; symbol: string };
-  candidate: { identity: string; symbol: string };
-  detail: string;
-};
-
 /** One network pass, so teardown can abort it and wait for it to settle. */
 type SourcePass = {
   abort: AbortController;
   done: Promise<unknown>;
+};
+
+/** Why a reconciliation's write did not commit. */
+type CommitFailure = {
+  /** The reason, as a record can carry it. */
+  detail: string;
+
+  /**
+   * Whether the write was refused for good: as too large
+   * (`isOversizedRejection`), or by a stored envelope its schema changes or
+   * weakens (`isEnvelopeStabilityRefusal`). The same write receives either
+   * again however often it is sent, from one pass to the next, and no grant
+   * lifts it. Other terminal rejections are not this: a CFC or row-label
+   * refusal can be lifted by a grant, which the next pass has to pick up.
+   */
+  lasting: boolean;
+};
+
+/**
+ * An adoption whose write was refused for good, and the state that write was
+ * built from. The same write built from the same state is refused the same
+ * way, so a pass that finds all of it unchanged builds nothing.
+ *
+ * What it covers is what the write is built from: the candidate, the piece's
+ * source state, and the stored argument its setup restages. A change to a
+ * document the argument links to is outside it. What the store admits can
+ * change when the space's memory session is replaced, as a host restart
+ * replaces it, so a replacement forgets the space's refusals. A runtime that
+ * starts again, which is when its own code can change, starts with none.
+ */
+type RefusedAdoption = {
+  /** The space of the refused piece. */
+  space: MemorySpace;
+
+  /** The candidate the refused write would have adopted. */
+  offered: { identity: string; symbol: string };
+
+  /**
+   * The piece's source state the refused write was guarded against, which
+   * names the origin it followed.
+   */
+  snapshot: PieceSourceSnapshot;
+
+  /**
+   * A fingerprint of the stored argument the write restaged
+   * (`#storedArgumentFingerprint`), which a remembered refusal keeps in place
+   * of the argument itself: it outlives the piece stopping, and an argument
+   * can be large.
+   */
+  argument: string;
+
+  /** What the record of the refusal says. */
+  detail: string;
 };
 
 /**
@@ -310,31 +361,33 @@ export class SourceReconciler {
   readonly #stoppedFabricFollowers = new Set<string>();
 
   /**
-   * The last adoption the store refused as too large, by follower key.
-   * Preparing an adoption loads and restages everything the piece holds, and
-   * the write it prepares grows with that data, so an open that re-enters
-   * reconciliation would otherwise prepare it again, at that cost, only to
-   * have it refused again. An entry applies only while the piece runs what it
-   * ran and its origin offers the same candidate, and is dropped when the
-   * piece stops or its space's memory session is replaced, which is when what
-   * the store admits can have changed.
-   */
-  readonly #oversizedAdoptions = new Map<string, OversizedAdoption>();
-
-  /**
-   * How many memory sessions have been replaced, so that an adoption refused
-   * across a replacement is not remembered: the refusal answered for a store
-   * that may no longer be the one serving the space.
-   */
-  #sessionsReplaced = 0;
-
-  /**
    * The pieces following a system origin, by follower key. A host serves one
    * source for the life of its process, and a restart replaces every memory
    * session it held, so each is reconciled again when its space's session is
    * replaced.
    */
   readonly #systemFollowers = new Map<string, Cell<unknown>>();
+
+  /**
+   * The adoptions this runtime saw refused for good, by follower key. Kept in
+   * the runtime rather than on the piece: such a refusal is the verdict of
+   * the runtime that built the write and the store it sent it to, and another
+   * runtime — a later build, a client under different enforcement — may build
+   * a write that is admitted. What the piece records is the refusal itself,
+   * which every runtime reports the same way. A refusal outlives the piece
+   * stopping: a host that keeps a piece running stops and starts it,
+   * reconciling on each start, and would otherwise build and send the refused
+   * write on every cycle.
+   */
+  readonly #refusedAdoptions = new Map<string, RefusedAdoption>();
+
+  /**
+   * How many memory sessions have been replaced, so that a refusal received
+   * across a replacement is not remembered: it answered for a store that may
+   * no longer be the one serving the space.
+   */
+  #sessionsReplaced = 0;
+
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
     capacity: 32,
@@ -498,16 +551,15 @@ export class SourceReconciler {
     for (const { abort } of this.#passes) abort.abort();
     for (const { cancel } of this.#fabricFollowers.values()) cancel();
     this.#fabricFollowers.clear();
-    this.#oversizedAdoptions.clear();
     this.#cancelSessionReplaced?.();
     this.#systemFollowers.clear();
+    this.#refusedAdoptions.clear();
     await this.idle();
   }
 
   /** Stop following a source when its piece stops. */
   unwatch(resultCell: Cell<unknown>): void {
     const key = this.#followerKey(resultCell);
-    this.#oversizedAdoptions.delete(key);
     const pending = this.#pending.get(key);
     if (pending !== undefined) {
       this.#stoppedFabricFollowers.add(key);
@@ -550,11 +602,15 @@ export class SourceReconciler {
     return pending.promise;
   }
 
-  /** Reconciles each piece following a system origin in `space` again. */
+  /**
+   * Forgets the refusals received for pieces in `space`, whose memory session
+   * was replaced, and reconciles each piece following a system origin there
+   * again.
+   */
   #followSystemSources(space: MemorySpace): void {
     this.#sessionsReplaced++;
-    for (const key of [...this.#oversizedAdoptions.keys()]) {
-      if (key.startsWith(`${space}\0`)) this.#oversizedAdoptions.delete(key);
+    for (const [key, refused] of [...this.#refusedAdoptions]) {
+      if (refused.space === space) this.#refusedAdoptions.delete(key);
     }
     for (const follower of [...this.#systemFollowers.values()]) {
       if (follower.space === space) this.#reconcileFromSourceEvent(follower);
@@ -782,7 +838,8 @@ export class SourceReconciler {
       }
     }
     const advertised = answer.identity;
-    state.offered = { identity: advertised, symbol: state.running.symbol };
+    const offered = { identity: advertised, symbol: state.running.symbol };
+    state.offered = offered;
     // The identity route settles whether the source moved. It says nothing
     // about whether this space still holds the compiled artifact for it, and a
     // piece whose artifact is gone cannot start however current its identity
@@ -792,16 +849,7 @@ export class SourceReconciler {
       advertised === state.running.identity &&
       await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
-    // Before the source is fetched, so a candidate the store refused as too
-    // large is not resolved and compiled again.
-    const oversized = this.#oversizedRefusal(resultCell, state, {
-      identity: advertised,
-      symbol: state.running.symbol,
-    });
-    if (oversized !== undefined) {
-      state.detail = oversized;
-      return "unavailable";
-    }
+    if (this.#refusedBefore(resultCell, state, offered)) return "rejected";
 
     const resolved = await this.#runtime.harness.resolve(
       new HttpProgramResolver(target.href, fetch),
@@ -1200,11 +1248,7 @@ export class SourceReconciler {
       target.identity === state.running.identity &&
       target.symbol === state.running.symbol
     ) return "current";
-    const oversized = this.#oversizedRefusal(resultCell, state, target);
-    if (oversized !== undefined) {
-      state.detail = oversized;
-      return "unavailable";
-    }
+    if (this.#refusedBefore(resultCell, state, target)) return "rejected";
 
     // Awaited directly rather than through the abort signal. The lookup
     // synchronizes a source closure against storage, and abandoning the await
@@ -1368,40 +1412,87 @@ export class SourceReconciler {
       });
       return true;
     }, sourceUpdate);
-    const key = this.#followerKey(resultCell);
-    if (failure === undefined) {
-      this.#oversizedAdoptions.delete(key);
-      return "updated";
-    }
-    if (failure.oversized && sessionsReplaced === this.#sessionsReplaced) {
-      this.#oversizedAdoptions.set(key, {
-        running: { ...state.running },
-        candidate: candidateRef,
-        detail: failure.detail,
-      });
-    }
+    if (failure === undefined) return "updated";
     state.detail = failure.detail;
-    return "unavailable";
+    if (!failure.lasting) return "unavailable";
+    // The commit's own guard held the argument to what was restaged, so the
+    // argument as it stands now is the one the refusal answered for.
+    const argument = this.#storedArgumentFingerprint(resultCell);
+    if (
+      sessionsReplaced !== this.#sessionsReplaced || argument === undefined
+    ) return "rejected";
+    this.#refusedAdoptions.set(this.#followerKey(resultCell), {
+      space: state.space,
+      offered: candidateRef,
+      snapshot: state.snapshot,
+      argument,
+      detail: failure.detail,
+    });
+    return "rejected";
   }
 
   /**
-   * Why the store refused, as too large, adopting `candidate` over what the
-   * piece runs, if it has.
+   * A fingerprint of the stored argument a setup over `resultCell` restages:
+   * the link the piece records for it, compared as `areNormalizedLinksSame()`
+   * compares one, and the content hash of the value that link names, as this
+   * replica holds it now. `undefined` where the value has
+   * no hash, which leaves nothing to remember a refusal by.
+   *
+   * The hash is the one `valueEqual()` decides a container by, and is cached on
+   * the value's identity, so a pass over an argument that has not changed
+   * hashes nothing again.
    */
-  #oversizedRefusal(
+  #storedArgumentFingerprint(resultCell: Cell<unknown>): string | undefined {
+    const link = getMetaLink(resultCell, "argument");
+    try {
+      return link === undefined ? "none" : hashStringOf({
+        link: {
+          space: link.space,
+          id: link.id,
+          scope: link.scope,
+          path: [...link.path],
+        },
+        value: this.#runtime.getCellFromLink({ ...link, schema: undefined })
+          .getRawUntyped(),
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Whether this runtime saw the adoption of `offered` refused for good, and
+   * nothing that write was built from has changed since. When it did, the
+   * pass ends here with what the refusal recorded, which is the conclusion
+   * building and sending the same write would reach again. A remembered
+   * refusal something has moved under is forgotten.
+   */
+  #refusedBefore(
     resultCell: Cell<unknown>,
     state: PieceState,
-    candidate: { identity: string; symbol: string },
-  ): string | undefined {
-    const refused = this.#oversizedAdoptions.get(
-      this.#followerKey(resultCell),
-    );
-    return refused?.running.identity === state.running.identity &&
-        refused.running.symbol === state.running.symbol &&
-        refused.candidate.identity === candidate.identity &&
-        refused.candidate.symbol === candidate.symbol
-      ? refused.detail
-      : undefined;
+    offered: { identity: string; symbol: string },
+  ): boolean {
+    const key = this.#followerKey(resultCell);
+    const refused = this.#refusedAdoptions.get(key);
+    if (refused === undefined) return false;
+    if (
+      refused.offered.identity !== offered.identity ||
+      refused.offered.symbol !== offered.symbol ||
+      !samePieceSourceSnapshot(refused.snapshot, state.snapshot) ||
+      this.#storedArgumentFingerprint(resultCell) !== refused.argument
+    ) {
+      this.#refusedAdoptions.delete(key);
+      return false;
+    }
+    state.offered = refused.offered;
+    state.detail = refused.detail;
+    logger.debug("reconcile-refusal-remembered", () => [
+      "not proposing source whose adoption was refused for good",
+      state.space,
+      resultCell.sourceURI,
+      refused.offered,
+    ]);
+    return true;
   }
 
   /**
@@ -1494,9 +1585,11 @@ export class SourceReconciler {
    * re-checks that state, so a concurrent edit, detach, or repoint is never
    * overwritten by a decision taken before it.
    *
-   * Returns `undefined` once the write commits, and otherwise why it did not,
-   * as a reason a record can carry: the error that stopped the commit, or the
-   * piece having changed under the write.
+   * Returns `undefined` once the write commits, and otherwise why it did not:
+   * the error that stopped the commit, or the piece having changed under the
+   * write. A failure is logged as a summary of the error, since the error
+   * carries the whole transaction the store refused; the error itself is
+   * logged at debug level.
    */
   async #commit(
     resultCell: Cell<unknown>,
@@ -1540,22 +1633,32 @@ export class SourceReconciler {
       { sourceUpdate },
     );
     if (signal?.aborted) {
-      return { detail: "the reconciliation was stopped", oversized: false };
+      return { detail: "the reconciliation was stopped", lasting: false };
     }
     if (result.error) {
+      const { name, message } = result.error;
+      const lasting = isOversizedRejection(result.error) ||
+        isEnvelopeStabilityRefusal(result.error);
       logger.warn("reconcile-commit-failed", () => [
-        "source reconciliation could not commit",
+        lasting
+          ? "the store refused a source reconciliation's write for good"
+          : "source reconciliation could not commit",
         state.space,
+        resultCell.sourceURI,
+        state.offered,
+        debugStr`${name}: $long${message}`,
+      ]);
+      logger.debug("reconcile-commit-failed-detail", () => [
+        "the failure the line above summarizes, whole",
+        state.space,
+        resultCell.sourceURI,
         result.error,
       ]);
-      return {
-        detail: reconciliationDetail(result.error),
-        oversized: isOversizedRejection(result.error),
-      };
+      return { detail: reconciliationDetail(result.error), lasting };
     }
     return result.ok === true ? undefined : {
       detail: "the piece changed while its write was being prepared",
-      oversized: false,
+      lasting: false,
     };
   }
 

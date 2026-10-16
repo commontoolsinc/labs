@@ -1,3 +1,5 @@
+import { isEnvelopeStabilityReason } from "../cfc/envelope-stability-reason.ts";
+
 /**
  * Permanent rejections are the commit-time precondition failures the engine
  * reports as `PreconditionFailedError` (spec scheduler-v2 §7.6): a failed
@@ -97,6 +99,22 @@ export function isOversizedRejection(
   error: { name?: string } | undefined | null,
 ): boolean {
   return error?.name === "MessageTooLargeError";
+}
+
+/**
+ * The CFC boundary refused the commit as a verdict because its schema changes
+ * or weakens a claim a stored envelope fixes (`cfc/envelope-stability-reason.ts`),
+ * and for nothing else. The stored envelope and the write's schema decide it,
+ * and no grant moves either, so the same write is refused again while both
+ * stay as they are. Read off the refusal's `reasons`, where prepare puts the
+ * class at the front of each reason it records for one.
+ */
+export function isEnvelopeStabilityRefusal(
+  error: { name?: string; reasons?: readonly string[] } | undefined | null,
+): boolean {
+  const reasons = error?.reasons ?? [];
+  return error?.name === "CfcCommitRefusalError" && reasons.length > 0 &&
+    reasons.every(isEnvelopeStabilityReason);
 }
 
 /**
