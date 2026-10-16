@@ -2421,6 +2421,82 @@ describe("canonicalizeCfcSchemaDocument", () => {
     });
   });
 
+  it("folds a minted copy of a self-referential definition onto the original", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/Node" },
+        b: { $ref: "#/$defs/__cfc_hoisted_3_Node" },
+      },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+        __cfc_hoisted_3_Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/__cfc_hoisted_3_Node" } },
+        },
+      },
+    }) as JSONSchemaObj;
+    expect(canonical.$defs).toEqual({
+      Node: { type: "object", properties: { next: { $ref: "#/$defs/Node" } } },
+    });
+    expect(canonical.properties).toEqual({
+      a: { $ref: "#/$defs/Node" },
+      b: { $ref: "#/$defs/Node" },
+    });
+  });
+
+  it("never folds two authored definitions onto each other", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: { a: { $ref: "#/$defs/Tag" }, b: { $ref: "#/$defs/Label" } },
+      $defs: {
+        Tag: { type: "string" },
+        Label: { type: "string" },
+        __cfc_hoisted_0_Tag: { type: "string" },
+      },
+    }) as JSONSchemaObj;
+    expect(canonical.$defs).toEqual({
+      Label: { type: "string" },
+      Tag: { type: "string" },
+    });
+    expect(canonical.properties).toEqual({
+      a: { $ref: "#/$defs/Tag" },
+      b: { $ref: "#/$defs/Label" },
+    });
+  });
+
+  it("keeps a definition named __proto__", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: { a: { $ref: "#/$defs/__proto__" } },
+      $defs: Object.fromEntries([["__proto__", { type: "string" }]]),
+    }) as JSONSchemaObj;
+    expect(Object.hasOwn(canonical.$defs!, "__proto__")).toBe(true);
+    expect(Object.entries(canonical.$defs!)).toEqual([
+      ["__proto__", { type: "string" }],
+    ]);
+  });
+
+  it("prunes a retained authored definition below the root", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: { a: { type: "string" } },
+      $defs: {
+        Unused: {
+          type: "object",
+          properties: { x: { type: "number", $defs: { Stale: true } } },
+          $defs: { AlsoStale: { type: "null" } },
+        },
+      },
+    }) as JSONSchemaObj;
+    expect(canonical.$defs).toEqual({
+      Unused: { type: "object", properties: { x: { type: "number" } } },
+    });
+  });
+
   it("drops a nested map, which is inert under the root's whatever it holds", () => {
     const canonical = canonicalizeCfcSchemaDocument({
       type: "object",

@@ -2,6 +2,8 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   debugStr,
   fabricAwareEqual,
+  type FabricValue,
+  hashStringOf,
   isDeepFrozen,
 } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
@@ -599,38 +601,11 @@ const pruneCfcSchemaDefinitionsInternal = (
 export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema =>
   pruneCfcSchemaDefinitionsInternal(schema, true);
 
-// A definition's content with its local refs spelled by `names`, as a string
-// that is the same for two definitions that resolve alike: object members
-// are written in sorted key order, so an interned and a freshly built
-// definition compare equal.
-const definitionContentKey = (
-  definition: JSONSchema,
-  names: ReadonlyMap<string, string>,
-): string => {
-  const write = (value: unknown): string => {
-    if (Array.isArray(value)) return `[${value.map(write).join(",")}]`;
-    if (!isObjectNotArray(value)) return JSON.stringify(value) ?? "undefined";
-    const members = Object.entries(value)
-      .filter(([, member]) => member !== undefined)
-      .toSorted(([a], [b]) => utf8Compare(a, b))
-      .map(([key, member]) => {
-        if (key === "$ref" && typeof member === "string") {
-          const name = localDefinitionName(member);
-          const canonical = name === undefined ? undefined : names.get(name);
-          return `${JSON.stringify(key)}:${
-            JSON.stringify(
-              canonical === undefined
-                ? member
-                : encodedLocalDefinitionRef(canonical),
-            )
-          }`;
-        }
-        return `${JSON.stringify(key)}:${write(member)}`;
-      });
-    return `{${members.join(",")}}`;
-  };
-  return write(definition);
-};
+// A name the hoist mints: `__cfc_<tag>_<n>_<name>` (`namespaceLocalDefinitionScope`).
+const MINTED_DEFINITION_NAME = /^__cfc_[a-z_]+_\d+_/;
+
+const isMintedDefinitionName = (name: string): boolean =>
+  MINTED_DEFINITION_NAME.test(name);
 
 /**
  * The canonical form of a schema document that is about to be persisted or
@@ -643,15 +618,23 @@ const definitionContentKey = (
  * (`resolveCfcSchemaRef()`). Persisted as they are, those two leave a
  * document whose root map holds the same definition under many names and
  * whose bodies each carry a copy of that map, and every later merge adds
- * another round of both. This folds the names of content-identical
- * definitions into one, the name that sorts first with an un-hoisted name
- * preferred, rewrites every local ref to the surviving name, drops the
- * nested maps (inert under the root's, `pruneCfcSchemaDefinitions()`), and
- * drops the minted definitions nothing reaches. A definition the author
- * named is kept whether or not anything refers to it. A `$defs` below the
- * root is inert whatever it holds: a `#/$defs/<name>` ref names a
+ * another round of both. This folds the minted names of content-identical
+ * definitions onto one name, rewrites every local ref to the surviving
+ * name, drops the nested maps (inert under the root's,
+ * `pruneCfcSchemaDefinitions()`), and drops the minted definitions nothing
+ * reaches. A definition the author named is kept whether or not anything
+ * refers to it, and is never folded onto another authored name. A `$defs`
+ * below the root is inert whatever it holds: a `#/$defs/<name>` ref names a
  * definition of the document root (`docs/specs/json_schema.md`), so
  * dropping the map rebinds nothing.
+ *
+ * Two definitions mean the same when they are equal once every local ref
+ * in them is read as the definition it names, recursion included: the
+ * names are partitioned by refinement, every name in one class to begin
+ * with, each round splitting a class by the hash of its members' bodies
+ * with refs spelled as class ids, until no class splits. Two copies of a
+ * self-referential definition then share a class, where comparing their
+ * bodies name by name never would.
  */
 export const canonicalizeCfcSchemaDocument = (
   schema: JSONSchema,
@@ -659,93 +642,115 @@ export const canonicalizeCfcSchemaDocument = (
   if (!isObjectNotArray(schema) || !isObjectNotArray(schema.$defs)) {
     return schema;
   }
-  const root = schema.$defs as SchemaDefinitions;
-
-  // The surviving name of each definition: iterated, since a definition's
-  // content refers to other definitions by name, and two definitions compare
-  // equal only once the names they refer to have been folded.
-  const names = [...Object.keys(root)].toSorted(utf8Compare);
-  const isHoisted = (name: string) => name.startsWith("__cfc_");
-  let surviving = new Map<string, string>(names.map((name) => [name, name]));
-  for (let round = 0; round < names.length; round++) {
-    const byContent = new Map<string, string>();
-    const next = new Map<string, string>();
-    for (const name of names) {
-      const key = definitionContentKey(root[name], surviving);
-      const representative = byContent.get(key);
-      if (representative === undefined) {
-        byContent.set(key, name);
-        next.set(name, name);
-        continue;
-      }
-      // Prefer an un-hoisted name; between two of a kind, the one that
-      // sorts first, which the sorted iteration already reached.
-      const keep = isHoisted(representative) && !isHoisted(name)
-        ? name
-        : representative;
-      if (keep !== representative) {
-        byContent.set(key, keep);
-        next.set(representative, keep);
-      }
-      next.set(name, keep);
-    }
-    // Fold chains (a -> b -> c) to their end.
-    const folded = new Map<string, string>();
-    for (const name of names) {
-      let target = next.get(name) ?? name;
-      while ((next.get(target) ?? target) !== target) {
-        target = next.get(target) ?? target;
-      }
-      folded.set(name, target);
-    }
-    let changed = false;
-    for (const name of names) {
-      if (folded.get(name) !== surviving.get(name)) changed = true;
-    }
-    surviving = folded;
-    if (!changed) break;
+  // A stored envelope is interned and deep-frozen, and is asked about on
+  // every write to its document, so its canonical form is kept by identity.
+  const cacheable = isDeepFrozen(schema);
+  if (cacheable) {
+    const cached = canonicalDocumentCache.get(schema);
+    if (cached !== undefined) return cached;
   }
+  const canonical = canonicalizeCfcSchemaDocumentUncached(schema);
+  if (cacheable) canonicalDocumentCache.set(schema, canonical);
+  return canonical;
+};
 
-  const renamed = new Map(
-    [...surviving].filter(([name, keep]) => name !== keep),
+const canonicalDocumentCache = new WeakMap<object, JSONSchema>();
+
+const canonicalizeCfcSchemaDocumentUncached = (
+  schema: JSONSchemaObj,
+): JSONSchema => {
+  // Held as `Map`s throughout, so that a definition named `__proto__` is an
+  // entry like any other rather than a prototype assignment.
+  const root = new Map(
+    Object.entries(schema.$defs as SchemaDefinitions).toSorted((
+      [left],
+      [right],
+    ) => utf8Compare(left, right)),
   );
-  const { $defs: _map, ...body } = schema;
-  const definitions: Record<string, JSONSchema> = {};
-  for (const name of names) {
-    if (surviving.get(name) !== name) continue;
-    definitions[name] = renamed.size === 0
-      ? root[name]
-      : renameLocalDefinitionRefs(root[name], renamed);
-  }
-  const document = {
-    ...(renamed.size === 0
-      ? body
-      : renameLocalDefinitionRefs(body, renamed) as JSONSchemaObj),
-    $defs: definitions,
-  };
-  const pruned = pruneCfcSchemaDefinitions(document);
-  if (!isObjectNotArray(pruned)) return pruned;
-  // A definition the document's author named stays even when nothing refers
-  // to it yet: it is part of the declared document, and a later merge may
-  // bind to it. What the prune may drop for good is a definition a merge
-  // minted (`__cfc_` prefix) that nothing reaches: those are the copies
-  // that grow a stored envelope. An authored definition kept this way keeps
-  // the definitions it refers to.
-  const kept: Record<string, JSONSchema> = isObjectNotArray(pruned.$defs)
-    ? { ...(pruned.$defs as Record<string, JSONSchema>) }
-    : {};
-  let retained = false;
-  for (const name of Object.keys(definitions).toSorted(utf8Compare)) {
-    if (isHoisted(name) || Object.hasOwn(kept, name)) continue;
-    retained = true;
-    kept[name] = definitions[name];
-    const closure = selectReferencedCfcSchemaDefs(
-      definitions[name],
-      definitions,
+  const names = [...root.keys()];
+
+  // Partition refinement: one class, split by content until stable.
+  let classOf = new Map<string, number>(names.map((name) => [name, 0]));
+  let classCount = 1;
+  while (true) {
+    const spelling = new Map<string, string>(
+      names.map((name) => [name, `class ${classOf.get(name)}`]),
     );
+    const classByKey = new Map<string, number>();
+    const next = new Map<string, number>();
+    for (const name of names) {
+      const key = hashStringOf(
+        renameLocalDefinitionRefs(root.get(name)!, spelling) as FabricValue,
+      );
+      let id = classByKey.get(key);
+      if (id === undefined) {
+        id = classByKey.size;
+        classByKey.set(key, id);
+      }
+      next.set(name, id);
+    }
+    classOf = next;
+    if (classByKey.size === classCount) break;
+    classCount = classByKey.size;
+  }
+
+  // One surviving name per class: every authored name of the class stays,
+  // and the class's minted names fold onto its first authored name, or onto
+  // the first minted one where the class has no authored name.
+  const members = new Map<number, string[]>();
+  for (const name of names) {
+    const id = classOf.get(name)!;
+    const list = members.get(id);
+    if (list === undefined) members.set(id, [name]);
+    else list.push(name);
+  }
+  const renamed = new Map<string, string>();
+  for (const list of members.values()) {
+    const authored = list.filter((name) => !isMintedDefinitionName(name));
+    const keep = authored[0] ?? list[0];
+    for (const name of list) {
+      if (name !== keep && isMintedDefinitionName(name)) {
+        renamed.set(name, keep);
+      }
+    }
+  }
+
+  const rename = (fragment: JSONSchema): JSONSchema =>
+    renamed.size === 0
+      ? fragment
+      : renameLocalDefinitionRefs(fragment, renamed);
+  const { $defs: _map, ...body } = schema;
+  const definitions = new Map<string, JSONSchema>();
+  for (const name of names) {
+    if (renamed.has(name)) continue;
+    definitions.set(name, rename(root.get(name)!));
+  }
+  const pruned = pruneCfcSchemaDefinitions({
+    ...(rename(body) as JSONSchemaObj),
+    $defs: Object.fromEntries(definitions),
+  });
+  if (!isObjectNotArray(pruned)) return pruned;
+
+  // A definition the author named stays whether or not anything refers to
+  // it, pruned below the root as any other, with what it refers to.
+  const kept = new Map<string, JSONSchema>(
+    Object.entries((pruned.$defs ?? {}) as SchemaDefinitions),
+  );
+  let retained = false;
+  const definitionMap = Object.fromEntries(definitions);
+  for (const [name, definition] of definitions) {
+    if (isMintedDefinitionName(name) || kept.has(name)) continue;
+    retained = true;
+    kept.set(name, pruneCfcSchemaDefinitionsInternal(definition, false));
+    const closure = selectReferencedCfcSchemaDefs(definition, definitionMap);
     if (closure !== undefined) {
-      for (const [dependency, definition] of Object.entries(closure)) {
-        if (!Object.hasOwn(kept, dependency)) kept[dependency] = definition;
+      for (const [dependency, body] of Object.entries(closure)) {
+        if (!kept.has(dependency)) {
+          kept.set(
+            dependency,
+            pruneCfcSchemaDefinitionsInternal(body, false),
+          );
+        }
       }
     }
   }
@@ -753,7 +758,7 @@ export const canonicalizeCfcSchemaDocument = (
   return {
     ...pruned,
     $defs: Object.fromEntries(
-      Object.keys(kept).toSorted(utf8Compare).map((name) => [name, kept[name]]),
+      [...kept].toSorted(([left], [right]) => utf8Compare(left, right)),
     ),
   };
 };
