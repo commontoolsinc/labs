@@ -28,7 +28,7 @@ delivery" and §4), and no activity log, since nothing read it. The plan is
 
 ## What the gate reports
 
-Against sixty of the room's sixty-four recorded baselines, the
+Against sixty-two of the room's sixty-six recorded baselines, the
 pattern-update proof reports `argument.messages[]: ifc changed`: the stored
 messages' write policy named the old handlers, and the new elements' policy
 names the four send handlers, `commitEdit`, `commitDelete`, and
