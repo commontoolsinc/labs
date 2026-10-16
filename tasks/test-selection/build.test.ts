@@ -46,13 +46,16 @@ import {
   COST_RULE,
   costSeconds,
   daysBetween,
+  emptyContext,
   emptyState,
   flakeRate,
   type IdentityState,
   lastMainIn,
   NEW_REAL_TEST_FAILURE_RULE,
+  parseContext,
   samplesOf,
   sealDay,
+  serializeContext,
   value,
 } from "./score.ts";
 import {
@@ -1338,10 +1341,29 @@ describe("build", () => {
       expect(state.prCatches).toBe(1);
     });
 
+    it("drops new real test failures held against something that is not a day", () => {
+      // Taken as the day of the most recent one, it would leave freshness
+      // nothing to age from.
+      const state = storedState({
+        newRealTestFailureDays: {
+          "2026-08-10": { local: 0, pr: 1, main: 0, sources: ["a"] },
+          "someday": { local: 0, pr: 1, main: 0, sources: ["b"] },
+          "2026-02-31": { local: 0, pr: 1, main: 0, sources: ["c"] },
+        },
+      });
+      expect(Object.keys(state.newRealTestFailureDays)).toEqual(["2026-08-10"]);
+      expect(state.lastCatch).toBe("2026-08-10");
+      expect(state.prCatches).toBe(1);
+    });
+
     it("refuses a closed day that is not a day", () => {
       // Read as later than it is, it would close days nothing has read.
       const stored = { ...emptyAggregate("2026-08-20"), closed: "yesterday" };
       expect(parseAggregate(JSON.stringify(stored))).toBeUndefined();
+      // Shaped like a day and not one the calendar has.
+      expect(
+        parseAggregate(JSON.stringify({ ...stored, closed: "2026/99/99" })),
+      ).toBeUndefined();
       expect(
         parseAggregate(JSON.stringify({ ...stored, closed: "2026/08/10" }))
           ?.closed,
@@ -2564,6 +2586,23 @@ describe("history held under a name an alias has since replaced", () => {
     resolveHistory(states, files, RENAMED);
     expect([...states.keys()]).toEqual([testIdentityKey(NEW)]);
     expect(files).toEqual({ [testIdentityKey(NEW)]: UNIT });
+  });
+
+  it("moves what the fold context remembers of the days it moves", () => {
+    const context = emptyContext();
+    context.credited.set(`${testIdentityKey(OLD)} c1 fix`, "2026-08-10");
+    context.credited.set(`${testIdentityKey(OLD)} c2 late`, "2026-08-16");
+    const after = new Fold(
+      { ...emptyAggregate("2026-08-19"), context: serializeContext(context) },
+      RENAMED,
+      "2026-08-20",
+    ).finish().aggregate;
+    expect([...parseContext(after.context).credited.keys()].sort()).toEqual(
+      [
+        `${testIdentityKey(NEW)} c1 fix`,
+        `${testIdentityKey(OLD)} c2 late`,
+      ].sort(),
+    );
   });
 
   it("keeps the file the new name's own records named", () => {

@@ -62,7 +62,9 @@ jobs:
     # Six hours is the ceiling for a job on a GitHub-hosted runner: past
     # it the platform cancels the run whatever this says. A bootstrap
     # reads sixty days of records in one job, and the four-hourly path
-    # reads two, or back to the last day it read.
+    # reads two, or back to the last day it read. The longest read is a
+    # fold of the whole history after the rules change, which took 75
+    # minutes over the two months from 2026-08-19.
     timeout-minutes: 360
     # Both steps that run the publisher name the store, so it is named
     # once for the job and the two cannot disagree about where it is.

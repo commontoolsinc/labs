@@ -477,11 +477,13 @@ type AggregateRead =
  * selection decays slowly — so an unreadable state is told apart from an absent
  * one rather than both becoming an empty one.
  *
- * The one empty aggregate a run starts from while a state exists is
- * the one it folds every day of that state's history into, when the
- * state's new real test failures were credited under other rules (see
- * `NEW_REAL_TEST_FAILURE_RULE`). That reads every record those came from,
- * so none of them is lost.
+ * A run starts from an empty aggregate while a state exists in two cases.
+ * An incremental run folds every day of a state's history into one when
+ * the state's new real test failures were credited under other rules (see
+ * `NEW_REAL_TEST_FAILURE_RULE`), which reads every record those came from,
+ * so none of them is lost. A bootstrap starts from one where every state
+ * is a body that is not an aggregate at all and none is written in a shape
+ * from further ahead, since then no publisher can read any of them.
  *
  * Passing over a state this publisher cannot read is what keeps one from
  * stopping it for good. Nothing but the publisher creates a state, and it

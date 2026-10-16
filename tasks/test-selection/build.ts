@@ -33,6 +33,7 @@ import {
   type FoldContext,
   foldObservations,
   type IdentityState,
+  isDay,
   isDaySamples,
   mergeSamples,
   moveHistory,
@@ -41,6 +42,7 @@ import {
   parseContext,
   readCostsForward,
   readNewRealTestFailuresForward,
+  renameInContext,
   sampleDuration,
   scoreInputs,
   sealDay,
@@ -419,7 +421,8 @@ export function parseAggregate(value: unknown): AggregateState | undefined {
   const { closed } = state;
   if (
     closed !== undefined &&
-    (typeof closed !== "string" || !/^\d{4}\/\d{2}\/\d{2}$/.test(closed))
+    (typeof closed !== "string" || !/^\d{4}\/\d{2}\/\d{2}$/.test(closed) ||
+      !isDay(closed.replaceAll("/", "-")))
   ) {
     return undefined;
   }
@@ -1104,6 +1107,14 @@ export class Fold {
       this.#held.surfaces.set(key, recordSurface(test, files[key]));
     }
     this.#context = parseContext(aggregate.context);
+    if (!resolver.empty) {
+      renameInContext(this.#context, (key, day) => {
+        const test = testIdentityOfKey(key);
+        return test === undefined
+          ? key
+          : testIdentityKey(resolver.resolve(test, day));
+      });
+    }
     for (const lane of aggregate.lanes ?? []) this.#held.lanes.push(lane);
     // Copied, because a day's sample is counted into where it is held.
     for (const [name, byDay] of Object.entries(aggregate.hooks ?? {})) {

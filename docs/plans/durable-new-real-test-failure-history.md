@@ -96,8 +96,9 @@ closing it, kept every one of its 7,995 new real test failures, moved the 89
 new real test failures of renamed tests, and left 9,835 object names. The
 first day of the store's history, 2026-08-19, has a rollup, so keeping that
 day adds a receipt rather than its 1,688 objects. The aggregate came to
-109 MB, and what remains grows with the number of tests rather than with
-the age of the store. The first run after this lands folds the whole history
+109 MB. What remains grows with the number of tests and with the days each
+had a new real test failure on, rather than with the number of objects the
+store holds. The first run after this lands folds the whole history
 again under the rules in force, so its counts are the ones those rules
 give.
 
@@ -122,8 +123,9 @@ older publisher folds the whole history again, from the first day it finds
 among the objects the state names, and the state keeps the names of the
 first day the history holds for that reason. Rolling forward again folds the
 whole history once more, for the same reason. Each costs one long run. The
-shape number stays where it is because raising it costs every lane on a
-branch behind the raise its manifest.
+shape number stays where it is, because raising it would leave every lane
+on a branch behind the raise unable to read the manifests published after
+it.
 
 Out of scope here, and recorded on the team's topics board: 36 new real test
 failures on the aggregate of 2026-10-01 stay under replaced names because they

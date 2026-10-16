@@ -321,18 +321,18 @@ function isNewRealTestFailureDay(
 }
 
 /**
- * Reads a state's new real test failures forward. Its days of new real
- * test failures are kept where they read, and a day that does not is
- * dropped. The totals are then set from the days, so the two agree. A
- * state stored without days was credited under other rules, so the fold
- * that reads it folds its whole history again rather than counting it.
+ * Reads a state's new real test failures forward. Its days of new real test
+ * failures are kept where they and the day they are held against read, and any
+ * other is dropped. The totals are then set from the days, so the two agree. A
+ * state stored without days was credited under other rules, so the fold that
+ * reads it folds its whole history again rather than counting it.
  */
 export function readNewRealTestFailuresForward(state: IdentityState): void {
   const days: Record<string, NewRealTestFailureDay> = {};
   const held: unknown = state.newRealTestFailureDays;
   if (isObjectNotArray(held)) {
     for (const [day, failed] of Object.entries(held)) {
-      if (isNewRealTestFailureDay(failed)) days[day] = failed;
+      if (isDay(day) && isNewRealTestFailureDay(failed)) days[day] = failed;
     }
   }
   state.newRealTestFailureDays = days;
@@ -429,6 +429,64 @@ export function moveHistory(
   }
   totalNewRealTestFailures(from);
   totalNewRealTestFailures(into);
+}
+
+/**
+ * Renames the identities a fold context remembers, each to what `rename`
+ * gives for it and the day the context holds it against, so that what the
+ * context says about a test's recent runs follows its history to a new
+ * name (see `moveHistory`). Each key of `mainAtCommit` and `credited`
+ * starts with an identity key and goes on with parts that hold no space.
+ */
+export function renameInContext(
+  context: FoldContext,
+  rename: (key: string, day: string) => string,
+): void {
+  for (const seen of context.outcomesAtCommit.values()) {
+    for (const [key, outcomes] of [...seen.identities]) {
+      const to = rename(key, seen.day);
+      if (to === key) continue;
+      seen.identities.delete(key);
+      const held = seen.identities.get(to) ?? new Set<string>();
+      for (const outcome of outcomes) held.add(outcome);
+      seen.identities.set(to, held);
+    }
+  }
+  for (const [at, said] of [...context.mainAtCommit]) {
+    const split = at.lastIndexOf(" ");
+    const to = rename(at.slice(0, split), said.day) + at.slice(split);
+    if (to === at) continue;
+    context.mainAtCommit.delete(at);
+    // A failure at a point is the commit being broken there, whichever
+    // name saw it.
+    if (context.mainAtCommit.get(to)?.outcome !== "fail") {
+      context.mainAtCommit.set(to, said);
+    }
+  }
+  for (const [attribution, day] of [...context.credited]) {
+    const split = attribution.lastIndexOf(
+      " ",
+      attribution.lastIndexOf(" ") - 1,
+    );
+    const to = rename(attribution.slice(0, split), day) +
+      attribution.slice(split);
+    if (to === attribution) continue;
+    context.credited.delete(attribution);
+    if (!context.credited.has(to)) context.credited.set(to, day);
+  }
+  for (const [key, seen] of [...context.failures]) {
+    context.failures.delete(key);
+    for (const failure of seen) {
+      const to = rename(key, failure.day);
+      const list = context.failures.get(to) ?? [];
+      list.push(failure);
+      context.failures.set(to, list);
+    }
+  }
+  for (const crowd of context.crowds.values()) {
+    const renamed = [...crowd.identities].map((key) => rename(key, crowd.day));
+    crowd.identities = new Set(renamed);
+  }
 }
 
 function bump(counts: Record<string, number>, day: string): void {
@@ -651,7 +709,7 @@ const OUTCOMES = new Set(["pass", "fail", "skip"]);
  * into the next month, so "2026-02-31" parses as March 3rd and would be
  * aged from three days later than it claims. What round-trips is a day.
  */
-function isDay(value: unknown): value is string {
+export function isDay(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
   }
