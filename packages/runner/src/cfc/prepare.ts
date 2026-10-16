@@ -215,6 +215,7 @@ import {
   withoutUndefinedMembers,
 } from "./schema-merge.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   resolveCfcSchemaRefRoot,
@@ -10214,7 +10215,12 @@ const mergeStoredCfcEnvelope = (
   options: MergeCfcSchemaEnvelopeOptions,
 ): JSONSchema =>
   storedEnvelopeUnchangedByCandidate(stored, candidate)
-    ? stored
+    // An envelope stored before merges left documents in canonical form
+    // is rewritten in that form by the first authorized write that leaves
+    // its labels unchanged: the canonical document hashes differently, so
+    // the idempotence check below does not skip the write. One already in
+    // canonical form hashes the same and is kept as it is.
+    ? canonicalizeCfcSchemaDocument(stored)
     : mergeCfcSchemaEnvelopes(stored, candidate, options);
 
 /**
