@@ -3766,8 +3766,9 @@ export type GraphSnapshotResponse = {
 
 /**
  * Everything the logger diagnostics read returns: counts, per-logger
- * metadata, timings, and active flags, gathered in one round trip because a
- * client comparing them wants them from the same moment.
+ * metadata, timings, active flags, the runtime's CFC counters, and the sizes
+ * of its live structures, gathered in one round trip because a client
+ * comparing them wants them from the same moment.
  */
 export type LoggerCountsResponse = {
   /**
@@ -3806,8 +3807,9 @@ export type LoggerCountsResponse = {
   /**
    * How large the runtime's live structures are at this moment: the
    * scheduler's tables, storage's documents and subscriptions, the compiled
-   * code caches, and the worker's own subscription and mount tables. A heap
-   * that grows shows up here as the structure growing it.
+   * code caches, and the worker's own subscription and mount tables. Each is
+   * a collection's own count, so a collection that keeps growing shows up
+   * here, while growth in what its entries hold does not.
    */
   sizes: RuntimeSizes & { worker: WorkerSizes };
 };

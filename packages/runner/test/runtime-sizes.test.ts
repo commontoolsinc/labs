@@ -42,9 +42,20 @@ describe("runtime-sizes", () => {
       )).toBe("sink-request confidentiality exceeds ceiling");
     });
 
+    it("returns the words ahead of an identifier a reason names with no connective", () => {
+      expect(cfcRejectionReasonPrefix(
+        "unprivileged write to protected runtime surface of:fid1:abc at /",
+      )).toBe("unprivileged write to protected runtime surface");
+      expect(cfcRejectionReasonPrefix(
+        "unprivileged write to protected runtime surface /secret/path",
+      )).toBe("unprivileged write to protected runtime surface");
+    });
+
     it("returns a reason that names nothing whole", () => {
       expect(cfcRejectionReasonPrefix("prepared digest changed"))
         .toBe("prepared digest changed");
+      expect(cfcRejectionReasonPrefix("CFC commit preparation crashed: boom"))
+        .toBe("CFC commit preparation crashed");
     });
 
     it("returns a placeholder for a reason with no words ahead of its detail", () => {
@@ -125,7 +136,6 @@ describe("runtime-sizes", () => {
       expect(sizes.storage?.spaces).toBe(0);
       expect(sizes.storage?.documents).toBe(0);
       expect(sizes.patterns.compiledPrograms).toBe(0);
-      expect(sizes.runtime.immutableSnapshots).toBe(0);
       expect(sizes.runtime.retryingEdits).toBe(0);
       expect(sizes.cfcRejectionsByReason).toEqual({});
     });
@@ -153,12 +163,16 @@ describe("runtime-sizes", () => {
       expect(runtime.getSizes().scheduler.nodes).toBe(0);
     });
 
-    it("counts the snapshots the immutable cell store retains", () => {
+    it("counts the snapshots the immutable cell stores retain", () => {
+      // The count spans every store in the process, so it is read as a
+      // difference: what this runtime adds to whatever other stores hold.
+
       const runtime = createRuntime();
+      const before = runtime.getSizes().runtime.immutableSnapshots;
       runtime.getImmutableCell(space, { value: 1 }, { type: "object" });
       runtime.getImmutableCell(space, { value: 2 }, { type: "object" });
 
-      expect(runtime.getSizes().runtime.immutableSnapshots).toBe(2);
+      expect(runtime.getSizes().runtime.immutableSnapshots - before).toBe(2);
     });
 
     it("tallies a commit CFC enforcement refused under its reason's prefix", async () => {

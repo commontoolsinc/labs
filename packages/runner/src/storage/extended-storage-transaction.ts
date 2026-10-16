@@ -4107,6 +4107,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.prepare.status !== "prepared"
       ) {
         if (this.#commitPreparationCrash !== undefined) {
+          this.#cfcInstrumentation.onCommitRejected?.([
+            `CFC commit preparation crashed: ${this.#commitPreparationCrash}`,
+          ]);
           return this.#rejectCommitBeforeStorage({
             error: {
               name: "CommitPreparationError",

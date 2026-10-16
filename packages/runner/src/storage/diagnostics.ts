@@ -52,11 +52,7 @@ export type StorageDiagnostics = {
   spacesOmitted: number;
 };
 
-/**
- * Sizes of one space replica's live structures, each a collection's own count.
- * `subscriptions` alone adds the sink sets up, one addition per subscribed
- * document.
- */
+/** Sizes of one space replica's live structures, each a collection's own count. */
 export type SpaceStorageSizes = {
   /** Documents the replica holds. */
   documents: number;

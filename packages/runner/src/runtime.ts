@@ -118,7 +118,11 @@ import {
 import type { ConsoleMethod } from "./harness/console.ts";
 import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { immutableCellsFor, ownImmutableCells } from "./immutable-cell.ts";
+import {
+  immutableCellsFor,
+  liveImmutableSnapshotCount,
+  ownImmutableCells,
+} from "./immutable-cell.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { addressKey } from "./link-types.ts";
 import {
@@ -1537,7 +1541,8 @@ export class Runtime {
   #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #cfcRejections = new CfcRejectionTally();
 
-  /** `editWithRetry()` calls waiting for their next attempt. */
+  /** `editWithRetry()` calls whose commit was rejected and that are waiting
+   * to attempt again. */
   #retryingEdits = 0;
 
   /**
@@ -3181,8 +3186,9 @@ export class Runtime {
   /**
    * The sizes of the structures this runtime holds live, each read from the
    * structure's own count, so the read is safe at any moment and walks
-   * nothing. The storage figure is `null` for a storage manager that reports
-   * no sizes.
+   * nothing. A tracked collection that keeps growing shows up here; growth in
+   * what its entries hold, or in a structure not counted here, does not. The
+   * storage figure is `null` for a storage manager that reports no sizes.
    */
   getSizes(): RuntimeSizes {
     return {
@@ -3190,7 +3196,7 @@ export class Runtime {
       storage: this.storageManager.getSizes?.() ?? null,
       patterns: this.patternManager.getSizes(),
       runtime: {
-        immutableSnapshots: immutableCellsFor(this).size,
+        immutableSnapshots: liveImmutableSnapshotCount(),
         pendingAsyncWork: this.#pendingAsyncWork.size,
         retryingEdits: this.#retryingEdits,
         modules: this.moduleRegistry.size,

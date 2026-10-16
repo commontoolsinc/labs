@@ -4549,6 +4549,9 @@ export class SpaceReplica
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+
+  /** How many callbacks `#sinks` holds across every document. */
+  #sinkCount = 0;
   readonly #operationSinks = new Map<
     string,
     Set<(snapshot: OperationFieldSnapshot) => void>
@@ -4958,12 +4961,10 @@ export class SpaceReplica
 
   /** @inheritDoc */
   getSizes(): SpaceStorageSizes {
-    let subscriptions = 0;
-    for (const sinks of this.#sinks.values()) subscriptions += sinks.size;
     return {
       documents: this.#docs.size,
       subscribedDocuments: this.#sinks.size,
-      subscriptions,
+      subscriptions: this.#sinkCount,
       watchedDocuments: this.#watchedIds.size,
       operationSinks: this.#operationSinks.size,
       inFlightCommits: this.#commitPromises.size,
@@ -5159,11 +5160,12 @@ export class SpaceReplica
       subscribers = new Set();
       this.#sinks.set(key, subscribers);
     }
+    if (!subscribers.has(callback)) this.#sinkCount += 1;
     subscribers.add(callback);
     void this.sync(uri);
     return () => {
       const current = this.#sinks.get(key);
-      current?.delete(callback);
+      if (current?.delete(callback)) this.#sinkCount -= 1;
       if (current && current.size === 0) {
         this.#sinks.delete(key);
       }

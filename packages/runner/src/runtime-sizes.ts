@@ -1,8 +1,10 @@
 /**
  * Sizes of the structures a runtime holds live, for the diagnostics read that
- * attributes a growing heap to the structure growing it. Every figure is a
- * collection's own count, so reading them walks nothing: a read is safe at any
- * moment, including one where the runtime is already struggling.
+ * tells which tracked collection kept growing while a heap did. Every figure
+ * is a collection's own count, so reading them walks nothing: a read is safe
+ * at any moment, including one where the runtime is already struggling. A
+ * heap that grows through larger entries, or through a structure not counted
+ * here, leaves every figure where it was.
  */
 
 import type { SchedulerSizes } from "./scheduler/types.ts";
@@ -25,13 +27,19 @@ export type PatternManagerSizes = {
 
 /** Sizes of the structures the runtime itself holds. */
 export type RuntimeOwnSizes = {
-  /** Snapshots the immutable cell store retains. */
+  /**
+   * Distinct snapshots retained by any immutable cell store in the process,
+   * element stores included.
+   */
   immutableSnapshots: number;
 
   /** Asynchronous builtin work not yet settled. */
   pendingAsyncWork: number;
 
-  /** `editWithRetry()` calls waiting to attempt their commit again. */
+  /**
+   * `editWithRetry()` calls whose commit was rejected and that are waiting to
+   * attempt again. A re-run after absence reconciliation is not one.
+   */
   retryingEdits: number;
 
   /** Modules registered by reference. */
@@ -73,14 +81,19 @@ const CFC_REJECTION_REASON_UNCLASSIFIED = "(unclassified)";
 
 /**
  * Returns the words of a CFC refusal reason ahead of the first thing it names:
- * the rule that refused, without the document, path or sink it refused. A
- * reason names what it refused after ` for `, ` at ` or `:`, so the cut falls
- * at the first of those. `"writer-fit confidentiality misfit for of:… at /"`
- * tallies as `"writer-fit confidentiality misfit"`.
+ * the rule that refused, without the document, path or sink it refused. The
+ * cut falls at the first of ` for `, ` at `, a `:` detail, or a word that is
+ * itself an identifier or a path (one with a `:` or `/` inside it), and a
+ * connective left dangling at the end is dropped with it. `"writer-fit
+ * confidentiality misfit for of:… at /"` tallies as `"writer-fit
+ * confidentiality misfit"`; `"unprivileged write to protected runtime surface
+ * of:…"` as `"unprivileged write to protected runtime surface"`.
  */
 export function cfcRejectionReasonPrefix(reason: string): string {
-  const cut = reason.search(/ (?:for|at) |:/);
-  const prefix = (cut === -1 ? reason : reason.slice(0, cut)).trim();
+  const cut = reason.search(/ (?:for|at) |:|\s\S*[:/]\S/);
+  const prefix = (cut === -1 ? reason : reason.slice(0, cut))
+    .trim()
+    .replace(/\s+(?:for|at|to|of|into|in|on|by|from)$/, "");
   if (prefix.length === 0) return CFC_REJECTION_REASON_UNCLASSIFIED;
   return prefix.slice(0, CFC_REJECTION_REASON_PREFIX_LIMIT);
 }

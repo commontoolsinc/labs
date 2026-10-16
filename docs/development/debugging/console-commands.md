@@ -356,10 +356,12 @@ and most runtime code runs in a web worker, so its loggers are in a separate
 // Fetch worker counts, timing, flags, CFC counters, and structure sizes
 await commonfabric.rt.getLoggerCounts()
 
-// How large the worker's live structures are right now: scheduler nodes and
+// Counts of the worker's live structures right now: scheduler nodes and
 // queues, storage documents and subscriptions, compiled-code caches, the
-// worker's own subscription and mount tables, and CFC commit refusals by
-// reason. A heap that keeps growing shows up here as the structure growing it.
+// worker's own subscription and mount tables, and cumulative CFC commit
+// refusals by reason. Take two readings apart to see which tracked collection
+// is growing; growth in what the entries hold, or in a structure not counted
+// here, does not show.
 (await commonfabric.rt.getLoggerCounts()).sizes
 
 // Control worker loggers

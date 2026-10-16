@@ -160,11 +160,6 @@ export class ImmutableCellStore {
     this.#retainValue(value);
   }
 
-  /** How many snapshots the store retains. */
-  get size(): number {
-    return this.#snapshots.size;
-  }
-
   /** Returns a live snapshot, or throws for an absent or expired identifier. */
   get(id: URI): ImmutableSnapshot {
     const snapshot = this.#snapshots.get(id);
@@ -435,6 +430,15 @@ export function isInlineCellId(id: string): boolean {
 }
 
 /** Looks up a runtime-local snapshot without retaining its runtime. */
+/**
+ * How many distinct snapshots any store in this process retains, element
+ * stores included. A snapshot several stores share counts once; one released
+ * by every owner, or whose owners were reclaimed, is gone from the count.
+ */
+export function liveImmutableSnapshotCount(): number {
+  return snapshots.size;
+}
+
 export function immutableSnapshot(id: URI): ImmutableSnapshot {
   const snapshot = snapshots.get(id)?.value.deref();
   if (snapshot === undefined) {
