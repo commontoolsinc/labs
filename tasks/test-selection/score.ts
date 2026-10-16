@@ -486,7 +486,9 @@ export function renameInContext(
   for (const [key, seen] of context.failures) {
     for (const failure of seen) {
       const to = rename(key, failure.day);
-      failures.set(to, [...failures.get(to) ?? [], failure]);
+      const list = failures.get(to);
+      if (list === undefined) failures.set(to, [failure]);
+      else list.push(failure);
     }
   }
   context.failures.clear();
