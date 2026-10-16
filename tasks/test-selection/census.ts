@@ -32,8 +32,8 @@ const UNRECORDED = "unrecorded ";
 
 /**
  * A stand-in identity for a unit no manifest has ever seen. Records exist
- * only for tests that ran, so a unit with none is either brand new or
- * renamed, and both must run. The packer needs something to place, and
+ * only for tests that ran, so a unit with none is new or renamed since
+ * the manifest was published. The packer needs something to place, and
  * this is the least it can be given: the suite's own record surface and
  * the unit's path, which no real record will ever collide with because a
  * real record is named for a test rather than for a file.
@@ -82,8 +82,8 @@ function standInCost(values: readonly number[]): number | undefined {
 
 /**
  * The entry a unit no manifest has ever seen is carried on. Records exist
- * only for tests that ran, so a unit with none is new or renamed, and
- * both have to run.
+ * only for tests that ran, so a unit with none is new or renamed since
+ * the manifest was published.
  *
  * It is charged from what its own suite's units cost, since the suites
  * are orders of magnitude apart — a unit test is milliseconds and a
@@ -185,6 +185,16 @@ export interface Census {
  * that never runs the unselected starves its own data, and a renamed test
  * is an unknown identity until an alias lands.
  *
+ * The second rule does not reach a unit whose path is in `landed`, the
+ * files the default branch gained after the commit the manifest was
+ * published from. The full run on the default branch runs every unit
+ * there, so the store has records of such a unit, or is about to, that
+ * the manifest is too old to hold. It keeps its stand-in, which has never
+ * run, so the exploration pass reaches it first among what is left. A
+ * unit the change brought, one the manifest's own commit already held,
+ * and one whose name is not a path at all — a repository gate, a
+ * type-check group — run whatever they cost.
+ *
  * Neither rule makes a gate mandatory. A gate is a verdict over units
  * rather than a unit, and the units it judges are each under both rules
  * already. The change reaching a gate, through the same declaration
@@ -196,6 +206,7 @@ export function census(
   suites: readonly Suite[],
   manifest: Manifest | undefined,
   changed: ReadonlySet<string>,
+  landed: ReadonlySet<string>,
 ): Census {
   // Everything below writes into the manifest this returns. What it does
   // not touch is what a manifest says about its own publication rather
@@ -274,7 +285,9 @@ export function census(
         unmeasured += 1;
         // Nothing in the manifest runs this unit, so it is unknown
         // whatever else made it mandatory.
-        mandatory.set(key, reason ?? "unknown");
+        if (reason !== undefined || !landed.has(unit)) {
+          mandatory.set(key, reason ?? "unknown");
+        }
         continue;
       }
       for (const entry of recorded) entries.push(entry);

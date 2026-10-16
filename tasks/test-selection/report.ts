@@ -172,6 +172,13 @@ export interface PullRequestView {
   /** The identities the packing over that manifest reached. */
   selected: ReadonlySet<string>;
 
+  /**
+   * Every unit the packing placed anything of, as `"<suite>\t<unit>"`.
+   * A test the manifest does not hold runs wherever its unit runs, so
+   * this is what says whether it was to have run.
+   */
+  placed: ReadonlySet<string>;
+
   /** The identities that manifest held back, against the reason. */
   withheld: ReadonlyMap<string, WithheldReason>;
 
@@ -203,11 +210,12 @@ export interface PullRequestView {
   newRealTestFailures: ReadonlyMap<string, number>;
 
   /**
-   * The invocation unit each identity the store knows lives in, as
-   * `"<suite>\t<unit>"`. What it answers is whether a unit ran at all:
-   * records exist only for tests that ran, so a test missing from a run
-   * whose unit produced no records at all is a test nothing judged
-   * rather than a test that left.
+   * The invocation unit each identity lives in, as `"<suite>\t<unit>"`:
+   * where the manifest places it, and for one the manifest does not hold,
+   * where this tree places the record the run under report wrote of it.
+   * What it answers is whether a unit ran at all: records exist only for
+   * tests that ran, so a test missing from a run whose unit produced no
+   * records at all is a test nothing judged rather than a test that left.
    */
   units: ReadonlyMap<string, string>;
 }
@@ -217,6 +225,7 @@ export function unknownPullRequest(): PullRequestView {
   return {
     manifest: false,
     selected: new Set(),
+    placed: new Set(),
     withheld: new Map(),
     heldWithUnit: new Set(),
     unschedulable: new Set(),
@@ -438,10 +447,14 @@ export function selectionOf(
   const withheld = view.withheld.get(key);
   if (withheld === "flaky") return "withheld-flaky";
   if (view.heldWithUnit.has(key)) return "withheld-unit";
-  // With a manifest, the packing says whether the test was to have run:
-  // an identity the packing reached, and one the store has never seen,
-  // are both identities that run.
-  if (view.manifest && view.flakes.has(key) && !view.selected.has(key)) {
+  // With a manifest, the packing says whether the test was to have run.
+  // One the manifest holds runs where the packing reached it, and one the
+  // manifest does not hold runs wherever its unit runs.
+  const unit = view.units.get(key);
+  const passedOver = view.flakes.has(key)
+    ? !view.selected.has(key)
+    : unit !== undefined && !view.placed.has(unit);
+  if (view.manifest && passedOver) {
     if (view.unschedulable.has(key)) return "unschedulable";
     return view.crowded ? "crowded-out" : "not-selected";
   }
@@ -884,8 +897,9 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "tests, and this was not one of them.",
   "crowded-out": "This pull request did not run it, and nothing about " +
     "this test decided that. The tests that had to run, which are the " +
-    "ones the change's edits reach and the ones the store has never seen, " +
-    "left no room in the lanes for anything else.",
+    "ones the change's edits reach and the units nothing had measured " +
+    "that the default branch had not already gained, left no room in the " +
+    "lanes for anything else.",
   "withheld-unit": "This pull request did not run it: its unit runs as " +
     "a whole, and the store holds back another test in that unit as too " +
     "flaky to judge a change by, so a pull request runs the unit only " +
