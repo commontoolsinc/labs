@@ -1393,6 +1393,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20261015T230231Z-X4fbcCTNwmTh1D4M",
       "20261016T004427Z-FEcfxYg99ADYSy58",
       "20261016T130413Z-IjgiKFLGlXaYMQ9O",
+      "20261016T142642Z-FwoDtgccmQ6x6E51",
+      "20261016T144813Z-j7kfnbuq3vl_PTT8",
+      "20261016T145511Z-URDigmceiHUQTgYw",
+      "20261016T151336Z-qyuKzPzUZ0f_x9H1",
     ],
     paths: ["argument.messages[]", "result.closeWindow"],
     reason:
