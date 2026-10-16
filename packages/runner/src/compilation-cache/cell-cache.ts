@@ -1956,12 +1956,14 @@ export function planCompileCacheWriteChunks(
  * What a closure load found, for a caller that reports why a load missed:
  * whether the entry document was absent, present but refused (no compiler
  * integrity atom on its label, or a `code` link whose document did not
- * arrive), or verified, and how many reached documents the walk refused the
- * same way. A refused document drops silently from the closure, so without
- * this a partial closure and a plain miss read alike.
+ * arrive), verified, or verified and then refused with the whole closure
+ * because a link left the space; and how many distinct reached documents
+ * the walk refused the way an entry can be. A refused document drops
+ * silently from the closure, so without this a partial closure and a plain
+ * miss read alike.
  */
 export type ClosureLoadTally = {
-  entry: "absent" | "unverified" | "verified";
+  entry: "absent" | "unverified" | "verified" | "refused";
   dropped: number;
 };
 
@@ -1996,6 +1998,8 @@ export async function loadCompiledClosure(
   const atom = COMPILED_INTEGRITY_ATOM;
   const out = new Map<string, CompiledDoc>();
   const visited = new Set<string>();
+  // Refused documents by id, so one imported from several places counts once.
+  const refused = new Set<string>();
 
   // Integrity-gated read (fail-closed): the cell's stored doc only if its
   // persisted CFC label carries the compiler atom. No sync here — the entry's
@@ -2104,12 +2108,16 @@ export async function loadCompiledClosure(
       // only in the linked cell's space. Mixed-space cache graphs fail closed
       // instead of rebasing a child space's attestation onto `space`.
       if (linkedCell.space !== space) {
-        if (tally !== undefined) tally.dropped++;
+        if (tally !== undefined) tally.entry = "refused";
         return new Map();
       }
       const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
       if (child === undefined) {
-        if (tally !== undefined) tally.dropped++;
+        const refusedId = linkedCell.getAsNormalizedFullLink().id;
+        if (tally !== undefined && !refused.has(refusedId)) {
+          refused.add(refusedId);
+          tally.dropped++;
+        }
         continue;
       }
       imports.push({ specifier: imp.specifier, identity: child.identity });

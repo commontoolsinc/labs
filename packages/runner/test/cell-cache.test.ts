@@ -1210,6 +1210,64 @@ describe("cell-cache", () => {
         expect(loaded.has(entryIdentity)).toBe(true);
         expect(loaded.has(utilIdentity)).toBe(false);
       });
+
+      it("counts a refused document once however many modules import it", async () => {
+        const diamond: RuntimeProgram = {
+          main: "/main.ts",
+          files: [
+            {
+              name: "/main.ts",
+              contents: `import "./a.ts"; import "./b.ts"; export const m = 1;`,
+            },
+            {
+              name: "/a.ts",
+              contents: `import "./util.ts"; export const a = 1;`,
+            },
+            {
+              name: "/b.ts",
+              contents: `import "./util.ts"; export const b = 1;`,
+            },
+            { name: "/util.ts", contents: "export const u = 1;" },
+          ],
+        };
+        const { modules, entryIdentity } = toModules(diamond);
+        const utilIdentity = computeModuleHashes(diamond).get("/util.ts")!;
+        const wtx = runtime.edit();
+        writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+        wtx.prepareCfc();
+        expect((await wtx.commit().settled).error).toBeUndefined();
+
+        const stripTx = runtime.edit();
+        const util = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, utilIdentity),
+          undefined,
+          stripTx,
+        );
+        seedStoredEnvelope(stripTx, {
+          space: spaceA,
+          id: util.getAsNormalizedFullLink().id!,
+          type: "application/json",
+          path: [],
+        }, { value: util.getRaw() as never });
+        stripTx.prepareCfc();
+        expect((await stripTx.commit().settled).error).toBeUndefined();
+
+        const rtx = runtime.edit();
+        const found = tally();
+        const loaded = await loadCompiledClosure(
+          runtime,
+          spaceA,
+          entryIdentity,
+          opts(),
+          rtx,
+          found,
+        );
+        rtx.abort?.();
+
+        expect(found).toEqual({ entry: "verified", dropped: 1 });
+        expect(loaded.size).toBe(3);
+      });
     });
 
     it("round-trips JSON coverage spans and rejects unsupported stored spans", async () => {

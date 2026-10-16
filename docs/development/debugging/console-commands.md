@@ -359,9 +359,10 @@ and most runtime code runs in a web worker, so its loggers are in a separate
 await commonfabric.rt.getLoggerCounts()
 // .compileCache = { hits, misses, byIdentityHits }; the `pattern-manager`
 // timing rows `compile-cache/load-by-identity/<outcome>` (hit, entry-absent,
-// entry-unverified, coverage-missing, eval-failed, no-version) and
-// `compile-cache/cold-load/<outcome>` (compiled, source-absent,
-// compile-failed) name the pattern in each row's `slowest` details
+// entry-unverified, closure-refused, coverage-missing, eval-failed,
+// no-version) and `compile-cache/cold-load/<outcome>` (compiled,
+// source-unavailable, compile-failed, eval-failed) name the pattern in each
+// row's `slowest` details
 
 // Control worker loggers
 await commonfabric.rt.setLoggerLevel("debug")         // all loggers

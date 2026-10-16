@@ -2458,6 +2458,8 @@ export class PatternManager {
       record(
         closure.has(entryIdentity)
           ? "coverage-missing"
+          : tally.entry === "refused"
+          ? "closure-refused"
           : tally.entry === "unverified"
           ? "entry-unverified"
           : "entry-absent",
@@ -2606,9 +2608,11 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
+    // The verified read answers alike for a source closure that is absent
+    // and one it refused, so the row says only that none was usable.
     const entry = sourceDocs?.get(entryIdentity);
     if (sourceDocs === undefined || entry === undefined) {
-      record("source-absent");
+      record("source-unavailable");
       return undefined;
     }
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
@@ -2629,6 +2633,7 @@ export class PatternManager {
     }));
 
     const patternCoverage = this.#patternCoverageFor();
+    let compileSucceeded = false;
     try {
       const compiled = await harness.compileResolvedToRecordGraph(
         sourceFiles,
@@ -2644,6 +2649,7 @@ export class PatternManager {
           `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
         );
       }
+      compileSucceeded = true;
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(
         (module) => ({
           identity: module.identity,
@@ -2705,7 +2711,7 @@ export class PatternManager {
       }
       return pattern;
     } catch (error) {
-      record("compile-failed");
+      record(compileSucceeded ? "eval-failed" : "compile-failed");
       logger.warn("load-pattern-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
