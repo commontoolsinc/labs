@@ -141,11 +141,19 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // Transient local drafts backing the amend inputs. Not a second source of
   // truth — seeded from the live values on entering edit mode, cleared/written
   // through the exported streams on save.
-  const nameDraft = new Writable("").for("nameDraft");
-  const avatarDraft = new Writable("").for("avatarDraft");
-  const bioDraft = new Writable("").for("bioDraft");
+  //
+  // Per session, with the view toggle below: a host mounts this embed in a
+  // space other viewers reach, and each of them sees their OWN profile here.
+  // A space-scoped draft or toggle would carry one viewer's edit form and
+  // drafts into another's view, and that viewer's save would send them into
+  // their own profile. The drafts share the toggle's scope: entering edit
+  // mode reseeds them, so per-user drafts would be overwritten by another of
+  // the same person's sessions opening its form.
+  const nameDraft = Writable.perSession.of<string>("");
+  const avatarDraft = Writable.perSession.of<string>("");
+  const bioDraft = Writable.perSession.of<string>("");
   // View toggle: presentation by default, amend form when the owner opts in.
-  const editing = new Writable<boolean>(false).for("editing");
+  const editing = Writable.perSession.of<boolean>(false);
 
   const hasProfile = computed(() => profileWish.result !== undefined);
   const isEditing = computed(() => editing.get() === true);
