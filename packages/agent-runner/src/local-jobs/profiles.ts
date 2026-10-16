@@ -464,6 +464,17 @@ const refuseInputs = (
         spaceOf(ref)
       }\`; pass the origin serving that space in \`foreignSpaces\`.`;
     }
+    let address;
+    try {
+      address = parseNamedPieceAddress(ref);
+    } catch {
+      // A malformed address is the harness check's to describe, below.
+    }
+    if (
+      byDid && address?.spaceName !== undefined && !isDID(address.spaceName)
+    ) {
+      return `Input \`${name}\` names its space by name, and the profile names its space by DID, so it cannot be checked against the profile's space; name the space by its DID, or send the space-relative /of:<id> form.`;
+    }
     try {
       checkInputCellSpec(
         { name, ref },

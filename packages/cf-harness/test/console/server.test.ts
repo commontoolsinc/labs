@@ -184,6 +184,9 @@ const config = () =>
     "/console",
   );
 
+/** The DID the legacy name `console-test` derives, which its session opens. */
+const CONSOLE_TEST_SPACE_DID = await legacySpaceDid("console-test");
+
 /** A space created with a random key, which only its DID addresses. */
 const CREATED_SPACE =
   "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -1934,6 +1937,7 @@ describe("console/server", () => {
             url: "http://localhost:8000/console-test/reading-list",
           }],
           spaceName: "console-test",
+          spaceDid: CONSOLE_TEST_SPACE_DID,
           outcome: "completed",
           sessionId: started.sessionId,
           continuable: true,
@@ -2091,6 +2095,7 @@ describe("console/server", () => {
           looms: [],
           pieces: [],
           spaceName: "console-test",
+          spaceDid: CONSOLE_TEST_SPACE_DID,
           outcome: "completed",
           sessionId: started.sessionId,
           continuable: true,
@@ -2815,6 +2820,17 @@ describe("console/server", () => {
       expect((await response.json()).error).toContain(
         `this session runs in \`${CREATED_SPACE}\``,
       );
+      const foreign = await didServer.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: `/@did:key:z6MkforeignSpaceForConsoleTest/of:fid1:${
+            "E".repeat(43)
+          }/x`,
+        }],
+      }, {}));
+      expect(foreign.status).toBe(400);
+      expect((await foreign.json()).error).toContain("targets another space");
       // A name cannot be checked against a space that has none.
       const byName = await didServer.handle(jsonRequest("/api/task", {
         text: "make the headings readable",
@@ -2842,6 +2858,32 @@ describe("console/server", () => {
       expect((await response.json()).error).toContain(
         "this session runs in `console-test`",
       );
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("starts a turn for a piece address naming this named console by the DID its name derives", async () => {
+      // A legacy space is named by its name or by the DID the name derives,
+      // and the session opens that DID; the turn finds out what it holds.
+      await startTask({
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: `pattern:${CONSOLE_TEST_SPACE_DID}/bill-inbox`,
+        }],
+      });
+    });
+
+    it("answers 400 for a reference into a foreign space the operator did not admit", async () => {
+      const foreign = `/@did:key:z6MkforeignSpaceForConsoleTest/of:fid1:${
+        "E".repeat(43)
+      }/x`;
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{ name: "pattern_1", ref: foreign }],
+      }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("targets another space");
       expect((await listSessions()).sessions).toHaveLength(0);
     });
 
@@ -3221,6 +3263,7 @@ describe("console/server", () => {
           url: "http://localhost:8000/console-test/reading-list",
         }],
         spaceName: "console-test",
+        spaceDid: CONSOLE_TEST_SPACE_DID,
         outcome: "completed",
         sessionId: expect.any(String),
         continuable: true,
@@ -3238,6 +3281,7 @@ describe("console/server", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: CONSOLE_TEST_SPACE_DID,
         outcome: "completed",
         sessionId: expect.any(String),
         continuable: true,
@@ -3296,6 +3340,17 @@ describe("console/server", () => {
         "/console",
       );
       expect(resolved.fabricSession.space).toBe(CREATED_SPACE);
+    });
+
+    it("starts in a legacy space whose name no address can hold", async () => {
+      // Its pieces are linked at its DID rather than at its name.
+      const resolved = await resolveConsoleConfig(
+        ["--fabric-identity", "k", "--fabric-space", "My Space"],
+        {},
+        "/console",
+      );
+      expect(resolved.fabricSession.space).toBe("My Space");
+      expect(resolved.fabricSpaceDid).toBe(await legacySpaceDid("My Space"));
     });
 
     it("returns the DID a legacy name derives, as the session opens it", async () => {

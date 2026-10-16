@@ -449,6 +449,7 @@ The successful result is:
     }
   ],
   "spaceName": "<space-did>",
+  "spaceDid": "<space-did>",
   "finalText": "Created reading-list."
 }
 ```

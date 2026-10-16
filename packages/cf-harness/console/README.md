@@ -69,10 +69,10 @@ shared host, a tailnet with an access policy — and not behind a public address
   its requests with the same identity.
 - **A space.** Either the DID of a space created with `cf space create`, or the
   name of a legacy space. The console names its pieces in it, and shows a person
-  each one at the API URL, then the space as configured, then the slug: the
-  address the shell opens. A space configured by `did:key` gives the model the
-  slug alone, since its address carries the DID, so the console composes that
-  address itself.
+  each one at the API URL, then the space, then the slug: the address the shell
+  opens. The space goes in by its name, or by its DID where it was configured by
+  DID or its name cannot be held in an address. The model is given that URL only
+  when it carries a name, never a DID, so the console composes the rest itself.
 - **A connected model provider.** The provider preference lives in
   `$CF_HARNESS_HOME/config.json` and its credentials in
   `$CF_HARNESS_HOME/auth.json`, both written by `cf-harness config set` and
@@ -571,6 +571,7 @@ The completed-turn result is:
     }
   ],
   "spaceName": "my-space",
+  "spaceDid": "did:key:z6Mk…",
   "finalText": "Your reading list is ready."
 }
 ```
@@ -612,20 +613,23 @@ receipts, replay flags, and current versions, and is empty when the run composed
 none. Optional `originLoomId` is the turn's submitted origin. Enable the tools
 with `--loom-authoring-config` or `CF_HARNESS_LOOM_AUTHORING_CONFIG`; the
 complete contract is [Durable Loom authoring](../docs/LOOM_AUTHORING.md). Each
-entry copies `slug` and `url` from the successful `assign_slug` observation; in
-a space configured by DID, whose observation carries no `url`, the entry's `url`
-is the address this console composes from its API URL, its space, and the slug.
-When that same held token also appeared in a verified successful composition,
-optional `loomComponents: [{loomId, componentId}]` identifies its saved
-membership. The correlation uses unique matching current-turn tool calls and
-request-order receipt IDs, never the human slug or assistant prose. When using
-this metadata, clients suppress duplicate placement only after verifying the
-pair in a freshly opened manifest. Weaver also retains a legacy exact-reference
-membership check; absent either proof it keeps ordinary placement. Different
-tokens for the same Pattern are not inferred equivalent. No cell address or
-token is added to the result. `spaceName` identifies this console's configured
-space as it was configured: a name, or a DID. A client addresses a piece of the
-result as `pattern:<spaceName>/<slug>`, which an input cell accepts back.
+entry copies `slug` and `url` from the successful `assign_slug` observation.
+Where the model was told no `url` (a space configured by DID, or a legacy name
+no address can hold), the entry's `url` is the piece at the space's DID under
+this console's API URL. When that same held token also appeared in a verified
+successful composition, optional `loomComponents: [{loomId, componentId}]`
+identifies its saved membership. The correlation uses unique matching
+current-turn tool calls and request-order receipt IDs, never the human slug or
+assistant prose. When using this metadata, clients suppress duplicate placement
+only after verifying the pair in a freshly opened manifest. Weaver also retains
+a legacy exact-reference membership check; absent either proof it keeps ordinary
+placement. Different tokens for the same Pattern are not inferred equivalent. No
+cell address or token is added to the result. `spaceName` identifies this
+console's configured space as it was configured: a name, or a DID. `spaceDid` is
+that space's DID: `spaceName` itself for a space configured by DID, else the DID
+its legacy name derives. A client addresses a piece of the result as
+`pattern:<spaceDid>/<slug>` in any space, or as `pattern:<spaceName>/<slug>`
+where the name has no `/`, and an input cell accepts either back.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:
@@ -817,7 +821,8 @@ that shows pieces somewhere else — a pane of its own, say, where the API's
 address answers with a login gate instead of the piece — names its prefix here,
 and every piece link on the page is composed as `<piecesBase>/<space>/<slug>`
 from the space and slug the turn's result carries, written as the shell writes
-an address, so a space's DID goes in as the DID. With no prefix named, the
+an address: by the space's name, or by its DID (`spaceDid`) where it was
+configured by DID or no address can hold its name. With no prefix named, the
 recorded URL is used as it stands rather than rebuilt. The prefix has to be an
 absolute `http` or `https` URL: it arrives from whatever opened the page and
 ends up in an `href`, so anything else — a `javascript:` URL, a relative path —

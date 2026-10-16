@@ -474,6 +474,12 @@ describe("local-jobs/profiles", () => {
 
         expect(narrowLocalJobProfile(byDid, { inputs: { focus: own } }))
           .toEqual({ profile: byDid });
+        // In the request's own terms, rather than the command line's.
+        expect(
+          (narrowLocalJobProfile(byDid, {
+            inputs: { focus: "pattern:my-space/tracker" },
+          }) as { refusal: string }).refusal,
+        ).toContain("Input `focus` names its space by name");
         for (
           const [profile, focus] of [
             [byDid, "pattern:did:key:z6MkforeignSpaceForProfileTest/tracker"],

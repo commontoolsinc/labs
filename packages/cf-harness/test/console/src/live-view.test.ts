@@ -645,8 +645,16 @@ describe("console/src/live-view", () => {
       )).toBe("http://localhost:9901/pattern-pane/my-space/reading-list");
     });
 
-    it("returns the recorded address for a space no address can be written for", () => {
-      // The shell reads `my%20space` as a space of that name, not `my space`.
+    it("returns an address at the space's DID for a name no address can hold", () => {
+      // The shell reads `my%20space` as a space of that name, not `my space`,
+      // so the piece is opened under the base at the DID the name derives.
+      const did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      expect(consoleLivePieceHref(
+        piece,
+        "my space",
+        "http://localhost:9901/pattern-pane",
+        did,
+      )).toBe(`http://localhost:9901/pattern-pane/${did}/reading-list`);
       expect(consoleLivePieceHref(
         piece,
         "my space",

@@ -153,6 +153,7 @@ describe("task-outcomes", () => {
           looms: [],
           pieces: [],
           spaceName: "empty-space",
+          spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
           finalText: message,
         });
       } finally {

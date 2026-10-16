@@ -124,6 +124,7 @@ describe("console/turn-result", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "Your request is awaiting approval.",
       });
     } finally {
@@ -611,6 +612,7 @@ describe("console/turn-result", () => {
           url: "http://localhost:8000/console-test/reading-list",
         }],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "Your reading list is ready.",
       });
     } finally {
@@ -653,6 +655,7 @@ describe("console/turn-result", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "The total is 42.",
       });
     } finally {
@@ -837,6 +840,7 @@ describe("console/turn-result", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "",
       });
     } finally {
@@ -875,6 +879,7 @@ describe("console/turn-result", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "The total is 42.",
       });
     } finally {
@@ -1037,6 +1042,7 @@ describe("console/turn-result", () => {
         looms: [],
         pieces: [],
         spaceName: "console-test",
+        spaceDid: "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
         finalText: "I could not name it.",
       });
     } finally {

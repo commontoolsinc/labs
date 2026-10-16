@@ -1697,6 +1697,7 @@ export class ConsoleServer {
       pieces: [],
       looms: [],
       spaceName: this.#config.fabricSession.space,
+      spaceDid: this.#config.fabricSpaceDid,
       finalText: envelope.event.finalText ?? "",
     };
     const taskOutcome = readHarnessTaskOutcome(result);

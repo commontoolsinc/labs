@@ -84,6 +84,14 @@ export type ConsoleTurnResult = HarnessTaskOutcome & {
    */
   spaceName: string;
 
+  /**
+   * The DID of that space: `spaceName` itself for a space configured by DID,
+   * else the DID its legacy name derives. A piece opens at it wherever its name
+   * cannot be written in an address. Every result this console writes carries
+   * it; a reader may meet a console that predates it.
+   */
+  spaceDid?: string;
+
   /** Human-readable answer, question, or reason the task cannot proceed. */
   finalText: string;
 
@@ -506,6 +514,7 @@ export const readConsoleTurnResult = async (
       }];
     }),
     spaceName: options.spaceName,
+    spaceDid: options.fabricSpaceDid,
     finalText: artifacts.finalText,
     ...(Object.keys(artifacts.revealed).length > 0
       ? { revealed: artifacts.revealed }
