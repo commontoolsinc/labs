@@ -182,7 +182,11 @@ Exit: a schema is recomposed once per reference per registry epoch.
       cell, which no store holds before the session writes it, counts as
       examined without asking. A cell owed a default at a narrower scope
       still holds the run, since the hold's preparation is what seeds it
-      (`ownedCellOwesSeed`). Before this, a thirty-message room's load
+      (`ownedCellOwesSeed`), and so does a family whose probes spent the
+      gate's budget (`NAMING_PROBE_BUDGET`), since a cell the budget left
+      unprobed was never read, and a store-confirmed absence a serving
+      runtime's store read-through remembers (`#storeAbsences`), which
+      the replica reports unexamined for commit to reconcile. Before this, a thirty-message room's load
       paid eleven name-syncs, nine of them holds of named families on such
       cells: the room core, the add-member surface and the manager core on
       session-scoped cells, four nested instances on the valueless cell a

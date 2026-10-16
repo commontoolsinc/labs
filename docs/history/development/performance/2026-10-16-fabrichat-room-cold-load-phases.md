@@ -8,10 +8,11 @@ reason: "Investigation of where a signed-in cold load of a thirty-message, twelv
 # Where a FabriChat room's cold load goes, October 2026
 
 The room-scale benchmark's cold load at thirty messages was 27 s on each
-side of commonfabric/labs#8931, where its send halved, and the earlier
-record ([`2026-10-fabrichat-room-send-30-profile.md`](2026-10-fabrichat-room-send-30-profile.md))
-read the floor as the twelve members' profiles, from a reactive body's
-read count that was the same at every room size. This record is the
+side of commonfabric/labs#8931, where its send halved, and the record
+that pull request carries (`2026-10-fabrichat-room-send-30-profile.md` on
+its branch, not in this tree as this is written) read the floor as the
+twelve members' profiles, from a reactive body's read count that was the
+same at every room size. This record is the
 measurement that question needed: which phases the load has, what each
 one does, and what the pre-sync's 3,976 list-child syncs were for.
 
@@ -204,8 +205,10 @@ one-minute load of 15 to 58:
 | 3 | before 21.8 s (20.2 … 24.1) | after 26.0 s (25.2 … 26.8) | 35 → 23 → 58 |
 | 4 | after 16.6 s (14.5 … 18.0) | before 24.9 s (20.5 … 27.2) | 58 → 25 → 26 |
 
-One binary spans 16.6 to 26.0 s across these runs, and each pair's
-difference follows the load more than the arm. On this shared machine the
+These four pairs are inconclusive. One binary spans 16.6 to 26.0 s
+across them, the after arm is the faster in two and the slower in two,
+and the load moved within each pair by more than the two arms differ, so
+no pair separates the arm from the machine. On this shared machine the
 benchmark's `30` row cannot resolve a change of two or three seconds; the
 pairs taken the evening before, at loads that fell steadily, could, and
 the counts above are what the change is measured by.
