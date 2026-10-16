@@ -183,7 +183,8 @@ const seedSecretSource = async (
 
 // Read the seeded source in a fresh transaction at `mode`, derive a value
 // into `targetName`, and commit. `targetSchema` declares the target's store
-// policy; omitted, the target declares nothing. `scope` is the target's.
+// policy; omitted, the target declares nothing. `scope` and `targetSpace` are
+// the target's.
 const deriveIntoTarget = async (
   runtime: Runtime,
   sourceName: string,
@@ -191,13 +192,14 @@ const deriveIntoTarget = async (
   mode: "enforce-strict" | "enforce-explicit" = "enforce-strict",
   targetSchema?: JSONSchema,
   scope: "space" | "user" | "session" = "space",
+  targetSpace: `did:${string}:${string}` = signer.did(),
 ) => {
   const tx = runtime.edit();
   tx.setCfcEnforcementMode(mode);
   const source = runtime.getCell(signer.did(), sourceName, undefined, tx);
   const raw = source.getRaw() as { secret?: string };
   const target = runtime.getCell<{ copied?: string }>(
-    signer.did(),
+    targetSpace,
     targetName,
     targetSchema,
     tx,
@@ -987,6 +989,62 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       }
     });
 
+    describe("in a space the signer does not own", () => {
+      // A room space, which is where FabriChat's per-user documents live.
+
+      it("admits a personal-space clause naming the signer into a user document", async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = newRuntime(storageManager);
+        try {
+          await seedSecretSource(runtime, "wf-room-personal-source", [
+            personalSpacePrincipal(signer.did()),
+          ]);
+          const { tx, result } = await deriveIntoTarget(
+            runtime,
+            "wf-room-personal-source",
+            "wf-room-personal-derived",
+            "enforce-strict",
+            undefined,
+            "user",
+            OTHER_SPACE,
+          );
+          expect(result.error?.message).toBeUndefined();
+          expect(writerFitDiagnostics(tx)).toEqual([]);
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+
+      it("rejects the signer's home space clause in a user document", async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = newRuntime(storageManager);
+        try {
+          // `Space` names the home's readers, which its ACL resolves, not
+          // the person the instance is keyed by.
+          await seedSecretSource(runtime, "wf-room-home-source", [
+            ownSpacePrincipal,
+          ]);
+          const { result } = await deriveIntoTarget(
+            runtime,
+            "wf-room-home-source",
+            "wf-room-home-derived",
+            "enforce-strict",
+            undefined,
+            "user",
+            OTHER_SPACE,
+          );
+          expect(result.error?.message).toContain(
+            "writer-fit confidentiality misfit",
+          );
+          expect(result.error?.message).toContain(signer.did());
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+    });
+
     describe("a whole value a verified writer replaces", () => {
       // A writer that sets a document's whole value is named on that value
       // by a `TransformedBy` stamp at its root, even where the diff changes
@@ -1166,19 +1224,29 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
 
       /**
        * Prepares a run that reads the seeded source and writes what it
-       * carries into a `user` document, stamped as a derivation demanded by
-       * `principal` when one is given, and returns the writer-fit reasons
-       * its preparation recorded.
+       * carries into a `user` document, and returns the writer-fit reasons
+       * its preparation recorded. Given a `principal`, the run is stamped as
+       * a derivation that principal demanded, whose wave context carries the
+       * identity, or, `onStorageOnly`, as a bookkeeping run whose storage
+       * transaction alone resolves under it, as a deferred piece start's
+       * does.
        */
       const preparedServedWrite = (
         runtime: Runtime,
         sourceName: string,
         targetName: string,
         principal?: string,
+        onStorageOnly = false,
       ): string[] => {
         const tx = runtime.edit();
         tx.setCfcEnforcementMode("enforce-strict");
-        if (principal !== undefined) {
+        if (principal !== undefined && onStorageOnly) {
+          tx.tx.scopeKeyIdentity = { principal, sessionId: "served-session" };
+          stampWaveRunContext(tx, {
+            actionId: `test:${targetName}`,
+            kind: "bookkeeping",
+          });
+        } else if (principal !== undefined) {
           stampWaveRunContext(tx, {
             actionId: `test:${targetName}`,
             kind: "derivation",
@@ -1262,6 +1330,31 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           expect(reasons).toHaveLength(1);
           expect(reasons[0]).toContain("writer-fit confidentiality misfit");
           expect(reasons[0]).toContain(signer.did());
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      });
+
+      it("rejects a personal space in a user document whose principal only the storage transaction carries", async () => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = servingRuntime(storageManager);
+        try {
+          // The seal keys such a run's scoped writes by its wave context,
+          // which names no one, so the instance is not that principal's.
+          await seedSecretSource(runtime, "wf-served-storage-source", [
+            personalSpacePrincipal(OTHER_PRINCIPAL),
+          ]);
+          const reasons = preparedServedWrite(
+            runtime,
+            "wf-served-storage-source",
+            "wf-served-storage-derived",
+            OTHER_PRINCIPAL,
+            true,
+          );
+          expect(reasons).toHaveLength(1);
+          expect(reasons[0]).toContain("writer-fit confidentiality misfit");
+          expect(reasons[0]).toContain(OTHER_PRINCIPAL);
         } finally {
           await runtime.dispose();
           await storageManager.close();

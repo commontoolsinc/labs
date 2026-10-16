@@ -3801,23 +3801,27 @@ const isDeclarablePolicyStore = (
  * The principal whose instance of a `user` or `session` document a write by
  * `tx` lands in, which the §8.12.4 residency clause names as the instance's
  * reader. The instance's scope key is built from that principal, and the
- * memory server serves an instance to that principal's sessions and to the
- * space's serving loop alone, so the principal is the whole audience of what
- * it holds. The guarantee is as strong as the deployment's binding of
- * instances to principals.
+ * memory server serves an instance only to that principal's sessions, so the
+ * principal is the whole audience of what it holds. The space's serving loop
+ * reads every instance too, as the runtime that runs each principal's work
+ * rather than as a reader of it. The guarantee is as strong as the
+ * deployment's binding of instances to principals.
  *
  * On a client it is the runtime's own identity, since the memory server keys a
  * client's scoped writes by the session it authenticated, whichever principal
  * the transaction's trust snapshot names as acting. On the serving posture it
- * is the scope-key identity the serving loop stamped on the run, which its
- * scoped reads and writes resolve against. A served transaction carrying none
- * names no one: where its scoped writes land is settled at the seal, from
- * context the transaction does not hold.
+ * is the scope-key identity of the run's wave context, which the wave seal
+ * keys the run's scoped writes by. A served transaction whose context carries
+ * none names no one, even where its storage transaction resolves reads under
+ * an identity of its own: the seal then keys its writes to the serving
+ * runtime's own instance, and an effect completion, which has no context,
+ * commits under the identity its outbox carriage records.
  */
 const scopedResidencyPrincipal = (
   tx: IExtendedStorageTransaction,
 ): string | undefined =>
-  tx.getCfcState().clientIdentity ?? tx.tx.scopeKeyIdentity?.principal;
+  tx.getCfcState().clientIdentity ??
+    waveRunContextOf(tx)?.scopeKeyIdentity?.principal;
 
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
@@ -12676,11 +12680,13 @@ export function* prepareBoundaryCommitSteps(
             // reader check: §4.9.3 resolves it against that space's ACL,
             // the document that also decides who holds the bytes. A store
             // in THIS space cannot keep a promise made to another space's
-            // readers, which is why residency admits another space's clause
-            // only into a scoped instance whose one reader is that space's
-            // owner. Declaring a foreign one would put the bytes in front
-            // of this space's members under a promise made to somebody
-            // else's, so the route leaves that write to the refusal below.
+            // readers, which is why residency admits a clause naming another
+            // space only in its `PersonalSpace(owner)` spelling, and only
+            // into a scoped instance of that owner; another space's `Space`
+            // atom stays refused. Declaring a foreign one would put the
+            // bytes in front of this space's members under a promise made to
+            // somebody else's, so the route leaves that write to the refusal
+            // below.
             // A clause residency admits is not reachable here: residency
             // covers it, so it is never offending.
             !offending.some((clause) =>

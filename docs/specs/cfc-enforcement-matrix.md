@@ -227,19 +227,22 @@ The strict-only delta is:
   audience it names, and a flow clause listing the target's own space among
   its alternatives fits a document there whatever that document declares. A
   `user` or `session` document is one principal's instance: its scope key is
-  built from that principal, and the memory server serves it to their
-  sessions and to the space's serving loop alone, so its residency clause
-  also carries `User(<that principal>)`, as strong as the deployment's binding
-  of instances to principals. On a client the principal is the one the storage
-  session authenticates as, because the memory server keys the client's scoped
-  writes by that session, independent of the principal the trust snapshot
-  names as acting. On the serving posture it is the scope-key identity the
-  serving loop stamped on the run,
-  and a served transaction carrying none gets no such clause. A
+  built from that principal, and the memory server serves it only to that
+  principal's sessions, so its residency clause also carries
+  `User(<that principal>)`, as strong as the deployment's binding of instances
+  to principals. The space's serving loop reads every instance too, as the
+  runtime that runs each principal's work rather than as a reader of it. On a
+  client the principal is the one the storage session authenticates as,
+  because the memory server keys the client's scoped writes by that session,
+  independent of the principal the trust snapshot names as acting. On the
+  serving posture it is the scope-key identity of the run's wave context,
+  which the wave seal keys the run's scoped writes by, and a served
+  transaction whose context carries none gets no such clause. A
   `PersonalSpace` label owned by that principal fits the clause through the
   owner-as-reader reading below, in plaintext or as the owner's `{digestOf}`
-  commitment, so an instance holds its own user's personal data and no one
-  else's. The measurement admits the write; it does not drop the clause. The stamp
+  commitment, so an instance holds its own user's personal data, and a
+  personal space owned by anyone else still misfits it. The
+  measurement admits the write; it does not drop the clause. The stamp
   persists the full join, so the egress and display ceilings gate reads on the
   unchanged label, and the space principal there reaches a concrete reader
   only through the verified `HasRole` exchange rule. Residency inherits the
@@ -790,9 +793,10 @@ The strict-only delta is:
     replica set rather than by a reader check — §4.9.3 resolves it against
     that space's ACL, the document that also decides who holds the bytes —
     so a store in this space cannot keep a promise made to another space's
-    readers. That is why residency admits another space's clause only into
-    a scoped instance whose one reader is that space's owner, and the route
-    declares no container clause naming another.
+    readers. That is why residency admits a clause naming another space
+    only in its `PersonalSpace(owner)` spelling, and only into a scoped
+    instance of that owner, while another space's `Space` atom stays
+    refused; the route declares no container clause naming another.
     `PersonalSpace(owner)` is the second spelling of one: §4.9.4 calls the
     two forms "the two `Space(...)` atoms", and §3.6.4 makes the named
     principal the sole owner of the space whose id it is. The same-space
@@ -899,10 +903,11 @@ Tracked in [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-13.
 
 The residency half of the writer-fit ceiling is owed to the spec as well:
 §8.12.4 states the fit against the declared policy and says nothing about the
-space a document lives in widening it. The same PR should make residency part
-of the write ceiling, state that the container-naming `Space` form counts,
-with `User` beside it only for a scoped instance's own principal, and record
-that residency admits the write without altering the persisted label. Tracked in
+space a document lives in widening it.
+[specs#68](https://github.com/commonfabric/specs/pull/68) proposes that text:
+residency as part of the write ceiling, the container-naming `Space` form, with
+`User` beside it for a store bound to one principal, and residency admitting
+the write without altering the persisted label. Tracked in
 [`cfc-spec-changes.md`](./cfc-spec-changes.md) SC-18(d).
 
 ## Provenance

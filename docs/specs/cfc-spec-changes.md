@@ -535,8 +535,8 @@ where it lives.** `proposed` in
 [specs#68](https://github.com/commonfabric/specs/pull/68), option (b) on both
 of its questions: residency joins `Space(S)` over a declared policy as well as
 without one, and a store bound to one principal also carries
-`User(<that principal>)`; the runner conforms to the first, and labs#8967 adds
-the second. The fit measurement joins the target's declared policy with
+`User(<that principal>)`; the runner conforms to both.
+The fit measurement joins the target's declared policy with
 one RESIDENCY clause, `Space(<the space the document resides in>)`. A flow
 clause listing that space among its alternatives therefore fits the document
 whatever it declares. The soundness argument is that writing into the space
