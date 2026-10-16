@@ -63,4 +63,13 @@ describe("delegate-task", () => {
   it("does not send running an indexed pattern through pattern-author", () => {
     expect(offered().description).not.toContain("Authoring or running");
   });
+
+  it("throws when invoked directly, since the prompt loop runs a delegation", () => {
+    expect(() =>
+      delegateTaskTool.invoke(
+        {} as Parameters<typeof delegateTaskTool.invoke>[0],
+        { goal: "unused", profile: "default" },
+      )
+    ).toThrow("delegate_task is orchestrated by the prompt loop");
+  });
 });

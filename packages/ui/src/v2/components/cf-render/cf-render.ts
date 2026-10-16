@@ -130,6 +130,10 @@ export function hasVariantValue(value: unknown, key: string): boolean {
  *   (default "full"). Renders the piece's matching variant key ([CHIP_UI] /
  *   [TILE_UI]) when exported, otherwise the per-variant platform default. The
  *   full [UI] is the universal floor, so every piece renders at every variant.
+ * @property {boolean} hostOpened - For a host, not a pattern: set when the
+ *   host has already opened the piece this render resolves to, as the shell
+ *   has the piece it navigated to, so the render does not open it again.
+ *   Otherwise showing the piece opens it, as navigating to it does.
  *
  * @slot - Shown only while there is no `cell`, which is where a view puts the
  *   access placeholder while a space the cell is read from is out of reach.
@@ -309,10 +313,12 @@ export class CFRender extends BaseElement {
     cell: { attribute: false },
     // Reflected so the host can size itself per variant (chip is inline).
     variant: { type: String, reflect: true },
+    hostOpened: { type: Boolean },
   };
 
   declare cell: CellHandle | undefined;
   declare variant: UIVariant | undefined;
+  declare hostOpened: boolean | undefined;
 
   /** Lit ref to the container, which stays stable across re-renders. */
   private _containerRef: Ref<HTMLDivElement> = createRef();
@@ -356,7 +362,6 @@ export class CFRender extends BaseElement {
 
   @state()
   private accessor _hasRendered = false;
-  private _startPromise?: Promise<boolean>;
 
   //
   // Debug helpers
@@ -488,8 +493,6 @@ export class CFRender extends BaseElement {
       // Pieces passed through patterns (e.g. piece-grid) arrive as LINKS, not
       // the root piece cell. Resolve every variant to the target piece so full
       // nested rendering and its piece menu address the same entity.
-      await this._startPromise;
-      if (cancelled()) return;
       const resolved = await cell.resolveAsCell();
       if (cancelled()) return;
       const currentTarget = await this._watchLinkTarget(cell, resolved);
@@ -504,7 +507,7 @@ export class CFRender extends BaseElement {
       // Full is the universal floor: render the piece's [UI] chain directly.
       if (kind === "full") {
         this._log("rendering full [UI] into container");
-        this._cleanup = this._mount(container, cell, generation);
+        this._cleanup = this._mount(container, cell, currentTarget, generation);
         this._hasRendered = true;
         return;
       }
@@ -522,6 +525,7 @@ export class CFRender extends BaseElement {
         this._cleanup = this._mount(
           container,
           presence.key(variantKey),
+          currentTarget,
           generation,
         );
         this._hasRendered = true;
@@ -560,18 +564,45 @@ export class CFRender extends BaseElement {
 
   /**
    * Mounts `cell` into `container` as the root of a render of its own, which
-   * decides under the viewer's render policy what reaches the page.
+   * decides under the viewer's render policy what reaches the page. Every
+   * caller displays `piece` itself (full, an exported variant, the default
+   * tile), so it opens the piece as navigating to it does; the default chip,
+   * which only names the piece, renders through `createNameChip()` instead.
+   * `piece` is the resolved target, since `cell` can be a link to it held in
+   * another piece's document.
    */
   private _mount(
     container: HTMLElement,
     cell: CellHandle,
+    piece: CellHandle,
     generation: number,
   ): () => void {
+    if (this.hostOpened !== true) this.#openDisplayed(piece);
     return render(
       container,
       cell as CellHandle<VNode>,
       this.#renderErrorOptions(generation),
     );
+  }
+
+  /**
+   * Opens the piece a render displays, through the request the shell opens a
+   * piece with (`getPiece` with `runIt`): the worker reconciles its source and
+   * starts it, or leaves both to the view where the space replicates views.
+   * Not awaited, as the render does not wait on a start. Only a piece opens:
+   * a cell at a path inside a document is left alone. A document at its root
+   * that is not a piece rejects the start ("no pattern identity"), as does a
+   * piece whose program fails to load; the worker reports the failed request,
+   * and here it only reaches the debug log, since the render shows what it
+   * can either way.
+   */
+  #openDisplayed(piece: CellHandle): void {
+    if (piece.ref().path.length > 0) return;
+    const runtime = piece.runtime();
+    runtime.getPiece(piece.id(), piece.space(), true, piece.ref().scope)
+      .catch((error: unknown) => {
+        this._log("opening the displayed piece failed:", error);
+      });
   }
 
   /**
@@ -618,7 +649,7 @@ export class CFRender extends BaseElement {
    */
   private _renderTileDefault(
     container: HTMLElement,
-    cell: CellHandle,
+    piece: CellHandle,
   ): () => void {
     const clip = globalThis.document.createElement("div");
     clip.className = "tile-clip";
@@ -626,7 +657,7 @@ export class CFRender extends BaseElement {
     scaler.className = "tile-default";
     clip.appendChild(scaler);
     container.appendChild(clip);
-    const inner = this._mount(scaler, cell, this._renderGeneration);
+    const inner = this._mount(scaler, piece, piece, this._renderGeneration);
     const onClick = (e: MouseEvent) => this._navigateToPiece(e);
     clip.addEventListener("click", onClick);
     return () => {

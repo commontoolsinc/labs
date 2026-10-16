@@ -159,7 +159,13 @@ Implemented. What the later stages depend on it leaving behind:
   "missing link source metadata" rule, which needed the source's envelope;
   the floor is the stated contract (§8.12.4.1 over §8.2.6) and needs only the
   source's evidence. A plain value written at a covered position stays with
-  the per-element read gate, as before.
+  the per-element read gate, as before. A floor on a concrete path is held
+  the same way at a reference: a stamp the writer's schema mints at the path
+  credits nothing there, since the store keeps no stamp at a position holding
+  a reference, so a link written at the floor path, or above it, is judged by
+  the declared label and the source's evidence. A stamp at a container the
+  write persists, the minted list a roster is, covers the references beneath
+  it.
 - The slot carries the creating attempt's join on a pointer-class stamp of
   its own, beside the link entry. A link-covered path is still skipped by the
   flow stage's derived stamp; the link loop mints the slot stamp instead. The
@@ -322,7 +328,12 @@ and 3. What it leaves behind:
   envelope that did not say it stands at a slot holding a reference.
   `slotStampPlacementUnknown` in `cfc/prepare.ts` withholds the witness of a
   writer's stamp at a reference slot of an envelope that does not say it
-  (§18.7). The member sits beside the ones the envelope's version defines
+  (§18.7). A writer's stamp is one the flow stage minted, a `derived` or
+  `structure` entry; a `TransformedBy` a schema declares at a slot, or in a
+  template over a list's items, names no attempt and is no witness, at a
+  reference slot or at a value, however trusted the declaring code
+  (`asWitnessEvidence`, §15.4). The member sits beside the ones the
+  envelope's version defines
   and is no version of its own, which is the second deviation from the first
   draft's "bump to version 3": a version this build's predecessors do not
   know makes every labeled document unreadable to them, where a member they
@@ -492,6 +503,12 @@ specification does not require.
   disposed of the same way. A floor that refused with a verdict would need
   its evidence to say whether every source it weighed was in hand, and a read
   of the source's stored labels that reactivity sees.
+- A reference written at a concrete floor path whose schema mints the floor's
+  atom is held to the source's evidence, where the mint used to credit it.
+  The store keeps no stamp at a slot holding a reference, so a floor the mint
+  passed was one no reader of the slot or of its target could see satisfied.
+  A list path that mints the atom still covers the references beneath it,
+  which is the roster shape of the lobby and the group-chat demo.
 - Under flow labels `persist`, a reference written by an attempt that read
   labeled data carries that join at its slot even when the reference has no
   declared or carried restriction, unless the container it sits in is

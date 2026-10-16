@@ -2,9 +2,14 @@
  * Stands in for a person's Home around FabriChat, in their home space: it
  * holds their profiles, created as `profile-create.tsx` creates them, and their
  * FabriChat manager, whose profile is their first. The manager a room's
- * `#chatManager` wish reaches carries the person's `PersonalSpace` label, as a
- * manager in a Home can come to, which no room's space admits. A session links
- * its home space's root here, so that the wish resolves to it. Fixture for
+ * `#chatManager` wish reaches carries the person's `PersonalSpace` label, which
+ * no room's space admits, on a result document of its own that passes the
+ * manager through. The manager's own documents declare no confidentiality, so
+ * the label reaches a room only through the wish's result, which the room's
+ * space holds. A manager whose own root carries the label, in the person's home
+ * space, as a real Home's manager can, is the case
+ * `fabrichat-flat-manager-send.test.ts` covers. A session links its home
+ * space's root here, so that the wish resolves to it. Fixture for
  * `fabrichat-labeled-manager-multi-runtime.test.ts`.
  */
 

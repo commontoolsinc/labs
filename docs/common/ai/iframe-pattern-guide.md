@@ -308,6 +308,39 @@ TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
 stable resolved items, SQLite query hooks, cleanup, and browser verification.
 Do not combine the two guest bootstraps.
 
+## Style with the ambient theme
+
+The guest wears the theme of the page around its iframe. The nearest `cf-theme`
+above the `cf-iframe` provides it: before the guest's own styles, the guest
+receives that theme's `--cf-theme-*` custom properties declared on `:root`,
+followed by a base stylesheet written against them:
+[`guest-base-sheet.ts`](../../../packages/ui/src/v2/components/cf-theme/guest-base-sheet.ts).
+The guest's root also carries the resolved scheme as `data-color-scheme`
+(`light` or `dark`). The sheet styles `html`, `body`, headings, links, buttons,
+form fields, code, and rules, and provides these classes:
+
+| Class | What it draws |
+| --- | --- |
+| `cf-surface` | the raised ground of a panel |
+| `cf-card` | a bordered, padded, rounded surface |
+| `cf-inset` | a recessed ground, for wells and code |
+| `cf-pill` | a small, fully rounded label |
+| `cf-muted` | secondary text |
+| `cf-primary`, `cf-accent`, `cf-brand` | a solid fill with its ink |
+| `cf-success`, `cf-warning`, `cf-danger` | a status fill with its ink |
+| `cf-stack`, `cf-row` | a vertical or horizontal flex layout with the theme's gap |
+
+The values follow the page: a theme change, or a switch between light and dark,
+restyles a running guest without reloading it. So write guest HTML with those
+elements, the `cf-*` classes, and `var(--cf-theme-…)` for anything else, such as
+`color: var(--cf-theme-color-text-muted)` or
+`font-family: var(--cf-theme-font-mono)`, and spell no color or font of your
+own. A literal color or font in the guest stays the same on every page, and
+reads wrong on the first one whose theme differs. The base sheet sits in a
+cascade layer, so any rule of the guest's own overrides it whatever its
+specificity; reserve that for a look the pattern deliberately owns, such as a
+game's art.
+
 ## Optional SQLite
 
 Declare database tables in `IFRAME_PATTERN`. The wrapper creates the database,

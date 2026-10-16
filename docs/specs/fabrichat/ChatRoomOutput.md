@@ -749,9 +749,9 @@ with them.
   whether it arrived; `noticed`, a notice in the manager's `outgoingNotices`
   for a client to deliver; or `access-only`, told nothing, so that the adder
   has to send them the room's link. An add with no manager to send to records
-  `access-only` in that event: the reader has no manager, theirs hasn't
-  resolved yet, or theirs has no `offerRoom`. Nothing is ever offered for such an add, even
-  once a manager resolves, since nothing runs then to send it. Otherwise
+  `access-only` in that event: the reader has no manager, or theirs hasn't
+  resolved yet. Nothing is ever offered for such an add, even once a manager
+  resolves, since nothing runs then to send it. Otherwise
   `delivery` is the manager's verdict, which `addRequests` reads from the
   manager's `requests` once it is recorded, and is absent until then. A
   manager that refuses to tell anyone of the room, as it does for a room its

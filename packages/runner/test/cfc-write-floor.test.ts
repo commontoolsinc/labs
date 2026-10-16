@@ -13,7 +13,10 @@ import {
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
+import {
+  cfcLabelViewForCell,
+  cfcLabelViewForResolvedTarget,
+} from "../src/cfc/label-view.ts";
 import type { CfcCellLinkRefPayload } from "../src/cfc/link-label-view.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { CfcWriteFloorMode, IFCLabel } from "../src/cfc/mod.ts";
@@ -887,6 +890,192 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
       expect(String((result.error as Error | undefined)?.message)).toContain(
         "write floor failed",
       );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("refuses a link at a path whose schema both requires and mints the atom, when the source lacks it", async () => {
+    // The stamp the schema mints at `out` lands on a value written there, and
+    // a reference is not one: the store keeps no stamp at a slot holding a
+    // reference, so the floor at `out` is held to what the linked source
+    // carries, and a source carrying nothing fails it.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(
+        runtime,
+        "wf-link-src-unminted",
+        "unendorsed-value",
+        {},
+      );
+      const tx = runtime.edit();
+      const src = runtime.getCell(
+        signer.did(),
+        "wf-link-src-unminted",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-link-sink-minting",
+        MINT_SCHEMA,
+        tx,
+      );
+      sink.set({ out: src as unknown as string });
+      tx.prepareCfc();
+      const result = await tx.commit().settled;
+      expect(String((result.error as Error | undefined)?.message)).toContain(
+        "write floor failed at /out",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("stores no stamp at a slot holding a reference, so no view of the slot carries the atom the schema mints there", async () => {
+    // Under `observe` the same write commits, with the miss recorded, which
+    // shows what the floor is held to: the stamp the schema mints at `out` is
+    // persisted nowhere, and neither the slot's own view nor the view of the
+    // document it resolves to carries the atom.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "observe" });
+    try {
+      await seedLabeledDoc(
+        runtime,
+        "wf-link-src-unminted-observe",
+        "unendorsed-value",
+        {},
+      );
+      const tx = runtime.edit();
+      const src = runtime.getCell(
+        signer.did(),
+        "wf-link-src-unminted-observe",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(
+        signer.did(),
+        "wf-link-sink-minting-observe",
+        MINT_SCHEMA,
+        tx,
+      );
+      sink.set({ out: src as unknown as string });
+      tx.prepareCfc();
+      const result = await tx.commit().settled;
+      expect(result.error).toBeUndefined();
+      expect(
+        tx.getCfcState().diagnostics.some((d) =>
+          d.includes("write-floor(observe)") && d.includes("write floor")
+        ),
+      ).toBe(true);
+      const read = runtime.edit();
+      const stored = readStoredCfcMetadata(
+        read,
+        runtime.getCell(
+          signer.did(),
+          "wf-link-sink-minting-observe",
+          undefined,
+          read,
+        )
+          .getAsNormalizedFullLink(),
+      );
+      const slot = runtime.getCell(
+        signer.did(),
+        "wf-link-sink-minting-observe",
+        undefined,
+        read,
+      ).key("out");
+      const atomsOf = (view: ReturnType<typeof cfcLabelViewForCell>) =>
+        (view?.entries ?? []).flatMap((entry) => entry.label.integrity ?? []);
+      // The stored value pins the document, and the declared entry at `out`
+      // pins the label map, so the absent stamp is the claim.
+      expect(slot.get()).toBe("unendorsed-value");
+      expect(
+        (stored?.labelMap.entries ?? []).some((entry) =>
+          entry.origin === "declared" && entry.path[0] === "out"
+        ),
+      ).toBe(true);
+      expect(
+        (stored?.labelMap.entries ?? []).some((entry) =>
+          entry.origin === "minted" &&
+          (entry.label.integrity ?? []).includes(ADMIN_ATOM)
+        ),
+      ).toBe(false);
+      expect(atomsOf(cfcLabelViewForCell(slot))).not.toContain(ADMIN_ATOM);
+      expect(atomsOf(cfcLabelViewForResolvedTarget(slot))).not.toContain(
+        ADMIN_ATOM,
+      );
+      read.abort();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("credits the references beneath a minted list path with the list's own stamp", async () => {
+    // The roster shape: the list path both requires and mints the atom, and
+    // each role holds a reference under `subject`. The list is a value
+    // written at the floor path, so its stamp is persisted there and covers
+    // the references beneath it, whatever their documents carry.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      await seedLabeledDoc(runtime, "wf-roster-profile", { name: "Alice" }, {});
+      const tx = runtime.edit();
+      const profile = runtime.getCell(
+        signer.did(),
+        "wf-roster-profile",
+        undefined,
+        tx,
+      );
+      const sink = runtime.getCell(signer.did(), "wf-roster-sink", {
+        type: "object",
+        properties: {
+          admins: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                subject: { type: "object" },
+                displayName: { type: "string" },
+              },
+              required: ["subject", "displayName"],
+            },
+            ifc: {
+              requiredIntegrity: [ADMIN_ATOM],
+              addIntegrity: [ADMIN_ATOM],
+            },
+          },
+        },
+        required: ["admins"],
+      }, tx);
+      sink.set({
+        admins: [{
+          subject: profile as unknown as Record<string, unknown>,
+          displayName: "Alice",
+        }],
+      });
+      tx.prepareCfc();
+      const result = await tx.commit().settled;
+      expect(result.error).toBeUndefined();
+      const read = runtime.edit();
+      const stored = readStoredCfcMetadata(
+        read,
+        runtime.getCell(signer.did(), "wf-roster-sink", undefined, read)
+          .getAsNormalizedFullLink(),
+      );
+      read.abort();
+      expect(
+        (stored?.labelMap.entries ?? []).filter((entry) =>
+          entry.origin === "minted"
+        ).map((entry) => ({
+          path: [...entry.path],
+          integrity: entry.label.integrity,
+        })),
+      ).toEqual([{ path: ["admins"], integrity: [ADMIN_ATOM] }]);
     } finally {
       await runtime.dispose();
       await storageManager.close();
