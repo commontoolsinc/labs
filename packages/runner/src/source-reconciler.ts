@@ -73,7 +73,7 @@ import type { Runtime } from "./runtime.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
-import { isTerminalRejection } from "./storage/rejection.ts";
+import { isLastingRejection } from "./storage/rejection.ts";
 
 /**
  * What went wrong, as a reason a record can carry: a thrown error, or the
@@ -115,7 +115,8 @@ const logger = getLogger("runner.source-reconcile", {
  * - `rejected`: the write that adopts the origin's source was refused for
  *   good — a terminal rejection, which no retry of the same write can get
  *   past. This runtime does not propose that source again until the
- *   candidate, the piece's source state, or its stored argument changes.
+ *   candidate, the piece's source state, or its stored argument changes, or
+ *   the space's memory session is replaced.
  * - `unavailable`: the origin's current source could not be adopted this
  *   time — it could not be reached, the write that adopts it did not commit,
  *   or the piece changed underneath the attempt and the write it was going to
@@ -250,8 +251,9 @@ type CommitFailure = {
   detail: string;
 
   /**
-   * Whether the store refused the write for good: a terminal rejection, which
-   * the same write is refused with again however often it is sent.
+   * Whether the store refused the write for good: a terminal rejection that
+   * the same write receives again however often it is sent, from one pass to
+   * the next (`isLastingRejection`).
    */
   terminal: boolean;
 };
@@ -263,11 +265,15 @@ type CommitFailure = {
  *
  * What it covers is what the write is built from: the candidate, the piece's
  * source state, and the stored argument its setup restages. A change to a
- * document the argument links to, or to what the store admits, is outside it.
- * A runtime that starts again, which is when its own code can change, starts
- * with none of these.
+ * document the argument links to is outside it. What the store admits can
+ * change when the space's memory session is replaced, as a host restart
+ * replaces it, so a replacement forgets the space's refusals. A runtime that
+ * starts again, which is when its own code can change, starts with none.
  */
 type TerminalRefusal = {
+  /** The space of the refused piece. */
+  space: MemorySpace;
+
   /** The candidate the refused write would have adopted. */
   offered: { identity: string; symbol: string };
 
@@ -358,6 +364,13 @@ export class SourceReconciler {
    * refusal itself, which every runtime reports the same way.
    */
   readonly #terminalRefusals = new Map<string, TerminalRefusal>();
+
+  /**
+   * How many memory sessions have been replaced, so that a refusal received
+   * across a replacement is not remembered: it answered for a store that may
+   * no longer be the one serving the space.
+   */
+  #sessionsReplaced = 0;
 
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
@@ -573,8 +586,16 @@ export class SourceReconciler {
     return pending.promise;
   }
 
-  /** Reconciles each piece following a system origin in `space` again. */
+  /**
+   * Forgets the refusals received for pieces in `space`, whose memory session
+   * was replaced, and reconciles each piece following a system origin there
+   * again.
+   */
   #followSystemSources(space: MemorySpace): void {
+    this.#sessionsReplaced++;
+    for (const [key, refused] of [...this.#terminalRefusals]) {
+      if (refused.space === space) this.#terminalRefusals.delete(key);
+    }
     for (const follower of [...this.#systemFollowers.values()]) {
       if (follower.space === space) this.#reconcileFromSourceEvent(follower);
     }
@@ -1258,6 +1279,7 @@ export class SourceReconciler {
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
+    const sessionsReplaced = this.#sessionsReplaced;
     const candidate = await runtime.patternManager.compilePattern(program, {
       space: state.space,
     });
@@ -1377,7 +1399,9 @@ export class SourceReconciler {
     if (failure === undefined) return "updated";
     state.detail = failure.detail;
     if (!failure.terminal) return "unavailable";
+    if (sessionsReplaced !== this.#sessionsReplaced) return "rejected";
     this.#terminalRefusals.set(this.#followerKey(resultCell), {
+      space: state.space,
       offered: candidateRef,
       snapshot: state.snapshot,
       argumentUnchanged,
@@ -1513,8 +1537,9 @@ export class SourceReconciler {
    *
    * Returns `undefined` once the write commits, and otherwise why it did not:
    * the error that stopped the commit, or the piece having changed under the
-   * write. A failure is logged as a summary of the error, not the error
-   * itself, which carries the whole transaction the store refused.
+   * write. A failure is logged as a summary of the error, since the error
+   * carries the whole transaction the store refused; the error itself is
+   * logged at debug level.
    */
   async #commit(
     resultCell: Cell<unknown>,
@@ -1562,7 +1587,7 @@ export class SourceReconciler {
     }
     if (result.error) {
       const { name, message } = result.error;
-      const terminal = isTerminalRejection(result.error);
+      const terminal = isLastingRejection(result.error);
       logger.warn("reconcile-commit-failed", () => [
         terminal
           ? "the store refused a source reconciliation's write for good"
@@ -1571,6 +1596,12 @@ export class SourceReconciler {
         resultCell.sourceURI,
         state.offered,
         debugStr`${name}: $long${message}`,
+      ]);
+      logger.debug("reconcile-commit-failed-detail", () => [
+        "the failure the line above summarizes, whole",
+        state.space,
+        resultCell.sourceURI,
+        result.error,
       ]);
       return { detail: reconciliationDetail(result.error), terminal };
     }

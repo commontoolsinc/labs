@@ -173,6 +173,21 @@ describe("piece source reconciliation", () => {
     return runtime.sourceReconciler.reconcile(piece);
   }
 
+  /**
+   * Captures the observer the reconciler subscribes when the runtime is
+   * constructed, so a test can report a replacement itself.
+   */
+  function captureSessionReplaced(): (space: MemorySpace) => void {
+    let observer: ((space: MemorySpace) => void) | undefined;
+    storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
+      observer = subscribed;
+      return () => {
+        observer = undefined;
+      };
+    };
+    return (space) => observer?.(space);
+  }
+
   /** Serves the tracked pattern's route, advertising `identity` for it. */
   function servingFetch(
     identity: () => string,
@@ -441,19 +456,6 @@ describe("piece source reconciliation", () => {
     });
 
     describe("when the space's memory session is replaced", () => {
-      /** Captures the observer the reconciler subscribes when the runtime is
-       * constructed, so a test can report a replacement itself. */
-      function captureSessionReplaced(): (space: MemorySpace) => void {
-        let observer: ((space: MemorySpace) => void) | undefined;
-        storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
-          observer = subscribed;
-          return () => {
-            observer = undefined;
-          };
-        };
-        return (space) => observer?.(space);
-      }
-
       /** A running piece following the tracked pattern's system origin, current
        * at v1, with the route's advertised source switchable to v2. */
       async function followingPiece(record?: (url: URL) => void) {
@@ -1037,8 +1039,14 @@ describe("piece source reconciliation", () => {
       reasons: ["writePolicyAnyOf must remain stable at /messages/*"],
     };
 
-    /** Refuses every adoption with `error`, and counts the refusals. */
-    function refuseAdoptions(error: Record<string, unknown>) {
+    /**
+     * Refuses every adoption with `error`, and counts the refusals.
+     * `onRefusal` runs as each refusal is made, before the reconciler sees it.
+     */
+    function refuseAdoptions(
+      error: Record<string, unknown>,
+      onRefusal?: () => void,
+    ) {
       let adopting = false;
       const counted = { refusals: 0 };
       const loadArgument = runtime.syncStoredSetupArgument.bind(runtime);
@@ -1058,6 +1066,7 @@ describe("piece source reconciliation", () => {
           if (!adopting) return write(fn, maxRetries, options);
           adopting = false;
           counted.refusals++;
+          onRefusal?.();
           return Promise.resolve({ error });
         }) as Runtime["editWithRetry"],
       );
@@ -1111,6 +1120,23 @@ describe("piece source reconciliation", () => {
         expect(getPatternIdentityRef(piece)?.identity).toBe(v1Identity);
       });
     }
+
+    it("builds nothing again for a piece stopped and started since", async () => {
+      // A host that keeps a piece running stops and starts it again, and
+      // reconciles it on each start. A refusal forgotten when the piece stops
+      // would be built and sent again on every cycle.
+
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(await runtime.start(piece)).toBe(true);
+      runtime.runner.stop(piece);
+      expect(await runtime.start(piece)).toBe(true);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
+    });
 
     it("builds nothing again for a fabric origin's same source", async () => {
       const piece = await preparePiece(refuseEveryFetch);
@@ -1207,20 +1233,65 @@ describe("piece source reconciliation", () => {
       expect(adoptions.refusals).toBe(2);
     });
 
-    it("proposes again after a refusal that is not for good", async () => {
-      const piece = await pieceOffered(source("v2"));
-      using adoptions = refuseAdoptions({
+    const notForGood = [
+      {
         name: "ConflictError",
         message: "stale confirmed read: of:doc at seq 1 conflicted with seq 2",
+      },
+      {
+        name: "SpeculativeBasisError",
+        message: "commit read basis names a speculative layer",
+      },
+    ];
+
+    for (const refusal of notForGood) {
+      it(`proposes again after a \`${refusal.name}\``, async () => {
+        const piece = await pieceOffered(source("v2"));
+        using adoptions = refuseAdoptions(refusal);
+
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        expect(adoptions.refusals).toBe(2);
+        expect(getPieceReconciliation(piece)).toMatchObject({
+          outcome: "unreachable",
+        });
+      });
+    }
+
+    it("proposes again once the space's memory session is replaced", async () => {
+      const replace = captureSessionReplaced();
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      // The replacement is itself what reconciles a piece following a
+      // system origin again.
+      replace(piece.space);
+      await runtime.sourceReconciler.idle();
+      expect(adoptions.refusals).toBe(2);
+
+      expect(await reconcile(piece)).toBe("rejected");
+      expect(adoptions.refusals).toBe(2);
+    });
+
+    it("proposes again after a refusal received while the space's memory session was replaced", async () => {
+      // The refusal answered for the store the session was replaced away
+      // from, so the pass the replacement starts proposes again.
+
+      const replace = captureSessionReplaced();
+      const piece = await pieceOffered(source("v2"));
+      let replaced = false;
+      using adoptions = refuseAdoptions(tooLarge, () => {
+        if (replaced) return;
+        replaced = true;
+        replace(piece.space);
       });
 
-      expect(await reconcile(piece)).toBe("unavailable");
-      expect(await reconcile(piece)).toBe("unavailable");
+      expect(await reconcile(piece)).toBe("rejected");
+      await runtime.sourceReconciler.idle();
 
       expect(adoptions.refusals).toBe(2);
-      expect(getPieceReconciliation(piece)).toMatchObject({
-        outcome: "unreachable",
-      });
     });
 
     it("logs a summary of the refusal once, and never the transaction", async () => {

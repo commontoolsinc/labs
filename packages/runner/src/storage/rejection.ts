@@ -89,6 +89,20 @@ export function isTerminalRejection(
 }
 
 /**
+ * A terminal rejection that stands beyond the attempt that received it: every
+ * {@link isTerminalRejection} but a `SpeculativeBasisError`. That one refuses
+ * a read basis naming a speculative layer of the committing process, which
+ * settles, so the same write built again from a later read can commit. A
+ * caller that remembers a refusal from one attempt to the next, as the source
+ * reconciler does, asks this rather than {@link isTerminalRejection}.
+ */
+export function isLastingRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return isTerminalRejection(error) && error?.name !== "SpeculativeBasisError";
+}
+
+/**
  * A conflict rejection is a stale-read / pending-dependency commit failure
  * (normalized to `ConflictError`, see storage/v2.ts): the authoritative version
  * is ahead of this replica. A reactive compute or effect recovers from one by

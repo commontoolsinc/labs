@@ -1372,14 +1372,16 @@ again however often it is sent. The runtime that received it therefore does not
 build that write again while nothing it was built from has changed — the
 candidate the origin offers, the piece's source state, and the stored argument
 its setup restages. Any of those changing puts the candidate up for adoption
-again, and so does the runtime starting again. What the runtime remembers is
-its own: a terminal rejection is the verdict of the runtime that built the write
-and of the store it went to, and a later build, or a runtime under different
-enforcement, may build a write that is admitted. What the piece records is the
-refusal, which every runtime reports the same way. A refusal that is not for
-good — a conflict, a dropped connection — is proposed again on the next
-reconciliation, and an explicit ask builds and sends the write whatever was
-refused before.
+again. So does the space's memory session being replaced, as a host restart
+replaces it, since what the store admits may have changed with it, and so does
+the runtime starting again. What the runtime remembers is its own: a terminal
+rejection is the verdict of the runtime that built the write and of the store
+it went to, and a later build, or a runtime under different enforcement, may
+build a write that is admitted. What the piece records is the refusal, which
+every runtime reports the same way. A refusal that is not for good — a
+conflict, a dropped connection, a read basis naming a speculative layer of the
+runtime's own, which settles — is proposed again on the next reconciliation,
+and an explicit ask builds and sends the write whatever was refused before.
 
 Distinguishing these needs the outcome of the last reconciliation to outlive
 the reconciliation, so the panel can show it to a reader who opened the piece
