@@ -4093,6 +4093,110 @@ describe("stage D seal-into-wave", () => {
     ).toBe(0);
   });
 
+  it("warns for a read-only-space reader that sealed before the withdrawn writer without claiming it read that write", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave read-only space, reader first",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const foreignEngine = await server.engineForSpace(foreign);
+    const lease = liveLease();
+    const engines = new Map<MemorySpace, Engine.Engine>([
+      [space, engine],
+      [foreign, foreignEngine],
+    ]);
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+
+    const foreignDoc = runtime.getCell<{ value: number }>(
+      foreign,
+      "wave-ro-first-foreign",
+      undefined,
+    );
+    const homeIn = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-first-home-in",
+      undefined,
+    );
+    const homeOut = runtime.getCell<{ value: number }>(
+      space,
+      "wave-ro-first-home-out",
+      undefined,
+    );
+
+    // The reader seals first: the foreign doc holds nothing yet.
+    const readerTx = runtime.edit();
+    stampWaveRunContext(readerTx, {
+      actionId: "derive-from-foreign",
+      kind: "derivation",
+    });
+    const seen = foreignDoc.withTx(readerTx).get();
+    expect(seen).toBeUndefined();
+    homeOut.withTx(readerTx).set({ value: 1 });
+    expect((await readerTx.commit().settled).error).toBeUndefined();
+
+    const writerTx = runtime.edit();
+    stampWaveRunContext(writerTx, {
+      actionId: "write-foreign",
+      kind: "event-handler",
+      eventId: "e-fw",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    writerTx.enableMultiSpaceWrites?.([foreign, space]);
+    foreignDoc.withTx(writerTx).set({ value: 5 });
+    homeIn.withTx(writerTx).set({ value: 5 });
+    expect((await writerTx.commit().settled).error).toBeUndefined();
+
+    // A whole-doc set never commutes, so the writer's home write requeues
+    // it, and its foreign write withdraws with it.
+    Engine.applyCommit(engine, {
+      sessionId: "rival-session",
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: homeIn.getAsNormalizedFullLink().id,
+          value: { value: { value: 99 } },
+        }],
+      },
+    });
+
+    runtime.clearSealDestination();
+    const sink = new EngineWaveCommitSink({
+      engineFor: (s) => engines.get(s)!,
+      sessionId: executionLeaseHolder(`service:${space}`),
+    });
+    const warnings: string[] = [];
+    const warn = stub(console, "warn", (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    });
+    let outcome: WaveCommitOutcome;
+    try {
+      outcome = await wave.commitWave(sink);
+      await wave.settled();
+    } finally {
+      warn.restore();
+    }
+
+    expect(outcome.dispositions).toEqual([
+      { kind: "dropped" },
+      { kind: "requeued" },
+    ]);
+    const dropped = warnings.filter((line) =>
+      line.includes("contribution-dropped")
+    );
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain(
+      `It read \`${foreignDoc.getAsNormalizedFullLink().id} space\` in ` +
+        `${foreign}, which action=write-foreign kind=event-handler ` +
+        `eventId=e-fw also wrote; that run was requeued. The match is by ` +
+        `doc alone, so the read may predate that write.`,
+    );
+    expect(dropped[0]).not.toContain("written by action=write-foreign");
+  });
+
   it("stage F: a bookkeeping contribution rebases commuting patches and carries derivedThrough; a semantic conflict drops it whole (Q4's sanctioned internal stamp kind)", async () => {
     const lease = liveLease();
     const wave = newWave({ lease });

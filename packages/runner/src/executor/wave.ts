@@ -879,6 +879,12 @@ interface WithdrawnRead {
 
   /** The doc instance read, as `docInstanceKey()` writes it. */
   docKey: string;
+
+  /** Whether the read's own pending layer names `owner`'s write. A read in
+   * a space the run wrote nothing to carries no layer, and is matched to a
+   * writer of the same doc instance alone; that read may predate the
+   * write. */
+  observed: boolean;
 }
 
 /** The staged doc instances of one foreign provisioning batch — the
@@ -1956,7 +1962,7 @@ export class WaveAccumulator
       reader.withdrawnRead !== undefined && !visited.has(reader.index)
     ) {
       visited.add(reader.index);
-      const { owner, space, docKey } = reader.withdrawnRead;
+      const { owner, space, docKey, observed } = reader.withdrawnRead;
       const writer = this.#contributions[owner];
       // A read reaches the closure only through a write its owner withdrew
       // whole, or through that one doc's superseded write.
@@ -1965,10 +1971,14 @@ export class WaveAccumulator
         : droppedWhole.has(owner)
         ? "was dropped"
         : "had that write superseded by a concurrent commit";
+      const read = `${sentences.length === 0 ? "It" : "That run"} read ` +
+        `\`${docKey}\`${space === this.#space ? "" : ` in ${space}`}`;
+      const run = describeRunContext(writer.context);
       sentences.push(
-        `${sentences.length === 0 ? "It" : "That run"} read ` +
-          `\`${docKey}\`${space === this.#space ? "" : ` in ${space}`}, ` +
-          `written by ${describeRunContext(writer.context)}, which ${fate}.`,
+        observed
+          ? `${read}, written by ${run}, which ${fate}.`
+          : `${read}, which ${run} also wrote; that run ${fate}. The ` +
+            "match is by doc alone, so the read may predate that write.",
       );
       reader = writer;
     }
@@ -2304,7 +2314,7 @@ export class WaveAccumulator
               owner !== contribution.index &&
               readSawWithdrawnWrite(owner, docKey, readSpace)
             ) {
-              return { owner, space: readSpace, docKey };
+              return { owner, space: readSpace, docKey, observed: false };
             }
           }
         }
@@ -3090,6 +3100,7 @@ export class WaveAccumulator
               owner,
               space: spaceContribution.space,
               docKey: readDocKey,
+              observed: true,
             };
           }
         }
