@@ -44,6 +44,27 @@ export function keybindDetail(
 }
 
 /**
+ * Whether the key event is aimed at somewhere the user is entering text.
+ * Editors such as `cf-code-editor` and `cf-input` keep their editable element
+ * in a shadow root, and an event that crosses a shadow boundary reports the
+ * shadow host as its target, so the composed path is what names the element
+ * holding focus.
+ */
+function targetsTextEntry(e: KeyboardEvent): boolean {
+  for (const node of e.composedPath()) {
+    if (!(node instanceof HTMLElement)) continue;
+    if (node.isContentEditable) return true;
+    switch (node.localName) {
+      case "input":
+      case "textarea":
+      case "select":
+        return true;
+    }
+  }
+  return false;
+}
+
+/**
  * CFKeybind - Declarative keyboard shortcut listener
  *
  * @element cf-keybind
@@ -172,13 +193,7 @@ export class CFKeybind extends BaseElement {
 
   #matchesContext(e: KeyboardEvent): boolean {
     if (!this.ignoreEditable) return true;
-    const t = e.target as HTMLElement | null;
-    const tag = (t?.tagName || "").toLowerCase();
-    const editable = !!(t && (
-      t.isContentEditable || tag === "input" || tag === "textarea" ||
-      tag === "select"
-    ));
-    return !editable;
+    return !targetsTextEntry(e);
   }
 
   #normalizeKey(k?: string): string | undefined {
