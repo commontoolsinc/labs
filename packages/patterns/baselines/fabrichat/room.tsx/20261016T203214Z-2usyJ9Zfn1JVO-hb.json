@@ -243,7 +243,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitSend"
                   ]
@@ -262,7 +262,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitComposerSend"
                   ]
@@ -281,7 +281,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitThreadSend"
                   ]
@@ -300,7 +300,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitReply"
                   ]
@@ -319,7 +319,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitEdit"
                   ]
@@ -338,7 +338,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitDelete"
                   ]
@@ -357,7 +357,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitObliterate"
                   ]
@@ -391,7 +391,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -410,7 +410,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -449,7 +449,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/manager.tsx",
-              "moduleIdentity": "MKqIKZ79ZVDrTcFVQmoq7sUN2dbofZeFv2al83mRTIc",
+              "moduleIdentity": "j1UkoYB4el7cjpBBBKiEk6ivD4YY5yaqIfh6Q0Fr75k",
               "path": [
                 "commitStart"
               ]
@@ -499,7 +499,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/fabrichat/room-records.tsx",
-              "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+              "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
               "path": [
                 "commitSetTitle"
               ]
@@ -980,7 +980,7 @@
             "asCell": [
               "stream"
             ],
-            "description": "Sends a message, and answers with it. A send naming a `requestId` this\nreader has already sent under adds nothing, and answers with the message\nthe first one sent."
+            "description": "Sends a message, and answers with it. A send naming a `requestId` this\nreader has already sent under adds nothing, while the id is among the\nreader's newest hundred recorded, and answers with the message the first\none sent."
           },
           "sendReaction": {
             "$ref": "#/$defs/RoomStreamEvent",
@@ -1220,7 +1220,7 @@
             "description": "What a sent message replies to."
           },
           "requestId": {
-            "description": "Chosen by a sender of `sendMessage`, and unique among its sends. A send\nwhose id the room has already recorded for its sender pushes nothing.",
+            "description": "Chosen by a sender of `sendMessage`, and unique among its sends. A send\nwhose id is among the newest hundred the room has recorded for its sender\npushes nothing. An empty id counts as none.",
             "type": "string"
           },
           "target": {
@@ -1276,7 +1276,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitSendReaction"
                   ]
@@ -1295,7 +1295,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/fabrichat/room-records.tsx",
-                  "moduleIdentity": "mihRvrN9b9d382xB7YP6E1Q81ORGJsbROWyMbh7YGzo",
+                  "moduleIdentity": "gx9YmFkvwV_RbrV_DnilXE7wDX3N4QmGL7JgMFagezc",
                   "path": [
                     "commitDeleteReaction"
                   ]
@@ -1541,7 +1541,7 @@
         "asCell": [
           "stream"
         ],
-        "description": "Sends a message, and answers with it. A send naming a `requestId` this\nreader has already sent under adds nothing, and answers with the message\nthe first one sent."
+        "description": "Sends a message, and answers with it. A send naming a `requestId` this\nreader has already sent under adds nothing, while the id is among the\nreader's newest hundred recorded, and answers with the message the first\none sent."
       },
       "sendReaction": {
         "$ref": "#/$defs/RoomStreamEvent",
