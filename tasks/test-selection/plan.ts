@@ -1182,8 +1182,8 @@ function inKeyOrder(
  * any test, taken by its own score. Choosing one places every identity it
  * runs, across as many lanes as that takes, inside the same budgets and
  * the same share, so a gate costs what running what it judges costs. The
- * mandatory pass never places a gate, and a gate the change does not reach
- * is never chosen.
+ * mandatory pass never places a gate, and under the budgeted policy a gate
+ * the change does not reach is never chosen.
  */
 export function plan(input: PlanInput): Plan {
   const gateKeys = new Set(

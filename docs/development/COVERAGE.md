@@ -797,8 +797,8 @@ is what it promises. In brief:
   set. Every line of the member that the set's tests newly cover lowers the
   count, so where the new code cannot all be covered, tests for other uncovered
   lines of the member bring the count back down.
-- Every run records each gate it judged, a rise as a failure, so that a gate's
-  score reflects the rises it has found. The full run on `main` judges every
+- Every run records each gate it judged, a rise no acceptance covers as a
+  failure, so that a gate's score reflects the rises it has found. The full run on `main` judges every
   gate and fails for none of them. It compares each commit against its parent's
   figure, read from the parent's own run once that run's `Status` has uploaded
   it, and reads the description of the pull request it merged for acceptances.

@@ -939,9 +939,10 @@ const ROUTE_PROSE: Record<MeasuredSetRoute, string> = {
   elsewhere: "The change did not touch this member, so the gate had " +
     "nothing to compare and something elsewhere moved which lines this " +
     "set's tests reach. The change is what to look at.",
-  gated: "The gate measured this set on the pull request and passed " +
-    "it, so the two measurements disagree. That is worth looking at on " +
-    "its own, before the rise.",
+  gated: "The plan for the pull request chose this set's gate, so the " +
+    "gate measured the set there. Either the pull request's description " +
+    "accepted the rise, or the gate found none and the two measurements " +
+    "disagree, which is worth looking at on its own, before the rise.",
 };
 
 /**

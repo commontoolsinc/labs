@@ -295,7 +295,10 @@ export function explainLines(
       "  test just added, one just renamed, and one whose records never",
       "  say which unit it is in all run until a run on `main` records",
       "  them. Nothing runs a test the tree no longer holds, and nothing",
-      "  runs one whose unit a configuration declares unavailable.",
+      "  runs one whose unit a configuration declares unavailable. A",
+      "  coverage gate is the exception: no lane runs one, and one no",
+      "  manifest knows is offered at the floor of the score until the",
+      "  default branch records it.",
     ];
   }
   const lines = [
@@ -506,7 +509,10 @@ export interface Verification {
  * treats as unknown and therefore mandatory, so a manifest missing many
  * of them is a run that selects nothing and tests everything. That is
  * what this fails on, and it is the check to run before anything depends
- * on selection working.
+ * on selection working. A coverage gate the manifest holds nothing for is
+ * no lane's work and is not mandatory: it is offered at the floor of the
+ * score until a run records it, and this fails on that too, since a gate
+ * the default branch never records never earns its place.
  *
  * A manifest entry naming a suite or unit the tree no longer holds is
  * work no lane can be asked to do, and the packer drops it silently. It

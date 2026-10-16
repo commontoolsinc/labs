@@ -81,8 +81,10 @@ how many units it holds, its baseline, and its gate's score, and then every
 workspace member that carries no set, with the reason. Of the baselines this
 commit's manifest holds for a set, the one shown is the one measured at the
 newest default-branch commit the checkout contains. That is the one the coverage
-gate compares this commit against, since the gate resolves its manifest at the
-commit's moment too and chooses among its baselines the same way. This is what
+gate compares this commit against on a pull request, since the gate resolves its
+manifest at the commit's moment too and chooses among its baselines the same
+way. On `main` a gate compares against its parent commit's own run first, and
+the manifest only where that run gives no figure. This is what
 answers "why is my package not gated?" and "what am I being compared against?".
 
 A member with two measured sets has two lines and two baselines. The
@@ -393,8 +395,9 @@ not fit. A test of the set the change edited runs anyway, so a gate whose whole
 set already runs costs nothing more. How often each identity runs is unchanged:
 one its flake rate says to repeat is still repeated, and the repeats leave the
 set's number where it was, since a coverage count is the union over what the
-runs reached. A gate whose set the change does not reach is never chosen, and
-`explain` on a gate's identity says whether the plan chose it.
+runs reached. A gate whose set the change does not reach is never chosen, except
+by a run of every test, which chooses every gate, and `explain` on a gate's
+identity says whether the plan chose it.
 
 `Status` packs the plan the lanes packed, from the same tree and manifest, to
 learn which gates they chose. For each one, it adds up what the lanes measured

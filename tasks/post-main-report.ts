@@ -397,7 +397,10 @@ export async function coverageOfRun(
  * then on, while the run goes on attesting and deploying. The earliest
  * upload rather than the newest, so that every reader asking once one
  * exists reads the same figures however often the commit is pushed or its
- * run attempted again.
+ * run attempted again. An earlier run is passed over only once it has
+ * finished without uploading, since one still going may yet upload, and
+ * a reader taking a later run's figures meanwhile would read different
+ * figures from one asking after it did.
  */
 export async function firstCoverageAt(
   commit: string,
@@ -406,7 +409,7 @@ export async function firstCoverageAt(
     event: "push",
     branch: DEFAULT_BRANCH,
     head_sha: commit,
-    per_page: "10",
+    per_page: "100",
   });
   const data = await githubGet<{ workflow_runs: WorkflowRun[] }>(
     `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?${params}`,
@@ -419,7 +422,10 @@ export async function firstCoverageAt(
         !candidate.expired
       )
       .sort((a, b) => a.id - b.id)[0];
-    if (artifact === undefined) continue;
+    if (artifact === undefined) {
+      if (run.status === "completed") continue;
+      return undefined;
+    }
     const records = await readArtifact(artifact);
     if (records === undefined) return undefined;
     return {

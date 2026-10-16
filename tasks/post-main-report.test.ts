@@ -994,6 +994,7 @@ describe("post-main-report", () => {
       uploads: { id: number; name: string }[],
       zips: Record<number, Uint8Array>,
       asked: string[],
+      earliest = "completed",
     ): typeof fetch {
       return ((input: string | URL | Request) => {
         const url = typeof input === "string" ? input : input.toString();
@@ -1006,14 +1007,19 @@ describe("post-main-report", () => {
               ? [
                 { id: 4, created_at: "2026-09-02T00:00:00Z" },
                 { id: 3, created_at: "2026-09-01T00:00:00Z" },
-                { id: 2, created_at: "2026-08-31T00:00:00Z" },
+                {
+                  id: 2,
+                  created_at: "2026-08-31T00:00:00Z",
+                  status: earliest,
+                },
               ]
               : [],
           }));
         }
         const run = Number(url.match(/runs\/(\d+)\/artifacts/)?.[1]);
         if (!Number.isNaN(run)) {
-          // The earliest run was cancelled before it uploaded coverage.
+          // The earliest run uploaded no coverage: it was cancelled first,
+          // or is still going.
           const held = run === 2 ? [] : run === 4 ? [uploads[0]!] : uploads;
           return Promise.resolve(Response.json({
             total_count: held.length,
@@ -1070,6 +1076,31 @@ describe("post-main-report", () => {
       // before it finishes.
       expect(asked[0]).toContain("event=push");
       expect(asked[0]).not.toContain("status=");
+    });
+
+    it("waits for an earlier run still going rather than read a later one", async () => {
+      // The earliest run may yet upload, and once it has, every reader
+      // reads its figures; a later run's in the meantime would disagree.
+
+      const zips: Record<number, Uint8Array> = {
+        5: await recordsZip(coverageRecords({
+          groups: new Map(),
+          sets: new Map([["workspace-unit/packages/bakery", 4]]),
+          cold: false,
+        })),
+      };
+      const original = globalThis.fetch;
+      globalThis.fetch = answering(
+        [{ id: 5, name: "test-records-coverage-a1" }],
+        zips,
+        [],
+        "in_progress",
+      );
+      try {
+        expect(await firstCoverageAt("abc")).toBeUndefined();
+      } finally {
+        globalThis.fetch = original;
+      }
     });
 
     it("finds nothing where the run has uploaded no coverage yet", async () => {
