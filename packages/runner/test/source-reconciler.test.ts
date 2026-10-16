@@ -1203,6 +1203,29 @@ describe("piece source reconciliation", () => {
       expect(adoptions.refusals).toBe(2);
     });
 
+    it("builds nothing again once the stored argument is changed and changed back", async () => {
+      // The refusal remembers the argument by its content rather than by the
+      // value it read, so an argument changed and then restored, a different
+      // value equal to the first, changes nothing.
+
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      const argument = piece.getArgumentCell<Record<string, string>>()!;
+      const before = argument.getRaw()!;
+      for (const value of [{ note: "changed" }, { ...before }]) {
+        const written = await runtime.editWithRetry((tx) => {
+          argument.withTx(tx).setRaw(value);
+        });
+        expect(written.error).toBeUndefined();
+      }
+      expect(argument.getRaw()).toEqual(before);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
+    });
+
     it("proposes again once the piece's source state changes", async () => {
       const piece = await pieceOffered(source("v2"));
       using adoptions = refuseAdoptions(tooLarge);

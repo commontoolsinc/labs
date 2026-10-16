@@ -34,7 +34,7 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
-import { debugStr } from "@commonfabric/data-model";
+import { debugStr, hashStringOf } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
@@ -48,6 +48,7 @@ import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+import { getMetaLink } from "./link-utils.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import {
   classifyPieceOriginString,
@@ -290,8 +291,13 @@ type RefusedAdoption = {
    */
   snapshot: PieceSourceSnapshot;
 
-  /** Whether the piece's stored argument is still what the write restaged. */
-  argumentUnchanged: (candidate: Cell<unknown>) => boolean;
+  /**
+   * A fingerprint of the stored argument the write restaged
+   * (`#storedArgumentFingerprint`), which a remembered refusal keeps in place
+   * of the argument itself: it outlives the piece stopping, and an argument
+   * can be large.
+   */
+  argument: string;
 
   /** What the record of the refusal says. */
   detail: string;
@@ -1409,15 +1415,49 @@ export class SourceReconciler {
     if (failure === undefined) return "updated";
     state.detail = failure.detail;
     if (!failure.lasting) return "unavailable";
-    if (sessionsReplaced !== this.#sessionsReplaced) return "rejected";
+    // The commit's own guard held the argument to what was restaged, so the
+    // argument as it stands now is the one the refusal answered for.
+    const argument = this.#storedArgumentFingerprint(resultCell);
+    if (
+      sessionsReplaced !== this.#sessionsReplaced || argument === undefined
+    ) return "rejected";
     this.#refusedAdoptions.set(this.#followerKey(resultCell), {
       space: state.space,
       offered: candidateRef,
       snapshot: state.snapshot,
-      argumentUnchanged,
+      argument,
       detail: failure.detail,
     });
     return "rejected";
+  }
+
+  /**
+   * A fingerprint of the stored argument a setup over `resultCell` restages:
+   * the link the piece records for it, compared as `areNormalizedLinksSame()`
+   * compares one, and the content hash of the value that link names, as this
+   * replica holds it now. `undefined` where the value has
+   * no hash, which leaves nothing to remember a refusal by.
+   *
+   * The hash is the one `valueEqual()` decides a container by, and is cached on
+   * the value's identity, so a pass over an argument that has not changed
+   * hashes nothing again.
+   */
+  #storedArgumentFingerprint(resultCell: Cell<unknown>): string | undefined {
+    const link = getMetaLink(resultCell, "argument");
+    try {
+      return link === undefined ? "none" : hashStringOf({
+        link: {
+          space: link.space,
+          id: link.id,
+          scope: link.scope,
+          path: [...link.path],
+        },
+        value: this.#runtime.getCellFromLink({ ...link, schema: undefined })
+          .getRawUntyped(),
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -1439,7 +1479,7 @@ export class SourceReconciler {
       refused.offered.identity !== offered.identity ||
       refused.offered.symbol !== offered.symbol ||
       !samePieceSourceSnapshot(refused.snapshot, state.snapshot) ||
-      !refused.argumentUnchanged(resultCell)
+      this.#storedArgumentFingerprint(resultCell) !== refused.argument
     ) {
       this.#refusedAdoptions.delete(key);
       return false;
