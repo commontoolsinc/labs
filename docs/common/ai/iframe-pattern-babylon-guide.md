@@ -337,7 +337,12 @@ Keep important state and actions outside the canvas as accessible HTML:
 ```
 
 Use `type="button"`; a scene action must never submit a form or navigate the
-frame. The custom shell must contain `<!-- PATTERN_IFRAME_SCRIPT -->` exactly
+frame. Style the HTML around the canvas with the ambient theme the iframe
+receives — its elements, `cf-*` classes, and `--cf-theme-*` variables — and
+spell no color or font; see
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme).
+Read a scene's clear color from those variables too when it should match the
+page. The custom shell must contain `<!-- PATTERN_IFRAME_SCRIPT -->` exactly
 once.
 
 ## Generate and validate

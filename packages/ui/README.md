@@ -348,6 +348,16 @@ guest's state. Set `.presentation` explicitly to override the context, or to
 `null` to opt out. See
 [the iframe presentation contract](../iframe-sandbox/README.md#guest-presentation).
 
+`cf-theme` provides that context, so the guest of an iframe beneath it wears its
+theme: the `--cf-theme-*` values computed on the theme element, declared on the
+guest's `:root`, followed by the guest base sheet
+(`src/v2/components/cf-theme/guest-base-sheet.ts`), which styles the common
+elements and provides the `cf-*` classes, with the resolved scheme as the root's
+`data-color-scheme`. A nested `cf-theme` provides its own values. The element
+reads them again whenever it recomputes, including on
+`theme-preference-changed`, which a host that changes the tokens by CSS
+dispatches on `document` afterwards; an unchanged reading provides nothing new.
+
 ### TypeScript/JSX Support
 
 For React/TypeScript projects, add type definitions:
