@@ -2033,18 +2033,22 @@ references are leads until inspected.
 A fresh CLI run tags its task before assembling the prompt
 (`src/task-classification.ts`) with every kind of work it calls for: `respond`,
 `find`, `act`, `pieces`, `author`. A keyword rule reads the task and what the
-run holds (input cells, attached patterns, a browser); when no rule applies, one
-call to the cheap research model tags it; a failed call, a no-tag answer, or a
-five-second timeout falls back to every tag, and the timeout cancels the call.
-The tags, the path that chose them (`rule`, `model`, `fallback`), a fallback's
-reason (`no-model`, `no-tag`, `model-error`, `timeout`), and the
-classification's wall time are recorded as `taskClassification` in
-`run-state.json` and `run-report.json`; a model call's attempts and tokens land
-in the run report and the run's total usage like research's. Only an `author`
-task gets the opening research pass. The parent's orientation follows the tags:
-`pieces` and `author` add the code-authoring framing (reading docs and skills,
-repairing code, acquiring a skill by its id), `pieces` a short held-pieces block
-(the input cells are the pieces of the loom the person is in; `describe_handle`,
+run holds (input cells, attached patterns, a browser). A task asking to use,
+call, run or invoke a verb, or to add something to "the" or "this" thing other
+than a loom, while the run holds input cells, is `pieces` and `act`. When no
+rule applies, the classifier assumes rather than asking a model: `find`, plus
+`pieces` when the run holds input cells, plus `act` when it has a browser and
+the task names an action verb the rule knows. A misread task still reaches what
+it needs, since the tool allow-list does not narrow; it takes longer. A
+classifier that throws falls back to every tag. The tags, the path that chose
+them (`rule`, `assumed`, `fallback`), and the classification's wall time are
+recorded as `taskClassification` in `run-state.json` and `run-report.json`.
+`scripts/task-classification-eval.ts` scores the rule against a cheap-model
+classifier over the playtest asks, by hand. Only an `author` task gets the
+opening research pass. The parent's orientation follows the tags: `pieces` and
+`author` add the code-authoring framing (reading docs and skills, repairing
+code, acquiring a skill by its id), `pieces` a short held-pieces block (the
+input cells are the pieces of the loom the person is in; `describe_handle`,
 `read_value`, and `call_verb` read and act on them) where any other task gets
 one sentence saying handles may be held, `author` alone the piece-targeting
 guidance, the instruction to verify an effect, and the revision-verification

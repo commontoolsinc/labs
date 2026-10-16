@@ -40,7 +40,6 @@ import type { HarnessBrowserHost } from "../src/contracts/browser-host.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
-import { RESEARCH_MODEL } from "../src/research/runner.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "../src/revision-verification.ts";
 import type { HarnessModelClient } from "../src/model/client.ts";
 import {
@@ -4640,24 +4639,6 @@ Deno.test({
             return new CfHarnessPromptLoop({
               ...options,
               fetchFn: (_input, init) => {
-                // The task matches no classification rule, so the cheap
-                // model tags it before the run's own turns.
-                if (
-                  (JSON.parse(String(init?.body)) as { model?: string })
-                    .model === RESEARCH_MODEL
-                ) {
-                  return Promise.resolve(
-                    new Response(
-                      JSON.stringify(responsesBodyFromChatFixture({
-                        choices: [{
-                          index: 0,
-                          message: { role: "assistant", content: "act" },
-                        }],
-                      })),
-                      { status: 200 },
-                    ),
-                  );
-                }
                 fetchCalls.push(init ?? {});
                 const payload = fetchCalls.length === 1
                   ? {

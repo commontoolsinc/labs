@@ -224,7 +224,7 @@ import {
   classifyTask,
   type HarnessTaskClassification,
 } from "./task-classification.ts";
-import { createResearchRunner, researchModel } from "./research/runner.ts";
+import { createResearchRunner } from "./research/runner.ts";
 import { researchPatternRecords } from "./research/context.ts";
 import { REVISION_VERIFICATION_GUIDANCE } from "./revision-verification.ts";
 import {
@@ -3112,15 +3112,6 @@ export class CfHarnessPromptLoop {
   #lastReservedSubagentSequence = 0;
 
   /**
-   * What the task-classification model call cost, held from `classifyTask`
-   * until the run's records exist, which the next transcript run opens and
-   * this then lands in: its attempts in the run report, its tokens in the
-   * total.
-   */
-  #classificationAttempts: HarnessModelAttemptDiagnostic[] = [];
-  #classificationUsage: HarnessModelUsage | undefined;
-
-  /**
    * The parent's subagent runs as they stood when the current turn's tool
    * calls were dispatched, and `undefined` outside a turn. Skill custody is
    * judged against this rather than the live state, so a delegation is not
@@ -3733,45 +3724,17 @@ export class CfHarnessPromptLoop {
   /**
    * Tags a fresh root task with the kinds of work it calls for and records
    * them on the run, before the host assembles the prompt the tags shape.
-   * When the keyword rule has no answer, one bounded call to the cheap
-   * research model decides; when that fails or runs past its bound, the task
-   * gets every tag. The tags gate the
-   * opening research pass and the parent's browser guidance here.
+   * The tags gate the opening research pass and the parent's browser
+   * guidance here.
    */
-  async classifyTask(
-    task: string,
-    options: { signal?: AbortSignal } = {},
-  ): Promise<HarnessTaskClassification> {
+  async classifyTask(task: string): Promise<HarnessTaskClassification> {
     const runState = this.engine.getRunState();
-    const classification = await classifyTask(task, {
+    const classification = classifyTask(task, {
       patternRefs: runState.patternRefs,
       skillRegistry: runState.skillRegistry,
       inputCells: runState.inputCells,
       browserHost: this.engine.browserHost !== undefined &&
         this.#allowedSubagentProfiles.has(BROWSER_SUBAGENT_PROFILE),
-    }, {
-      askModel: async (prompt, bound) => {
-        const result = await this.modelClient.complete({
-          model: researchModel(this.modelClient.providerId),
-          transcript: [{ role: "user", content: prompt }],
-          tools: [],
-          nativeModelToolIds: [],
-          runId: `${runState.runId}:task-classification`,
-          ...(this.#researchReasoningEffort !== undefined
-            ? { reasoningEffort: this.#researchReasoningEffort }
-            : {}),
-          signal: options.signal === undefined
-            ? bound
-            : AbortSignal.any([options.signal, bound]),
-          // A call past its bound no longer belongs to this run's accounting,
-          // which may already have been flushed into the run's records.
-          onAttempt: (attempt) => {
-            if (!bound.aborted) this.#classificationAttempts.push(attempt);
-          },
-        });
-        if (!bound.aborted) this.#classificationUsage = result.usage;
-        return result.assistant.content;
-      },
     });
     await this.engine.recordTaskClassification(classification);
     return classification;
@@ -3992,13 +3955,6 @@ export class CfHarnessPromptLoop {
       onUsage: recordModelUsage,
     });
     this.engine.setResearchRunner(runResearch);
-    for (const attempt of this.#classificationAttempts.splice(0)) {
-      recordModelAttempt(attempt);
-    }
-    if (this.#classificationUsage !== undefined) {
-      await recordModelUsage(this.#classificationUsage);
-      this.#classificationUsage = undefined;
-    }
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
