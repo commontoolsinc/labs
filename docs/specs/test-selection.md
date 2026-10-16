@@ -829,8 +829,9 @@ other identities cheaper. `FILL_EXPLORATION_SHARE` is spent on what
 neither chose, never-run identities first and then the longest unrun,
 with an order shuffled by the manifest's seed breaking ties. A share left
 unspent is available to the passes after it. The passes spend the target
-and no more however many lanes the run has, and a change that forces in a
-great deal of work takes more lanes rather than leaving them no room.
+and no more however many lanes the run has, and less where `LANES_MAX`
+leaves them less room. A change that forces in a great deal of work takes
+more lanes rather than leaving them no room.
 
 In these passes an identity goes in the cheapest lane that can hold it
 inside its budget, and the emptier lane wins a tie. A lane holding

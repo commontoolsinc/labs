@@ -198,8 +198,9 @@ test the passes could choose would be charged needs no more room than that,
 so a large scale opens no lanes that nothing could fill.
 So a change that forces a great deal of work in takes more lanes, and still
 runs the tests chosen by score. A change with nothing mandatory takes the
-fewest lanes that hold `DISCRETIONARY_SECONDS`, which is three. The passes spend the target and no more,
-however many lanes there are.
+fewest lanes that hold `DISCRETIONARY_SECONDS`, which is three. The passes
+spend the target and no more however many lanes there are, and less where
+`LANES_MAX` leaves them less room.
 
 The run on the default branch has no tests chosen by score, since it runs
 everything, so its count is the fewest lanes at which nothing overflows.
@@ -633,7 +634,7 @@ measurement to look at rather than a setting to fix.
 | `FULL_LANE_BOUND_SECONDS` | 1800 | seconds | chosen | Up when the run on `main` uses more jobs than it needs; down when `main` takes too long to say something broke. |
 | `FULL_LANE_BUDGET_SECONDS` | 1730 | seconds | derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
 | `DISCRETIONARY_SECONDS` | 575 | seconds | chosen | Up when regressions reach the default branch past pull requests that did not run the test chosen by score that would have caught them; down when pull requests take more lanes than runner minutes allow. A pull request whose mandatory work fits in five lanes with room to spare most often takes five at this figure. The label `ci: <n>x` multiplies it by n for one pull request. |
-| `LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says a run needs more lanes than this, and the organization's runner limit has room; down when one run crowds out the runs behind it. A run needing more lanes than this takes this many: a pull request then runs fewer tests chosen by score, and a full run's lanes may run past their budget. |
+| `LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says a run needs more lanes than this, and the organization's runner limit has room; down when one run crowds out the runs behind it. A run needing more lanes than this takes this many: a pull request then runs fewer tests chosen by score, and any run's mandatory work may put its lanes past their budget. |
 | `FULL_RUN_LABEL` | ci: full | a label | chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `UNMEASURED_COST_SECONDS` | 1 | seconds | chosen | Up when a lane holding new tests runs long; down when it finishes early. It is reached for only by a suite with no measured unit at all, since a suite that has any charges an unmeasured one the larger of its units' mean and their ninetieth percentile. |
 | `VALUE_FLOOR` | 0.05 | score | chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
@@ -1712,7 +1713,10 @@ itself.
   between changes. Withheld is the store holding the test back as too flaky to
   judge a change by. Otherwise the note says what the plan the lanes computed
   over that manifest says about leaving it out, which is never something the
-  author missed. Either its unit runs whole and holds a withheld test, or no
+  author missed. That plan is rebuilt from the labels the pull request carries
+  when the comment is written, so a `ci: <n>x` or `ci: full` it ran under is
+  the plan that explains it; labels the count cannot read leave no plan, and
+  the note gives no reason. Either its unit runs whole and holds a withheld test, or no
   lane can hold the test, or the tests that had to run left no room in the lanes
   for anything else, or the lanes filled what they left with other tests. Only
   those four are said, because the plan records nothing more specific about a

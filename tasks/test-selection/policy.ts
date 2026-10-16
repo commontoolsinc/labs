@@ -75,10 +75,10 @@ export const DISCRETIONARY_SECONDS = 575;
  * lanes of whatever runs beside it; `tasks/ci-workflow.test.ts` holds the
  * first wave of a run to the same half. A run needing more takes no more
  * lanes. A pull request's tests chosen by score then get what room is
- * left, and a full run's lanes may run past their budget: the full run's
- * packer places every test, running a repeated one fewer times where its
- * runs fit in no lane, and putting one that fits nowhere even once in the
- * lane it leaves shortest.
+ * left, and any run's mandatory work may put its lanes past their budget:
+ * the packer places every mandatory test, running a repeated one fewer
+ * times where its runs fit in no lane, and putting one that fits nowhere
+ * even once in the lane it leaves shortest.
  */
 export const LANES_MAX = 30;
 
@@ -582,7 +582,8 @@ export const DIALS: readonly Dial[] = [
       "this, and the organization's runner limit has room; down when one " +
       "run crowds out the runs behind it. A run needing more lanes than " +
       "this takes this many: a pull request then runs fewer tests chosen " +
-      "by score, and a full run's lanes may run past their budget.",
+      "by score, and any run's mandatory work may put its lanes past their " +
+      "budget.",
   },
   {
     name: "FULL_RUN_LABEL",

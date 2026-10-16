@@ -83,7 +83,7 @@ import {
 } from "./ci-check-lib.ts";
 import { loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
-import { planOver } from "./ci-lane.ts";
+import { planOver, requestedRun } from "./ci-lane.ts";
 import { isLaneMeasurement } from "./lane-measurement.ts";
 import {
   coverageGateIdentity,
@@ -477,23 +477,38 @@ export async function runGit(...args: string[]): Promise<string> {
   return new TextDecoder().decode(stdout);
 }
 
+/** What the report reads of one pull request. */
+export interface PullRequestFacts {
+  /** The commit at the head of its branch, which its runs are listed under. */
+  head: string;
+
+  /**
+   * The labels it carries, which say how much its runs ran. They are the
+   * labels its last run read unless somebody changed them since.
+   */
+  labels: string[];
+}
+
 /**
- * The commit at the head of one pull request's branch, which is what its
- * runs are listed under.
+ * The head of one pull request's branch, and its labels.
  *
  * Undefined when the pull request cannot be read. The report is worth
  * more with a note saying its own run could not be read than it is worth
  * not being written, so this is one place the reporter carries on
  * without an answer.
  */
-export async function pullRequestHead(
+export async function pullRequestFacts(
   pullRequest: number,
-): Promise<string | "absent" | undefined> {
+): Promise<PullRequestFacts | "absent" | undefined> {
   try {
-    const info = await githubGet<{ head: { sha: string } }>(
-      `/repos/${REPO}/pulls/${pullRequest}`,
-    );
-    return info.head.sha;
+    const info = await githubGet<{
+      head: { sha: string };
+      labels?: { name: string }[];
+    }>(`/repos/${REPO}/pulls/${pullRequest}`);
+    return {
+      head: info.head.sha,
+      labels: (info.labels ?? []).map((label) => label.name),
+    };
   } catch (error) {
     // A number in a commit subject may name an issue rather than a pull
     // request, and an issue takes comments just as a pull request does.
@@ -567,15 +582,18 @@ async function manifestOfTheirRun(
  * Reading the tree is what makes this the answer a lane would give
  * rather than a summary of the manifest, because the capabilities a
  * suite opens are most of what a lane's budget goes on and the manifest
- * holds neither the suites nor which units still exist.
+ * holds neither the suites nor which units still exist. `run` is what the
+ * pull request's labels asked its run to be: the full one, or a budgeted
+ * one at a scale.
  */
 export function manifestView(
   manifest: Manifest,
   suites: readonly Suite[],
   changed: ReadonlySet<string>,
+  run: { full: boolean; scale: number },
 ): Omit<PullRequestView, "ran"> {
   // A pull request's run, packed into as many lanes as it would take.
-  const packed = planOver({ suites, manifest, changed, full: false }).laid;
+  const packed = planOver({ suites, manifest, changed, ...run }).laid;
   const selected = new Set<string>();
   for (const lane of packed.lanes) {
     for (const selection of lane.selections) {
@@ -787,8 +805,8 @@ export async function main(
   );
 
   const manifestAt = deps.manifest ?? fetchManifest;
-  const head = await pullRequestHead(pullRequest);
-  if (head === "absent") {
+  const facts = await pullRequestFacts(pullRequest);
+  if (facts === "absent") {
     console.log(
       `${commit}'s subject names #${pullRequest}, which is not a pull ` +
         "request. Nothing to post.",
@@ -797,8 +815,8 @@ export async function main(
   }
   const suites = await (deps.topology ?? loadTopology)();
   let view: PullRequestView = unknownPullRequest();
-  if (head !== undefined) {
-    const theirRun = await runAt(head, "pull_request");
+  if (facts !== undefined) {
+    const theirRun = await runAt(facts.head, "pull_request");
     const ran = theirRun === undefined
       ? undefined
       : await outcomesFromStore(theirRun);
@@ -806,12 +824,16 @@ export async function main(
     if (fetched.manifest === undefined) {
       console.log(`No manifest for PR #${pullRequest}: ${fetched.absent}`);
     }
+    // Labels that ask for no run this can read leave no plan to explain
+    // what the run left out by.
+    const requested = requestedRun(facts.labels);
+    if (!requested.ok) {
+      console.log(`No plan for PR #${pullRequest}: ${requested.problem}`);
+    }
     view = {
-      ...(fetched.manifest === undefined ? unknownPullRequest() : manifestView(
-        fetched.manifest,
-        suites,
-        changed,
-      )),
+      ...(fetched.manifest === undefined || !requested.ok
+        ? unknownPullRequest()
+        : manifestView(fetched.manifest, suites, changed, requested)),
       ...(ran === undefined ? {} : { ran: ran.outcomes }),
     };
   }

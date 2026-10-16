@@ -26,7 +26,10 @@ to what lanes spend on average, on 2026-10-09.
 
 For each pull request the replay checked out its head commit and took its
 diff against the default branch as it stood when the run was created. It
-read the manifest current at that moment, and ran the lane count of this
+read the manifest current at that moment. The lanes read the manifest
+current when the commit they test was made, and that commit is the merge
+GitHub makes for the run, so the two moments are close; a manifest
+published between them would make a replay differ from its run. It ran the lane count of this
 change over them, at targets from 0 to 2,300 seconds. It also packed the
 same work into five lanes as the lanes had before the change. One of the
 90 failed because the topology code of this change looks for a package
