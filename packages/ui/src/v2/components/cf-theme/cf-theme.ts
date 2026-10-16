@@ -1,3 +1,4 @@
+import type { IframePresentation } from "@commonfabric/iframe-sandbox";
 import { type CellHandle, isCellHandle } from "@commonfabric/runtime-client";
 import { ContextConsumer, provide } from "@lit/context";
 import { css, html } from "lit";
@@ -5,14 +6,21 @@ import { property } from "lit/decorators.js";
 
 import { BaseElement } from "../../core/base-element.ts";
 import { valueForDisplay } from "../../core/value-for-display.ts";
+import { iframePresentationContext } from "../cf-iframe/cf-iframe.ts";
 import {
   applyThemeToElement,
   type CFTheme,
   cfThemeContext,
   defaultTheme,
   mergeWithDefaultTheme,
+  resolveColorScheme,
   tokenAround,
 } from "../theme-context.ts";
+import {
+  computedThemeValues,
+  guestPresentation,
+  sameGuestPresentation,
+} from "./guest-presentation.ts";
 
 export function unwrapThemeCellValues(
   value: unknown,
@@ -104,6 +112,16 @@ export function subscribeToThemeCellValues(
  * tokens in effect by CSS: then it sets only what its partial changes from
  * the defaults.
  *
+ * It also provides `iframePresentationContext`, so every `cf-iframe` beneath
+ * it that has no `presentation` of its own themes its guest: the
+ * `--cf-theme-*` values computed on this element, which include a host's CSS
+ * overrides of them, followed by the guest base sheet, with the resolved
+ * color scheme as the guest root's `data-color-scheme`. It reads them again
+ * whenever it recomputes, including on `theme-preference-changed`, the event
+ * a host dispatches on `document` after changing the tokens by CSS, since a
+ * custom property changes without one; an unchanged reading provides nothing
+ * new.
+ *
  * @element cf-theme
  */
 export class CFThemeProvider extends BaseElement {
@@ -121,6 +139,14 @@ export class CFThemeProvider extends BaseElement {
   @provide({ context: cfThemeContext })
   @property({ attribute: false })
   accessor _computedTheme: CFTheme = defaultTheme;
+
+  /**
+   * The presentation provided to `cf-iframe` guests beneath, `null` until the
+   * first computation; a guest receives the latest one when it loads.
+   */
+  @provide({ context: iframePresentationContext })
+  @property({ attribute: false })
+  accessor _guestPresentation: IframePresentation | null = null;
 
   #unsubs: Array<() => void> = [];
 
@@ -182,6 +208,7 @@ export class CFThemeProvider extends BaseElement {
     // Styles first: a consumer told of the new theme reads them at once.
     applyThemeToElement(this, computed, around);
     this._computedTheme = computed;
+    this.#provideGuestPresentation();
     this.#setupSubscriptions();
 
     // Manage the matchMedia listener based on the resolved colorScheme
@@ -201,6 +228,17 @@ export class CFThemeProvider extends BaseElement {
         this._mediaQuery = undefined;
       }
     }
+  }
+
+  /** Provides the guest presentation read now, unless it reads as before. */
+  #provideGuestPresentation() {
+    const next = guestPresentation(
+      computedThemeValues(this),
+      resolveColorScheme(this._computedTheme.colorScheme),
+    );
+    const held = this._guestPresentation;
+    if (held && sameGuestPresentation(held, next)) return;
+    this._guestPresentation = next;
   }
 
   #setupSubscriptions() {
