@@ -29,6 +29,7 @@ import {
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
+  canonicalizeCfcSchemaDocument,
   cfcSchemaResolvedRoot,
   hoistCfcSchemaDefs,
   localDefinitionName,
@@ -1507,10 +1508,18 @@ export const mergeCfcSchemaEnvelopes = (
       ? { definitions: definitions ?? {}, active: new Set() }
       : undefined,
   );
+  // The merged document is persisted and hashed as it is returned, so it
+  // leaves here in canonical form: one definition per distinct meaning, one
+  // map, nothing unreachable. Without this each merge adds a renamed copy of
+  // the candidate's map and each resolved body a copy of the whole map, and
+  // the stored envelope grows with every merge (a Home envelope reached 22 MB
+  // over ~90 merges, 99.75% of it such copies).
   return internSchema(
-    definitions !== undefined && isObjectOrArray(merged)
-      ? { ...merged, $defs: definitions }
-      : merged,
+    canonicalizeCfcSchemaDocument(
+      definitions !== undefined && isObjectOrArray(merged)
+        ? { ...merged, $defs: definitions }
+        : merged,
+    ),
   );
 };
 

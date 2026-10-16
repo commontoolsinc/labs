@@ -7,6 +7,7 @@ import {
   cfcSchemaPoliciesEqual,
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
+import { canonicalizeCfcSchemaDocument } from "../src/cfc/schema-refs.ts";
 import {
   storedCfcEnvelopeMergeIssue,
   storedSchemaCoversCandidateEnvelope,
@@ -2304,5 +2305,130 @@ describe("cfcSchemaPoliciesEqual", () => {
         ),
       ).toBe(false);
     });
+  });
+});
+
+describe("canonicalizeCfcSchemaDocument", () => {
+  // A definition reused from several places, with a policy on it, so that a
+  // candidate whose policy differs sends the merge through the resolving
+  // path that attaches the document's map to each expanded body.
+  const envelope = (round: number): JSONSchemaObj => ({
+    type: "object",
+    properties: {
+      main: { $ref: "#/$defs/Profile" },
+      recent: { type: "array", items: { $ref: "#/$defs/Profile" } },
+    },
+    $defs: {
+      Profile: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          // Strengthened each round, so each candidate's policy differs
+          // from the stored one and the merge takes the resolving path.
+          secret: {
+            type: "string",
+            ifc: {
+              confidentiality: Array.from(
+                { length: round + 1 },
+                (_, index) => `c${index}`,
+              ),
+            },
+          },
+        },
+      },
+    },
+  });
+  const countDefs = (schema: unknown): number => {
+    let count = 0;
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(walk);
+        return;
+      }
+      if (value === null || typeof value !== "object") return;
+      for (const [key, member] of Object.entries(value)) {
+        if (key === "$defs" && member && typeof member === "object") {
+          count += Object.keys(member).length;
+        }
+        walk(member);
+      }
+    };
+    walk(schema);
+    return count;
+  };
+  const nestedMaps = (schema: unknown): number => {
+    let count = 0;
+    const walk = (value: unknown, atRoot: boolean): void => {
+      if (Array.isArray(value)) {
+        value.forEach((member) => walk(member, false));
+        return;
+      }
+      if (value === null || typeof value !== "object") return;
+      for (const [key, member] of Object.entries(value)) {
+        if (key === "$defs" && !atRoot) count++;
+        walk(member, false);
+      }
+    };
+    walk(schema, true);
+    return count;
+  };
+
+  it("keeps a repeatedly merged envelope's definition map bounded", () => {
+    let merged: JSONSchema = envelope(0);
+    const sizes: number[] = [];
+    for (let round = 1; round <= 12; round++) {
+      merged = mergeCfcSchemaEnvelopes(merged, envelope(round));
+      sizes.push(JSON.stringify(merged).length);
+    }
+    // From the 6th merge to the 12th the document grows only by the six
+    // tags the label gained (under 100 chars); left unpruned, each merge
+    // adds a renamed copy of the candidate's definition that nothing
+    // references, about 200 chars a round.
+    expect(sizes[11] - sizes[5]).toBeLessThan(100);
+    expect(nestedMaps(merged)).toBe(0);
+    // At most one definition per distinct meaning that is still reachable.
+    expect(countDefs(merged)).toBeLessThanOrEqual(1);
+  });
+
+  it("folds content-identical definitions onto one name and rewrites refs", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/Entry" },
+        b: { $ref: "#/$defs/__cfc_hoisted_0_Entry" },
+        c: { $ref: "#/$defs/Other", $defs: { Entry: { type: "string" } } },
+      },
+      $defs: {
+        Entry: { type: "string" },
+        __cfc_hoisted_0_Entry: { type: "string" },
+        __cfc_hoisted_1_Other: { type: "null" },
+        Other: { type: "number" },
+        // Authored and unreferenced: kept, with what it refers to.
+        Unused: { type: "array", items: { $ref: "#/$defs/Spare" } },
+        Spare: { type: "boolean" },
+      },
+    }) as JSONSchemaObj;
+    expect(canonical.$defs).toEqual({
+      Entry: { type: "string" },
+      Other: { type: "number" },
+      Spare: { type: "boolean" },
+      Unused: { type: "array", items: { $ref: "#/$defs/Spare" } },
+    });
+    expect(canonical.properties).toEqual({
+      a: { $ref: "#/$defs/Entry" },
+      b: { $ref: "#/$defs/Entry" },
+      c: { $ref: "#/$defs/Other" },
+    });
+  });
+
+  it("leaves a document alone whose nested map disagrees with the root's", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/Entry", $defs: { Entry: { type: "number" } } },
+      },
+      $defs: { Entry: { type: "string" } },
+    };
+    expect(canonicalizeCfcSchemaDocument(schema)).toBe(schema);
   });
 });

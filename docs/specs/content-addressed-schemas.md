@@ -239,7 +239,13 @@ keyword, the resource-scope keywords (`$id`, `$anchor`, `$dynamicAnchor`,
 `$recursiveRef`, whose scoping the rewrite cannot preserve), and an
 external
 ref whose document is not at hand — and a writer falls back to carrying
-such a schema inline, as today.
+such a schema inline, as today. A merged envelope never reaches the fallback
+on account of its definition map: the merge returns the document in
+canonical form, with one map at the root holding one definition per
+distinct meaning and the definitions the author named, and nothing a
+merge minted that the document does not reach
+(`canonicalizeCfcSchemaDocument` in the runner's `cfc/schema-refs.ts`), so
+the hash an envelope is stamped with is of that form.
 
 An external ref is a `$ref` whose value is a `cid:` URI:
 
