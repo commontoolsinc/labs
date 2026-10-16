@@ -494,7 +494,7 @@ async function gitOutput(
 }
 
 /** A full git object id, in either hash a repository can use. */
-const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 
 /** The paths in what `git … -z` printed. */
 function pathsOf(listing: string): Set<string> {

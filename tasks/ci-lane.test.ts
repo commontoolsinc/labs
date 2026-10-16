@@ -2713,6 +2713,8 @@ describe("the lane's own housekeeping", () => {
     expect([...await landedFiles(repo, "base", published)]).toEqual([
       "landed.test.ts",
     ]);
+    expect([...await landedFiles(repo, "base", published.toUpperCase())])
+      .toEqual(["landed.test.ts"]);
     // A change branched off before the manifest's commit gained nothing
     // from after it, and a file the default branch deleted since is not
     // one it gained.
