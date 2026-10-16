@@ -5125,6 +5125,21 @@ export function deepTraverse(
   }
 }
 
+/**
+ * Returns `link` with its path rewritten to start at a snapshot of the deepest
+ * inline array element it passes through, or `link` itself where it passes
+ * through none. An inline element is an object or array stored in place in an
+ * array rather than linked to, and the snapshot gives the resolved cell an
+ * identity that stays with the element's content.
+ *
+ * The walk reads, without recursing, each container it steps into and each
+ * array element it passes, and nothing else of the document: what it decides
+ * rests on those containers' shapes and those elements' kinds alone. A
+ * recursive read of the whole document would put every other writer of the
+ * document into the transaction's conflict set, among them every append to a
+ * list beside the one the link names. The element a snapshot is taken of is
+ * read whole, since the snapshot's identity depends on all of it.
+ */
 function maybeConvertArrayPathToImmutableLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
@@ -5133,17 +5148,6 @@ function maybeConvertArrayPathToImmutableLink(
     return link;
   }
 
-  let rootValue: FabricValue;
-  try {
-    rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
-      meta: ignoreReadForScheduling,
-    });
-  } catch {
-    return link;
-  }
-
-  let current: FabricValue = rootValue;
-  const prefix: string[] = [];
   let candidate:
     | {
       value: FabricValue;
@@ -5152,32 +5156,30 @@ function maybeConvertArrayPathToImmutableLink(
     }
     | undefined;
 
-  for (let i = 0; i < link.path.length; i++) {
-    if (!isObjectOrArray(current)) {
-      break;
-    }
-
-    const segment = link.path[i];
-    let next: FabricValue;
-
-    if (Array.isArray(current)) {
-      if (!isArrayIndexPropertyName(segment)) {
-        break;
-      }
-      next = (current as unknown as Record<string, FabricValue>)[segment];
-      if (isObjectOrArray(next) && !isCellLink(next)) {
+  const shapeRead = { meta: ignoreReadForScheduling, nonRecursive: true };
+  try {
+    let container = tx.readValueOrThrow({ ...link, path: [] }, shapeRead);
+    for (let i = 0; i < link.path.length; i++) {
+      if (!isObjectOrArray(container)) break;
+      const inArray = Array.isArray(container);
+      if (inArray && !isArrayIndexPropertyName(link.path[i])) break;
+      // A link ending at an object's key passes through no element there,
+      // whatever the key holds.
+      const last = i === link.path.length - 1;
+      if (last && !inArray) break;
+      const slot = link.path.slice(0, i + 1);
+      const next = tx.readValueOrThrow({ ...link, path: slot }, shapeRead);
+      if (inArray && isObjectOrArray(next) && !isCellLink(next)) {
         candidate = {
           value: next,
-          path: [...prefix, segment],
+          path: slot,
           remainingPath: link.path.slice(i + 1),
         };
       }
-    } else {
-      next = (current as Record<string, FabricValue>)[segment];
+      container = next;
     }
-
-    prefix.push(segment);
-    current = next;
+  } catch {
+    return link;
   }
 
   if (candidate === undefined) {
