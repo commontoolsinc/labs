@@ -389,8 +389,8 @@ Records new text for one of the sender's messages.
 - **Effect:** makes `body` the message's text, and the handler clock its
   `editedAt`. The text it replaces is gone. `authorProfile`, `sentAt`,
   `replyTo`, and the reactions don't change.
-- **Dropped:** a `message` sent by someone else or deleted, or a `body` that
-  isn't a non-empty string.
+- **Dropped:** a `message` outside the room's space, sent by someone else, or
+  deleted, or a `body` that isn't a non-empty string.
 
 ### `deleteMessage(message: Cell<ChatMessage>)`
 
@@ -414,7 +414,8 @@ Records one of the sender's messages as deleted.
 
   Either way, no reaction outlives the deletion, and the message stays among the
   room's messages, so replies to it and threads rooted at it keep their links.
-- **Dropped:** a `message` sent by someone else, or already deleted.
+- **Dropped:** a `message` outside the room's space, sent by someone else, or
+  already deleted.
 
 ### `obliterateMessage(message: Cell<ChatMessage>)`
 
@@ -443,10 +444,10 @@ room, it is also how either person removes their own words completely.
   `{ deleted: true }`, its `editedAt` the handler clock, and its
   `authorProfile` and `reactions` are removed. `sentAt` and `replyTo` stay.
   The tombstone is labeled `authored-by` the sender, whoever obliterated it.
-- **Dropped:** unless the room is a direct room and the message is the
-  sender's own, a sender who isn't an OWNER, or any sender where the room's
-  `ownersMayObliterate` doesn't hold. Obliterating a message that is already
-  obliterated changes nothing.
+- **Dropped:** a `message` outside the room's space; and, unless the room is a
+  direct room and the message is the sender's own, a sender who isn't an
+  OWNER, or any sender where the room's `ownersMayObliterate` doesn't hold.
+  Obliterating a message that is already obliterated changes nothing.
 
 ### `sendReaction(message: Cell<ChatMessage>, emoji: string)`
 
@@ -466,7 +467,8 @@ Adds the sender's reaction to a message.
   the handler clock as its `sentAt`. If they already have one, nothing
   changes, and it keeps its `sentAt`. No one else's reaction changes, and
   neither does the message itself.
-- **Dropped:** a deleted `message`, or an `emoji` that isn't a single emoji.
+- **Dropped:** a `message` outside the room's space, or deleted, or an `emoji`
+  that isn't a single emoji.
 
 Adding a reaction that's already there changes nothing, and so does removing
 one that isn't.
@@ -485,8 +487,8 @@ Removes the sender's reaction from a message.
 - **Effect:** removes `reaction` from `message`'s reactions. One that is no
   longer there removes nothing. No one else's reaction changes, and neither
   does the message itself.
-- **Dropped:** a deleted `message`, a `reaction` that reads as no reaction, or
-  one that isn't the sender's.
+- **Dropped:** a `message` outside the room's space, or deleted, a `reaction`
+  that reads as no reaction, or one that isn't the sender's.
 
 A client never toggles: it sends whichever of the two the person asked for, so a
 repeated or delayed event can't undo what the person meant.

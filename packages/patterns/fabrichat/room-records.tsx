@@ -86,11 +86,11 @@ const NSEC_PER_SEC = 1_000_000_000n;
 
 /**
  * The policy every room starts from, a group room's. `about.policy` states
- * it, and the handlers read `ownersMayObliterate` and `deletionIsObliteration`
- * from it, so the two cannot disagree; `maxWindowCount` bounds
- * `messages.latest`. The other settings are stated for the policy's shape,
- * which a user's Home carries, and read by nothing. A room's
- * `ownersMayObliterate` is `ownersMayObliterateIn()`'s.
+ * it, and the handlers read `deletionIsObliteration` from it, so the two
+ * cannot disagree; `maxWindowCount` bounds `messages.latest`. The other
+ * settings are stated for the policy's shape, which a user's Home carries,
+ * and read by nothing. A room's `ownersMayObliterate` is
+ * `ownersMayObliterateIn()`'s.
  */
 export const FABRICHAT_POLICY: ChatRoomPolicy = {
   ownersMayObliterate: true,
@@ -107,8 +107,8 @@ export const FABRICHAT_POLICY: ChatRoomPolicy = {
  * The `ownersMayObliterate` a room of `kind` states in its policy, which
  * decides which policy document `about.policy` links: `given`, where the room
  * is configured, and otherwise yes for a group room and no for a direct room.
- * What the room enforces is what that document states
- * (`ownersMayObliterateBy()`).
+ * The handlers are bound to the same value, so what the room enforces is what
+ * that document states.
  */
 export const ownersMayObliterateIn = (
   kind: ChatRoomKind,
@@ -474,14 +474,6 @@ export const messageRightsOf = (
       ((isOwner && ownersMayObliterate) || (kind === "direct" && isAuthor)),
   };
 };
-
-/**
- * Whether the room whose policy `policy` is lets its OWNERs obliterate, as
- * the policy states it; a policy that is absent, or doesn't read yet, doesn't.
- */
-export const ownersMayObliterateBy = (
-  policy: Cell<ChatRoomPolicy> | undefined,
-): boolean => policy?.get()?.ownersMayObliterate === true;
 
 /**
  * Whether the viewer can send, edit, delete, and react in the room whose

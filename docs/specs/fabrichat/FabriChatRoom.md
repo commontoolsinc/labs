@@ -108,9 +108,14 @@ delivery" and §4). So two sends of the same text are two messages.
 
 An act on a message, and a reply, takes the message by its cell and reads it
 alone. A handler checks what the element's write policy does not — whose
-message or reaction it is, and the obliteration rights — and drops anything
+message or reaction it is, the obliteration rights, and, for an act on a
+message, that the message lives in the room's space — and drops anything
 else without a word: the room's rendering offers only acts the viewer can
-take, so no event outside the rules comes from it.
+take, so no event outside the rules comes from it. The acts on a message are
+bound to a handle on one of the room's records, which names the room's space
+and is read for nothing else. A message's write policy names its handlers,
+not a room, so the space is what keeps one room's rules, its kind and its
+`ownersMayObliterate`, off a message another room's rules govern.
 
 `commitEdit` and `commitDelete` are admitted only for the message's own sender.
 `commitEdit` records the new text in place, with the time as `editedAt`.
@@ -122,15 +127,15 @@ does. They have the same kind of write policy as the send handlers.
 `commitObliterate` is admitted for an OWNER of the room's space, in a direct
 room as in a group room or a space's own chat, when the room's policy states
 `ownersMayObliterate`, and for a message's own sender in a direct room. The
-handlers read that from the policy document `about.policy` links, so a room
-enforces what it states, and a policy that doesn't read lets no OWNER
-obliterate. One function, `messageRightsOf()`, states who may edit, delete,
-and obliterate a message: the three handlers admit an act by it, and
-`messageRights` and the rendering's controls offer one by it, so what a reader
-is offered is what the room takes. `commitObliterate` rewrites the message to
-its tombstone, which drops its author and its link to its reactions. So the
-message's write policy admits it alongside the send handlers, `commitEdit`,
-and `commitDelete`.
+handler is bound to that setting as a value, the same value that picks which
+policy document `about.policy` links, so a room enforces what it states, and a
+binding without the setting lets no OWNER obliterate. One function,
+`messageRightsOf()`, states who may edit, delete, and obliterate a message: the
+three handlers admit an act by it, and `messageRights` and the rendering's
+controls offer one by it, so what a reader is offered is what the room takes.
+`commitObliterate` rewrites the message to its tombstone, which drops its author
+and its link to its reactions. So the message's write policy admits it alongside
+the send handlers, `commitEdit`, and `commitDelete`.
 
 Every time a handler records, a message's `sentAt` and `editedAt` and a
 reaction's `sentAt`, is its own handler clock's reading when it made the
@@ -194,9 +199,9 @@ only their own messages. The room's kind picks which policy document
 `FabriChatRoomCore` is given the setting as an input, which the room's own
 pattern leaves unset. Nothing in the room's rendering shows or changes it. A
 room states its settings in `about.policy`
-([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present, and its
-handlers read `ownersMayObliterate` from that document itself, so it is the
-source of truth for what the room allows.
+([`ChatRoomPolicy`](ChatRoomPolicy.md)), with every key present. Its handlers
+are bound to `ownersMayObliterate` as the value that picks that document, so
+what the document states is what the room allows.
 
 ## Prerequisites
 
