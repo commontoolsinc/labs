@@ -668,12 +668,17 @@ const canonicalizeCfcSchemaDocumentUncached = (
   schema: JSONSchemaObj,
 ): JSONSchema => {
   // Held as `Map`s throughout, so that a definition named `__proto__` is an
-  // entry like any other rather than a prototype assignment.
+  // entry like any other rather than a prototype assignment. Each definition
+  // is taken without the maps below it, which are inert, so that neither
+  // the comparison nor the renaming ever sees one.
   const root = new Map(
     Object.entries(schema.$defs as SchemaDefinitions).toSorted((
       [left],
       [right],
-    ) => utf8Compare(left, right)),
+    ) => utf8Compare(left, right)).map(([name, definition]) => [
+      name,
+      pruneCfcSchemaDefinitionsInternal(definition, false),
+    ]),
   );
   const names = [...root.keys()];
 
@@ -692,7 +697,9 @@ const canonicalizeCfcSchemaDocumentUncached = (
   }
   const marker = "\u0000".repeat(leadingNuls + 1);
 
-  // Partition refinement: one class, split by content until stable.
+  // Partition refinement: one class, split by content until stable. A
+  // round's key carries the class the name was in, so a class only ever
+  // splits, and an unchanged count is an unchanged partition.
   let classOf = new Map<string, number>(names.map((name) => [name, 0]));
   let classCount = 1;
   while (true) {
@@ -702,9 +709,11 @@ const canonicalizeCfcSchemaDocumentUncached = (
     const classByKey = new Map<string, number>();
     const next = new Map<string, number>();
     for (const name of names) {
-      const key = hashStringOf(
-        renameLocalDefinitionRefs(root.get(name)!, spelling) as FabricValue,
-      );
+      const key = `${classOf.get(name)}:${
+        hashStringOf(
+          renameLocalDefinitionRefs(root.get(name)!, spelling) as FabricValue,
+        )
+      }`;
       let id = classByKey.get(key);
       if (id === undefined) {
         id = classByKey.size;

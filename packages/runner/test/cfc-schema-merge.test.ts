@@ -8,6 +8,7 @@ import {
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
 import { canonicalizeCfcSchemaDocument } from "../src/cfc/schema-refs.ts";
+import { validateSchemaDefinition } from "../src/cfc/schema-sanitization.ts";
 import {
   storedCfcEnvelopeMergeIssue,
   storedSchemaCoversCandidateEnvelope,
@@ -2718,6 +2719,64 @@ describe("canonicalizeCfcSchemaDocument", () => {
     expect((canonical.properties as Record<string, JSONSchemaObj>).n).toEqual({
       $ref: "#/$defs/__cfc_hoisted_1_N",
     });
+  });
+
+  it("folds only once the partition is stable, whatever inert maps the definitions carry", () => {
+    // Minted C, D and F; B and F look alike until the C/D distinction has
+    // propagated to them, and the inert maps the bodies carry (in this
+    // order) must not take part in the comparison.
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/__cfc_hoisted_3_F" } },
+      $defs: {
+        A: {},
+        B: {
+          type: "object",
+          ifc: { confidentiality: [] },
+          properties: { next: { $ref: "#/$defs/__cfc_hoisted_1_D" } },
+          $defs: { B: { type: "number" }, A: { type: "string" } },
+        },
+        __cfc_hoisted_0_C: {
+          type: "object",
+          ifc: { confidentiality: [{ type: "https://example.com/Secret" }] },
+          properties: { next: { $ref: "#/$defs/__cfc_hoisted_1_D" } },
+          $defs: { A: { type: "string" } },
+        },
+        __cfc_hoisted_1_D: {
+          type: "object",
+          ifc: { confidentiality: [{ type: "https://example.com/Secret" }] },
+          properties: { next: { $ref: "#/$defs/B" } },
+          $defs: { A: { type: "string" } },
+        },
+        __cfc_hoisted_3_F: {
+          type: "object",
+          ifc: { confidentiality: [] },
+          properties: { next: { $ref: "#/$defs/__cfc_hoisted_0_C" } },
+          $defs: { A: { type: "string" }, B: { type: "number" } },
+        },
+      },
+    };
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    const canonical = canonicalizeCfcSchemaDocument(schema);
+    expect(cfcSchemaPoliciesEqual(schema, canonical)).toBe(true);
+    const merged = mergeCfcSchemaEnvelopes(schema, schema);
+    expect(validateSchemaDefinition(merged)).toBeUndefined();
+    expect(cfcSchemaPoliciesEqual(schema, merged)).toBe(true);
+  });
+
+  it("keeps an unresolved reference unresolved through the merge", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: { bad: { $ref: "#/$defs/__cfc_hoisted_0_C" } },
+      $defs: {
+        A: { type: "string" },
+        B: { $ref: "#/$defs/A" },
+        __cfc_hoisted_0_C: { $ref: "#/$defs/class 0" },
+      },
+    };
+    expect(validateSchemaDefinition(schema)).toContain("cannot resolve");
+    expect(validateSchemaDefinition(mergeCfcSchemaEnvelopes(schema, schema)))
+      .toContain("cannot resolve");
   });
 
   it("drops a nested map, which is inert under the root's whatever it holds", () => {
