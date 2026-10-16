@@ -37,6 +37,7 @@ import { FabriChatManagerCore, type ManagerStreamEvent } from "./manager.tsx";
 import {
   type MessagesValue,
   type RoomStreamEvent,
+  type SendResult,
   type SetTitleEvent,
 } from "./room-records.tsx";
 import {
@@ -174,7 +175,7 @@ interface ViewerOutput {
   addParticipant: ChatRoomOutput["addParticipant"];
 
   /** Sends a message as the viewer. */
-  sendMessage: Stream<RoomStreamEvent>;
+  sendMessage: Stream<RoomStreamEvent, SendResult | undefined>;
 
   /** Retitles the room as the viewer. */
   setTitle: Stream<SetTitleEvent>;

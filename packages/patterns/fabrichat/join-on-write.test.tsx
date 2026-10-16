@@ -37,6 +37,7 @@ import {
   type JoinRoomRequest,
   type MessagesValue,
   type RoomStreamEvent,
+  type SendResult,
 } from "./room-records.tsx";
 import {
   type ChatRoomOutput,
@@ -165,7 +166,7 @@ interface ViewerOutput {
   addParticipant: ChatRoomOutput["addParticipant"];
 
   /** Sends a message as the viewer. */
-  sendMessage: Stream<RoomStreamEvent>;
+  sendMessage: Stream<RoomStreamEvent, SendResult | undefined>;
 
   /** Adds the viewer's reaction to the room's first message. */
   reactToFirst: Stream<RoomStreamEvent>;
