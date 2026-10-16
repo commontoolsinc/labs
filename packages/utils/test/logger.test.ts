@@ -815,12 +815,12 @@ describe("logger", () => {
   describe("count baselines", () => {
     it("reports every count as a delta once a baseline is set", () => {
       const logger = getLogger("count-baseline-test");
-      logger.info(() => ["before"]);
-      logger.warn(() => ["before"]);
+      logger.info("before", () => ["before"]);
+      logger.warn("before", () => ["before"]);
 
       logger.resetCountBaseline();
-      logger.warn(() => ["after"]);
-      logger.error(() => ["after"]);
+      logger.warn("after", () => ["after"]);
+      logger.error("after", () => ["after"]);
 
       expect(logger.getCountDeltas()).toEqual({
         debug: 0,
@@ -833,8 +833,8 @@ describe("logger", () => {
 
     it("reports the counts themselves while no baseline is set", () => {
       const logger = getLogger("count-no-baseline-test");
-      logger.debug(() => ["one"]);
-      logger.info(() => ["two"]);
+      logger.debug("one", () => ["one"]);
+      logger.info("two", () => ["two"]);
 
       expect(logger.getCountDeltas()).toEqual({
         debug: 1,
