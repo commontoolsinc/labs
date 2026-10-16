@@ -204,12 +204,14 @@ What works today:
     records the answer on the entry. A link at the read position is followed; a
     link inside the value returns as the linked document's handle. A position in
     a derived document no run has written yet runs the piece behind the handle,
-    as `call_verb` does, and reads what it derives. Running it commits the
-    piece's derived values to the piece's space, a foreign one included, where a
-    commit the session may not make is refused after the value was read locally;
-    a handle on such a document itself names no piece to run, and the refusal
-    says to read it through the piece's handle. "Holds nothing at that path"
-    means the path does not exist. What it reads is measured through its own
+    as `call_verb` does, and reads what it derives; a run not authorized for
+    side effects, as the policy gate decides for a side-effect tool, is refused
+    instead, naming that the piece has not run. Running it commits the piece's
+    derived values to the piece's space, a foreign one included, where a commit
+    the session may not make is refused after the value was read locally; a
+    handle on such a document itself names no piece to run, and the refusal says
+    to read it through the piece's handle. "Holds nothing at that path" means
+    the path does not exist. What it reads is measured through its own
     transaction against the release ceiling with the model as the sink, the
     measurement `call_verb` and `run_pattern` apply to their results; a refused
     read names the offending atoms and that `delegate_task` can hand the handle

@@ -16,7 +16,8 @@
  * model context, so everything the model writes afterwards carries it.
  *
  * A piece's derived fields live in documents its run writes, so a read that
- * lands in one no run has written runs the piece first, as `call_verb` does.
+ * lands in one no run has written runs the piece first, as `call_verb` does,
+ * where the run is authorized for side effects.
  * "Holds nothing at that path" is then a statement about the path rather than
  * about a piece nobody ran.
  */
@@ -268,6 +269,14 @@ export const readValueTool: HarnessToolDefinition<
         if (getPatternIdentityRef(piece) === undefined) {
           return fail(
             `${entry.token} is a value its piece derives, and it holds none until that piece runs; read it through the piece's handle, which runs the piece`,
+          );
+        }
+        // Running the piece commits what it derives and fires what its
+        // builtins send, so it waits on the authorization a side effect
+        // needs, even though the read itself does not.
+        if (context.sideEffectsAuthorized !== true) {
+          return fail(
+            `${entry.token} holds a value its piece derives, and the piece has not run; running it is a side effect this run is not authorized for. A run under a direct command reads it, which runs the piece`,
           );
         }
         await runtime.startWithCommit(piece);
