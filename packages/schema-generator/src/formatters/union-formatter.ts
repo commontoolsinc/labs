@@ -3,6 +3,7 @@ import type {
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import { type FabricValue, hashStringOf } from "@commonfabric/data-model";
+import { minOf } from "@commonfabric/utils/math";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import ts from "typescript";
 
@@ -24,6 +25,7 @@ import {
 } from "../type-utils.ts";
 import { hasDefaultMarker } from "../typescript/default-brand.ts";
 import { extractLiteralValueOfSymbol } from "../typescript/literal-value.ts";
+import { inSourceOrder, isWrittenNode } from "../typescript/source-order.ts";
 import {
   getTypeAliasDeclaration,
   readUnionMemberNodes,
@@ -161,6 +163,26 @@ export function pairUnionMemberNodes(
 }
 
 /**
+ * The members of `union` in source order (`sourceOrderOfMembers()`), each
+ * beside the node `unionNode` writes for it, where it writes one.
+ */
+export function unionMembersInSourceOrder(
+  union: ts.UnionType,
+  unionNode: ts.UnionTypeNode | undefined,
+  checker: ts.TypeChecker,
+): Array<{ member: ts.Type; node: ts.TypeNode | undefined }> {
+  const members = union.types;
+  const paired = unionNode &&
+    pairWrittenMemberNodes(members, unionNode.types, checker, () => false);
+  return sourceOrderOfMembers(union, members, paired, checker).map((
+    index,
+  ) => ({
+    member: members[index]!,
+    node: paired?.ordered[index],
+  }));
+}
+
+/**
  * Like `pairUnionMemberNodes()`, for the nodes `written` written as the
  * members of a union.
  */
@@ -172,6 +194,7 @@ function pairWrittenMemberNodes(
 ): {
   ordered: Array<ts.TypeNode | undefined>;
   wholeNodes: Map<ts.Type, WholeMemberNode[]>;
+  memberNodes: readonly ts.TypeNode[];
 } {
   const read = new Set<ts.TypeNode>();
   const memberNodes = written.flatMap((node) =>
@@ -186,7 +209,77 @@ function pairWrittenMemberNodes(
       wholeNodes.set(member, [...wholeNodes.get(member) ?? [], { node, type }]);
     }
   }
-  return { ordered, wholeNodes };
+  return { ordered, wholeNodes, memberNodes };
+}
+
+/**
+ * The indices of `members`, the members of `union`, in source order
+ * (`inSourceOrder()`): each member ranked by where the source writes the
+ * node it is read at, and a member no written node stands for after those,
+ * in the order of its type. `paired` is the members' pairing with the nodes
+ * written for them where the union is read; where it holds no written node,
+ * as where a transform built the node `union` is read at, the members are
+ * ranked by the union `union`'s alias declares instead
+ * (`declaredPairing()`).
+ */
+function sourceOrderOfMembers(
+  union: ts.Type,
+  members: readonly ts.Type[],
+  paired: ReturnType<typeof pairWrittenMemberNodes> | undefined,
+  checker: ts.TypeChecker,
+): number[] {
+  const ranking = paired?.memberNodes.some(isWrittenNode)
+    ? paired
+    : declaredPairing(union, members, checker);
+  const rankOfNode = new Map<ts.TypeNode, number>();
+  ranking?.memberNodes.forEach((node, index) => {
+    if (isWrittenNode(node)) rankOfNode.set(node, index);
+  });
+  const rankOf = (index: number): number | undefined => {
+    const node = ranking?.ordered[index];
+    const direct = node === undefined ? undefined : rankOfNode.get(node);
+    if (direct !== undefined) return direct;
+    const whole = ranking?.wholeNodes.get(members[index]!)?.flatMap((
+      { node },
+    ) => rankOfNode.get(node) ?? []);
+    return whole?.length ? minOf(whole) : undefined;
+  };
+  return inSourceOrder(
+    members.map((_, index) => index),
+    (index) => members[index]!,
+    rankOf,
+  );
+}
+
+/**
+ * The pairing of `members` with the members the union `union`'s alias
+ * declares, for a union read through an alias declared as one, or
+ * `undefined`. It ranks the members and nothing else: the nodes it pairs
+ * are the declaration's, not the ones the union is read at.
+ *
+ * Only an alias without type parameters is read. Pairing reads the type of
+ * each declared member, which the checker already holds for such an alias,
+ * having resolved it to reach `union`; for a generic one it would
+ * instantiate the members anew, and the generator's recursion bounds read
+ * how old a type is.
+ */
+function declaredPairing(
+  union: ts.Type,
+  members: readonly ts.Type[],
+  checker: ts.TypeChecker,
+): ReturnType<typeof pairWrittenMemberNodes> | undefined {
+  const declaration = union.aliasSymbol?.declarations?.find(
+    ts.isTypeAliasDeclaration,
+  );
+  if (declaration === undefined || declaration.typeParameters?.length) {
+    return undefined;
+  }
+  return pairWrittenMemberNodes(
+    members,
+    [declaration.type],
+    checker,
+    () => false,
+  );
 }
 
 export class UnionFormatter implements TypeFormatter {
@@ -278,7 +371,7 @@ export class UnionFormatter implements TypeFormatter {
     type: ts.Type,
     outerContext: GenerationContext,
   ): MutableJSONSchema {
-    const members = type.isUnion() ? type.types : [type];
+    const checkerMembers = type.isUnion() ? type.types : [type];
     // A scope wrapper's payload written as the members of a union outside it
     // is read at those members (`GenerationContext.scopePayloadNodes`), here
     // and nowhere below.
@@ -292,13 +385,23 @@ export class UnionFormatter implements TypeFormatter {
         : undefined);
     const paired = memberNodes
       ? pairWrittenMemberNodes(
-        members,
+        checkerMembers,
         memberNodes,
         context.typeChecker,
         (union, node) => this.#readsWhole(union, node, context),
       )
       : undefined;
-    const orderedMemberNodes = paired?.ordered;
+    // Everything below emits the members in the order it visits them, so
+    // they are put in source order here, each beside the node it is read at.
+    const order = sourceOrderOfMembers(
+      type,
+      checkerMembers,
+      paired,
+      context.typeChecker,
+    );
+    const members = order.map((index) => checkerMembers[index]!);
+    const orderedMemberNodes = paired &&
+      order.map((index) => paired.ordered[index]);
 
     if (members.length === 0) {
       throw new Error("UnionFormatter received empty union type");

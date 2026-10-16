@@ -301,7 +301,7 @@ by any repo test.
 | Tuple (`[string, number]`) | `{ type: "array", items: <merged element union> }` — e.g. `items: { type: ["number","string"] }`. **No `prefixItems`, no length bounds**; positional structure is lost (numeric-index fallback, `type-utils.ts`; grep confirms `prefixItems` appears only in a comment) | `type-utils.ts` | `test/tuple-emission.test.ts` |
 | Object with a numeric index signature and no `length` | an object map (`additionalProperties`), not an array, with or without a string index or declared numeric keys such as `0` | `type-utils.ts` | record-mapped-types.test.ts |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts`; node path `schema-generator.ts` (no JSDoc) | descriptions-index* fixtures |
-| `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
+| `Record<K,V>` with finite literal-union `K` | expands to concrete `properties`, in the order `K` is written (a mapped type's properties follow its written key union, else their declarations: `Omit<T, K>` lists `T`'s in `T`'s order; §8 says why the checker's order is not used) | via `ObjectFormatter`; `propertiesInSourceOrder()` in `source-order.ts`; fixture `record-union-keys` | record-mapped-types.test.ts; schema-order.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }`, they participate in `required`, and they carry the property's JSDoc description and lowered tags (`deprecated` included) exactly like a kept data property. Generic members, including nested type literals, union/intersection arms and array elements, use their instantiated type or bound argument to classify callability | classification: `object-formatter.ts`; member paths: `object-formatter.ts`, `schema-generator.ts` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures; object-formatter.test.ts |
 | `FabricPrimitive` class (`FabricBytes`, `FabricDurationDay`, `FabricDurationNsec`, `FabricEpochDay`, `FabricEpochNsec`, `FabricHash`, `FabricKeyPair`, `FabricRegExp`, `FabricUnavailable` carrying the `FabricPrimitive` brand) | `{ type: "<Name>" }` — the fabric-primitive schema vocabulary (§5.2); a leaf, not hoisted, matched by prototype at validation time | `native-type-formatter.ts` | fixture `fabric-special-object-brand`; end-to-end: ts-transformers `schema-transform/fabric-special-object-brand` |
 | `FabricInstancePlus` nominal brand (`FABRIC_INSTANCE_PLUS_BRAND` in `packages/data-model/src/api.ts`, an interned `unique symbol`), which `FabricInstance` declares at `never` | property skipped entirely (not in `properties`, not in `required`) — a symbol-keyed member, which the generator skips as it skips every symbol-keyed member; a field typed as `FabricInstance` emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
@@ -932,10 +932,36 @@ Default paths of §7:
   (probe; the all-literal `enum` branch runs first and never consults the
   flag).
 - Member nodes re-associate with semantic members order-insensitively
-  (`orderMemberNodesBySemanticType`) — the checker canonicalizes
-  union order. Union alias nodes resolve through non-generic alias
-  declarations to recover member nodes (`getUnionTypeNode`).
+  (`orderMemberNodesBySemanticType`), since the checker keeps a union's
+  members in its own order. Union alias nodes resolve through non-generic
+  alias declarations to recover member nodes (`getUnionTypeNode`).
   Empty unions **throw**.
+- **Member order is read from the source** (`src/typescript/source-order.ts`).
+  The checker's own order is the order it created the member types in, which
+  depends on everything else in the program, so one module compiled inside two
+  programs would list one union two ways under one pattern identity. Emitted
+  `enum` values and `anyOf` arms follow this order instead, in
+  `UnionFormatter` and in a union of cell wrappers alike:
+  - the checker's intrinsic types (`string`, `number`, `undefined`, `null`,
+    `true`, `false`, and the rest) first, in the checker's order, which it
+    fixes before reading any source;
+  - then the members as the union is written where it is read, through
+    parentheses and non-generic aliases, `"a" | Tail | "d"` with
+    `type Tail = "b" | "c"` emitting `["a","b","c","d"]`;
+  - where nothing written is read — a node a transform built, as
+    ts-transformers builds one for an inferred type — as the union's alias
+    declares them, if it has one without type parameters;
+  - and otherwise in a canonical order: literals by kind and value, then
+    declared types by the name of their symbol and then by declaration, a TS
+    enum's members as the enum declares them; any other member keeps the
+    order it came in. A union the checker builds, as `keyof T`, an inferred
+    `cond ? "x" : "y"`, or a tuple's positionless items are, is listed this
+    way.
+  None of this creates a type: resolving a type's arguments, printing it, or
+  reading a generic alias's members anew can, and the expanding recursion
+  bound reads how old a type is. The bound also spends one budget across a
+  union's members in the order it reads them, so where it cuts depends on
+  that order.
 - The checker folds a member that is itself a union into the union it is a
   member of, so one member node can stand for several members
   (`pairUnionMemberNodes`, which `#labelsOf` in `schema-generator.ts` reads
