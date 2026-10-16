@@ -62,11 +62,21 @@ const RESULT_SCHEMA = {
 type Server = ReturnType<typeof newLoopbackServer>;
 
 /** A promise and its resolver, for a run a case holds open. */
-const defer = <T>() => {
+const defer = <T>(label = "unlabeled") => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => resolve = r);
-  return { promise, resolve };
+  console.error(`[AR29] defer ${label} created`);
+  return {
+    promise,
+    resolve: (value: T) => {
+      console.error(`[AR29] defer ${label} resolved`);
+      resolve(value);
+    },
+  };
 };
+
+/** Logs a diagnostic stage marker. */
+const mark = (stage: string) => console.error(`[AR29] ${stage}`);
 
 describe("agent runner", () => {
   let signer: Identity;
@@ -184,12 +194,17 @@ describe("agent runner", () => {
   const waitForState = (
     result: Cell<{ run?: AgentRunRecord }>,
     state: AgentRunRecord["state"],
-  ) =>
-    waitForCellValue<AgentRunRecord>(
+  ) => {
+    mark(`waitForState ${state} start`);
+    return waitForCellValue<AgentRunRecord>(
       patternSide,
       recordOf(result),
       (value) => value?.state === state,
-    );
+    ).then((value) => {
+      mark(`waitForState ${state} done`);
+      return value;
+    });
+  };
 
   /** Starts a runner with runtimes of its own on both toolsheds. */
   const startRunner = async (
@@ -622,8 +637,9 @@ describe("agent runner", () => {
   });
 
   it("expires and retries an active run whose executor becomes silent", async () => {
-    const firstAborted = defer<void>();
-    const wakeScheduled = defer<void>();
+    mark("EXPIRE start");
+    const firstAborted = defer<void>("EXPIRE firstAborted");
+    const wakeScheduled = defer<void>("EXPIRE wakeScheduled");
     let wake: (() => void) | undefined;
     let executions = 0;
     await startRunner((run) => {
@@ -655,17 +671,20 @@ describe("agent runner", () => {
     const ended = await waitForState(result, "refused");
     expect(ended.attempts).toBe(2);
     expect(executions).toBe(2);
+    mark("EXPIRE end");
   });
 
   it("keeps an active run when renewal wins a race with expiry recovery", async () => {
+    mark("RACE start");
     const result = await submit();
+    mark("RACE submitted");
     const runnerSide = connect(CLOUD);
-    const renewalReady = defer<void>();
-    const renewalCommitted = defer<void>();
-    const recoveryReady = defer<void>();
-    const releaseRenewal = defer<void>();
-    const executionStarted = defer<ClaimedAgentRun>();
-    const held = defer<AgentRunExecution>();
+    const renewalReady = defer<void>("RACE renewalReady");
+    const renewalCommitted = defer<void>("RACE renewalCommitted");
+    const recoveryReady = defer<void>("RACE recoveryReady");
+    const releaseRenewal = defer<void>("RACE releaseRenewal");
+    const executionStarted = defer<ClaimedAgentRun>("RACE executionStarted");
+    const held = defer<AgentRunExecution>("RACE held");
     const original = runnerSide.editWithRetry.bind(runnerSide);
     let delayedRenewal = false;
     let delayedRecovery = false;
@@ -705,35 +724,44 @@ describe("agent runner", () => {
     }, {
       runtimeForHost: () => Promise.resolve(runnerSide),
       scheduleAt: (at, scheduled) => {
+        mark(`RACE scheduleAt ${at.toISOString()}`);
         if (at.toISOString() === "2026-09-18T12:01:00.000Z") wake = scheduled;
         return () => {};
       },
     });
+    mark("RACE runner started");
     await waitForState(result, "running");
     const active = await executionStarted.promise;
+    mark("RACE execution started");
 
     clock = new Date("2026-09-18T12:00:30.000Z");
     const renewal = active.renewLease();
     await renewalReady.promise;
+    mark(`RACE renewal ready; wake set: ${wake !== undefined}`);
     clock = new Date("2026-09-18T12:01:00.000Z");
     wake!();
     await recoveryReady.promise;
+    mark("RACE recovery ready");
     releaseRenewal.resolve();
     await renewal;
+    mark("RACE renewal done");
     await waitForCellValue<AgentRunRecord>(
       patternSide,
       recordOf(result),
       (value) => value?.claim?.leaseUntil === "2026-09-18T12:01:30.000Z",
     );
 
+    mark("RACE lease renewed");
     expect(active.signal.aborted).toBe(false);
     expect(runner.activeRuns).toBe(1);
     held.resolve({ outcome: "refused" });
     await waitForState(result, "refused");
+    mark("RACE end");
   });
 
   it("keeps an expiry wake after aborting a cancelled active run", async () => {
-    const aborted = defer<void>();
+    mark("WAKE start");
+    const aborted = defer<void>("WAKE aborted");
     const scheduled: { at: Date; wake: () => void; cancelled: boolean }[] = [];
     const runner = await startRunner((run) => {
       run.signal.addEventListener("abort", () => aborted.resolve(), {
@@ -742,6 +770,7 @@ describe("agent runner", () => {
       return new Promise<AgentRunExecution>(() => {});
     }, {
       scheduleAt: (at, wake) => {
+        mark(`WAKE scheduleAt ${at.toISOString()}`);
         const entry = { at, wake, cancelled: false };
         scheduled.push(entry);
         return () => entry.cancelled = true;
@@ -754,7 +783,9 @@ describe("agent runner", () => {
       recordOf(result).withTx(tx).key("cancelRequestedAt")
         .set("2026-09-18T12:00:30.000Z");
     });
+    mark("WAKE cancel requested");
     await aborted.promise;
+    mark(`WAKE aborted; scheduled ${scheduled.length}`);
 
     expect(scheduled.length).toBeGreaterThan(scheduledBeforeCancel);
     expect(scheduled.slice(0, -1).some((entry) => entry.cancelled)).toBe(true);
@@ -767,6 +798,7 @@ describe("agent runner", () => {
     const record = await waitForState(result, "cancelled");
     expect(record.errorCode).toBe("CANCELLED");
     await runner.idle();
+    mark("WAKE end");
   });
 
   it("stops following a record removed from the queue", async () => {
