@@ -1894,8 +1894,8 @@ export async function processPullQueuedEventDuringExecute(
   // re-runs against arrives; the readiness continuation queues a fresh tick.
   if (queuedEvent.retryReadinessPending) return;
 
-  // Head is parked on in-flight closure loads; loadsSettled re-queues after
-  // success or drops the event after an explicit load failure.
+  // Head is parked on in-flight closure loads; the park's settlement
+  // re-queues, drops, or defers the event.
   if (state.isHeadEventLoadParked(queuedEvent)) {
     return;
   }
