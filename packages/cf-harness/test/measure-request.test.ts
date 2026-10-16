@@ -103,19 +103,22 @@ describe("measure-request", () => {
     expect(inputOf("fallback")).toBeGreaterThanOrEqual(inputOf("author"));
   });
 
-  it("prints the rows as JSON and exits 0 given one directory", async () => {
-    const printed: string[] = [];
-    expect(await main([dir], (line) => printed.push(line), () => {})).toBe(0);
-    expect(JSON.parse(printed[0]).rows).toHaveLength(6);
+  it("logs the rows as JSON and exits 0 given one directory", async () => {
+    const logged: string[] = [];
+    const out = { log: (line: string) => logged.push(line), error: () => {} };
+    expect(await main([dir], out)).toBe(0);
+    expect(JSON.parse(logged[0]).rows).toHaveLength(6);
   });
 
-  it("prints its usage as an error and exits 2 given no directory", async () => {
-    const printed: string[] = [];
+  it("logs its usage as an error and exits 2 given no directory", async () => {
+    const logged: string[] = [];
     const errors: string[] = [];
-    expect(
-      await main([], (line) => printed.push(line), (line) => errors.push(line)),
-    ).toBe(2);
-    expect(printed).toEqual([]);
+    const out = {
+      log: (line: string) => logged.push(line),
+      error: (line: string) => errors.push(line),
+    };
+    expect(await main([], out)).toBe(2);
+    expect(logged).toEqual([]);
     expect(errors[0]).toContain("usage:");
   });
 });
