@@ -398,7 +398,10 @@ message sent.
 - **Repeated:** a send naming a `requestId` the sender's `sendRequests` already
   holds appends nothing, and answers with the message the recorded send sent.
   The record is the sender's own, so another sender naming the same id sends a
-  message of their own, and suppresses no one's.
+  message of their own, and suppresses no one's. The record keeps an id until
+  the sender has made a hundred newer sends that name one, however much time
+  has passed, so a client that sends again after waiting for a confirmation,
+  30 seconds or much longer, still gets the first send's message back.
 - **Dropped:** a `body` that isn't a non-empty string, a sender whose profile
   hasn't resolved, or a `replyTo` whose `message` is outside the room's space.
   Otherwise the room takes `replyTo` as sent: a client sends a reply only to a
