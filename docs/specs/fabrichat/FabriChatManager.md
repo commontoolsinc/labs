@@ -83,10 +83,15 @@ open it.
 
 `direct` holds one entry per counterpart, including forgotten rooms, for direct
 rooms this manager created or accepted. `openDirect` finds a direct room there
-and restores its membership. A room another manager created and offered the
-user is there too once the host's share intake accepts it on the user's behalf.
-`rooms` can also hold a second direct room with the same counterpart, after
-crossing creations.
+and restores its membership. A room found there that has a notice for its
+counterpart still waiting in `outgoingNotices`, since the room was offered them
+nothing, is offered to them, as step 3 of [creating a room](#creating-a-room)
+offers a new room, once a request names a profile of theirs that points at an
+inbox, and the notice is removed. A counterpart the room's roster already lists
+has joined the room, and is offered nothing. A room another manager created and
+offered the user is there too once the host's share intake accepts it on the
+user's behalf. `rooms` can also hold a second direct room with the same
+counterpart, after crossing creations.
 
 `direct`'s entries, and the entry a `done` outcome in `requests` carries, hold a
 room as `FabriChatRoom.inSpace(…)` returned it at creation, or as `accept` was
