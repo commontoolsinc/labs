@@ -87,7 +87,7 @@ const seedLabelMap = async (
   runtime: Runtime,
   id: string,
   value: FabricValue,
-  entries: { path: string[]; label: IFCLabel; origin?: "link" }[],
+  entries: { path: string[]; label: IFCLabel; origin?: "link" | "derived" }[],
 ): Promise<void> => {
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
@@ -418,6 +418,66 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
         },
       }, tx);
       sink.set({ out: source });
+      setCfcImplementationIdentity(tx, undefined);
+      tx.prepareCfc();
+      expect((await tx.commit().settled).error).toBeUndefined();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("credits a nested link floor with a stored flow stamp's TransformedBy that a builtin reaches through a reference it stages", async () => {
+    // What the linked source stores is evidence as stored. A `TransformedBy`
+    // the flow stage minted there names the attempt that wrote the value, so
+    // the gate that keeps the atom out of schemas leaves it in the stored
+    // view a staged reference hands the next hop, here the sink's link to the
+    // slot this same transaction points at the source.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = makeRuntime({ storageManager, cfcWriteFloor: "enforce" });
+    try {
+      const transformedBy = {
+        type: CFC_ATOM_TYPE.TransformedBy,
+        identity: { kind: "builtin", builtinId: "floor-test" },
+      };
+      await seedLabelMap(runtime, "builtin-stamped-source", {
+        nested: "computed",
+      }, [{
+        path: ["nested"],
+        label: { integrity: [transformedBy] },
+        origin: "derived",
+      }]);
+      const tx = runtime.edit();
+      setCfcImplementationIdentity(tx, {
+        kind: "builtin",
+        builtinId: "floor-test",
+      });
+      const source = runtime.getCell(
+        signer.did(),
+        "builtin-stamped-source",
+        undefined,
+        tx,
+      );
+      const hop = runtime.getCell(signer.did(), "builtin-stamped-hop", {
+        type: "object",
+        properties: { via: { type: "object" } },
+      }, tx);
+      hop.set({ via: source as unknown as Record<string, unknown> });
+      const sink = runtime.getCell(signer.did(), "builtin-stamped-sink", {
+        type: "object",
+        properties: {
+          out: {
+            type: "object",
+            properties: {
+              nested: {
+                type: "string",
+                ifc: { requiredIntegrity: [transformedBy] },
+              },
+            },
+          },
+        },
+      }, tx);
+      sink.set({ out: hop.key("via") as unknown as { nested: string } });
       setCfcImplementationIdentity(tx, undefined);
       tx.prepareCfc();
       expect((await tx.commit().settled).error).toBeUndefined();

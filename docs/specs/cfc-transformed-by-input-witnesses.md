@@ -133,9 +133,10 @@ slot, as a shallow read of it is, and it counts even when nothing labels the
 slot. A value stamp is one the flow stage minted on the value an attempt
 wrote. A schema declaration never carries a `TransformedBy`: the runtime
 mints the atom for one attempt and for nothing else, and
-`gateRuntimeMintedIntegrity` strips it from every schema-derived label,
-whatever the author, where it keeps the other runtime-minted atoms for a
-builtin (CFC §15.4). A stored declaration that still carries one, written
+`gateSchemaIntegrity` strips it from every label a schema declares or stamps,
+whatever the author, where `gateRuntimeMintedIntegrity` keeps the other
+runtime-minted atoms for a builtin (CFC §15.4). What a document stores, the
+flow stage's stamps among it, a link carries downstream as stored. A stored declaration that still carries one, written
 before that rule held, is no value stamp and witnesses nothing there, so a
 slot another writer filled under such a declaration witnesses only what that
 writer's own stamp says. So is a slot whose reference leads to another such

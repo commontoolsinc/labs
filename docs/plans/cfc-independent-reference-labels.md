@@ -330,8 +330,9 @@ and 3. What it leaves behind:
   writer's stamp at a reference slot of an envelope that does not say it
   (§18.7). A writer's stamp is one the flow stage minted, a `derived` or
   `structure` entry. A schema declaration never carries a `TransformedBy`:
-  `gateRuntimeMintedIntegrity` strips the atom from every schema-derived
-  label, whatever the author (§15.4), and a stored declaration that still
+  `gateSchemaIntegrity` strips the atom from every label a schema declares
+  or stamps, whatever the author (§15.4), leaving what a document stores as
+  stored, and a stored declaration that still
   carries one, written before that rule held, names no attempt and is no
   witness, at a reference slot or at a value (`asWitnessEvidence`). The
   member sits beside the ones the envelope's version defines
