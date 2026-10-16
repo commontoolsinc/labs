@@ -22,7 +22,13 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import { findNodeByProp, propValue, readValue } from "../test/vnode-helpers.ts";
+import {
+  findNode,
+  findNodeByProp,
+  propsOf,
+  propValue,
+  readValue,
+} from "../test/vnode-helpers.ts";
 import FabriChatPlacement from "./placement.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
@@ -112,6 +118,18 @@ const editorDisplay = (row: unknown): unknown =>
 // Whether a room's main composer is disabled.
 const composerDisabled = (room: unknown): unknown =>
   propValue(findNodeByProp(room, "inputId", "fabrichat-message"), "disabled");
+
+// The display of a room's main composer, whose surface is shown only to a
+// viewer who may send.
+const composerDisplay = (room: unknown): unknown =>
+  readValue(
+    (propValue(
+      findNode(room, (node) =>
+        readValue(propsOf(node)?.["data-ui-pattern"]) === CHAT_SEND_SURFACE &&
+        findNodeByProp(node, "inputId", "fabrichat-message") !== undefined),
+      "style",
+    ) as { display?: unknown } | undefined)?.display,
+  );
 
 /** A message of the shared records, as an event names it. */
 function messageOf(cell: unknown): Writable<MessageRecord>;
@@ -260,6 +278,7 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === true && composerDisabled(room[UI]) === false &&
+          composerDisplay(room[UI]) === "block" &&
           reactingDisabled(room[UI]) === false
         ),
       },
@@ -339,6 +358,7 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         assertion: assert(() =>
           room.canSend === false && composerDisabled(room[UI]) === true &&
+          composerDisplay(room[UI]) === "none" &&
           reactingDisabled(room[UI]) === true
         ),
       },

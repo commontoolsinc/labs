@@ -131,16 +131,17 @@ const composerSurface = (root: unknown): unknown =>
       findNodeByProp(node, "inputId", "fabrichat-message") !== undefined,
   );
 
-// Whether the main composer is hidden until its display has a value, and is
-// shown once it has: a static `hidden`, which only a computed display
-// outranks, so the composer never shows before its `disabled` is decided.
-const composerShownOnceKnown = (root: unknown): boolean => {
+// The main composer's display: its surface carries a static `hidden`, which
+// only a computed display outranks, so it is hidden until that display has a
+// value, and is shown only once the viewer may send.
+const composerDisplay = (root: unknown): unknown => {
   const surface = composerSurface(root);
-  return propValue(surface, "hidden") === true &&
-    readValue(
-        (propValue(surface, "style") as { display?: unknown } | undefined)
-          ?.display,
-      ) === "block";
+  return propValue(surface, "hidden") === true
+    ? readValue(
+      (propValue(surface, "style") as { display?: unknown } | undefined)
+        ?.display,
+    )
+    : "<no static hidden>";
 };
 
 export default pattern(() => {
@@ -219,9 +220,9 @@ export default pattern(() => {
       },
       { assertion: assert(() => composerDisabled(pending[UI]) === true) },
       { assertion: assert(() => composerDisabled(alice[UI]) === false) },
-      // Shown, once known, whether or not the viewer may send.
-      { assertion: assert(() => composerShownOnceKnown(pending[UI])) },
-      { assertion: assert(() => composerShownOnceKnown(alice[UI])) },
+      // Shown only to a viewer who may send.
+      { assertion: assert(() => composerDisplay(pending[UI]) === "none") },
+      { assertion: assert(() => composerDisplay(alice[UI]) === "block") },
       {
         assertion: assert(() =>
           alice.canSend === true && pending.canSend === false
