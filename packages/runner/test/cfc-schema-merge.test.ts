@@ -2546,8 +2546,8 @@ describe("canonicalizeCfcSchemaDocument", () => {
     const canonical = canonicalizeCfcSchemaDocument(schema) as JSONSchemaObj;
     const defs = canonical.$defs as Record<string, JSONSchemaObj>;
     expect(Object.keys(defs).toSorted()).toEqual(["A", "B", "X", "Y"]);
-    expect(defs.A.ifc).toEqual(schema.$defs!.A.ifc);
-    expect(defs.B.ifc).toEqual(schema.$defs!.B.ifc);
+    expect(defs.A.ifc).toEqual((schema.$defs!.A as JSONSchemaObj).ifc);
+    expect(defs.B.ifc).toEqual((schema.$defs!.B as JSONSchemaObj).ifc);
     expect((canonical.properties as Record<string, JSONSchemaObj>).d).toEqual({
       $ref: "#/$defs/X",
       default: { $ref: "#/$defs/Y" },
@@ -2575,7 +2575,7 @@ describe("canonicalizeCfcSchemaDocument", () => {
           default: new FabricBytes(new Uint8Array([3])),
         },
       },
-    }) as JSONSchemaObj;
+    } as unknown as JSONSchemaObj) as JSONSchemaObj;
     expect(Object.keys(canonical.$defs!).toSorted()).toEqual([
       "Bytes",
       "__cfc_hoisted_0_Bytes",
@@ -2583,6 +2583,109 @@ describe("canonicalizeCfcSchemaDocument", () => {
     expect((canonical.properties as Record<string, JSONSchemaObj>).b).toEqual({
       $ref: "#/$defs/__cfc_hoisted_0_Bytes",
     });
+  });
+
+  it("is a fixpoint: canonicalizing a canonical document changes nothing", () => {
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: {
+        a: { $ref: "#/$defs/Node" },
+        b: { $ref: "#/$defs/__cfc_hoisted_3_Node" },
+        c: { $ref: "#/$defs/Other", $defs: { Other: { type: "number" } } },
+      },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+        __cfc_hoisted_3_Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/__cfc_hoisted_3_Node" } },
+        },
+        Other: { type: "number" },
+        Spare: { type: "boolean" },
+      },
+    });
+    expect(canonicalizeCfcSchemaDocument(canonical)).toEqual(canonical);
+  });
+
+  it("brings a stored document of the earlier shape down to its definitions in one merge", () => {
+    // The shape a stored envelope took on before merges left documents in
+    // canonical form: the root map holding the definitions under their own
+    // names and under many minted names, each minted copy referring to its
+    // own kind, and bodies carrying the whole root map.
+    const copies = 30;
+    const base = (suffix: string): Record<string, JSONSchema> => ({
+      [`A${suffix}`]: {
+        type: "object",
+        properties: {
+          s: { type: "string", ifc: { confidentiality: ["c"] } },
+          link: { $ref: `#/$defs/B${suffix}` },
+        },
+      },
+      [`B${suffix}`]: {
+        type: "object",
+        properties: {
+          n: { type: "number" },
+          deeper: { $ref: `#/$defs/C${suffix}` },
+        },
+      },
+      [`C${suffix}`]: {
+        type: "object",
+        properties: { z: { type: "boolean" } },
+      },
+    });
+    const rootMap: Record<string, JSONSchema> = { ...base("") };
+    for (let index = 0; index < copies; index++) {
+      for (const [name, definition] of Object.entries(base(`-${index}`))) {
+        const kind = name[0];
+        rootMap[`__cfc_hoisted_${index}_${kind}`] = JSON.parse(
+          JSON.stringify(definition).replaceAll(
+            `#/$defs/${kind === "A" ? "B" : "C"}-${index}`,
+            `#/$defs/__cfc_hoisted_${index}_${kind === "A" ? "B" : "C"}`,
+          ),
+        );
+      }
+    }
+    const resolvedBody = (ref: string): JSONSchemaObj => ({
+      type: "object",
+      properties: { s: { type: "string" }, link: { $ref: ref } },
+      $defs: rootMap,
+    });
+    const stored: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        a: resolvedBody("#/$defs/__cfc_hoisted_7_B"),
+        b: resolvedBody("#/$defs/__cfc_hoisted_12_B"),
+        c: { $ref: "#/$defs/A" },
+      },
+      $defs: rootMap,
+    };
+    const candidate: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        a: {
+          type: "object",
+          properties: { s: { type: "string" }, link: { $ref: "#/$defs/B" } },
+        },
+        b: {
+          type: "object",
+          properties: { s: { type: "string" }, link: { $ref: "#/$defs/B" } },
+        },
+        c: { $ref: "#/$defs/A" },
+      },
+      $defs: base(""),
+    };
+    const merged = mergeCfcSchemaEnvelopes(stored, candidate) as JSONSchemaObj;
+    expect(Object.keys(merged.$defs ?? {}).toSorted()).toEqual(["A", "B", "C"]);
+    expect(JSON.stringify(merged).includes("__cfc_hoisted")).toBe(false);
+    expect(nestedMaps(merged)).toBe(0);
+    expect(JSON.stringify(merged).length).toBeLessThan(
+      JSON.stringify(candidate).length * 2,
+    );
+    expect(JSON.stringify(stored).length).toBeGreaterThan(
+      JSON.stringify(merged).length * 50,
+    );
   });
 
   it("drops a nested map, which is inert under the root's whatever it holds", () => {

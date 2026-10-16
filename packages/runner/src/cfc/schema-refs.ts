@@ -644,8 +644,10 @@ export const canonicalizeCfcSchemaDocument = (
   if (!isObjectNotArray(schema) || !isObjectNotArray(schema.$defs)) {
     return schema;
   }
-  // A stored envelope is interned and deep-frozen, and is asked about on
-  // every write to its document, so its canonical form is kept by identity.
+  // The unchanged-write fast path (`mergeStoredCfcEnvelope`) asks about the
+  // stored envelope, interned and deep-frozen, on every write to its
+  // document, so that answer is kept by identity. A merge's own document is
+  // freshly built, never asked about twice, and not kept.
   const cacheable = isDeepFrozen(schema);
   if (cacheable) {
     const cached = canonicalDocumentCache.get(schema);

@@ -1509,11 +1509,9 @@ export const mergeCfcSchemaEnvelopes = (
       : undefined,
   );
   // The merged document is persisted and hashed as it is returned, so it
-  // leaves here in canonical form: one definition per distinct meaning, one
-  // map, nothing unreachable. Without this each merge adds a renamed copy of
-  // the candidate's map and each resolved body a copy of the whole map, and
-  // the stored envelope grows with every merge (a Home envelope reached 22 MB
-  // over ~90 merges, 99.75% of it such copies).
+  // leaves here in canonical form: one root map, every authored definition,
+  // one minted definition per meaning those do not carry, nothing minted
+  // that the document does not reach.
   return internSchema(
     canonicalizeCfcSchemaDocument(
       definitions !== undefined && isObjectOrArray(merged)
