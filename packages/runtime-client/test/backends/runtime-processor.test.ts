@@ -44,6 +44,7 @@ import {
   entityIdFrom,
   type EventIntentOutcome,
   type IExtendedStorageTransaction,
+  type JSONSchema,
   parseLink,
   popFrame,
   pushFrame,
@@ -4027,7 +4028,7 @@ describe("runtime-processor", () => {
     });
 
     /**
-     * Stands in for the three steps of the housekeeping, recording each
+     * Stands in for the four steps of the housekeeping, recording each
      * call, so that a case can say none was started even of a step that
      * fails at once.
      */
@@ -4041,6 +4042,11 @@ describe("runtime-processor", () => {
         stub(
           PiecesController.prototype,
           "ensurePrivateInbox",
+          () => Promise.resolve(),
+        ),
+        stub(
+          PiecesController.prototype,
+          "repairProfileRoots",
           () => Promise.resolve(),
         ),
         stub(
@@ -4066,11 +4072,12 @@ describe("runtime-processor", () => {
      * handler records the event and runs `onEnsurePrivateInbox`, so a throw
      * from that is a failure of Home's handling, which the host's ensure
      * waits for and reports. Each
-     * read the inbox ensure makes of Home waits for `inboxReadable`. The share
-     * intake's subscriptions to Home are recorded, and `onSubscribe` runs as
-     * each is made, a throw from it being a throw from the subscription. Every
-     * space reads as having that stand-in stored as its root, which records a
-     * pattern, until `storeRoot()` stores another.
+     * read the inbox ensure makes of Home waits for `inboxReadable`. Home
+     * lists no profiles, so the profile root repair has none to repair. The
+     * share intake's subscriptions to Home are recorded, and `onSubscribe` runs
+     * as each is made, a throw from it being a throw from the subscription.
+     * Every space reads as having that stand-in stored as its root, which
+     * records a pattern, until `storeRoot()` stores another.
      */
     async function homeWorker(
       rows: readonly unknown[] | (() => unknown),
@@ -4122,13 +4129,16 @@ describe("runtime-processor", () => {
             ? ensurePrivateInbox
             : {
               getRaw: () => ({ $stream: true }),
-              // Home's `privateInbox` and `profiles`, as the inbox ensure
-              // reads them: no inbox held, and no profile advertising one.
+              // Home's `privateInbox` and `profiles`, as the inbox ensure and
+              // the profile root repair read them: no inbox held, and no
+              // profile listed.
               asSchema: () => ({
                 pull: async () => {
                   await inboxReadable;
                   return undefined;
                 },
+                sync: () => Promise.resolve(),
+                get: () => undefined,
                 sink: () => {
                   onSubscribe();
                   subscribed.push(name);
@@ -4436,6 +4446,111 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("repairs the user's profile roots once per worker", async () => {
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => Promise.resolve(),
+      );
+
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+
+      expect(repair.calls.length).toBe(1);
+    });
+
+    it("opens Home when repairing profile roots fails, and repairs them again on the next ensure", async () => {
+      let attempts = 0;
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () =>
+          attempts++ === 0
+            ? Promise.reject(new Error("transient repair failure"))
+            : Promise.resolve(),
+      );
+      using warn = stub(console, "warn", () => {});
+
+      const first = await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      expect(first.cell).toBeDefined();
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      expect(worker.processor.accessForTestingOnly.profileRootsRepaired)
+        .toBeUndefined();
+
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      await worker.processor.accessForTestingOnly.profileRootsRepaired;
+
+      expect(repair.calls.length).toBe(2);
+      expect(warn.calls.map(({ args }) => args[0])).toEqual([
+        "[RuntimeProcessor] Repairing profile roots:",
+      ]);
+    });
+
+    it("opens Home while the profile root repair is still running", async () => {
+      // A bring-up that waited for the repair would never return here, since
+      // the repair finishes only on a release that comes after it.
+
+      const release = Promise.withResolvers<void>();
+      await using worker = await homeWorker([]);
+      using _repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => release.promise,
+      );
+
+      const opened = await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+
+      expect(opened.cell).toBeDefined();
+      const repaired = worker.processor.accessForTestingOnly
+        .profileRootsRepaired;
+      expect(repaired).toBeDefined();
+      release.resolve();
+      await repaired;
+    });
+
+    it("aborts the profile root repair's signal when disposed, and reports nothing when the repair then fails", async () => {
+      const release = Promise.withResolvers<void>();
+      await using worker = await homeWorker([]);
+      using repair = stub(
+        PiecesController.prototype,
+        "repairProfileRoots",
+        () => release.promise,
+      );
+      using warn = stub(console, "warn", () => {});
+      await worker.processor.handleEnsureHomePatternRunning({
+        type: RequestType.EnsureHomePatternRunning,
+      });
+      const repaired = worker.processor.accessForTestingOnly
+        .profileRootsRepaired;
+      const signal = repair.calls[0].args[0] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+
+      await worker.processor.dispose();
+      release.reject(new Error("runtime disposed"));
+      await repaired;
+
+      expect(signal.aborted).toBe(true);
+      expect(warn.calls.length).toBe(0);
+    });
+
     it("starts Home's share intake once per worker, following the inbox Home holds and the ones it retains", async () => {
       await using worker = await homeWorker([]);
 
@@ -4636,7 +4751,7 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("starts no housekeeping when the root started is another space's", async () => {
@@ -4650,7 +4765,7 @@ describe("runtime-processor", () => {
         });
 
         expect(root.piece).toBeDefined();
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
     });
 
@@ -4686,7 +4801,7 @@ describe("runtime-processor", () => {
 
         expect(response).toStrictEqual({});
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("treats a root that records no pattern yet as no Home", async () => {
@@ -4714,7 +4829,7 @@ describe("runtime-processor", () => {
         expect(root.getRaw()).toEqual({ name: "Home" });
         expect(response).toStrictEqual({});
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
 
       it("creates Home where it has no root when not asked for an existing Home only", async () => {
@@ -4773,7 +4888,7 @@ describe("runtime-processor", () => {
         expect(response).toStrictEqual({});
         expect(join.calls.length).toBe(0);
         expect(worker.rootEnsures()).toBe(0);
-        expect(housekeeping.starts()).toEqual([0, 0, 0]);
+        expect(housekeeping.starts()).toEqual([0, 0, 0, 0]);
       });
     });
   });
@@ -4795,6 +4910,7 @@ describe("runtime-processor", () => {
           // The housekeeping that starting Home's root starts.
           adoptLegacySpaces: () => Promise.resolve(),
           ensurePrivateInbox: () => Promise.resolve(),
+          repairProfileRoots: () => Promise.resolve(),
           startShareIntake: () => Promise.resolve(undefined),
         };
         // The space is the identity's Home, which is the identity's own.
@@ -4924,6 +5040,85 @@ describe("runtime-processor", () => {
         }),
       ).resolves.toEqual({ value: { ready: true } });
       expect(calls).toEqual(["pull", "commits"]);
+    });
+  });
+
+  describe("`RuntimeProcessor` cell subscribe IPC", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        state: {
+          type: "object",
+          properties: {
+            shapes: {
+              type: "array",
+              items: { type: "object", properties: { x: { type: "number" } } },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+
+    /**
+     * Subscribes to `state.shapes` of a stored cell through `keyedFrom`, and
+     * returns what the subscription posted and the empty-schema diagnostics
+     * it logged.
+     */
+    async function subscribeToShapes(keyedFrom: CellRef["keyedFrom"]) {
+      const { runtime, storageManager } = createRuntime();
+      try {
+        const ancestor = runtime.getCell(
+          cfcSigner.did(),
+          "keyed-subscribe",
+          schema,
+        );
+        const seed = runtime.edit();
+        ancestor.withTx(seed).set({ state: { shapes: [{ x: 1 }] } });
+        expect((await seed.commit().settled).error).toBeUndefined();
+        const { schema: _schema, ...address } = createCellRef(ancestor);
+        const posted: Array<{ value?: unknown }> = [];
+        using errors = stub(console, "error");
+
+        buildProcessor({ runtime }).handleCellSubscribe({
+          type: RequestType.CellSubscribe,
+          cell: {
+            ...address,
+            path: ["state", "shapes"],
+            ...(keyedFrom !== undefined && { keyedFrom }),
+          },
+        }, {
+          id: 1,
+          post: (message) => {
+            posted.push(message as { value?: unknown });
+            return true;
+          },
+        });
+        // The sink posts from a microtask.
+        await Promise.resolve();
+
+        const diagnostics = errors.calls.map(({ args }) => String(args[0]))
+          .filter((message) => message.includes("EMPTY SCHEMA SUBSCRIPTION"));
+        return { posted, diagnostics };
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    }
+
+    it("logs no empty-schema subscription for a ref keyed from an ancestor whose schema reaches its path", async () => {
+      const { posted, diagnostics } = await subscribeToShapes({
+        depth: 0,
+        schema,
+      });
+
+      expect(diagnostics).toEqual([]);
+      expect(posted.map(({ value }) => value)).toEqual([[{ x: 1 }]]);
+    });
+
+    it("logs an empty-schema subscription for a keyed ref with no schema above it", async () => {
+      const { diagnostics } = await subscribeToShapes(undefined);
+
+      expect(diagnostics).toHaveLength(1);
     });
   });
 
@@ -6906,6 +7101,56 @@ describe("runtime-processor", () => {
       expect(seen).toEqual([undefined]);
     });
 
+    it("reads a ref keyed from an ancestor as the ancestor's `key()` along the rest of its path", async () => {
+      const { runtime, storageManager } = createRuntime();
+      try {
+        const schema = {
+          type: "object",
+          properties: {
+            state: {
+              type: "object",
+              properties: {
+                shapes: { type: "array", items: { $ref: "#/$defs/Shape" } },
+              },
+            },
+          },
+          $defs: {
+            Shape: { type: "object", properties: { x: { type: "number" } } },
+          },
+        } as const satisfies JSONSchema;
+        const ancestor = runtime.getCell(cfcSigner.did(), "keyed-from", schema);
+        const { schema: _schema, ...address } = createCellRef(ancestor);
+
+        const cell = getCell(runtime, {
+          ...address,
+          path: ["state", "shapes"],
+          keyedFrom: { depth: 0, schema },
+        });
+
+        expect(cell.getAsNormalizedFullLink()).toEqual(
+          ancestor.key("state").key("shapes").getAsNormalizedFullLink(),
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("throws for a ref keyed from an ancestor deeper than its own path", () => {
+      const ref: CellRef = {
+        id: "of:keyed-too-deep" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: ["state"],
+        keyedFrom: { depth: 2, schema: { type: "object" } },
+      };
+
+      expect(() => getCell({} as Runtime, ref)).toThrow(
+        "A cell ref's `keyedFrom.depth` (2) must be a whole number no " +
+          "greater than its path's length (1).",
+      );
+    });
+
     it("strips label views from raw sigil links in inbound values", () => {
       // A raw sigil link inside an inbound value is not a `CellRef`, so it
       // does not pass through `cellRefToSigilLink()`. The value walker must
@@ -8013,6 +8258,7 @@ describe("runtime-processor", () => {
         const step of [
           "legacySpacesAdopted",
           "privateInboxEnsured",
+          "profileRootsRepaired",
         ] as const
       ) {
         it(`resolves only once the \`${step}\` step of Home's housekeeping has settled`, async () => {

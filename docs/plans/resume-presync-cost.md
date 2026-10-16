@@ -148,6 +148,71 @@ Exit: a schema is recomposed once per reference per registry epoch.
       rendering unchanged. The pre-sync no longer appears among the
       profile's top inclusive frames; pattern compilation and the render's
       sinks do.
+- [x] For an instance the pre-sync named, a derived cell it owns reads
+      present once its record has arrived. The cell's document can hold the
+      `result` back-link setup wrote and no value, in the store as on the
+      replica that loaded it: nothing has demanded its computation, the
+      computation yields `undefined`, or the client that set the instance
+      up closed before the commits of its values were applied. The gate
+      read value presence for every owned cell but a stream, so an instance
+      owning such a cell was held on every load for a name-sync with no
+      value to deliver, and a list's rows were held twice each: the element
+      piece, then the row it instantiates. `#familyAbsent` takes the record
+      for the cell, unless the cell is owed a default at a scope narrower
+      than the result of the instance that owns it, which a start's
+      preparation seeds (`ownedCellRecordSuffices`). A tree whose rows each
+      own a derived cell that yields `undefined` resumes with one
+      name-sync, as does one whose rows run a per-user sub-instance owning
+      a per-user cell with a default; a tree named by a synced run in a
+      caller's transaction, which seeds nothing, has each row's per-user
+      default seeded by the row's own start
+      (`packages/runner/test/resume-presync-plan-count.test.ts`).
+- [x] The field check, on a thirty-message room of sixty row instances
+      whose rows each own one derived cell nothing demands, five reloads
+      each way from copies of one store: `start/syncCellsForRunningPattern`
+      from 124 to 4 on every reload, `resumeCellSync` spans from 13,285 to
+      295, and all sixty rows instantiated inside their list's own run
+      where none had been. The record is
+      [`../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md`](../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md).
+- [x] A named family's start is held on an owned cell that is absent
+      only while the replica has not examined its document
+      (`IStorageProvider.unexaminedAbsences`): the pre-sync asked the store
+      for every cell the family owns, so an absence it was told of is what
+      the store holds, and the session's own instance of a session-scoped
+      cell, which no store holds before the session writes it, counts as
+      examined without asking. A cell owed a default at a narrower scope
+      still holds the run, since the hold's preparation is what seeds it
+      (`ownedCellOwesSeed`), and so does a family whose probes spent the
+      gate's budget (`NAMING_PROBE_BUDGET`), since a cell the budget left
+      unprobed was never read, and a store-confirmed absence a serving
+      runtime's store read-through remembers (`#storeAbsences`), which
+      the replica reports unexamined for commit to reconcile. Before this, a thirty-message room's load
+      paid eleven name-syncs, nine of them holds of named families on such
+      cells: the room core, the add-member surface and the manager core on
+      session-scoped cells, four nested instances on the valueless cell a
+      `wish` writes to; the room core's name-sync planned the whole room a
+      second time before the room could render, and half of the 3,976
+      list-child syncs a load paid were repeats. After: two name-syncs,
+      1,983 list-child syncs, 299 cell syncs where there were 776, and the
+      pre-sync's share of the worker's CPU from 17.6% to under 4% (a tree
+      whose rows own a session-scoped cell resumes with one name-sync,
+      `packages/runner/test/resume-presync-plan-count.test.ts`). The
+      record is
+      [`../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md`](../history/development/performance/2026-10-16-fabrichat-room-cold-load-phases.md).
+- [ ] An instance the pre-sync did not name is still held on a derived
+      cell that holds no value: one a caller's `run()` reaches, or one
+      whose pre-sync round had a sync that failed. Taking the record there
+      too changes what a start does when a policy manifest cannot be
+      loaded. In `packages/runner/test/cfc-policy-manifest-shared-install.test.ts`,
+      "starts it again for the participant who set it up when the manifest
+      cannot be loaded", the piece's per-user part is held on its derived
+      cell `known`, which nothing has computed, so the part starts in a
+      transaction of its own and its refused commit leaves the piece
+      running. A part that is not held starts inside the piece's
+      instantiation, and the refusal takes the piece's start with it. That
+      already happens once any reader has demanded `known`. Decide first
+      whether a part's start belongs in its parent's instantiation when a
+      manifest it needs is unreachable.
 
 Exit: a child's start names its family only when something a name-sync
 could deliver is missing.
@@ -385,9 +450,11 @@ where the pre-sync was no longer the whole cost.
 - [ ] The remaining label map of a row is its 25 fixed entries, about
       9 KB, of which the `LinkReference` atoms are the largest share: each
       spells its source and its target in full, and on an in-place link
-      entry both restate the link stored beside it. Shrinking that is a
-      change to the atom's registered shape, which the Contextual Flow
-      Control specification owns.
+      entry both restate the link stored beside it.
+      `cfc-independent-reference-labels.md` stops minting the atom, so a
+      slot written after it carries none, and a slot written before keeps
+      its atom until its pointer is replaced; this item closes on a
+      measurement of a freshly written row.
 - [ ] A load of a materialized room still commits for a fifth of its time,
       writing a reader's own instance of every session-scoped derivation
       in a commit of its own: 429 commits of about 400 bytes on the

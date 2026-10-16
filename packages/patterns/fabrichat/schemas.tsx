@@ -8,8 +8,9 @@
  * the records a room stores, and `room.tsx` the room's own output types over
  * them.
  *
- * Every recorded time is a `FabricEpochNsec`, unique in its room. Times are
- * compared through `nsecOf()`.
+ * Every recorded time is a `FabricEpochNsec`, the handler clock's reading when
+ * the room made the record, which two records can share. Times are compared
+ * through `nsecOf()`.
  */
 import {
   type Cell,
@@ -102,13 +103,6 @@ export const isPrincipalDID = (value: unknown): value is DID =>
 /** Nanoseconds in one millisecond, the handler clock's unit. */
 export const NSEC_PER_MSEC = 1_000_000n;
 
-/**
- * Nanoseconds in one tick of the handler clock. A handler's clock reads to the
- * second, so a reading `t` stands for every time from `t` up to, but not
- * including, `t + CLOCK_TICK_NSEC`.
- */
-export const CLOCK_TICK_NSEC = 1_000_000_000n;
-
 /** The nanoseconds a recorded time holds. */
 export const nsecOf = (time: FabricEpochNsec): bigint => time.value;
 
@@ -170,18 +164,6 @@ export type ManagerProfileCell = Cell<ChatManagerProfile>;
 // Room records
 //
 
-/** One version of a message: its body, and when the room recorded it. */
-export interface ChatMessageVersion {
-  /** The version's text. */
-  body: string;
-
-  /**
-   * When the room recorded this version; in a send or an edit, the time the
-   * sender proposes.
-   */
-  sentAt: FabricEpochNsec;
-}
-
 /** The body of a deleted or obliterated message. */
 export interface ChatDeletedBody {
   /** Always `true`: the marker of a deleted message. */
@@ -208,11 +190,11 @@ export interface ChatReaction {
   /** A single emoji. */
   emoji: string;
 
-  /** When the room recorded the reaction. Unique in the room. */
+  /** The room's handler clock when it recorded the reaction. */
   sentAt: FabricEpochNsec;
 }
 
-/** One message in a room, with its reactions and its edit history. */
+/** One message in a room, with its reactions. */
 export interface ChatMessage {
   /** The profile the sender sent under; absent once obliterated. */
   authorProfile?: ProfileCell;
@@ -220,23 +202,23 @@ export interface ChatMessage {
   /** The current text, or the marker of a deleted message. */
   body: string | ChatDeletedBody;
 
-  /** When the room recorded the message's first version. Unique in the room. */
+  /** The room's handler clock when it recorded the message. */
   sentAt: FabricEpochNsec;
 
   /**
-   * When the room recorded the current version, if it isn't the first: the
-   * latest edit or deletion. Unique in the room.
+   * The room's handler clock at the latest edit or deletion; absent until
+   * the message is first edited or deleted.
    */
   editedAt?: FabricEpochNsec;
-
-  /** The versions before the current one, oldest first. */
-  earlierVersions: ChatMessageVersion[];
 
   /** What this message replies to, and where it is shown; absent for none. */
   replyTo?: ChatReply;
 
-  /** Everyone's reactions to this message, in no particular order. */
-  reactions: ChatReaction[];
+  /**
+   * Everyone's reactions to this message, in the order they were added;
+   * absent once the message is deleted.
+   */
+  reactions?: ChatReaction[];
 }
 
 /** A room's policy, stated correctly, with every key present. */
@@ -244,25 +226,25 @@ export interface ChatRoomPolicy {
   /** Whether an OWNER may obliterate messages. */
   ownersMayObliterate: boolean;
 
-  /** Whether an edit or a plain deletion keeps the version it replaces. */
+  /** Stated for the policy's shape, and read by nothing: a message keeps no history. */
   keepsHistory: boolean;
 
   /** Whether a sender's deletion of their own message obliterates it. */
   deletionIsObliteration: boolean;
 
-  /** How far before the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxAgeNsec: FabricDurationNsec;
 
-  /** How far after the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxLeadNsec: FabricDurationNsec;
 
-  /** How long an entry stays in `recentActivity`, in ns. */
+  /** Stated for the policy's shape, and read by nothing: the room keeps no activity log. */
   recentActivityWindowNsec: FabricDurationNsec;
 
-  /** The most messages a message window holds. */
+  /** How many of the newest messages `messages.latest` holds. */
   maxWindowCount: number;
 
-  /** The most message windows a session can have open. */
+  /** Stated for the policy's shape, and read by nothing: the room offers no windows. */
   maxOpenWindows: number;
 }
 
@@ -319,48 +301,6 @@ export interface ChatRoomAbout {
   record?: Cell<AboutRecord>;
 }
 
-/** One entry in a room's log of recent activity. */
-export interface ChatRoomActivity {
-  /** The entry's place in the room's activity: 1, 2, 3, … with no gaps. */
-  seq: number;
-
-  /** When the room recorded it. Unique in the room. */
-  at: FabricEpochNsec;
-
-  /** The `requestId` of the event it records. */
-  requestId: string;
-
-  /** The message the event changed or added. */
-  what: Cell<ChatMessage>;
-}
-
-/** Where a window of messages sits in its view. */
-export type ChatWindowAnchor =
-  | { before: FabricEpochNsec | "end" }
-  | { after: FabricEpochNsec | "start" }
-  | { around: FabricEpochNsec };
-
-/**
- * A request that opens, moves, or closes a window. Opening names where the
- * window sits and how many messages it holds; closing names only the window.
- */
-export interface WindowEvent {
-  /** Chosen by the client; shown in the window once an open is fulfilled. */
-  requestId: string;
-
-  /** The window to set or close, chosen by the client. */
-  windowId: string;
-
-  /** The root of the thread to show; absent for the main conversation. */
-  root?: Cell<ChatMessage>;
-
-  /** Where the window sits; required to open one. */
-  from?: ChatWindowAnchor;
-
-  /** The most messages to show, capped by the room's `maxWindowCount`. */
-  count?: number;
-}
-
 //
 // Reaction tallies
 //
@@ -398,13 +338,22 @@ export const reactionTalliesOf = (
     [],
   );
   return emoji.map((each) => {
-    const onThis = ordered.filter((reaction) => reaction.emoji === each);
+    // One reactor counts once, however many of their reactions with this
+    // emoji the message holds.
+    const reactors = ordered.filter((reaction) => reaction.emoji === each)
+      .reduce<ProfileCell[]>(
+        (found, reaction) =>
+          found.some((known) => equals(known, reaction.reactorProfile))
+            ? found
+            : [...found, reaction.reactorProfile],
+        [],
+      );
     return {
       emoji: each,
-      count: onThis.length,
+      count: reactors.length,
       mine: viewer !== undefined &&
-        onThis.some((reaction) => equals(reaction.reactorProfile, viewer)),
-      reactors: onThis.map((reaction) => reaction.reactorProfile),
+        reactors.some((reactor) => equals(reactor, viewer)),
+      reactors,
     };
   });
 };
@@ -605,49 +554,6 @@ export type SetTitleRefusalCode =
   | "not-member"
   | "invalid-title"
   | "fixed-title";
-
-/**
- * Why a room refused one of a sender's message acts: a send, an edit, a
- * deletion, an obliteration, or a reaction added or removed.
- * - `no-profile`: the sender's profile hasn't resolved, so the act can't name
- *   them.
- * - `not-member`: the sender can't write in the room, or isn't signed in.
- * - `invalid-body`: a message with no text, or a reaction that isn't a single
- *   emoji.
- * - `out-of-window`: the act's time is outside the room's window.
- * - `bad-reply`: a reply to a message not in the room, or shown where its
- *   target can't be.
- * - `deleted-target`: the message acted on, or replied to, is deleted.
- * - `unknown-target`: the message acted on isn't in the room.
- * - `not-allowed`: the act is one only the message's author, or an owner, may
- *   make.
- */
-export type MessageActRefusalCode =
-  | "no-profile"
-  | "not-member"
-  | "invalid-body"
-  | "out-of-window"
-  | "bad-reply"
-  | "deleted-target"
-  | "unknown-target"
-  | "not-allowed";
-
-/** The outcome of one of a sender's message acts, by its `requestId`. */
-export type MessageActOutcome =
-  | {
-    /** The act took effect, or had nothing left to change. */
-    status: "done";
-  }
-  | {
-    /** The act was refused, and wrote nothing to the room. */
-    status: "refused";
-
-    /** Why, for a person to read. */
-    reason: string;
-
-    /** Which refusal it is, for a client to act on. */
-    code: MessageActRefusalCode;
-  };
 
 /**
  * The `requestId` under which an add to the room in `space` asks the adder's

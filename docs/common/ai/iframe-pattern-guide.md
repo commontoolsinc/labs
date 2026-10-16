@@ -3,8 +3,9 @@
 Use this guide to build a Common Fabric pattern whose application lives inside
 one sandboxed `cf-iframe`. The wrapper is deliberately mechanical: it exposes
 three named Cell resources (`input`, `state`, and `output`), optionally exposes
-SQLite databases, embeds the guest and its dependencies into one HTML string,
-and returns the state and output through the normal pattern result.
+SQLite databases and presence rooms, embeds the guest and its dependencies into
+one HTML string, and returns the state and output through the normal pattern
+result.
 
 No other pattern guide is required for this shape.
 
@@ -14,7 +15,7 @@ Keep these files together:
 
 ```text
 packages/patterns/quick-notes/
-├── contract.ts  # input, durable state, output, scopes, optional databases
+├── contract.ts  # input, durable state, output, scopes, optional resources
 ├── guest.ts     # the iframe application; guest.tsx is also accepted
 ├── guest.html   # optional custom document shell
 └── main.tsx     # generated wrapper; do not hand-edit
@@ -100,6 +101,9 @@ available scopes are:
 
 Choose scope independently for state and output. Do not put transient DOM state
 such as hover or an open tooltip in a Fabric Cell; keep that inside the guest.
+State that other people should see while it happens and nobody needs afterwards,
+such as a pointer position or a drag in flight, belongs in a presence room
+rather than a Cell; see [Optional presence](#optional-presence).
 
 The generated wrapper owns `space`-scoped state and output inside the piece. It
 declares `user`- and `session`-scoped state or output as optional scoped pattern
@@ -304,6 +308,39 @@ TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
 stable resolved items, SQLite query hooks, cleanup, and browser verification.
 Do not combine the two guest bootstraps.
 
+## Style with the ambient theme
+
+The guest wears the theme of the page around its iframe. The nearest `cf-theme`
+above the `cf-iframe` provides it: before the guest's own styles, the guest
+receives that theme's `--cf-theme-*` custom properties declared on `:root`,
+followed by a base stylesheet written against them:
+[`guest-base-sheet.ts`](../../../packages/ui/src/v2/components/cf-theme/guest-base-sheet.ts).
+The guest's root also carries the resolved scheme as `data-color-scheme`
+(`light` or `dark`). The sheet styles `html`, `body`, headings, links, buttons,
+form fields, code, and rules, and provides these classes:
+
+| Class | What it draws |
+| --- | --- |
+| `cf-surface` | the raised ground of a panel |
+| `cf-card` | a bordered, padded, rounded surface |
+| `cf-inset` | a recessed ground, for wells and code |
+| `cf-pill` | a small, fully rounded label |
+| `cf-muted` | secondary text |
+| `cf-primary`, `cf-accent`, `cf-brand` | a solid fill with its ink |
+| `cf-success`, `cf-warning`, `cf-danger` | a status fill with its ink |
+| `cf-stack`, `cf-row` | a vertical or horizontal flex layout with the theme's gap |
+
+The values follow the page: a theme change, or a switch between light and dark,
+restyles a running guest without reloading it. So write guest HTML with those
+elements, the `cf-*` classes, and `var(--cf-theme-…)` for anything else, such as
+`color: var(--cf-theme-color-text-muted)` or
+`font-family: var(--cf-theme-font-mono)`, and spell no color or font of your
+own. A literal color or font in the guest stays the same on every page, and
+reads wrong on the first one whose theme differs. The base sheet sits in a
+cascade layer, so any rule of the guest's own overrides it whatever its
+specificity; reserve that for a look the pattern deliberately owns, such as a
+game's art.
+
 ## Optional SQLite
 
 Declare database tables in `IFRAME_PATTERN`. The wrapper creates the database,
@@ -362,6 +399,113 @@ Database resource names, table names, and column names are data rather than
 generated TypeScript bindings. They may use reserved words. When the exact name
 `__proto__` is required in `contract.ts`, write it as a computed property
 (`["__proto__"]`) so JavaScript creates an own property.
+
+## Optional presence
+
+A presence room carries what the people on a piece are doing right now. Nothing
+in it is stored: each member holds one record, a display name and a few named
+facets, and the record is gone when the member leaves. Use it for pointers,
+selections, a drag in flight, or a player's position. Use a Cell for anything
+that must be agreed on or must survive.
+
+Declare each room in `IFRAME_PATTERN`, naming the resource whose field it
+follows:
+
+```typescript
+export const IFRAME_PATTERN = {
+  name: "CursorCanvas",
+  displayName: "Cursor canvas",
+  stateScope: "space",
+  outputScope: "user",
+  frameHeight: "100vh",
+  databases: {},
+  presence: { cursors: "state" },
+} as const;
+```
+
+The value is `state` or `output`. Everyone who shares that resource shares the
+room, so a room following `space`-scoped state gathers every user and session
+on the piece, and a room following `user`-scoped output gathers only one user's
+sessions. The name grants the room and none of the resource's data.
+
+Join from the guest by listening, and publish your own record:
+
+```typescript
+// Shown at module scope.
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+
+const fabric = connectFabric();
+const cursors = fabric.presence("cursors");
+const board = document.querySelector<HTMLDivElement>("#root")!;
+
+const draw = () => {
+  for (const participant of cursors.participants) {
+    const pointer = participant.facets.pointer;
+    if (typeof pointer?.x !== "number" || typeof pointer.y !== "number") {
+      continue;
+    }
+    console.log(participant.name, pointer.x, pointer.y);
+  }
+};
+
+const leave = cursors.join((event) => {
+  if (event.kind === "failure") {
+    console.warn(event.error.code);
+    return;
+  }
+  draw();
+});
+
+// A publication that cannot land rejects; the room reports why to the
+// listener, so the rejection itself needs no handling.
+const publish = (publication: Promise<void>) => publication.catch(() => {});
+
+publish(cursors.setName("Ada"));
+board.addEventListener("pointermove", (event) => {
+  publish(cursors.setFacet("pointer", { x: event.offsetX, y: event.offsetY }));
+});
+board.addEventListener("pointerleave", () => {
+  publish(cursors.clearFacet("pointer"));
+});
+
+globalThis.addEventListener("pagehide", leave, { once: true });
+```
+
+The rules that shape a guest:
+
+- The room publishes nothing for a member with no name, so call `setName()`
+  before expecting peers to see you. The guest picks the name; a `user`-scoped
+  output field is a reasonable place to keep one.
+- `participants` holds every other member, never the guest itself. A
+  `participantId` names a membership, not a person: it changes on reconnect,
+  and two windows of one user are two participants.
+- A room holds latest state, not a stream. Each `setFacet()` replaces the
+  facet, and the host sends one publication per animation frame, so peers see
+  where a pointer is and not every place it was. A page that is not being
+  drawn, such as a background tab, publishes nothing until it is shown.
+- A facet is whatever another guest wrote. Check the type of every field
+  before using it, as the example does, and ignore a facet that does not fit.
+- A record holds at most eight facets and 8 KiB, and a facet's name starts
+  with a lowercase letter, continues with lowercase letters, digits, and
+  hyphens, and is at most 32 characters long. A publication outside those
+  bounds ends the room with a `presence-refused` failure.
+- A `failure` ends the room, and a new membership starts empty.
+  `presence-unsupported` means the host has no relay, and joining again will
+  not help. `presence-refused` means the relay refused the join or a
+  publication, and its message says which bound: correct what was published
+  before joining again, or the same publication ends the new room too, and a
+  full room may admit the guest later. After `presence-disconnected`, call
+  `join()` again when the user next acts and publish the name and facets as
+  they were.
+- Presence does not wait for the hydration barrier. Join at startup, and set
+  the name once the Cell that holds it has been pulled.
+
+A shape dragged across a shared board shows the division of labor. While the
+pointer is down, publish the shape's position as a facet and draw peers' facets
+over the stored positions. On release, write the position to the Cell, and
+clear the facet only after that write and a `pull()` have settled, so peers do
+not see the shape return to where it was in between.
+`packages/patterns/iframe-cursor-canvas/` is a complete example.
 
 ## Generate the wrapper
 

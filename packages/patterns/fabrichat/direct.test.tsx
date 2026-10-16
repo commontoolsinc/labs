@@ -21,15 +21,7 @@ import {
   VIEWS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessageRecord,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessageRecord, type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_DELETE_ACTION,
@@ -39,7 +31,6 @@ import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatProfile,
-  type MessageActOutcome,
 } from "./schemas.tsx";
 
 type RoomArg = Parameters<typeof FabriChatRoomCore>[0];
@@ -65,11 +56,6 @@ const typed = (text: string) => ({ type: "click", target: { value: text } });
 /** The room's records, which every participant's room shares. */
 interface Records {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
 }
 
 /** What every session receives from the setup. */
@@ -80,11 +66,6 @@ interface Setup {
 export const setup = pattern(() => ({
   records: {
     messages: Writable.of<MessagesValue>([] as MessagesValue),
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   },
 }));
 
@@ -98,19 +79,6 @@ const bodies = (messages: Cell<MessagesValue>): string =>
       ? "<obliterated>"
       : "<deleted>"
   ).join(" | ");
-
-/** The outcome `outcomes` records under `id`, as `status/code`. */
-const outcomeOf = (
-  outcomes: Record<string, MessageActOutcome> | undefined,
-  id: string,
-): string => {
-  const outcome = outcomes?.[id];
-  return outcome === undefined
-    ? "none"
-    : outcome.status === "refused"
-    ? `refused/${outcome.code}`
-    : outcome.status;
-};
 
 /** A message of the shared records, as an event names it. */
 function messageOf(cell: unknown): Writable<MessageRecord>;
@@ -129,11 +97,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...directRoom,
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
 
   return {
@@ -148,14 +111,12 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-own",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(room.messageRequests, "o-own") === "done" &&
           bodies(setup.records.messages) ===
             "<obliterated> | <obliterated> | <obliterated>"
         ),
@@ -173,11 +134,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...directRoom,
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
 
   return {
@@ -205,7 +161,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -213,17 +168,12 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(room.messageRequests, "d-alices") ===
-            "refused/not-allowed" &&
-          outcomeOf(room.messageRequests, "o-alices") ===
-            "refused/not-allowed" &&
           bodies(setup.records.messages) ===
             "From Alice | From Bob | <obliterated>"
         ),
@@ -232,7 +182,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-own",
           message: messageOf(setup.records.messages.key(1)),
         },
         trustedUi: obliterateGesture,
@@ -257,11 +206,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     ...directRoom,
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
 
   return {
@@ -275,7 +219,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -283,17 +226,12 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() =>
-          outcomeOf(room.messageRequests, "d-alices") ===
-            "refused/not-allowed" &&
-          outcomeOf(room.messageRequests, "o-alices") ===
-            "refused/not-allowed" &&
           bodies(setup.records.messages) ===
             "From Alice | From Bob | From Carol"
         ),
@@ -301,7 +239,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-own",
           message: messageOf(setup.records.messages.key(2)),
         },
         trustedUi: obliterateGesture,

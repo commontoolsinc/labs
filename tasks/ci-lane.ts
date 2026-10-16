@@ -47,6 +47,7 @@ import {
   FragmentWriter,
   NAME_SEPARATOR,
   readRegistrations,
+  readWholeRuns,
   recordsDir,
   type TestIdentity,
   testIdentityKey,
@@ -80,9 +81,11 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  aroundOf,
   costliestUnschedulable,
   crowdingLine,
   type CrowdingSuite,
+  type FullLaneCount,
   fullLaneCount,
   type Plan,
   plan,
@@ -128,6 +131,7 @@ import { writeLcovReport } from "./write-coverage-lcov.ts";
 import {
   batchMeasurementName,
   excusedMeasurementName,
+  hooksMeasurementName,
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
   laneMeasurementName,
@@ -499,12 +503,17 @@ export function batchesOf(
     const all = inUnit.get(key) ?? [];
     // A unit declared whole runs every identity in it, chosen or not.
     const whole = wholeOf.get(suite)!.has(unit);
-    const runs = whole ? all : all.filter((entry) => names.has(entry.test.n));
     // A `describe` that fails as a whole is recorded under its own title,
     // and the outermost `describe` registers one test under its title, so
     // skipping that title skips every leaf inside it. A title enclosing a
-    // chosen name therefore stays off the list.
+    // chosen name therefore stays off the list, and its hooks run, so its
+    // own cost is part of what the unit takes.
     const around = new Set([...names].flatMap(enclosingNames));
+    const runs = whole
+      ? all
+      : all.filter((entry) =>
+        names.has(entry.test.n) || around.has(entry.test.n)
+      );
     const request: UnitRequest = {
       unit,
       skip: whole ? [] : all
@@ -933,16 +942,23 @@ export async function runBatch(
 
   /**
    * The names this batch's test processes registered over every execution,
-   * by the repository-relative file that registered them, as
-   * `readRegistrations()` reads them. That file is the unit for a suite
-   * whose units are files. A file whose processes left no name map is not
-   * here.
+   * by unit. A unit that is one file is here by the names
+   * `readRegistrations()` reads for that file. A unit of several files that
+   * one process runs, such as a package's browser tests, is here by the
+   * mark its runner leaves on running every test of every file. A unit
+   * whose processes said neither is not here.
    */
   registered: Map<string, Set<string>>;
 }> {
   const records: TestRecord[] = [];
   const passedOver: TestRecord[] = [];
   const registered = new Map<string, Set<string>>();
+  /** Adds `names` to what `unit` registered. */
+  const register = (unit: string, names: Iterable<string>): void => {
+    const known = registered.get(unit);
+    if (known === undefined) registered.set(unit, new Set(names));
+    else for (const name of names) known.add(name);
+  };
   const conflicts: TestRecord[] = [];
   let ok = true;
   let seconds = 0;
@@ -964,8 +980,11 @@ export async function runBatch(
   let unexplained = 0;
   // How many times a pass opened a unit, over every pass.
   let opened = 0;
-  // Seconds the records the suite places in a unit took, over every pass.
+  // Seconds the records the suite places in a unit took, and what the
+  // units' hooks took, over every pass.
   let ran = 0;
+  // What each unit's hooks took, once for each pass that opened it.
+  const hooks: { unit: string; seconds: number }[] = [];
   for (let run = 1; run <= batchRepeats(batch); run++) {
     if (stop.signal !== undefined) break;
     console.log(
@@ -990,6 +1009,8 @@ export async function runBatch(
     // The units this execution recorded anything at all for, gathered
     // across whatever invocations the suite splits it into.
     const heard = new Set<string>();
+    // What this pass's units' hooks took, summed over their reports.
+    const hooked = new Map<string, number>();
     const invocations = await batch.suite.command(asked, {
       root: options.root,
       outputDir,
@@ -1066,15 +1087,37 @@ export async function runBatch(
       }
       for (const conflict of collected.conflicts) conflicts.push(conflict);
       for (const [file, names] of await readRegistrations(batchSpool)) {
-        const known = registered.get(file);
-        if (known === undefined) registered.set(file, names);
-        else for (const name of names) known.add(name);
+        register(file, names);
+      }
+      for (const marked of await readWholeRuns(batchSpool)) {
+        for (const [file, names] of Object.entries(marked.tests)) {
+          // A file is placed by the kind and scope its tests record under
+          // and the file itself, so one that registered no test still says
+          // its unit holds none.
+          const location = batch.suite.locate({
+            test: { k: marked.kind, s: marked.scope, n: names[0] ?? file },
+            file,
+          });
+          if (location?.level === "unit") register(location.unit, names);
+        }
+      }
+      for (const record of collected.hooks) {
+        const location = batch.suite.locate(record);
+        if (location?.level !== "unit") continue;
+        hooked.set(
+          location.unit,
+          (hooked.get(location.unit) ?? 0) + record.durationMs / 1000,
+        );
       }
       await Deno.remove(batchSpool, { recursive: true }).catch(() => {});
       await Deno.mkdir(batchSpool, { recursive: true });
     }
     for (const request of asked) {
       if (!heard.has(request.unit)) silent.add(request.unit);
+    }
+    for (const [unit, seconds] of hooked) {
+      ran += seconds;
+      hooks.push({ unit, seconds });
     }
   }
   // A batch that stopped part way measured only the part it ran, and the
@@ -1096,7 +1139,10 @@ export async function runBatch(
       // suite places in a unit, which are the ones a manifest can hold and
       // the packer charges by. A record the suite places in no unit, such
       // as one a wrapper writes for its whole invocation, is part of what
-      // the batch spent beyond its units' tests.
+      // the batch spent beyond its units' tests. What each unit's hooks
+      // took is in it as well, since the packer charges that through the
+      // same correction, and it is also written for each unit each time a
+      // pass opened it, which is what the publisher reads it from.
       timingRecord(
         batchMeasurementName(batch.suite.id, coverage !== undefined),
         seconds,
@@ -1137,6 +1183,13 @@ export async function runBatch(
         ),
         batch.projected,
         ok,
+      ),
+      ...hooks.map(({ unit, seconds }) =>
+        timingRecord(
+          hooksMeasurementName(batch.suite.id, coverage !== undefined, unit),
+          seconds,
+          ok,
+        )
       ),
     ]);
   }
@@ -1674,8 +1727,12 @@ export function describeWithheld(
   say(lines);
 }
 
-/** What one suite's share of a lane was chosen for, and what it costs. */
+/**
+ * What one suite's share of a lane was chosen for, and what it costs, the
+ * tests `manifest` holds around its selections included.
+ */
 function chosenFor(
+  manifest: Manifest,
   suite: string,
   selections: readonly Selection[],
 ): { identities: number; seconds: number; why: string } {
@@ -1686,7 +1743,7 @@ function chosenFor(
   }
   return {
     identities: mine.length,
-    seconds: testsOf(mine).ran,
+    seconds: testsOf(mine, aroundOf(manifest, mine)).ran,
     why: [...reasons].sort().map(([reason, count]) => `${reason} ${count}`)
       .join(", "),
   };
@@ -1728,9 +1785,11 @@ function standingOnStandIns(
  * expected to take and why each of its identities was chosen. "Why did
  * my test not run" is the question a selected run provokes, and a
  * summary that only names the suites cannot begin to answer it. The
- * seconds in the table are the tests' own time and not what the lane
- * will take: the overheads the packer charged on top are per lane rather
- * than per identity, and `projectedSeconds` is where the whole figure is.
+ * seconds in the table are the own time of the tests and of the tests
+ * around them, such as a `describe` whose `beforeAll` every run of a unit
+ * runs, and not what the lane will take: the overheads the packer charged
+ * on top are per lane rather than per identity, and `projectedSeconds` is
+ * where the whole figure is.
  *
  * Not all of that time is measured. A unit nothing has recorded is
  * carried on a stand-in whose cost comes from the suite around it, and
@@ -1781,7 +1840,11 @@ export function describePlan(
   );
   lines.push("| --- | --- | --- | --- | --- | --- |");
   for (const batch of batches) {
-    const share = chosenFor(batch.suite.id, chosen.selections);
+    const share = chosenFor(
+      chosen.manifest,
+      batch.suite.id,
+      chosen.selections,
+    );
     lines.push(
       `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
         `${duration(share.seconds)} | ${batchRepeats(batch)} | ` +
@@ -2050,13 +2113,17 @@ export async function fullLanes(
 ): Promise<number> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
   const { manifest, changed } = await read(options, deps);
-  const needed = fullLanesNeeded(suites, manifest, changed, options.full);
-  const lanes = Math.min(needed, FULL_LANES_MAX);
-  if (needed > lanes) {
+  const { lanes, capped } = fullLanesNeeded(
+    suites,
+    manifest,
+    changed,
+    options.full,
+  );
+  if (capped) {
     console.error(
-      `ci-lane: the full run needs ${needed} lanes and takes ` +
-        `${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane may ` +
-        `run past its budget`,
+      `ci-lane: the full run needs more than ${FULL_LANES_MAX} lanes and ` +
+        `takes ${FULL_LANES_MAX}, the most FULL_LANES_MAX allows, so a lane ` +
+        `may run past its budget`,
     );
   }
   const { laid } = planOver({
@@ -2106,13 +2173,13 @@ export function describeFullLanes(laid: Plan, prologue: number): void {
   ], console.error);
 }
 
-/** How many lanes the full run would take with no cap on them. */
+/** How many lanes the full run takes, up to `FULL_LANES_MAX`. */
 function fullLanesNeeded(
   suites: readonly Suite[],
   manifest: Manifest | undefined,
   changed: ReadonlySet<string>,
   full: boolean,
-): number {
+): FullLaneCount {
   const seen = pricedOver({ suites, manifest, changed, full });
   if (seen.unmeasured === seen.manifest.entries.length) {
     // Nothing at all has a measured cost, so a cost model here would be
@@ -2145,14 +2212,17 @@ function fullLanesNeeded(
       capabilities: capabilitiesBySuite(suites),
       wholeUnits: wholeUnits(suites),
     });
-    const lanes = Math.max(1, running.length, byCost);
+    const wanted = Math.max(1, running.length, byCost.lanes);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
-        `count is ${lanes} — ${running.length} suites with anything to ` +
-        `run, and ${byCost} from packing the stand-ins — rather than a ` +
-        `projection from costs nobody has measured`,
+        `count is ${wanted} — ${running.length} suites with anything to ` +
+        `run, and ${byCost.lanes} from packing the stand-ins — rather ` +
+        `than a projection from costs nobody has measured`,
     );
-    return lanes;
+    return {
+      lanes: Math.min(wanted, FULL_LANES_MAX),
+      capped: byCost.capped || wanted > FULL_LANES_MAX,
+    };
   }
   return fullLaneCount({
     manifest: seen.manifest,

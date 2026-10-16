@@ -340,6 +340,7 @@ in progress. Divide state by the lifecycle that owns it:
 | State | Owner | Examples |
 | --- | --- | --- |
 | Durable collaborative data | Fabric Cell or SQLite | records, committed positions, shared edges |
+| Live status others see and nobody keeps | A presence room | pointers, a peer's drag in flight, who is here |
 | Local user intent not yet committed | React state or refs | a text draft, open menu, active drag, pending selection |
 | Third-party interaction state | The library's local component state | `dragging`, measured bounds, viewport, focus, selection handles |
 | Pure presentation | Derived during render | labels, colors, filtered rows |
@@ -369,6 +370,12 @@ remount: native popups close, focus moves, selections flash, and dragged items
 snap between local and durable positions. Keep component types, React keys, and
 the library root stable for the same reason. The full loading view belongs only
 to initial hydration; an ordinary mutation must not remount the application.
+
+A presence room is declared in the contract and read through
+`fabric.presence(name)`; its events arrive outside React, so hold what a
+component renders from them in state or an external store.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
 
 ### Reconcile asynchronous gestures by identity
 
@@ -444,7 +451,10 @@ replace the text under the user's cursor.
 The generated wrapper bundles JavaScript imports, but a React library can also
 depend on stylesheet rules that give its viewport, measurement wrappers,
 overlays, portals, and controls their geometry. Theme colors alone are not
-enough. Put the required structural rules in `guest.html` so the document stays
+enough; the guest receives the `--cf-theme-*` variables and
+the `cf-*` classes described in
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme),
+so components spell no color or font of their own. The required structural rules still belong in `guest.html` so the document stays
 self-contained under the iframe CSP. Give `html`, `body`, `#root`, and every
 intermediate layout container an explicit height, and give custom measured
 items a stable width or size when the library expects one.

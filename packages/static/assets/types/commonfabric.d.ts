@@ -3536,13 +3536,16 @@ export interface LiftFunction {
   ): ModuleFactory<StripCell<Parameters<T>[0]>, ReturnType<T>>;
 }
 
-// Helper type to make non-Cell and non-Stream properties readonly in handler state.
-// Cell/Stream/SqliteDb are passed through whole (they are handle interfaces with
-// methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
-// to map over).
-export type HandlerState<T> = T extends Cell<any> ? T
+// Helper type to make the plain data in handler state readonly. A cell of every
+// kind, a stream, and a SqliteDb are passed through whole: they are handle
+// interfaces with methods — `.get()/.set()`, `.send()`, `.exec()/.query()` —
+// not data containers to map over. A fabric primitive, such as a
+// `FabricBytes`, is passed through whole too: it is an immutable value read
+// through its methods.
+export type HandlerState<T> = T extends AnyBrandedCell<any> ? T
   : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
+  : T extends FabricPrimitive ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
   : T;

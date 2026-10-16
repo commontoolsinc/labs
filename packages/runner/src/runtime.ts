@@ -389,6 +389,13 @@ export interface ExperimentalOptions {
   serverExecution?: boolean | undefined;
 
   /**
+   * Keep session documents in the owning client's replica when server
+   * execution is disabled. Defaults to off. Shared reads still require
+   * server validation, including transactions whose writes are all local.
+   */
+  localSessionDocuments?: boolean | undefined;
+
+  /**
    * The `agent` builtin (`docs/common/capabilities/agent.md`): a pattern's
    * request for an agent run, staged as a sink request and handed to a
    * runner through an `AgentRun` record. When false, the builtin settles
@@ -1935,11 +1942,12 @@ export class Runtime {
 
     // These flags are consumed from this Runtime instance. Normalize their
     // local defaults after override logging so an omitted option does not
-    // appear as an explicit `true` override.
+    // appear as an explicit override.
     this.experimental.computedCellIds ??= true;
     this.experimental.plainResultReceipts ??= true;
     this.experimental.lazyMaterialization ??= true;
     this.experimental.agentBuiltin ??= true;
+    this.experimental.localSessionDocuments ??= false;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -2048,6 +2056,10 @@ export class Runtime {
       });
 
       this.storageManager = options.storageManager;
+      this.storageManager.setLocalSessionDocuments?.(
+        this.experimental.localSessionDocuments === true &&
+          this.experimental.serverExecution !== true,
+      );
       // Hand the storage layer the telemetry bus so it can emit the
       // storage.push/pull markers (duck-typed: only the v2 StorageManager
       // implements it; emulated/test managers simply don't have the method).
@@ -2722,6 +2734,9 @@ export class Runtime {
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
     wrapped.setCfcServingIdentity(
       this.servingPosture ? this.userIdentityDID : undefined,
+    );
+    wrapped.setCfcClientIdentity(
+      this.servingPosture ? undefined : this.userIdentityDID,
     );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
@@ -4819,6 +4834,15 @@ export class Runtime {
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {
     return this.runner.start(resultCell);
+  }
+
+  /**
+   * Starts a piece and waits for the commit of the setup writes of the graph
+   * it instantiates, rejecting when that commit failed; see
+   * `Runner.startWithCommit()`.
+   */
+  startWithCommit<T = any>(resultCell: Cell<T>): Promise<boolean> {
+    return this.runner.startWithCommit(resultCell);
   }
 
   /**

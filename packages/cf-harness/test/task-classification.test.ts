@@ -118,10 +118,36 @@ describe("task-classification", () => {
         .toEqual(["act", "find"]);
     });
 
-    it("leaves a polite request for an action to the model rather than calling it a question", () => {
+    it("returns undefined for a polite request for an action rather than calling it a question", () => {
       expect(
         classifyTaskByRule("Can you add an appointment to my calendar?", {}),
       ).toBeUndefined();
+    });
+
+    it("does not return author for making a new note or a new loom", () => {
+      for (
+        const task of [
+          "make me a new note called Test",
+          "make a new loom for the trip",
+          "create new note",
+        ]
+      ) {
+        expect(tagsOf(classifyTaskByRule(task, {})) ?? []).not.toContain(
+          "author",
+        );
+      }
+      expect(tagsOf(classifyTaskByRule("make me a new tracker", {})))
+        .toEqual(["author"]);
+    });
+
+    it("does not read this weekend as pointing at a held piece", () => {
+      expect(
+        tagsOf(
+          classifyTaskByRule("make a loom with ideas for a walk this weekend", {
+            inputCells: [cell("Pomodoro Timer")],
+          }),
+        ) ?? [],
+      ).not.toContain("pieces");
     });
 
     it("returns undefined when no rule applies", () => {
@@ -131,40 +157,63 @@ describe("task-classification", () => {
   });
 
   describe("classifyTask()", () => {
-    it("records the rule path without asking the model when a rule applies", async () => {
-      let asked = 0;
-      const classification = await classifyTask("what's on Thursday?", {}, {
-        askModel: () => {
-          asked += 1;
-          return Promise.resolve("respond");
-        },
-      });
+    it("records the rule path when a rule applies", () => {
+      const classification = classifyTask("what's on Thursday?", {});
 
-      expect(asked).toBe(0);
       expect(classification.path).toBe("rule");
       expect(classification.tags).toEqual(["find"]);
       expect(classification.durationMs).toBeGreaterThanOrEqual(0);
     });
 
-    it("asks the model when no rule applies and records its tags", async () => {
-      const prompts: string[] = [];
-      const classification = await classifyTask(
-        "the quarterly numbers for Q3 sales",
-        { inputCells: [cell("Budget")] },
-        {
-          askModel: (prompt) => {
-            prompts.push(prompt);
-            return Promise.resolve("find, pieces");
-          },
-        },
-      );
+    it("returns find by the assumed path when no rule applies", () => {
+      const classification = classifyTask("weather in Brisbane", {});
 
-      expect(classification.path).toBe("model");
-      expect(classification.tags).toEqual(["find", "pieces"]);
-      expect(prompts[0]).toContain("the quarterly numbers for Q3 sales");
-      expect(prompts[0]).toContain('The agent holds: piece "Budget".');
+      expect(classification.path).toBe("assumed");
+      expect(classification.tags).toEqual(["find"]);
     });
 
+    it("adds pieces to an assumed find when the run holds input cells", () => {
+      const classification = classifyTask("weather in Brisbane", {
+        inputCells: [cell("Budget")],
+      });
+
+      expect(classification.path).toBe("assumed");
+      expect(classification.tags).toEqual(["find", "pieces"]);
+    });
+
+    it("adds act to an assumed find for an action verb when a browser is attached", () => {
+      const withBrowser = classifyTask("move the quarterly numbers", {
+        browserHost: true,
+      });
+      const withoutBrowser = classifyTask("move the quarterly numbers", {});
+
+      expect(withBrowser.path).toBe("assumed");
+      expect(withBrowser.tags).toEqual(["find", "act"]);
+      expect(withoutBrowser.tags).toEqual(["find"]);
+    });
+
+    it("falls back to every tag when the rule throws", () => {
+      const classification = classifyTask("weather in Brisbane", {
+        inputCells: [{
+          get name(): string {
+            throw new Error("unreadable cell");
+          },
+          token: "cfh:a:unreadable",
+          ref: "of:fid1:unreadable",
+        }],
+      });
+
+      expect(classification.path).toBe("fallback");
+      expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
+    });
+
+    it("records only the tags, the path, and the wall time", () => {
+      expect(Object.keys(classifyTask("weather in Brisbane", {})).sort())
+        .toEqual(["durationMs", "path", "tags", "type", "version"]);
+    });
+  });
+
+  describe("classifyTaskByModel()", () => {
     it("tells the model what the run holds, or that it holds nothing", async () => {
       const prompts: string[] = [];
       const ask = (prompt: string) => {
@@ -183,37 +232,42 @@ describe("task-classification", () => {
       );
       expect(prompts[1]).toContain("The agent holds: nothing.");
     });
+  });
 
-    it("falls back to every tag when the model answers no tag", async () => {
-      const classification = await classifyTask(
-        "the quarterly numbers for Q3 sales",
-        {},
-        { askModel: () => Promise.resolve("I am not sure.") },
-      );
+  describe("the verb asks of 2026-10-15", () => {
+    // Two asks typed on a focused Ring Loops piece, each of which a model
+    // call failed to tag within its bound.
 
-      expect(classification.path).toBe("fallback");
-      expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
+    const ringLoops = {
+      inputCells: [cell("focused_piece"), cell("in_loom_iframe_ring_loops")],
+    };
+
+    for (
+      const task of [
+        "use the addnotes verb to add hihats",
+        "add a basic hihat loop to the music",
+      ]
+    ) {
+      it(`returns act and pieces by rule for ${JSON.stringify(task)}`, () => {
+        const classification = classifyTask(task, ringLoops);
+
+        expect(classification.path).toBe("rule");
+        expect(classification.tags).toEqual(["act", "pieces"]);
+        expect(classification.durationMs).toBeLessThan(1);
+      });
+    }
+
+    it("does not return act for a question about a held piece's verbs", () => {
+      expect(
+        tagsOf(
+          classifyTaskByRule("what verbs does the music have?", ringLoops),
+        ),
+      ).not.toContain("act");
     });
 
-    it("falls back to every tag when the model call fails", async () => {
-      const classification = await classifyTask(
-        "the quarterly numbers for Q3 sales",
-        {},
-        { askModel: () => Promise.reject(new Error("provider down")) },
-      );
-
-      expect(classification.path).toBe("fallback");
-      expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
-    });
-
-    it("falls back to every tag when no model is available", async () => {
-      const classification = await classifyTask(
-        "the quarterly numbers for Q3 sales",
-        {},
-      );
-
-      expect(classification.path).toBe("fallback");
-      expect(classification.tags).toEqual([...HARNESS_TASK_TAGS]);
+    it("does not read adding to something as acting on a piece when the run holds none", () => {
+      expect(classifyTaskByRule("add a basic hihat loop to the music", {}))
+        .toBeUndefined();
     });
   });
 

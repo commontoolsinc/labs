@@ -86,7 +86,13 @@ the next round plan the level below. An instance whose result document holds
 no argument link is planned against the inputs its parent's node binds it
 to. An instance with a stored setup is recorded in `#presyncNamedInstances`,
 under the pattern it was planned with, once a round has planned all of its
-nodes and none of that round's syncs has failed.
+nodes and none of that round's syncs has failed. An instance whose pattern
+pointer or setup marker names a pattern other than the one it is planned
+with is set up again by its parent's start, and that setup judges every slot
+its stored argument holds against the new argument schema, slots no plan
+reads among them. Once the round's syncs have landed, such an instance's
+stored argument has its direct link targets, and the result document owning
+each, named the way the root's are (`#syncStoredArgumentLinkTargets`).
 
 `runSynced` runs the same pre-sync before setup. On a fresh start the result
 document has no `argument` meta link yet, so the plans bind against an
@@ -200,8 +206,12 @@ plan syncs. `LINK_HOPS`, `ArgumentLinkRoot`, `narrowChildSchema`, and
 `isReferenceOnlySchema` go with them. One walk stays, one hop wide: the
 stored argument's direct link targets and the result document owning each
 are named root-only (`#syncStoredArgumentLinkTargets`), because setup's
-supplied-link proof reads them and that read is no node's. It runs last in
-the pre-sync, after every plan sync and coordinator sync has been issued, so
+supplied-link proof reads them and that read is no node's. A nested instance
+that its parent's start sets up again under another pattern has the same
+walk over its own stored argument, because that setup reads each stored slot
+through the link it holds, and that read is no node's either. The root's walk
+runs last in the pre-sync, after every plan sync and coordinator sync has
+been issued, so
 a document a plan reads is asked for under that plan's schema before the
 root-only naming asks for it. Among plans the requests go out together, in
 pattern order, and no order among them is claimed; what the ordering
@@ -498,7 +508,10 @@ Exit: no resumed action's first run is released by a timer.
       instance's own start, asked under the same pattern, skips the
       argument walk: the pre-sync's plans are the plans a name-sync would
       build, so a name-sync could request nothing the pre-sync did not. The
-      owned cells are still probed, since an absent one is owed a seed. The
+      owned cells are still probed, since an absent one is owed a seed; a
+      derived cell owed none is probed by its record, since its value is
+      its computation's to produce and a name-sync would deliver the same
+      record. The
       instance wave also names the policy manifests each nested pattern
       declares, as the root wave names the root's.
 - [x] Test: a tree whose rows receive, through the root's argument, a link

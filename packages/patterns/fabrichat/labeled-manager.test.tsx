@@ -20,15 +20,7 @@ import type { ParticipantRoster } from "../loom/participants.tsx";
 import type { SharedSpaceCatalogStorage } from "../system/shared-space-catalog.ts";
 import { FabriChatManagerCore } from "./manager.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
-import {
-  type ActivityCounters,
-  type ComposerState,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type ComposerState, type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore, type RoomManager } from "./room.tsx";
 import {
   CHAT_REACT_ACTION,
@@ -88,14 +80,8 @@ function roomLinkOf(room: unknown): unknown {
 export default pattern((input) => {
   const profile = Writable.of<TestProfile>({ name: "Alice" });
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
-  const reactionLists = Writable.of<ReactionList[]>([] as ReactionList[]);
   const records = {
     messages,
-    reactionLists,
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
     titles: Writable.of<TitleRecord[]>([]),
   };
   const core = FabriChatManagerCore({
@@ -138,7 +124,7 @@ export default pattern((input) => {
     isOwner: false,
     ...records,
     canJoin: true,
-    joinRoom: manager.joinRoom,
+    manager,
     self,
   } as RowArg);
 

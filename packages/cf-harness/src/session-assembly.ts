@@ -56,6 +56,8 @@ import {
 } from "./host-mounts.ts";
 import { patternRefsContextMessage } from "./pattern-refs.ts";
 import {
+  HELD_PIECES_GUIDANCE,
+  MAY_HOLD_PIECES_GUIDANCE,
   PIECE_TARGETING_GUIDANCE,
   pieceTargetingContextMessages,
 } from "./piece-targeting.ts";
@@ -70,6 +72,15 @@ import type {
 import { loadHarnessSkillContext } from "./skills/registry.ts";
 import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import type { HarnessTaskTag } from "./task-classification.ts";
+import {
+  AUTHOR_TOOL_GUIDANCE,
+  LOOM_COMMANDS_TOOL_GUIDANCE,
+  LOOM_RETRIEVAL_TOOL_GUIDANCE,
+  PIECES_TOOL_GUIDANCE,
+  RESEARCH_TOOL_GUIDANCE,
+  RESOLVE_PIECE_TOOL_GUIDANCE,
+  toolGuidanceContextMessages,
+} from "./tool-guidance.ts";
 import { wellKnownGrantsContextMessage } from "./well-known-grants.ts";
 
 /**
@@ -425,8 +436,9 @@ export interface EstablishHarnessSessionContextOptions {
  * Brings up everything a run holds before its first model turn, and returns
  * the context messages announcing it: the skill registry and any preloaded
  * skills, the well-known grants of the session's space, host-supplied input
- * cells, the guidance for selecting a piece target, and, for a run whose host
- * opted in to `weaver_action`, the guidance for using the Weaver's commands.
+ * cells, the guidance for selecting a piece target, for a run whose host
+ * opted in to `weaver_action` the guidance for using the Weaver's commands,
+ * and the guidance for using the tools the session's backings carry.
  *
  * The three differ in how they fail, and deliberately. A missing skills root
  * simply yields no messages. Grants are best-effort: a session that will not
@@ -511,27 +523,60 @@ const establishContextMessages = async (
     messages.push(WEAVER_COMMAND_GUIDANCE);
   }
   messages.push(REVISION_VERIFICATION_GUIDANCE);
+  const toolGuidance = toolGuidanceContextMessages({
+    fabricSessionAvailable: engine.fabricSessionAvailable,
+    loomCommandsAvailable: engine.config.loomCommands !== undefined,
+    loomRetrievalAvailable: engine.config.loomRetrieval !== undefined,
+  });
+  for (const message of toolGuidance) {
+    messages.push(message);
+  }
   return messages;
 };
 
 /**
- * Drops from a run's context messages the host guidance its task tags do not
- * call for: piece targeting and revision verification belong to work on
- * pieces and to authoring, and the Weaver's commands, which read as well as
- * change the person's application, to finding and acting. Every other
- * message passes through.
+ * Fits a run's context messages to its task tags. In the piece-targeting
+ * guidance's place, a task about the pieces it holds is told how to read and
+ * act on them, and any other task that it may hold some. Piece targeting
+ * itself belongs to authoring, as does revision verification, where a
+ * pattern's output can be inspected; the Weaver's commands, which read as well
+ * as change the person's application, belong to finding and acting. So does
+ * each block of tool guidance: writing and running patterns to authoring,
+ * building on research to authoring, finding and work on pieces,
+ * reading and acting on pieces to work on them, and the host's commands and
+ * retrieval to finding and acting; resolving a named piece belongs to
+ * finding, acting and work on pieces. Every other message passes through.
  */
 export const orientContextMessages = (
   messages: readonly string[],
   tags: ReadonlySet<HarnessTaskTag>,
 ): string[] => {
-  const pieceWork = tags.has("pieces") || tags.has("author");
+  const author = tags.has("author");
+  const findsOrActs = tags.has("act") || tags.has("find");
   const withheld = new Set([
-    ...(pieceWork ? [] : [
-      PIECE_TARGETING_GUIDANCE,
-      REVISION_VERIFICATION_GUIDANCE,
+    ...(author ? [] : [REVISION_VERIFICATION_GUIDANCE, AUTHOR_TOOL_GUIDANCE]),
+    ...(tags.has("pieces") ? [] : [PIECES_TOOL_GUIDANCE]),
+    ...(author || tags.has("find") || tags.has("pieces")
+      ? []
+      : [RESEARCH_TOOL_GUIDANCE]),
+    // Authoring carries the same rule inside piece targeting.
+    ...(!author && (findsOrActs || tags.has("pieces"))
+      ? []
+      : [RESOLVE_PIECE_TOOL_GUIDANCE]),
+    ...(findsOrActs ? [] : [
+      WEAVER_COMMAND_GUIDANCE,
+      LOOM_COMMANDS_TOOL_GUIDANCE,
+      LOOM_RETRIEVAL_TOOL_GUIDANCE,
     ]),
-    ...(tags.has("act") || tags.has("find") ? [] : [WEAVER_COMMAND_GUIDANCE]),
   ]);
-  return messages.filter((message) => !withheld.has(message));
+  return messages.flatMap((message) =>
+    message === PIECE_TARGETING_GUIDANCE
+      ? [
+        tags.has("pieces") ? HELD_PIECES_GUIDANCE : MAY_HOLD_PIECES_GUIDANCE,
+        ...(author ? [PIECE_TARGETING_GUIDANCE] : []),
+      ]
+      : withheld.has(message)
+      ? []
+      : [message]
+  );
 };

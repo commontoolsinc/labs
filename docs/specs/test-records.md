@@ -99,6 +99,10 @@ A record carries `outcome` (`pass`, `fail`, or `skip`), `durationMs` from
 the runner's own measurement (never a clock inside the test process, which
 several packages fake), and optionally `file`, the repository-relative
 source path when the producer reliably knows it — metadata, not identity.
+A reader drops a record whose `file`, or whose name where the kind is
+`pattern`, is absolute or climbs above the repository root. Such a path
+names a file outside the repository, and no test of the repository lives
+there.
 A `cfcheck` item's duration is what the batch spent on that pattern's own
 files. The gate is its own runner and measures them itself: the compiler
 times each file it checks and each file it emits, and the batch charges
@@ -155,6 +159,30 @@ for. Either way the scope is applied before ambiguity is judged, or a
 name two packages happen to share would cost each of them a file it held
 unambiguously.
 
+A name map is also a statement of what a file holds, which a lane reads to tell
+a test the tree no longer holds from one a batch never reached. An uncaught
+error or an unhandled rejection can stop a module part way through loading,
+after it has registered some of its tests. Deno runs each test file in a realm
+of its own, with a preload of its own. So once an `error` or
+`unhandledrejection` event reaches a test file's realm before any of that file's
+hooks or tests has begun, whether or not anything handles it, the preload writes
+every name it has noted for the file again, in a map carrying `"interrupted":
+true`, and marks every later map of that file the same way. Deno begins a file's
+hooks and tests only once its module has settled, having finished loading or
+stopped, and the preload marks nothing after that. The names still say which
+file each came from, but no file such a map names counts as having registered
+only those names. A module whose loading never finishes, or that calls
+`Deno.exit`, leaves a map without the mark, but none of its file's tests run, so
+its file records nothing, and a unit that recorded nothing fails the run.
+
+The browser test runner registers no names through the preload, and makes the
+same statement for the whole of a run with a mark named `whole-run-<uuid>.json`.
+The mark holds a JSON object with the `kind` and `scope` the run's records carry
+and `tests`, every test's name by the repository-relative file that registered
+it. The runner writes one only when it loaded every file it was handed and every
+test returned a result, so a run that stopped part way leaves none. No mark
+reaches the store: a spool shipped as a run ships only its records.
+
 The context line carries `schema` (this document describes version 1, the
 `v1` in object paths), a per-object ULID `reportId`, the canonical `repo`
 name (a constant owned by the repository's tooling, never derived from git
@@ -199,14 +227,21 @@ stop; recording never fails a run.
 
 A producer records the run it was asked for. Several are also libraries
 that this repository's own tests drive — the pattern runner behind
-`cf test`, the type-check task, the vintage gate's replay — and each takes
-the decision to record from its caller rather than from the environment
-alone. The entry point asks for records; a test driving the same function
-does not, because the files it hands over are that test's fixtures, and a
-fixture is data rather than a test of this repository. A test that drives
-such a harness as a child process hands it an empty
-`CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
-empty value is recording off, the same as an unset one.
+`cf test`, the workspace runner behind `deno task test`, the type-check
+task, the vintage gate's replay — and each takes the decision to record
+from its caller rather than from the environment alone. The entry point
+asks for records; a test driving the same function does not, because the
+files it hands over are that test's fixtures, and a fixture is data
+rather than a test of this repository. A test that drives such a harness
+as a child process hands it an empty `CF_TEST_RECORDS_DIR`, since the
+child reads its own environment; an empty value is recording off, the
+same as an unset one.
+
+A file no repository holds is no test of one. The pattern runner and the
+browser harness, which name each test by its file or record the file
+alongside it, record nothing for a file outside every repository. A
+fixture a test writes to a temporary directory is such a file, so either
+harness run over one records nothing even where the run inherited a spool.
 
 A check that no lane can be asked to run is not recorded. A record is one
 execution of one test, and every history built from records — flake rate,
@@ -265,11 +300,17 @@ asked of the identity the lane wrote, before any alias is resolved, so
 that a line in the alias file cannot decide whether a measurement enters
 a test's history.
 
-A test another workflow already records against the same commit is not
-recorded a second time. One execution of one test is one record, so a
-second workflow running those tests on that commit would give each of
-them two entries in its history. The exemption covers tests rather than
-jobs: a test that runs only in such a job is recorded there.
+A test another workflow already records against the same commit in the
+same order is not recorded a second time. One execution of one test is
+one record, so a second workflow running those tests on that commit in
+that order would give each of them two entries in its history. The
+exemption covers tests rather than jobs: a test that runs only in such a
+job is recorded there. A run in another order is a different execution
+and is recorded. The daily run of every suite at the head of `main`
+under the next day's seed
+([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead))
+is such a run, and its contexts' `shuffleSeed` is what tells its records
+apart from those of the commit's own run.
 
 `run-recorded` records the command it wraps, as one line carrying the
 identity the wrapper was given. It is therefore for a command that is
@@ -571,8 +612,9 @@ object in the store was authored under the write-access group's trust;
 trusted the same way a same-repository branch's is, and what the flag
 still tells a consumer is that the run executed unmerged pull-request
 code. Consumers that feed decisions read `submissions/ci/` only, and
-take baselines from `event: "push"` runs, whose code the tree itself
-carries. A
+take baselines from runs of the head of `main` — `event` `"push"`,
+`"schedule"` or `"workflow_dispatch"` on branch `main` — whose code the
+tree itself carries. A
 `local/<username>/` prefix attributes records to the key's named holder
 under the trust of the repository's write-access group, since the minting
 workflow's username input lets any member mint for any username, with the

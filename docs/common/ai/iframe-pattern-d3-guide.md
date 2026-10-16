@@ -258,6 +258,12 @@ state.
 Append new members with `push()` as the complete guest above does, so
 concurrent additions compose.
 
+Status that other viewers should see while it happens and that nobody needs
+afterwards, such as a brush in progress or each viewer's hovered mark, travels
+through a presence room instead of a Cell.
+[Optional presence](./iframe-pattern-guide.md#optional-presence) in the
+iframe pattern guide is the contract.
+
 When an interaction starts from an array position, resolve that position to a
 stable Cell before subscribing or writing. The returned handle remains attached
 to the same item even when it moves:
@@ -316,6 +322,12 @@ small assets locally, or pass data through `input`; do not depend on a CDN,
 `fetch()`, or remote fonts. A custom shell must contain
 `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once. Buttons must use `type="button"`
 so an accidental form ancestor cannot trigger navigation.
+
+Style the shell and the chart with the ambient theme the iframe receives — its
+elements, `cf-*` classes, and `--cf-theme-*` variables, which SVG `fill` and
+`stroke` accept as `var(--cf-theme-color-primary)` — and spell no color or
+font; see
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme).
 
 ## Generate and validate
 

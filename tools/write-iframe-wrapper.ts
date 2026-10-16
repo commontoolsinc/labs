@@ -12,6 +12,9 @@ type DatabaseConfig = {
   tables: Record<string, Record<string, string>>;
 };
 
+/** The resource whose field a presence room is derived from. */
+type PresenceField = "state" | "output";
+
 type PatternConfig = {
   name: string;
   displayName?: string;
@@ -19,6 +22,7 @@ type PatternConfig = {
   outputScope?: Scope;
   frameHeight?: string;
   databases?: Record<string, DatabaseConfig>;
+  presence?: Record<string, PresenceField>;
 };
 
 type Options = {
@@ -101,7 +105,10 @@ function validateConfig(value: unknown):
       "name" | "displayName" | "stateScope" | "outputScope" | "frameHeight"
     >
   >
-  & { databases: Record<string, Required<DatabaseConfig>> } {
+  & {
+    databases: Record<string, Required<DatabaseConfig>>;
+    presence: Record<string, PresenceField>;
+  } {
   const source = record(value, "IFRAME_PATTERN");
   if (typeof source.name !== "string" || !IDENTIFIER.test(source.name)) {
     throw new TypeError(
@@ -165,6 +172,30 @@ function validateConfig(value: unknown):
     };
   }
 
+  const presence: Record<string, PresenceField> = Object.create(null);
+  const presenceSource = source.presence === undefined
+    ? {}
+    : record(source.presence, "IFRAME_PATTERN.presence");
+  for (const [name, field] of Object.entries(presenceSource)) {
+    if (
+      name.length === 0 || RESERVED_RESOURCES.has(name) || name in databases
+    ) {
+      throw new TypeError(
+        `Presence room name ${
+          JSON.stringify(name)
+        } must be non-empty and distinct from input, state, output, and every database.`,
+      );
+    }
+    if (field !== "state" && field !== "output") {
+      throw new TypeError(
+        `Presence room ${
+          JSON.stringify(name)
+        } must name "state" or "output", the resource whose field it follows.`,
+      );
+    }
+    presence[name] = field;
+  }
+
   return {
     name: source.name,
     displayName,
@@ -172,6 +203,7 @@ function validateConfig(value: unknown):
     outputScope: scope(source.outputScope, "IFRAME_PATTERN.outputScope"),
     frameHeight,
     databases,
+    presence,
   };
 }
 
@@ -269,16 +301,34 @@ function wrapperSource(
     "type VNode",
     constructsWritable ? "Writable" : "type Writable",
   ];
-  const contextDatabaseFields = databases.map(([name]) =>
-    `  ${JSON.stringify(name)}: SqliteDb;`
-  ).join("\n");
-  const contextDatabaseValues = databases.map(([name], index) =>
-    `    [${JSON.stringify(name)}]: ${databaseVariable(index)},`
-  ).join("\n");
+  // A presence room is the room of a field, so the context names the field's
+  // cell a second time and the resource kind withholds its data.
+  const presence = Object.entries(config.presence);
+  const presenceFieldType = {
+    state: "Writable<Default<IframeStateData, typeof DEFAULT_STATE>>",
+    output: "Writable<Default<IframeOutputData, typeof DEFAULT_OUTPUT>>",
+  };
+  const contextResourceFields = [
+    ...databases.map(([name]) => `  ${JSON.stringify(name)}: SqliteDb;`),
+    ...presence.map(([name, field]) =>
+      `  ${JSON.stringify(name)}: ${presenceFieldType[field]};`
+    ),
+  ].join("\n");
+  const contextResourceValues = [
+    ...databases.map(([name], index) =>
+      `    [${JSON.stringify(name)}]: ${databaseVariable(index)},`
+    ),
+    ...presence.map(([name, field]) =>
+      `    [${JSON.stringify(name)}]: ${field},`
+    ),
+  ].join("\n");
   const resourceKinds = [
     '              input: "readonly",',
     ...databases.map(([name]) =>
       `              [${JSON.stringify(name)}]: "sqlite",`
+    ),
+    ...presence.map(([name]) =>
+      `              [${JSON.stringify(name)}]: "presence",`
     ),
   ].join("\n");
 
@@ -328,7 +378,7 @@ interface IframeContextInput {
   input: IframeInputData;
   state: Writable<Default<IframeStateData, typeof DEFAULT_STATE>>;
   output: Writable<Default<IframeOutputData, typeof DEFAULT_OUTPUT>>;
-${contextDatabaseFields}
+${contextResourceFields}
 }
 
 interface IframeContextOutput extends IframeContextInput {}
@@ -359,7 +409,7 @@ ${
     input: iframeInput,
     state,
     output,
-${contextDatabaseValues}
+${contextResourceValues}
   });
 
   return {
@@ -499,7 +549,7 @@ async function main(): Promise<void> {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${htmlText(config.displayName)}</title>
-  <style>html,body,#root{box-sizing:border-box;width:100%;height:100%;margin:0}body{font-family:system-ui,sans-serif}</style>
+  <style>html,body,#root{box-sizing:border-box;width:100%;height:100%;margin:0}</style>
 </head>
 <body>
   <div id="root"></div>

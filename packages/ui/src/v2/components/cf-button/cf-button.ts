@@ -1,4 +1,3 @@
-import { consume } from "@lit/context";
 import { html, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
@@ -8,10 +7,8 @@ import { oneOf } from "../../core/property-guards.ts";
 import {
   applyThemeToElement,
   type CFTheme,
-  cfThemeContext,
   type ColorIntent,
   type ComponentSize,
-  defaultTheme,
 } from "../theme-context.ts";
 import { styles } from "./styles.ts";
 
@@ -83,9 +80,12 @@ export class CFButton extends BaseElement {
   declare disabled: boolean;
   declare type: "button" | "submit" | "reset";
 
-  @consume({ context: cfThemeContext, subscribe: true })
+  /**
+   * A theme given to this element directly, written over the theme it would
+   * otherwise inherit. Left unset, the element draws the ambient theme.
+   */
   @property({ attribute: false })
-  accessor theme: CFTheme = defaultTheme;
+  accessor theme: CFTheme | undefined = undefined;
 
   constructor() {
     super();
@@ -131,7 +131,6 @@ export class CFButton extends BaseElement {
   ) {
     super.firstUpdated(changedProperties);
     this._updateAccessibilityAttributes();
-    this._updateThemeProperties();
 
     // Sync the host's aria-label from slotted text content. The inner
     // <button> is aria-hidden, so the slot content is invisible to the
@@ -156,7 +155,7 @@ export class CFButton extends BaseElement {
       this._updateAccessibilityAttributes();
     }
     if (changedProperties.has("theme")) {
-      this._updateThemeProperties();
+      applyThemeToElement(this, this.theme);
     }
   }
 
@@ -173,11 +172,6 @@ export class CFButton extends BaseElement {
       this.size = oneOf(this.size, buttonSizes, "md");
       this.type = oneOf(this.type, buttonTypes, "button");
     }
-  }
-
-  private _updateThemeProperties() {
-    const currentTheme = this.theme || defaultTheme;
-    applyThemeToElement(this, currentTheme);
   }
 
   private _updateAccessibilityAttributes() {

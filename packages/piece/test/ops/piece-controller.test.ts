@@ -6,7 +6,10 @@ import {
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { readStoredCfcMetadata } from "@commonfabric/runner/cfc";
+import {
+  cfcLabelViewForCell,
+  readStoredCfcMetadata,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -229,6 +232,20 @@ describe("piece-controller", () => {
         .flatMap((entry) => entry.label.confidentiality ?? []);
     }
 
+    /**
+     * The confidentiality atoms a read of the input at `path` reaches,
+     * through whatever links the path lands on or crosses.
+     */
+    async function confidentialityReachedAt(
+      piece: PieceController,
+      path: string[],
+    ): Promise<unknown[]> {
+      const view = cfcLabelViewForCell(await piece.input.getCell(path));
+      return (view?.entries ?? [])
+        .filter((entry) => entry.path.length === 0)
+        .flatMap((entry) => entry.label.confidentiality ?? []);
+    }
+
     it("leaves the linked document's confidentiality off the field it writes", async () => {
       const counter = await counterHolding("labeled", { count: 3 }, true);
       const piece = await pieces.create(
@@ -244,9 +261,13 @@ describe("piece-controller", () => {
         "the write read the counter through the handle slot, and its " +
           "transaction carried the counter's label onto the written field",
       ).not.toContainEqual(personalSpaceOf(space));
-      // The input document carries the counter's label where it links it,
-      // so the atom the written field must not carry is present beside it.
+      // The counter's label stays with the counter: the input document
+      // stores none of it where it links the counter, and a read through
+      // that link reaches it. So the atom the written field must not carry
+      // is one a write that read through the handle slot would have carried.
       expect(await inputConfidentialityAt(piece, ["tally", "count"]))
+        .toEqual([]);
+      expect(await confidentialityReachedAt(piece, ["tally", "count"]))
         .toContainEqual(personalSpaceOf(space));
     });
 

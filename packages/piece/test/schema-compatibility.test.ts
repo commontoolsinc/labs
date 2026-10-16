@@ -1750,6 +1750,39 @@ describe("piece schema compatibility", () => {
     ).toThrow(/not stable under default insertion/);
   });
 
+  it("admits a recursive labeled schema with no default, and refuses one whose recursion holds a default", () => {
+    // A FabriChat message replies to a message, so the walk for defaults below
+    // a label meets the node it is already walking. It stops there rather than
+    // recursing without end, and still finds a default the recursion holds.
+    const message = (withReactionsDefault: boolean): JSONSchema => ({
+      $defs: {
+        message: {
+          type: "object",
+          ifc: { addIntegrity: ["fabrichat-test-message"] },
+          properties: {
+            body: { type: "string" },
+            replyTo: { $ref: "#/$defs/message" },
+            ...(withReactionsDefault
+              ? {
+                reactions: {
+                  type: "array",
+                  items: { type: "string" },
+                  default: [],
+                },
+              }
+              : {}),
+          },
+        },
+      },
+      $ref: "#/$defs/message",
+    });
+    expect(() => assertSchemaSubset(message(false), message(false))).not
+      .toThrow();
+    expect(() => assertSchemaSubset(message(true), message(true))).toThrow(
+      /not stable under default insertion/,
+    );
+  });
+
   it("rejects cell and scope changes when a record gains a default", () => {
     for (
       const [before, after, message] of [

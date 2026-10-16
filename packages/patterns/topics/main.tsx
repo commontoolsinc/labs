@@ -660,18 +660,13 @@ export const submitProfileTopic = handler<void, {
 
   /** The mention universe, declared at the child's own demand — the three
    * strings a universe entry carries — so the board's index rows and a plain
-   * list of pieces both satisfy it. `Writable` for the handler-state reason
-   * `boardCrossrefs` states, and nothing here writes an entry. */
-  mentionable: Writable<TopicMentionable[] | Default<[]>>;
+   * list of pieces both satisfy it. Handed to the new topic as it arrives;
+   * nothing here writes an entry. */
+  mentionable: ReadonlyCell<TopicMentionable[] | Default<[]>>;
 
-  /** `Writable` because a `Cell` is what survives handler state: `HandlerState`
-   * passes one through whole and recursively maps everything else, and a
-   * `ReadonlyCell` is not a `Cell`, so it arrives as a plain readonly object
-   * that no longer satisfies the input this is handed straight to. The input
-   * is not what refuses it — it declares `ReadonlyCell`, and an intact
-   * `ReadonlyCell` and the plain rows `StripCell` unwraps it to both fit.
-   * Nothing here writes a row. */
-  boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
+  /** The board's pivot, handed to the new topic as it arrives; nothing here
+   * writes a row. */
+  boardCrossrefs: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
 
   /** The namespace, written one key per create. Read for its keys and written
    * at one of them inside this handler, so the allocation and the append are
@@ -680,7 +675,6 @@ export const submitProfileTopic = handler<void, {
   names: Writable<Default<NamesMap, {}>>;
   newTitle: Writable<string>;
   profileName: string;
-  profileAvatar: string;
 }>((_, {
   topics,
   mentionable,
@@ -688,10 +682,9 @@ export const submitProfileTopic = handler<void, {
   names,
   newTitle,
   profileName,
-  profileAvatar,
 }) => {
   const trimmed = newTitle.get().trim();
-  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  const author = topicAuthorFromPerson(profileName);
   if (!trimmed || !author) return;
   // The number, the create, and the append are one transaction, as they are
   // in `addTopic`: no reader observes the topic without its number, and a
@@ -741,11 +734,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   // Browser authorship comes from the current viewer's canonical Profile.
   // CLI streams below remain wish-free: agents sign each mutation in the
   // event payload, while Fabric records the human principal behind the key.
-  // One wish, not three: `#profile` resolves the profile itself, and `name`
-  // and `avatar` are fields on it. The `#profileName` / `#profileAvatar`
-  // targets are the same two fields reached through a second and third
-  // resolution of the same profile.
-  const profileWish = wish<{ name: string; avatar: string }>({
+  // One wish, not two: `#profile` resolves the profile itself, and `name` is a
+  // field on it. The `#profileName` target is the same field reached through a
+  // second resolution of the same profile.
+  const profileWish = wish<{ name: string }>({
     query: "#profile",
   });
   // A wish resolves after setup, so each of these stays a derivation. Reading
@@ -753,7 +745,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
   // started with: the Start button never enables, and a topic filed through it
   // carries blank attribution.
   const profileName = profileWish.result?.name ?? "";
-  const profileAvatar = profileWish.result?.avatar ?? "";
   const hasProfile = profileName.trim().length > 0;
 
   const addTopic = action<AddTopicEvent, AddTopicResult>((
@@ -814,7 +805,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, names }) => {
     names,
     newTitle,
     profileName,
-    profileAvatar,
   });
 
   return {

@@ -350,6 +350,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   setSharedMemoryConnection?(enabled: boolean): void;
 
   /**
+   * Keeps session-scoped documents in the local replica when enabled.
+   * Repeated configuration must agree across runtimes sharing this manager.
+   * @throws If a different policy has already been configured.
+   */
+  setLocalSessionDocuments?(enabled: boolean): void;
+
+  /**
    * Record a runtime-learned HTTP or HTTPS host hint for a space
    * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
@@ -1413,6 +1420,16 @@ export interface IStorageTransaction {
   derivedWrites?: boolean;
 
   /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
+
+  /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
    * (server-execution v2 stage A — OW17's tx→replica identity seam,
@@ -1938,6 +1955,21 @@ export interface TransactionSealDestination {
     tx: IExtendedStorageTransaction,
     options?: TransactionCommitOptions,
   ): Promise<Result<Unit, CommitError>> | TransactionCommitReceipt;
+
+  /**
+   * Whether `seal` would drop `tx`'s writes rather than accept them, were
+   * `tx` sealed now. A commit asks before its CFC boundary pass and skips the
+   * pass for a transaction this returns `true` for: writes that reach no
+   * store and no reader cross no boundary. Absent, the commit treats no
+   * transaction as discarded, and leaves what becomes of its writes to `seal`.
+   *
+   * The answer is for the moment it is asked and binds nothing: a destination
+   * may answer differently later, in either direction, and `seal` decides for
+   * itself when it runs. A commit therefore asks again right before it seals,
+   * in the same synchronous stretch as the seal's own decision, rather than
+   * trusting what a preparation ahead of it was told.
+   */
+  discards?(tx: IExtendedStorageTransaction): boolean;
 
   /**
    * The HOME space of the wave this destination seals into (the space
@@ -3498,6 +3530,23 @@ export interface ISpaceReplica extends ISpace {
     coverClass?: CommitClass;
     pendingLocalSeqs: number[];
   };
+
+  /**
+   * Resolves once every client speculation layer standing over the document
+   * now (entries sealed `speculative: true` — speculation.md §1) has settled,
+   * by retirement or withdrawal; `undefined` when none stands. A layer sealed
+   * after the call is not waited for.
+   *
+   * A layer masks the document's durable state, so a change to that state
+   * beneath it changes nothing visible and notifies nothing, and neither does
+   * its retirement over a durable value equal to its own. A reader of the
+   * durable view waits on this to learn of either.
+   */
+  whenSpeculationSettled?(
+    id: URI,
+    scope?: CellScope,
+    identity?: ScopeKeyIdentity,
+  ): Promise<void> | undefined;
 
   /**
    * The store seq a local commit's accept committed at (speculation.md

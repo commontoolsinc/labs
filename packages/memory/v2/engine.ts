@@ -5547,11 +5547,15 @@ const applyCommitTransaction = (
     }
   }
   const hasPreconditions = (commit.preconditions?.length ?? 0) > 0;
+  const hasReads = commit.reads.confirmed.length > 0 ||
+    commit.reads.pending.length > 0;
   if (
-    commit.operations.length === 0 && !hasPreconditions &&
+    commit.operations.length === 0 && !hasPreconditions && !hasReads &&
     allowEmptyOperations !== true
   ) {
-    throw new Error("memory v2 commit requires at least one operation");
+    throw new Error(
+      "memory v2 commit requires operations, reads, or preconditions",
+    );
   }
 
   const branch = commit.branch ?? DEFAULT_BRANCH;

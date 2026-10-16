@@ -1,5 +1,9 @@
 import type { CellKind, FabricValue, LinkScope } from "@commonfabric/api";
-import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
+import {
+  debugStr,
+  fabricAwareEqual,
+  taggedHashStringOf,
+} from "@commonfabric/data-model";
 import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -2004,8 +2008,9 @@ function deriveTargetContracts(
 /**
  * Parse a supplied link and recover its producer's durable schema contract.
  * A metadata-less linked document is held to the prior argument contract on
- * a pattern update. Dynamic binding can explicitly accept an unproven source;
- * other supplied-link operations require the durable contract.
+ * a pattern update, and `heldToPriorContract` says so. Dynamic binding can
+ * explicitly accept an unproven source; other supplied-link operations
+ * require the durable contract.
  */
 function resolveDurableSource(
   suppliedLink: SuppliedLink,
@@ -2020,6 +2025,7 @@ function resolveDurableSource(
   link: NormalizedLink;
   linkedCell: Cell<unknown>;
   durableSource: DurableSourceContract | undefined;
+  heldToPriorContract: boolean;
 } {
   const link = parseLinkOrThrow(suppliedLink.value, linkBase);
   const linkedCell = pieces.runtime.getCellFromLink(
@@ -2031,7 +2037,9 @@ function resolveDurableSource(
   // serialized alias can carry a narrowed schema. Neither is a future-value
   // invariant, so a static producer proof needs producer-owned metadata.
   let durableSource = durableSourceContract(linkedCell, pieces);
-  if (durableSource === undefined && priorArgumentSchema !== undefined) {
+  const heldToPriorContract = durableSource === undefined &&
+    priorArgumentSchema !== undefined;
+  if (heldToPriorContract) {
     // Pattern update over existing state: hold a metadata-less linked doc to
     // the prior argument contract at this path (see the option's doc).
     durableSource = {
@@ -2076,7 +2084,7 @@ function resolveDurableSource(
       }
     }
   }
-  return { link, linkedCell, durableSource };
+  return { link, linkedCell, durableSource, heldToPriorContract };
 }
 
 /** Localize the destination contracts and derive their agreed outer shape. */
@@ -2410,9 +2418,11 @@ function provePreservedContracts(
 }
 
 /**
- * Whether an update retains both a committed handle and its input contract.
- * The producer's policy remains on the linked document; preserving the same
- * handle under the same contract changes neither its policy nor its authority.
+ * Whether an update retains both a committed handle and its input contract,
+ * where the handle is a direct one or a link to a metadata-less document that
+ * the prior contract governs. The producer's policy remains on the linked
+ * document; preserving the same handle under the same contract changes
+ * neither its policy nor its authority.
  * This proves consumer-contract continuity, not that the producer contract
  * was checked at link creation or has stayed unchanged. Producer enforcement
  * on access and commit governs the retained handle.
@@ -2500,6 +2510,8 @@ export function assertSuppliedLinkSchemasCompatible(
      * With `linksPreservedVerbatim`, this also proves an existing direct
      * handle's consumer contract unchanged. Such a handle keeps the linked
      * producer's policy without requiring that policy on the consumer schema.
+     * The same proof admits a committed link to a metadata-less document
+     * whose contract is unchanged, without the new-link proof.
      */
     priorArgumentSchema?: JSONSchema;
 
@@ -2545,16 +2557,17 @@ export function assertSuppliedLinkSchemasCompatible(
       suppliedLink.path,
       displayPath,
     );
-    const { link, linkedCell, durableSource } = resolveDurableSource(
-      suppliedLink,
-      linkBase,
-      baseCell,
-      fullPath,
-      pieces,
-      options.priorArgumentSchema,
-      displayPath,
-      options.allowUnprovenSource === true && isCell(suppliedLink.value),
-    );
+    const { link, linkedCell, durableSource, heldToPriorContract } =
+      resolveDurableSource(
+        suppliedLink,
+        linkBase,
+        baseCell,
+        fullPath,
+        pieces,
+        options.priorArgumentSchema,
+        displayPath,
+        options.allowUnprovenSource === true && isCell(suppliedLink.value),
+      );
     const { localizedTargets, targetOuter } = localizeTargetOuter(
       targetContracts,
       displayPath,
@@ -2585,6 +2598,23 @@ export function assertSuppliedLinkSchemasCompatible(
       );
     }
     if (preservedOuter === undefined) {
+      // A metadata-less document is held to the prior contract, so its
+      // producer proof compares that contract with the candidate's. When the
+      // link is the one already committed and the contract is unchanged, that
+      // proof can only refuse what new-link default insertion refuses, and a
+      // link carried over byte for byte is not new.
+      if (
+        heldToPriorContract &&
+        options.linksPreservedVerbatim === true &&
+        options.destinationIsStream !== true &&
+        retainsInputHandleContract(
+          suppliedLink,
+          baseCell,
+          basePath,
+          options.priorArgumentSchema,
+          targetContracts,
+        )
+      ) continue;
       proveRebuiltContracts(sourceContracts, targetContracts, displayPath);
     } else {
       const localized = policePreservedEnvelope(
@@ -4310,12 +4340,23 @@ export class PieceController<T = unknown> {
    * this call adopts whatever it finds as its own expectation, so a writer
    * landing between a caller's proof and this read would have its change
    * silently written over. With it, such a piece is refused by name.
+   *
+   * `expectedRevision` pins the revision head the same way, `null` naming a
+   * piece whose source log is empty. Every source transition appends a
+   * revision, so a caller that proved what a piece's log holds pins every
+   * transition with it, including one that leaves the pattern as it was: a
+   * detach, or an edit back to the same source. A pattern changed by a write
+   * that is no source transition leaves the head alone, which is what the
+   * pattern pin is for. Either pin refuses with
+   * {@link PieceSourceChangedError}, before the change is prepared and again
+   * when the piece's source moves while it is prepared or written.
    */
   async changeSource(
     action: PieceSourceAction,
     options: {
       confirmedChange?: PreparedPieceSourceChange;
       expectedPattern?: { identity: string; symbol: string };
+      expectedRevision?: string | null;
     } = {},
   ): Promise<PieceSourceActionResult> {
     if (!isPieceSourceAction(action)) {
@@ -4362,6 +4403,21 @@ export class PieceController<T = unknown> {
           `${pinned.symbol} this change was proved against.`,
       );
     }
+    const pinnedRevision = options.expectedRevision;
+    if (
+      pinnedRevision !== undefined && expected.revisionId !== pinnedRevision
+    ) {
+      throw new PieceSourceChangedError(
+        `The piece's source log ${sourceLogState(expected.revisionId)}, but ` +
+          `this change was proved against one that ` +
+          `${sourceLogState(pinnedRevision)}.`,
+      );
+    }
+    // What a pinned caller proved the piece runs: past the checks above it is
+    // the snapshot's pattern, which a move inside the write is refused off.
+    const proved = pinned === undefined && pinnedRevision === undefined
+      ? undefined
+      : expected.pattern;
 
     const confirmed = options.confirmedChange;
     if (
@@ -4383,10 +4439,11 @@ export class PieceController<T = unknown> {
       if (expected.origin === null) {
         throw new Error("piece is not following a source");
       }
-      const baseline = await preparePieceSourceTransitionBaseline(
+      const baseline = await preparePinnedBaseline(
         this.#pieces.runtime,
         this.#cell,
         expected,
+        proved,
       );
       const transition = pieceSourceTransition(
         expected,
@@ -4424,7 +4481,7 @@ export class PieceController<T = unknown> {
             executionWarning: pieceSourceErrorMessage(error),
           };
         }
-        throw error;
+        throw pinnedSourceMoved(error, proved);
       }
     }
 
@@ -4493,10 +4550,11 @@ export class PieceController<T = unknown> {
       // displaced-identity arm, as it does under `setPattern`. A piece that
       // recorded how it got its pattern keeps its claim to a restorable
       // current source, so the baseline still refuses one that has none.
-      const baseline = await preparePieceSourceTransitionBaseline(
+      const baseline = await preparePinnedBaseline(
         this.#pieces.runtime,
         this.#cell,
         expected,
+        proved,
         expected.revisionId === null && expected.origin === null
           ? { allowUnavailable: true }
           : {},
@@ -4768,7 +4826,7 @@ export class PieceController<T = unknown> {
           };
         }
       }
-      throw pinnedSourceMoved(error, pinned);
+      throw pinnedSourceMoved(error, proved);
     }
   }
 
@@ -5572,6 +5630,41 @@ function isOverridableArgumentCompatibilityError(error: unknown): boolean {
 
 function pieceSourceErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Helper for `changeSource()`, which prepares a transition's baseline and
+ * reports a move under a pinned caller as {@link PieceSourceChangedError}.
+ * The baseline reads the piece again past an `await`, so a source change
+ * landing after the pin check is found there before the write sees it.
+ */
+async function preparePinnedBaseline(
+  runtime: Runtime,
+  cell: Cell<unknown>,
+  expected: PieceSourceSnapshot,
+  proved: { identity: string; symbol: string } | undefined,
+  options: { allowUnavailable?: boolean } = {},
+): Promise<PieceSourceTransitionBaseline> {
+  try {
+    return await preparePieceSourceTransitionBaseline(
+      runtime,
+      cell,
+      expected,
+      options,
+    );
+  } catch (error) {
+    throw pinnedSourceMoved(error, proved);
+  }
+}
+
+/**
+ * Helper for `changeSource()`'s revision pin, which says where a source log
+ * stands: empty, or ending at the revision `revisionId` names.
+ */
+function sourceLogState(revisionId: string | null): string {
+  return revisionId === null
+    ? "is empty"
+    : debugStr`ends at revision $quote${revisionId}`;
 }
 
 function pieceSourceTransition(

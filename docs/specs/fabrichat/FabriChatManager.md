@@ -71,19 +71,27 @@ catalog, which neither the rendering nor `rooms` reads. Registration takes the
 room's title, whatever its kind. Whenever the manager handles `accept` or
 `joinRoom` for a room its catalog lists, it reads the room's `about`, and
 retitles the entry (`retitleSharedSpaceIn()`) where the room's title differs
-from the entry's, moving neither its revision nor its membership. A join of an
-already-listed room arrives with every write in the room, so that is all it
-reads of the room, and it writes the catalog only on a mismatch. The member who
-retitles a room tells their manager at once; another member's entry follows on
-their manager's next event for that room: their next message, reaction, or
-retitle, an acceptance, or a client's `joinRoom` when they open it.
+from the entry's, moving neither its revision nor its membership. That is all a
+join of an already-listed room reads of the room, and it writes the catalog
+only on a mismatch. The one exception is a `joinRoom` marked `messageAct`,
+which a room sends with every message and reaction: none of those changes the
+title, so the manager reads nothing of the room's `about` for one. The member
+who retitles a room tells their manager at once; another member's entry follows
+on their manager's next event for that room other than a message or a
+reaction: their own retitle, an acceptance, or a client's `joinRoom` when they
+open it.
 
 `direct` holds one entry per counterpart, including forgotten rooms, for direct
 rooms this manager created or accepted. `openDirect` finds a direct room there
-and restores its membership. A room another manager created and offered the
-user is there too once the host's share intake accepts it on the user's behalf.
-`rooms` can also hold a second direct room with the same counterpart, after
-crossing creations.
+and restores its membership. A room found there that has a notice for its
+counterpart still waiting in `outgoingNotices`, since the room was offered them
+nothing, is offered to them, as step 3 of [creating a room](#creating-a-room)
+offers a new room, once a request names a profile of theirs that points at an
+inbox, and the notice is removed. A counterpart the room's roster already lists
+has joined the room, and is offered nothing. A room another manager created and
+offered the user is there too once the host's share intake accepts it on the
+user's behalf. `rooms` can also hold a second direct room with the same
+counterpart, after crossing creations.
 
 `direct`'s entries, and the entry a `done` outcome in `requests` carries, hold a
 room as `FabriChatRoom.inSpace(…)` returned it at creation, or as `accept` was
@@ -102,7 +110,9 @@ acceptance made on the user's behalf, with `keepArchived`, leaves it archived.
 the user's own choice, so it restores an archived entry whatever it says of
 `keepArchived`, and it lists a direct room this user created, which `accept`
 refuses, without changing `direct`. A join of a room the catalog keeps as saved
-that names no `requestId` changes nothing and records nothing. A room offered to the
+that names no `requestId` changes no membership and records nothing; it brings
+the entry's title up to the room's, as described below, unless it is marked
+`messageAct`. A room offered to the
 user is registered by the host that vets the offer (see [first
 contact](#first-contact)). Accepting or joining a container's declared chat supplies `container`, a link
 to the root declaring it. The manager checks that its `chatRoom` resolves to

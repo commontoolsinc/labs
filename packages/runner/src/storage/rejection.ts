@@ -89,6 +89,17 @@ export function isTerminalRejection(
 }
 
 /**
+ * The store refused the commit for standing for more than it admits in one
+ * message. The size grows with what the write carries, so the same write is
+ * refused again while that and the store's limit stay as they are.
+ */
+export function isOversizedRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "MessageTooLargeError";
+}
+
+/**
  * A conflict rejection is a stale-read / pending-dependency commit failure
  * (normalized to `ConflictError`, see storage/v2.ts): the authoritative version
  * is ahead of this replica. A reactive compute or effect recovers from one by

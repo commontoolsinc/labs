@@ -89,23 +89,21 @@ export const callVerbToolDescriptor: HarnessToolDescriptor = {
   toolId: "call_verb",
   title: "Call Verb",
   description:
-    "Send an event to a verb of a piece behind a handle token, running the piece's handler for it — the way a pattern changes its own state. describe_handle on the piece's token lists its verbs, each with the event schema it takes and the result schema it returns; call one of those by name with an event that satisfies its schema. Where the event takes a piece, pass that piece's handle token, never a copy of its fields. An event the verb does not declare, a missing required field, a copy where a reference is declared, or a name that is not a verb is refused before anything is sent, so a refused call changed nothing; an event the schema refuses is refused naming the field and the rule it broke, and a name that is not a verb is refused listing the verbs the piece has. A handler that rejects an event fails the call with the handler's own message. Returns the verb's result: numbers, booleans and nulls as themselves, a piece the verb returns as its handle token, and other values as reference tokens you can describe_handle or wire into run_pattern. The piece may be in this run's own space or in a space admitted to it.",
+    "Send an event to a named verb of the piece behind a handle token, running its handler; returns the verb's result, with values that are not numbers, booleans or nulls as handle or reference tokens. The piece may be in this run's space or one admitted to it.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
     properties: {
       token: {
         type: "string",
-        description:
-          "A handle token of the form cfh:a:<suffix> naming the piece.",
+        description: "The piece's cfh:a: handle token.",
       },
       verb: {
         type: "string",
         description: "The verb's name, as describe_handle lists it.",
       },
       event: {
-        description:
-          "The event to send, satisfying the verb's event schema. Omit it for a verb that takes none.",
+        description: "Omit for a verb that takes none.",
       },
     },
     required: ["token", "verb"],

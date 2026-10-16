@@ -63,9 +63,74 @@ export function readConfirmed<R>(
     const seq = confirmed ? replica.completeThroughSeq?.() : undefined;
     return seq === undefined ? { value, confirmed } : { value, confirmed, seq };
   } finally {
-    // A read-only transaction refuses abort(); closing it releases the reads
-    // it cached, which a callback that kept it would otherwise hold.
-    tx.clearReadOnly?.();
-    tx.abort();
+    closeReadTx(tx);
   }
+}
+
+/** What {@link readDurable} returns. */
+export type DurableRead<R> = {
+  /** What `read` returned. */
+  value: R;
+
+  /**
+   * Resolves once every client speculation layer that stood over a document
+   * `read` consumed has settled; absent when none stood
+   * (`ISpaceReplica.whenSpeculationSettled`).
+   */
+  speculationSettled?: Promise<void>;
+};
+
+/**
+ * Runs `read` against this runtime's replicas in one transaction that reads
+ * past any speculation overlay, and returns what it returned, with a promise
+ * for when the speculation layers over the documents it consumed have settled.
+ * What it reads is the durable view: confirmed state with this runtime's own
+ * pending writes over it, in any space. `read` runs as it does in
+ * {@link readConfirmed}.
+ *
+ * A reader subscribed to a cell learns of changes to what the cell shows,
+ * which a speculation layer masks. A change to the durable view beneath a
+ * layer shows nothing, and neither does the layer's retirement over a durable
+ * value equal to its own. So a reader waiting for the durable view to say
+ * something reads again on each change its subscription delivers and once
+ * `speculationSettled` resolves.
+ */
+export function readDurable<R>(
+  runtime: Runtime,
+  read: (tx: IExtendedStorageTransaction) => R,
+): DurableRead<R> {
+  const tx = runtime.readTx();
+  try {
+    markDurableReadTx(tx);
+    const value = read(tx);
+    const standing: Promise<void>[] = [];
+    const visited = new Set<string>();
+    for (const activity of getTransactionReadActivities(tx)) {
+      const key = `${activity.space}\0${activity.id}\0${activity.scope}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      const { replica } = runtime.storageManager.open(activity.space);
+      const settled = replica.whenSpeculationSettled?.(
+        activity.id,
+        activity.scope,
+      );
+      if (settled !== undefined) standing.push(settled);
+    }
+    return standing.length === 0
+      ? { value }
+      : { value, speculationSettled: Promise.all(standing).then(() => {}) };
+  } finally {
+    closeReadTx(tx);
+  }
+}
+
+/**
+ * Helper for {@link readConfirmed} and {@link readDurable}, which closes the
+ * read-only transaction a read ran in.
+ */
+function closeReadTx(tx: IExtendedStorageTransaction): void {
+  // A read-only transaction refuses abort(); closing it releases the reads
+  // it cached, which a callback that kept it would otherwise hold.
+  tx.clearReadOnly?.();
+  tx.abort();
 }

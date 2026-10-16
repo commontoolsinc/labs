@@ -1,7 +1,8 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { isDeepFrozen } from "@commonfabric/data-model";
+import { hashOf, isDeepFrozen } from "@commonfabric/data-model";
+import { getFrozenObjectHashCacheHitsForTestingOnly } from "@commonfabric/data-model/for-testing-only";
 import { Identity } from "@commonfabric/identity";
 import { table } from "@commonfabric/memory/sqlite/schema";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
@@ -23,7 +24,10 @@ import {
   setCfcImplementationIdentity,
   setCfcTrustSnapshot,
 } from "../../src/storage/extended-storage-transaction.ts";
-import { markReadAsAttemptedWrite } from "../../src/storage/reactivity-log.ts";
+import {
+  ignoreReadForScheduling,
+  markReadAsAttemptedWrite,
+} from "../../src/storage/reactivity-log.ts";
 import { Runtime } from "../../src/runtime.ts";
 import type { JSONSchema } from "../../src/builder/types.ts";
 import { runtimeWritePolicyAuthorization } from "../../src/cfc/types.ts";
@@ -395,6 +399,37 @@ describe("prepared digest transaction binding", () => {
         expect(input.moduleDelegations?.length).toBe(1);
         expect(isDeepFrozen(input)).toBe(true);
         expect(Object.isFrozen(meta.note.nested)).toBe(true);
+      } finally {
+        tx.abort();
+      }
+    });
+
+    it("freezes a read's marker-only `meta` without hashing it, and hashes one with a string key", () => {
+      // The hash reads no symbol-keyed property, so a `meta` of read markers
+      // alone hashes as the empty record and has nothing for the hash to
+      // refuse. Hashing a `meta` caches its hash by identity, so hashing it
+      // again afterwards is served from that cache only when the snapshot
+      // hashed it.
+      const { tx } = relevantTx();
+      try {
+        const markers = { ...ignoreReadForScheduling };
+        const keyed = { note: "keyed" };
+        tx.readValueOrThrow(address("markers"), { meta: markers });
+        tx.readValueOrThrow(address("keyed"), { meta: keyed });
+        tx.prepareForCommit();
+        expect(tx.getCfcState().prepare.status).toBe("prepared");
+        expect(Object.isFrozen(markers)).toBe(true);
+        const servedBeforeMarkers =
+          getFrozenObjectHashCacheHitsForTestingOnly();
+        hashOf(markers);
+        expect(getFrozenObjectHashCacheHitsForTestingOnly()).toBe(
+          servedBeforeMarkers,
+        );
+        const servedBeforeKeyed = getFrozenObjectHashCacheHitsForTestingOnly();
+        hashOf(keyed);
+        expect(getFrozenObjectHashCacheHitsForTestingOnly()).toBe(
+          servedBeforeKeyed + 1,
+        );
       } finally {
         tx.abort();
       }

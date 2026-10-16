@@ -3163,52 +3163,15 @@ describe("CfHarnessPromptLoop opening research", () => {
       }
     });
 
-    it("counts a model classification's tokens in the run's total usage", async () => {
-      const task = "the quarterly numbers for Q3 sales";
-      const classificationRequests: HarnessModelTurnRequest[] = [];
-      const loop = new CfHarnessPromptLoop({
-        researchReasoningEffort: "low",
-        engine: new CfHarnessEngine({
-          sandboxRuntime: new FakeSandboxRuntime(),
-          runId: "run-classified-by-model",
-          model: "gpt-test",
-        }),
-        modelClient: {
-          providerId: "test-provider",
-          complete: (request) => {
-            if (request.runId.endsWith(":task-classification")) {
-              classificationRequests.push(request);
-            }
-            return Promise.resolve(
-              request.runId.endsWith(":task-classification")
-                ? {
-                  assistant: { role: "assistant", content: "find" },
-                  usage: { totalTokens: 5 },
-                }
-                : {
-                  assistant: { role: "assistant", content: "Done." },
-                  usage: { totalTokens: 7 },
-                },
-            );
-          },
-        },
-      });
+    it("makes no model call to tag a task no rule reads", async () => {
+      const task = "weather in Brisbane";
+      const runIds: string[] = [];
+      const loop = classifiedLoop("run-classified-assumed", runIds);
 
-      const classification = await loop.classifyTask(task, {
-        signal: new AbortController().signal,
-      });
-      const result = await loop.runPrompt({
-        prompt: task,
-        openingResearchTask: task,
-        promptSlotBinding: directPromptSlotBinding,
-      });
+      const classification = await loop.classifyTask(task);
 
-      expect(classification).toMatchObject({ tags: ["find"], path: "model" });
-      expect(result.usage?.totalTokens).toBe(7);
-      expect(result.totalUsage?.totalTokens).toBe(12);
-      expect(classificationRequests).toHaveLength(1);
-      expect(classificationRequests[0].reasoningEffort).toBe("low");
-      expect(classificationRequests[0].signal).toBeDefined();
+      expect(classification).toMatchObject({ tags: ["find"], path: "assumed" });
+      expect(runIds).toEqual([]);
     });
 
     it("runs opening research for an author task", async () => {
@@ -7214,6 +7177,17 @@ Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default
     denied.detail,
     'delegate_task profile "browser" is not allowed in this run',
   );
+  const firstRequest = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{
+      name?: string;
+      parameters?: { properties?: { profile?: { enum?: string[] } } };
+    }>;
+  };
+  assertEquals(
+    firstRequest.tools.find((tool) => tool.name === "delegate_task")
+      ?.parameters?.properties?.profile?.enum,
+    ["default"],
+  );
   assertEquals(result.runState.subagentRuns, undefined);
   assertEquals(result.runState.toolOutputs, []);
   assertEquals(result.runState.policyEvents[0]?.toolInputSummary, {
@@ -7833,7 +7807,12 @@ Deno.test("CfHarnessPromptLoop denies delegate_task when the profile is not auth
     result.runState.policyEvents[0]?.detail,
     'delegate_task profile "default" is not allowed in this run',
   );
-  assertEquals(result.runState.primaryFailure?.kind, "tool_not_allowed");
+  assertEquals(result.runState.status, "completed");
+  assertEquals(
+    result.runState.failureRecords?.map((failure) => failure.kind),
+    ["subagent_profile_not_allowed"],
+  );
+  assertEquals(result.runState.primaryFailure, undefined);
 });
 
 Deno.test("CfHarnessPromptLoop completes a direct assistant response without tool calls", async () => {

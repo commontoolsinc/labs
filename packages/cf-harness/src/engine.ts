@@ -143,6 +143,7 @@ import {
   type ClassifyHarnessRunErrorOptions,
   collectHarnessCapabilitySnapshot,
   createHarnessFailureRecord,
+  type HarnessFailureKind,
   type HarnessFailureRecord,
 } from "./diagnostics.ts";
 import {
@@ -1740,8 +1741,13 @@ export class CfHarnessEngine {
     return this.getRunState();
   }
 
+  /**
+   * Records a policy event, and a denial among the run's failures, as
+   * `failureKind` when given.
+   */
   async recordPolicyEvent(
     event: Omit<HarnessPolicyEvent, "type" | "at">,
+    options: { failureKind?: HarnessFailureKind } = {},
   ): Promise<HarnessRunState> {
     const now = this.#now();
     const policyEvent = createHarnessPolicyEvent({ ...event, at: now });
@@ -1751,7 +1757,10 @@ export class CfHarnessEngine {
       policyEvent,
       now,
     );
-    const failure = classifyHarnessPolicyEventFailure(policyEvent);
+    const failure = classifyHarnessPolicyEventFailure(
+      policyEvent,
+      options.failureKind,
+    );
     if (failure !== undefined) {
       this.#runState = appendHarnessFailureRecord(this.#runState, failure, now);
     }
@@ -2574,7 +2583,7 @@ export class CfHarnessEngine {
   async invokeBuiltinTool<TToolId extends BuiltinToolId>(
     toolId: TToolId,
     input: BuiltinToolInputMap[TToolId],
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; sideEffectsAuthorized?: boolean } = {},
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     const tool = getBuiltinTool(toolId);
     if (tool === undefined) {
@@ -2584,7 +2593,10 @@ export class CfHarnessEngine {
     await this.ensureDiagnosticsInitialized();
     try {
       const output = await tool.invoke(
-        this.#createToolContext(options.signal),
+        this.#createToolContext(
+          options.signal,
+          options.sideEffectsAuthorized,
+        ),
         input,
       ) as BuiltinToolOutputMap[TToolId];
       return await this.recordBuiltinToolOutput(toolId, input, output, options);
@@ -2995,11 +3007,12 @@ export class CfHarnessEngine {
     );
   }
 
-  #createToolContext(signal?: AbortSignal) {
+  #createToolContext(signal?: AbortSignal, sideEffectsAuthorized?: boolean) {
     const researchTaskCfcLabel = this.#researchTaskCfcLabel();
     return {
       runId: this.#runState.runId,
       cfcEnforcementMode: this.#runState.cfcEnforcementMode,
+      ...(sideEffectsAuthorized !== undefined ? { sideEffectsAuthorized } : {}),
       currentDir: this.#runState.currentDir,
       workspaceHostPath: this.workspaceHostPath,
       ...(signal !== undefined ? { signal } : {}),

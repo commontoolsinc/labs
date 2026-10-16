@@ -1,3 +1,4 @@
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { CFC_POLICY_PLACEHOLDER_TEXT } from "@commonfabric/html/client";
 import { ProfileBadgeSchema } from "@commonfabric/runner/component-read-contract";
 import { consume } from "@lit/context";
@@ -32,6 +33,9 @@ export type ProfileBadgeState = "presented" | "verified" | "unverified";
 
 export type ProfileBadgeDisplay = {
   name: string | undefined;
+  /** The profile's picture: the bytes of a raster image. */
+  picture: FabricBytes | undefined;
+  /** The profile's legacy avatar text, shown when it has no picture. */
   avatar: string | undefined;
 };
 
@@ -64,7 +68,8 @@ export const profileTooltipFromValue = (val: unknown): ProfileBadgeTooltip => {
 };
 
 /**
- * Extracts the display name + avatar from a subscribed profile-cell value.
+ * Extracts the display name, picture and avatar from a subscribed
+ * profile-cell value.
  * Prefers the profile's own editable `name` field, falling back to the cell's
  * `[NAME]`. This ordering matters: on `main`, profile-home sets `[NAME]` to the
  * static placeholder `"Profile"` (profile-home.tsx:303), so trusting `[NAME]`
@@ -75,11 +80,12 @@ export const profileTooltipFromValue = (val: unknown): ProfileBadgeTooltip => {
  */
 export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
   if (!val || typeof val !== "object") {
-    return { name: undefined, avatar: undefined };
+    return { name: undefined, picture: undefined, avatar: undefined };
   }
   const record = val as Record<PropertyKey, unknown>;
   const named = record[NAME as unknown as PropertyKey];
   const plain = record["name"];
+  const picture = record["picture"];
   const avatar = record["avatar"];
   const name = typeof plain === "string" && plain.trim().length > 0
     ? plain
@@ -88,6 +94,9 @@ export const profileDisplayFromValue = (val: unknown): ProfileBadgeDisplay => {
     : undefined;
   return {
     name,
+    picture: picture instanceof FabricBytes && picture.length > 0
+      ? picture
+      : undefined,
     avatar: typeof avatar === "string" && avatar.trim().length > 0
       ? avatar
       : undefined,
@@ -196,7 +205,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
 
       .tooltip-meta {
         font-size: var(--cf-font-size-xs, 0.75rem);
-        color: var(--cf-theme-color-muted-foreground, hsl(0, 0%, 45%));
+        color: var(--cf-theme-color-text-muted, hsl(0, 0%, 45%));
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -505,6 +514,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   private accessor _resolved = false;
 
   @state()
+  private accessor _picture: FabricBytes | undefined = undefined;
+
+  @state()
   private accessor _avatar: string | undefined = undefined;
 
   /** The bio, an extra detail surfaced in the hover/focus tooltip. */
@@ -715,6 +727,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         {
           [NAME]?: string;
           name?: string;
+          picture?: FabricBytes;
           avatar?: string;
           bio?: string;
           elements?: Array<{ title?: string }>;
@@ -778,7 +791,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   }
 
   private _applyValue(val: unknown): void {
-    const { name, avatar } = profileDisplayFromValue(val);
+    const { name, picture, avatar } = profileDisplayFromValue(val);
     // A VALUE arrived, not merely an attempt that finished. The no-cell and
     // failed-resolve paths both land here with `undefined`, and treating
     // those as resolved would suppress the fallback in exactly the case it
@@ -786,6 +799,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     this._resolved = val !== undefined;
     const { bio, pinnedCount } = profileTooltipFromValue(val);
     this._name = name;
+    this._picture = picture;
     this._avatar = avatar;
     this._bio = bio;
     this._pinnedCount = pinnedCount;
@@ -802,6 +816,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
     if (generation !== this._resolveGeneration || !this.isConnected) return;
     this._resolved = true;
     this._name = CFC_POLICY_PLACEHOLDER_TEXT;
+    this._picture = undefined;
     this._avatar = undefined;
     this._bio = undefined;
     this._pinnedCount = 0;
@@ -915,6 +930,7 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
               <cf-avatar
                 part="avatar"
                 exportparts="avatar"
+                .bytes="${this._picture}"
                 .src="${this._avatar}"
                 .name="${presentedName}"
                 size="${this.size}"

@@ -418,8 +418,7 @@ export const runHarnessJob = async (
         // wrapper without this seam runs every job with full orientation.
         ...(loop.classifyTask !== undefined
           ? {
-            classifyTask: (task: string) =>
-              loop.classifyTask!(task, { signal: options.signal }),
+            classifyTask: (task: string) => loop.classifyTask!(task),
           }
           : {}),
       };

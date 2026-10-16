@@ -41,8 +41,13 @@ follows it. Both compare runs at **one point** only: the same commit, with the
 same seed or both without one. A test that depends on the order its siblings
 run in passes in one order and fails in another, which is a bug in the test
 rather than chance, so outcomes at one commit in different orders are not
-compared. The rules that read the default branch's most recent outcome, and
-those that count failures across sources, take runs in any order.
+compared. The rules that read the default branch's most recent outcome read
+it in the order of the run being judged, and fall back to the branch's most
+recent outcome in any order only where the branch has not run the identity in
+that one. The default branch runs in two orders at once, the day's and, in
+its daily run, the next day's, so an order-dependent test can be failing
+there in one and passing in the other. The rules that count failures across
+sources take runs in any order.
 
 ### What a catch is
 
@@ -51,7 +56,8 @@ something about a change or something about the test. A failure is a
 **catch** unless one of these holds:
 
 - The identity was already failing in the most recent run on the default
-  branch. The test was already broken and this run learned nothing.
+  branch, in the order described above. The test was already broken and
+  this run learned nothing.
 - The identity both passed and failed at one point, with nothing between
   the two runs but chance. That is a flake observation, and it is counted as
   one.
@@ -87,34 +93,49 @@ broke itself.
 
 On the default branch the crowd is judged at the failure that began a
 breakage, and a failure continuing it belongs to the same breakage until
-the branch passes, since the catch would be dated to the first failure.
+the branch passes in that failure's order, since the catch would be dated
+to the first failure. Where the branch has not yet run the identity in
+that order, as on the first run of a new day's order, the failure
+continues whatever breakage the branch was in when it last ran it.
 
 The publisher folds the objects one continuous-integration run uploaded
 in one batch, and carries what each run newly broke from one batch to
 the next for `SAME_COMMIT_REACH_DAYS`. A part of a run arriving in a later
 publisher run is judged with what was counted before it.
 
-A failure on the default branch cannot be judged when it happens. Every
-push there is a distinct commit with one run. When a test fails in that
-run, the run runs the test again, up to `RERUN_EXECUTIONS` times
+A run on the default branch is a run of that branch's own head: each
+push to it, and the daily run of every suite at its head under the seed
+the next day's commits will take
+([TESTING.md](../development/TESTING.md#tomorrows-seed-run-a-day-ahead)).
+A failure on the default branch cannot be judged when it happens. Each
+of those runs is the one run at its point. When a test fails in one of
+them, the run runs the test again, up to `RERUN_EXECUTIONS` times
 ([the guide](../development/test-selection.md#running-a-failure-again)), and
 a pass on one of those reruns is the test disagreeing with itself at that
 point, which counts as a flake observation. A failure every rerun repeats
 says nothing yet. Counting each such failure as a catch would make a test
 that is flaky enough to fail several times in a row look like the most
 valuable test in the repository. Such a failure waits for the next run on
-that branch. Still
-failing is the same breakage continuing, and nothing new is learned.
-Passing at the same point is the test disagreeing with itself, and counts
-as a flake observation. Passing at a later commit with the same seed counts
-as a catch: the change between the two commits fixed what the test found.
-Passing with a different seed is neither, and the failure is dropped: the
-order moved on, and an order-dependent test stops failing when it does, so
-the pass says nothing about whether a change fixed anything. That drops the
-catch of a real breakage whose fix landed on a later Pacific day than the
-breakage did, which is the price of not crediting an order change as a fix.
+that branch with the same seed. Still failing is the same breakage
+continuing, and nothing new is learned. Passing at the same point is the
+test disagreeing with itself, and counts as a flake observation. Passing
+at a later commit with the same seed counts as a catch: the change
+between the two commits fixed what the test found. Passing with a
+different seed judges nothing, since an order-dependent test stops
+failing when the order moves on, so that pass says nothing about whether
+a change fixed anything. The failure goes on waiting. A run with its seed
+is a later commit of the same Pacific day, a rerun of one of that day's
+commits, or, for a failure in the daily run under the next day's seed,
+one of the next day's commits. A pass that judges a failure in its own
+order also drops the failures waiting in other orders, since they are the
+same breakage seen in another order. A failure no run judges is dropped
+once it is older than the longest window a test's history keeps. That
+drops the catch of a real breakage whose fix landed on a later Pacific
+day than the breakage did, which is the price of not crediting an order
+change as a fix.
 A run of failures ended by one pass counts one catch, dated to the first of
-them, so a week of the branch being red is worth one catch and not seven.
+them in the pass's order, so a week of the branch being red is worth one
+catch and not seven.
 
 Nothing separates a failure a change fixed from one that healed itself, so
 a test flaky on the default branch is credited for its own noise. The
@@ -506,6 +527,14 @@ absent. A process that died before it could say what it registered shows
 nothing, and an identity it left unrecorded withdraws the excusal like any
 other.
 
+A test file that an `error` or `unhandledrejection` event reached before any of
+its hooks or tests began shows nothing either. Either can stop a module part way
+through loading, after it registered some of its tests and before it registered
+the rest. A unit of several files that one process runs, such as a package's
+browser tests, is shown only by a mark its runner leaves after loading every
+file and running every test, since a file that never loaded registered nothing.
+[The record spec](test-records.md) says what each writes.
+
 The rule is per invocation and not per set of them. A consumer that runs
 an identity several times, or that reaches one unit through several
 commands, has several invocations whose records arrive in one place, and
@@ -660,30 +689,56 @@ suite it holds:
   so a batch whose identities run three times takes three passes;
 - the suite's `unitOverhead` for each time a pass opens a unit;
 - what its tests take, which is the larger of two figures. One is the
-  suite's `correction` times the tests' own costs, each counted once for
-  each time its unit runs. The other is what the longest unit of each pass
-  takes, added together, since a pass does not finish before its longest
-  unit does. The second is the one that binds for a suite whose runner
-  runs its units side by side.
+  suite's `correction` times the tests' own costs and their units' hooks,
+  each counted once for each time its unit runs. The other is what the
+  longest unit of each pass takes, hooks included, added together, since a
+  pass does not finish before its longest unit does. The second is the one
+  that binds for a suite whose runner runs its units side by side.
 
-A suite with no fit is charged no overhead, nothing per unit, and a
-correction of one. A runner that runs units side by side starts the
+A unit's tests are the identities the lane holds in it, and every test the
+manifest holds around one of them in that unit: the `describe` blocks
+enclosing a leaf, whose `beforeAll` and `afterAll` hooks run on every run of
+the unit that runs anything inside them. A `describe`'s own cost is the time
+it spent outside the cases directly inside it, so a chain of them is counted
+level by level without overlap. Each is counted once per run of its unit,
+whichever lane holds its own identity, and once only where the lane holds
+both it and a test inside it.
+
+A unit's hooks are the time its outermost tests took that no record
+holds: chiefly the `beforeAll` and `afterAll` hooks of the `describe`s the
+manifest holds no identity for, such as one that deploys a pattern. They
+are the unit's rather than the suite's, since one file's hooks can take a
+minute where another's take nothing, and they are counted once per run of
+the unit. A unit the fit names no hooks for takes nothing for them.
+
+A suite with no fit is charged no overhead, nothing per unit, no hooks,
+and a correction of one. A runner that runs units side by side starts the
 costliest first, by the cost the lane hands it with each unit, since the
 second figure assumes nothing long starts last.
 
 A capability's setup is charged at the ninetieth percentile of its
-openings over the cost window. A suite's three figures are fitted to what
-the lanes' own batches of it spent, by least squares with none of them
-below zero: what each batch spent against `overhead` times its passes,
-`unitOverhead` times the units it opened, and `correction` times what the
-tests of its units took. The fit takes no account of the longest-unit
-figure. So a batch is charged what a batch of its shape spends on
+openings over the cost window. A unit's hooks are charged at the ninetieth
+percentile of what they took each time a pass opened the unit over the
+cost window, which is the percentile a test's own cost is read at. They
+are read apart for batches run with coverage on, as a suite's figures are.
+A suite's three figures are fitted to what the lanes' own batches of it
+spent, by least squares with none of them below zero: what each batch
+spent against `overhead` times its passes, `unitOverhead` times the units
+it opened, and `correction` times what the tests of its units and their
+hooks took. The fit takes no account of the longest-unit figure. So a batch is charged what a batch of its shape spends on
 average, and the safety margin `LANE_SAFETY_SECONDS` absorbs a lane that
 spends more than its batches' average.
 
 - What a batch's tests took counts only the records its suite places in
   a unit. A record placed in no unit, such as one a wrapper writes for a
   whole invocation, is part of what the batch spent beyond its tests.
+- What a unit's hooks took is read from the unit's JUnit report: the time
+  each outermost test took that no record holds, which is what the hooks
+  of its `describe`s took, and for a `Deno.test` whose leaves are steps,
+  what its own body took around them, less what a recorded container
+  among them holds. A unit whose report holds no such test, such as one a
+  runner other than `deno test` reports, has no hooks, and what it spends
+  beyond its tests is in the per-unit charge.
 - The correction is fitted only over at least `MIN_CORRECTION_SAMPLES`
   batches whose tests' times span at least `MIN_CORRECTION_SPAN_SECONDS`,
   and only where it comes out above zero. Otherwise the correction is
