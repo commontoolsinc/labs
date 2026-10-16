@@ -9,8 +9,9 @@
  * reaching the same memory. The release time is what decides which of the two
  * is the later one. A deployment states it once per deploy, the patterns route
  * sends it beside each identity it advertises, and the piece records it with
- * the revision that adopts the source, so the reconciler can refuse to move a
- * piece from a later release to an earlier one.
+ * the revision that adopts the source, moving it forward when a later release
+ * offers that same source, so the reconciler can refuse to move a piece from a
+ * later release to an earlier one.
  *
  * It is the time of the deploy, not of the commit or the build: deploying an
  * earlier commit again, to roll a bad release back, is the latest release the

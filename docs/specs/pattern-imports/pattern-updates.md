@@ -576,10 +576,13 @@ then start it:
 3. If `currentId` equals the running `patternIdentity.identity`, probe that
    exact stored artifact. A successful load is done. A missing or unloadable
    artifact continues to compile from source rather than taking the fast path,
-   which is what puts the artifact back.
-4. If `currentId` differs, and the revision that adopted the running source
-   records a release time, an answer stating an earlier time or none is an
-   earlier release than the piece runs. The piece keeps its source, and the
+   which is what puts the artifact back. Either way, an answer stating a later
+   release time than the running source's moves that time forward: the
+   reconciliation record confirms the running source at it.
+4. The running source's release time is the later of the one the revision that
+   adopted it records and the one the reconciliation record confirms for it.
+   If `currentId` differs and the running source has a release time, an answer
+   stating an earlier time or none is an earlier release than the piece runs. The piece keeps its source, and the
    attempt records that it follows its origin, naming what the origin offered.
    Two answers stating the same time are not ordered, and an answer to a piece
    whose source records no time is not either. A running artifact that will
