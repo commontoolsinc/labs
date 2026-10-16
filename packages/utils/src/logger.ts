@@ -302,12 +302,14 @@ class TimingDataStore {
    * this one measurement; given as a function, it is called only when the
    * measurement is among the slowest this store keeps.
    */
-  record(elapsed: number, detail?: string | (() => string)): void {
+  record(
+    elapsed: number,
+    detail?: string | (() => string | undefined),
+  ): void {
     this.#count++;
     this.#totalTime += elapsed;
     this.#lastTime = elapsed;
     this.#lastTimestamp = performance.now();
-    this.#recordSlowest(elapsed, detail);
 
     if (elapsed < this.#min) this.#min = elapsed;
     if (elapsed > this.#max) this.#max = elapsed;
@@ -334,6 +336,8 @@ class TimingDataStore {
         }
       }
     }
+
+    this.#recordSlowest(elapsed, detail);
   }
 
   /**
@@ -415,25 +419,13 @@ class TimingDataStore {
     };
   }
 
-  /** Resets all timing data. */
-  reset(): void {
-    this.#count = 0;
-    this.#min = Infinity;
-    this.#max = -Infinity;
-    this.#totalTime = 0;
-    this.#lastTime = 0;
-    this.#lastTimestamp = 0;
-    this.#samples = [];
-    this.#slowest = [];
-  }
-
   /**
    * Keeps a measurement of `elapsed` milliseconds among the slowest when it
    * is one, building its detail only then.
    */
   #recordSlowest(
     elapsed: number,
-    detail: string | (() => string) | undefined,
+    detail: string | (() => string | undefined) | undefined,
   ): void {
     const slowest = this.#slowest;
     const shortest = slowest[slowest.length - 1];
@@ -913,14 +905,30 @@ export type LoggerBreakdown = {
   total: number;
 };
 
-/** Logger, which handles both basic and tagged logging. */
-/** `detail` as a function that builds it once, however often it is read. */
-function detailOnce(detail: string | (() => string)): () => string {
+/**
+ * `detail` as a function that builds it once, however often it is read. A
+ * builder that throws names nothing: the measurement is kept without a
+ * detail, since instrumentation never fails the thing it is measuring.
+ */
+function detailOnce(
+  detail: string | (() => string),
+): () => string | undefined {
   if (typeof detail === "string") return () => detail;
   let built: string | undefined;
-  return () => built ??= detail();
+  let tried = false;
+  return () => {
+    if (tried) return built;
+    tried = true;
+    try {
+      built = detail();
+    } catch {
+      built = undefined;
+    }
+    return built;
+  };
 }
 
+/** Logger, which handles both basic and tagged logging. */
 export class Logger {
   #moduleName: string | undefined;
   #disabled: boolean;

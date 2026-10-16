@@ -812,6 +812,40 @@ describe("logger", () => {
     });
   });
 
+  describe("count baselines", () => {
+    it("reports every count as a delta once a baseline is set", () => {
+      const logger = getLogger("count-baseline-test");
+      logger.info(() => ["before"]);
+      logger.warn(() => ["before"]);
+
+      logger.resetCountBaseline();
+      logger.warn(() => ["after"]);
+      logger.error(() => ["after"]);
+
+      expect(logger.getCountDeltas()).toEqual({
+        debug: 0,
+        info: 0,
+        warn: 1,
+        error: 1,
+        total: 2,
+      });
+    });
+
+    it("reports the counts themselves while no baseline is set", () => {
+      const logger = getLogger("count-no-baseline-test");
+      logger.debug(() => ["one"]);
+      logger.info(() => ["two"]);
+
+      expect(logger.getCountDeltas()).toEqual({
+        debug: 1,
+        info: 1,
+        warn: 0,
+        error: 0,
+        total: 2,
+      });
+    });
+  });
+
   describe("resetAllLoggerCounts()", () => {
     it("returns every logger's counts to `0`", () => {
       const logger1 = getLogger("reset-all-test-1");
@@ -1721,6 +1755,50 @@ describe("logger", () => {
         logger.timeDetailed(detail, 0, 200, "op");
         expect(built).toBe(6);
         expect(logger.getTimeStats("op")?.slowest[0]?.elapsed).toBe(200);
+      });
+
+      it("keeps a measurement whose detail builder throws, unnamed", () => {
+        const logger = getLogger("timing-test-slowest-throws");
+
+        logger.timeDetailed(
+          () => {
+            throw new Error("no name today");
+          },
+          0,
+          40,
+          "op",
+        );
+
+        const stats = logger.getTimeStats("op");
+        expect(stats?.count).toBe(1);
+        expect(stats?.max).toBe(40);
+        expect(stats?.slowest).toEqual([
+          expect.objectContaining({ elapsed: 40 }),
+        ]);
+        expect(stats?.slowest[0]?.detail).toBeUndefined();
+      });
+
+      it("builds a detail once when both the slowest and the timeline keep it", () => {
+        setTimingMeasuresEnabled(true);
+        try {
+          const logger = getLogger("timing-test-slowest-once");
+          let built = 0;
+
+          logger.timeDetailed(
+            () => {
+              built++;
+              return "once";
+            },
+            0,
+            30,
+            "op",
+          );
+
+          expect(built).toBe(1);
+          expect(logger.getTimeStats("op")?.slowest[0]?.detail).toBe("once");
+        } finally {
+          setTimingMeasuresEnabled(false);
+        }
       });
 
       it("names a timer's span through `timeEndDetailed()` too", () => {
