@@ -4469,12 +4469,14 @@ describe("console/server", () => {
         "client_actions",
         "typed_commands",
         "starts_run",
+        "automatic_mutations",
       ]);
       expect(await features(hosted)).toEqual([
         "client_actions",
         "typed_commands",
         "browser_host",
         "starts_run",
+        "automatic_mutations",
       ]);
 
       const refused = await requiring(server);
