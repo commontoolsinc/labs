@@ -163,6 +163,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   the loop on purpose. The
   backoff Topic 911 waits for, and the first of Topic 913's three guardrails.
   Always on, in every runtime.
+- [Durable history of new real test failures and a bounded
+  aggregate](durable-new-real-test-failure-history.md) keeps every new real
+  test failure the test-selection publisher has credited a test with through
+  a bootstrap, a rename, and an outage, and stops the publisher's aggregate
+  growing with the age of the store. It is built, and waits for the checks
+  its first run after landing answers.
 - [Memory `apply-op`](memory-apply-op.md) sequences the editor-neutral
   collaborative-field substrate, the first CodeMirror codec and editor
   integration, and the checkpoints and review gates required before a future

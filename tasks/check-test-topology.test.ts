@@ -18,6 +18,7 @@ import {
 import { AliasResolver } from "@commonfabric/test-support/records";
 import type { Suite } from "./test-topology/suite.ts";
 import { loadTopology } from "./test-topology.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 
 /** The repository this file belongs to, whose own tree some cases check. */
 const REPOSITORY = dirname(dirname(fromFileUrl(import.meta.url)));
@@ -219,6 +220,25 @@ describe("the store half of the drift guard", () => {
     const findings = checkStore([bakery], [], HERE);
     expect(findings.map((finding) => finding.fails)).toEqual([false]);
     expect(findings[0]!.message).toContain("never recorded");
+  });
+
+  it("reports no gate as never recorded, since the job running it records them after", () => {
+    const measured = suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/test/glaze.test.ts"],
+      measured: [{
+        member: "packages/bakery",
+        reachedBy: ["packages/bakery/"],
+        units: ["packages/bakery/test/glaze.test.ts"],
+      }],
+    });
+    const messages = checkStore(
+      [measured, coverageGateSuite([measured])],
+      [],
+      HERE,
+    ).map((finding) => finding.message);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("workspace-unit enumerates");
   });
 
   it("names the job and the file a failing identity came from", () => {

@@ -533,6 +533,55 @@ describe("cfc-write-policy-any-of", () => {
         );
       });
     });
+
+    it("is refused with `CfcCommitRefusalError` after one run where a candidate names another lone writer", async () => {
+      const lone = (writer: string): JSONSchemaObj => ({
+        type: "string",
+        ifc: {
+          writeAuthorizedBy: writerClaim(writer),
+          uiContract: contract("Send"),
+        },
+      });
+      await withFixture(async (f) => {
+        expect(await f.write("send", "Send", { schema: lone("send") }))
+          .toBeUndefined();
+
+        const { runs, error } = await f.writeWithRetry("edit", "Send", {
+          schema: lone("edit"),
+        });
+
+        expect(runs).toBe(1);
+        expect(error?.name).toBe("CfcCommitRefusalError");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(true);
+        expect(error?.message).toContain(
+          "writeAuthorizedBy must remain stable at /",
+        );
+      });
+    });
+
+    it("is not recognized as a stored envelope's refusal where the merge refuses on other grounds", async () => {
+      // Moving between a lone writer and a list is refused by the merge too,
+      // but not as a claim the stored envelope fixes.
+
+      await withFixture(async (f) => {
+        expect(
+          await f.write("send", "Send", {
+            schema: {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: writerClaim("send"),
+                uiContract: contract("Send"),
+              },
+            },
+          }),
+        ).toBeUndefined();
+
+        const { error } = await f.writeWithRetry("send", "Send");
+
+        expect(error?.message).toContain("writePolicyAnyOf cannot join");
+        expect(isEnvelopeStabilityRefusal(error)).toBe(false);
+      });
+    });
   });
 
   describe("merging", () => {

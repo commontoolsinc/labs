@@ -35,16 +35,16 @@ nothing. Instrumented on the room: 79 holds, every one at that stage, none
 for the probe budget, every absent document a `computed:` cell, the same
 few recurring across the rows that received them.
 
-**A plan's inputs cell recomposes every schema.** `#bindNodeIO` hands the
-bound inputs to `getImmutableCell()`, which rewrites each link's
-content-addressed schema reference into its recomposed form before minting
-the `snapshot:` id. The rewrite stays: a traversal accepts a reference-form
-schema only where the space it is reading persists that schema's closure,
-and no write has stored the links a plan binds, so a link inside the inputs
-cell carries its schema inline (`packages/runner/src/link-utils.ts`). What
-costs is that recomposition built a fresh object graph per call, so the
-interned-schema cache never hit and every call deep-froze and hashed the
-same closure again.
+**A plan's inputs document carries every schema.** `#nodeIOBinding` hands
+the bound inputs to `getImmutableCell()`, which mints a `snapshot:` id from
+the value's content. With each link's content-addressed schema reference
+rewritten to its inline form before the mint, a document carries 10 to
+30 KB of schema and is hashed whole, once per node: on a thirty-message
+room's cold load, 2,073 of the profile's 6,348 hashing samples, 2.8 s of
+worker CPU over about 3,000 nodes. A traversal can resolve a reference
+inside such a document through the registry that minted it, since no space
+stores the document and none holds the closure, so nothing requires the
+inline form there.
 
 **The cross-space pass materializes to discover.** `#syncCrossSpaceReads`
 does a full schema-validated `get()` of every plan's inputs, in every round,
@@ -90,20 +90,39 @@ stage 0 is what every later stage reports against.
 
 Exit: a number per stage that a pull request can quote.
 
-### Stage 1. An immutable cell's inline schemas come from a memo
+### Stage 1. An immutable cell keeps its links' schemas as references
 
 - [x] `inlineExternalSchemaRefsInValue()` keeps the inline form each
       reference recomposed to, by reference, for the registry epoch
-      (`inlinedSchemaByRef`, cleared with the registry). Recomposition
-      built a fresh closure per link per plan, so every call deep-froze and
-      hashed the same few schemas again; a reference names one content, so
-      the form it recomposed to once is the form it has.
+      (`inlinedSchemaByRef`, cleared with the registry): a reference names
+      one content, so the form it recomposed to once is the form it has.
+      The portable boundaries still inline — a `data:` identifier, a value
+      crossing the runtime boundary, the content identity two immutable
+      documents compare by — and this memo is what they pay.
+- [x] `Runtime.getImmutableCell()` mints the value as the caller held it,
+      references included. A link inside a snapshot minted from a value no
+      space has stored (`mintedFromUnstoredValue`,
+      `packages/runner/src/immutable-cell.ts`) names a closure the realm
+      registry holds, since the registry minted the reference, and the
+      traversal's loader takes a document the registry holds from there for
+      such a document rather than reading the space the snapshot is
+      addressed in (`loadSchemaDocClosure`, `packages/runner/src/traverse.ts`);
+      a document the registry lacks is read from the space, as for a stored
+      document (`docs/specs/content-addressed-schemas.md`, "Space
+      boundaries").
 - [x] Tests: the inline form is the same object on a second call for the
       same reference (`packages/runner/test/link-utils.test.ts`); an
-      immutable cell carries each link's schema inline and a read through it
-      resolves the linked value (`packages/runner/test/runtime.test.ts`).
+      immutable cell keeps each link's schema as the reference the caller
+      held, and a read through it resolves the linked value
+      (`packages/runner/test/runtime.test.ts`).
+- [x] The field check, three interleaved pairs on the thirty-message room's
+      reload: `getImmutableCell` from 3.5–6.2% of the worker's busy samples
+      to 1.1–2.6%, the hashing under it (`#findSnapshot`) from 2.1–3.6% to
+      0.9–1.3%, and the pre-sync frame from 7.5–11.3% to 3.8–7.3%, the
+      rendering unchanged. The record is
+      [`../history/development/performance/2026-10-16-fabrichat-room-inputs-documents.md`](../history/development/performance/2026-10-16-fabrichat-room-inputs-documents.md).
 
-Exit: a schema is recomposed once per reference per registry epoch.
+Exit: a plan's inputs document is hashed over its links, not its schemas.
 
 ### Stage 2. The gate probes what a name-sync could deliver
 
@@ -478,6 +497,22 @@ where the pre-sync was no longer the whole cost.
       running. The 1,823 further calls the planner made to itself for nodes
       whose module is a registry reference bound nothing, and are gone with
       the loop that resolves the reference first.
+- [x] A binding is held from the first plan of its node for every later
+      plan of it, across the load, rather than given up to the node's
+      instantiation; and a pattern is named in the memo's key by its
+      content identity, a node by its position among its nodes, so the
+      pattern embedded in a parent's graph and the one loaded by identity
+      for the instance's own start share their bindings
+      (`Runner.#bindingSubjectMembers`). On the thirty-message room's
+      reload, 1,711 bindings were computed for about 1,614 `(instance,
+      node)` pairs: 79 nodes were planned again after their instantiation
+      had taken the binding, and 18 missed on the pattern object. A node
+      planned after its instantiation, and a node planned under two
+      pattern objects of one identity, each bind once
+      (`packages/runner/test/resume-presync-plan-count.test.ts`). The
+      reload now computes 1,618 bindings and mints 1,618 documents: the
+      1,614 pairs, and the four stand-in instances bound once more at their
+      instantiation, which the memo never holds (the record above).
 - [x] A runtime keeps the ids of the derived internal cells it has hashed
       most recently, 65,536 of them (`DerivedInternalCellIds`,
       `packages/runner/src/derived-internal-cell-ids.ts`). Every action
@@ -500,11 +535,13 @@ where the pre-sync was no longer the whole cost.
       makes belong in the action's transaction. The pre-sync makes the other
       6,428 in read-only transactions it discards, across three passes over
       the same nodes, and could make each once.
-- [ ] Past the bound on held bindings the pre-sync's earliest bindings are
-      dropped before their instantiation asks for them. The bound is 256 MB
-      of inputs documents and the thirty-row room holds 69 MB, so a room of
-      about a hundred rows is at it: an inputs document carries the schema
-      of every link it holds inline, and averages 22 KB on that room.
+- [ ] Past the bound on held bindings the earliest bindings are dropped
+      before a later plan asks for them. The bound is 256 MB of inputs
+      documents. While a document carried the schema of every link it holds
+      inline, averaging 22 KB, the thirty-row room held 69 MB and a room of
+      about a hundred rows was at the bound; a document now carries each
+      link's schema as a reference, a few hundred characters a link, and
+      the room that reaches the bound is to be measured again.
 - [ ] A plan's inputs document is decoded apart from the value it was
       minted from: once for its sync (`valueFromDataUri` under
       `#syncDataURICell`, `packages/runner/src/storage/v2.ts`) and again for

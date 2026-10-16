@@ -124,6 +124,16 @@ export class NodeRegistry {
    * entity) live in the facade. */
   readonly demandedWriters = new Set<Action>();
 
+  /** How many nodes are registered and active, of either kind. */
+  get activeCount(): number {
+    return this.#all.size;
+  }
+
+  /** How many active nodes are `invalid` or `never-ran`. */
+  get invalidCount(): number {
+    return this.#invalidNodes.size;
+  }
+
   isDemandedWriter(action: Action): boolean {
     return this.demandedWriters.has(action);
   }
