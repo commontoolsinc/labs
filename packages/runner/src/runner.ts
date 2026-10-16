@@ -1850,6 +1850,17 @@ export interface PieceReconciliation {
 
   /** What the attempt reported, in its own words. */
   detail?: string;
+
+  /**
+   * The source the piece runs, with the latest release time at which its
+   * `system:` origin has offered that source since the piece adopted it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). A later deploy
+   * of unchanged source moves it forward without adopting anything, which is
+   * what keeps the piece from being moved to a release between the one it
+   * adopted and the one that confirmed it. It never moves backward, and an
+   * accepted transition clears it with the rest of the record.
+   */
+  confirmed?: { identity: string; releasedAt: number };
 }
 
 export type PieceSourceTransitionBaseline =
@@ -14934,7 +14945,7 @@ export function getPieceReconciliation(
     meta: ignoreReadForScheduling,
   });
   if (!isObjectOrArray(raw)) return undefined;
-  const { outcome, at, origin, offered, reason, detail } = raw;
+  const { outcome, at, origin, offered, reason, detail, confirmed } = raw;
   if (
     !isPieceReconciliationOutcome(outcome) ||
     typeof at !== "number" || !Number.isFinite(at) || at < 0 ||
@@ -14950,6 +14961,18 @@ export function getPieceReconciliation(
     ...(offeredRef === undefined ? {} : { offered: offeredRef }),
     ...(isPieceReconciliationReason(reason) ? { reason } : {}),
     ...(typeof detail === "string" && detail.length > 0 ? { detail } : {}),
+    ...(isObjectNotArray(confirmed) &&
+        typeof confirmed.identity === "string" &&
+        confirmed.identity.length > 0 &&
+        typeof confirmed.releasedAt === "number" &&
+        Number.isFinite(confirmed.releasedAt) && confirmed.releasedAt >= 0
+      ? {
+        confirmed: {
+          identity: confirmed.identity,
+          releasedAt: confirmed.releasedAt,
+        },
+      }
+      : {}),
   };
 }
 
@@ -14977,6 +15000,8 @@ export function samePieceReconciliation(
   if (left === undefined || right === undefined) return left === right;
   return left.outcome === right.outcome && left.origin === right.origin &&
     left.reason === right.reason && left.detail === right.detail &&
+    left.confirmed?.identity === right.confirmed?.identity &&
+    left.confirmed?.releasedAt === right.confirmed?.releasedAt &&
     (left.offered === undefined || right.offered === undefined
       ? left.offered === right.offered
       : patternIdentityKey(left.offered) === patternIdentityKey(right.offered));

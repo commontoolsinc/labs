@@ -822,6 +822,7 @@ describe("piece source reconciliation", () => {
       // reads back where the piece settled.
 
       const EARLIER = "2026-10-16T14:03:00Z";
+      const BETWEEN = "2026-10-16T14:33:00Z";
       const LATER = "2026-10-16T15:03:00Z";
 
       type Offer = { marker: "v1" | "v2"; releasedAt?: string };
@@ -980,6 +981,66 @@ describe("piece source reconciliation", () => {
           running: "v2",
         });
         expect(originUpdates(piece)).toHaveLength(1);
+      });
+
+      describe("when a later release offers the source the piece runs", () => {
+        // A release between the one the piece adopted and the one that later
+        // offered the same source again is earlier than what the piece runs:
+        // still served by an instance a deploy left behind, it is the release
+        // a rollback replaced.
+
+        it("keeps that source against a release between the two", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+
+          expect(await offer({ marker: "v2", releasedAt: LATER })).toEqual({
+            outcome: "current",
+            running: "v2",
+          });
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+          expect(await offer({ marker: "v1", releasedAt: BETWEEN })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+          expect(originUpdates(piece)).toHaveLength(1);
+        });
+
+        it("keeps the later release time across an attempt that cannot read one", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+          await offer({ marker: "v2", releasedAt: LATER });
+
+          expect(
+            (await offer({ marker: "v2", releasedAt: "yesterday" })).outcome,
+          )
+            .toBe("unavailable");
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+          expect(await offer({ marker: "v1", releasedAt: BETWEEN })).toEqual({
+            outcome: "ahead",
+            running: "v2",
+          });
+        });
+
+        it("keeps the later release time when an earlier release offers the same source", async () => {
+          const { piece, identities, offer } = await followingPiece();
+          await offer({ marker: "v2", releasedAt: EARLIER });
+          await offer({ marker: "v2", releasedAt: LATER });
+
+          expect(await offer({ marker: "v2", releasedAt: BETWEEN })).toEqual({
+            outcome: "current",
+            running: "v2",
+          });
+          expect(getPieceReconciliation(piece)?.confirmed).toEqual({
+            identity: identities.v2,
+            releasedAt: Date.parse(LATER),
+          });
+        });
       });
 
       it("adopts an earlier release over a running pattern this space cannot load", async () => {
