@@ -242,6 +242,13 @@ export interface ManagerStreamEvent {
   container?: Cell<ChatContainer>;
 
   /**
+   * Whether a `joinRoom` comes from a message or a reaction the user sent in
+   * the room, which leaves the title the catalog lists an already listed room
+   * under as it is.
+   */
+  messageAct?: boolean;
+
+  /**
    * Whether accepting a room leaves its entry archived, when it is; absent,
    * accepting the room restores it.
    */
@@ -1106,11 +1113,13 @@ const performManagerAct = (
     (membership?.state === "saved" ||
       (membership === undefined && listsRoomIn(catalog.get(), joinedSpace)))
   ) {
-    // Every write in the room sends one of these, so it reads only the room's
-    // `about`, whose links it doesn't follow, and writes the catalog only
-    // where the two titles differ, which a retitle makes them. A room listed
-    // only through a container has no catalog entry, and gets no write.
-    if (isWellFormedDID(joinedSpace)) {
+    // Every message and reaction in the room sends one of these, and none of
+    // them changes the room's title, so those leave the room's `about`
+    // unread. Any other join reads only `about`, whose links it doesn't
+    // follow, and writes the catalog only where the two titles differ, which
+    // a retitle makes them. A room listed only through a container has no
+    // catalog entry, and gets no write.
+    if (isWellFormedDID(joinedSpace) && event?.messageAct !== true) {
       refreshListedTitle(
         catalog,
         joinedSpace,

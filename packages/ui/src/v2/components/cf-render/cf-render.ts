@@ -21,6 +21,7 @@ import { createNameChip } from "../../core/name-chip.ts";
 import "../cf-loader/index.ts";
 import "../cf-drag-source/index.ts";
 import "../cf-piece-menu/index.ts";
+import { targetsTextEntry } from "../text-entry.ts";
 
 import {
   closePieceMenuFor,
@@ -70,21 +71,6 @@ export interface PieceContextMenuDetail {
 
   /** The variant the piece was rendered at. */
   variant: UIVariant;
-}
-
-/**
- * True for a target whose own context menu is the useful one: text editing
- * offers cut, copy, and paste, which a piece menu would replace. Read
- * structurally, so a target from another document or realm still matches.
- */
-function isTextEntry(target: EventTarget | undefined): boolean {
-  const element = target as
-    | { tagName?: unknown; isContentEditable?: unknown }
-    | undefined;
-  if (!element || typeof element.tagName !== "string") return false;
-  const tag = element.tagName.toUpperCase();
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
-    element.isContentEditable === true;
 }
 
 /**
@@ -716,7 +702,7 @@ export class CFRender extends BaseElement {
    * piece content.
    */
   private _onContextMenu = (e: MouseEvent) => {
-    if (e.shiftKey || isTextEntry(e.composedPath()[0])) return;
+    if (e.shiftKey || targetsTextEntry(e)) return;
     const nestedTarget = this._nestedPieceTarget(e);
     const target = nestedTarget?.cell ?? this._pieceTarget();
     if (!target) return;
