@@ -2522,21 +2522,25 @@ export async function runTests(
   // not just the assertion results. Written only for a caller that asked
   // for records, and inert unless CF_TEST_RECORDS_DIR is set; the
   // integration orchestrator clears that variable for its cf children and
-  // records from its own clock instead.
+  // records from its own clock instead. A file inside no repository is no
+  // test of one and records nothing.
   const recordsFragment = options.recordResults === true
     ? FragmentWriter.openForRun()
     : undefined;
-  const recordFile = (testPath: string, failed: boolean, durationMs: number) =>
+  const recordFile = (
+    testPath: string,
+    failed: boolean,
+    durationMs: number,
+  ) => {
+    const name = repositoryRelativePath(testPath);
+    if (name === undefined) return;
     recordsFragment?.append({
       line: "record",
-      test: {
-        k: "pattern",
-        s: "patterns",
-        n: repositoryRelativePath(testPath),
-      },
+      test: { k: "pattern", s: "patterns", n: name },
       outcome: failed ? "fail" : "pass",
       durationMs: Math.round(durationMs),
     });
+  };
 
   // Files run in the order the seed puts them in, so a file that leans
   // on another file having run fails rather than passing quietly. The

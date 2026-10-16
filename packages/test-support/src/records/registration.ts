@@ -14,12 +14,13 @@
  * as skipped instead of vanishing.
  */
 
-import { dirname, fromFileUrl, join, relative, resolve } from "@std/path";
+import { fromFileUrl, join, relative } from "@std/path";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import {
   type Environment,
   readEnv,
   recordsDir,
+  repositoryRelativePath,
   repositoryRoot,
 } from "./paths.ts";
 
@@ -160,15 +161,6 @@ export function runDirectory(): string | undefined {
 export type SkipList = Record<string, string[]>;
 
 /**
- * The repository root enclosing a file, found by climbing to the
- * directory holding `.git`. Undefined outside any repository, and
- * undefined when the climb is not permitted to read the filesystem.
- */
-export function repositoryRootOf(path: string): string | undefined {
-  return repositoryRoot(dirname(resolve(path)));
-}
-
-/**
  * The repository-relative path of the file a `file:` URL names. Undefined
  * for a URL naming no file, for a file inside no repository, and where
  * finding the repository is not permitted to read the filesystem.
@@ -180,10 +172,7 @@ export function repositoryPathOf(url: string): string | undefined {
   } catch {
     return undefined;
   }
-  const root = repositoryRootOf(path);
-  return root === undefined
-    ? undefined
-    : relative(root, path).replaceAll("\\", "/");
+  return repositoryRelativePath(path);
 }
 
 /** The test file this process runs, resolved once. */

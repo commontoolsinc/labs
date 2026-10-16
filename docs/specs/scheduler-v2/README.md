@@ -292,7 +292,11 @@ parts:
    These are simply *additional output documents*: they enter the writer map
    and the reader-edge graph exactly like the primary output, so demand
    flowing from readers of a side-written document reaches the writer the
-   normal way. A node with static side-writes needs no standing demand.
+   normal way. A node with static side-writes needs no standing demand. The
+   stores a raw builtin keeps join this tier when their identity follows from
+   the node alone: the builtin names them at setup
+   (`RawBuiltinResult.storeWrites`), and each is declared at every scope,
+   since a store's instance scope is decided only when the store is created.
 3. **Materializer envelopes** — declared write envelopes for computations
    whose side-write targets are dynamic or broad (the function navigates a
    large structure behind a passed-in cell and may modify a small part

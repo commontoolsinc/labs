@@ -1415,6 +1415,16 @@ export interface IStorageTransaction {
   derivedWrites?: boolean;
 
   /**
+   * The first user- or session-scoped instance, as `<space>/<scope>/<id>`,
+   * that this transaction read through a link while the instance was missing
+   * and another derivation registered in the same runtime writes the
+   * document. Set by link resolution on a serving runtime only, where such an
+   * instance is one the serving loop has not produced yet, and read by the
+   * reactive action's commit, which a run that read one does not make.
+   */
+  unproducedScopedInstance?: string;
+
+  /**
    * The scope INSTANCE identity this transaction's scoped reads and writes
    * resolve against when it is NOT the storage manager's own session
    * (server-execution v2 stage A — OW17's tx→replica identity seam,

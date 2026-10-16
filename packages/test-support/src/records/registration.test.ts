@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { fromFileUrl, join, toFileUrl } from "@std/path";
+import { join, toFileUrl } from "@std/path";
 
 import {
   activeCapture,
@@ -15,12 +15,12 @@ import {
   readNameMaps,
   readRegistrations,
   repositoryPathOf,
-  repositoryRootOf,
   runDirectory,
   runningFile,
   serializeSkipList,
   writableSpool,
 } from "./registration.ts";
+import { repositoryRoot } from "./paths.ts";
 
 // The fixture runner's module, as a class name would end.
 const FIXTURE_RUNNER = new URL("../fixture-runner.ts", import.meta.url).href;
@@ -705,26 +705,6 @@ describe("what the capture does with what it cannot read", () => {
   });
 });
 
-describe("repositoryRootOf()", () => {
-  it("finds the root above a file inside the repository", () => {
-    const root = repositoryRootOf(fromFileUrl(import.meta.url));
-    expect(root).toBeDefined();
-    expect(Deno.statSync(join(root!, ".git"))).toBeDefined();
-  });
-
-  it("is nothing for a path under no repository at all", async () => {
-    // The climb reaches the filesystem root and stops there. Answering
-    // with the root itself would make every test file's path relative
-    // to "/", which names no file in any repository.
-    const outside = await Deno.makeTempDir();
-    try {
-      expect(repositoryRootOf(join(outside, "a.test.ts"))).toBeUndefined();
-    } finally {
-      await Deno.remove(outside, { recursive: true });
-    }
-  });
-});
-
 describe("runDirectory()", () => {
   it("names the working directory as the repository sees it", () => {
     const dir = runDirectory();
@@ -734,7 +714,7 @@ describe("runDirectory()", () => {
     // nor climbs out of the repository.
     expect(dir!.startsWith("/")).toBe(false);
     expect(dir!.split("/")).not.toContain("..");
-    const root = repositoryRootOf(join(Deno.cwd(), "a.ts"));
+    const root = repositoryRoot();
     expect(join(root!, dir!)).toBe(Deno.cwd());
   });
 });
