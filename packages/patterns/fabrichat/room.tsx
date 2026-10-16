@@ -73,6 +73,8 @@ import {
   ownersMayObliterateIn,
   rightsOf,
   type RoomStreamEvent,
+  type SendRequestsValue,
+  type SendResult,
   type SetTitleEvent,
   type StoredAbout,
   tellManagerJoined,
@@ -1021,8 +1023,12 @@ export interface ChatRoomView {
    */
   messageRights: ChatMessageRights[];
 
-  /** Sends a message. */
-  sendMessage: Stream<RoomStreamEvent>;
+  /**
+   * Sends a message, and answers with it. A send naming a `requestId` this
+   * reader has already sent under adds nothing, and answers with the message
+   * the first one sent.
+   */
+  sendMessage: Stream<RoomStreamEvent, SendResult | undefined>;
 
   /** Records a new version of one of the sender's messages. */
   editMessage: Stream<RoomStreamEvent>;
@@ -1070,6 +1076,12 @@ export interface ChatRoomView {
 
   /** The outcome of each of this reader's retitles, by its `requestId`. */
   titleRequests: Record<string, SetTitleOutcome>;
+
+  /**
+   * The message each of this reader's recent sends that named a `requestId`
+   * sent, by that id.
+   */
+  sendRequests: SendRequestsValue;
 }
 
 /** What a room offers everyone its space admits: `ChatRoomOutput`. */
@@ -1362,7 +1374,15 @@ export const FabriChatRoomCore = pattern<
   );
 
   // Each handler is bound to the cells it uses and no others.
-  const sendMessage = commitSend({ myProfile, messages, joined: tellJoined });
+  // The sender's recent sends that named a `requestId`, which follow them,
+  // and only them, across sessions.
+  const sendRequests = new Writable.perUser<SendRequestsValue>({});
+  const sendMessage = commitSend({
+    myProfile,
+    messages,
+    requests: sendRequests,
+    joined: tellJoined,
+  });
   const composeSend = commitComposerSend({
     myProfile,
     messages,
@@ -1410,6 +1430,7 @@ export const FabriChatRoomCore = pattern<
     addRequests: addMember.outcomes,
     setTitle,
     titleRequests,
+    sendRequests,
   };
   const closeThread = action(() => composer.key("thread").set(undefined));
   const cancelReply = action(() => composer.key("replyTo").set(undefined));
@@ -1683,6 +1704,7 @@ const FabriChatRoom = pattern<FabriChatRoomInput, ChatRoomOutput>(
       addRequests: room.addRequests,
       setTitle: room.setTitle,
       titleRequests: room.titleRequests,
+      sendRequests: room.sendRequests,
       [UI]: (
         <cf-screen>
           {room[UI]}

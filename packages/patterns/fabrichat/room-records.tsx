@@ -335,6 +335,38 @@ export type TitleRequestsCell = Writable<
   Record<string, SetTitleOutcome> | Default<Record<PropertyKey, never>>
 >;
 
+/** A send that named a `requestId`, as its sender's record keeps it. */
+export interface SendRequest {
+  /** The message the send pushed. */
+  message: MessageCell;
+
+  /**
+   * The send's place among its sender's recorded sends, 1 for the first; the
+   * record drops the lowest when it holds more than `SEND_REQUESTS_KEPT`.
+   */
+  seq: number;
+}
+
+/** A sender's recorded sends, by the `requestId` each named. */
+export type SendRequestsValue = Record<string, SendRequest>;
+
+/**
+ * Each of a sender's recent sends that named a `requestId`, by that id: one
+ * instance per user, which no one else reads.
+ */
+export type SendRequestsCell = Writable<
+  SendRequestsValue | Default<Record<PropertyKey, never>>
+>;
+
+/** How many of a sender's sends that name a `requestId` the room remembers. */
+export const SEND_REQUESTS_KEPT = 100;
+
+/** What `sendMessage` answers: the message the send pushed, or pushed before. */
+export interface SendResult {
+  /** The message. */
+  message: MessageCell;
+}
+
 //
 // Helpers
 //
@@ -572,6 +604,12 @@ export const canActIn = (
  * `target.value`.
  */
 export interface RoomStreamEvent {
+  /**
+   * Chosen by a sender of `sendMessage`, and unique among its sends. A send
+   * whose id the room has already recorded for its sender pushes nothing.
+   */
+  requestId?: string;
+
   /** The text to send, or to record as a message's new version. */
   body?: string;
 
@@ -665,6 +703,12 @@ export interface SendState extends ActState {
    * carry a label the room's space doesn't admit.
    */
   joined?: Stream<JoinedEvent>;
+}
+
+/** What the room's `sendMessage` is bound to. */
+export interface StreamSendState extends SendState {
+  /** The sender's recent sends that named a `requestId`. */
+  requests: SendRequestsCell;
 }
 
 /** What a rendered composer's send is bound to. */
@@ -862,7 +906,7 @@ const leaveTombstone = (target: MessageCell, keepsAuthor: boolean): void => {
  * as a reply to `reply` where that names a message, shown `shownIn`, with a
  * reaction list of its own; then `joined` is told. A send with no text,
  * before the profile resolves, or replying to a message outside the room's
- * space, pushes nothing. Returns whether it pushed.
+ * space, pushes nothing. Returns the message it pushed, if it pushed one.
  *
  * Every handler here takes the event a rendered control of the room sends,
  * and the controls offer only acts the viewer may take, so a handler checks
@@ -877,33 +921,81 @@ const sendInto = (
   reply: Cell<RepliedMessage> | undefined,
   shownIn: ShownIn,
   joined: Stream<JoinedEvent> | undefined,
-): boolean => {
+): MessageCell | undefined => {
   const profile = resolvedProfile(myProfile);
   const body = textOf(event);
-  if (profile === undefined || body === "") return false;
+  if (profile === undefined || body === "") return undefined;
   const target = reply?.resolveAsCell();
-  if (target !== undefined && !isInRoomOf(messages, target)) return false;
+  if (target !== undefined && !isInRoomOf(messages, target)) return undefined;
   // A message may link only a list that exists, so the list is made before
-  // the message links it.
+  // the message links it; and the message is made as a cell of its own, so
+  // the send can name it without reading the list it is pushed onto. A cell
+  // made with a value holds only static data, and the message links cells,
+  // so it is made empty and then set.
   const reactions = new Writable<ReactionsValue>([] as ReactionsValue);
-  messages.push({
-    authorProfile: profile,
-    body,
-    sentAt: now(),
-    ...(target === undefined ? {} : { replyTo: { message: target, shownIn } }),
-    reactions,
-  } as SentMessage);
+  const message = new Writable<SentMessage>();
+  message.set(
+    {
+      authorProfile: profile,
+      body,
+      sentAt: now(),
+      ...(target === undefined
+        ? {}
+        : { replyTo: { message: target, shownIn } }),
+      reactions,
+    } as SentMessage,
+  );
+  messages.push(message);
   joined?.send({ messageAct: true });
-  return true;
+  const sent: MessageCell = message;
+  return sent;
+};
+
+/**
+ * Records in `requests` that the send named `requestId` pushed `message`,
+ * dropping the oldest of the sender's recorded sends beyond
+ * `SEND_REQUESTS_KEPT`.
+ */
+const recordSendRequest = (
+  requests: SendRequestsCell,
+  requestId: string,
+  message: MessageCell,
+): void => {
+  const recorded = Object.entries(
+    (requests.get() ?? {}) as SendRequestsValue,
+  );
+  const seq = recorded.reduce((top, [, each]) => Math.max(top, each.seq), 0) +
+    1;
+  const kept = recorded
+    .sort(([, a], [, b]) => b.seq - a.seq)
+    .slice(0, SEND_REQUESTS_KEPT - 1);
+  requests.set(
+    Object.fromEntries([...kept, [requestId, { message, seq }]]),
+  );
 };
 
 /**
  * Sends a message, from `ChatSendSurface`: the event's text, replying to the
- * event's `replyTo` where it carries one.
+ * event's `replyTo` where it carries one, and answers with the message sent.
+ * A send naming a `requestId` the sender's record already holds pushes
+ * nothing, and answers with the message the first send pushed; one naming a
+ * new id is recorded under it. A send naming none is sent as it is.
  */
-export const commitSend = handler<RoomStreamEvent, SendState>(
-  (event, { myProfile, messages, joined }) => {
-    sendInto(
+export const commitSend = handler<
+  RoomStreamEvent,
+  StreamSendState,
+  SendResult | undefined
+>(
+  (event, { myProfile, messages, requests, joined }) => {
+    const requestId = typeof event?.requestId === "string" &&
+        event.requestId !== ""
+      ? event.requestId
+      : undefined;
+    if (requestId !== undefined) {
+      const earlier = requests.key(requestId).get();
+      if (earlier !== undefined) return { message: earlier.message };
+    }
+    const message = sendInto(
       event,
       myProfile,
       messages,
@@ -911,6 +1003,11 @@ export const commitSend = handler<RoomStreamEvent, SendState>(
       event?.replyTo?.shownIn ?? "main",
       joined,
     );
+    if (message === undefined) return undefined;
+    if (requestId !== undefined) {
+      recordSendRequest(requests, requestId, message);
+    }
+    return { message };
   },
 );
 
@@ -925,7 +1022,8 @@ export const commitComposerSend = handler<RoomStreamEvent, ComposerSendState>(
     const link = composer.get()?.replyTo;
     const reply = link?.get() === undefined ? undefined : link;
     if (
-      sendInto(event, myProfile, messages, reply, "main", joined) &&
+      sendInto(event, myProfile, messages, reply, "main", joined) !==
+        undefined &&
       reply !== undefined
     ) {
       composer.key("replyTo").set(undefined);
