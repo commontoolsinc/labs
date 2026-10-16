@@ -48,8 +48,7 @@ export interface RawBuiltinResult {
    * when the node is set up so the action's write surface declares them
    * before the first one exists. The runner declares each at every scope,
    * since a store's instance scope is decided when the store is created. An
-   * effect takes no write surface, so an effect that names stores here
-   * declares nothing.
+   * effect takes no write surface, so an effect's stores are not declared.
    */
   storeWrites?: readonly NormalizedFullLink[];
 }

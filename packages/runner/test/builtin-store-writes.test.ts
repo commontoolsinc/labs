@@ -227,4 +227,40 @@ describe("builtin-store-writes", () => {
     expect(new Set(declared!.map((address) => address.id)).size).toBe(1);
     expect(declared).toHaveLength(1);
   });
+
+  it("leaves an effect's named stores out of its action's writes", async () => {
+    // An effect takes no write surface, so nothing reads these writes as a
+    // declaration; the action's own annotation, which diagnostics print,
+    // lists none of them either.
+
+    const store = runtime.getCell(space, "builtin store writes effect store")
+      .getAsNormalizedFullLink();
+    let annotated: readonly NormalizedFullLink[] | undefined;
+    runtime.moduleRegistry.addModuleByRef(
+      "builtinStoreWritesEffect",
+      raw(() => ({
+        action: () => {},
+        isEffect: true,
+        storeWrites: [store],
+        onActionRegistered: (action) => {
+          annotated = (action as { writes?: NormalizedFullLink[] }).writes;
+        },
+      })),
+    );
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const builtin = commonfabric.byRef("builtinStoreWritesEffect");
+    const testPattern = commonfabric.pattern(() => builtin({}));
+    const tx = runtime.edit();
+    const result = runtime.getCell(
+      space,
+      "builtin store writes effect",
+      undefined,
+      tx,
+    );
+    runtime.run(tx, testPattern, {}, result);
+    expect((await tx.commit().settled).error).toBeUndefined();
+
+    expect(annotated).toBeDefined();
+    expect(annotated!.filter((link) => link.id === store.id)).toEqual([]);
+  });
 });

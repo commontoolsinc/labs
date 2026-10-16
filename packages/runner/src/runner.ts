@@ -13947,9 +13947,12 @@ export class Runner {
       ...outputCells,
       ...staticRedirectWriteTargets,
     ]);
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: dedupeNormalizedLinks([
+      // An effect takes no write surface, so its stores are not declared.
+      writes: isEffect ? schedulingWrites : dedupeNormalizedLinks([
         ...schedulingWrites,
         ...atEveryScope(builtinStoreWrites),
       ]),
@@ -13960,8 +13963,6 @@ export class Runner {
       pattern,
     });
 
-    // isEffect can come from module options or from the builtin result
-    const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;
