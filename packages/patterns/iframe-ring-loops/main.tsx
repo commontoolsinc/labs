@@ -40,6 +40,7 @@ import {
   laneLabel,
   liveNotes,
   type NoteAuthor,
+  noteAuthorName,
   noteFor,
   type NoteSpec,
   type RingLayout,
@@ -114,8 +115,9 @@ export interface RingLoopsOutput {
 /** Who a verb's notes are attributed to, and the color they are drawn in. */
 interface Attribution {
   /**
-   * Name of the agent placing the notes, shown as their author. Left out, the
-   * notes carry the caller's profile name.
+   * Name of the agent placing the notes, shown as their author. It is stored
+   * without control characters and cut to at most 80 characters. Left out, the
+   * carry the caller's profile name.
    */
   agentName?: string;
 
@@ -245,7 +247,7 @@ function authorOf(
   viewerName: string,
   chosenColor: string | null,
 ): NoteAuthor {
-  const name = (event.agentName ?? "").trim() || viewerName.trim();
+  const name = noteAuthorName(event.agentName, viewerName);
   const id = currentPrincipal() ?? "unknown";
   return {
     id,

@@ -514,6 +514,21 @@ export function uniqueCells(
   });
 }
 
+/**
+ * Returns the name a note records for its author: the agent's where one is
+ * given, else the viewer's. Every note a caller places carries a copy, so the
+ * name takes the bounded form a presence name takes (see
+ * `normalizePresenceParticipantName()`), and is the empty string where neither
+ * leaves anything.
+ */
+export function noteAuthorName(
+  agentName: string | undefined,
+  viewerName: string,
+): string {
+  return normalizePresenceParticipantName(agentName ?? "") ||
+    normalizePresenceParticipantName(viewerName);
+}
+
 /** Returns the name to show for whoever placed `note`. */
 export function authorNameOf(note: PlacedNote): string {
   return note.authorName?.trim() || "Someone";

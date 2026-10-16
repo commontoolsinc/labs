@@ -45,6 +45,7 @@ import {
   MIN_TEMPO_BPM,
   normalizeTempo,
   NOTE_COLORS,
+  noteAuthorName,
   notesAtStep,
   padForKey,
   type PadPress,
@@ -1682,7 +1683,7 @@ function toggleCell(cell: Cell): void {
   if (!ready() || !layout) return;
   const edit = toggleEdit(layout, currentNotes(), cell, {
     id: authorId,
-    name: viewerName(),
+    name: noteAuthorName(undefined, viewerName()),
     color: effectiveColor(),
   });
   if (pendingEdits.has(edit.key)) return;

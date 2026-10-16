@@ -38,6 +38,7 @@ import {
   MIN_TEMPO_BPM,
   normalizeTempo,
   NOTE_COLORS,
+  noteAuthorName,
   noteFor,
   notesAtStep,
   padForKey,
@@ -369,6 +370,25 @@ describe("model", () => {
       const a = { ringIndex: 0, step: 1, lane: 0 };
       const b = { ringIndex: 2, step: 4, lane: 3 };
       expect(uniqueCells(layout, [a, b, { ...a }, b])).toEqual([a, b]);
+    });
+  });
+
+  describe("noteAuthorName()", () => {
+    it("returns the agent's name in preference to the viewer's", () => {
+      expect(noteAuthorName("Test Agent", "Ada")).toBe("Test Agent");
+    });
+
+    it("returns the viewer's name where the agent gives none", () => {
+      expect(noteAuthorName(undefined, " Ada ")).toBe("Ada");
+    });
+
+    it("returns at most 80 code points, with control characters removed", () => {
+      expect(noteAuthorName(`Agent\u0007 ${"x".repeat(500)}`, "Ada"))
+        .toBe(`Agent ${"x".repeat(74)}`);
+    });
+
+    it("returns the empty string where neither name leaves anything", () => {
+      expect(noteAuthorName("\u0007", "  ")).toBe("");
     });
   });
 
