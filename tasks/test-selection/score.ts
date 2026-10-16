@@ -437,6 +437,12 @@ export function moveHistory(
  * context says about a test's recent runs follows its history to a new
  * name (see `moveHistory`). Each key of `mainAtCommit` and `credited`
  * starts with an identity key and goes on with parts that hold no space.
+ *
+ * What the context remembers at one point is held against the day it first
+ * saw that point, and is renamed by that day. A record of a later day at
+ * that point, a rerun of the commit, is the same test at the same commit,
+ * so its outcomes go with the rest rather than leave the new name unable to
+ * tell a rerun that disagrees from a first failure.
  */
 export function renameInContext(
   context: FoldContext,
@@ -472,17 +478,19 @@ export function renameInContext(
       attribution.slice(split);
     if (to === attribution) continue;
     context.credited.delete(attribution);
-    if (!context.credited.has(to)) context.credited.set(to, day);
+    // The earlier credit is the one a single fold would have kept.
+    const held = context.credited.get(to);
+    if (held === undefined || day < held) context.credited.set(to, day);
   }
-  for (const [key, seen] of [...context.failures]) {
-    context.failures.delete(key);
+  const failures = new Map<string, SeenFailure[]>();
+  for (const [key, seen] of context.failures) {
     for (const failure of seen) {
       const to = rename(key, failure.day);
-      const list = context.failures.get(to) ?? [];
-      list.push(failure);
-      context.failures.set(to, list);
+      failures.set(to, [...failures.get(to) ?? [], failure]);
     }
   }
+  context.failures.clear();
+  for (const [key, seen] of failures) context.failures.set(key, seen);
   for (const crowd of context.crowds.values()) {
     const renamed = [...crowd.identities].map((key) => rename(key, crowd.day));
     crowd.identities = new Set(renamed);

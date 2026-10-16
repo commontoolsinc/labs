@@ -481,9 +481,9 @@ type AggregateRead =
  * An incremental run folds every day of a state's history into one when
  * the state's new real test failures were credited under other rules (see
  * `NEW_REAL_TEST_FAILURE_RULE`), which reads every record those came from,
- * so none of them is lost. A bootstrap starts from one where every state
- * is a body that is not an aggregate at all and none is written in a shape
- * from further ahead, since then no publisher can read any of them.
+ * so none of them is lost. A bootstrap starts from one where this publisher
+ * can read no state and none is written in a shape from further ahead,
+ * which a publisher at that shape would read.
  *
  * Passing over a state this publisher cannot read is what keeps one from
  * stopping it for good. Nothing but the publisher creates a state, and it

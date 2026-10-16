@@ -2344,73 +2344,120 @@ describe("moveHistory()", () => {
       { day: "2026-08-14", commit: "c9", source: "main" },
     ]);
   });
+});
 
-  describe("renameInContext()", () => {
-    const RENAMED = { k: "unit", s: "memory", n: "space > records a write" };
-    const TO = testIdentityKey(RENAMED);
+describe("renameInContext()", () => {
+  const RENAMED = { k: "unit", s: "memory", n: "space > records a write" };
+  const TO = testIdentityKey(RENAMED);
 
-    /** What a fold remembers after a branch's failure at one commit. */
-    function remembering() {
-      const context = emptyContext();
-      foldObservations([
-        saw("fail", { day: "2026-08-10", place: "pr", source: "branch" }),
-      ], { context });
-      return context;
-    }
+  /** What a fold remembers after a branch's failure at one commit. */
+  function remembering() {
+    const context = emptyContext();
+    foldObservations([
+      saw("fail", { day: "2026-08-10", place: "pr", source: "branch" }),
+    ], { context });
+    return context;
+  }
 
-    /** The branch's failure seen again, under the new name. */
-    function againAs(context: ReturnType<typeof emptyContext>) {
-      return foldObservations([
-        saw("fail", {
-          test: RENAMED,
-          day: "2026-08-10",
-          place: "pr",
-          source: "branch",
-        }),
-      ], { context }).get(TO)!;
-    }
-
-    it("carries what a fold remembers of a test to its new name", () => {
-      // A record of a day before an alias's date resolves to the new
-      // name, so a rerun of a commit the old name was credited at must
-      // find that credit there.
-      const renamed = remembering();
-      renameInContext(renamed, (key) => key === KEY ? TO : key);
-      expect(againAs(renamed).prCatches).toBe(0);
-      expect(againAs(remembering()).prCatches).toBe(1);
-    });
-
-    it("renames by the day the context holds each entry against", () => {
-      const context = emptyContext();
-      context.failures.set(KEY, [
-        { day: "2026-08-10", source: "a" },
-        { day: "2026-08-16", source: "b" },
-      ]);
-      context.credited.set(`${KEY} c1 a`, "2026-08-10");
-      context.credited.set(`${KEY} c2 b`, "2026-08-16");
-      context.mainAtCommit.set(`${KEY} c1#7`, {
+  /** The branch's failure seen again, under the new name. */
+  function againAs(context: ReturnType<typeof emptyContext>) {
+    return foldObservations([
+      saw("fail", {
+        test: RENAMED,
         day: "2026-08-10",
-        outcome: "fail",
-      });
-      context.crowds.set("c1 a", {
-        day: "2026-08-10",
-        identities: new Set([KEY]),
-      });
-      renameInContext(
-        context,
-        (key, day) => key === KEY && day < "2026-08-15" ? TO : key,
-      );
-      expect(context.failures.get(TO)).toEqual([
-        { day: "2026-08-10", source: "a" },
-      ]);
-      expect(context.failures.get(KEY)).toEqual([
-        { day: "2026-08-16", source: "b" },
-      ]);
-      expect([...context.credited.keys()].sort()).toEqual(
-        [`${KEY} c2 b`, `${TO} c1 a`].sort(),
-      );
-      expect([...context.mainAtCommit.keys()]).toEqual([`${TO} c1#7`]);
-      expect([...context.crowds.get("c1 a")!.identities]).toEqual([TO]);
+        place: "pr",
+        source: "branch",
+      }),
+    ], { context }).get(TO)!;
+  }
+
+  it("carries what a fold remembers of a test to its new name", () => {
+    // A record of a day before an alias's date resolves to the new
+    // name, so a rerun of a commit the old name was credited at must
+    // find that credit there.
+    const renamed = remembering();
+    renameInContext(renamed, (key) => key === KEY ? TO : key);
+    expect(againAs(renamed).prCatches).toBe(0);
+    expect(againAs(remembering()).prCatches).toBe(1);
+  });
+
+  it("adds a renamed test's failures to those its new name holds", () => {
+    const context = emptyContext();
+    context.failures.set(KEY, [{ day: "2026-08-10", source: "a" }]);
+    context.failures.set(TO, [{ day: "2026-08-11", source: "b" }]);
+    renameInContext(context, (key) => key === KEY ? TO : key);
+    expect([...context.failures.keys()]).toEqual([TO]);
+    expect(context.failures.get(TO)!.map((one) => one.source).sort())
+      .toEqual(["a", "b"]);
+  });
+
+  it("merges a renamed test's entries with those its new name holds", () => {
+    const context = emptyContext();
+    context.outcomesAtCommit.set("c1#7", {
+      day: "2026-08-10",
+      identities: new Map([[KEY, new Set(["fail"])], [TO, new Set(["pass"])]]),
     });
+    // A failure at a point is the commit being broken there, whichever
+    // name saw it, and a pass beside it does not clear that.
+    context.mainAtCommit.set(`${KEY} c1#7`, {
+      day: "2026-08-10",
+      outcome: "fail",
+    });
+    context.mainAtCommit.set(`${TO} c1#7`, {
+      day: "2026-08-11",
+      outcome: "pass",
+    });
+    context.mainAtCommit.set(`${KEY} c2#7`, {
+      day: "2026-08-10",
+      outcome: "pass",
+    });
+    context.mainAtCommit.set(`${TO} c2#7`, {
+      day: "2026-08-11",
+      outcome: "fail",
+    });
+    context.credited.set(`${KEY} c1 a`, "2026-08-10");
+    context.credited.set(`${TO} c1 a`, "2026-08-12");
+    renameInContext(context, (key) => key === KEY ? TO : key);
+    expect([...context.outcomesAtCommit.get("c1#7")!.identities]).toEqual([
+      [TO, new Set(["pass", "fail"])],
+    ]);
+    expect(context.mainAtCommit.get(`${TO} c1#7`)?.outcome).toBe("fail");
+    expect(context.mainAtCommit.get(`${TO} c2#7`)?.outcome).toBe("fail");
+    expect(context.mainAtCommit.size).toBe(2);
+    // The earlier credit is the one a single fold would have kept.
+    expect([...context.credited]).toEqual([[`${TO} c1 a`, "2026-08-10"]]);
+  });
+
+  it("renames by the day the context holds each entry against", () => {
+    const context = emptyContext();
+    context.failures.set(KEY, [
+      { day: "2026-08-10", source: "a" },
+      { day: "2026-08-16", source: "b" },
+    ]);
+    context.credited.set(`${KEY} c1 a`, "2026-08-10");
+    context.credited.set(`${KEY} c2 b`, "2026-08-16");
+    context.mainAtCommit.set(`${KEY} c1#7`, {
+      day: "2026-08-10",
+      outcome: "fail",
+    });
+    context.crowds.set("c1 a", {
+      day: "2026-08-10",
+      identities: new Set([KEY]),
+    });
+    renameInContext(
+      context,
+      (key, day) => key === KEY && day < "2026-08-15" ? TO : key,
+    );
+    expect(context.failures.get(TO)).toEqual([
+      { day: "2026-08-10", source: "a" },
+    ]);
+    expect(context.failures.get(KEY)).toEqual([
+      { day: "2026-08-16", source: "b" },
+    ]);
+    expect([...context.credited.keys()].sort()).toEqual(
+      [`${KEY} c2 b`, `${TO} c1 a`].sort(),
+    );
+    expect([...context.mainAtCommit.keys()]).toEqual([`${TO} c1#7`]);
+    expect([...context.crowds.get("c1 a")!.identities]).toEqual([TO]);
   });
 });
