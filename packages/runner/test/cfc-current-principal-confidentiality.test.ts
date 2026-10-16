@@ -146,9 +146,12 @@ describe("cfc-current-principal-confidentiality", () => {
       properties: { ...declared.properties, title: { type: "string" } },
       $defs: { ...declared.$defs, Unrelated: { type: "number" } },
     } as const;
-    expect(mergeCfcSchemaEnvelopes(declared, candidate)).toMatchObject(
-      candidate,
-    );
+    // `Unrelated` is a definition nothing references, which the merged
+    // document does not carry.
+    expect(mergeCfcSchemaEnvelopes(declared, candidate)).toMatchObject({
+      ...candidate,
+      $defs: declared.$defs,
+    });
   });
 
   it("retains a recursive private external schema through public evolution", () => {
@@ -215,7 +218,12 @@ describe("cfc-current-principal-confidentiality", () => {
         Anything: true,
       },
     } as const;
-    expect(mergeCfcSchemaEnvelopes(declared, declared)).toMatchObject(declared);
+    // `Anything` is a definition nothing in `declared` references, which the
+    // merged document does not carry.
+    expect(mergeCfcSchemaEnvelopes(declared, declared)).toMatchObject({
+      ...declared,
+      $defs: { Node: declared.$defs.Node },
+    });
     const tightened = {
       ...declared,
       ifc: {

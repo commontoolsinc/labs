@@ -2,6 +2,7 @@ import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import {
   debugStr,
   fabricAwareEqual,
+  hashStringOf,
   isDeepFrozen,
 } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
@@ -220,6 +221,52 @@ const renameLocalDefinitionRefs = (
 };
 
 /**
+ * Partitions the definitions of one map into classes of definitions that
+ * mean the same schema, and returns each name's class number. Two definitions
+ * share a class when their bodies are equal once every local ref in them is
+ * read as the class of the definition it names, which is the coarsest such
+ * partition: recursive definitions that unfold to the same schema share a
+ * class whatever their names. A ref naming no definition in `definitions`
+ * stays as written, so it matches only the same ref. A `$defs` inside a body
+ * is inert there and takes no part.
+ */
+const definitionEquivalenceClasses = (
+  definitions: ReadonlyMap<string, JSONSchema>,
+): Map<string, number> => {
+  const bodies = new Map<string, JSONSchema>();
+  for (const [name, definition] of definitions) {
+    bodies.set(name, pruneCfcSchemaDefinitionsInternal(definition, false));
+  }
+  // Moore's refinement: start from one class and split by signature until the
+  // number of classes stops growing. A signature carries the class it refines,
+  // so each round can only split classes, never join them.
+  let classes = new Map<string, number>();
+  for (const name of definitions.keys()) classes.set(name, 0);
+  let count = 1;
+  while (true) {
+    const tokens = new Map<string, string>();
+    for (const [name, index] of classes) tokens.set(name, `\u0000${index}`);
+    const bySignature = new Map<string, number>();
+    const next = new Map<string, number>();
+    for (const [name, body] of bodies) {
+      const signature = hashStringOf([
+        classes.get(name)!,
+        renameLocalDefinitionRefs(body, tokens),
+      ]);
+      let index = bySignature.get(signature);
+      if (index === undefined) {
+        index = bySignature.size;
+        bySignature.set(signature, index);
+      }
+      next.set(name, index);
+    }
+    classes = next;
+    if (bySignature.size === count) return classes;
+    count = bySignature.size;
+  }
+};
+
+/**
  * Merge the definition maps of `fragments` into one map, and return the
  * fragments without theirs. Each fragment is a self-contained view whose
  * `$defs` holds the closure its local refs reach, which is how
@@ -229,8 +276,12 @@ const renameLocalDefinitionRefs = (
  * their maps merge as they are. A fragment whose map defines a name
  * differently comes from another document — an arm that resolved through a
  * `cid:` ref into a cyclic group — and its whole map is renamed, refs and
- * all, so the merged map keeps the two meanings apart. A fragment carrying
- * no map is returned as it is.
+ * all, so the merged map keeps the two meanings apart. A definition a later
+ * fragment brings that means the same schema as one the merged map already
+ * holds, by `definitionEquivalenceClasses()`, is not added: the fragment's
+ * refs to it name the one already there. So hoisting a fragment against a
+ * map that already took in its definitions adds nothing and names nothing
+ * new. A fragment carrying no map is returned as it is.
  */
 export const hoistCfcSchemaDefs = (
   fragments: readonly JSONSchema[],
@@ -262,11 +313,32 @@ export const hoistCfcSchemaDefs = (
       stripped = renamedBody;
       additions = renamed!;
     }
-    merged ??= new Map();
-    for (const [name, definition] of Object.entries(additions)) {
-      if (!merged.has(name)) merged.set(name, definition);
+    if (merged === undefined) {
+      merged = new Map(Object.entries(additions));
+      return stripped;
     }
-    return stripped;
+    const held = merged;
+    const newNames = Object.keys(additions).filter((name) => !held.has(name));
+    if (newNames.length === 0) return stripped;
+    const union = new Map(held);
+    for (const name of newNames) union.set(name, additions[name]);
+    const classes = definitionEquivalenceClasses(union);
+    // The first held name of each class is the one its later members take.
+    const heldNames = new Map<number, string>();
+    for (const name of held.keys()) {
+      const index = classes.get(name)!;
+      if (!heldNames.has(index)) heldNames.set(index, name);
+    }
+    const renamed = new Map<string, string>();
+    for (const name of newNames) {
+      const heldName = heldNames.get(classes.get(name)!);
+      if (heldName !== undefined) renamed.set(name, heldName);
+    }
+    for (const name of newNames) {
+      if (renamed.has(name)) continue;
+      held.set(name, renameLocalDefinitionRefs(additions[name], renamed));
+    }
+    return renameLocalDefinitionRefs(stripped, renamed) as JSONSchemaObj;
   });
   return {
     fragments: hoisted,
