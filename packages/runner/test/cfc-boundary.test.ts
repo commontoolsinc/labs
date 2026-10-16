@@ -3034,12 +3034,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             path: [],
             label: expect.objectContaining({
               confidentiality: ["same-tx-secret"],
-              integrity: expect.arrayContaining([
-                "same-tx-integrity",
-                expect.objectContaining({
-                  type: "https://commonfabric.org/cfc/atom/LinkReference",
-                }),
-              ]),
+              integrity: expect.arrayContaining(["same-tx-integrity"]),
             }),
           }),
         ]),
@@ -3107,19 +3102,6 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(stored.value?.["/"][LINK_V1_TAG]).not.toHaveProperty(
         "cfcLabelView",
       );
-      const referenceIntegrity = {
-        type: "https://commonfabric.org/cfc/atom/LinkReference",
-        source: {
-          space: signer.did(),
-          id: source.getAsNormalizedFullLink().id,
-          path: [],
-        },
-        target: {
-          space: signer.did(),
-          id: target.getAsNormalizedFullLink().id,
-          path: [],
-        },
-      };
       const entries = (stored.cfc?.labelMap?.entries ?? []) as Array<{
         path: string[];
         label: IFCLabel;
@@ -3128,10 +3110,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       expect(entries.filter((entry) => entry.origin === "link")).toEqual([
         {
           path: [],
-          label: {
-            confidentiality: ["alice-selection"],
-            integrity: [referenceIntegrity],
-          },
+          label: { confidentiality: ["alice-selection"] },
           origin: "link",
         },
       ]);
@@ -4144,12 +4123,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
             path: ["linked"],
             label: expect.objectContaining({
               confidentiality: ["linked-secret"],
-              integrity: expect.arrayContaining([
-                "linked-integrity",
-                expect.objectContaining({
-                  type: "https://commonfabric.org/cfc/atom/LinkReference",
-                }),
-              ]),
+              integrity: expect.arrayContaining(["linked-integrity"]),
             }),
           }),
           expect.objectContaining({

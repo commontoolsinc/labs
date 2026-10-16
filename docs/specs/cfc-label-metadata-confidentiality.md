@@ -19,7 +19,7 @@ persists into a space-B document:
 |---|---|---|
 | `User{subject}`, `Space{id}`, `PersonalSpace{owner}` clause atoms | **yes — DIDs** | read gating (equality), §4.9.3 ACL point query (`Space.id` dereference) |
 | `Caveat{kind, source, by}` | **yes** — `source` is a full nested atom | evidence binding (inv-10: discharge must bind the same caveat source) |
-| `LinkReference{source:{space,id,path}, target:{…}}` | **yes** — space DID + doc id + path | provenance display; S7 exemption keys on atom *type* only |
+| `LinkReference{source:{space,id,path}, target:{…}}`, retired and no longer minted, present in labels stored before | **yes** — space DID + doc id + path | provenance display; S7 exemption keys on atom *type* only |
 | `TransformedBy{identity}` | code identity: `moduleIdentity`, `sourceFile`, `bindingPath`, `codeHash` | trust statements (B3 pattern match) |
 | `HasRole`, `UserSurfaceInput`, vouched-channel `ExternalIngest`, `authored-by`/`represents-principal` | **yes — DIDs** | role guards; authorship UI (product feature); fetch-ingest provenance carries a URL and commit SHA instead |
 | sigil-link `cfcLabelView` **inside `value`** | same atom set, second copy | link-carried enforcement at B |
@@ -335,8 +335,8 @@ tension 8).
 ## Provenance
 
 Runner seams: envelope persist loop + `ensureSchemaDocument`
-(`cfc/prepare.ts`), `linkSlotLabel` + `LinkReference` mint
-(`cfc/prepare.ts`), flow join `deriveFlowJoin` (`cfc/prepare.ts`),
+(`cfc/prepare.ts`), `linkSlotLabel` (`cfc/prepare.ts`), flow join
+`deriveFlowJoin` (`cfc/prepare.ts`),
 `redactCaveatSourceAtom`/`redactCaveatSourcesForDisplay` + the
 keep-source-intact scope comment (`cfc/label-view-core.ts`), the three IPC
 redaction sites + the open `meta:"cfc"` raw seam

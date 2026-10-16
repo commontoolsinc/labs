@@ -1,7 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
@@ -172,21 +171,14 @@ const idOf = (runtime: Runtime, name: string): string =>
 
 /**
  * The labels document `name` stores where the labeled element `a` is linked
- * at `path`: the link's own label at the slot, which its schema declares, and
- * the reference from that position to `a`. Nothing below the slot: `a`'s
- * `secret` label is `a`'s, read where `a` is.
+ * at `path`: the link's own label at the slot, which its schema declares.
+ * Nothing below the slot: `a`'s `secret` label is `a`'s, read where `a` is.
  */
 const labelsOfAAt = (
-  runtime: Runtime,
+  _runtime: Runtime,
   path: readonly string[],
-  name = "list",
-): string[] => [
-  labelString(path, [LABEL], [{
-    type: CFC_ATOM_TYPE.LinkReference,
-    source: { space, id: idOf(runtime, "a"), path: [] },
-    target: { space, id: idOf(runtime, name), path },
-  }]),
-];
+  _name = "list",
+): string[] => [labelString(path, [LABEL])];
 
 describe("cfc-list-link-labels", () => {
   for (const flow of ["persist", "off"] as const) {

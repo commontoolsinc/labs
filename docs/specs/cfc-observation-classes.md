@@ -297,9 +297,9 @@ normative from C1 on:
   hereditary integrity meet quantifies over the transformation's *content*
   inputs; standalone probes rarely resolve any label, and admitting them
   would empty the weakest-link meet on virtually every transaction,
-  silently ending TransformedBy / PolicyCertified propagation. Pointer
-  integrity evidence stays on the link entry (the LinkReference chain).
-  The probe of a followed slot leaves its input witnesses to the followed
+  silently ending TransformedBy / PolicyCertified propagation. A pointer
+  carries no integrity evidence of its own (§15.4, the retired
+  `LinkReference`). The probe of a followed slot leaves its input witnesses to the followed
   reference's own location, which resolves them over the value stamps at the
   slot, and which counts whenever the slot's label is confidential
   (`cfc-transformed-by-input-witnesses.md`).

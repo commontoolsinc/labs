@@ -28,14 +28,14 @@ confidentiality is the reference restriction conjoined with the target's
 current labels; integrity is the target's plus the link's own endorsements,
 §3.7.2). What the runtime persists at the link path in space B is the
 reference's own label (`linkSlotLabel`, `prepare.ts`): the link schema's
-declarations, the restriction the written handle carried, and a
-runtime-minted `LinkReference` endorsement recording **both** spaces, in one
-entry stamped `origin: "link"`. Where flow labels persist, the creating
-attempt's flow join is stamped at the same path as an entry of its own, with
-`origin: "structure"` and `observes: "followRef"`. Nothing of the source's
-labels is copied into either (§8.2.5, §8.12.8): a public, independently
-acquired reference to confidential content is public to hold and compare, and
-confidential to read through.
+declarations and the restriction the written handle carried, in one entry
+stamped `origin: "link"`. Where flow labels persist, the creating attempt's
+flow join is stamped at the same path as an entry of its own, with
+`origin: "structure"` and `observes: "followRef"`. No evidence atom is minted
+for the reference (§15.4, the retired `LinkReference`). Nothing of the
+source's labels is copied into either (§8.2.5, §8.12.8): a public,
+independently acquired reference to confidential content is public to hold
+and compare, and confidential to read through.
 
 By contrast, once a handler reads a value into plain bytes and writes those
 bytes into another space, the runtime has no basis to attest they are the same
@@ -171,8 +171,7 @@ deployment.
 ## Provenance
 
 Runner seams: `linkSlotLabel` / `linkedSourceEvidence` /
-`linkReferenceIntegrity` / `derivePersistedLabel` /
-`verifyExactCopyRequirements` /
+`derivePersistedLabel` / `verifyExactCopyRequirements` /
 `unsupportedTrustSensitiveReason` / `gateRuntimeMintedIntegrity`
 (`cfc/prepare.ts`); `ExchangeRule` / `buildCfcPolicySnapshot` (`cfc/policy.ts`);
 `evaluateExchangeRules` + home-clause locality (`cfc/exchange-eval.ts`);

@@ -275,7 +275,7 @@ describe("cfc-label-metadata-persist", () => {
       expect(entries.map((entry) => entry.path)).toEqual([["field"]]);
       expect(entries[0].label.confidentiality).toEqual(["acquired"]);
       expect(
-        entries[0].label.integrity?.some((atom) =>
+        (entries[0].label.integrity ?? []).some((atom) =>
           atom.type === CFC_ATOM_TYPE.InjectionSafe
         ),
       ).toBe(false);

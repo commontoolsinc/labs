@@ -150,12 +150,7 @@ describe("cfc-current-principal-legacy", () => {
       expect(slot).toEqual([{
         path: ["books"],
         origin: "link",
-        label: {
-          confidentiality: [cfcAtom.user(visitor.did())],
-          integrity: [expect.objectContaining({
-            type: "https://commonfabric.org/cfc/atom/LinkReference",
-          })],
-        },
+        label: { confidentiality: [cfcAtom.user(visitor.did())] },
       }]);
       expect(fixture.readEnvelope()).toEqual(fixture.envelope);
       expect(

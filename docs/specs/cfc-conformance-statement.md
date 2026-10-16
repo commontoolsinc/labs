@@ -194,7 +194,19 @@ it: the link schema's declarations, the restriction the written handle
 carries at its root, and, where flow labels persist, the creating attempt's
 flow join, stamped at the slot as a pointer-class `structure` entry beside
 the link entry, or carried to the slot by the `*` template of a container the
-transaction stamps as a whole. Nothing of the source's labels is copied to the slot,
+transaction stamps as a whole. No evidence atom is minted for the reference:
+§15.4 retires `LinkReference`. The atom stays non-authorable, and one in a
+label stored before the retirement stays what it was, provenance that
+endorses nothing. A writer's stamp at a slot describes the reference the
+committed document holds there in an envelope that says so, with
+`stampPlacement: "committed"`: the runtime re-derives an attempt's labels
+against the committed placement (§8.10.2.2,
+`SpaceReplica.#commitReadActivities`), and writes the member when the
+envelope's stamps at reference slots were all placed that way. A stamp at a
+reference slot of an envelope that does not say it is not an input witness
+(§18.7, `slotStampPlacementUnknown`). The member is beside the ones the
+envelope's version defines, so a reader that predates it reads the envelope
+all the same. Nothing of the source's labels is copied to the slot,
 and the write takes no dependency on the source's envelope. A write floor on
 the slot, including a floor declared under a wildcard on every element of a
 list, resolves the source's current evidence through `linkedSourceEvidence`,

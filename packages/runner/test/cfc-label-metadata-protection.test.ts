@@ -335,19 +335,6 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         // An atom with nothing classified persists verbatim (the
         // transform's copy-on-write passthrough).
         expect(rootEntry.label.confidentiality).toContainEqual("opaque-tag");
-        // The runtime-minted LinkReference provenance atom: source/target
-        // committed per the table (display/provenance only).
-        const linkRef = rootEntry.label.integrity?.find((atom) =>
-          atom.type === CFC_ATOM_TYPE.LinkReference
-        );
-        expect(linkRef).toBeDefined();
-        expect(linkRef!.source).toEqual(
-          commitCfcFieldValue({
-            space: spaceA,
-            id: sourceId,
-            path: [],
-          }),
-        );
 
         // No plaintext DID survives anywhere in the persisted entries'
         // committed families.
