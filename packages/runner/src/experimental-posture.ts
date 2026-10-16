@@ -156,8 +156,9 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
-  // Local session writes with shared reads require validation-only commits.
-  // The deployment must support those commits before clients enable this.
+  // A local session write carrying a precondition on a shared document is
+  // sent as a validation-only commit. The deployment must support those
+  // commits before clients enable this.
   localSessionDocuments: "server",
   // Defaults are published fleet-wide; each session negotiates the mode.
   viewScopedReplication: "server",

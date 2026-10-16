@@ -141,8 +141,9 @@ audit step leave that workflow taking no part in test records at all.
 
 There are no jobs to split or rebalance by hand: the lanes pack every test by
 its measured cost. What decides a lane's wall time is the lane dials in
-`tasks/test-selection/policy.ts` — `LANES`, `LANE_BOUND_SECONDS`,
-`LANE_SAFETY_SECONDS`, `FULL_LANE_BOUND_SECONDS` and `FULL_LANES_MAX` — and
+`tasks/test-selection/policy.ts` — `DISCRETIONARY_SECONDS`,
+`LANE_BOUND_SECONDS`, `LANE_SAFETY_SECONDS`, `FULL_LANE_BOUND_SECONDS` and
+`LANES_MAX` — and
 "Every dial" in `docs/development/test-selection.md` gives the reason to move
 each. `docs/development/CI_PERFORMANCE.md` says when changing them is worth
 starting. Read it first.

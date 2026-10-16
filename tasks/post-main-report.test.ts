@@ -32,7 +32,7 @@ import {
   outcomesFromArtifacts,
   outcomesFromStore,
   postReport,
-  pullRequestHead,
+  pullRequestFacts,
   pullRequestOf,
   recordsInDirectory,
   reportsFromArtifacts,
@@ -626,8 +626,30 @@ describe("post-main-report", () => {
   });
 
   describe("manifestView()", () => {
+    /** What a pull request carrying no label asks of its run. */
+    const DEFAULT_RUN = { full: false, scale: 1 };
+
+    it("rebuilds the plan the pull request's labels asked for", () => {
+      // Nothing chosen by score: the run held only what had to run.
+      const mandatoryOnly = manifestView(manifest, suites, new Set(), {
+        full: false,
+        scale: 0,
+      });
+      expect(mandatoryOnly.selected.has(testIdentityKey(proves))).toBe(false);
+      expect(mandatoryOnly.crowded).toBe(true);
+      // Everything, the flaky test the default plan holds back included.
+      const full = manifestView(manifest, suites, new Set(), {
+        full: true,
+        scale: 1,
+      });
+      expect(full.selected.has(testIdentityKey(kneads))).toBe(true);
+      expect(full.withheld.size).toBe(0);
+      const unlabelled = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
+      expect(unlabelled.selected.has(testIdentityKey(kneads))).toBe(false);
+    });
+
     it("reports what the packing reached and what was held back", () => {
-      const view = manifestView(manifest, suites, new Set());
+      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
       expect(view.manifest).toBe(true);
       expect(view.withheld.get(testIdentityKey(kneads))).toBe("flaky");
       expect(view.selected.has(testIdentityKey(proves))).toBe(true);
@@ -645,10 +667,14 @@ describe("post-main-report", () => {
         manifest,
         [{ ...suites[0]!, whole: [bakeryUnit] }],
         new Set(),
+        DEFAULT_RUN,
       );
       expect([...view.heldWithUnit]).toEqual([testIdentityKey(proves)]);
       expect(view.selected.has(testIdentityKey(proves))).toBe(false);
-      expect(manifestView(manifest, suites, new Set()).heldWithUnit.size)
+      expect(
+        manifestView(manifest, suites, new Set(), DEFAULT_RUN).heldWithUnit
+          .size,
+      )
         .toBe(0);
     });
 
@@ -671,6 +697,7 @@ describe("post-main-report", () => {
         },
         [{ ...suites[0]!, units: [bakeryUnit, oven] }],
         new Set(),
+        DEFAULT_RUN,
       );
       expect(view.crowded).toBe(true);
       expect(view.unschedulable.has(testIdentityKey(proves))).toBe(true);
@@ -706,17 +733,27 @@ describe("post-main-report", () => {
       };
       const topology = [measured, coverageGateSuite([measured])];
       expect(
-        manifestView(withGate, topology, new Set(["packages/bakery/src/x.ts"]))
+        manifestView(
+          withGate,
+          topology,
+          new Set(["packages/bakery/src/x.ts"]),
+          DEFAULT_RUN,
+        )
           .selected.has(testIdentityKey(gate)),
       ).toBe(true);
       expect(
-        manifestView(withGate, topology, new Set(["docs/README.md"]))
+        manifestView(
+          withGate,
+          topology,
+          new Set(["docs/README.md"]),
+          DEFAULT_RUN,
+        )
           .selected.has(testIdentityKey(gate)),
       ).toBe(false);
     });
 
     it("carries the flake counts and the catches behind every entry", () => {
-      const view = manifestView(manifest, suites, new Set());
+      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
       expect(view.flakes.get(testIdentityKey(kneads)))
         .toEqual({ flakes: 20, runs: 20 });
       // An entry with no counts is still a key, since membership is what
@@ -729,7 +766,7 @@ describe("post-main-report", () => {
     // Which unit a test lives in is what says whether a run that did not
     // record it ran its unit at all.
     it("carries the unit every entry lives in", () => {
-      const view = manifestView(manifest, suites, new Set());
+      const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
       expect(view.units.get(testIdentityKey(kneads)))
         .toBe(`workspace-unit\t${bakeryUnit}`);
     });
@@ -742,6 +779,7 @@ describe("post-main-report", () => {
         manifest,
         [{ ...suites[0]!, units: [] }],
         new Set(),
+        DEFAULT_RUN,
       );
       expect(view.selected.size).toBe(0);
     });
@@ -1588,27 +1626,35 @@ describe("post-main-report", () => {
     });
   });
 
-  describe("pullRequestHead()", () => {
+  describe("pullRequestFacts()", () => {
     /** Answers the pull request and commit lookups however a case says. */
     async function asking(
       answer: (url: string) => Response,
-    ): Promise<Awaited<ReturnType<typeof pullRequestHead>>> {
+    ): Promise<Awaited<ReturnType<typeof pullRequestFacts>>> {
       const original = globalThis.fetch;
       globalThis.fetch = ((input: string | URL | Request) =>
         Promise.resolve(
           answer(typeof input === "string" ? input : input.toString()),
         )) as typeof fetch;
       try {
-        return await pullRequestHead(7008);
+        return await pullRequestFacts(7008);
       } finally {
         globalThis.fetch = original;
       }
     }
 
-    it("gives the branch tip", async () => {
+    it("gives the branch tip and the labels", async () => {
       expect(
-        await asking(() => Response.json({ head: { sha: "b".repeat(40) } })),
-      ).toBe("b".repeat(40));
+        await asking(() =>
+          Response.json({
+            head: { sha: "b".repeat(40) },
+            labels: [{ name: "ci: 2x" }, { name: "bug" }],
+          })
+        ),
+      ).toEqual({ head: "b".repeat(40), labels: ["ci: 2x", "bug"] });
+      expect(
+        await asking(() => Response.json({ head: { sha: "c".repeat(40) } })),
+      ).toEqual({ head: "c".repeat(40), labels: [] });
     });
 
     // A number in a commit subject may name an issue, and an issue takes

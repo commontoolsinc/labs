@@ -3814,9 +3814,10 @@ export type GraphSnapshotResponse = {
 
 /**
  * Everything the logger diagnostics read returns: counts, per-logger
- * metadata, timings, active flags, the runtime's CFC counters, and the sizes
- * of its live structures, gathered in one round trip because a client
- * comparing them wants them from the same moment.
+ * metadata, timings, active flags, the runtime's CFC counters, the pattern
+ * manager's compile-cache counters, and the sizes of the runtime's live
+ * structures, gathered in one round trip because a client comparing them
+ * wants them from the same moment.
  */
 export type LoggerCountsResponse = {
   /**
@@ -3851,6 +3852,14 @@ export type LoggerCountsResponse = {
    * no index signature does not satisfy, and every counter there is a number.
    */
   cfc: Record<string, number>;
+
+  /**
+   * The pattern manager's compile-cache counters: `hits`, `misses` and
+   * `byIdentityHits`, as `PatternManager.getCompileCacheStats()` reports
+   * them. A capture reading them beside the `compile-cache` timing rows can
+   * tell a worker that recompiled once from one that never hits.
+   */
+  compileCache: Record<string, number>;
 
   /**
    * How large the runtime's live structures are at this moment: the

@@ -3678,6 +3678,7 @@ export class RuntimeProcessor {
       timing,
       flags,
       cfc: this.#runtime.getCfcStats(),
+      compileCache: { ...this.#runtime.patternManager.getCompileCacheStats() },
       sizes: {
         ...this.#runtime.getSizes(),
         worker: {

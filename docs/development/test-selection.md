@@ -157,36 +157,58 @@ longer enumerates is reported without failing, because a manifest is hours old
 and a unit deleted since it was published is expected to linger in it. A unit
 the configuration declares unavailable is passed over, since nothing runs it.
 
-### How many lanes the run on the default branch uses
+### How many lanes a run uses
 
-A change's tests are packed into a fixed number of lanes, `LANES`. The run
-on the default branch cannot be, because how much work there is decides
-how many lanes it needs and the job matrix has to exist before anything
-starts. So one job asks:
+The number of lanes a run takes depends on how much work it has, and the
+job matrix has to exist before any lane starts. So one job asks, for a
+change:
 
 ```
-deno run -A tasks/ci-lane.ts --full --lane-count
+deno run -A tasks/ci-lane.ts --lane-count --base <ref> [--label <name>]...
 ```
 
-and it answers with an integer and nothing else on its standard output.
-On its error stream and in the job summary it also gives what each lane of
-that count is projected to take, both its work and the whole job with the
-prologue. It packs those lanes the way the lanes will pack themselves, so
-the table is what each lane projects for itself. The lanes then read the
-same tree against the same manifest and work out their own shares, the
-way a change's lanes do. What travels through job outputs is only the
-lane count and the `--full` that tells each lane to run everything, never
-which lane runs which test.
+and for the run on the default branch:
 
-The count is the fewest lanes at which a bisection, described below,
-finds that nothing mandatory overflows, or `FULL_LANES_MAX` where even
-that many lanes overflow. An identity
-overflows when no lane can hold even one run of it and no lane is empty
-to run it alone. So unless the cap holds the run back, every identity
-either fits inside a lane's budget or runs alone, and the only lanes past
-their budget each hold one test that no number of lanes would bring under
-it. A repeated identity with room for some of its runs but not all runs
-fewer times, which is not an overflow.
+```
+deno run -A tasks/ci-lane.ts --lane-count --full
+```
+
+It answers on its standard output with one line of JSON and nothing else:
+the count as `of`, and as `args` the arguments every lane takes besides its
+own number, which are `--full`, or the base and the scale. On its error
+stream and in the job summary it also gives what each lane of that count is
+projected to take, both its work and the whole job with the prologue. It
+packs those lanes the way the lanes will pack themselves, so the table is
+what each lane projects for itself. The lanes then read the same tree
+against the same manifest and work out their own shares. What travels
+through job outputs is only the count and those arguments, never which lane
+runs which test. A lane run without `--of`, as on a workstation, counts its
+run's lanes the same way.
+
+A change's tests have two parts: the work its change makes mandatory, and
+`DISCRETIONARY_SECONDS` of tests chosen by score, which the value, density
+and exploration passes share. The count is the fewest lanes at which a
+bisection, described below, finds that the plan holds both. A plan holds
+the mandatory work where nothing mandatory overflows: an identity overflows
+when no lane can hold even one run of it and no lane is empty to run it
+alone. It holds the tests chosen by score where the room the mandatory pass
+leaves below the lanes' budgets, added up over the lanes, is at least
+`DISCRETIONARY_SECONDS`. A target larger than what one lane holding every
+test the passes could choose would be charged needs no more room than that,
+so a large scale opens no lanes that nothing could fill.
+So a change that forces a great deal of work in takes more lanes, and still
+runs the tests chosen by score. A change with nothing mandatory takes the
+fewest lanes that hold `DISCRETIONARY_SECONDS`, which is three. The passes
+spend the target and no more however many lanes there are, and less where
+`LANES_MAX` leaves them less room.
+
+The run on the default branch has no tests chosen by score, since it runs
+everything, so its count is the fewest lanes at which nothing overflows.
+Unless the cap holds a run back, every mandatory identity either fits inside
+a lane's budget or runs alone, and the only lanes past their budget each
+hold one test that no number of lanes would bring under it. A repeated
+identity with room for some of its runs but not all runs fewer times, which
+is not an overflow.
 
 Each count is judged by its own packing alone. Adding up how far the lanes
 run past their budget would not do, because that total does not fall
@@ -198,28 +220,30 @@ needs, and a count far short of the run's needs can show a smaller total
 than one close to it, so no total measured at one count says what another
 count would achieve.
 
-The search is a bisection between one lane and `FULL_LANES_MAX`, so it
-packs a handful of counts and none past the cap. It relies on an added
-lane not making anything overflow that did not before. Where the packing
-breaks that, the count can be more lanes than the run needs, but never
-fewer: every count it settles on below the cap is one it saw overflow
-nothing.
+The search is a bisection between one lane and `LANES_MAX`, so it packs a
+handful of counts and none past the cap. Each count it tries is packed
+through the mandatory pass only, since that settles whether the count holds
+the run. It relies on an added lane not making anything overflow that did
+not before, nor leaving less room. Where the packing breaks that, the count
+can be more lanes than the run needs, but never fewer: every count it
+settles on below the cap is one it saw hold the run.
 
-Run it yourself to see how many jobs the default branch would take. Where
-nothing in the tree has a measured cost it answers from the shape of the
-tree instead — the larger of the number of suites with anything to run
-and what packing the stand-ins asks for — and says on the error stream
-that it did so, since a projection from costs nobody has measured would
-be arithmetic over an invented figure.
+Run it yourself to see how many jobs a change or the default branch would
+take. Where nothing in the tree has a measured cost it answers from the
+shape of the tree instead — the larger of the number of suites with
+anything to run and what packing the stand-ins asks for — and says on the
+error stream that it did so, since a projection from costs nobody has
+measured would be arithmetic over an invented figure.
 
-Whichever way it gets its answer, it answers no more than
-`FULL_LANES_MAX`, so that one push's full run leaves runners for the
-changes waiting behind it. A run that overflows even that many lanes takes
-that many and says on the error stream that it needs more, which is the
-sign to raise `FULL_LANES_MAX`. Every test still runs when that happens.
-A test whose repeated runs fit in no lane runs fewer times, down to once,
-and a test that fits nowhere even once goes into the lane it leaves
-shortest, so the lanes run past their budget instead.
+Whichever way it gets its answer, it answers no more than `LANES_MAX`, so
+that one run leaves runners for the runs waiting behind it. A run that needs
+more takes that many and says on the error stream that it needs more. A
+change's tests chosen by score then get what room is left, which it also
+says. In the run on the default branch every test still runs. A test whose
+repeated runs fit in no lane runs fewer times, down to once, and a test
+that fits nowhere even once goes into the lane it leaves shortest, so the
+lanes run past their budget instead. A full run that needs more is the sign
+to raise `LANES_MAX`.
 
 ## How continuous integration runs the lanes
 
@@ -228,19 +252,20 @@ names no suite. Adding a test, a kind of test, or a configuration of existing
 tests is a change to the topology, `tasks/test-topology.ts`, and never to the
 workflow. A run's lanes come from two jobs.
 
-- **`plan-full`** runs on a push to the default branch, on a run
-  `.github/workflows/test-order-tomorrow.yml` calls, and on a pull request
-  labelled `ci: full`. It runs `tasks/ci-lane.ts --full --lane-count`. It
-  writes the count as its `of` output, the list of lane numbers from one to
-  that count as its `lanes` output, and `--full` as its `args` output. On any
-  other pull request it is skipped at once.
-- **`tests`** runs every lane, once `plan-full` has succeeded or been skipped.
-  It takes its matrix from `lanes`, or `[1, 2, 3, 4, 5]` where `plan-full` was
-  skipped. Each of its jobs is named `Tests (N/M)`, where `M` is `of`, or 5
-  where `plan-full` was skipped. Each runs `deno run -A tasks/ci-lane.ts --lane
-  N --of M` with `plan-full`'s `args`, or with `--base origin/<base>` where
-  `plan-full` was skipped. A lane packs the same plan from the manifest and the
-  tree as every other lane of its run, and runs its own share of it.
+- **`plan`** runs first in every run. On a pull request it checks out the
+  whole history, since the change is the diff against the merge base, and
+  runs `tasks/ci-lane.ts --lane-count --base origin/<base>` with a `--label`
+  for each label the pull request carries. On a push to the default branch,
+  and on a run `.github/workflows/test-order-tomorrow.yml` calls, it runs
+  `tasks/ci-lane.ts --lane-count --full`. It writes the count as its `of`
+  output, the list of lane numbers from one to that count as its `lanes`
+  output, and the lanes' arguments as its `args` output. A label the count
+  cannot read fails it, and with it the run.
+- **`tests`** runs every lane, once `plan` has succeeded. It takes its matrix
+  from `lanes`. Each of its jobs is named `Tests (N/M)`, where `M` is `of`.
+  Each runs `deno run -A tasks/ci-lane.ts --lane N --of M` with `plan`'s
+  `args`. A lane packs the same plan from the manifest and the tree as every
+  other lane of its run, and runs its own share of it.
 - Each job of `tests` plans before it runs. Its `🗺️ Plan the lane` step runs
   the lane with `--dry-run`, which prints the lane's share, what it is
   projected to take, and what was withheld, in a step of their own. The
@@ -286,23 +311,40 @@ written and named in the lane's summary. It does not fail the batch, since the
 tests it came with either passed or did not. The record then belongs to no
 suite, and the store half of `check-test-topology` in `Status` fails on it.
 
-So a pull request's five lanes start without waiting, and a run of every test
-waits for the count. Whether a run runs every test is decided in one place,
-`plan-full`'s condition.
+So every run's lanes wait for the count. Whether a run runs every test, and
+how much a pull request chooses by score, is decided in one place, the count.
 
-The label is `ci: full`, the value of `FULL_RUN_LABEL` in
-`tasks/test-selection/policy.ts`, and `tasks/ci-workflow.test.ts` holds
-`deno.yml` to it. The label is how a pull request runs everything: `plan-full`
-runs, and the lanes run every test. They run them as the run on the default
-branch does, so a test too flaky for a change runs as many times as its share
-asks for and its failures do not fail the pull request. A change that fixes
-such a test therefore gets no gating run of it under the label; without the
-label, the change reaching the test makes it mandatory and gating.
+A pull request's labels say how much it runs:
+
+- No label beginning `ci:` runs the work the change makes mandatory and
+  `DISCRETIONARY_SECONDS` of tests chosen by score.
+- `ci: <n>x`, where `<n>` is a non-negative decimal such as `2`, `2.5`,
+  `0.1` or `.5`, runs the mandatory work and `n` times `DISCRETIONARY_SECONDS`
+  of tests chosen by score, over as many lanes as that takes. `ci: 0x` runs
+  the mandatory work and nothing chosen by score, in the fewest lanes that
+  hold it, which is one lane where nothing is mandatory. `ci: 1x` is the
+  same as no label.
+- `ci: full` runs everything. It is the value of `FULL_RUN_LABEL` in
+  `tasks/test-selection/policy.ts`. The lanes run every test as the run on
+  the default branch does, so a test too flaky for a change runs as many
+  times as its share asks for and its failures do not fail the pull
+  request. A change that fixes such a test therefore gets no gating run of
+  it under the label; without the label, the change reaching the test makes
+  it mandatory and gating.
+
+Every label beginning `ci:`, however it is spelled or capitalized, must be
+one of these, and a pull request may carry only one of them. A label such as
+`ci: 2`, `CI: 2x` or `ci: fast`, or two such labels even where they agree,
+fails `plan` with an error naming them, before any lane starts. Labels
+outside that namespace are ignored. The scale the count settled on is among
+the arguments it hands the lanes, which each lane's job log shows as
+`LANE_ARGS`.
 
 The workflow runs when a label is added to or removed from a pull request, so
-adding or removing `ci: full` starts a run that reads the labels the pull
-request then carries. Any other label starts one too. A re-run reads the labels
-of the event it repeats, so it does not see a label changed since.
+adding or removing one starts a run that reads the labels the pull request
+then carries. Any other label starts one too. A re-run reads the labels of the
+event it repeats, so it does not see a label changed since. A re-run of the
+lanes alone reuses the count and arguments `plan` gave the first attempt.
 
 Each lane checks out the whole history, installs Deno and the dependencies,
 restores its caches, runs the lane, and then uploads what it produced. Each of
@@ -340,7 +382,7 @@ stopped with its later batches unrun, and its job log says how far its plan was
 projected past the budget.
 
 **`Status`** is the job a pull request requires. It runs on a pull request and
-on a push once `plan-full` and `tests` have finished, whether they passed or
+on a push once `plan` and `tests` have finished, whether they passed or
 failed, and not in a run that was cancelled. It reads what every lane uploaded:
 
 1. It holds the run's records to the topology: `deno task check-test-topology
@@ -399,8 +441,9 @@ runs reached. A gate whose set the change does not reach is never chosen, except
 by a run of every test, which chooses every gate, and `explain` on a gate's
 identity says whether the plan chose it.
 
-`Status` packs the plan the lanes packed, from the same tree and manifest, to
-learn which gates they chose. For each one, it adds up what the lanes measured
+`Status` packs the plan the lanes packed, from the same tree and manifest and
+the lane count and arguments `plan` handed them, to learn which gates they
+chose. For each one, it adds up what the lanes measured
 for its set, scores the set over its member's own source, and compares that
 against what the same set measured at the newest `main` commit the branch
 contains. On a pull request the baselines come from the manifest current at the
@@ -422,14 +465,17 @@ Run it yourself the way `Status` does:
 
 ```
 deno run -A tasks/coverage-gate.ts --base origin/main --reports <directory> \
-  [--full] [--body <description>] [--tests-failed] \
-  [--comment <file> --pr <number>]
-deno run -A tasks/coverage-gate.ts --full --default-branch \
+  [--full | --scale <n>] [--of <lanes>] [--body <description>] \
+  [--tests-failed] [--comment <file> --pr <number>]
+deno run -A tasks/coverage-gate.ts --full --default-branch [--of <lanes>] \
   --reports <directory> [--body <description>] [--tests-failed]
 ```
 
 where the directory holds the lanes' uploaded coverage. The first is a pull
 request's, and `--full` says its run ran every test, which chooses every gate.
+`--of` and `--scale` are the lane count and the scale `plan` handed the lanes,
+which `Status` passes on so that it packs the plan they packed; without them it
+counts the lanes the way `plan` does, at a scale of one.
 The second is a push's, and reads the parent commit's run through GitHub's API,
 which takes `GITHUB_TOKEN`. It prints a row per set — the baseline, this run's
 count, the change, and the outcome — and stops with a non-zero status where a
@@ -559,8 +605,8 @@ matching edit here fails `deno task test`.
 The **Units** column says what each number counts. Several of the dials
 are bare fractions that do not mean the same thing, and the table holds
 two different `0.25` values as it stands: `WEIGHT_BREADTH` is a share of a
-test's score and `FILL_DENSITY_SHARE` is a share of the run's budget. A
-share of an item's runs reads the same way again. Naming the unit is what
+test's score and `FILL_DENSITY_SHARE` is a share of the discretionary
+target. A share of an item's runs reads the same way again. Naming the unit is what
 keeps them from being compared to each other.
 
 The **Set by** column separates two kinds. A **chosen** value is a
@@ -585,14 +631,14 @@ measurement to look at rather than a setting to fix.
 
 | Dial | Default | Units | Set by | Why you would move it, and which way |
 | --- | --- | --- | --- | --- |
-| `LANES` | 5 | lanes | chosen | Up when pull-request feedback is too thin and runner capacity allows more; down when the wave crowds other workflows off the shared runners. |
 | `LANE_BOUND_SECONDS` | 300 | seconds | chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. It sets what a lane packs against, not the workflow's step timeout, which only stops a lane that hangs. |
 | `LANE_PROLOGUE_SECONDS` | 40 | seconds | chosen | Up when checkout, setup, and cache restore take longer than this and eat into the safety margin; down when they take less. Nothing measures it. |
 | `LANE_SAFETY_SECONDS` | 30 | seconds | chosen | Up when lanes overrun their bound on slow runners; down when they finish early every time and the headroom is buying nothing. |
 | `LANE_BUDGET_SECONDS` | 230 | seconds | derived | Nothing edits this. It is the bound less the prologue and the safety margin, so a budget that does not fit inside its own bound cannot be written down. |
 | `FULL_LANE_BOUND_SECONDS` | 1800 | seconds | chosen | Up when the run on `main` uses more jobs than it needs; down when `main` takes too long to say something broke. |
 | `FULL_LANE_BUDGET_SECONDS` | 1730 | seconds | derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
-| `FULL_LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says the full run needs more lanes than this, and the organization's runner limit has room; down when a push's full run crowds out the pull requests behind it. A full run needing more lanes than this takes this many, and a lane may then run past its budget. |
+| `DISCRETIONARY_SECONDS` | 575 | seconds | chosen | Up when regressions reach the default branch past pull requests that did not run the test chosen by score that would have caught them; down when pull requests take more lanes than runner minutes allow. A pull request whose mandatory work fits in five lanes with room to spare most often takes five at this figure. The label `ci: <n>x` multiplies it by n for one pull request. |
+| `LANES_MAX` | 30 | lanes | chosen | Up when the lane-count job says a run needs more lanes than this, and the organization's runner limit has room; down when one run crowds out the runs behind it. A run needing more lanes than this takes this many: a pull request then runs fewer tests chosen by score, and any run's mandatory work may put its lanes past their budget. |
 | `FULL_RUN_LABEL` | ci: full | a label | chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `UNMEASURED_COST_SECONDS` | 1 | seconds | chosen | Up when a lane holding new tests runs long; down when it finishes early. It is reached for only by a suite with no measured unit at all, since a suite that has any charges an unmeasured one the larger of its units' mean and their ninetieth percentile. |
 | `VALUE_FLOOR` | 0.05 | score | chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
@@ -613,9 +659,9 @@ measurement to look at rather than a setting to fix.
 | `FLAKE_HALF_LIFE_RUNS` | 200 | runs | chosen | How many runs without disagreeing halve what a disagreement counts for. It is also how much evidence the share is measured over, so far below one over `FLAKE_EXCLUSION_RATE` the share swings about on too little: up when it does; down when a test that has plainly settled is still judged by what it did. |
 | `FLAKE_WINDOW_DAYS` | 60 | days | chosen | How far back the counts are read at all. The weight decays by runs rather than by days, so this bounds what is remembered rather than marking where the weight has faded: a test that runs rarely can still be carrying weight when its days fall off the end. |
 | `COST_WINDOW_DAYS` | 7 | days | chosen | Up when cost estimates are noisy; down when durations drift with the code or the runner image faster than the estimate follows. |
-| `FILL_VALUE_SHARE` | 0.6 | share of the run's budget | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
-| `FILL_DENSITY_SHARE` | 0.25 | share of the run's budget | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
-| `FILL_EXPLORATION_SHARE` | 0.15 | share of the run's budget | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
+| `FILL_VALUE_SHARE` | 0.6 | share of the discretionary target | chosen | Up when expensive high-value tests are crowded out by cheap ones; down when a lane spends its budget on a few slow tests and runs little else. The three shares sum to one. |
+| `FILL_DENSITY_SHARE` | 0.25 | share of the discretionary target | chosen | Up when more of the cheap tail should run; down when the tail is displacing tests with a record. |
+| `FILL_EXPLORATION_SHARE` | 0.15 | share of the discretionary target | chosen | Up when the unselected corpus is going stale; down when lanes spend the share on tests that never find anything. |
 | `MIN_CORRECTION_SPAN_SECONDS` | 23 | seconds | derived | A tenth of a lane's budget, measured as the widest gap between the time two batches' own tests took. Nothing edits it: it moves only when the lane's budget does. |
 | `MIN_CORRECTION_SAMPLES` | 3 | batches | chosen | Up when a slope is being fitted from too little and swinging about; down when a suite's real slope takes too long to be believed. |
 | `HEALTH_TOO_LONG_FACTOR` | 2 | multiplier | chosen | Up when the test selection tile goes red for ordinary growth in the tests too long for any lane; down when a jump that took tests out of every pull request went unreported. |
@@ -1420,15 +1466,17 @@ A set past `LOCAL_COVERAGE_MAX_SECONDS` makes every pull request that chooses
 its gate slower, and costs its gate a place wherever the run cannot spare that
 much. What the line gives is the set's cost over the fewest lanes that hold it,
 counting what each of those lanes pays for the set's suites and capabilities. A
-set that no number of the run's lanes holds gets a line saying it costs "more
-with coverage on than the run's 5 lanes of 3m50s hold", and no plan for a pull
-request can choose its gate. Nothing is done about either automatically: which
-of the three to do is a decision about the repository.
+set that no number of lanes up to `LANES_MAX` holds gets a line saying it costs
+"more with coverage on than the 30 lanes of 3m50s a pull request may take
+hold", and no plan for a pull request can choose its gate. Nothing is done about
+either automatically: which of the three to do is a decision about the
+repository.
 
 ```
 test selection: packages/donut is on EXCLUDED_FROM_COVERAGE_GATE for its
 size, and its tests now cost 13m32s with coverage on across 4 lane(s),
-inside the run's 5 lanes of 3m50s, so its line can come off.
+inside the 30 lanes of 3m50s a pull request may take, so its line can come
+off.
 ```
 
 Each entry on `EXCLUDED_FROM_COVERAGE_GATE` carries a kind in
@@ -1571,7 +1619,8 @@ loaded every file and run every test.
 
 Two tiles read the newest manifest. The flake tile reports how many tests
 are too noisy to judge a change by. The selection tile reports what share
-of the corpus five lanes would run and how close the fullest lane is to
+of the corpus a change touching nothing would run and how close the fullest
+lane is to
 its budget; it goes amber when the manifest has gone stale and red when a
 lane's projected work is past its bound, or when the publisher found the
 cost model broken. Both tiles link to the full manifest detail page, and a
@@ -1668,7 +1717,10 @@ itself.
   between changes. Withheld is the store holding the test back as too flaky to
   judge a change by. Otherwise the note says what the plan the lanes computed
   over that manifest says about leaving it out, which is never something the
-  author missed. Either its unit runs whole and holds a withheld test, or no
+  author missed. That plan is rebuilt from the labels the pull request carries
+  when the comment is written, so a `ci: <n>x` or `ci: full` it ran under is
+  the plan that explains it; labels the count cannot read leave no plan, and
+  the note gives no reason. Either its unit runs whole and holds a withheld test, or no
   lane can hold the test, or the tests that had to run left no room in the lanes
   for anything else, or the lanes filled what they left with other tests. Only
   those four are said, because the plan records nothing more specific about a

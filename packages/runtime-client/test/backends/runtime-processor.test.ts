@@ -7248,12 +7248,14 @@ describe("runtime-processor", () => {
   describe("RuntimeProcessor.getLoggerCounts()", () => {
     // The handler reads process-global logger state, so each case raises its own
     // flag and clears it again rather than leaving one for the next. It also
-    // reads the runtime's CFC counters and structure sizes, which travel in the
-    // same response so a client comparing them against the timings has all of
-    // it from one moment — hence the stand-in below, which fakes the two
-    // runtime members this handler touches.
+    // reads the runtime's CFC counters, the pattern manager's compile-cache
+    // counters and the runtime's structure sizes, which travel in the same
+    // response so a client comparing them against the timings has all of it
+    // from one moment — hence the stand-in below, which fakes the runtime
+    // members this handler touches.
 
     const cfcStats = { cfcRelevantTx: 7 };
+    const compileCacheStats = { hits: 2, misses: 1, byIdentityHits: 3 };
     const runtimeSizes = {
       scheduler: { nodes: 3 },
       storage: { documents: 5 },
@@ -7264,6 +7266,7 @@ describe("runtime-processor", () => {
       return buildProcessor({
         runtime: {
           getCfcStats: () => cfcStats,
+          patternManager: { getCompileCacheStats: () => compileCacheStats },
           getSizes: () => runtimeSizes,
           getCellFromLink: () => ({ sink: () => () => {} }),
         },
@@ -7304,6 +7307,7 @@ describe("runtime-processor", () => {
 
         expect(Object.keys(response).sort()).toEqual([
           "cfc",
+          "compileCache",
           "counts",
           "flags",
           "metadata",
@@ -7314,6 +7318,7 @@ describe("runtime-processor", () => {
           a: 1,
         });
         expect(response.cfc).toEqual(cfcStats);
+        expect(response.compileCache).toEqual(compileCacheStats);
       });
     });
 
