@@ -35,7 +35,12 @@ import type { CellLinkRefPayload, URI } from "./sigil-types.ts";
 /** The addressing context needed to interpret a relative primitive link. */
 type SnapshotOrigin = Pick<NormalizedLink, "id" | "space" | "scope">;
 
-/** A frozen snapshot and its optional relative-link origin. */
+/**
+ * A frozen snapshot and its optional relative-link origin: the stored
+ * document the value was read out of, which a relative link inside the
+ * value resolves against. A snapshot minted from a value no space has stored
+ * (`Runtime.getImmutableCell()`) has none.
+ */
 export interface ImmutableSnapshot {
   readonly id: URI;
   readonly value: FabricValue;
@@ -427,6 +432,16 @@ export function hasInlineCellScheme(id: string): boolean {
 /** Whether an inline identifier is one the runtime can expand to a value. */
 export function isInlineCellId(id: string): boolean {
   return isImmutableCellId(id) || isFabricDataUri(id);
+}
+
+/**
+ * Whether `id` names a snapshot minted from a value no space has stored: one
+ * read out of no stored document, so with no origin. The links inside such a
+ * snapshot were never written, so no space holds the closure a reference
+ * among their schemas names; the registry that minted the reference does.
+ */
+export function mintedFromUnstoredValue(id: string): boolean {
+  return isImmutableCellId(id) && immutableSnapshot(id).origin === undefined;
 }
 
 /** Looks up a runtime-local snapshot without retaining its runtime. */

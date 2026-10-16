@@ -77,7 +77,11 @@ import {
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
-import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
+import {
+  immutableCellsFor,
+  mintedFromUnstoredValue,
+  pinImmutableCell,
+} from "./immutable-cell.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -3199,6 +3203,19 @@ function loadSchemaDocClosure(
       };
       const key = getTrackerKey(address, context.scopeKeyIdentity);
       if (context.schemaDocsLoaded.has(key)) return { kind: "settled" };
+      // A link inside a document minted from a value no space has stored
+      // was never written, so no space holds the closure its schema's
+      // reference names, and the registry that minted the reference does
+      // (`docs/specs/content-addressed-schemas.md`, "Space boundaries").
+      // The registry satisfies the reference, and a document it lacks is
+      // read from the space the document is addressed in, as for a stored
+      // document.
+      if (mintedFromUnstoredValue(referrer.id)) {
+        const registered = lookupSchemaDocument(hash);
+        if (registered !== undefined) {
+          return { kind: "verified", schema: registered };
+        }
+      }
       context.schemaDocsLoaded.add(key);
       // A plain read: loads the document AND records the dependency, so an
       // absent document's later arrival re-triggers the reader.

@@ -21,7 +21,6 @@ import {
   setContentAddressedSchemasConfig,
 } from "../src/schema-doc-config.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { resolvedSchema } from "./schema-ref-helpers.ts";
 import { portableSnapshotLinks } from "../src/data-uri.ts";
 import { immutableSnapshot } from "../src/immutable-cell.ts";
 
@@ -268,10 +267,11 @@ describe("runtime", () => {
       expect(isRendererTrustedEvent(event)).toBe(true);
     });
 
-    it("carries a link's schema inline in the snapshot", () => {
-      // No write has stored this link, so no space holds the closure its
-      // reference-form schema names; the snapshot carries the schema in its
-      // recomposed form instead.
+    it("keeps a link's schema as a reference in the snapshot", () => {
+      // The snapshot carries the link as the caller held it. The closure its
+      // reference-form schema names is in the registry, which registered it
+      // when the reference was stamped, and a read through the link resolves
+      // the reference there.
       const target = runtime.getCell(
         space,
         "immutable-target",
@@ -291,7 +291,7 @@ describe("runtime", () => {
         undefined,
       );
       const stored = immutable.withTx(tx).getRaw()!;
-      expect(parseLink(stored.ref)!.schema).toEqual(resolvedSchema(carried));
+      expect(parseLink(stored.ref)!.schema).toBe(carried);
     });
 
     it("resolves a linked value through the reference on a read", () => {
