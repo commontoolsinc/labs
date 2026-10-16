@@ -41,7 +41,7 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
-import { debugStr, hashStringOf } from "@commonfabric/data-model";
+import { debugStr } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
@@ -53,9 +53,9 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { Pattern } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Cell } from "./cell.ts";
+import { readStoredCfcSchemaHash } from "./cfc/metadata.ts";
 import { prepareSourceClosureVerification } from "./compilation-cache/cell-cache.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
-import { getMetaLink } from "./link-utils.ts";
 import type { PreparedSourceUpdate } from "./pattern-manager.ts";
 import {
   parseReleaseTime,
@@ -137,8 +137,9 @@ const logger = getLogger("runner.source-reconcile", {
  *   good — by the store as too large, or by a stored envelope whose claim the
  *   candidate's schema changes or weakens — which neither a retry nor a grant
  *   gets past. This runtime does not propose that source again until the
- *   candidate, the piece's source state, or its stored argument changes, or
- *   the space's memory session is replaced.
+ *   candidate or the piece's source state changes, the envelopes a stored
+ *   envelope's refusal was reached over change, or the space's memory session
+ *   is replaced.
  * - `unavailable`: the origin's current source could not be adopted this
  *   time — it could not be reached, the write that adopts it did not commit,
  *   or the piece changed underneath the attempt and the write it was going to
@@ -334,30 +335,41 @@ type SourcePass = {
   done: Promise<unknown>;
 };
 
+/**
+ * How a write was refused for good: by the store as too large
+ * (`isOversizedRejection`), or by a stored envelope its schema changes or
+ * weakens (`isEnvelopeStabilityRefusal`). The same write receives either again
+ * however often it is sent, from one pass to the next, and no grant lifts it.
+ * Other terminal rejections are not this: a CFC or row-label refusal can be
+ * lifted by a grant, which the next pass has to pick up.
+ */
+type LastingRefusal = "too-large" | "stored-envelope";
+
 /** Why a reconciliation's write did not commit. */
 type CommitFailure = {
   /** The reason, as a record can carry it. */
   detail: string;
 
-  /**
-   * Whether the write was refused for good: as too large
-   * (`isOversizedRejection`), or by a stored envelope its schema changes or
-   * weakens (`isEnvelopeStabilityRefusal`). The same write receives either
-   * again however often it is sent, from one pass to the next, and no grant
-   * lifts it. Other terminal rejections are not this: a CFC or row-label
-   * refusal can be lifted by a grant, which the next pass has to pick up.
-   */
-  lasting: boolean;
+  /** How the write was refused for good, or `undefined` where it was not. */
+  lasting: LastingRefusal | undefined;
 };
 
 /**
- * An adoption whose write was refused for good, and the state that write was
- * built from. The same write built from the same state is refused the same
- * way, so a pass that finds all of it unchanged builds nothing.
+ * An adoption whose write was refused for good, and what that refusal answered
+ * for. A pass that finds all of it unchanged builds nothing, since the write it
+ * would build is refused the same way.
  *
- * What it covers is what the write is built from: the candidate, the piece's
- * source state, and the stored argument its setup restages. A change to a
- * document the argument links to is outside it. What the store admits can
+ * Every refusal answers for the candidate and the piece's source state. One by
+ * a stored envelope answers also for the envelopes the piece's argument and
+ * result documents store: a write under the schema the piece runs leaves them
+ * as they are, and a migration that rewrites them can change the answer. One
+ * the store refused as too large answers for nothing more, since the write
+ * grows with what the piece holds and a change to its data rarely makes it
+ * fit.
+ *
+ * That is narrower than everything the refusing merge reads. An envelope on
+ * another document the write merges, and the values a release's merge reads to
+ * relax a claim beneath a link, are outside it. What the store admits can
  * change when the space's memory session is replaced, as a host restart
  * replaces it, so a replacement forgets the space's refusals. A runtime that
  * starts again, which is when its own code can change, starts with none.
@@ -376,12 +388,11 @@ type RefusedAdoption = {
   snapshot: PieceSourceSnapshot;
 
   /**
-   * A fingerprint of the stored argument the write restaged
-   * (`#storedArgumentFingerprint`), which a remembered refusal keeps in place
-   * of the argument itself: it outlives the piece stopping, and an argument
-   * can be large.
+   * The envelopes the piece's argument and result documents stored when a
+   * stored envelope refused the write (`#storedEnvelopes`); absent for a write
+   * the store refused as too large.
    */
-  argument: string;
+  envelopes?: string;
 
   /** What the record of the refusal says. */
   detail: string;
@@ -466,11 +477,12 @@ export class SourceReconciler {
   readonly #refusedAdoptions = new Map<string, RefusedAdoption>();
 
   /**
-   * How many memory sessions have been replaced, so that a refusal received
-   * across a replacement is not remembered: it answered for a store that may
-   * no longer be the one serving the space.
+   * How many times each space's memory session has been replaced, so that a
+   * refusal received across a replacement of its own space's session is not
+   * remembered: it answered for a store that may no longer be the one serving
+   * the space.
    */
-  #sessionsReplaced = 0;
+  readonly #sessionReplacements = new Map<MemorySpace, number>();
 
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
@@ -692,7 +704,7 @@ export class SourceReconciler {
    * again.
    */
   #followSystemSources(space: MemorySpace): void {
-    this.#sessionsReplaced++;
+    this.#sessionReplacements.set(space, this.#replacementsOf(space) + 1);
     for (const [key, refused] of [...this.#refusedAdoptions]) {
       if (refused.space === space) this.#refusedAdoptions.delete(key);
     }
@@ -1429,7 +1441,7 @@ export class SourceReconciler {
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
-    const sessionsReplaced = this.#sessionsReplaced;
+    const replacements = this.#replacementsOf(state.space);
     const candidate = await runtime.patternManager.compilePattern(program, {
       space: state.space,
     });
@@ -1559,55 +1571,55 @@ export class SourceReconciler {
       return "updated";
     }
     state.detail = failure.detail;
-    if (!failure.lasting) return "unavailable";
-    // The commit's own guard held the argument to what was restaged, so the
-    // argument as it stands now is the one the refusal answered for.
-    const argument = this.#storedArgumentFingerprint(resultCell);
-    if (
-      sessionsReplaced !== this.#sessionsReplaced || argument === undefined
-    ) return "rejected";
+    if (failure.lasting === undefined) return "unavailable";
+    if (replacements !== this.#replacementsOf(state.space)) return "rejected";
+    // The refused commit wrote nothing, so the envelopes stored now are the
+    // ones the refusing merge read.
+    let envelopes: string | undefined;
+    if (failure.lasting === "stored-envelope") {
+      envelopes = this.#storedEnvelopes(resultCell);
+      if (envelopes === undefined) return "rejected";
+    }
     this.#refusedAdoptions.set(this.#followerKey(resultCell), {
       space: state.space,
       offered: candidateRef,
       snapshot: state.snapshot,
-      argument,
+      ...(envelopes === undefined ? {} : { envelopes }),
       detail: failure.detail,
     });
     return "rejected";
   }
 
+  /** How many times `space`'s memory session has been replaced. */
+  #replacementsOf(space: MemorySpace): number {
+    return this.#sessionReplacements.get(space) ?? 0;
+  }
+
   /**
-   * A fingerprint of the stored argument a setup over `resultCell` restages:
-   * the link the piece records for it, compared as `areNormalizedLinksSame()`
-   * compares one, and the content hash of the value that link names, as this
-   * replica holds it now. `undefined` where the value has
-   * no hash, which leaves nothing to remember a refusal by.
-   *
-   * The hash is the one `valueEqual()` decides a container by, and is cached on
-   * the value's identity, so a pass over an argument that has not changed
-   * hashes nothing again.
+   * The envelopes the argument and result documents of the piece over
+   * `resultCell` store, as one key: each one's schema hash, or `none` where it
+   * stores none. `undefined` where either could not be read, which leaves
+   * nothing to remember a refusal by. Only each envelope's own record is read,
+   * never the schema it names, which grows with the piece's releases.
    */
-  #storedArgumentFingerprint(resultCell: Cell<unknown>): string | undefined {
-    const link = getMetaLink(resultCell, "argument");
+  #storedEnvelopes(resultCell: Cell<unknown>): string | undefined {
+    const tx = this.#runtime.edit();
     try {
-      return link === undefined ? "none" : hashStringOf({
-        link: {
-          space: link.space,
-          id: link.id,
-          scope: link.scope,
-          path: [...link.path],
-        },
-        value: this.#runtime.getCellFromLink({ ...link, schema: undefined })
-          .getRawUntyped(),
-      });
+      return [resultCell.getArgumentCell(), resultCell].map((cell) => {
+        if (cell === undefined) return "none";
+        const { space, id, scope } = cell.getAsNormalizedFullLink();
+        return readStoredCfcSchemaHash(tx, { space, id, scope }) ?? "none";
+      }).join("\0");
     } catch {
       return undefined;
+    } finally {
+      tx.abort();
     }
   }
 
   /**
    * Whether this runtime saw the adoption of `offered` refused for good, and
-   * nothing that write was built from has changed since. When it did, the
+   * nothing that refusal answered for has changed since. When it did, the
    * pass ends here with what the refusal recorded, which is the conclusion
    * building and sending the same write would reach again. A remembered
    * refusal something has moved under is forgotten.
@@ -1624,7 +1636,8 @@ export class SourceReconciler {
       refused.offered.identity !== offered.identity ||
       refused.offered.symbol !== offered.symbol ||
       !samePieceSourceSnapshot(refused.snapshot, state.snapshot) ||
-      this.#storedArgumentFingerprint(resultCell) !== refused.argument
+      (refused.envelopes !== undefined &&
+        this.#storedEnvelopes(resultCell) !== refused.envelopes)
     ) {
       this.#refusedAdoptions.delete(key);
       return false;
@@ -1778,14 +1791,18 @@ export class SourceReconciler {
       { sourceUpdate },
     );
     if (signal?.aborted) {
-      return { detail: "the reconciliation was stopped", lasting: false };
+      return { detail: "the reconciliation was stopped", lasting: undefined };
     }
     if (result.error) {
       const { name, message } = result.error;
-      const lasting = isOversizedRejection(result.error) ||
-        isEnvelopeStabilityRefusal(result.error);
+      const lasting: LastingRefusal | undefined =
+        isOversizedRejection(result.error)
+          ? "too-large"
+          : isEnvelopeStabilityRefusal(result.error)
+          ? "stored-envelope"
+          : undefined;
       logger.warn("reconcile-commit-failed", () => [
-        lasting
+        lasting !== undefined
           ? "the store refused a source reconciliation's write for good"
           : "source reconciliation could not commit",
         state.space,
@@ -1803,7 +1820,7 @@ export class SourceReconciler {
     }
     return result.ok === true ? undefined : {
       detail: "the piece changed while its write was being prepared",
-      lasting: false,
+      lasting: undefined,
     };
   }
 
