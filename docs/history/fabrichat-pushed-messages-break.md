@@ -61,9 +61,9 @@ handlers cannot write. Such a room never adopts the new source: each open
 proposes the release, the write-policy gate refuses it (`writePolicyAnyOf
 must remain stable at /messages/*`), and the room keeps running the code it
 was deployed with, so what a person sees is the old room, not a broken new
-one. The rooms on Estuary and the shared Loom rooms are among them. They are not
-migrated: the decision, taken on 2026-10-15, is that breaking the rooms is
-acceptable, as the system has not been deployed for keeps, and
+one. The rooms on deployed fabrics, including shared ones, are among them.
+They are not migrated: the decision, taken on 2026-10-15, is that breaking
+the rooms is acceptable, as the system has not been deployed for keeps, and
 `docs/history/fabrichat-room-link-messages-break.md` records the same ruling
 for the manager's link.
 

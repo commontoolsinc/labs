@@ -34,7 +34,7 @@ left behind; they are not migrated.
 | The replay check in a send | A send whose memo expired finds the message it made instead of overwriting it. | Same as above: there is no second run to guard against. |
 | `usedTimes` | Every recorded time is unique in the room (`ChatMessage.md`, "Unique times"), so `t<sentAt>` can serve as a message's key in the views. | A key minted from a timestamp is the user-land id `docs/common/patterns/primitives.md` rules out. A message is identified by its cell. |
 | The proposed-time window | A client proposes `sentAt` from its own clock, and the room records it within a window. | No client proposes a time. The room's own controls send text, and the handler stamps it. |
-| `activity` and `counters` | `recentActivity` lets a client follow a room by reading what changed, and find the message its send produced (`ChatRoomActivity.md`). | Nothing reads it. In labs only `placement.tsx` passes it through; loom's one room reader, `loom-daemon/loom-chats.ts`, watches the stored `messages` list instead. |
+| `activity` and `counters` | `recentActivity` lets a client follow a room by reading what changed, and find the message its send produced (`ChatRoomActivity.md`). | Nothing reads it. In labs only `placement.tsx` passes it through; an external client's room reader watches the stored `messages` list instead. |
 | `reactionLists`, keyed by request | A message links a list the send created at a derived address. | The send creates the list as a new cell and links it; nothing addresses it by key. |
 | `elementById` addressing | The send writes its message at an address derived from sender and `requestId`, which the replay check reads back. | A pushed object is its own document already, with its own identity. |
 
@@ -293,10 +293,9 @@ which this plan does not touch.
   record and stay.
 - **`system/home.tsx`, `loom/main.tsx`.** Unchanged, given the `ChatRoomPolicy`
   proposal and the message facts Home's contract embeds.
-- **Loom's `loom-daemon/loom-chats.ts`.** Reads `messages` as a list of cells
+- **An external client's room reader.** Reads `messages` as a list of cells
   holding `{ body, sentAt, authorProfile }` and keys each by its entity id;
-  that shape stays. Nothing else in loom (`origin/main` at `1f3f6a1fe`) reads a
-  room's records.
+  that shape stays. Nothing else in that client reads a room's records.
 - **Integration fixtures and benchmarks.** `integration/fabrichat-room-fixture.ts`
   and `integration/fabrichat-send-burst.bench.ts` seed and drive the stored
   shape and follow it. `integration/fabrichat-update-rehearsal.test.ts`
