@@ -115,21 +115,26 @@ const nestedDefinitionMaps = (schema: JSONSchema): number => {
   return count;
 };
 
-/** The root definitions of `schema` that no local reference names. */
-const unreferencedDefinitions = (schema: JSONSchema): string[] => {
+/** The root definitions of `schema` that no reference from its root reaches. */
+const unreachableDefinitions = (schema: JSONSchema): string[] => {
   const definitions = (schema as JSONSchemaObj).$defs ?? {};
-  const named = new Set<string>();
+  const reached = new Set<string>();
   const visit = (node: JSONSchema): void => {
     if (!isObjectNotArray(node)) return;
     if (typeof node.$ref === "string") {
       const name = localDefinitionName(node.$ref);
-      if (name !== undefined) named.add(name);
+      if (
+        name !== undefined && !reached.has(name) &&
+        Object.hasOwn(definitions, name)
+      ) {
+        reached.add(name);
+        visit(definitions[name]);
+      }
     }
     forEachSubschema(node, visit, { includeUnused: true });
   };
   visit(schema);
-  for (const definition of Object.values(definitions)) visit(definition);
-  return Object.keys(definitions).filter((name) => !named.has(name));
+  return Object.keys(definitions).filter((name) => !reached.has(name));
 };
 
 /** The label entries of `schema`, each written as one comparable string. */
@@ -170,8 +175,8 @@ describe("schema-merge-idempotence", () => {
       expect(mergedRounds().map(nestedDefinitionMaps)).toStrictEqual([0, 0, 0]);
     });
 
-    it("stores no definition that nothing references", () => {
-      expect(mergedRounds().map(unreferencedDefinitions)).toStrictEqual([
+    it("stores no definition its root does not reach", () => {
+      expect(mergedRounds().map(unreachableDefinitions)).toStrictEqual([
         [],
         [],
         [],
@@ -214,9 +219,13 @@ describe("schema-merge-idempotence", () => {
 
     it("reports a difference where a claim inside a definition changes", () => {
       const merged = mergedRounds()[0] as JSONSchemaObj;
+      const unreachable = unreachableDefinitions(merged);
       const [name, claimed] = Object.entries(merged.$defs!).find((
-        [, definition],
-      ) => isObjectNotArray(definition) && definition.ifc !== undefined)!;
+        [held, definition],
+      ) =>
+        !unreachable.includes(held) && isObjectNotArray(definition) &&
+        definition.ifc !== undefined
+      )!;
       const changed = {
         ...merged,
         $defs: {
@@ -271,7 +280,7 @@ describe("schema-merge-idempotence", () => {
       expect(slotsOf(bloated)).toBeGreaterThan(1_000_000);
       expect(slotsOf(mergedOnce())).toBeLessThan(20_000);
       expect(nestedDefinitionMaps(mergedOnce())).toBe(0);
-      expect(unreferencedDefinitions(mergedOnce())).toStrictEqual([]);
+      expect(unreachableDefinitions(mergedOnce())).toStrictEqual([]);
     });
 
     it("merges into an envelope that unfolds alike to it", () => {
