@@ -1055,6 +1055,40 @@ describe("piece source reconciliation", () => {
         expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
       });
 
+      it("does not remember a refusal that arrives after the session was replaced", async () => {
+        // The pass that was preparing when the session went is refused by
+        // whatever served it before; the pass the replacement queued asks the
+        // store that serves the space now.
+        const replace = captureSessionReplaced();
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using _refused = refuseAdoption(piece, TOO_LARGE);
+        const preparing = defer<void>();
+        const proceed = defer<void>();
+        const sync = runtime.runner.syncStoredPieceCells.bind(runtime.runner);
+        using prepared = stub(
+          runtime.runner,
+          "syncStoredPieceCells",
+          async (...args: Parameters<typeof sync>) => {
+            preparing.resolve();
+            await proceed.promise;
+            return sync(...args);
+          },
+        );
+
+        const first = reconcile(piece);
+        await preparing.promise;
+        replace(piece.space);
+        proceed.resolve();
+        expect(await first).toBe("unavailable");
+        await runtime.sourceReconciler.idle();
+
+        expect(prepared.calls).toHaveLength(2);
+      });
+
       it("prepares the adoption again once the piece stopped", async () => {
         const v2Identity = await identityFor(source("v2"));
         const piece = await preparePiece(
@@ -1226,11 +1260,13 @@ describe("piece source reconciliation", () => {
         `cf:/${piece.space}/${upstreamPiece.getAsNormalizedFullLink().id}`,
       );
       using _refused = refuseAdoption(piece, TOO_LARGE);
+      using compiled = spy(runtime.patternManager, "compilePattern");
       using prepared = spy(runtime.runner, "syncStoredPieceCells");
 
       expect(await reconcile(piece)).toBe("unavailable");
       expect(await reconcile(piece)).toBe("unavailable");
 
+      expect(compiled.calls).toHaveLength(1);
       expect(prepared.calls).toHaveLength(1);
       expect(getPatternIdentityRef(piece)?.identity).toBe(
         await identityFor(source("v1")),

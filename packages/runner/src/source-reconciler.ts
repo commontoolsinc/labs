@@ -241,7 +241,7 @@ type CommitFailure = { detail: string; oversized: boolean };
  * origin offered `candidate`.
  */
 type OversizedAdoption = {
-  running: string;
+  running: { identity: string; symbol: string };
   candidate: { identity: string; symbol: string };
   detail: string;
 };
@@ -320,6 +320,13 @@ export class SourceReconciler {
    * the store admits can have changed.
    */
   readonly #oversizedAdoptions = new Map<string, OversizedAdoption>();
+
+  /**
+   * How many memory sessions have been replaced, so that an adoption refused
+   * across a replacement is not remembered: the refusal answered for a store
+   * that may no longer be the one serving the space.
+   */
+  #sessionsReplaced = 0;
 
   /**
    * The pieces following a system origin, by follower key. A host serves one
@@ -545,6 +552,7 @@ export class SourceReconciler {
 
   /** Reconciles each piece following a system origin in `space` again. */
   #followSystemSources(space: MemorySpace): void {
+    this.#sessionsReplaced++;
     for (const key of [...this.#oversizedAdoptions.keys()]) {
       if (key.startsWith(`${space}\0`)) this.#oversizedAdoptions.delete(key);
     }
@@ -1192,6 +1200,11 @@ export class SourceReconciler {
       target.identity === state.running.identity &&
       target.symbol === state.running.symbol
     ) return "current";
+    const oversized = this.#oversizedRefusal(resultCell, state, target);
+    if (oversized !== undefined) {
+      state.detail = oversized;
+      return "unavailable";
+    }
 
     // Awaited directly rather than through the abort signal. The lookup
     // synchronizes a source closure against storage, and abandoning the await
@@ -1238,6 +1251,7 @@ export class SourceReconciler {
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
+    const sessionsReplaced = this.#sessionsReplaced;
     const candidate = await runtime.patternManager.compilePattern(program, {
       space: state.space,
     });
@@ -1269,11 +1283,6 @@ export class SourceReconciler {
       candidateRef.identity === state.running.identity &&
       candidateRef.symbol === state.running.symbol
     ) return "current";
-    const oversized = this.#oversizedRefusal(resultCell, state, candidateRef);
-    if (oversized !== undefined) {
-      state.detail = oversized;
-      return "unavailable";
-    }
 
     const refusal = origin.kind === "system"
       ? undefined
@@ -1364,9 +1373,9 @@ export class SourceReconciler {
       this.#oversizedAdoptions.delete(key);
       return "updated";
     }
-    if (failure.oversized) {
+    if (failure.oversized && sessionsReplaced === this.#sessionsReplaced) {
       this.#oversizedAdoptions.set(key, {
-        running: state.running.identity,
+        running: { ...state.running },
         candidate: candidateRef,
         detail: failure.detail,
       });
@@ -1387,7 +1396,8 @@ export class SourceReconciler {
     const refused = this.#oversizedAdoptions.get(
       this.#followerKey(resultCell),
     );
-    return refused?.running === state.running.identity &&
+    return refused?.running.identity === state.running.identity &&
+        refused.running.symbol === state.running.symbol &&
         refused.candidate.identity === candidate.identity &&
         refused.candidate.symbol === candidate.symbol
       ? refused.detail
