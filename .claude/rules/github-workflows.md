@@ -13,9 +13,10 @@ a job passes it only works once the matching infra change has landed and been
 deployed. `docs/development/deploying.md` describes which jobs deploy where and
 what the wrapper accepts.
 
-The staging deploy jobs trigger on pushes to `main`, so a change to one of them
-cannot be exercised on a branch. Reason it through before merging rather than
-after.
+The Rapids receiver runs only on `main`, so its deployment cannot be exercised
+on a pull-request branch. Its wrapper must be installed before its Labs call
+site merges; `tasks/rapids-workflows.test.ts` checks the receiver's trust gates
+and success-proof sequence locally.
 
 ## Step names carry a phase marker
 

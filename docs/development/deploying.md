@@ -1,10 +1,9 @@
-# Deploying a commit
+# Deploying a release
 
-A commit reaches a server host by way of the bastion. The deploy jobs in CI
-open an SSH connection to the bastion and run one command there,
-`/opt/cf/deploy.sh`, passing the environment to deploy and the commit to deploy
-to it. That script does the rest: it deploys the binaries that CI already built
-and uploaded for that commit.
+Server deployments run through the bastion using binaries that CI has built
+and published. Rapids releases coordinate Labs, Loom, Weaver, gVisor, and infra
+at verified green `main` revisions. Estuary takes a manually selected Labs
+revision.
 
 Two browser shells reach users, and they are configured in different places.
 The toolshed binary carries one and serves it from its own origin, so it is
@@ -12,29 +11,78 @@ configured when that binary is built; "The shell inside the binary" below
 covers it. The other is a static site published to its own bucket, and "The
 staging shell" covers that one.
 
-Two jobs do this:
+The server deployment entrypoints are:
 
-| Job | Workflow | Environment passed | Trigger |
+| Job | Workflow | Bastion command | Trigger |
 | --- | --- | --- | --- |
-| `deploy-rapids` | `.github/workflows/deno.yml` | `rapids`, written out in the step | every push to `main` |
-| `deploy-estuary` | `.github/workflows/deploy-production.yml` | `DEPLOYMENT_ENVIRONMENT` variable | manual dispatch, naming the ref to deploy |
+| `deploy` | `.github/workflows/rapids-release.yml` | `/opt/cf/deploy-rapids.sh "$INFRA_SHA"` | infra dispatch on Labs `main`, naming the candidate's infra commit |
+| `deploy-estuary` | `.github/workflows/deploy-production.yml` | `/opt/cf/deploy.sh <environment> <Labs SHA>` | manual dispatch, naming the ref to deploy |
 
 The production job reads the environment name from a repository variable rather
 than naming it, because the variable is defined on the GitHub environment the
 job declares.
 
-The staging job waits on `attest-binaries`, because the script deploys binaries
-rather than building them. There is nothing for it to deploy until that job has
-uploaded the artifacts for the commit. The production job downloads those same
-artifacts itself, and fails with a message naming the commit if they are not
-there.
+The Rapids job declares GitHub's `toolshed` environment, which holds
+`BASTION_HOST` and `BASTION_SSH_PRIVATE_KEY`. It connects as `bastion`. The
+production job downloads the selected commit's artifacts itself and fails with
+a message naming that commit if they are absent.
 
-Staging used to deploy to toolshed as well, from a `deploy-toolshed` job in
-`.github/workflows/deno.yml`. Toolshed has been decommissioned and rapids
-replaces it, so that job is gone and `deploy-rapids` is the only staging
-deploy. The `deploy-rapids` job still declares GitHub's `toolshed` environment,
-which is where its bastion credentials live; renaming that environment is a
-repository-settings change, and the job has to be updated in the same change.
+## Coordinated Rapids releases
+
+Labs CI publishes binaries and attestations on green pushes to `main`.
+`.github/workflows/notify-rapids.yml` then dispatches two workflows with the
+paired `producer=commonfabric/labs` and `run_id` hints:
+
+- `commonfabric/infra`: `rapids.yml`, which reconciles the release candidate.
+- `commonfabric/loom`: `rapids-dependencies.yml`, which integrates verified
+  producer dependencies and resolves their revisions independently.
+
+Each notification uses a separate repository-scoped Actions-write token from
+`RAPIDS_APP_ID` and `RAPIDS_APP_PRIVATE_KEY`. Notifications follow successful
+main-push CI runs in this repository. They execute no checked-out code.
+
+The infra coordinator selects the latest green main revisions and verifies
+their immutable artifacts. It lands `releases/rapids-candidate.json` on infra
+`main` and keeps that candidate frozen through deployment and publication. See
+[infra's Rapids release documentation](https://github.com/commonfabric/infra/blob/main/releases/rapids.md)
+for selection and reconciliation rules.
+
+The coordinator dispatches `rapids-release.yml` on Labs `main` with the single
+required string input `infra_sha`. The run is named `Deploy Rapids <infra_sha>`.
+The `rapids-release-deploy` concurrency group serializes runs without canceling
+an in-progress deployment. The receiver performs these steps in order:
+
+1. Require a 40-character lowercase hexadecimal SHA and ask GitHub whether it
+   is an ancestor of infra `main`, before checking out or executing infra code.
+2. Check out `commonfabric/infra` at that exact SHA, with full history and no
+   persisted credentials. Install `jsonschema[format]==4.23.0` for validation.
+3. Run `releases/rapids_deploy.py <infra_sha> --validate-only`. The infra
+   validator requires a clean exact checkout, main ancestry, a candidate equal
+   to the current main candidate, green infra checks, green producer pins, and
+   the exact Labs archive and attestation. The candidate file supplies artifact
+   selections.
+4. Call `/opt/cf/deploy-rapids.sh "$INFRA_SHA"` on the bastion. The wrapper
+   locks deployments, verifies the infra checkout and producer main ancestry,
+   and invokes infra's `rapids_release.yml` playbook. Deployment is forward-only;
+   completion requires all 21 workers to report the expected SHAs.
+5. Pass the captured `RAPIDS_RECEIPT:<base64-json>` output to
+   `releases/rapids_deploy.py <infra_sha> --save-receipt <path>`. The validator
+   binds the receipt to the candidate, the Labs workflow SHA, run and attempt,
+   and the expected worker set and SHAs.
+6. Upload only the verified receipt as
+   `rapids-deployment-<run_id>-<run_attempt>`, retained for 90 days. A failed
+   validation or deployment stops this sequence before proof is uploaded.
+
+The evidence token is read-only for contents and Actions in `infra`, `loom`,
+`labs`, `commonfabric-weaver`, and `gvisor`. The bastion receives that token,
+`INFRA_SHA`, and the Labs orchestrator's `GITHUB_SHA`, `GITHUB_REPOSITORY`,
+`GITHUB_RUN_ID`, and `GITHUB_RUN_ATTEMPT`.
+
+Every completed `Deploy Rapids release` run on main, including failures and
+cancellations, notifies infra with empty dispatch inputs. The coordinator
+checks the trusted main workflow, run and attempt, GitHub artifact digest,
+candidate hash, and every worker before proposing an update to the active
+`releases/rapids.json`. That active file advances only after all-worker success.
 
 ## One commit, one set of artifacts
 
@@ -42,10 +90,9 @@ The `build-toolshed` and `build-cf` jobs in `.github/workflows/deno.yml` build
 the binaries. Once every lane of the full run has passed, the `attest-binaries`
 job signs them, packs them into `labs-<commit>.tar.gz`, writes that
 tarball's SHA-256 into `labs-<commit>.hash.txt`, and copies both objects into
-the `commontools-build-artifacts` bucket. A deploy is given a commit rather than
-a build, so those two objects are the whole of what a commit means to a host.
-The host downloads them, checks the tarball against the checksum, and unpacks
-it.
+the `commontools-build-artifacts` bucket. A host downloads the pair, checks the
+tarball against the checksum, and unpacks it. The Rapids candidate additionally
+binds the exact archive and producer evidence verified by the coordinator.
 
 Building one commit twice does not produce the same tarball. The binaries are
 compiled again, and `tar` records the modification time of every file it packs.
@@ -64,10 +111,10 @@ the ways a second build starts without a second run, a re-run of the job among
 them. Removing either object from the bucket by hand lets the next build of
 that commit publish both of them again.
 
-## A host keeps what it has already downloaded
+## Production artifact caching
 
-The deploy playbook downloads the tarball and the checksum only when the
-release directory for the commit is missing a binary, and Ansible's `get_url`
+The production deploy playbook downloads the tarball and the checksum only when
+the release directory for the commit is missing a binary, and Ansible's `get_url`
 leaves a destination file that is already there as it is. So a release
 directory that failed verification stays as it is across later deploys of that
 commit. The download tasks report no change, the same mismatched pair is
@@ -79,32 +126,32 @@ That playbook is `ansible/playbooks/toolshed_binary_deploy.yml` in the
 `/opt/cf/deploy.sh` wrapper described above. Making the download replace what
 it finds, rather than skip it, is a change in that repository.
 
-## The wrapper is owned by another repository
+## The wrappers are owned by infra
 
-`/opt/cf/deploy.sh` is not in this repository. The
-[infra repository](https://github.com/commonfabric/infra) generates it, in
-`ansible/playbooks/bastion.yml`, and writes it to the bastion when that
-playbook runs. Nothing here reads it, imports it, or tests it against the real
-thing.
+The [infra repository](https://github.com/commonfabric/infra) generates
+`/opt/cf/deploy.sh` and `/opt/cf/deploy-rapids.sh` in
+`ansible/playbooks/bastion.yml` and installs them on the bastion. Their
+implementations and deployment validation tests belong there; Labs checks its
+call sites against their interfaces.
 
-The script validates what it is given, and it takes exactly two arguments: an
+The production wrapper takes exactly two arguments: an
 environment name it recognizes, and a 40-character commit SHA. Given anything
 else — an extra argument, an unknown environment, a revision that is not a
 full SHA — it prints its usage and exits with status 1, and the deploy job
 fails without deploying anything.
 
-This is the seam to be careful about. The staging deploy jobs run only on
-`main`, so a deploy step that no longer matches the script cannot fail on the
-pull request that introduces it. It fails on the first push to `main`
-afterwards, and then on every push after that until someone fixes it. The
-`Deploy steps call the bastion wrapper the way it accepts` case in
-[`tasks/ci-workflow.test.ts`](../../tasks/ci-workflow.test.ts) reads the
-`script:` line out of each deploy step and checks it against that contract, so
-a mismatch fails on the pull request instead.
+The Rapids wrapper takes one full infra SHA. Its GitHub environment variables
+identify the Labs orchestrator run, while its candidate identifies the producer
+commits to deploy. [`tasks/rapids-workflows.test.ts`](../../tasks/rapids-workflows.test.ts)
+checks this interface, the trust gates and receipt upload ordering. The
+production interface is checked in
+[`tasks/ci-workflow.test.ts`](../../tasks/ci-workflow.test.ts).
 
-Changing the argument list therefore takes a change in each repository, in
-order: land the infra change, apply the bastion playbook so the host has the
-new script, then change the call sites here.
+Changes to these interfaces land in order: land the infra implementation,
+apply the bastion playbook so the host has that implementation, then merge the
+Labs call sites. Installing the Rapids wrapper uses the `rapids-deploy-script`
+tag. The deployment transition also blocks the independent `deploy.sh rapids`
+entrypoint so queued CI runs cannot race the coordinated release.
 
 ## The shell inside the binary
 
@@ -131,7 +178,9 @@ different origin than the API it calls. The `STAGING_SHELL_API_URL` variable
 carries that host, and the build substitutes it into the bundle. It is a
 variable rather than a secret: the value ends up in a bundle that anyone can
 read, so hiding it from review buys nothing and costs the ability to see what
-staging points at. The host it names is the one `deploy-rapids` keeps current.
+staging points at. The host it names is the server the coordinated Rapids
+release keeps current. This static shell follows Labs main separately; the
+same-origin shell inside the Rapids toolshed binary follows the candidate.
 
 Publishing is not the same as working, and this job cannot tell the difference
 by uploading alone — it makes no request to the API it just configured. So it
