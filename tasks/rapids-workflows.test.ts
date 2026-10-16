@@ -26,6 +26,7 @@ const stepSchema = z.object({
 const jobSchema = z.object({
   if: z.string().optional(),
   environment: z.string().optional(),
+  "timeout-minutes": z.number().optional(),
   permissions: z.record(z.string(), z.string()).optional(),
   env: z.record(z.string(), z.string()).default({}),
   steps: z.array(stepSchema),
@@ -140,6 +141,7 @@ describe("rapids-workflows", () => {
     const job = release.jobs.deploy;
     expect(job.if).toBe("github.ref == 'refs/heads/main'");
     expect(job.environment).toBe("toolshed");
+    expect(job["timeout-minutes"]).toBe(60);
     expect(job.permissions).toBeUndefined();
     expect(job.env).toEqual({
       INFRA_SHA: "${{ inputs.infra_sha }}",
@@ -234,6 +236,7 @@ describe("rapids-workflows", () => {
     expect(deploy.with.host).toBe("${{ secrets.BASTION_HOST }}");
     expect(deploy.with.key).toBe("${{ secrets.BASTION_SSH_PRIVATE_KEY }}");
     expect(deploy.with.username).toBe("bastion");
+    expect(deploy.with.command_timeout).toBe("45m");
     expect(commandWords(z.string().parse(deploy.with.script))).toEqual([
       "/opt/cf/deploy-rapids.sh",
       '"$INFRA_SHA"',

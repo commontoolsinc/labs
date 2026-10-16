@@ -21,6 +21,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment: toolshed
     env:
       INFRA_SHA: ${{ inputs.infra_sha }}
@@ -86,6 +87,7 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          command_timeout: 45m
           envs: GH_TOKEN,INFRA_SHA,GITHUB_SHA,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT
           script: /opt/cf/deploy-rapids.sh "$INFRA_SHA"
           capture_stdout: true

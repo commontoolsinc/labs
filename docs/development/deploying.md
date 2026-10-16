@@ -50,7 +50,9 @@ for selection and reconciliation rules.
 The coordinator dispatches `rapids-release.yml` on Labs `main` with the single
 required string input `infra_sha`. The run is named `Deploy Rapids <infra_sha>`.
 The `rapids-release-deploy` concurrency group serializes runs without canceling
-an in-progress deployment. The receiver performs these steps in order:
+an in-progress deployment. The remote command has a 45-minute limit inside a
+60-minute job, leaving time for runner-side validation and receipt upload. The
+receiver performs these steps in order:
 
 1. Require a 40-character lowercase hexadecimal SHA and ask GitHub whether it
    is an ancestor of infra `main`, before checking out or executing infra code.
@@ -68,7 +70,9 @@ an in-progress deployment. The receiver performs these steps in order:
 5. Pass the captured `RAPIDS_RECEIPT:<base64-json>` output to
    `releases/rapids_deploy.py <infra_sha> --save-receipt <path>`. The validator
    binds the receipt to the candidate, the Labs workflow SHA, run and attempt,
-   and the expected worker set and SHAs.
+   and the expected worker set and SHAs. The captured stream includes remote
+   stderr and the SSH action's success banner; the parser requires exactly one
+   receipt marker line.
 6. Upload only the verified receipt as
    `rapids-deployment-<run_id>-<run_attempt>`, retained for 90 days. A failed
    validation or deployment stops this sequence before proof is uploaded.
