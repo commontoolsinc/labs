@@ -11,14 +11,7 @@ import {
   TESTS,
   Writable,
 } from "commonfabric";
-import {
-  type ActivityCounters,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_SEND_ACTION,
@@ -61,11 +54,6 @@ export default pattern(() => {
     myProfile: aliceProfile,
     about: { kind: "group" as const },
     messages,
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   } as RoomArg);
   const held = Writable.of<HeldLink>({});
   const action_hold_link = action(() => held.key("room").set(alice));

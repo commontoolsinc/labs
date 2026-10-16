@@ -1,8 +1,7 @@
 /**
  * A FabriChat group room of its own, as several viewers sharing it: what a
- * send stores, how edits, deletions, and obliterations change a message, how
- * replies divide into the conversation and its threads, and what the room's
- * recent activity records.
+ * send stores, how edits, deletions, and obliterations change a message, and
+ * how replies divide into the conversation and its threads.
  */
 import {
   type AddIntegrity,
@@ -23,15 +22,10 @@ import {
 } from "../test/vnode-helpers.ts";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type MessageCell,
   type MessageRecord,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -44,7 +38,6 @@ import {
   CHAT_SEND_ACTION,
   CHAT_SEND_SURFACE,
   type ChatProfile,
-  epochNsecFromMsec,
   nsecOf,
 } from "./schemas.tsx";
 
@@ -79,11 +72,7 @@ const obliterateGesture = {
 };
 
 // A composer delivers its field's text on the trusted click.
-const typed = (text: string, requestId?: string) => ({
-  type: "click",
-  target: { value: text },
-  ...(requestId === undefined ? {} : { requestId }),
-});
+const typed = (text: string) => ({ type: "click", target: { value: text } });
 
 /** A message of the room's records, as an event names it. */
 function messageOf(cell: unknown): Writable<MessageRecord>;
@@ -103,21 +92,12 @@ const bodies = (messages: Cell<MessagesValue>): string =>
       : "<deleted>"
   ).join(" | ");
 
-const times = (messages: Cell<MessagesValue>): bigint[] =>
-  stored(messages).map((message) => nsecOf(message.sentAt));
-
-const strictlyIncreasing = (values: readonly bigint[]): boolean =>
-  values.every((value, index) => index === 0 || values[index - 1] < value);
-
 // Each of the latest messages is a link to the stored message.
 const mainTexts = (latest: readonly MessageCell[]): string =>
   latest.map((each) => {
     const message = each.get();
     return typeof message?.body === "string" ? message.body : "<gone>";
   }).join(" | ");
-
-const activitySeqs = (activity: Cell<SentActivity[]>): number[] =>
-  (activity.get() ?? []).map((entry) => entry.seq);
 
 const composerDisabled = (root: unknown): unknown =>
   propValue(findNodeByProp(root, "inputId", "fabrichat-message"), "disabled");
@@ -146,22 +126,12 @@ const composerDisplay = (root: unknown, inputId: string): unknown => {
 
 export default pattern(() => {
   const messages = Writable.of<MessagesValue>([] as MessagesValue);
-  const reactionLists = Writable.of<ReactionList[]>([] as ReactionList[]);
-  const requests = Writable.of<RequestMemo[]>([]);
-  const usedTimes = Writable.of<UsedTime[]>([]);
-  const activity = Writable.of<SentActivity[]>([]);
-  const counters = Writable.of<ActivityCounters[]>([]);
   const aliceProfile = Writable.of<TestProfile>({ name: "Alice" });
   const bobProfile = Writable.of<TestProfile>({ name: "Bob" });
   const pendingProfile = Writable.of<TestProfile | undefined>(undefined);
   const records = {
     about: { kind: "group" as const, title: "Team" },
     messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
   };
 
   const alice = FabriChatRoomCore(
@@ -196,12 +166,6 @@ export default pattern(() => {
   } as RowArg);
   const bobOnSecond = FabriChatMessageRow({
     message: messages.key(1),
-    myProfile: bobProfile,
-    ...rowRecords,
-  } as RowArg);
-  // The thread-only reply that the replies below send first.
-  const bobOnThreadReply = FabriChatMessageRow({
-    message: messages.key(3),
     myProfile: bobProfile,
     ...rowRecords,
   } as RowArg);
@@ -240,24 +204,16 @@ export default pattern(() => {
         ),
       },
 
-      // Sends: a blank one, and one with a proposal far older than the
-      // room's window, are refused.
+      // Sends: a blank one, and one from a viewer whose profile hasn't
+      // resolved, are refused.
       {
         action: alice.sendMessage,
-        event: typed("Hello, team", "alice-1"),
+        event: typed("Hello, team"),
         trustedUi: sendGesture,
       },
       {
         action: alice.sendMessage,
         event: typed("   "),
-        trustedUi: sendGesture,
-      },
-      {
-        action: alice.sendMessage,
-        event: {
-          requestId: "alice-stale",
-          version: { body: "Very late", sentAt: epochNsecFromMsec(1000) },
-        },
         trustedUi: sendGesture,
       },
       {
@@ -269,16 +225,11 @@ export default pattern(() => {
       {
         assertion: assert(() =>
           equals(stored(messages)[0]?.authorProfile, aliceProfile) &&
-          stored(messages)[0]?.earlierVersions.length === 0
+          stored(messages)[0]?.editedAt === undefined
         ),
       },
 
-      // The same request, delivered again, changes nothing.
-      {
-        action: alice.sendMessage,
-        event: typed("Hello, team", "alice-1"),
-        trustedUi: sendGesture,
-      },
+      // Two sends of the same text are two messages.
       {
         action: bob.sendMessage,
         event: typed("Hi, Alice"),
@@ -294,8 +245,6 @@ export default pattern(() => {
           bodies(messages) === "Hello, team | Hi, Alice | Hi, Alice"
         ),
       },
-      // Sends in the same clock tick still get times unique in the room.
-      { assertion: assert(() => strictlyIncreasing(times(messages))) },
       { assertion: assert(() => alice.messages.count === 3) },
       {
         assertion: assert(() =>
@@ -305,7 +254,7 @@ export default pattern(() => {
         ),
       },
 
-      // Edits: only the sender's, and each keeps the version it replaces.
+      // Edits: only the sender's.
       {
         action: bobOnFirst.editMessage,
         event: typed("Hijacked"),
@@ -320,14 +269,11 @@ export default pattern(() => {
         assertion: assert(() => {
           const first = stored(messages)[0];
           return first?.body === "Hello, everyone" &&
-            first?.editedAt !== undefined &&
-            first?.earlierVersions.length === 1 &&
-            first?.earlierVersions[0].body === "Hello, team" &&
-            nsecOf(first?.earlierVersions[0].sentAt) === nsecOf(first?.sentAt);
+            first?.editedAt !== undefined;
         }),
       },
 
-      // Deletion keeps the deleted text in history; `members.test.tsx`
+      // Deletion keeps the author and drops the text; `members.test.tsx`
       // covers who may delete someone else's message.
       {
         action: bobOnSecond.deleteMessage,
@@ -339,8 +285,7 @@ export default pattern(() => {
           const second = stored(messages)[1];
           return typeof second?.body === "object" &&
             equals(second?.authorProfile, bobProfile) &&
-            second?.earlierVersions.length === 1 &&
-            second?.earlierVersions[0].body === "Hi, Alice";
+            second?.editedAt !== undefined;
         }),
       },
       // A deleted message takes no edit.
@@ -358,15 +303,14 @@ export default pattern(() => {
       // `members.test.tsx` covers a member who isn't.
       {
         action: alice.obliterateMessage,
-        event: { requestId: "o-third", message: messageOf(messages.key(2)) },
+        event: { message: messageOf(messages.key(2)) },
         trustedUi: obliterateGesture,
       },
       {
         assertion: assert(() => {
           const third = stored(messages)[2];
           return typeof third?.body === "object" &&
-            third?.authorProfile === undefined &&
-            third?.earlierVersions.length === 0;
+            third?.authorProfile === undefined;
         }),
       },
 
@@ -399,33 +343,11 @@ export default pattern(() => {
           return replies.length === 3 &&
             replies.every((reply) =>
               reply.replyTo !== undefined &&
-              nsecOf(reply.sentAt) > nsecOf(stored(messages)[0]?.sentAt)
+              nsecOf(reply.sentAt) >= nsecOf(stored(messages)[0]?.sentAt)
             ) &&
             replies.map((reply) => reply.replyTo?.shownIn).join() ===
               "thread,both,main";
         }),
-      },
-
-      // Refused: a reply to a deleted message, a reply quoted in the main
-      // conversation to a message shown only in a thread, and an edit whose
-      // proposed time is far older than the room's window.
-      {
-        action: bobOnSecond.replyInThread,
-        event: typed("To the deleted one"),
-        trustedUi: sendGesture,
-      },
-      {
-        action: bobOnThreadReply.replyInMain,
-        event: typed("Quoting a thread reply"),
-        trustedUi: sendGesture,
-      },
-      {
-        action: aliceOnFirst.editMessage,
-        event: {
-          requestId: "alice-stale-edit",
-          version: { body: "Very late edit", sentAt: epochNsecFromMsec(1000) },
-        },
-        trustedUi: editGesture,
       },
       {
         assertion: assert(() =>
@@ -433,15 +355,6 @@ export default pattern(() => {
           stored(messages)[0]?.body === "Hello, everyone"
         ),
       },
-
-      // Every recorded change has an activity entry, numbered without gaps
-      // but for the obliterated message's earlier entries.
-      {
-        assertion: assert(() =>
-          activitySeqs(activity).join() === "1,2,4,5,6,7,8,9"
-        ),
-      },
-      { assertion: assert(() => alice.recentActivityExpiredThrough === 0) },
     ],
   };
 });

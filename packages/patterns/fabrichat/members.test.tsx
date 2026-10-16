@@ -32,14 +32,9 @@ import {
 import FabriChatPlacement from "./placement.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type MessageRecord,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
@@ -78,11 +73,6 @@ const typed = (text: string) => ({ type: "click", target: { value: text } });
 /** The room's records, which every participant's room shares. */
 interface Records {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
 }
 
 /** What every session receives from the setup. */
@@ -146,11 +136,6 @@ const groupRoom = {
 export const setup = pattern(() => ({
   records: {
     messages: Writable.of<MessagesValue>([] as MessagesValue),
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   },
 }));
 
@@ -159,11 +144,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Alice" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -189,18 +169,14 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-bobs",
           message: messageOf(setup.records.messages.key(1)),
         },
         trustedUi: deleteGesture,
       },
       {
         assertion: assert(() => {
-          const outcome = room.messageRequests["d-bobs"];
-          return outcome?.status === "refused" &&
-            outcome.code === "not-allowed" &&
-            bodies(setup.records.messages) ===
-              "From Alice | From Bob | Bob again";
+          return bodies(setup.records.messages) ===
+            "From Alice | From Bob | Bob again";
         }),
       },
       // An OWNER may obliterate anyone's message in a group room, whose
@@ -213,7 +189,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.obliterateMessage,
         event: {
-          requestId: "o-bobs",
           message: messageOf(setup.records.messages.key(1)),
         },
         trustedUi: obliterateGesture,
@@ -235,11 +210,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Bob" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -307,7 +277,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       {
         action: room.deleteMessage,
         event: {
-          requestId: "d-alices",
           message: messageOf(setup.records.messages.key(0)),
         },
         trustedUi: deleteGesture,
@@ -317,14 +286,6 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
           bodies(setup.records.messages) ===
             "From Alice | From Bob | Bob again"
         ),
-      },
-      // The room records his refused deletion as one he isn't allowed.
-      {
-        assertion: assert(() => {
-          const outcome = room.messageRequests["d-alices"];
-          return outcome?.status === "refused" &&
-            outcome.code === "not-allowed";
-        }),
       },
       // He opens the editor on his own message.
       { action: action_start_edit },
@@ -342,11 +303,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Carol" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,
@@ -374,11 +330,6 @@ export const stranger = pattern<{ setup: Setup }>(({ setup }) => {
   const profile = Writable.of<TestProfile>({ name: "Stranger" });
   const records = {
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   };
   const room = FabriChatRoomCore(
     { myProfile: profile, ...groupRoom, ...records } as RoomArg,

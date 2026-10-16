@@ -41,14 +41,7 @@ import PrivateInbox, {
 } from "../system/private-inbox.tsx";
 import type { ShareInboxPiece } from "../system/profile-home.tsx";
 import { FabriChatManagerCore } from "./manager.tsx";
-import {
-  type ActivityCounters,
-  type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
-  type SentActivity,
-  type UsedTime,
-} from "./room-records.tsx";
+import { type MessagesValue } from "./room-records.tsx";
 import { FabriChatRoomCore } from "./room.tsx";
 import {
   CHAT_ROOM_OFFER_KIND,
@@ -168,11 +161,6 @@ type HeldRoom = ChatRoomLink & { participants?: ProfileCell[] };
 /** The room's records, which every participant's room shares. */
 interface Records {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
 }
 
 /** What every session receives from the setup. */
@@ -195,11 +183,6 @@ interface Setup {
 export const setup = pattern(() => ({
   records: {
     messages: Writable.of<MessagesValue>([] as MessagesValue),
-    reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-    requests: Writable.of<RequestMemo[]>([]),
-    usedTimes: Writable.of<UsedTime[]>([]),
-    activity: Writable.of<SentActivity[]>([]),
-    counters: Writable.of<ActivityCounters[]>([]),
   },
   aliceDid: Writable.of<string>(""),
   carolDid: Writable.of<string>(""),
@@ -241,11 +224,6 @@ export const alice = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     about: { kind: "group" as const },
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
 
   return {
@@ -299,11 +277,6 @@ export const carol = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     about: { kind: "group" as const },
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
   const requests = Writable.of<Record<string, ChatRequestOutcome>>({});
   const manager = FabriChatManagerCore({
@@ -359,11 +332,6 @@ export const dave = pattern<{ setup: Setup }>(({ setup }) => {
     myProfile: profile,
     about: { kind: "group" as const },
     messages: setup.records.messages,
-    reactionLists: setup.records.reactionLists,
-    requests: setup.records.requests,
-    usedTimes: setup.records.usedTimes,
-    activity: setup.records.activity,
-    counters: setup.records.counters,
   } as RoomArg);
 
   return {
