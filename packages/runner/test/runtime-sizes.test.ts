@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { MetaField } from "@commonfabric/runner";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { immutableCellsFor } from "../src/immutable-cell.ts";
@@ -17,6 +18,9 @@ import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("runner-runtime-sizes");
 const space: MemorySpace = signer.did();
+
+// The stored CFC envelope sits under a meta field the cell API does not name.
+const cfcMeta = "cfc" as unknown as MetaField;
 
 describe("runtime-sizes", () => {
   describe("cfcRejectionReasonPrefix()", () => {
@@ -274,8 +278,8 @@ describe("runtime-sizes", () => {
         "[sizes-diag refusal]",
         JSON.stringify({
           seen,
-          targetCfc: runtime.getCell(space, "target").getMetaRaw("cfc"),
-          sourceCfc: runtime.getCell(space, "source").getMetaRaw("cfc"),
+          targetCfc: runtime.getCell(space, "target").getMetaRaw(cfcMeta),
+          sourceCfc: runtime.getCell(space, "source").getMetaRaw(cfcMeta),
           sourceSchema: runtime.getCell(space, "source").getMetaRaw("schema"),
           os: Deno.build.os,
           envKeys: Object.keys(Deno.env.toObject()).filter((key) =>
@@ -352,7 +356,7 @@ describe("runtime-sizes", () => {
           env: state.decomposedEnvelopes,
           prepare: prepare.status,
           diagnostics: state.diagnostics,
-          wishCfc: runtime.getCell(space, "wish").getMetaRaw("cfc"),
+          wishCfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
           wishSchema: runtime.getCell(space, "wish").getMetaRaw("schema"),
         }),
       );
