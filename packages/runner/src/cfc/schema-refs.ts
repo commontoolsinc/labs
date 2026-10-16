@@ -677,12 +677,24 @@ const canonicalizeCfcSchemaDocumentUncached = (
   );
   const names = [...root.keys()];
 
+  // A class is spelled into a ref under a marker no name the document
+  // refers to begins with, so a ref spelled as a class can never read as a
+  // ref to a definition, resolved or not, that happens to carry that text.
+  const referenced = localDefinitionNamesInScope(
+    schema,
+    Object.fromEntries(root),
+  );
+  let marker = "\u0000";
+  while ([...referenced].some((name) => name.startsWith(marker))) {
+    marker += "\u0000";
+  }
+
   // Partition refinement: one class, split by content until stable.
   let classOf = new Map<string, number>(names.map((name) => [name, 0]));
   let classCount = 1;
   while (true) {
     const spelling = new Map<string, string>(
-      names.map((name) => [name, `class ${classOf.get(name)}`]),
+      names.map((name) => [name, `${marker}${classOf.get(name)}`]),
     );
     const classByKey = new Map<string, number>();
     const next = new Map<string, number>();

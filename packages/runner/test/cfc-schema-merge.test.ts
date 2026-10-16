@@ -2688,6 +2688,38 @@ describe("canonicalizeCfcSchemaDocument", () => {
     );
   });
 
+  it("never reads an unresolved ref as a class while comparing definitions", () => {
+    // `N` refers to a definition that does not exist and whose name is the
+    // text a class could be spelled as; `M` refers to a definition that does.
+    // The two mean different things and must stay apart.
+    const canonical = canonicalizeCfcSchemaDocument({
+      type: "object",
+      properties: {
+        m: { $ref: "#/$defs/__cfc_hoisted_0_M" },
+        n: { $ref: "#/$defs/__cfc_hoisted_1_N" },
+      },
+      $defs: {
+        A: { type: "string" },
+        __cfc_hoisted_0_M: {
+          type: "object",
+          properties: { x: { $ref: "#/$defs/A" } },
+        },
+        __cfc_hoisted_1_N: {
+          type: "object",
+          properties: { x: { $ref: "#/$defs/class 0" } },
+        },
+      },
+    }) as JSONSchemaObj;
+    expect(Object.keys(canonical.$defs!).toSorted()).toEqual([
+      "A",
+      "__cfc_hoisted_0_M",
+      "__cfc_hoisted_1_N",
+    ]);
+    expect((canonical.properties as Record<string, JSONSchemaObj>).n).toEqual({
+      $ref: "#/$defs/__cfc_hoisted_1_N",
+    });
+  });
+
   it("drops a nested map, which is inert under the root's whatever it holds", () => {
     const canonical = canonicalizeCfcSchemaDocument({
       type: "object",
