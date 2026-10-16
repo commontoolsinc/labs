@@ -906,6 +906,18 @@ const isCoveredPendingVersion = (
   confirmed.localWavePromotion === undefined &&
   pending.acceptedSeq !== undefined && pending.acceptedSeq <= confirmed.seq;
 
+/**
+ * Whether `record`'s confirmed value is a content-addressed document whose
+ * content hashes to `hash`, the id it sits under.
+ */
+const holdsContentAddressedValue = (
+  record: DocumentRecord | undefined,
+  hash: string,
+): boolean => {
+  const doc = record?.confirmed.value;
+  return isObjectNotArray(doc) && taggedHashStringOf(doc.value) === hash;
+};
+
 /** Folds pending and locally accepted wave contributions in sealing order. */
 const materializePendingVersions = (
   confirmed: ConfirmedVersion,
@@ -6025,15 +6037,23 @@ export class SpaceReplica
   ): boolean {
     const key = this.#docKeyOf({ id, scope }, identity);
     const delivered = this.#delivered.get(key);
-    if (delivered === undefined) return false;
     const record = this.#docs.get(key);
-    if (record === undefined) return true;
+    if (record === undefined) return delivered !== undefined;
     const { confirmed } = record;
     if (
       record.pending.length > 0 || confirmed.localFold === true ||
       confirmed.localWavePromotion !== undefined
     ) {
       return false;
+    }
+    if (delivered === undefined) {
+      // A schema document this replica's own commit stored may never arrive
+      // in a frame: the server ships it with a document that refers to it,
+      // and does not send a replica its own change to a document it holds.
+      // Content under a `cid:` id cannot change, so holding that content
+      // confirmed is confirmation.
+      return id.startsWith("cid:") &&
+        holdsContentAddressedValue(record, id.slice("cid:".length));
     }
     // Past its delivered seq, the confirmed state is an own accepted write
     // promoted locally, which a push through that seq has since covered.
@@ -9221,12 +9241,10 @@ export class SpaceReplica
    * (CT-2046 tracks enforcing that broadly).
    */
   isContentAddressedDocPersisted(hash: string): boolean {
-    const record = this.#docs.get(docKey(`cid:${hash}` as URI, "space"));
-    const doc = record?.confirmed.value;
-    if (!isObjectNotArray(doc)) return false;
-    const value = doc.value;
-    // A content-addressed document's value must hash to the id it sits under.
-    return taggedHashStringOf(value) === hash;
+    return holdsContentAddressedValue(
+      this.#docs.get(docKey(`cid:${hash}` as URI, "space")),
+      hash,
+    );
   }
 
   /**

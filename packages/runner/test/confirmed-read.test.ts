@@ -2,15 +2,23 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  collectExternalSchemaRefHashes,
+  parseExternalSchemaRef,
+} from "@commonfabric/data-model-schema/schema-refs";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { Cell } from "../src/cell.ts";
 import type {
   IExtendedStorageTransaction,
   SealedCommitVerdict,
+  URI,
 } from "../src/storage/interface.ts";
 import { readConfirmed, readDurable } from "../src/confirmed-read.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { writeResultSchemaMeta } from "../src/result-schema-meta.ts";
 import { Runtime } from "../src/runtime.ts";
+import { lookupSchemaDocument } from "../src/schema-registry.ts";
 import type { SessionSync } from "@commonfabric/memory/v2";
 import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -130,6 +138,109 @@ describe("confirmed-read", () => {
     expect(read.value).toEqual({ n: 1, child: 2 });
     expect(read.confirmed).toBe(true);
     expect(read.seq).toBeGreaterThanOrEqual(seq);
+  });
+
+  describe("of a content-addressed schema document", () => {
+    // A document's schema is stored as `cid:` documents in the transaction
+    // that writes it. The server ships them with a document that refers to
+    // them, and does not send a replica its own change to a document it holds,
+    // so a replica that changed a loaded document's schema is never sent them.
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        title: { $ref: "#/$defs/Title" },
+        detail: { $ref: "#/$defs/Detail" },
+      },
+      $defs: {
+        Title: { type: "string", description: "A confirmed read's title" },
+        Detail: { type: "object", properties: { count: { type: "number" } } },
+      },
+    } as const satisfies JSONSchema;
+
+    /** The documents `cell`'s stored `schema` metadata names: its root and
+     * every document the root refers to. */
+    function schemaDocumentsOf(cell: Cell<unknown>): URI[] {
+      const stored = cell.getMetaRaw("schema");
+      const ref = isObjectNotArray(stored) ? stored.$ref : undefined;
+      const root = typeof ref === "string"
+        ? parseExternalSchemaRef(ref)?.taggedHash
+        : undefined;
+      expect(root).toBeDefined();
+      const closure = new Set<string>([root!]);
+      for (const hash of closure) {
+        for (
+          const dependency of collectExternalSchemaRefHashes(
+            lookupSchemaDocument(hash),
+          )
+        ) {
+          closure.add(dependency);
+        }
+      }
+      return [...closure].map((hash): URI => `cid:${hash}`);
+    }
+
+    /** `readConfirmed` of the reader's read of the documents `ids`, returning
+     * whether it found each one. */
+    function confirmedReadOf(ids: URI[]) {
+      return readConfirmed(
+        reader,
+        space,
+        (tx) =>
+          ids.every((id) =>
+            tx.read({ space, id, type: "application/json", path: [] }).ok
+              ?.value !== undefined
+          ),
+      );
+    }
+
+    it("returns a read of the ones the reader's own commit stored as confirmed once a push covers its commit", async () => {
+      await write("described", 1);
+      const described = await loaded("described");
+      const tx = reader.edit();
+      expect(writeResultSchemaMeta(described.withTx(tx), resultSchema)).toBe(
+        true,
+      );
+      expect((await tx.commit().settled).error).toBeUndefined();
+      const seq = tx.committedSeq!(space)!;
+      const ids = schemaDocumentsOf(described);
+      expect(ids.length).toBeGreaterThan(1);
+
+      const read = confirmedReadOf(ids);
+      expect(read.value).toBe(true);
+      expect(read.confirmed).toBe(true);
+      expect(read.seq).toBeGreaterThanOrEqual(seq);
+    });
+
+    it("returns an unconfirmed read of ones the reader's own commit has not had accepted", async () => {
+      await write("described", 1);
+      const described = await loaded("described");
+      const tx = reader.edit();
+      writeResultSchemaMeta(described.withTx(tx), resultSchema);
+      const committed = tx.commit();
+      const read = confirmedReadOf(schemaDocumentsOf(described));
+      expect((await committed.settled).error).toBeUndefined();
+
+      expect(read).toEqual({ value: true, confirmed: false });
+    });
+
+    it("returns an unconfirmed read of ones the reader does not hold", async () => {
+      const tx = writer.edit();
+      const described = writer.getCell<Note>(
+        space,
+        "described",
+        noteSchema,
+        tx,
+      );
+      described.set({ n: 1 });
+      writeResultSchemaMeta(described, resultSchema);
+      expect((await tx.commit().settled).error).toBeUndefined();
+
+      const read = confirmedReadOf(
+        schemaDocumentsOf(writer.getCell<Note>(space, "described", noteSchema)),
+      );
+      expect(read).toEqual({ value: false, confirmed: false });
+    });
   });
 
   it("returns no sequence once a frame failed to apply", async () => {
