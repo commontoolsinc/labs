@@ -404,8 +404,11 @@ The selection area is the one part of this store that expires. A bucket
 lifecycle rule deletes its objects at a fixed age, and that age has to
 exceed the window in which a continuous-integration run may still be
 re-run, because a re-run resolves the same moment as the attempt it
-repeats and has to find the same manifest. Records carry no retention and
-must not acquire one.
+repeats and has to find the same manifest. It also has to exceed the
+longest the publisher may stop for: every run writes a new aggregate that
+carries each new real test failure forward, so an aggregate expiring costs
+nothing while a newer one exists. Records carry no retention and must not
+acquire one, since they are what a fold of the whole history reads.
 
 A local object's date partition comes from its run's start. A CI
 object's comes from the start of the attempt that produced it. Each
@@ -542,18 +545,19 @@ container whose only failure is that a case inside it failed is not recorded for
 that failure, since that case carries it. A recorded container takes the time it
 spent outside the cases directly inside it, since theirs is in their own records.
 
-A container the lane's manifest holds, as an identity in the unit that ran it, is
-recorded on every run with its outcome on its own account: a pass where it
+A container the lane's manifest holds, as an identity in the unit that ran it,
+is recorded on every run with its outcome on its own account: a pass where it
 failed only through the cases inside it. Its history then holds its passes as
-well as its failures, which is what the publisher judges flakiness, catches, and
-the default branch's latest outcome by. The manifest holds a container once a
-run has recorded it, so a container becomes an identity of its own the first
-time it fails on its own account, and every `describe` does not. Until the
-manifest holds it, a rerun of its unit records nothing for it. A name the report
-gives to more than one case is not recorded this way: the bdd runner names the
-suite of a file's top-level hooks `global` in every file that has them, and that
-name says nothing about which of them passed. Outside a lane, nothing is known,
-and a container is recorded only when it fails on its own account.
+well as its failures, which is what the publisher judges flakiness, new real
+test failures, and the default branch's latest outcome by. The manifest holds a
+container once a run has recorded it, so a container becomes an identity of its
+own the first time it fails on its own account, and every `describe` does not.
+Until the manifest holds it, a rerun of its unit records nothing for it. A name
+the report gives to more than one case is not recorded this way: the bdd runner
+names the suite of a file's top-level hooks `global` in every file that has
+them, and that name says nothing about which of them passed. Outside a lane,
+nothing is known, and a container is recorded only when it fails on its own
+account.
 
 In `deno.yml` the recording jobs are the lanes of the `tests` job. Each lane
 ships one artifact, `test-records-tests-<lane>-a<attempt>`, and its shipping

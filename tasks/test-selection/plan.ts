@@ -613,11 +613,11 @@ export interface Folding {
  * The merged entry combines its tests as follows:
  *
  * - Cost is the sum, because running the unit runs every test in it.
- * - Catches are the sum, because the unit catches whenever any of its tests
- *   does. Two tests catching one commit count twice, which favors running
- *   the unit.
+ * - New real test failures are the sum, because the unit has one whenever
+ *   any of its tests does. Two tests with a new real test failure at one
+ *   commit count twice, which favors running the unit.
  * - Sources and churn are the largest, because an entry records how many
- *   distinct sources saw a catch, not which ones.
+ *   distinct sources saw a new real test failure, not which ones.
  * - Flake rate and repeat count are the largest, because a test disagreeing
  *   with itself makes the whole invocation disagree.
  * - The last run is the oldest of the tests' last runs, and absent when any

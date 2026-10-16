@@ -613,12 +613,12 @@ export function manifestView(
   );
   const heldWithUnit = new Set(packed.heldWithUnit.map(testIdentityKey));
   const flakes = new Map<string, FlakeEvidence | undefined>();
-  const catches = new Map<string, number>();
+  const newRealTestFailures = new Map<string, number>();
   const units = new Map<string, string>();
   for (const entry of manifest.entries) {
     const key = testIdentityKey(entry.test);
     flakes.set(key, entry.flakeEvidence);
-    catches.set(key, entry.inputs.catches);
+    newRealTestFailures.set(key, entry.inputs.catches);
     units.set(key, `${entry.suite}\t${entry.unit}`);
   }
   return {
@@ -629,7 +629,7 @@ export function manifestView(
     unschedulable,
     crowded: placedOnlyMandatory(packed),
     flakes,
-    catches,
+    newRealTestFailures,
     units,
   };
 }

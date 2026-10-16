@@ -304,11 +304,12 @@ export function explainLines(
     `${key}`,
     `  suite ${entry.suite}, in ${entry.unit}`,
     `  score ${entry.score.toFixed(3)}, costing ${duration(entry.cost)}`,
-    `  ${entry.inputs.catches.toFixed(1)} weighted catches, across ` +
-    `${entry.inputs.sources} sources`,
+    `  ${entry.inputs.catches.toFixed(1)} weighted new real test failures, ` +
+    `across ${entry.inputs.sources} sources`,
     entry.inputs.lastCatch === undefined
-      ? "  it has never caught anything"
-      : `  the most recent catch was on ${entry.inputs.lastCatch}`,
+      ? "  it has never had a new real test failure"
+      : `  the most recent new real test failure was on ` +
+        `${entry.inputs.lastCatch}`,
     `  churn ${entry.inputs.churn.toFixed(4)}, flake rate ` +
     `${entry.flakeRate.toFixed(4)}`,
   ];

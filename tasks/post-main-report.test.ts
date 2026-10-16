@@ -752,7 +752,7 @@ describe("post-main-report", () => {
       ).toBe(false);
     });
 
-    it("carries the flake counts and the catches behind every entry", () => {
+    it("carries the flake counts and the new real test failures behind every entry", () => {
       const view = manifestView(manifest, suites, new Set(), DEFAULT_RUN);
       expect(view.flakes.get(testIdentityKey(kneads)))
         .toEqual({ flakes: 20, runs: 20 });
@@ -760,7 +760,7 @@ describe("post-main-report", () => {
       // says the store has seen the test at all.
       expect(view.flakes.has(testIdentityKey(proves))).toBe(true);
       expect(view.flakes.get(testIdentityKey(proves))).toBeUndefined();
-      expect(view.catches.get(testIdentityKey(proves))).toBe(3);
+      expect(view.newRealTestFailures.get(testIdentityKey(proves))).toBe(3);
     });
 
     // Which unit a test lives in is what says whether a run that did not
