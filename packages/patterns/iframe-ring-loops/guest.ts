@@ -1334,16 +1334,21 @@ function renderAuthors(): void {
  * by, and a placed note names whoever placed it.
  */
 function renderReadout(): void {
-  if (!layout || !hoverCell) {
-    readout.textContent = HINT;
-    return;
-  }
+  const text = readoutText();
+  // The readout is a live region, so rewriting the text it already shows would
+  // have a screen reader announce it again on every edit to the shared notes.
+  if (readout.textContent !== text) readout.textContent = text;
+}
+
+/** Helper for `renderReadout()`, which returns the text to show. */
+function readoutText(): string {
+  if (!layout || !hoverCell) return HINT;
   const { ringIndex, step, lane } = hoverCell;
   const ring = layout.rings[ringIndex];
   const placed = live.find(({ note }) =>
     note.ringId === ring.id && note.step === step && note.lane === lane
   );
-  readout.textContent = `${ring.label} · step ${step} · lane ${lane} · ${
+  return `${ring.label} · step ${step} · lane ${lane} · ${
     laneLabel(layout, ring, lane)
   }${placed ? ` · placed by ${authorNameOf(placed.note)}` : ""}`;
 }
