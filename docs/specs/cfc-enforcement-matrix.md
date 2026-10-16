@@ -231,9 +231,10 @@ The strict-only delta is:
   sessions and to the space's serving loop alone, so its residency clause
   also carries `User(<that principal>)`, as strong as the deployment's binding
   of instances to principals. On a client the principal is the one the storage
-  session authenticates as, which is what the memory server keys the client's
-  scoped writes by whoever the trust snapshot names as acting. On the serving
-  posture it is the scope-key identity the serving loop stamped on the run,
+  session authenticates as, because the memory server keys the client's scoped
+  writes by that session, independent of the principal the trust snapshot
+  names as acting. On the serving posture it is the scope-key identity the
+  serving loop stamped on the run,
   and a served transaction carrying none gets no such clause. A
   `PersonalSpace` label owned by that principal fits the clause through the
   owner-as-reader reading below, in plaintext or as the owner's `{digestOf}`

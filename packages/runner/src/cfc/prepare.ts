@@ -11992,6 +11992,41 @@ export function* prepareBoundaryCommitSteps(
     const currentLinkWritePaths = new Set(
       [...currentLinkWriteInputs].map((input) => pathKey(input.target.path)),
     );
+    // §8.12.4 residency, which both writer-fit measurements below join onto
+    // each path's declared ceiling: the whole-value destination fit and the
+    // per-path fit of the join. `Space(<this space>)` is one clause, so a
+    // flow clause listing the target's own space among its alternatives fits
+    // a document stored there, and a clause without such an alternative
+    // measures against the declared policy alone. The atom's audience is the
+    // space's reader set — §4.9.3 resolves it against the space's ACL, the
+    // same document that decides who receives a replica — so it already
+    // contains every principal the stored bytes reach, and the guarantee is
+    // as strong as the deployment's ACL posture. The flow stamp below
+    // persists the full join, leaving the egress and display gates the
+    // unchanged label.
+    //
+    // The space's clause takes the `Space` form alone. The bare DID-string
+    // spelling gates by equality against one acting reader, so it reaches a
+    // narrower audience than the space's readers. `PersonalSpace(<owner>)`
+    // names a space rather than a person (SC-39), and nothing in an address
+    // names a space's owner or marks the space as personal, so that atom
+    // cannot be built from the target's address.
+    //
+    // A `user` or `session` document is one principal's instance, and
+    // `User(<that principal>)` joins the space's clause there: they are the
+    // instance's whole audience (`scopedResidencyPrincipal` names them). A
+    // `PersonalSpace` label whose owner is that principal fits the clause, in
+    // plaintext or as the owner's `{digestOf}` commitment, because
+    // `clauseSubsumes` reads a personal space's owner as one of its readers.
+    // So an instance holds its own user's personal data, and a personal
+    // space owned by anyone else still misfits it.
+    const scopedReader = scope === "user" || scope === "session"
+      ? scopedResidencyPrincipal(tx)
+      : undefined;
+    const residencyCeiling: readonly CfcConfClause[] = [
+      cfcAtom.space(space),
+      ...(scopedReader === undefined ? [] : [cfcAtom.user(scopedReader)]),
+    ];
     // Whole-value write destinations stamped as written
     // (`assertedValueRootPaths`). They join the written prefixes here, so the
     // per-value entries beneath them are replaced and the attribution of any
@@ -12041,7 +12076,7 @@ export function* prepareBoundaryCommitSteps(
             atomsOutsideCeiling(flowConfidentiality, [
               ...(labelForEntriesAtPath(indexedEntriesAt(index, path), path)
                 ?.confidentiality ?? []) as readonly CfcConfClause[],
-              cfcAtom.space(space),
+              ...residencyCeiling,
             ]).length === 0
           );
         },
@@ -12412,7 +12447,7 @@ export function* prepareBoundaryCommitSteps(
       // below as this target's `derived` value component is the measurement
       // of the written value's actual taint, and canWrite demands it fit the
       // target's write ceiling at each path where it lands — the store's
-      // DECLARED policy component joined with the residency clause below. The
+      // DECLARED policy component joined with `residencyCeiling`. The
       // policy component is the declared + legacy entries only — link/
       // derived/structure entries are per-value data components (§8.12.8),
       // not store policy — and of those, only the entries a VALUE read
@@ -12432,39 +12467,6 @@ export function* prepareBoundaryCommitSteps(
       // names, and not writing. Link-covered writes carry per-slot link
       // labels instead of the join and are outside this v1 check, as is the
       // pure-link-structure shape channel.
-      // §8.12.4 residency: `Space(<this space>)` joins each path's declared
-      // ceiling, so a flow clause listing the target's own space among its
-      // alternatives fits a document stored there, and a clause without such
-      // an alternative measures against the declared policy alone. The atom's
-      // audience is the space's reader set — §4.9.3 resolves it against the
-      // space's ACL, the same document that decides who receives a replica —
-      // so it already contains every principal the stored bytes reach, and
-      // the guarantee is as strong as the deployment's ACL posture. The flow
-      // stamp below persists the full join, leaving the egress and display
-      // gates the unchanged label.
-      //
-      // The space's clause takes the `Space` form alone. The bare DID-string
-      // spelling gates by equality against one acting reader, so it reaches a
-      // narrower audience than the space's readers. `PersonalSpace(<owner>)`
-      // names a space rather than a person (SC-39), and nothing in an address
-      // names a space's owner or marks the space as personal, so that atom
-      // cannot be built from the target's address.
-      //
-      // A `user` or `session` document is one principal's instance, and
-      // `User(<that principal>)` joins the space's clause there: they are the
-      // instance's whole audience (`scopedResidencyPrincipal` names them). A
-      // `PersonalSpace` label whose owner is that principal fits the clause,
-      // in plaintext or as the owner's `{digestOf}` commitment, because
-      // `clauseSubsumes` reads a personal space's owner as one of its
-      // readers. So an instance holds its own user's personal data, and a
-      // personal space owned by anyone else still misfits it.
-      const scopedReader = scope === "user" || scope === "session"
-        ? scopedResidencyPrincipal(tx)
-        : undefined;
-      const residencyCeiling: readonly CfcConfClause[] = [
-        cfcAtom.space(space),
-        ...(scopedReader === undefined ? [] : [cfcAtom.user(scopedReader)]),
-      ];
       // Whether an alternative names a CONTAINER audience — the readers of
       // some space, resolved from that space's ACL — other than this
       // document's own. `PersonalSpace(owner)` is the second spelling

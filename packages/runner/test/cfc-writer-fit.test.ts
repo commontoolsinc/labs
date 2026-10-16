@@ -37,6 +37,7 @@ type StoredEntry = {
   path: string[];
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
+  observes?: string;
 };
 
 const storedDocument = (
@@ -983,6 +984,95 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       } finally {
         await runtime.dispose();
         await storageManager.close();
+      }
+    });
+
+    describe("a whole value a verified writer replaces", () => {
+      // A writer that sets a document's whole value is named on that value
+      // by a `TransformedBy` stamp at its root, even where the diff changes
+      // one member, provided the join fits the root's ceiling. Residency
+      // answers that fit as it answers the per-path one, so the instance's
+      // own principal's data is attributed whole.
+
+      const verifiedWriter = (symbol: string) => ({
+        kind: "verified" as const,
+        moduleIdentity: "module:writer-fit-whole-value",
+        symbol,
+        bindingPath: [symbol],
+      });
+
+      /**
+       * Has one verified writer create a `scope` document holding two
+       * members, and a second replace its whole value with one member
+       * changed, each after reading a source labeled `confidentiality`.
+       * Returns the integrity of the `value` stamp at the document's root.
+       */
+      const rootIntegrityAfterWholeWrite = async (
+        name: string,
+        scope: "user" | "session",
+        confidentiality: readonly FabricValue[],
+      ) => {
+        const storageManager = StorageManager.emulate({ as: signer });
+        const runtime = newRuntime(storageManager);
+        try {
+          await seedSecretSource(runtime, `${name}-source`, confidentiality);
+          const write = async (
+            symbol: string,
+            changed: (secret?: string) => string,
+          ) => {
+            const tx = runtime.edit();
+            tx.setCfcEnforcementMode("enforce-strict");
+            setCfcImplementationIdentity(tx, verifiedWriter(symbol));
+            const raw = runtime.getCell(
+              signer.did(),
+              `${name}-source`,
+              undefined,
+              tx,
+            ).getRaw() as { secret?: string };
+            const target = runtime.getCell(
+              signer.did(),
+              `${name}-target`,
+              undefined,
+              tx,
+              scope,
+            );
+            target.set({ unchanged: "same", changed: changed(raw.secret) });
+            tx.prepareCfc();
+            expect((await tx.commit().settled).error).toBeUndefined();
+            return target.getAsNormalizedFullLink().id;
+          };
+          await write("previousWriter", () => "old");
+          const targetId = await write("wholeWriter", (secret) => `${secret}`);
+          return replicaEntries(storageManager, targetId, scope).find((entry) =>
+            entry.path.length === 0 && entry.origin === "derived" &&
+            entry.observes === "value"
+          )?.label.integrity;
+        } finally {
+          await runtime.dispose();
+          await storageManager.close();
+        }
+      };
+
+      for (const scope of ["user", "session"] as const) {
+        for (
+          const [form, clause] of [
+            ["User", userPrincipal(signer.did())],
+            ["personal-space", personalSpacePrincipal(signer.did())],
+          ] as const
+        ) {
+          it(`names the writer on the whole value of a ${scope} document under a ${form} clause naming the signer`, async () => {
+            expect(
+              await rootIntegrityAfterWholeWrite(
+                `wf-whole-${scope}-${form}`,
+                scope,
+                [clause],
+              ),
+            ).toContainEqual({
+              type: "https://commonfabric.org/cfc/atom/TransformedBy",
+              identity: verifiedWriter("wholeWriter"),
+            });
+          });
+        }
       }
     });
 
