@@ -13,7 +13,6 @@ import {
   cellRuntime,
   cellTx,
   cellWithScopedLinkRequiredsRelaxed,
-  classifyPieceOriginString,
   ContextualFlowControl,
   deepEqual,
   extractDefaultValues,
@@ -97,6 +96,8 @@ import { isCfcMigrationRejection } from "./cfc-migration-rejection.ts";
 import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
+  classifyOrigin,
+  PieceOriginError,
   qualifyFabricOrigin,
   readPieceOrigin,
   resolvePieceOriginSource,
@@ -493,6 +494,14 @@ export interface PreparedPieceSourceChange {
   operation: PieceSourceTransition["operation"];
   baseline: PieceSourceTransitionBaseline;
   selectedRevisionId?: string;
+
+  /**
+   * When the deployment serving a `system:` origin released `candidate`, where
+   * it stated one (`ResolvedPieceOriginSource.releasedAt`). The revision that
+   * adopts the candidate records it.
+   */
+  releasedAt?: number;
+
   review?: {
     argumentEvidence: string;
     issues: PieceSourceCompatibilityIssues;
@@ -4343,9 +4352,9 @@ export class PieceController<T = unknown> {
    * transition.
    *
    * Each of those three reviews its candidate before adopting it. A candidate
-   * from a `system:` origin whose source the piece shows it runs is reviewed
-   * without comparing schemas, which the release gate did
-   * ({@link showsSystemRelease}); every other candidate has its schemas
+   * that is a later release of the `system:` pattern the piece took its
+   * source from is reviewed without comparing schemas, which the release gate
+   * did ({@link isGatedReleaseStep}); every other candidate has its schemas
    * compared with what the piece runs. The piece's stored argument, retained
    * links, and CFC envelopes are reviewed for every candidate.
    *
@@ -4505,9 +4514,9 @@ export class PieceController<T = unknown> {
     let candidate: Pattern;
     let prepared: PreparedPieceSourceChange;
     let acceptedReview: PreparedPieceSourceChange["review"];
-    // Whether the candidate is a release of a `system:` origin whose source
-    // the piece runs, which leaves the contract comparison to the release
-    // gate (`showsSystemRelease`).
+    // Whether the candidate is a later release of the `system:` pattern the
+    // piece runs, which leaves the contract comparison to the release gate
+    // (`isGatedReleaseStep`).
     let gatedRelease = false;
     if (confirmed !== undefined) {
       if (confirmed.review === undefined) {
@@ -4533,11 +4542,11 @@ export class PieceController<T = unknown> {
       }
       candidate = loaded;
       prepared = confirmed;
-      gatedRelease = await showsSystemRelease(
+      gatedRelease = isGatedReleaseStep(
         this.#pieces,
         this.#cell,
         expected.pattern,
-        confirmed.origin,
+        confirmed,
       );
       const currentReview = await pieceSourceCompatibilityReview(
         previous,
@@ -4591,6 +4600,7 @@ export class PieceController<T = unknown> {
       let origin: string | null;
       let operation: PieceSourceTransition["operation"];
       let selectedRevisionId: string | undefined;
+      let releasedAt: number | undefined;
       if (action.kind === "restore") {
         const selected = sourceRevision(revisions, action.revisionId);
         const retained = await this.#pieces.runtime.patternManager
@@ -4650,6 +4660,7 @@ export class PieceController<T = unknown> {
             { self: { space: this.#pieces.getSpace(), pieceId: this.id } },
           );
           program = resolved.program;
+          releasedAt = resolved.releasedAt;
         } catch (error) {
           // Only for `adopt`: the other two are being pointed at an origin the
           // piece does not follow yet, and an outcome recorded against one
@@ -4694,12 +4705,13 @@ export class PieceController<T = unknown> {
         operation,
         baseline,
         ...(selectedRevisionId === undefined ? {} : { selectedRevisionId }),
+        ...(releasedAt === undefined ? {} : { releasedAt }),
       };
-      gatedRelease = await showsSystemRelease(
+      gatedRelease = isGatedReleaseStep(
         this.#pieces,
         this.#cell,
         expected.pattern,
-        origin,
+        prepared,
       );
       const review = await pieceSourceCompatibilityReview(
         previous,
@@ -4739,7 +4751,10 @@ export class PieceController<T = unknown> {
       prepared.operation,
       prepared.origin,
       prepared.baseline,
-      { selectedRevisionId: prepared.selectedRevisionId },
+      {
+        selectedRevisionId: prepared.selectedRevisionId,
+        releasedAt: prepared.releasedAt,
+      },
     );
     const mutationVersion = ++this.#mutationVersion;
     // The accepted setup transaction's receipt, held exactly when storage
@@ -5426,38 +5441,68 @@ const TAKES_SOURCE_FROM_ORIGIN: ReadonlySet<PieceSourceRevision["operation"]> =
   new Set(["create", "origin-update", "follow", "repoint"]);
 
 /**
- * Whether `origin` is a `system:` origin and `piece` shows that it runs source
- * that origin served, which is when a candidate from that origin is reviewed
- * as an automatic update from a gated origin is: without comparing its
- * schemas with the piece's.
- *
- * The release gate proves each release of a `system:` pattern against every
- * contract its earlier releases recorded, and names each break it accepts
- * (`tasks/pattern-compat-accepted-breaks.ts`). That verdict is about a piece
- * only while the piece runs one of those releases. A piece shows it does in
- * one of two ways:
- *
- * - a revision among the latest ones naming the pattern it runs, `running`,
- *   took that pattern from `origin` ({@link TAKES_SOURCE_FROM_ORIGIN}); or
- * - its source log is empty or holds only its creation revision, and the
- *   source it runs is retained with `origin`'s file under the patterns route
- *   as its entry: a piece made from that file by a path that records no
- *   origin, and changed by nothing since.
- *
- * Either way the evidence is where the source came from, not which commit
- * built it. A deployment whose patterns route served source its gate never
- * judged is trusted for that source here, as the automatic update from the
- * origin trusts every candidate the route serves.
+ * The patterns route `origin` names on the host serving the piece's space, in
+ * any spelling the lifecycle accepts for a deployment-served origin, or
+ * `undefined` for an origin that names none.
  */
-async function showsSystemRelease(
+function systemRoute(
+  pieces: PiecesController,
+  origin: string,
+): string | undefined {
+  let classified: ReturnType<typeof classifyOrigin>;
+  try {
+    classified = classifyOrigin(pieces.runtime, pieces.getSpace(), origin);
+  } catch (error) {
+    if (error instanceof PieceOriginError) return undefined;
+    throw error;
+  }
+  return classified.kind === "system"
+    ? new URL(classified.url).pathname
+    : undefined;
+}
+
+/**
+ * Whether adopting `change.candidate` from `change.origin` is a step forward
+ * from a release of the `system:` pattern `piece` runs, which is when the
+ * candidate is reviewed as an automatic update from a gated origin is: without
+ * comparing its schemas with the piece's.
+ *
+ * The release gate proves each release of a `system:` pattern's default export
+ * against every contract that export's earlier releases recorded, and names
+ * each break it accepts (`tasks/pattern-compat-accepted-breaks.ts`). That
+ * verdict covers a step forward from one of those releases and nothing else,
+ * so the step has to show all of it:
+ *
+ * - the piece runs the default export, `running`, and the candidate is the
+ *   default export too;
+ * - a revision since the piece's source last changed took that source from
+ *   the origin ({@link TAKES_SOURCE_FROM_ORIGIN}) and records when it was
+ *   released, a time a reconciliation with the origin may since have confirmed
+ *   at a later release;
+ * - the deployment stated when it released the candidate, `change.releasedAt`,
+ *   and that is later than the running source's release.
+ *
+ * A step short of any of these, an earlier release and one whose time either
+ * side does not state among them, has its schemas compared and takes the
+ * explicit override. Release times order deploys, not commits: a deployment
+ * whose patterns route served source its gate never judged is trusted for it
+ * here, as the automatic update from the origin trusts it.
+ */
+function isGatedReleaseStep(
   pieces: PiecesController,
   piece: Cell<unknown>,
   running: { identity: string; symbol: string },
-  origin: string | null,
-): Promise<boolean> {
-  if (origin === null) return false;
-  const system = classifyPieceOriginString(origin);
-  if (system.kind !== "system") return false;
+  change: Pick<
+    PreparedPieceSourceChange,
+    "candidate" | "origin" | "releasedAt"
+  >,
+): boolean {
+  if (running.symbol !== "default" || change.candidate.symbol !== "default") {
+    return false;
+  }
+  if (change.origin === null || change.releasedAt === undefined) return false;
+  const route = systemRoute(pieces, change.origin);
+  if (route === undefined) return false;
   const revisions = getPieceSourceRevisions(piece);
   let first = revisions.length;
   while (
@@ -5465,32 +5510,45 @@ async function showsSystemRelease(
     revisions[first - 1].pattern.identity === running.identity &&
     revisions[first - 1].pattern.symbol === running.symbol
   ) first--;
-  const taken = revisions.slice(first).some((revision) => {
-    if (!TAKES_SOURCE_FROM_ORIGIN.has(revision.operation)) return false;
-    if (revision.origin === undefined) return false;
-    const recorded = classifyPieceOriginString(revision.origin);
-    return recorded.kind === "system" && recorded.route === system.route;
-  });
-  if (taken) return true;
-  const unchangedSinceMade = revisions.length === 0 ||
-    (revisions.length === 1 && first === 0 &&
-      revisions[0].operation === "create");
-  if (!unchangedSinceMade) return false;
-  const program = await pieces.runtime.patternManager
-    .getPatternSourceProgramByIdentity(running.identity, pieces.getSpace());
-  return program?.main === system.route;
+  let runningReleasedAt: number | undefined;
+  for (const revision of revisions.slice(first)) {
+    if (
+      TAKES_SOURCE_FROM_ORIGIN.has(revision.operation) &&
+      revision.origin !== undefined &&
+      revision.releasedAt !== undefined &&
+      systemRoute(pieces, revision.origin) === route
+    ) {
+      runningReleasedAt = Math.max(
+        runningReleasedAt ?? revision.releasedAt,
+        revision.releasedAt,
+      );
+    }
+  }
+  if (runningReleasedAt === undefined) return false;
+  const reconciliation = getPieceReconciliation(piece);
+  if (
+    reconciliation?.confirmed?.identity === running.identity &&
+    systemRoute(pieces, reconciliation.origin) === route
+  ) {
+    runningReleasedAt = Math.max(
+      runningReleasedAt,
+      reconciliation.confirmed.releasedAt,
+    );
+  }
+  return change.releasedAt > runningReleasedAt;
 }
 
 /**
  * Every reason `candidate` cannot replace what `piece` runs, with the evidence
  * the stored argument was judged on.
  *
- * `options.gatedRelease` says the candidate comes from a `system:` origin
- * whose source the piece shows it runs ({@link showsSystemRelease}). The
- * comparison of the two contracts is then the release gate's, and the review
- * leaves `schema` out, as an automatic update from that origin does. The
- * stored argument, the retained links, and the CFC envelopes are this piece's
- * own data, which no release gate saw, and are reviewed either way.
+ * `options.gatedRelease` says adopting the candidate is a step forward from a
+ * release of the `system:` pattern the piece runs
+ * ({@link isGatedReleaseStep}). The comparison of the two contracts is then
+ * the release gate's, and the review leaves `schema` out, as an automatic
+ * update from that origin does. The stored argument, the retained links, and
+ * the CFC envelopes are this piece's own data, which no release gate saw, and
+ * are reviewed either way.
  *
  * `previous.pattern` is `undefined` for a piece whose current pattern does not
  * load. Nothing can then say whether the candidate keeps the contract the piece
@@ -5785,7 +5843,7 @@ function pieceSourceTransition(
   operation: PieceSourceTransition["operation"],
   origin: string | null,
   baseline: PieceSourceTransitionBaseline,
-  options: { selectedRevisionId?: string } = {},
+  options: { selectedRevisionId?: string; releasedAt?: number } = {},
 ): PieceSourceTransition {
   const timestamp = Date.now();
   return {
@@ -5798,6 +5856,9 @@ function pieceSourceTransition(
     ...(options.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: options.selectedRevisionId }),
+    ...(options.releasedAt === undefined
+      ? {}
+      : { releasedAt: options.releasedAt }),
   };
 }
 

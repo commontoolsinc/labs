@@ -34,6 +34,10 @@ import {
   stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "@commonfabric/runner/entity-kind";
+import {
+  parseReleaseTime,
+  RELEASED_AT_HEADER,
+} from "@commonfabric/runner/pattern-release-time";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { isObjectOrArray } from "@commonfabric/utils/types";
@@ -162,6 +166,15 @@ function pinnedPatternIdentity(ref: FabricRef): string | undefined {
 export interface ResolvedPieceOriginSource {
   program: RuntimeProgram;
   pattern: { identity?: string; symbol: string };
+
+  /**
+   * When the deployment serving a `system:` origin released `program`, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). Present only
+   * when every response that served the program stated the same time, so
+   * that a program assembled across two releases, as a deployment partway
+   * through restarting can serve one, states none.
+   */
+  releasedAt?: number;
 }
 
 type StableFabricRef = FabricRef & {
@@ -197,19 +210,32 @@ export async function resolvePieceOriginSource(
 ): Promise<ResolvedPieceOriginSource> {
   const origin = classifyOrigin(runtime, destinationSpace, recorded);
   if (origin.kind === "system") {
+    const stated: (number | undefined)[] = [];
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(
         origin.url,
-        (input, init) =>
-          runtime.fetch(input, {
+        async (input, init) => {
+          const response = await runtime.fetch(input, {
             ...init,
             cache: "no-cache",
-          }),
+          });
+          if (response.ok) {
+            const header = response.headers.get(RELEASED_AT_HEADER);
+            stated.push(
+              header === null ? undefined : parseReleaseTime(header.trim()),
+            );
+          }
+          return response;
+        },
       ),
     );
+    const releasedAt = stated[0];
+    const agreed = releasedAt !== undefined &&
+      stated.every((time) => time === releasedAt);
     return {
       program: { ...program, mainExport: historicalSymbol },
       pattern: { symbol: historicalSymbol },
+      ...(agreed ? { releasedAt } : {}),
     };
   }
 
