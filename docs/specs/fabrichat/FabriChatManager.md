@@ -71,12 +71,15 @@ catalog, which neither the rendering nor `rooms` reads. Registration takes the
 room's title, whatever its kind. Whenever the manager handles `accept` or
 `joinRoom` for a room its catalog lists, it reads the room's `about`, and
 retitles the entry (`retitleSharedSpaceIn()`) where the room's title differs
-from the entry's, moving neither its revision nor its membership. A join of an
-already-listed room arrives with every write in the room, so that is all it
-reads of the room, and it writes the catalog only on a mismatch. The member who
-retitles a room tells their manager at once; another member's entry follows on
-their manager's next event for that room: their next message, reaction, or
-retitle, an acceptance, or a client's `joinRoom` when they open it.
+from the entry's, moving neither its revision nor its membership. That is all a
+join of an already-listed room reads of the room, and it writes the catalog
+only on a mismatch. The one exception is a `joinRoom` marked `messageAct`,
+which a room sends with every message and reaction: none of those changes the
+title, so the manager reads nothing of the room's `about` for one. The member
+who retitles a room tells their manager at once; another member's entry follows
+on their manager's next event for that room other than a message or a
+reaction: their own retitle, an acceptance, or a client's `joinRoom` when they
+open it.
 
 `direct` holds one entry per counterpart, including forgotten rooms, for direct
 rooms this manager created or accepted. `openDirect` finds a direct room there

@@ -551,6 +551,23 @@ export interface JoinRoomRequest {
 
   /** The room the viewer has joined. */
   room: Cell<ChatRoomLink>;
+
+  /**
+   * Whether the viewer joined the room by sending a message or a reaction, as
+   * `JoinedEvent` says.
+   */
+  messageAct?: boolean;
+}
+
+/** What a room's write tells `tellManagerJoined` of how the viewer joined. */
+export interface JoinedEvent {
+  /**
+   * Whether the write was a message or a reaction. One comes with every such
+   * write and none changes the room's title, so the manager leaves the title
+   * its catalog lists the room under as it is; any other join brings that
+   * title up to the room's.
+   */
+  messageAct?: boolean;
 }
 
 /**
@@ -583,7 +600,7 @@ export interface SendState extends ActState {
    * told. The act's own transaction reads nothing of the manager, which can
    * carry a label the room's space doesn't admit.
    */
-  joined?: Stream<void>;
+  joined?: Stream<JoinedEvent>;
 }
 
 /** What a rendered composer's send is bound to. */
@@ -652,7 +669,7 @@ export interface AddReactionState extends ReactionState {
   closesPicker?: boolean;
 
   /** Tells the viewer's manager the viewer has joined, as `SendState` says. */
-  joined?: Stream<void>;
+  joined?: Stream<JoinedEvent>;
 }
 
 /** The part of the viewer's manager `tellManagerJoined` reaches. */
@@ -687,23 +704,30 @@ export interface ManagerJoinState {
 
 /**
  * Tells the viewer's manager the viewer has joined the room. The manager's
- * own event checks its private catalog and leaves an already listed room
- * unchanged, so catalog reads stay in the manager's event. A room's acts send
- * it an event once they have recorded what the viewer wrote.
+ * own event checks its private catalog, so catalog reads stay in the
+ * manager's event. For an already listed room it changes no membership, and
+ * brings the title its catalog lists the room under up to the room's, except
+ * for a join marked `messageAct`, which leaves the title as it is. A room's
+ * acts send it an event once they have recorded what the viewer wrote, saying
+ * whether that was a message or a reaction, which it passes on.
  *
  * The manager is read here, as a value, rather than by what the room stores:
  * a stream bound to a manager that isn't there still reads as present, so
  * only the manager's own value says whether it has a `joinRoom`, and this
  * event writes nothing in the room's space.
  */
-export const tellManagerJoined = handler<void, ManagerJoinState>(
-  (_event, { canJoin, container, manager, self }) => {
+export const tellManagerJoined = handler<JoinedEvent, ManagerJoinState>(
+  (event, { canJoin, container, manager, self }) => {
     // The room decides first, so a room the viewer can't join reads nothing
     // of the manager.
     if (canJoin !== true || self === undefined) return;
     const joinRoom = manager?.joinRoom;
     if (joinRoom === undefined) return;
-    joinRoom.send({ room: self, container });
+    joinRoom.send({
+      room: self,
+      container,
+      ...(event?.messageAct === true ? { messageAct: true } : {}),
+    });
   },
 );
 
@@ -769,7 +793,7 @@ const sendInto = (
   messages: MessagesCell,
   reply: Cell<RepliedMessage> | undefined,
   shownIn: ShownIn,
-  joined: Stream<void> | undefined,
+  joined: Stream<JoinedEvent> | undefined,
 ): boolean => {
   const profile = resolvedProfile(myProfile);
   const body = textOf(event);
@@ -785,7 +809,7 @@ const sendInto = (
     ...(target === undefined ? {} : { replyTo: { message: target, shownIn } }),
     reactions,
   } as SentMessage);
-  joined?.send();
+  joined?.send({ messageAct: true });
   return true;
 };
 
@@ -955,7 +979,7 @@ export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
         { reactorProfile: profile, emoji, sentAt: now() } as SentReaction,
       );
     }
-    joined?.send();
+    joined?.send({ messageAct: true });
   },
 );
 
@@ -1037,7 +1061,7 @@ export interface SetTitleState {
    * nothing is told. The retitle's own transaction reads nothing of the
    * manager.
    */
-  joined?: Stream<void>;
+  joined?: Stream<JoinedEvent>;
 }
 
 /**
@@ -1080,6 +1104,6 @@ export const commitSetTitle = handler<SetTitleEvent, SetTitleState>(
     titles.addUnique(record);
     outcomes.key(requestId).set({ status: "done" });
     refusal.set("");
-    joined?.send();
+    joined?.send({});
   },
 );

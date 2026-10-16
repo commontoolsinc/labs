@@ -3817,6 +3817,32 @@ const isDeclarablePolicyStore = (
 ): boolean =>
   (!isUndeclarableIdClass(id) && !markedUndeclarable) || !joinIsLocal;
 
+/**
+ * The principal whose instance of a `user` or `session` document a write by
+ * `tx` lands in, which the §8.12.4 residency clause names as the instance's
+ * reader. The instance's scope key is built from that principal, and the
+ * memory server serves an instance only to that principal's sessions, so the
+ * principal is the whole audience of what it holds. The space's serving loop
+ * reads every instance too, as the runtime that runs each principal's work
+ * rather than as a reader of it. The guarantee is as strong as the
+ * deployment's binding of instances to principals.
+ *
+ * On a client it is the runtime's own identity, since the memory server keys a
+ * client's scoped writes by the session it authenticated, whichever principal
+ * the transaction's trust snapshot names as acting. On the serving posture it
+ * is the scope-key identity of the run's wave context, which the wave seal
+ * keys the run's scoped writes by. A served transaction whose context carries
+ * none names no one, even where its storage transaction resolves reads under
+ * an identity of its own: the seal then keys its writes to the serving
+ * runtime's own instance, and an effect completion, which has no context,
+ * commits under the identity its outbox carriage records.
+ */
+const scopedResidencyPrincipal = (
+  tx: IExtendedStorageTransaction,
+): string | undefined =>
+  tx.getCfcState().clientIdentity ??
+    waveRunContextOf(tx)?.scopeKeyIdentity?.principal;
+
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
 // wrote (§8.9.2/§8.9.3 collapsed to tx granularity). Reads of runtime-internal
@@ -12156,6 +12182,46 @@ export function* prepareBoundaryCommitSteps(
     const currentLinkWritePaths = new Set(
       [...currentLinkWriteInputs].map((input) => pathKey(input.target.path)),
     );
+    // §8.12.4 residency, which both writer-fit measurements below join onto
+    // each path's declared ceiling: the whole-value destination fit and the
+    // per-path fit of the join. `Space(<this space>)` is one clause, so a
+    // flow clause listing the target's own space among its alternatives fits
+    // a document stored there, and a clause without such an alternative
+    // measures against the declared policy alone. The atom's audience is the
+    // space's reader set — §4.9.3 resolves it against the space's ACL, the
+    // same document that decides who receives a replica — so it already
+    // contains every principal the stored bytes reach, and the guarantee is
+    // as strong as the deployment's ACL posture. The flow stamp below
+    // persists the full join, leaving the egress and display gates the
+    // unchanged label.
+    //
+    // The space's clause takes the `Space` form alone. The bare DID-string
+    // spelling gates by equality against one acting reader, so it reaches a
+    // narrower audience than the space's readers. `PersonalSpace(<owner>)`
+    // names a space rather than a person (SC-39), and nothing in an address
+    // names a space's owner or marks the space as personal, so that atom
+    // cannot be built from the target's address.
+    //
+    // A `user` or `session` document is one principal's instance, and
+    // `User(<that principal>)` joins the space's clause there: they are the
+    // instance's whole audience (`scopedResidencyPrincipal` names them). A
+    // `PersonalSpace` label whose owner is that principal fits the clause, in
+    // plaintext or as the owner's `{digestOf}` commitment, because
+    // `clauseSubsumes` reads a personal space's owner as one of its readers.
+    // So an instance holds its own user's personal data, and a personal
+    // space owned by anyone else still misfits it.
+    // SPEC-PENDING https://github.com/commonfabric/specs/pull/68
+    // TODO(mathpirate): The `User` clause admits more than §8.12.4 states at
+    // the pinned specs commit, and runs by default rather than behind a dial,
+    // on the CFC owner's ruling for this case. Remove this marker once the pin
+    // holds that ruling.
+    const scopedReader = scope === "user" || scope === "session"
+      ? scopedResidencyPrincipal(tx)
+      : undefined;
+    const residencyCeiling: readonly CfcConfClause[] = [
+      cfcAtom.space(space),
+      ...(scopedReader === undefined ? [] : [cfcAtom.user(scopedReader)]),
+    ];
     // Whole-value write destinations stamped as written
     // (`assertedValueRootPaths`). They join the written prefixes here, so the
     // per-value entries beneath them are replaced and the attribution of any
@@ -12205,7 +12271,7 @@ export function* prepareBoundaryCommitSteps(
             atomsOutsideCeiling(flowConfidentiality, [
               ...(labelForEntriesAtPath(indexedEntriesAt(index, path), path)
                 ?.confidentiality ?? []) as readonly CfcConfClause[],
-              cfcAtom.space(space),
+              ...residencyCeiling,
             ]).length === 0
           );
         },
@@ -12624,7 +12690,7 @@ export function* prepareBoundaryCommitSteps(
       // below as this target's `derived` value component is the measurement
       // of the written value's actual taint, and canWrite demands it fit the
       // target's write ceiling at each path where it lands — the store's
-      // DECLARED policy component joined with the residency clause below. The
+      // DECLARED policy component joined with `residencyCeiling`. The
       // policy component is the declared + legacy entries only — link/
       // derived/structure entries are per-value data components (§8.12.8),
       // not store policy — and of those, only the entries a VALUE read
@@ -12640,28 +12706,10 @@ export function* prepareBoundaryCommitSteps(
       // A schema declaring a covering policy in this same tx passes by
       // construction — §8.12.5's monotone-safe upgrade route; the other outs
       // are writing to a fitting store, writing to a store whose space the
-      // clause already names, and not writing. Link-covered writes carry
-      // per-slot link labels instead of the join and are outside this v1
-      // check, as is the pure-link-structure shape channel.
-      // §8.12.4 residency: `Space(<this space>)` joins each path's declared
-      // ceiling, so a flow clause listing the target's own space among its
-      // alternatives fits a document stored there, and a clause without such
-      // an alternative measures against the declared policy alone. The atom's
-      // audience is the space's reader set — §4.9.3 resolves it against the
-      // space's ACL, the same document that decides who receives a replica —
-      // so it already contains every principal the stored bytes reach, and
-      // the guarantee is as strong as the deployment's ACL posture. The flow
-      // stamp below persists the full join, leaving the egress and display
-      // gates the unchanged label.
-      //
-      // `Space` is the only form admitted here, for two reasons. The bare
-      // DID-string spelling gates by equality against one acting reader, so
-      // it reaches a narrower audience than the space's readers.
-      // `PersonalSpace(<owner>)` names a space rather than a person (SC-39),
-      // and what keeps it out is that this clause is built from the target's
-      // address alone: nothing in an address names a space's owner or marks
-      // the space as personal, so the atom cannot be constructed here.
-      const residencyCeiling: readonly CfcConfClause[] = [cfcAtom.space(space)];
+      // clause already names or to a scoped instance of the principal it
+      // names, and not writing. Link-covered writes carry per-slot link
+      // labels instead of the join and are outside this v1 check, as is the
+      // pure-link-structure shape channel.
       // Whether an alternative names a CONTAINER audience — the readers of
       // some space, resolved from that space's ACL — other than this
       // document's own. `PersonalSpace(owner)` is the second spelling
@@ -12837,9 +12885,10 @@ export function* prepareBoundaryCommitSteps(
           // an undeclared store is the canonical misfit, and fitting it
           // by default would hollow the rule out. The residency clause is
           // then the whole ceiling, so only the target's own space audience
-          // fits. Clause membership is the shared subsumption predicate of
-          // the egress/observation gates, so writer-fit cannot drift from
-          // what a ceiling admits — and the ungrantable read-failed marker
+          // fits, or a scoped instance's own principal. Clause membership is
+          // the shared subsumption predicate of the egress/observation
+          // gates, so writer-fit cannot drift from what a ceiling admits —
+          // and the ungrantable read-failed marker
           // stays outside every ceiling, the residency clause included (a
           // poisoned measurement never proves fit).
           const declaredCeiling =
@@ -12870,11 +12919,14 @@ export function* prepareBoundaryCommitSteps(
             // reader check: §4.9.3 resolves it against that space's ACL,
             // the document that also decides who holds the bytes. A store
             // in THIS space cannot keep a promise made to another space's
-            // readers, which is why residency admits only this space's own
-            // clause. Declaring a foreign one would put the bytes in front
-            // of this space's members under a promise made to somebody
-            // else's, so the route leaves that write to the refusal below.
-            // The space's own clause is not reachable here: residency
+            // readers, which is why residency admits a clause naming another
+            // space only in its `PersonalSpace(owner)` spelling, and only
+            // into a scoped instance of that owner; another space's `Space`
+            // atom stays refused. Declaring a foreign one would put the
+            // bytes in front of this space's members under a promise made to
+            // somebody else's, so the route leaves that write to the refusal
+            // below.
+            // A clause residency admits is not reachable here: residency
             // covers it, so it is never offending.
             !offending.some((clause) =>
               clauseAlternatives(clause as CfcConfClause).some(

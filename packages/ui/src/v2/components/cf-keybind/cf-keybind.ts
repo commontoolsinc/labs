@@ -3,6 +3,7 @@ import { consume } from "@lit/context";
 import { BaseElement } from "../../core/base-element.ts";
 import { keyboardRouterContext } from "../keyboard-context.ts";
 import type { KeyboardRouter, ShortcutSpec } from "../keyboard-router.ts";
+import { targetsTextEntry } from "../text-entry.ts";
 
 /**
  * What a `cf-keybind` event carries: the matched key and modifiers, as plain
@@ -172,13 +173,7 @@ export class CFKeybind extends BaseElement {
 
   #matchesContext(e: KeyboardEvent): boolean {
     if (!this.ignoreEditable) return true;
-    const t = e.target as HTMLElement | null;
-    const tag = (t?.tagName || "").toLowerCase();
-    const editable = !!(t && (
-      t.isContentEditable || tag === "input" || tag === "textarea" ||
-      tag === "select"
-    ));
-    return !editable;
+    return !targetsTextEntry(e);
   }
 
   #normalizeKey(k?: string): string | undefined {
