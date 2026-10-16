@@ -61,7 +61,12 @@ that settles it.
 The load made 1,425,301 `internSchema()` calls with an object. 1,394,076 hit
 the identity cache. 31,225 missed, and hashed 42.1 million characters of
 schema JSON between them; 22,412 of the misses were of content already
-interned.
+interned. The misses came from 237 callers. The table holds the thirteen
+that matter to the question, 13,562 misses and 28.5 million characters; the
+other 224 callers are 17,663 misses and 13.6 million characters between
+them, none above 0.8 million, the largest of them by count the 2,297
+`{ $ref }` forms `externalizeSchema` minted per alias binding (0.14 million
+characters) and the 1,217 documents `externalizeSyncSelector` interned.
 
 | caller | misses | deep-frozen on arrival | distinct contents | JSON characters hashed |
 | --- | ---: | ---: | ---: | ---: |
