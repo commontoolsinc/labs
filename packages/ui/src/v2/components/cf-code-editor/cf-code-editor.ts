@@ -1937,11 +1937,10 @@ export class CFCodeEditor extends BaseElement {
 
   private _updateEditorFromCellValue(): void {
     if (!this._editorView) return;
-    // While an operation field is active, its integrated stream is the editor
-    // authority. The ordinary Cell subscription still updates the bound value,
-    // but feeding that materialized echo back into CodeMirror would discard its
-    // unconfirmed local OT state.
-    if (this._collaboration?.active) return;
+    // The controller owns the view through the handoff to the ordinary Cell.
+    // Its confirmed operations can arrive ahead of that Cell's materialized
+    // echo, including while the stopped controller awaits a fresh Cell read.
+    if (this._collaboration !== undefined) return;
 
     const newValue = this.getValue();
     // Guard against undefined - can happen when cell isn't bound yet
@@ -2104,6 +2103,12 @@ export class CFCodeEditor extends BaseElement {
       });
       try {
         await previous.stop();
+        if (generation !== this._collaborationGeneration) return;
+        if (!this.collaborative) {
+          // Refresh the materialized channel before it takes over from the
+          // confirmed operation stream. Keep the view read-only until it lands.
+          await this._cellController.getCell()?.pull();
+        }
       } catch (cause) {
         if (generation !== this._collaborationGeneration) return;
         if (this._collaboration === previous) {
@@ -2701,7 +2706,9 @@ export class CFCodeEditor extends BaseElement {
       this._editorView.dispatch({
         effects: this._readonly.reconfigure(
           EditorState.readOnly.of(
-            this.readonly || this._collaborationFailed,
+            this.readonly || this._collaborationFailed ||
+              (this._collaboration !== undefined &&
+                !this._collaboration.active),
           ),
         ),
       });
