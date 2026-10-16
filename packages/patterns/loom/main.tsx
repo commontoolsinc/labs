@@ -28,6 +28,7 @@ import type {
   ChatRoomChoice,
   LoomInput,
   LoomOutput,
+  LoomStyle,
   MeetingAssociationCell,
   Panel,
   PanelAdmission,
@@ -375,6 +376,29 @@ const bindMeeting = handler<
   reply?.set({ status: "bound", key });
 });
 
+/** The portable appearance a viewer can consume, or no style. */
+function normalizedStyle(selected: LoomStyle): LoomStyle {
+  if (
+    selected === null || !selected || typeof selected.id !== "string" ||
+    /^[a-z][a-z0-9-]{0,63}$/.exec(selected.id)?.[0] !== selected.id ||
+    !["native", "light", "dark"].includes(selected.mode)
+  ) {
+    return null;
+  }
+  return { id: selected.id, mode: selected.mode };
+}
+
+/** Validates and replaces the confirmed appearance in one write. */
+const setStyle = handler<{ style: LoomStyle }, { style: Writable<LoomStyle> }>(
+  (event, { style }) => {
+    const selected = normalizedStyle(event.style);
+    if (event.style !== null && selected === null) {
+      throw new Error("Invalid Loom style identifier or mode");
+    }
+    style.set(selected);
+  },
+);
+
 /** Sets the Loom's title, which is also its name. */
 const retitleLoom = handler<{ title: string }, { title: Writable<string> }>(
   (event, { title }) => {
@@ -672,6 +696,7 @@ export default pattern<LoomInput, LoomOutput>(
   (
     {
       title,
+      style,
       panels,
       presentation,
       participants,
@@ -849,6 +874,7 @@ export default pattern<LoomInput, LoomOutput>(
         </cf-theme>
       ),
       title,
+      style: normalizedStyle(style.get()),
       panels,
       presentation,
       pieceRegistry,
@@ -867,6 +893,7 @@ export default pattern<LoomInput, LoomOutput>(
       ensureChatRoom: ensureChatRoom({ chatRoom }),
       meeting,
       bindMeeting: bindMeeting({ meeting, storedFields: meeting }),
+      setStyle: setStyle({ style }),
       retitleLoom: retitleLoom({ title }),
       retitlePanel: retitlePanel({ panels }),
       retargetPanel: retargetPanel({ panels }),

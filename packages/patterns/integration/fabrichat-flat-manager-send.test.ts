@@ -439,8 +439,8 @@ describe("FabriChat flat manager sends", () => {
     // manager's data: the picker's list of the people `candidates` reads from
     // the manager, once on the rendering before the add and once on the one
     // after it, and the `outcomes` that merge the manager's verdicts into
-    // `addRequests`, once. This add guard bounds that known debt and permits
-    // no other refusal.
+    // `addRequests`, a document of the viewer's own, once. This add guard
+    // bounds that known debt and permits no other refusal.
     const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
       const people = runtime.getCellFromLink(
         { ...input.read, path: [] } as Parameters<
@@ -464,10 +464,15 @@ describe("FabriChat flat manager sends", () => {
           listsBob(input)
         )
       );
-    const isOutcomes = ({ reasons }: Refusal) =>
-      reasons.length === 1 &&
-      /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
-        .test(reasons[0]);
+    const isOutcomes = ({ reasons, refusals: details }: Refusal) =>
+      reasons.every((reason) =>
+        /^writer-fit confidentiality misfit for computed:\S+ at \/add-bob\S* .*PersonalSpace/
+          .test(reason)
+      ) &&
+      details.length > 0 &&
+      details.every(({ target }) =>
+        target?.space === space && target.scope === "user"
+      );
     for (const refusal of refusals) expect(refusal.terminal).toBe(true);
     expect(
       refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),

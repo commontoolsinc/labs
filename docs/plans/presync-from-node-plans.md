@@ -508,7 +508,10 @@ Exit: no resumed action's first run is released by a timer.
       instance's own start, asked under the same pattern, skips the
       argument walk: the pre-sync's plans are the plans a name-sync would
       build, so a name-sync could request nothing the pre-sync did not. The
-      owned cells are still probed, since an absent one is owed a seed. The
+      owned cells are still probed, since an absent one is owed a seed; a
+      derived cell owed none is probed by its record, since its value is
+      its computation's to produce and a name-sync would deliver the same
+      record. The
       instance wave also names the policy manifests each nested pattern
       declares, as the root wave names the root's.
 - [x] Test: a tree whose rows receive, through the root's argument, a link
