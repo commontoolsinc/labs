@@ -14,12 +14,15 @@ import {
   type SidecarSurfaceState,
 } from "../src/builtins/wish.ts";
 import {
+  applyPieceSourceTransition,
   type Cell,
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceReconciliation,
   getPieceSourceRevisions,
+  getPieceSourceSnapshot,
+  preparePieceSourceTransitionBaseline,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -168,6 +171,21 @@ describe("piece source reconciliation", () => {
 
   function reconcile(piece: Cell<unknown>) {
     return runtime.sourceReconciler.reconcile(piece);
+  }
+
+  /**
+   * Captures the observer the reconciler subscribes when the runtime is
+   * constructed, so a test can report a replacement itself.
+   */
+  function captureSessionReplaced(): (space: MemorySpace) => void {
+    let observer: ((space: MemorySpace) => void) | undefined;
+    storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
+      observer = subscribed;
+      return () => {
+        observer = undefined;
+      };
+    };
+    return (space) => observer?.(space);
   }
 
   /** Serves the tracked pattern's route, advertising `identity` for it. */
@@ -438,19 +456,6 @@ describe("piece source reconciliation", () => {
     });
 
     describe("when the space's memory session is replaced", () => {
-      /** Captures the observer the reconciler subscribes when the runtime is
-       * constructed, so a test can report a replacement itself. */
-      function captureSessionReplaced(): (space: MemorySpace) => void {
-        let observer: ((space: MemorySpace) => void) | undefined;
-        storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
-          observer = subscribed;
-          return () => {
-            observer = undefined;
-          };
-        };
-        return (space) => observer?.(space);
-      }
-
       /** A running piece following the tracked pattern's system origin, current
        * at v1, with the route's advertised source switchable to v2. */
       async function followingPiece(record?: (url: URL) => void) {
@@ -1011,6 +1016,347 @@ describe("piece source reconciliation", () => {
       expect(await reconcile(piece)).toBe("unusable");
 
       expect(getPieceReconciliation(piece)).toBeUndefined();
+    });
+  });
+
+  describe("a write the store refuses for good", () => {
+    // Each case refuses the write that adopts the origin's source, and only
+    // that write. The adoption is the commit that follows the reconciler
+    // loading the piece's stored argument; every other write — the record a
+    // pass leaves, a case's own edits — reaches the store.
+
+    const tooLarge = {
+      name: "MessageTooLargeError",
+      message: "Memory message stands for more than 100000 array slots " +
+        "and record members",
+      transaction: { marker: "the-whole-refused-transaction" },
+    };
+
+    const policyChanged = {
+      name: "CfcCommitRefusalError",
+      message: "CFC enforcement rejected commit: relevant transaction was " +
+        "not prepared: writePolicyAnyOf must remain stable at /messages/*",
+      reasons: [
+        "cfc-envelope-stability: writePolicyAnyOf must remain stable at " +
+        "/messages/*",
+      ],
+    };
+
+    /**
+     * Refuses every adoption with `error`, and counts the refusals.
+     * `onRefusal` runs as each refusal is made, before the reconciler sees it.
+     */
+    function refuseAdoptions(
+      error: Record<string, unknown>,
+      onRefusal?: () => void,
+    ) {
+      let adopting = false;
+      const counted = { refusals: 0 };
+      const loadArgument = runtime.syncStoredSetupArgument.bind(runtime);
+      const write = runtime.editWithRetry.bind(runtime);
+      const argumentStub = stub(
+        runtime,
+        "syncStoredSetupArgument",
+        (piece) => {
+          adopting = true;
+          return loadArgument(piece);
+        },
+      );
+      const writeStub = stub(
+        runtime,
+        "editWithRetry",
+        ((fn, maxRetries, options) => {
+          if (!adopting) return write(fn, maxRetries, options);
+          adopting = false;
+          counted.refusals++;
+          onRefusal?.();
+          return Promise.resolve({ error });
+        }) as Runtime["editWithRetry"],
+      );
+      return {
+        get refusals() {
+          return counted.refusals;
+        },
+        [Symbol.dispose]() {
+          writeStub.restore();
+          argumentStub.restore();
+        },
+      };
+    }
+
+    /** A piece running v1 and following an origin that serves `contents`. */
+    async function pieceOffered(contents: string) {
+      const identity = await identityFor(contents);
+      const piece = await preparePiece(
+        servingFetch(() => identity, () => contents),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      return piece;
+    }
+
+    for (const refusal of [tooLarge, policyChanged]) {
+      it(`records a \`${refusal.name}\`, and builds nothing for the same source again`, async () => {
+        const v1Identity = await identityFor(source("v1"));
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await pieceOffered(source("v2"));
+        using adoptions = refuseAdoptions(refusal);
+        using compiles = spy(runtime.patternManager, "compilePattern");
+
+        expect(await reconcile(piece)).toBe("rejected");
+        expect(adoptions.refusals).toBe(1);
+        expect(compiles.calls).toHaveLength(1);
+        const recorded = getPieceReconciliation(piece);
+        // The store refused the source rather than the origin failing to
+        // answer, so the piece says it refused what was offered.
+        expect(recorded).toMatchObject({
+          outcome: "refused",
+          reason: "apply-failed",
+          origin: PARENT_SOURCE,
+          offered: { identity: v2Identity, symbol: SYMBOL },
+          detail: refusal.message,
+        });
+
+        expect(await reconcile(piece)).toBe("rejected");
+        expect(adoptions.refusals).toBe(1);
+        expect(compiles.calls).toHaveLength(1);
+        expect(getPieceReconciliation(piece)).toEqual(recorded);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(v1Identity);
+      });
+    }
+
+    it("builds nothing again for a piece stopped and started since", async () => {
+      // A host that keeps a piece running stops and starts it again, and
+      // reconciles it on each start. A refusal forgotten when the piece stops
+      // would be built and sent again on every cycle.
+
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(await runtime.start(piece)).toBe(true);
+      runtime.runner.stop(piece);
+      expect(await runtime.start(piece)).toBe(true);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
+    });
+
+    it("builds nothing again for a fabric origin's same source", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const v2 = await compileMarkerPattern("v2");
+      const v2Ref = runtime.patternManager.getArtifactEntryRef(v2)!;
+      await stampSource(piece, `cf:pattern:${v2Ref.identity}`);
+      using adoptions = refuseAdoptions(tooLarge);
+      using sourceReads = spy(
+        runtime.patternManager,
+        "getPatternSourceProgramByIdentity",
+      );
+
+      expect(await reconcile(piece)).toBe("rejected");
+      expect(adoptions.refusals).toBe(1);
+      const reads = sourceReads.calls.length;
+      expect(reads).toBeGreaterThan(0);
+
+      expect(await reconcile(piece)).toBe("rejected");
+      expect(adoptions.refusals).toBe(1);
+      expect(sourceReads.calls).toHaveLength(reads);
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "refused",
+        reason: "apply-failed",
+        offered: v2Ref,
+      });
+    });
+
+    it("proposes again once the origin offers different source", async () => {
+      let served = source("v2");
+      let servedIdentity = await identityFor(served);
+      const piece = await preparePiece(
+        servingFetch(() => servedIdentity, () => served),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      served = source("v3");
+      servedIdentity = await identityFor(served);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(2);
+      expect(getPieceReconciliation(piece)?.offered).toEqual({
+        identity: servedIdentity,
+        symbol: SYMBOL,
+      });
+    });
+
+    it("proposes again once the piece's stored argument changes", async () => {
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      const argument = piece.getArgumentCell<Record<string, string>>()!;
+      const edited = await runtime.editWithRetry((tx) => {
+        argument.withTx(tx).setRaw({ note: "changed" });
+      });
+      expect(edited.error).toBeUndefined();
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(2);
+    });
+
+    it("builds nothing again once the stored argument is changed and changed back", async () => {
+      // The refusal remembers the argument by its content rather than by the
+      // value it read, so an argument changed and then restored, a different
+      // value equal to the first, changes nothing.
+
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      const argument = piece.getArgumentCell<Record<string, string>>()!;
+      const before = argument.getRaw()!;
+      for (const value of [{ note: "changed" }, { ...before }]) {
+        const written = await runtime.editWithRetry((tx) => {
+          argument.withTx(tx).setRaw(value);
+        });
+        expect(written.error).toBeUndefined();
+      }
+      expect(argument.getRaw()).toEqual(before);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
+    });
+
+    it("proposes again once the piece's source state changes", async () => {
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      // A revision that keeps both the pattern and the origin, so the source
+      // state is all that moves.
+      const expected = getPieceSourceSnapshot(piece)!;
+      const baseline = await preparePieceSourceTransitionBaseline(
+        runtime,
+        piece,
+        expected,
+        { allowUnavailable: true },
+      );
+      const revised = await runtime.editWithRetry((tx) => {
+        applyPieceSourceTransition(runtime, piece, tx, expected.pattern, {
+          revisionId: crypto.randomUUID(),
+          baseline,
+          timestamp: Date.now(),
+          operation: "origin-update",
+          origin: expected.origin,
+          expected,
+        });
+      });
+      expect(revised.error).toBeUndefined();
+      expect(getPieceSourceSnapshot(piece)?.revisionId).not.toBe(
+        expected.revisionId,
+      );
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(2);
+    });
+
+    const notForGood = [
+      {
+        name: "ConflictError",
+        message: "stale confirmed read: of:doc at seq 1 conflicted with seq 2",
+      },
+      {
+        name: "SpeculativeBasisError",
+        message: "commit read basis names a speculative layer",
+      },
+      // A flow-control refusal other than a stored envelope's, which a grant
+      // can lift.
+      {
+        name: "CfcCommitRefusalError",
+        message: "the write would carry data where policy forbids it",
+        reasons: ["the write would carry data where policy forbids it"],
+      },
+      {
+        name: "RowLabelCommitError",
+        message: "a row's label forbids the write",
+      },
+    ];
+
+    for (const refusal of notForGood) {
+      it(`proposes again after a \`${refusal.name}\``, async () => {
+        const piece = await pieceOffered(source("v2"));
+        using adoptions = refuseAdoptions(refusal);
+
+        expect(await reconcile(piece)).toBe("unavailable");
+        expect(await reconcile(piece)).toBe("unavailable");
+
+        expect(adoptions.refusals).toBe(2);
+        expect(getPieceReconciliation(piece)).toMatchObject({
+          outcome: "unreachable",
+        });
+      });
+    }
+
+    it("proposes again once the space's memory session is replaced", async () => {
+      const replace = captureSessionReplaced();
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      expect(await reconcile(piece)).toBe("rejected");
+
+      // The replacement is itself what reconciles a piece following a
+      // system origin again.
+      replace(piece.space);
+      await runtime.sourceReconciler.idle();
+      expect(adoptions.refusals).toBe(2);
+
+      expect(await reconcile(piece)).toBe("rejected");
+      expect(adoptions.refusals).toBe(2);
+    });
+
+    it("proposes again after a refusal received while the space's memory session was replaced", async () => {
+      // The refusal answered for the store the session was replaced away
+      // from, so the pass the replacement starts proposes again.
+
+      const replace = captureSessionReplaced();
+      const piece = await pieceOffered(source("v2"));
+      let replaced = false;
+      using adoptions = refuseAdoptions(tooLarge, () => {
+        if (replaced) return;
+        replaced = true;
+        replace(piece.space);
+      });
+
+      expect(await reconcile(piece)).toBe("rejected");
+      await runtime.sourceReconciler.idle();
+
+      expect(adoptions.refusals).toBe(2);
+    });
+
+    it("logs a summary of the refusal once, and never the transaction", async () => {
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await pieceOffered(source("v2"));
+      using adoptions = refuseAdoptions(tooLarge);
+      using warnings = spy(console, "warn");
+
+      expect(await reconcile(piece)).toBe("rejected");
+      expect(await reconcile(piece)).toBe("rejected");
+
+      expect(adoptions.refusals).toBe(1);
+      const refused = warnings.calls.filter((call) =>
+        call.args.includes("reconcile-commit-failed")
+      );
+      expect(refused).toHaveLength(1);
+      const logged = refused[0].args
+        .map((arg) => typeof arg === "string" ? arg : Deno.inspect(arg))
+        .join(" ");
+      expect(logged).toContain(
+        "refused a source reconciliation's write for good",
+      );
+      expect(logged).toContain("MessageTooLargeError");
+      expect(logged).toContain(tooLarge.message);
+      expect(logged).toContain(piece.space);
+      expect(logged).toContain(piece.sourceURI);
+      expect(logged).toContain(v2Identity);
+      expect(logged).not.toContain(tooLarge.transaction.marker);
     });
   });
 

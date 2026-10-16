@@ -47,8 +47,8 @@ weeks later.
 ## 1. Wish targets and result semantics
 
 **Contract.** The runtime resolves the well-known profile targets
-`#profile`, `#profileName`, `#profileAvatar`, `#profileBio`,
-`#profileSpace`, and hashtag search over profile elements with
+`#profile`, `#profileName`, `#profileAvatar`, `#profilePicture`,
+`#profileBio`, `#profileSpace`, and hashtag search over profile elements with
 `scope: ["profile"]`. Reads are read-only; writes go only through the
 profile pattern's own owner-protected handlers (seam 7). At zero
 profiles, `#profile` renders the trusted create surface inline
@@ -92,6 +92,31 @@ export const hostProvidedContexts = [runtimeContext, spaceContext] as const;
 the real export, so a rename fails the docs check.)
 
 **Test.** `packages/ui/src/v2/runtime-context.test.ts`.
+
+**Theme.** The look needs no context for token-based styling: a host themes
+what it mounts by setting the `--cf-theme-*` custom properties on an ancestor,
+which components read through inheritance. Behavior that reads the theme
+object rather than its tokens still wants a `cf-theme` above it: `cf-code-editor`
+consumes `cfThemeContext` to choose CodeMirror's dark chrome, so dark tokens
+alone leave that chrome light. A sandboxed iframe guest inherits nothing from the page, so
+`cf-theme` also provides `iframePresentationContext`: the `--cf-theme-*` values
+computed on the theme element, declared on the guest's `:root`, followed by a
+base stylesheet written against them, with the resolved scheme as the root's
+`data-color-scheme`. Every `cf-iframe` beneath it whose `presentation` is
+`undefined` takes it, and a nested tinting `cf-theme` provides its own values to
+the iframes beneath it. The element reads the values again whenever it
+recomputes: when its theme or the enclosing one changes, when the system
+color-scheme changes while its theme's `colorScheme` is `auto`, and when
+`document` dispatches `theme-preference-changed`. A
+custom property changes without an event, so a host that changes the tokens by
+CSS dispatches `theme-preference-changed` on `document` afterwards. A host that
+themes by CSS with no `cf-theme` above its iframes provides them nothing; the
+labs shell and Loom's pattern pane each have one at their root. A host that
+wants its own presentation sets `presentation` on the iframe or provides a
+nearer `iframePresentationContext`, as
+[the iframe presentation contract](../../packages/iframe-sandbox/README.md#guest-presentation)
+describes. Tests:
+`packages/ui/src/v2/components/cf-theme/guest-presentation.browser.test.ts`.
 
 ---
 

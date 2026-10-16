@@ -260,6 +260,12 @@ function isReactivityLog(value: unknown): value is ReactivityLog {
     Array.isArray(candidate.writes);
 }
 
+/** Whether `error` reports a load its principal is not authorized to read. */
+function isAuthorizationLoadFailure(error: unknown): boolean {
+  return error instanceof ReplicaLoadFailureError &&
+    error.failure.failureClass === "authorization";
+}
+
 function normalizeRegistrationArgs(
   dependenciesOrOptions?: SchedulerRegistrationInput | SchedulerRegisterOptions,
   options: SchedulerRegisterOptions = {},
@@ -530,9 +536,11 @@ export class Scheduler {
   #wakeShaper = new WakeShaper();
 
   /**
-   * Head event parked on in-flight document loads. Keyed by event id; released
-   * by `loadsSettled()`, which either re-queues execution on success or drops
-   * the at-most-once event on an explicit load failure.
+   * Head event parked on in-flight document loads, keyed by event id. The
+   * park ends once every load it waits on has settled: with no failure among
+   * them — or, for a client event, none but `authorization`-class failures —
+   * execution is re-queued, and otherwise `#failHeadEventLoadPark()` drops a
+   * client event and defers a served one.
    */
   #headEventLoadPark: {
     eventId: string;
@@ -2012,6 +2020,30 @@ export class Scheduler {
       computations: this.#nodes.computations.size,
       pending: this.#pending.size,
     };
+  }
+
+  /**
+   * Whether an action registered here other than `except` declares a write to
+   * some instance of `address`'s document, at any scope.
+   *
+   * The lookup spans every scope because the write index keys a derivation by
+   * its declared scope, while a JavaScript derivation writes its output at the
+   * scope its reads narrowed to: a user instance of an output declared at
+   * space scope has a writer indexed only at space scope.
+   */
+  hasOtherWriterOf(
+    address: Pick<IMemorySpaceAddress, "space" | "id">,
+    except: object,
+  ): boolean {
+    for (const scope of ["space", "user", "session"] as const) {
+      const writers = this.#writeIndex.writersByEntity.get(
+        entityNameKey({ ...address, scope }),
+      );
+      for (const writer of writers ?? []) {
+        if (writer !== except) return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -3790,11 +3822,12 @@ export class Scheduler {
     // Each key is waited for on its own, so that every failed load is seen,
     // in the order the failures arrive, once all of them have settled.
     const manager = this.runtime.storageManager;
+    const loadsSettled = manager.loadsSettled?.bind(manager);
     const failures: unknown[] = [];
-    const settled = manager.loadsSettled === undefined
+    const settled = loadsSettled === undefined
       ? Promise.resolve()
       : Promise.all(keys.map((key) =>
-        manager.loadsSettled!([key]).catch((error: unknown) => {
+        loadsSettled([key]).catch((error: unknown) => {
           failures.push(error);
         })
       ));
@@ -3817,44 +3850,36 @@ export class Scheduler {
   }
 
   /**
-   * The head event's required replica load FAILED.
+   * Settles the head event whose required replica load failed, the park's
+   * other ending beside `#releaseHeadEventLoadPark()`.
    *
    * events.md §5's T3 drop predicate is "no runnable handler", never
-   * "the run raced" — and a load failure is the second: the doc the
-   * closure reads EXISTS durably, only the read path failed. The live
-   * shape (verification-coverage.md's OW45 residue member, store-proven
-   * on CI run 32929764230) is a serving session revoked by the genesis
-   * ACL landing after activation — `unauthorized` on a cross-space read
-   * of a doc the server itself wrote one second earlier. Sealing §5's
-   * dropped-event notice for that DISCHARGED at-least-once on a healthy
-   * trusted user action and advanced the watermark past it, so nothing
-   * ever re-ran it: the click was silently lost.
-   *
-   * CORRECTED 2026-08-26. This docstring used to add "healing by design
-   * on the next mount", and that was FALSE: nothing remounted. Run
-   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
-   * over 5m47s off one revoked session, zero successful loads — the
-   * deferral below waiting for a heal that did not exist, exactly as
-   * `storage/rejection.ts`'s SessionError note had said ("the
-   * convergence argument is sound, only the remount is missing"). The
-   * remount now exists: an admitted commit touching the space's ACL doc
-   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
-   * triggered by executor/host.ts), so the deferral's convergence
-   * argument holds. What has NOT changed is the persistent-failure
-   * posture spelled out below: a load whose ACL never changes — or whose
-   * re-open is denied — defers indefinitely, which is OW54's territory.
+   * "the run raced" — and a load failure is the second: the document the
+   * closure reads exists durably, only the read path failed. The live
+   * shape (verification-coverage.md's OW45 residue member) is a serving
+   * session revoked by the genesis ACL landing after activation —
+   * `unauthorized` on a cross-space read of a document the server itself
+   * wrote a moment earlier. Sealing §5's dropped-event notice for that
+   * discharges at-least-once on a healthy trusted user action and
+   * advances the watermark past it, so nothing ever re-runs it: the click
+   * is silently lost.
    *
    * A SERVED event therefore DEFERS — no consequence written, the
    * durable entry left pending and UNCONSEQUENCED, a later drain
-   * re-delivering it. The deferral carries the drain's arrival-order
-   * BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
-   * arm): every later-arrived durable served entry behind it IN THE
-   * SAME SPACE defers too, or a later arrival's consequence lands ahead
-   * of an earlier one. Two exclusions, both deliberate: cross-space
-   * queue neighbours (§2's order is per-space) and LT1 in-process
-   * copies (`served` with no `streamEntry`), which have no durable
-   * entry to re-drain and are a running event's same-wave cascade
-   * children rather than later arrivals.
+   * re-delivering it. What makes the deferral converge is the session
+   * remount: an admitted commit touching the space's ACL document re-arms
+   * the session (storage/v2.ts `consumeOwedSessionRemount`, triggered by
+   * executor/host.ts). A load whose ACL never changes, or whose re-open
+   * is denied, defers indefinitely, which is OW54's territory. The
+   * deferral carries the drain's arrival-order BARRIER with it (events.md
+   * §2, mirroring the sidecar-sync-failure arm): every later-arrived
+   * durable served entry behind it IN THE SAME SPACE defers too, or a
+   * later arrival's consequence lands ahead of an earlier one. Two
+   * exclusions, both deliberate: cross-space queue neighbors (§2's order
+   * is per-space) and LT1 in-process copies (`served` with no
+   * `streamEntry`), which have no durable entry to re-drain and are a
+   * running event's same-wave cascade children rather than later
+   * arrivals.
    *
    * Client-side (no `served`) there is no durable entry to re-drain, so
    * a failed load drops the event — the same split events.ts makes for a
@@ -3870,30 +3895,25 @@ export class Scheduler {
    * class among them still drops the event, since that document may yet
    * hold what the closure reads.
    *
-   * `errors` holds every failed load's error, in the order they failed;
-   * the first is the one reported.
+   * `errors` holds every failed load's error, in the order they failed. A
+   * served deferral reports the first; a client drop reports the first of
+   * another class than `authorization`, the one that decided it.
    */
   #failHeadEventLoadPark(
     event: QueuedEvent,
     errors: readonly unknown[],
   ): void {
     if (this.#headEventLoadPark?.eventId !== event.id) return;
-    const error = errors[0];
-    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
-      failureClass: "unknown" as const,
-      recoveryEpoch: "untyped",
-      permanentEvidence: false,
-    };
     if (
-      event.served === undefined &&
-      errors.every((each) =>
-        each instanceof ReplicaLoadFailureError &&
-        each.failure.failureClass === "authorization"
-      )
+      event.served === undefined && errors.every(isAuthorizationLoadFailure)
     ) {
       this.#releaseHeadEventLoadPark(event.id);
       return;
     }
+    // Chosen by position, since a rejection may carry no error at all.
+    const error = event.served === undefined
+      ? errors[errors.findIndex((each) => !isAuthorizationLoadFailure(each))]
+      : errors[0];
     const keys = this.#headEventLoadPark.keys.join(", ");
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
@@ -3901,11 +3921,17 @@ export class Scheduler {
     if (event.served === undefined) {
       this.#dropEvent(
         event,
-        `Event dropped: required replica load failed before dispatch (${detail})`,
+        `Event dropped: required replica load failed before dispatch ` +
+          `(${keys}: ${detail})`,
       );
       this.queueExecution();
       return;
     }
+    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
+      failureClass: "unknown" as const,
+      recoveryEpoch: "untyped",
+      permanentEvidence: false,
+    };
     // The head's debug record names the failing doc keys and error;
     // `events.loadParkDeferrals` counts every head and barrier deferral, while
     // the durable checkpoint and terminal attention surface persistent failure.

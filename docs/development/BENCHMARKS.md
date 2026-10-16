@@ -1036,10 +1036,11 @@ before it seeds anything.
 `packages/patterns/integration/fabrichat-room-scale.bench.ts` measures two of
 those segments across rooms of 10, 30, 100 and 300 messages, all with twelve
 members, in a `fabrichat room scale` group: `<size>` is `messages`, and
-`send <size>` is `send`. A room renders a row for every message it holds and
-hides those outside the main conversation's view rather than leaving them out,
-so a room of three hundred messages builds three hundred rows although its
-`latest` holds a hundred; these curves say what that costs. Each size seeds two
+`send <size>` is `send`. A room renders a row for every message of its main
+conversation, however many its `latest` holds, so a room of three hundred
+messages builds a main-conversation row for each of them except the replies in
+the thread the fixture seeds, which render in the thread pane; these curves say
+what that costs. Each size seeds two
 rooms, one for each series, so that sends do not grow the room `<size>` loads.
 The `send <size>` room does grow, by one message per send: it holds `<size>`
 messages before the first of its five sends — one per invocation of the body,

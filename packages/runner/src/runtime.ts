@@ -2725,6 +2725,9 @@ export class Runtime {
     wrapped.setCfcServingIdentity(
       this.servingPosture ? this.userIdentityDID : undefined,
     );
+    wrapped.setCfcClientIdentity(
+      this.servingPosture ? undefined : this.userIdentityDID,
+    );
     wrapped.setCfcModuleDelegations(
       this.#moduleDelegationSnapshot(options.sourceUpdate),
     );

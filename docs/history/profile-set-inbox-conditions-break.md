@@ -38,11 +38,14 @@ neither condition sets or clears the pointer as before.
 
 ## What the proof reports
 
-`system/profile-picker.tsx`, `argument.legacyDefaultProfile`, on its four
-baselines from `20261003T212417Z` on. That argument is an alternative of a
-stored profile or nothing. The proof compares alternatives without the
-allowance it gives a property, and the recorded event left `ifUnset` and
-`replacing` open, so it reads them as values the candidate refuses.
+`system/profile-picker.tsx`, `argument.legacyDefaultProfile`, on
+`20261016T163241Z-cABRwrsT-Kpo7YwG`, the baseline recorded after profiles
+gained a picture. That argument is an alternative of a stored profile or
+nothing. The proof compares alternatives without the allowance it gives a
+property, and the recorded event left `ifUnset` and `replacing` open, so it
+reads them as values the candidate refuses. The picker's four baselines from
+`20261003T212417Z` on report the same path under the picture break, and the
+entry recorded for that break, `profile-picture-break.md`, carries them.
 
 `system/profile-home.tsx`, `system/profile-create.tsx`, `system/home.tsx` and
 `fabrichat/room.tsx` report the change compatible and carry no entry.

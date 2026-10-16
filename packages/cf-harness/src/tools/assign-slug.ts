@@ -87,20 +87,19 @@ export const assignSlugToolDescriptor: HarnessToolDescriptor = {
   toolId: "assign_slug",
   title: "Assign Slug",
   description:
-    "Register the piece behind a handle token in the space's piece list and give it a named address a person can open. Use it after verifying a settled result and a UI; pending reads and data-only results cannot be named; a piece never named stays out of the list, which is what pure computation wants. A slug already naming another piece, or a collection, is never repointed: a counter is appended (-2, -3, ...) until a free slug is found, and the receipt's slug is the one assigned, so read the address from the receipt rather than from what you asked for.",
+    "List the piece behind a handle token in the space's piece list under a named address a person can open; returns a receipt with the address it got.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
     properties: {
       token: {
         type: "string",
-        description:
-          "A handle token of the form cfh:a:<suffix> referring to a piece — a run_pattern resultRef, or any granted or discovered piece reference.",
+        description: "A piece's cfh:a: handle token.",
       },
       slug: {
         type: "string",
         description:
-          "Named address for the piece: lowercase letters, numbers, and single hyphens between words, at most 80 characters. When it is already taken, the piece gets this word with a counter appended.",
+          "Lowercase letters, numbers, and single hyphens between words, at most 80 characters.",
       },
     },
     required: ["token", "slug"],

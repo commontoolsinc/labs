@@ -161,8 +161,10 @@ describe("FabriChat flat manager sends", () => {
    * Writes the viewer's Home in their home space: their manager's core, which
    * lists `people`, behind the wrapper and document-valued link Home keeps to
    * it, and Home's root, which names the wrapper as `chatManager` beside
-   * `profile`. A `labeled` core declares the viewer's `PersonalSpace` label
-   * over all of it. Returns the wrapper and the core's `offerRoom`.
+   * `profile`. The wrapper's `[UI]` links the core's, as Home's manager does,
+   * and is the slot a `#chatManager` wish reads for its view. A `labeled` core
+   * declares the viewer's `PersonalSpace` label over all of it. Returns the
+   * wrapper and the core's `offerRoom`.
    */
   const writeHome = async (
     labeled: boolean,
@@ -182,6 +184,7 @@ describe("FabriChat flat manager sends", () => {
     const managerSchema = {
       type: "object",
       properties: {
+        $UI: { asCell: ["cell"] },
         offerRoom: { asCell: ["stream"] },
         joinRoom: { asCell: ["stream"] },
         openDirect: { asCell: ["stream"] },
@@ -199,8 +202,11 @@ describe("FabriChat flat manager sends", () => {
         }
         : {}),
     } as const satisfies JSONSchema;
+    const view = runtime.getCell(home, "manager view", undefined, tx);
+    view.set({ type: "vnode", name: "div", props: {}, children: [] });
     const manager = runtime.getCell(home, "manager core", managerSchema, tx);
     manager.set({
+      $UI: view,
       offerRoom,
       joinRoom,
       openDirect,
@@ -213,6 +219,7 @@ describe("FabriChat flat manager sends", () => {
     mid.set(manager);
     const wrapper = runtime.getCell(home, "manager wrapper", undefined, tx);
     wrapper.set({
+      $UI: mid.key("$UI"),
       offerRoom: mid.key("offerRoom"),
       joinRoom: mid.key("joinRoom"),
       openDirect: mid.key("openDirect"),
@@ -323,7 +330,7 @@ describe("FabriChat flat manager sends", () => {
       space as Parameters<typeof server.readDocument>[0],
       aclDocId(space) as Parameters<typeof server.readDocument>[1],
     ))?.value;
-    return { space, bobProfile, offers, addRequests, acl };
+    return { space, offers, addRequests, acl };
   };
 
   for (const discovered of [false, true]) {
@@ -363,20 +370,7 @@ describe("FabriChat flat manager sends", () => {
         expect((await roomTx.commit().settled).error).toBeUndefined();
         await runtime.idle();
         await room.pull();
-        // Root-private setup can refuse one manager-derived computation. This
-        // send guard bounds that known debt and permits no additional refusal.
-        expect(refusals.length).toBeLessThanOrEqual(labeled ? 1 : 0);
-        for (const refusal of refusals) {
-          expect(refusal.terminal).toBe(true);
-          expect(refusal.reasons.length).toBeGreaterThan(0);
-          expect(
-            refusal.reasons.every((reason) =>
-              reason.includes("writer-fit confidentiality misfit") &&
-              reason.includes("PersonalSpace")
-            ),
-          ).toBe(true);
-        }
-        const refusedBeforeSend = refusals.length;
+        expect(refusals).toEqual([]);
         const click = {
           type: "click",
           requestId: "flat-manager-send",
@@ -398,7 +392,7 @@ describe("FabriChat flat manager sends", () => {
             "body",
           ).pull(),
         ).toBe("A shared message");
-        expect(refusals.length).toBe(refusedBeforeSend);
+        expect(refusals).toEqual([]);
       });
     }
   }
@@ -418,7 +412,7 @@ describe("FabriChat flat manager sends", () => {
   });
 
   it("offers a room to a member added through a root-private manager's discovered flat bindings", async () => {
-    const { space, bobProfile, offers, acl } = await addBob(true);
+    const { space, offers, addRequests, acl } = await addBob(true);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
     expect(offers).toHaveLength(1);
@@ -428,42 +422,14 @@ describe("FabriChat flat manager sends", () => {
       room: { "/": { "link@1": { space } } },
     });
 
-    // Root-private setup refuses what the room's space would store of the
-    // manager's data: the picker's list of the people `candidates` reads from
-    // the manager, on each rendering, and the `outcomes` that merge the
-    // manager's verdicts into `addRequests`. This add guard bounds that known
-    // debt and permits no other refusal.
-    const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
-      const people = runtime.getCellFromLink(
-        { ...input.read, path: [] } as Parameters<
-          typeof runtime.getCellFromLink
-        >[0],
-        { type: "array", items: { asCell: ["cell"] } },
-      ).get() as Cell<unknown>[];
-      return people.length === 1 && people[0].equalLinks(bobProfile);
-    };
-    const isPicker = ({ reasons, refusals: details }: Refusal) =>
-      reasons.every((reason) =>
-        /^writer-fit confidentiality misfit for of:\S+ at \/\S* .*PersonalSpace/
-          .test(reason)
-      ) &&
-      details.length > 0 &&
-      details.every(({ target, inputs }) =>
-        target?.space === space && target.scope === "session" &&
-        inputs.length > 0 &&
-        inputs.every((input) =>
-          input.read.space === space && input.read.scope === "session" &&
-          listsBob(input)
-        )
-      );
-    const isOutcomes = ({ reasons }: Refusal) =>
-      reasons.length === 1 &&
-      /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
-        .test(reasons[0]);
-    for (const refusal of refusals) expect(refusal.terminal).toBe(true);
-    expect(
-      refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),
-    ).toEqual([]);
-    expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
+    // Everything the room stores of the manager's data lands in the viewer's
+    // own documents: the picker's list of the people `candidates` reads from
+    // the manager, in their session documents, and the `outcomes` that merge
+    // the manager's verdicts into `addRequests`, in their per-user ones. A
+    // user or session document may hold its own principal's personal data
+    // (§8.12.4), so the add refuses nothing and is listed as done, as it is
+    // through a public manager.
+    expect(addRequests).toEqual({ "add-bob": { status: "done" } });
+    expect(refusals).toEqual([]);
   });
 });

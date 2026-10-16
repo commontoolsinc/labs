@@ -26,6 +26,7 @@ import {
   bindCurrentPrincipalToStoredClauses,
   isCurrentPrincipalUserClause,
 } from "./current-principal-confidentiality.ts";
+import { CfcEnvelopeStabilityError } from "./envelope-stability-reason.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { isValueStamp } from "./minted-integrity.ts";
 import {
@@ -242,7 +243,9 @@ const mergeSetLikeIfcArray = (
     case "addIntegrity": {
       if (!Array.isArray(existing) || !Array.isArray(candidate)) {
         if (!deepEqual(existing, candidate)) {
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
@@ -278,7 +281,9 @@ const mergeSetLikeIfcArray = (
         ? existingArray.filter((atom) => !isValueStamp(atom))
         : existingArray;
       if (!arraySubsetOf(comparableExisting, candidateArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(existingArray, candidateArray);
     }
@@ -310,14 +315,18 @@ const mergeSetLikeIfcArray = (
               return reconciled;
             }
           }
-          throw new Error(`${key} must remain stable at ${path || "/"}`);
+          throw new CfcEnvelopeStabilityError(
+            `${key} must remain stable at ${path || "/"}`,
+          );
         }
         return existing;
       }
       const existingArray = existing as readonly unknown[];
       const candidateArray = candidate as readonly unknown[];
       if (!arraySubsetOf(candidateArray, existingArray)) {
-        throw new Error(`${key} cannot be weakened at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} cannot be weakened at ${path || "/"}`,
+        );
       }
       return mergeArraySet(candidateArray);
     }
@@ -328,13 +337,17 @@ const mergeSetLikeIfcArray = (
     case "collection":
     case "ownerPrincipal":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     case "flowPrecisionClaim":
     case "uiContract":
       if (!deepEqual(existing, candidate)) {
-        throw new Error(`${key} must remain stable at ${path || "/"}`);
+        throw new CfcEnvelopeStabilityError(
+          `${key} must remain stable at ${path || "/"}`,
+        );
       }
       return existing;
     default:
@@ -356,7 +369,9 @@ const mergeWritePolicyAnyOf = (
   adoptsStamp?: (claim: unknown) => boolean,
 ): unknown => {
   const unstable = () =>
-    new Error(`writePolicyAnyOf must remain stable at ${path || "/"}`);
+    new CfcEnvelopeStabilityError(
+      `writePolicyAnyOf must remain stable at ${path || "/"}`,
+    );
   if (
     !Array.isArray(existing) || !Array.isArray(candidate) ||
     existing.length !== candidate.length

@@ -451,7 +451,10 @@ replace the text under the user's cursor.
 The generated wrapper bundles JavaScript imports, but a React library can also
 depend on stylesheet rules that give its viewport, measurement wrappers,
 overlays, portals, and controls their geometry. Theme colors alone are not
-enough. Put the required structural rules in `guest.html` so the document stays
+enough; the guest receives the `--cf-theme-*` variables and
+the `cf-*` classes described in
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme),
+so components spell no color or font of their own. The required structural rules still belong in `guest.html` so the document stays
 self-contained under the iframe CSP. Give `html`, `body`, `#root`, and every
 intermediate layout container an explicit height, and give custom measured
 items a stable width or size when the library expects one.

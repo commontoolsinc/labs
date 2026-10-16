@@ -206,8 +206,11 @@ a **link to that profile cell** in the shared entry and render every participant
 with a live, visitable `<cf-profile-badge $profile={p.profile} />` — cross-space
 reads resolve for any authorized viewer (CT-1667/1687), so the badge stays
 current, carries the verified-identity seal, and links to each contributor's
-profile. Snapshotting the `#profileName` / `#profileAvatar` strings instead is
-the self-containment fallback (renders with remote profile spaces offline). See
+profile. Snapshotting the `#profileName` value and the `#profilePicture` bytes
+(or, for a profile with no picture, the `#profileAvatar` text) instead is the
+self-containment fallback (renders with remote profile spaces offline);
+`profileLook()` in `packages/patterns/system/profile-look.ts` picks which to
+copy. See
 the [shared-profile roster guide](../../specs/shared-profile-rosters.md);
 canonical live-link demo:
 `packages/patterns/profile-roster-live-demo.tsx`; worked examples:
@@ -275,9 +278,9 @@ user's home space):
 // Shown inside a pattern body.
 const profileWish = wish({ query: "#profile" });            // the viewer's profile CELL
 const profileNameWish = wish<string>({ query: "#profileName" });
-const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+const profilePictureWish = wish<FabricBytes>({ query: "#profilePicture" });
 const myName = computed(() => (profileNameWish.result ?? "").trim());
-const myAvatar = computed(() => (profileAvatarWish.result ?? "").trim());
+const myPicture = computed(() => profilePictureWish.result); // image bytes, or undefined
 const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
 ```
 
@@ -298,7 +301,7 @@ The viewer is whoever the runtime says they are; `#profile` is how you read it.
 `cf-profile-badge` renders **any** participant, not just the viewer: bind the live
 profile cell you stored for them on join. Cross-space profile reads resolve for
 every authorized viewer (CT-1667/1687), so each badge stays current and carries the
-verified seal. Fall back to `<cf-avatar src={p.avatar} name={p.name} />` only when
+verified seal. Fall back to `<cf-avatar bytes={p.picture} src={p.avatar} name={p.name} />` only when
 you deliberately hold just a snapshot — a self-contained piece, or a participant
 whose remote profile space is offline.
 
@@ -314,7 +317,8 @@ whose remote profile space is offline.
 
 There is no "list everyone's profiles" primitive. Each viewer contributes their
 own identity on join: push their live `#profile` **cell** into the shared
-`PerSpace` roster (plus a `{ displayName, avatar }` snapshot for the offline
+`PerSpace` roster (plus a `{ displayName, ...profileLook(picture, avatar) }`
+snapshot for the offline
 fallback), and keep a `PerUser` pointer that is a **cell reference** to their own
 entry (see [Shared Directories And "Me"](#shared-directories-and-me)). Decide "is
 this me?" with `equals()` on the stored profile cell (or the entry reference) —
@@ -324,7 +328,8 @@ never by comparing the mutable, non-unique display name. The live demo
 ### Ownership and authorship
 
 "Who created this / who wrote this" is identity too. For display, snapshot the
-actor's `{ displayName, avatar }`. For an *attested* claim the user cannot forge,
+actor's name and `profileLook(picture, avatar)`: the picture, or the avatar
+text for a profile with no picture. For an *attested* claim the user cannot forge,
 use the CFC wrappers `AuthoredByCurrentUser<T>` / `RepresentsCurrentUser<T>` and
 render with `cf-cfc-authorship`. Read-only display works today; note that
 owner-protected profile *writes* are currently constrained (see CT-1665).

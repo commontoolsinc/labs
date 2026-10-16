@@ -2,6 +2,7 @@ import {
   action,
   assert,
   equals,
+  FabricBytes,
   NAME,
   pattern,
   TESTS,
@@ -15,6 +16,14 @@ import ProfileHome, {
   VerifiedIdentitiesSection,
   VerifiedIdentityRow,
 } from "./profile-home.tsx";
+
+// Stand-ins for two pictures. The profile stores the bytes it is sent and
+// never decodes them.
+const PICTURE = [0x89, 0x50, 0x4e, 0x47];
+const PICKED_PICTURE = [0xff, 0xd8, 0xff];
+
+const bytesAre = (actual: FabricBytes | undefined, expected: number[]) =>
+  actual?.slice().join() === expected.join();
 
 export default pattern(() => {
   const profile = ProfileHome({ initialName: "Ada Lovelace" });
@@ -128,6 +137,23 @@ export default pattern(() => {
   const action_set_avatar = action(() => {
     profile.setAvatar.send({ avatar: "AL" });
   });
+  const action_set_picture = action(() => {
+    profile.setPicture.send({
+      picture: new FabricBytes(new Uint8Array(PICTURE)),
+    });
+  });
+  // `<cf-avatar-input>` carries the picked picture as its change event's
+  // `detail.bytes`.
+  const action_pick_picture = action(() => {
+    profile.setPicture.send({
+      detail: { bytes: new FabricBytes(new Uint8Array(PICKED_PICTURE)) },
+    });
+  });
+  // An event without bytes leaves the picture alone.
+  const action_send_no_picture = action(() => {
+    profile.setPicture.send({ picture: new FabricBytes(new Uint8Array()) });
+    profile.setPicture.send({});
+  });
   // The share inbox link. Loom sends it serialized, as the `link@1` sigil
   // naming the inbox piece and its space; here the link is a live cell, the
   // catalog card added below, because a link into a space the harness does
@@ -221,6 +247,14 @@ export default pattern(() => {
   // The avatar the badge binds resolves (single context — owner-protected reads
   // are clean here; cross-stamp masking is the browser-only CT-1740 issue).
   const assert_avatar_set = assert(() => profile.avatar === "AL");
+  const assert_no_picture = assert(() => profile.picture === undefined);
+  const assert_picture_set = assert(() => bytesAre(profile.picture, PICTURE));
+  const assert_picture_picked = assert(() =>
+    bytesAre(profile.picture, PICKED_PICTURE)
+  );
+  const assert_picture_unchanged_after_empty = assert(() =>
+    bytesAre(profile.picture, PICKED_PICTURE) && profile.avatar === "AL"
+  );
   // CT-1828: an empty send must not clear a previously-set avatar.
   const assert_avatar_unchanged_after_empty = assert(() =>
     profile.avatar === "AL"
@@ -367,6 +401,13 @@ export default pattern(() => {
       // CT-1828: an empty send must not erase the avatar either.
       { action: action_clear_avatar },
       { assertion: assert_avatar_unchanged_after_empty },
+      { assertion: assert_no_picture },
+      { action: action_set_picture },
+      { assertion: assert_picture_set },
+      { action: action_pick_picture },
+      { assertion: assert_picture_picked },
+      { action: action_send_no_picture },
+      { assertion: assert_picture_unchanged_after_empty },
       // Add/remove exercise the full owner-protected element write stack:
       // the same-transaction card instantiation linked into the
       // writeAuthorizedBy-protected list (prepare's setup-schema / child-doc

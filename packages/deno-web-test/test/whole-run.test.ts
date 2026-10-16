@@ -7,11 +7,19 @@ import {
 } from "@commonfabric/test-support/records";
 import { runDenoWebTest } from "./utils.ts";
 
-/** What a run leaves in a spool of its own, read once the run has settled. */
-async function marksOf(projectDir: string): Promise<WholeRun[]> {
+/**
+ * What a run leaves in a spool of its own, read once the run has settled.
+ * The project is copied inside a repository unless `inRepository` is false.
+ */
+async function marksOf(
+  projectDir: string,
+  { inRepository = true }: { inRepository?: boolean } = {},
+): Promise<WholeRun[]> {
   const spool = await Deno.makeTempDir();
   try {
-    await runDenoWebTest(projectDir, { [RECORDS_DIR_VARIABLE]: spool });
+    await runDenoWebTest(projectDir, { [RECORDS_DIR_VARIABLE]: spool }, {
+      inRepository,
+    });
     return await readWholeRuns(spool);
   } finally {
     await Deno.remove(spool, { recursive: true });
@@ -33,8 +41,17 @@ describe("whole-run", () => {
     }))).toEqual([{
       kind: "browser",
       scope: "deno-web-test-success-project",
-      tests: { "add.test.ts": new Set(["add-sync", "add-async"]) },
+      tests: {
+        "success-project/add.test.ts": new Set(["add-sync", "add-async"]),
+      },
     }]);
+  });
+
+  it("names nothing for a run of files inside no repository", async () => {
+    // Such a file is no test of a repository, so it has no
+    // repository-relative path to be named by.
+    expect(await marksOf("success-project", { inRepository: false }))
+      .toEqual([]);
   });
 
   it("names nothing for a run that never reached its tests", async () => {

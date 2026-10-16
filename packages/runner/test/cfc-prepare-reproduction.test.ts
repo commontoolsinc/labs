@@ -184,8 +184,11 @@ describe("CFC prepare reproduction", () => {
         3 * stats.flowTemplateContainers,
       );
       expect(stats.flowTemplateContainers).toBe(251);
-      // All fifty instances reuse one source-container template query.
-      expect(stats.overlapWildcardQueries).toBe(1);
+      // A link write persists the reference's own label and nothing of the
+      // source's (CFC §8.2, §8.12.8), so no instance's link write walks the
+      // source container's template entries: `overlapWildcardQueries`, which
+      // counts those wildcard overlap walks, stays at zero.
+      expect(stats.overlapWildcardQueries).toBe(0);
       for (let index = 0; index < 50; index++) {
         const cell = result.key("rendered").key(String(index)).resolveAsCell();
         const status = cfcLabelViewForResolvedCellWithStatus(cell);
@@ -195,7 +198,14 @@ describe("CFC prepare reproduction", () => {
           expect(entry.label.confidentiality).toEqual(["secret"]);
         }
       }
-      expect(stats.authoritativeCoverCalls).toBeGreaterThan(0);
+      // The same contract leaves `authoritativeCoverCalls`, the count of
+      // authoritative label-cover walks over a source's view, and
+      // `stagedReferenceDerivations`, the count of source views derived
+      // through references staged in the writing transaction, at zero: no
+      // link write reads the source's labels to persist them, and no floor
+      // here needs a staged chain.
+      expect(stats.authoritativeCoverCalls).toBe(0);
+      expect(stats.stagedReferenceDerivations).toBe(0);
       expect(stats.consumedLabelWalks).toBe(0);
     } finally {
       await runtime.dispose();

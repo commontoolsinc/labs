@@ -851,6 +851,15 @@ folder-scoped create grant for manifests. A personal reporting key cannot
 create one: it is scoped to its holder's own submissions folder. So a person
 runs `--dry-run --out` and reads what a run would have produced.
 
+The access token the workflow mints for that identity lasts an hour, and a
+run that folds every day of the history again, as one does after the rules
+for crediting a catch change, takes longer than that. So the workflow runs
+the publisher in two steps. The first reads, folds and scores with
+`--dry-run --out <dir>`, and holds no credential, since the store is public
+to read. The workflow then mints the token, and the second step runs
+`--create <dir>`, which checks what the first step wrote and creates the
+manifest and the aggregate from it.
+
 ### Verifying publication
 
 A bootstrap or recovery is accepted only after all three of these are true:

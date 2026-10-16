@@ -180,6 +180,38 @@ const SCOPED_BADGE_TREE_PROGRAM: RuntimeProgram = {
   }],
 };
 
+// The plain tree, each row owning two cells of the session's own with no
+// default to seed: a per-session derived value, and a per-session writable
+// nothing has written. A session that has not run the row holds no document
+// for either, in the store or anywhere else.
+const SESSION_CELL_TREE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern, type PerSession, Writable } from 'commonfabric';",
+      "type Item = { n: number };",
+      "export const row = pattern<{ item: Item }, {",
+      "  value: number;",
+      "  note?: string;",
+      "  draft?: string;",
+      "}>(({ item }) => {",
+      "  const note = computed(",
+      "    (): PerSession<string | undefined> =>",
+      "      item.n > 100 ? 'large' : undefined,",
+      "  );",
+      "  const draft = new Writable.perSession<string | undefined>(undefined);",
+      "  return { value: computed(() => item.n * 2), note, draft };",
+      "});",
+      "export default pattern<{ items: Item[] }, {",
+      "  rows: { value: number; note?: string; draft?: string }[];",
+      "}>(({ items }) => ({",
+      "  rows: items.map((item) => row({ item })),",
+      "}));",
+    ].join("\n"),
+  }],
+};
+
 const ITEMS = [{ n: 1 }, { n: 2 }, { n: 3 }];
 
 /** The pattern a node instantiates, or undefined for any other node. */
@@ -763,6 +795,35 @@ describe("resume-presync-plan-count", () => {
       markDescriptor,
     );
     expect(again.nameSyncs).toBe(1);
+  });
+
+  it("names a nested instance's family once when a cell it owns is the session's own", async () => {
+    const cellId = "resume-presync-plan-count-session-cell-root";
+    const compiled = await authorTree(cellId, SESSION_CELL_TREE_PROGRAM);
+    const wrapperPattern = compiled.nodes
+      .map((node) => (node.inputs as { op?: unknown }).op)
+      .find(isPattern)!;
+    const rowPattern = wrapperPattern.nodes
+      .map(childPatternOf)
+      .find((pattern) => pattern !== undefined)!;
+    expect(ownedDescriptor(rowPattern, "note")).toMatchObject({
+      kind: "computed",
+      scope: "session",
+    });
+    expect(ownedDescriptor(rowPattern, "draft")).toMatchObject({
+      scope: "session",
+    });
+
+    // The root's pre-sync asks the store for each row's cells under this
+    // session, and a session that has not run the rows has written neither.
+    // No store holds a document for another session's instance, so a row's
+    // own name-sync could deliver nothing: the root's is the only one.
+    const resumed = await resumeTree(
+      SESSION_CELL_TREE_PROGRAM,
+      cellId,
+      ownedDescriptor(rowPattern, "note"),
+    );
+    expect(resumed.nameSyncs).toBe(1);
   });
 
   it("yields to the event loop between the syncs of a resume wave", async () => {

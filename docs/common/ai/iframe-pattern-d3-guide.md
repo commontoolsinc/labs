@@ -323,6 +323,12 @@ small assets locally, or pass data through `input`; do not depend on a CDN,
 `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once. Buttons must use `type="button"`
 so an accidental form ancestor cannot trigger navigation.
 
+Style the shell and the chart with the ambient theme the iframe receives — its
+elements, `cf-*` classes, and `--cf-theme-*` variables, which SVG `fill` and
+`stroke` accept as `var(--cf-theme-color-primary)` — and spell no color or
+font; see
+[Style with the ambient theme](./iframe-pattern-guide.md#style-with-the-ambient-theme).
+
 ## Generate and validate
 
 Generate the wrapper without the React flag:
