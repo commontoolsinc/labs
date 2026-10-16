@@ -1,8 +1,4 @@
-import type {
-  InSpaceGrants,
-  InSpaceOptions,
-  JSONSchemaObj,
-} from "@commonfabric/api";
+import type { InSpaceGrants, InSpaceOptions } from "@commonfabric/api";
 import {
   debugStr,
   hashStringOf,
