@@ -140,8 +140,7 @@ const landsUnderived = async (
 
 /**
  * The confidentiality atom types `cell` carries, for a refusal to name. A
- * label that cannot be read names nothing, and the refusal points to
- * `describe_handle` instead.
+ * label that cannot be read names nothing.
  */
 const confidentialityAtoms = (cell: Cell<unknown> | undefined): string[] =>
   cell === undefined ? [] : [
@@ -241,42 +240,39 @@ export const readValueTool: HarnessToolDefinition<
     }
 
     const { runtime } = pieces;
-    // A derived value is the piece's to produce, so a read that lands where
-    // no run has produced it runs the piece, as `call_verb` does, and reads
-    // what the run derives. Only a piece can be run: a handle on the derived
-    // document itself names no piece, and says so.
-    if (
-      await landsUnderived(runtime, link, select, space, session.foreignSpaces)
-    ) {
-      const piece = runtime.getCellFromLink({
-        ...link,
-        path: [],
-        schema: undefined,
-      });
-      try {
-        await piece.sync();
-        if (getPatternIdentityRef(piece) === undefined) {
-          return fail(
-            `${entry.token} is a value its piece derives, and it holds none until that piece runs; read it through the piece's handle, which runs the piece`,
-          );
-        }
-        await runtime.start(piece);
-        await runtime.idle();
-      } catch (error) {
-        return fail(
-          `read_value could not run the piece that derives ${entry.token}: ${
-            errorMessage(error)
-          }`,
-        );
-      }
-    }
-
     const releaseTx = runtime.edit();
     let value: unknown;
     let refusal: string | undefined;
     let observedLabel: IFCLabel | undefined;
     let measured: Cell<unknown> | undefined;
     try {
+      // A derived value is the piece's to produce, so a read that lands where
+      // no run has produced it runs the piece, as `call_verb` does, and reads
+      // what the run derives. Only a piece can be run: a handle on the
+      // derived document itself names no piece, and says so.
+      if (
+        await landsUnderived(
+          runtime,
+          link,
+          select,
+          space,
+          session.foreignSpaces,
+        )
+      ) {
+        const piece = runtime.getCellFromLink({
+          ...link,
+          path: [],
+          schema: undefined,
+        });
+        await piece.sync();
+        if (getPatternIdentityRef(piece) === undefined) {
+          return fail(
+            `${entry.token} is a value its piece derives, and it holds none until that piece runs; read it through the piece's handle, which runs the piece`,
+          );
+        }
+        await runtime.startWithCommit(piece);
+        await runtime.idle();
+      }
       // A link at the position itself is followed, so a piece's field reads
       // as the value it aliases. Links within that value stay links. The
       // position is pulled before it is resolved: a resolution stops at a
@@ -331,13 +327,11 @@ export const readValueTool: HarnessToolDefinition<
       // measured, and binds every reader the session runs, so the refusal
       // says which limit held rather than offering a route around it.
       if (error instanceof CfcReadCeilingError) {
-        const atoms = confidentialityAtoms(measured);
+        const atoms = confidentialityAtoms(measured).join(", ");
         return fail(
-          atoms.length > 0
-            ? `the value was withheld: it carries ${
-              atoms.join(", ")
-            }, which is above this session's read ceiling`
-            : `the value was withheld: its label is above this session's read ceiling; describe_handle lists the labels ${entry.token} carries`,
+          `the value was withheld: its label${
+            atoms === "" ? "" : ` (${atoms})`
+          } is above this session's read ceiling; describe_handle lists the labels ${entry.token} carries`,
         );
       }
       return fail(
