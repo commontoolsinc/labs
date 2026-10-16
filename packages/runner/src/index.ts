@@ -259,6 +259,7 @@ export {
   getPieceSourceSnapshot,
   inSpaceRootCause,
   isStoredArgumentSchemaRefusal,
+  keepLaterConfirmation,
   mergeSchemaDefaults,
   patternIdentityKey,
   type PatternSetupCommitReceipt,

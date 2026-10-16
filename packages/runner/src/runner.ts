@@ -1789,6 +1789,14 @@ export interface PieceSourceRevision {
 
   operation: PieceSourceRevisionOperation;
   selectedRevisionId?: string;
+
+  /**
+   * When the deployment that served this revision's source released it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). Carried only by
+   * a revision adopted from a `system:` origin whose host states one; it is
+   * what keeps that piece from being moved to an earlier release.
+   */
+  releasedAt?: number;
 }
 
 export interface PieceSourceSnapshot {
@@ -1843,6 +1851,17 @@ export interface PieceReconciliation {
 
   /** What the attempt reported, in its own words. */
   detail?: string;
+
+  /**
+   * The source the piece runs, with the latest release time at which its
+   * `system:` origin has offered that source since the piece adopted it, in
+   * milliseconds since the epoch (`pattern-release-time.ts`). A later deploy
+   * of unchanged source moves it forward without adopting anything, which is
+   * what keeps the piece from being moved to a release between the one it
+   * adopted and the one that confirmed it. It never moves backward, and an
+   * accepted transition clears it with the rest of the record.
+   */
+  confirmed?: { identity: string; releasedAt: number };
 }
 
 export type PieceSourceTransitionBaseline =
@@ -1860,6 +1879,9 @@ export interface PieceSourceTransition {
 
   expected: PieceSourceSnapshot;
   selectedRevisionId?: string;
+
+  /** The release time the revision records (`PieceSourceRevision`). */
+  releasedAt?: number;
 }
 
 /**
@@ -14890,7 +14912,10 @@ export function getPieceSourceRevisions(
           typeof value.origin !== "string") ||
       value.selectedRevisionId !== undefined &&
         (typeof value.selectedRevisionId !== "string" ||
-          value.selectedRevisionId.length === 0)
+          value.selectedRevisionId.length === 0) ||
+      value.releasedAt !== undefined &&
+        (typeof value.releasedAt !== "number" ||
+          !Number.isFinite(value.releasedAt) || value.releasedAt < 0)
     ) {
       throw new Error("piece source history is invalid");
     }
@@ -14907,6 +14932,9 @@ export function getPieceSourceRevisions(
     }
     if (typeof value.selectedRevisionId === "string") {
       revision.selectedRevisionId = value.selectedRevisionId;
+    }
+    if (typeof value.releasedAt === "number") {
+      revision.releasedAt = value.releasedAt;
     }
     revisionIds.add(revision.revisionId);
     revisions.push(revision);
@@ -14928,7 +14956,7 @@ export function getPieceReconciliation(
     meta: ignoreReadForScheduling,
   });
   if (!isObjectOrArray(raw)) return undefined;
-  const { outcome, at, origin, offered, reason, detail } = raw;
+  const { outcome, at, origin, offered, reason, detail, confirmed } = raw;
   if (
     !isPieceReconciliationOutcome(outcome) ||
     typeof at !== "number" || !Number.isFinite(at) || at < 0 ||
@@ -14944,6 +14972,18 @@ export function getPieceReconciliation(
     ...(offeredRef === undefined ? {} : { offered: offeredRef }),
     ...(isPieceReconciliationReason(reason) ? { reason } : {}),
     ...(typeof detail === "string" && detail.length > 0 ? { detail } : {}),
+    ...(isObjectNotArray(confirmed) &&
+        typeof confirmed.identity === "string" &&
+        confirmed.identity.length > 0 &&
+        typeof confirmed.releasedAt === "number" &&
+        Number.isFinite(confirmed.releasedAt) && confirmed.releasedAt >= 0
+      ? {
+        confirmed: {
+          identity: confirmed.identity,
+          releasedAt: confirmed.releasedAt,
+        },
+      }
+      : {}),
   };
 }
 
@@ -14963,6 +15003,29 @@ export function setPieceReconciliation(
   );
 }
 
+/**
+ * `recorded`, keeping the confirmation `stored` carries where that confirms
+ * the source the piece runs (`running`) at a later release time than
+ * `recorded` does, or where `recorded` confirms nothing. Another runtime can
+ * confirm the running source at a later release while an attempt is under
+ * way, and an attempt that failed, or found nothing to adopt, has learned
+ * nothing that moves that time back. An accepted transition clears the record
+ * it supersedes, so nothing is carried past one.
+ */
+export function keepLaterConfirmation(
+  stored: PieceReconciliation | undefined,
+  recorded: PieceReconciliation,
+  running: string | undefined,
+): PieceReconciliation {
+  const kept = stored?.confirmed;
+  if (kept === undefined || kept.identity !== running) return recorded;
+  const own = recorded.confirmed;
+  return own === undefined ||
+      (own.identity === kept.identity && own.releasedAt < kept.releasedAt)
+    ? { ...recorded, confirmed: kept }
+    : recorded;
+}
+
 /** Whether two recorded outcomes say the same thing, ignoring when. */
 export function samePieceReconciliation(
   left: PieceReconciliation | undefined,
@@ -14971,6 +15034,8 @@ export function samePieceReconciliation(
   if (left === undefined || right === undefined) return left === right;
   return left.outcome === right.outcome && left.origin === right.origin &&
     left.reason === right.reason && left.detail === right.detail &&
+    left.confirmed?.identity === right.confirmed?.identity &&
+    left.confirmed?.releasedAt === right.confirmed?.releasedAt &&
     (left.offered === undefined || right.offered === undefined
       ? left.offered === right.offered
       : patternIdentityKey(left.offered) === patternIdentityKey(right.offered));
@@ -15308,6 +15373,9 @@ export function applyPieceSourceTransition(
     ...(transition.selectedRevisionId === undefined
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
+    ...(transition.releasedAt === undefined
+      ? {}
+      : { releasedAt: transition.releasedAt }),
   });
   candidate.setMetaRaw(
     "patternSource",
