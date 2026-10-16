@@ -246,14 +246,15 @@ accepted, pins that candidate during confirmation, and revalidates source state
 and retained inputs. A changed review during confirmation is returned to the
 caller without automatically accepting it.
 
-A piece whose current pattern cannot be loaded is reported the same way: the
-candidate cannot be compared with what the piece ran, and that is the
-incompatibility. Under `--dangerously-allow-incompatible-schema` the piece
-adopts the origin's pattern and records the origin in one transition, and keeps
-the identity it displaced where its space retains no source for it. The stored
-argument is still checked against the candidate, which no flag waives, and a
-piece with recorded source history whose current source cannot be restored is
-still refused.
+Outside that exception, a piece whose current pattern cannot be loaded is
+reported the same way: the candidate cannot be compared with what the piece ran,
+and that is the incompatibility. A piece inside it is reviewed without that
+comparison, as an automatic update from the origin is. Under
+`--dangerously-allow-incompatible-schema` the piece adopts the origin's pattern
+and records the origin in one transition, and keeps the identity it displaced
+where its space retains no source for it. The stored argument is still checked
+against the candidate, which no flag waives, and a piece with recorded source
+history whose current source cannot be restored is still refused.
 
 A caller that decided to follow on the strength of what it inspected pins the
 follow to the source state it read, so a piece whose source changed in between

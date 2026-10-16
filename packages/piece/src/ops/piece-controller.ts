@@ -5443,6 +5443,11 @@ const TAKES_SOURCE_FROM_ORIGIN: ReadonlySet<PieceSourceRevision["operation"]> =
  *   source it runs is retained with `origin`'s file under the patterns route
  *   as its entry: a piece made from that file by a path that records no
  *   origin, and changed by nothing since.
+ *
+ * Either way the evidence is where the source came from, not which commit
+ * built it. A deployment whose patterns route served source its gate never
+ * judged is trusted for that source here, as the automatic update from the
+ * origin trusts every candidate the route serves.
  */
 async function showsSystemRelease(
   pieces: PiecesController,

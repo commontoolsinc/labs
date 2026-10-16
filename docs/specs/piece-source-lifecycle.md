@@ -872,7 +872,11 @@ a creation from it, an update from it, or a repoint to it. A piece made from the
 origin's file by a path that records no origin, whose source log is empty or
 holds only its creation revision, shows it by the entry of the source it runs,
 which is that file under the patterns route. A piece that shows neither has its
-schemas compared, as any manual replacement does. Either way the review
+schemas compared, as any manual replacement does. What a piece shows is where
+its source came from, not which commit built it, so the step trusts a
+deployment for what its patterns route served exactly as the automatic update
+does: a deployment serving source its gate never judged, a local one among
+them, is trusted the same. Either way the review
 validates the stored argument and the links it retains, and runs the CFC
 envelope merges the commit will make: those concern the piece's own data, which
 no release gate saw.
