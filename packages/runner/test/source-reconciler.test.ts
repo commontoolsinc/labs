@@ -15,11 +15,13 @@ import {
 } from "../src/builtins/wish.ts";
 import {
   type Cell,
+  type CommitError,
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
   getPatternSource,
   getPieceReconciliation,
   getPieceSourceRevisions,
+  type IExtendedStorageTransaction,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -38,6 +40,14 @@ const PARENT_PATH = "/api/patterns/system/reconcile-parent.tsx";
 const PARENT_SOURCE = systemPatternSource("system/reconcile-parent.tsx");
 const SOURCE_PATH = "/api/patterns/system/reconcile-target.tsx";
 const SYMBOL = "TrackedPattern";
+// The memory server's refusal of a message that stands for too much. The
+// commit error union does not list its name; the runner passes it through
+// unchanged (`toRejectedError` in storage/v2.ts), and so does this stand-in.
+const TOO_LARGE = {
+  name: "MessageTooLargeError",
+  message: "Memory message stands for more than 1000000 array slots " +
+    "and record members",
+} as unknown as CommitError;
 
 const parentSource = [
   `import { ${SYMBOL} } from "./reconcile-target.tsx";`,
@@ -202,52 +212,52 @@ describe("piece source reconciliation", () => {
   const refuseEveryFetch: RuntimeFetch = () =>
     Promise.reject(new Error("this origin must not be fetched"));
 
-  const TOO_LARGE = {
-    name: "MessageTooLargeError",
-    message: "Memory message stands for more than 1000000 array slots " +
-      "and record members",
-  };
+  /** Captures the observer the reconciler subscribes when the runtime is
+   * constructed, so a test can report a replacement itself. */
+  function captureSessionReplaced(): (space: MemorySpace) => void {
+    let observer: ((space: MemorySpace) => void) | undefined;
+    storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
+      observer = subscribed;
+      return () => {
+        observer = undefined;
+      };
+    };
+    return (space) => observer?.(space);
+  }
 
   /**
-   * Answers every adopting write with `refusal`, and lets every other
-   * write through. An adopting write is the one that sets up the candidate.
+   * Refuses, with `refusal`, every write that moves `piece` off the pattern it
+   * runs, and lets every other write through.
    */
-  function refuseAdoption(refusal: { name: string; message: string }) {
-    const adopting = new Set<unknown>();
-    const sentinel = new Error("adopting write refused by the test");
-    const setup = runtime.setup.bind(runtime);
-    const setupStub = stub(
-      runtime,
-      "setup",
-      ((tx: unknown, ...rest: unknown[]) => {
-        if (tx !== undefined) adopting.add(tx);
-        return (setup as (...args: unknown[]) => unknown)(tx, ...rest);
-      }) as typeof runtime.setup,
-    );
-    const edit = runtime.editWithRetry.bind(runtime);
-    const editStub = stub(
+  function refuseAdoption(piece: Cell<unknown>, refusal: CommitError) {
+    const running = getPatternIdentityRef(piece)?.identity;
+    const refused = new Error("the test refuses this adoption");
+    const write = runtime.editWithRetry.bind(runtime);
+    return stub(
       runtime,
       "editWithRetry",
-      (async (
-        fn: Parameters<typeof runtime.editWithRetry>[0],
-        ...rest: unknown[]
+      async <T>(
+        fn: (tx: IExtendedStorageTransaction) => T,
+        maxRetries?: number,
+        options?: Parameters<Runtime["editWithRetry"]>[2],
       ) => {
-        const result = await (edit as (...args: unknown[]) => Promise<
-          { ok?: unknown; error?: { reason?: unknown } }
-        >)((tx: Parameters<typeof fn>[0]) => {
-          const value = fn(tx);
-          if (adopting.has(tx)) throw sentinel;
-          return value;
-        }, ...rest);
-        return result.error?.reason === sentinel ? { error: refusal } : result;
-      }) as typeof runtime.editWithRetry,
-    );
-    return {
-      [Symbol.dispose]() {
-        editStub.restore();
-        setupStub.restore();
+        const result = await write(
+          (tx) => {
+            const value = fn(tx);
+            if (getPatternIdentityRef(piece.withTx(tx))?.identity !== running) {
+              throw refused;
+            }
+            return value;
+          },
+          maxRetries,
+          options,
+        );
+        return result.error !== undefined && "reason" in result.error &&
+            result.error.reason === refused
+          ? { error: refusal }
+          : result;
       },
-    };
+    );
   }
 
   describe("origins nothing follows", () => {
@@ -486,19 +496,6 @@ describe("piece source reconciliation", () => {
     });
 
     describe("when the space's memory session is replaced", () => {
-      /** Captures the observer the reconciler subscribes when the runtime is
-       * constructed, so a test can report a replacement itself. */
-      function captureSessionReplaced(): (space: MemorySpace) => void {
-        let observer: ((space: MemorySpace) => void) | undefined;
-        storageManager.subscribeSpaceSessionReplaced = (subscribed) => {
-          observer = subscribed;
-          return () => {
-            observer = undefined;
-          };
-        };
-        return (space) => observer?.(space);
-      }
-
       /** A running piece following the tracked pattern's system origin, current
        * at v1, with the route's advertised source switchable to v2. */
       async function followingPiece(record?: (url: URL) => void) {
@@ -963,19 +960,14 @@ describe("piece source reconciliation", () => {
       );
     });
 
-    describe("when the store refuses the adopting write for good", () => {
-      // A refusal on the data's own merits — a commit too large for the
-      // store to admit, say — answers the same however often the same write
-      // is sent, and preparing it means loading and restaging everything the
-      // piece holds. A piece opened on every change of its document would
-      // otherwise prepare it again for as long as anything watches the piece.
-      it("prepares the same adoption once, and answers again from what it learned", async () => {
+    describe("when the store refuses the adopting write as too large", () => {
+      it("returns unavailable again without preparing the same adoption a second time", async () => {
         const v2Identity = await identityFor(source("v2"));
         const piece = await preparePiece(
           servingFetch(() => v2Identity, () => source("v2")),
         );
         await stampSource(piece, PARENT_SOURCE);
-        using _refused = refuseAdoption(TOO_LARGE);
+        using _refused = refuseAdoption(piece, TOO_LARGE);
         using resolved = spy(runtime.harness, "resolve");
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
 
@@ -1006,7 +998,7 @@ describe("piece source reconciliation", () => {
         await stampSource(piece, PARENT_SOURCE);
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
         {
-          using _refused = refuseAdoption(TOO_LARGE);
+          using _refused = refuseAdoption(piece, TOO_LARGE);
           expect(await reconcile(piece)).toBe("unavailable");
         }
 
@@ -1018,7 +1010,9 @@ describe("piece source reconciliation", () => {
         expect(getPatternIdentityRef(piece)?.identity).toBe(advertised);
       });
 
-      it("prepares the adoption again after a refusal another attempt can change", async () => {
+      it("prepares the adoption again after a refusal that is not about its size", async () => {
+        // A policy refusal is lifted by a grant, and the next open is what
+        // picks that up.
         const v2Identity = await identityFor(source("v2"));
         const piece = await preparePiece(
           servingFetch(() => v2Identity, () => source("v2")),
@@ -1026,13 +1020,54 @@ describe("piece source reconciliation", () => {
         await stampSource(piece, PARENT_SOURCE);
         using prepared = spy(runtime.runner, "syncStoredPieceCells");
         {
-          using _refused = refuseAdoption({
-            name: "StorageTransactionInconsistent",
-            message: "the transaction read state that has since moved",
+          using _refused = refuseAdoption(piece, {
+            name: "CfcCommitRefusalError",
+            message: "the write would carry data where policy forbids it",
+            reasons: ["the write would carry data where policy forbids it"],
+            refusals: [],
           });
           expect(await reconcile(piece)).toBe("unavailable");
         }
 
+        expect(await reconcile(piece)).toBe("updated");
+
+        expect(prepared.calls).toHaveLength(2);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+      });
+
+      it("prepares the adoption again once the space's memory session is replaced", async () => {
+        const replace = captureSessionReplaced();
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        {
+          using _refused = refuseAdoption(piece, TOO_LARGE);
+          expect(await reconcile(piece)).toBe("unavailable");
+        }
+
+        replace(piece.space);
+        await runtime.sourceReconciler.idle();
+
+        expect(prepared.calls).toHaveLength(2);
+        expect(getPatternIdentityRef(piece)?.identity).toBe(v2Identity);
+      });
+
+      it("prepares the adoption again once the piece stopped", async () => {
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        {
+          using _refused = refuseAdoption(piece, TOO_LARGE);
+          expect(await reconcile(piece)).toBe("unavailable");
+        }
+
+        runtime.sourceReconciler.unwatch(piece);
         expect(await reconcile(piece)).toBe("updated");
 
         expect(prepared.calls).toHaveLength(2);
@@ -1178,7 +1213,7 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(upstreamRef);
     });
 
-    it("prepares an adoption the store refused for good only once", async () => {
+    it("prepares an adoption the store refused as too large only once", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const upstream = await compileMarkerPattern("v2");
       const upstreamPiece = runtime.getCell(
@@ -1190,13 +1225,16 @@ describe("piece source reconciliation", () => {
         piece,
         `cf:/${piece.space}/${upstreamPiece.getAsNormalizedFullLink().id}`,
       );
-      using _refused = refuseAdoption(TOO_LARGE);
+      using _refused = refuseAdoption(piece, TOO_LARGE);
       using prepared = spy(runtime.runner, "syncStoredPieceCells");
 
       expect(await reconcile(piece)).toBe("unavailable");
       expect(await reconcile(piece)).toBe("unavailable");
 
       expect(prepared.calls).toHaveLength(1);
+      expect(getPatternIdentityRef(piece)?.identity).toBe(
+        await identityFor(source("v1")),
+      );
       expect(getPieceReconciliation(piece)?.detail).toBe(TOO_LARGE.message);
     });
 
