@@ -281,6 +281,9 @@ describe("runtime-sizes", () => {
         "[sizes-diag refusal]",
         JSON.stringify({
           seen,
+          sourceValue: runtime.getCell(space, "source").getRaw(),
+          targetValue: runtime.getCell(space, "target").getRaw(),
+          storage: runtime.getSizes().storage,
           targetCfc: runtime.getCell(space, "target").getMetaRaw(cfcMeta),
           sourceCfc: runtime.getCell(space, "source").getMetaRaw(cfcMeta),
           sourceSchema: runtime.getCell(space, "source").getMetaRaw("schema"),
@@ -339,9 +342,25 @@ describe("runtime-sizes", () => {
       });
       seed.prepareCfc();
       expect((await seed.commit().settled).error).toBeUndefined();
+      const beforeSync = {
+        value: runtime.getCell(space, "wish").getRaw(),
+        cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
+      };
       // The crash needs the stored envelope the seed wrote, which the replica
       // holds only once the document's load has completed.
       await runtime.storageManager.synced();
+      console.error(
+        "[sizes-diag crash-seed]",
+        JSON.stringify({
+          beforeSync,
+          afterSync: {
+            value: runtime.getCell(space, "wish").getRaw(),
+            cfc: runtime.getCell(space, "wish").getMetaRaw(cfcMeta),
+          },
+          storage: runtime.getSizes().storage,
+          deno: Deno.version,
+        }),
+      );
 
       const tx = runtime.edit();
       const resolved = runtime.getCell(space, "wish-resolved", profile, tx);
