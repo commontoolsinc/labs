@@ -40,13 +40,18 @@ import type {
 } from "../src/contracts/transcript.ts";
 import type { HarnessModelUsage } from "../src/model/client.ts";
 import { readHarnessModelUsage } from "../src/model/usage.ts";
+import { namedPieceAddress } from "../src/piece-url.ts";
 
 /** A named piece a completed console turn made openable. */
 export interface ConsoleTurnResultPiece {
   /** Slug returned by `assign_slug`. */
   slug: string;
 
-  /** Openable URL returned beside the slug. */
+  /**
+   * Openable URL: the one returned beside the slug, or, for a space configured
+   * by DID, whose model-facing output carries none, the console's own address
+   * for the slug (`namedPieceAddress`).
+   */
   url: string;
 
   /** Verified composition membership for the same held token. No cell address. */
@@ -73,7 +78,11 @@ export type ConsoleTurnResult = HarnessTaskOutcome & {
   /** Successful named-piece outputs, in transcript order. */
   pieces: readonly ConsoleTurnResultPiece[];
 
-  /** The space this console is configured against. */
+  /**
+   * The space this console is configured against, as it was configured: its
+   * name, or the DID of a space created with a random key. A surface holding a
+   * piece of this result addresses it as `pattern:<spaceName>/<slug>`.
+   */
   spaceName: string;
 
   /** Human-readable answer, question, or reason the task cannot proceed. */
@@ -131,8 +140,11 @@ export interface ReadConsoleTurnResultOptions {
   /** Turn identifier, which is also the run artifact directory name. */
   turnId: string;
 
-  /** Space this console is configured against. */
+  /** Space this console is configured against: a name, or a DID. */
   spaceName: string;
+
+  /** Fabric API URL this console's session runs against. */
+  fabricApiUrl: string;
 
   /** Durable turn timestamps; absent when only legacy run artifacts are held. */
   timing?: Pick<HarnessChatTurnStatus, "startedAt" | "endedAt">;
@@ -367,6 +379,7 @@ const readTurnRunArtifacts = async (
 /** Copies the openable fields from one successful `assign_slug` output. */
 const pieceFromAssignSlug = (
   message: HarnessTranscriptMessage,
+  options: Pick<ReadConsoleTurnResultOptions, "fabricApiUrl" | "spaceName">,
 ): ConsoleTurnResultPiece | undefined => {
   if (message.role !== "tool" || message.toolName !== "assign_slug") {
     return undefined;
@@ -380,14 +393,19 @@ const pieceFromAssignSlug = (
   if (
     !isObjectOrArray(output) ||
     !("status" in output) || output.status !== "ok" ||
-    !("slug" in output) || typeof output.slug !== "string" ||
-    !("url" in output) || typeof output.url !== "string"
+    !("slug" in output) || typeof output.slug !== "string"
   ) {
     return undefined;
   }
-  // These two fields are copied from the model-facing `assign_slug` output.
-  // No new data crosses the console boundary and no URL is reconstructed.
-  return { slug: output.slug, url: output.url };
+  // The slug and URL are the model-facing `assign_slug` output's. A space
+  // configured by DID gives the model no URL, since its address carries the
+  // DID; the person is shown the address this console's own fabric and space
+  // compose, which is what the URL would have been. Nothing crosses the
+  // console boundary that the result does not already carry.
+  const url = "url" in output && typeof output.url === "string"
+    ? output.url
+    : namedPieceAddress(options.fabricApiUrl, options.spaceName, output.slug);
+  return url === undefined ? undefined : { slug: output.slug, url };
 };
 
 /**
@@ -465,7 +483,7 @@ export const readConsoleTurnResult = async (
       ) {
         return [];
       }
-      const piece = pieceFromAssignSlug(message);
+      const piece = pieceFromAssignSlug(message, options);
       if (piece === undefined) return [];
       const args = callArguments(calls, index, message);
       const coverage = typeof args?.token === "string"

@@ -2756,13 +2756,14 @@ The URL is the session's API URL, the space, and the slug — the address
 `cf piece new` prints — and it appears only when `--fabric-space` names the
 space. A space configured as a `did:key` has no URL that is not built from that
 DID, and a bare fabric identifier does not cross the model boundary, so the
-model-facing output carries the slug alone rather than a fabricated link. The
-prompt loop strips `pieceId` and records that omission. Nothing in the remaining
-output is swapped for a handle token, because nothing in it is a fabric
-reference: the slug is the model's own word and the URL is the operator's API
-URL and space name. Its error `message`, which can carry a DID from an
-authorization failure, is scrubbed for bare fabric identifiers like the other
-free-text fields. Compiler diagnostics come back as
+model-facing output carries the slug alone rather than a fabricated link; a
+console still shows its person that address, composed from its own
+configuration. The prompt loop strips `pieceId` and records that omission.
+Nothing in the remaining output is swapped for a handle token, because nothing
+in it is a fabric reference: the slug is the model's own word and the URL is the
+operator's API URL and space name. Its error `message`, which can carry a DID
+from an authorization failure, is scrubbed for bare fabric identifiers like the
+other free-text fields. Compiler diagnostics come back as
 `{ status: "compile-error", message }` so the model can iterate on the source;
 bare fabric identifiers a diagnostic can embed (compiler-generated `fid1:`
 module roots, DIDs, `data:` URIs) are replaced with a `[fabric-id]` placeholder

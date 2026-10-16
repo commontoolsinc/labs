@@ -196,7 +196,7 @@ the toolshed's CFC posture to match what this checkout documents.
 | `CF_HARNESS_CONSOLE_DIR`         | Any absolute directory unique to this console. It holds sessions, runs, and the workspace.     |
 | `CF_HARNESS_FABRIC_API_URL`      | The toolshed API URL from above.                                                               |
 | `CF_HARNESS_FABRIC_IDENTITY`     | The absolute path to the keyfile from prerequisite 3.                                          |
-| `CF_HARNESS_FABRIC_SPACE`        | A space name. A new name is fine; a `did:key` is refused.                                      |
+| `CF_HARNESS_FABRIC_SPACE`        | The DID `cf space create` printed, or the name of a legacy space.                              |
 | `MEMORY_DIR`                     | The toolshed's store directory from above, as a plain path.                                    |
 | `CF_HARNESS_PATTERN_INDEX_URL`   | Optional: `https://us-central1-pattern-index.cloudfunctions.net`, once prerequisite 5 is done. |
 | `CF_HARNESS_SKILLS_REGISTRY_URL` | Optional: `https://skills.sh`, which adds a metadata-only `search_skills` tool.                |
@@ -207,13 +207,19 @@ export CF_HARNESS_CONSOLE_PORT=<free-console-port>
 export CF_HARNESS_CONSOLE_DIR=<absolute-unique-console-directory>
 export CF_HARNESS_FABRIC_API_URL=<toolshed-api-url>
 export CF_HARNESS_FABRIC_IDENTITY=<absolute-path-to-identity-keyfile>
-export CF_HARNESS_FABRIC_SPACE=<space-name>
+export CF_HARNESS_FABRIC_SPACE="$(deno task cf space create --quiet \
+  --api-url "$CF_HARNESS_FABRIC_API_URL" \
+  --identity "$CF_HARNESS_FABRIC_IDENTITY" --label "cf-harness console")"
 export CF_HARNESS_FABRIC_CFC_POSTURE=max-enforcement
 export CF_HARNESS_FABRIC_CFC_FLOW_LABELS=persist
 export CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE=enforce-strict
 export MEMORY_DIR=<absolute-toolshed-cache-directory>
 deno task console
 ```
+
+`cf space create` prints the new space's DID, which the console takes as its
+space. Create it once and keep the DID: each run of `cf space create` makes
+another space, and a name reaches only a legacy space that already exists.
 
 The three CFC exports are the console's defaults, written out so the posture a
 run ran under is never a guess. Success is a startup summary naming the space,
@@ -289,7 +295,7 @@ Two things the first turn does that are not faults:
 - The server log prints
   `fabric grants unavailable for this turn: Error: space
   has no default pattern to anchor the piece registry`
-  on a space with no default pattern, which a new name always is. The turn
+  on a space with no default pattern, which a new space always is. The turn
   continues without the grants that let a task explore what the space already
   holds.
 - The Runs column fills in at the first completed tool call. Press its

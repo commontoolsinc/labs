@@ -2036,19 +2036,21 @@ export class CfHarnessEngine {
       );
     }
     const session = await this.#fabricSessionFactory();
+    const space = session.pieces.getSpace();
     const minted = await mintInputCellHandles(
       this.handleTable,
       this.#runState.runId,
       this.#inputCells,
-      session.pieces.getSpace(),
+      space,
       {
-        // The space by NAME, which is the vocabulary a named address speaks;
-        // the mint checks references against the DID beside it. A space
-        // configured by `did:key` has no name, and an address naming a space
-        // is then refused rather than assumed to mean this one.
-        ...(session.pieces.getSpaceName() !== undefined
-          ? { spaceName: session.pieces.getSpaceName() }
-          : {}),
+        // The space as a named address spells it: by NAME for a space
+        // configured by name, and by DID for one created with a random key,
+        // which has no name — the spelling a console reports its space in, so
+        // a surface's `pattern:<space>/<slug>` comes back as it was handed
+        // out. A name never matches a DID: an address spelling this space
+        // another way than it was configured is refused rather than assumed
+        // to mean it. The mint checks references against the DID beside it.
+        spaceName: session.pieces.getSpaceName() ?? space,
         resolvePiece: (slug) => resolvePieceAddress(session.pieces, slug),
         foreignSpaces: session.foreignSpaces,
       },

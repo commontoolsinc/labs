@@ -142,6 +142,7 @@ describe("task-outcomes", () => {
             sessionId: "conversation",
             continuable: true,
             spaceName: "empty-space",
+            fabricApiUrl: "http://localhost:8000",
           }),
         ).toEqual({
           ...taskOutcome,
@@ -566,6 +567,7 @@ describe("task-outcomes", () => {
           sessionId: started.sessionId,
           continuable: true,
           spaceName: "empty-space",
+          fabricApiUrl: "http://localhost:8000",
         }),
       ).toMatchObject({ outcome: "completed", answer, actions });
     } finally {

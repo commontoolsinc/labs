@@ -72,6 +72,7 @@ describe("console/turn-result", () => {
           sessionId: "conversation",
           continuable: true,
           spaceName: "usage-test",
+          fabricApiUrl: "http://localhost:8000",
           timing: {
             startedAt: "2026-09-21T00:00:00Z",
             endedAt: "2026-09-21T00:00:03.250Z",
@@ -110,6 +111,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",
@@ -191,6 +193,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "coverage",
         spaceName: "space",
+        fabricApiUrl: "http://localhost:8000",
       });
       expect(result?.pieces).toEqual([{
         slug: "clock",
@@ -215,6 +218,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "later-duplicates",
         spaceName: "space",
+        fabricApiUrl: "http://localhost:8000",
       });
       expect(laterDuplicates?.pieces).toEqual(result?.pieces);
       transcript.splice(5);
@@ -230,6 +234,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "independent",
         spaceName: "space",
+        fabricApiUrl: "http://localhost:8000",
       });
       expect(independent?.pieces).toEqual([{
         slug: "clock",
@@ -373,6 +378,7 @@ describe("console/turn-result", () => {
           artifactRoot,
           turnId: name,
           spaceName: "space",
+          fabricApiUrl: "http://localhost:8000",
         });
         expect(result?.pieces, name).toEqual([{
           slug: named.slug,
@@ -440,6 +446,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "turn-looms",
         spaceName: "test-space",
+        fabricApiUrl: "http://localhost:8000",
         originLoomId: "loom-2222222222222222",
       });
       expect(result?.looms).toEqual([{
@@ -449,6 +456,59 @@ describe("console/turn-result", () => {
       }]);
       expect(result?.originLoomId).toBe("loom-2222222222222222");
       expect(result?.pieces).toEqual([]);
+    } finally {
+      await Deno.remove(artifactRoot, { recursive: true });
+    }
+  });
+
+  it("returns a piece the model was told of by slug alone at the console's own address for it", async () => {
+    // A space created with a random key has only its DID, which the model
+    // is never shown, so `assign_slug` told it the slug and no URL. The
+    // result is the person's, and composes the link from the console's
+    // fabric and space; an unsuccessful naming is still no piece.
+    const space = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+    const artifactRoot = await Deno.makeTempDir({
+      prefix: "cf-harness-console-result-",
+    });
+    try {
+      await writeTranscript(artifactRoot, "turn-in-created-space", [
+        { role: "user", content: "build a reading list" },
+        {
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "assign_slug",
+          content: JSON.stringify({
+            outputId: "run:assign_slug:1",
+            status: "ok",
+            slug: "reading-list",
+          }),
+        },
+        {
+          role: "tool",
+          toolCallId: "call-2",
+          toolName: "assign_slug",
+          content: JSON.stringify({
+            outputId: "run:assign_slug:2",
+            status: "error",
+            message: "assign_slug cannot confirm a UI on this piece.",
+          }),
+        },
+        { role: "assistant", content: "Your reading list is ready." },
+      ]);
+
+      const result = await readConsoleTurnResult({
+        sessionId: "session",
+        continuable: true,
+        artifactRoot,
+        turnId: "turn-in-created-space",
+        spaceName: space,
+        fabricApiUrl: "http://localhost:8000/",
+      });
+      expect(result?.pieces).toEqual([{
+        slug: "reading-list",
+        url: `http://localhost:8000/${space}/reading-list`,
+      }]);
+      expect(result?.spaceName).toBe(space);
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
     }
@@ -481,6 +541,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "turn-with-piece",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",
@@ -523,6 +584,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "turn-without-piece",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",
@@ -570,6 +632,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "turn-with-referent",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       });
 
       expect(result?.finalText).toBe(`Found it at ${token}; not cfh:v:zzzzz.`);
@@ -616,6 +679,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "turn-with-unfit-referent",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       });
 
       expect(result?.finalText).toBe(`Found it at ${token}.`);
@@ -653,6 +717,7 @@ describe("console/turn-result", () => {
           artifactRoot,
           turnId,
           spaceName: "console-test",
+          fabricApiUrl: "http://localhost:8000",
         });
 
       expect(await read("turn-with-bad-table")).toBeUndefined();
@@ -695,6 +760,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "follow-up-turn",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",
@@ -730,6 +796,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",
@@ -773,6 +840,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toBeUndefined();
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
@@ -808,6 +876,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toBeUndefined();
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
@@ -825,6 +894,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId: "../another-run",
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toBeUndefined();
 
       const turnId = "turn-with-malformed-transcript";
@@ -842,6 +912,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toBeUndefined();
     } finally {
       await Deno.remove(artifactRoot, { recursive: true });
@@ -877,6 +948,7 @@ describe("console/turn-result", () => {
         artifactRoot,
         turnId,
         spaceName: "console-test",
+        fabricApiUrl: "http://localhost:8000",
       })).resolves.toEqual({
         outcome: "completed",
         sessionId: "session",

@@ -131,9 +131,10 @@ export const parseNamedPieceAddress = (
  * another one is a mistake to report. Foreign attachments need a reference
  * carrying an operator-admitted DID.
  *
- * `spaceName` is the space's NAME, which is what an address carries; the
- * `MemorySpace` a mint checks a reference against is its DID, and the two are
- * never compared to each other.
+ * `spaceName` is the space as an address spells it: its NAME, or, for a space
+ * created with a random key, which has no name, its DID. A name never matches
+ * a DID, even the one it derives: the `MemorySpace` a mint checks a reference
+ * against is the DID, and is never compared to a name.
  *
  * @throws Error naming both spaces.
  */
@@ -270,7 +271,10 @@ export interface InputCellSessionResolution {
   /** Operator admission snapshot from the Fabric session. */
   foreignSpaces?: HarnessForeignSpaces;
 
-  /** The session's space, by name. */
+  /**
+   * The session's space as a named address spells it: its name, or the DID of
+   * a space created with a random key.
+   */
   spaceName?: string;
 
   /**
@@ -312,8 +316,8 @@ const resolvedInputCellRef = async (
   // this side cannot check the name of is one the address cannot be
   // honoured against: the same slug in another space is a different piece,
   // and answering with this space's would hand back a cell nobody asked
-  // for. A space configured by `did:key` has no name, which is exactly
-  // when this fires.
+  // for. A session always spells its space, by name or by DID, so this
+  // fires for a resolution that was handed none.
   if (address.spaceName !== undefined && session.spaceName === undefined) {
     throw new Error(
       `--input-cell \`${spec.name}\` names space \`${address.spaceName}\`, and this session's space has no name to check that against; name the space, or attach the piece by reference`,

@@ -67,10 +67,12 @@ shared host, a tailnet with an access policy — and not behind a public address
 - **An identity keyfile.** A PKCS#8 key on this host, the same one the `cf` CLI
   uses. The fabric session loads it to sign with, and the pattern index signs
   its requests with the same identity.
-- **A space named by name.** `assign_slug` composes the URL a person opens from
-  the API URL and the space's name, and offers no URL at all for a space named
-  by `did:key`. The server refuses a `did:` space at startup rather than
-  finishing a run with no link to show.
+- **A space.** Either the DID of a space created with `cf space create`, or the
+  name of a legacy space. The console names its pieces in it, and shows a person
+  each one at the API URL, then the space as configured, then the slug: the
+  address the shell opens. A space configured by `did:key` gives the model the
+  slug alone, since its address carries the DID, so the console composes that
+  address itself.
 - **A connected model provider.** The provider preference lives in
   `$CF_HARNESS_HOME/config.json` and its credentials in
   `$CF_HARNESS_HOME/auth.json`, both written by `cf-harness config set` and
@@ -609,7 +611,9 @@ receipts, replay flags, and current versions, and is empty when the run composed
 none. Optional `originLoomId` is the turn's submitted origin. Enable the tools
 with `--loom-authoring-config` or `CF_HARNESS_LOOM_AUTHORING_CONFIG`; the
 complete contract is [Durable Loom authoring](../docs/LOOM_AUTHORING.md). Each
-entry copies `slug` and `url` from the successful `assign_slug` observation.
+entry copies `slug` and `url` from the successful `assign_slug` observation; in
+a space configured by DID, whose observation carries no `url`, the entry's `url`
+is the address this console composes from its API URL, its space, and the slug.
 When that same held token also appeared in a verified successful composition,
 optional `loomComponents: [{loomId, componentId}]` identifies its saved
 membership. The correlation uses unique matching current-turn tool calls and
@@ -619,7 +623,8 @@ pair in a freshly opened manifest. Weaver also retains a legacy exact-reference
 membership check; absent either proof it keeps ordinary placement. Different
 tokens for the same Pattern are not inferred equivalent. No cell address or
 token is added to the result. `spaceName` identifies this console's configured
-space.
+space as it was configured: a name, or a DID. A client addresses a piece of the
+result as `pattern:<spaceName>/<slug>`, which an input cell accepts back.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:

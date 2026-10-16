@@ -65,7 +65,6 @@ import {
   patternIndexFailure,
   patternIndexSearchRequest,
 } from "@commonfabric/pattern-index/front";
-import { isDID } from "@commonfabric/identity/did";
 import {
   dirname,
   extname,
@@ -398,8 +397,10 @@ const callPatternIndex = (
  *
  * A reference may also be a piece's NAME — `pattern:<space>/<slug>`, or a bare
  * slug meaning this console's own space — which is what a surface showing a
- * rendered piece holds. `spaceName` is this console's space, and an address
- * naming another one is refused here: the caller cannot see which space this
+ * rendered piece holds. `spaceName` is this console's space as it was
+ * configured — a name, or the DID of a space created with a random key, which
+ * is how the console's results name it — and an address naming another one is
+ * refused here: the caller cannot see which space this
  * console runs against, so a mismatch is this side's to explain. Whether the
  * space holds the slug is the turn's to find out, like every other reference
  * that parses and may still not mint.
@@ -820,11 +821,6 @@ export const resolveConsoleConfig = async (
   if (identityKeyPath === undefined || space === undefined) {
     throw new Error(
       "a fabric session is required: set --fabric-identity/CF_HARNESS_FABRIC_IDENTITY and --fabric-space/CF_HARNESS_FABRIC_SPACE",
-    );
-  }
-  if (isDID(space)) {
-    throw new Error(
-      `--fabric-space must be a space name rather than a DID: assign_slug composes a URL from the name, and offers none for ${space}`,
     );
   }
   const posture = flag("fabric-cfc-posture") ??
@@ -1722,6 +1718,7 @@ export class ConsoleServer {
       artifactRoot: session?.artifactRoot ?? this.#config.artifactRoot,
       turnId,
       spaceName: this.#config.fabricSession.space,
+      fabricApiUrl: this.#config.fabricSession.apiUrl,
       timing: turn?.turn,
       display: await this.#display(),
     });

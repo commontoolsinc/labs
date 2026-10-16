@@ -204,6 +204,7 @@ describe("piece-output", () => {
           sessionId: "conversation",
           continuable: true,
           spaceName: fabricSession.space,
+          fabricApiUrl: "http://localhost:8000",
         }),
       ).toMatchObject({
         outcome: "completed",

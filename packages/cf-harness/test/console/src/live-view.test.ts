@@ -18,6 +18,7 @@ import {
   stepWithheldAnything,
 } from "../../../console/src/live-view.ts";
 import "../../../console/src/live.ts";
+import { urlToAppView } from "@commonfabric/navigation";
 import { readConsoleRun } from "../../../console/run-store.ts";
 import type { ConsoleRunDetail } from "../../../console/run-store.ts";
 import type {
@@ -642,6 +643,22 @@ describe("console/src/live-view", () => {
         "my space",
         "http://localhost:9901/pattern-pane",
       )).toBe("http://localhost:9901/pattern-pane/my%20space/reading%20list");
+    });
+
+    it("returns a space created by DID as the DID the shell reads", () => {
+      // Escaping the DID's colons would hand the shell a segment it reads as
+      // a space NAME, which derives a different space.
+      const space = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+      const href = consoleLivePieceHref(
+        { slug: "reading-list", url: "http://localhost:8000/x/y" },
+        space,
+        "http://localhost:9901/pattern-pane",
+      );
+      expect(href).toBe(
+        `http://localhost:9901/pattern-pane/${space}/reading-list`,
+      );
+      expect(urlToAppView(new URL(`http://shell.test/${space}/reading-list`)))
+        .toEqual({ spaceDid: space, pieceSlug: "reading-list" });
     });
 
     it("returns the recorded address for a result naming no space", () => {

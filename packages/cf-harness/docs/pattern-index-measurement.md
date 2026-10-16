@@ -122,8 +122,7 @@ deno task console
 ```
 
 [The console README](../console/README.md) covers the rest of its prerequisites
-— a local toolshed, a sandbox runtime, a connected model provider, and a space
-named by name rather than by `did:key`.
+— a local toolshed, a sandbox runtime, a connected model provider, and a space.
 
 Then, in another shell, run the suite:
 

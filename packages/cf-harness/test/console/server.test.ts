@@ -4,6 +4,7 @@ import { fromFileUrl, join, resolve, toFileUrl } from "@std/path";
 import { PatternIndexClient } from "@commonfabric/pattern-index/client";
 import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
+import { urlToAppView } from "@commonfabric/navigation";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   consoleDataDirectories,
@@ -182,6 +183,10 @@ const config = () =>
     {},
     "/console",
   );
+
+/** A space created with a random key, which only its DID addresses. */
+const CREATED_SPACE =
+  "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
 /** The same configuration, allowing a task to declare a browser host. */
 const configWithBrowserHost = () =>
@@ -1940,6 +1945,84 @@ describe("console/server", () => {
       }
     });
 
+    it("returns a piece in a space created by DID at the address the shell opens", async () => {
+      // A space created with a random key is addressed by its DID alone, so
+      // the model is told the slug and no URL. The person still needs the
+      // link: the result composes it from the console's own fabric and
+      // space, in the spelling the shell reads back as that space's DID.
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-result-created-space-",
+      });
+      try {
+        const resultConfig = await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            CREATED_SPACE,
+            "--fabric-api-url",
+            "http://localhost:8000",
+            "--session-db",
+            "none",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        );
+        const resultServer = new ConsoleServer(
+          resultConfig,
+          (onEvent) =>
+            new HarnessInteractiveChatService({
+              createPromptLoop: answeringLoop,
+              onEvent,
+            }),
+        );
+        const page = await resultServer.handle(getRequest("/"));
+        await page.body?.cancel();
+        const startedResponse = await resultServer.handle(
+          jsonRequest("/api/task", { text: "track my books" }, {}),
+        );
+        const started = await startedResponse.json();
+        await resultServer.service.waitForTurn(
+          started.sessionId,
+          started.turnId,
+        );
+        await writeTurnTranscript(artifactRoot, started.turnId, [
+          {
+            role: "tool",
+            toolCallId: "call-1",
+            toolName: "assign_slug",
+            content: JSON.stringify({
+              outputId: "run:assign_slug:1",
+              status: "ok",
+              slug: "reading-list",
+            }),
+          },
+          { role: "assistant", content: "built it" },
+        ]);
+
+        const response = await resultServer.handle(getRequest(
+          `/api/turns/${started.turnId}/result`,
+          {},
+        ));
+
+        expect(response.status).toBe(200);
+        const result = await response.json();
+        expect(result.spaceName).toBe(CREATED_SPACE);
+        expect(result.pieces).toEqual([{
+          slug: "reading-list",
+          url: `http://localhost:8000/${CREATED_SPACE}/reading-list`,
+        }]);
+        expect(urlToAppView(new URL(result.pieces[0].url))).toEqual({
+          spaceDid: CREATED_SPACE,
+          pieceSlug: "reading-list",
+        });
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
     it("returns a completed turn after its session is restored", async () => {
       const artifactRoot = await Deno.makeTempDir({
         prefix: "cf-harness-console-result-restored-",
@@ -3138,6 +3221,15 @@ describe("console/server", () => {
           CF_HARNESS_MODEL: "gpt-5.6-sol",
         }, "/console")).model,
       ).toBe("gpt-6-luna");
+    });
+
+    it("returns a space named by DID as it is", async () => {
+      const resolved = await resolveConsoleConfig(
+        ["--fabric-identity", "k", "--fabric-space", CREATED_SPACE],
+        {},
+        "/console",
+      );
+      expect(resolved.fabricSession.space).toBe(CREATED_SPACE);
     });
 
     it("throws naming both ways to supply a fabric session when neither is given", async () => {
