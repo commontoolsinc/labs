@@ -418,7 +418,7 @@ describe("FabriChat flat manager sends", () => {
   });
 
   it("offers a room to a member added through a root-private manager's discovered flat bindings", async () => {
-    const { space, offers, acl } = await addBob(true);
+    const { space, offers, addRequests, acl } = await addBob(true);
 
     expect(acl).toMatchObject({ [BOB]: "OWNER" });
     expect(offers).toHaveLength(1);
@@ -428,19 +428,14 @@ describe("FabriChat flat manager sends", () => {
       room: { "/": { "link@1": { space } } },
     });
 
-    // The picker's list of the people `candidates` reads from the manager
-    // lands in the viewer's own session documents, which may hold the
-    // viewer's personal data (§8.12.4), so rendering it refuses nothing.
-    // Root-private setup refuses the `outcomes` that merge the manager's
-    // verdicts into `addRequests`: the labeled link each verdict makes finds
-    // no source metadata. This add guard bounds that known debt and permits
-    // no other refusal.
-    const isOutcomes = ({ reasons }: Refusal) =>
-      reasons.length === 1 &&
-      /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
-        .test(reasons[0]);
-    for (const refusal of refusals) expect(refusal.terminal).toBe(true);
-    expect(refusals.filter((refusal) => !isOutcomes(refusal))).toEqual([]);
-    expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
+    // Everything the room stores of the manager's data lands in the viewer's
+    // own documents: the picker's list of the people `candidates` reads from
+    // the manager, in their session documents, and the `outcomes` that merge
+    // the manager's verdicts into `addRequests`, in their per-user ones. A
+    // user or session document may hold its own principal's personal data
+    // (§8.12.4), so the add refuses nothing and is listed as done, as it is
+    // through a public manager.
+    expect(addRequests).toEqual({ "add-bob": { status: "done" } });
+    expect(refusals).toEqual([]);
   });
 });
