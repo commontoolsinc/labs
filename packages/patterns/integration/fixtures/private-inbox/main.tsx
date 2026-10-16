@@ -262,7 +262,7 @@ const pointProfileAtIfUnset = handler<
 >((event, { profiles, inbox }) => {
   profiles.key(event.index).resolveAsCell().key("setInbox").send({
     inbox: inbox.get().piece?.resolveAsCell(),
-    ifUnset: true,
+    replacing: undefined,
   });
 });
 

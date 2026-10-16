@@ -43,7 +43,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "setAvatar"
                   ]
@@ -69,7 +69,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "setBio"
                   ]
@@ -94,7 +94,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "mutateElements"
                   ]
@@ -123,7 +123,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "mutateExternalProfileLinks"
                   ]
@@ -152,7 +152,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "setInbox"
                   ]
@@ -183,7 +183,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "setName"
                   ]
@@ -191,6 +191,31 @@
               }
             },
             "type": "string"
+          },
+          "picture": {
+            "ifc": {
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ],
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
+                  "path": [
+                    "setPicture"
+                  ]
+                }
+              }
+            },
+            "type": "FabricBytes"
           },
           "publishVerifiedIdentities": {
             "$ref": "#/$defs/MutateVerifiedIdentitiesEvent",
@@ -240,6 +265,12 @@
               "stream"
             ]
           },
+          "setPicture": {
+            "$ref": "#/$defs/SetProfilePictureEvent",
+            "asCell": [
+              "stream"
+            ]
+          },
           "toggleEditing": {
             "asCell": [
               "stream",
@@ -263,7 +294,7 @@
               "writeAuthorizedBy": {
                 "__ctWriterIdentityOf": {
                   "file": "/packages/patterns/system/profile-home.tsx",
-                  "moduleIdentity": "aTDIPmWK-M6yBoKk65iIWvuEWZv1zs1xozUmdoAABlQ",
+                  "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
                   "path": [
                     "publishVerifiedIdentities"
                   ]
@@ -484,10 +515,6 @@
       },
       "SetProfileInboxEvent": {
         "properties": {
-          "ifUnset": {
-            "description": "When true, the pointer is set only while the profile points at no inbox.",
-            "type": "boolean"
-          },
           "inbox": {
             "$ref": "#/$defs/ShareInboxPiece",
             "asCell": [
@@ -496,11 +523,18 @@
             "description": "The inbox piece to point at; absent clears the pointer."
           },
           "replacing": {
-            "$ref": "#/$defs/ShareInboxPiece",
-            "asCell": [
-              "cell"
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/ShareInboxPiece",
+                "asCell": [
+                  "cell"
+                ]
+              }
             ],
-            "description": "When present, the pointer is set only while the profile points at this\ninbox, by a comparison of links that reads only link shape."
+            "description": "What the profile is to point at for the write to happen. Left out, the\npointer is set whatever it holds. Present and `undefined`, it is set only\nwhile the profile points at no inbox. A link, it is set only while the\nprofile points at that inbox, by a comparison of links that reads only\nlink shape: a link to an inbox holding nothing is a link, and names it.\nAn event spelled `{ inbox, replacing: undefined }` is a conditional one."
           }
         },
         "type": "object"
@@ -528,6 +562,22 @@
               }
             },
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "SetProfilePictureEvent": {
+        "properties": {
+          "detail": {
+            "properties": {
+              "bytes": {
+                "type": "FabricBytes"
+              }
+            },
+            "type": "object"
+          },
+          "picture": {
+            "type": "FabricBytes"
           }
         },
         "type": "object"

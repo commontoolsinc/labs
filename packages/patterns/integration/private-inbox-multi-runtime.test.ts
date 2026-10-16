@@ -1000,7 +1000,7 @@ describe("private inbox across runtimes", () => {
     ).toEqual([]);
   });
 
-  it("writes a profile's pointer once when two runtimes of the owner's each send `ifUnset` at once, and both read the inbox it set", async () => {
+  it("writes a profile's pointer once when two runtimes of the owner's each point it only while unset, at once, and both read the inbox it set", async () => {
     // With server execution off, each runtime's own handler runs over its
     // replica. A handler that read the pointer unset after the other's commit
     // landed has its write refused as stale, and runs again over the pointer

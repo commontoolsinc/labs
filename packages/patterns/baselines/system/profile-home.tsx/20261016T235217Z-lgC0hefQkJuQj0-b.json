@@ -191,17 +191,20 @@
       },
       "SetProfileInboxEvent": {
         "properties": {
-          "ifUnset": {
-            "description": "When true, the pointer is set only while the profile points at no inbox.",
-            "type": "boolean"
-          },
           "inbox": {
             "$ref": "#/$defs/ShareInboxPiece",
             "description": "The inbox piece to point at; absent clears the pointer."
           },
           "replacing": {
-            "$ref": "#/$defs/ShareInboxPiece",
-            "description": "When present, the pointer is set only while the profile points at this\ninbox, by a comparison of links that reads only link shape."
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/ShareInboxPiece"
+              }
+            ],
+            "description": "What the profile is to point at for the write to happen. Left out, the\npointer is set whatever it holds. Present and `undefined`, it is set only\nwhile the profile points at no inbox. A link, it is set only while the\nprofile points at that inbox, by a comparison of links that reads only\nlink shape: a link to an inbox holding nothing is a link, and names it.\nAn event spelled `{ inbox, replacing: undefined }` is a conditional one."
           }
         },
         "type": "object"
@@ -307,7 +310,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "setAvatar"
               ]
@@ -333,7 +336,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "setBio"
               ]
@@ -358,7 +361,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "mutateElements"
               ]
@@ -387,7 +390,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "mutateExternalProfileLinks"
               ]
@@ -416,7 +419,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "setInbox"
               ]
@@ -447,7 +450,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "setName"
               ]
@@ -472,7 +475,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "setPicture"
               ]
@@ -558,7 +561,7 @@
           "writeAuthorizedBy": {
             "__ctWriterIdentityOf": {
               "file": "/packages/patterns/system/profile-home.tsx",
-              "moduleIdentity": "egdxLQi14M0_crtXGifuyihuIzKHW5ymbUHSMiOIGMg",
+              "moduleIdentity": "lw1a05f7cbp8YTQ2hMQ07oi8Fl7Wk5qMzOIPoLt2Ho8",
               "path": [
                 "publishVerifiedIdentities"
               ]
