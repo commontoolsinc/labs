@@ -435,7 +435,7 @@ export class ObjectFormatter implements TypeFormatter {
           propName,
           checker,
         );
-        attachOptionsPaths(generated as Record<string, unknown>, prop, checker);
+        attachOptionsPaths(generated as Record<string, unknown>, prop);
       }
       if (propName === "$UI") {
         const uiContract = getUiContractHint(context, propTypeNode);
@@ -561,9 +561,8 @@ export class ObjectFormatter implements TypeFormatter {
 function attachOptionsPaths(
   schema: Record<string, unknown>,
   prop: ts.Symbol,
-  checker: ts.TypeChecker,
 ): void {
-  const paths = symbolOptionsTag(prop, checker);
+  const paths = symbolOptionsTag(prop);
   if (paths !== undefined) schema["x-options"] = paths;
 }
 

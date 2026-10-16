@@ -94,10 +94,24 @@ function optionsAt(
   return labelRest === undefined ? { options } : { options, labels };
 }
 
-/** The schema keywords holding subschemas a property of an event sits under. */
-const SCHEMA_MAP_KEYS = ["properties", "$defs", "patternProperties"] as const;
+/** The schema keywords holding subschemas an annotated property can sit under. */
+const SCHEMA_MAP_KEYS = [
+  "properties",
+  "$defs",
+  "definitions",
+  "patternProperties",
+  "dependentSchemas",
+] as const;
 const SCHEMA_LIST_KEYS = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
-const SCHEMA_KEYS = ["items", "additionalProperties", "not"] as const;
+const SCHEMA_KEYS = [
+  "items",
+  "additionalProperties",
+  "contains",
+  "not",
+  "if",
+  "then",
+  "else",
+] as const;
 
 /** Every `x-options` annotation `schema` carries, at any depth. */
 function annotationsIn(schema: unknown, found: OptionsPaths[] = []) {

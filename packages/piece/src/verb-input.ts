@@ -310,7 +310,8 @@ interface ValueOutsideOptions {
 /**
  * The first value in `value` at a position whose schema names its options in
  * an `enum` and does not name that value, following the event's properties,
- * its array items and local references. A position under `anyOf` or `oneOf`
+ * its array items and tuple prefixes, the members of an `allOf`, and local
+ * references. A position under `anyOf` or `oneOf`
  * is passed over, as {@link firstUndeclaredEventField} passes it over, and the
  * validation that follows judges it.
  */
@@ -343,11 +344,29 @@ function firstValueOutsideOptions(
         : {}),
     };
   }
+  // A value has to satisfy every member of a conjunction, so a member's
+  // options bind it as the node's own do.
+  if (Array.isArray(node.allOf)) {
+    for (const member of node.allOf) {
+      const found = firstValueOutsideOptions(
+        value,
+        member as JSONSchema,
+        nodeRoot,
+        position,
+      );
+      if (found !== undefined) return found;
+    }
+  }
   if (Array.isArray(value)) {
+    const prefixItems = Array.isArray(node.prefixItems)
+      ? node.prefixItems as JSONSchema[]
+      : [];
     for (let index = 0; index < value.length; index++) {
       const found = firstValueOutsideOptions(
         value[index],
-        node.items as JSONSchema | undefined,
+        index < prefixItems.length
+          ? prefixItems[index]
+          : node.items as JSONSchema | undefined,
         nodeRoot,
         `${position}[${index}]`,
       );

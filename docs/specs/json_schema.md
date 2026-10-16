@@ -49,8 +49,8 @@ The authoritative field inventory is the `JSONSchema` type in
   `packages/piece/src/verb-call.ts`) resolves it against the piece's state
   into a plain `enum`, with each option's label at the same index of
   **`x-enum-labels`**, and keeps the annotation beside them; a state holding
-  no options leaves the property without an `enum`. Annotation-class in the
-  piece compat checker.
+  no options leaves the property as the pattern declared it. Annotation-class
+  in the piece compat checker.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### Streams are declarations, not views

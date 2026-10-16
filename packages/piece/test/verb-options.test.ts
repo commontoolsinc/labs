@@ -217,6 +217,27 @@ describe("verb options", () => {
       );
     });
 
+    it("judges a tuple's prefix positions by their own schemas, not the items'", () => {
+      const error = verbInputSchemaError(["head", "tail"], {
+        type: "array",
+        prefixItems: [{ type: "string" }],
+        items: { enum: ["tail"] },
+      });
+
+      expect(error).toBeUndefined();
+    });
+
+    it("names the options an allOf member gives a position", () => {
+      const error = verbInputSchemaError(
+        { ring: "keys" },
+        ringSchema({ allOf: [{ type: "string" }, { enum: ["drums"] }] }),
+      );
+
+      expect(error).toBe(
+        '"keys" at <event>.ring is not one of its options: "drums"',
+      );
+    });
+
     it("leaves an enum holding an object to the schema validation", () => {
       const error = verbInputSchemaError(
         { ring: { id: "keys" } },

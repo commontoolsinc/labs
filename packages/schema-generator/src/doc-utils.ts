@@ -168,18 +168,14 @@ export function symbolHasDeprecatedTag(
  */
 export function symbolOptionsTag(
   symbol: ts.Symbol | undefined,
-  checker: ts.TypeChecker,
 ): { value: string; label?: string } | undefined {
-  if (!symbol) return undefined;
-  const hasUserDecl = (symbol.declarations ?? []).some((d) =>
-    !d.getSourceFile().isDeclarationFile
-  );
-  if (!hasUserDecl) return undefined;
-  const tag = symbol.getJsDocTags(checker).find((tag) =>
-    tag.name === "options"
-  );
-  // @ts-ignore - displayPartsToString exists on the TS namespace
-  const text: string = ts.displayPartsToString(tag?.text ?? []);
+  // Read off the user's own declarations, so a declaration file merged into
+  // the symbol cannot name options for it.
+  const tag = (symbol?.declarations ?? [])
+    .filter((decl) => !decl.getSourceFile().isDeclarationFile)
+    .flatMap((decl) => [...ts.getJSDocTags(decl)])
+    .find((tag) => tag.tagName.text === "options");
+  const text = ts.getTextOfJSDocComment(tag?.comment) ?? "";
   const [value, label] = text.trim().split(/\s+/);
   if (!value) return undefined;
   return label ? { value, label } : { value };
