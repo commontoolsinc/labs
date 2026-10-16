@@ -2008,8 +2008,9 @@ function deriveTargetContracts(
 /**
  * Parse a supplied link and recover its producer's durable schema contract.
  * A metadata-less linked document is held to the prior argument contract on
- * a pattern update. Dynamic binding can explicitly accept an unproven source;
- * other supplied-link operations require the durable contract.
+ * a pattern update, and `heldToPriorContract` says so. Dynamic binding can
+ * explicitly accept an unproven source; other supplied-link operations
+ * require the durable contract.
  */
 function resolveDurableSource(
   suppliedLink: SuppliedLink,
@@ -2024,6 +2025,7 @@ function resolveDurableSource(
   link: NormalizedLink;
   linkedCell: Cell<unknown>;
   durableSource: DurableSourceContract | undefined;
+  heldToPriorContract: boolean;
 } {
   const link = parseLinkOrThrow(suppliedLink.value, linkBase);
   const linkedCell = pieces.runtime.getCellFromLink(
@@ -2035,7 +2037,9 @@ function resolveDurableSource(
   // serialized alias can carry a narrowed schema. Neither is a future-value
   // invariant, so a static producer proof needs producer-owned metadata.
   let durableSource = durableSourceContract(linkedCell, pieces);
-  if (durableSource === undefined && priorArgumentSchema !== undefined) {
+  const heldToPriorContract = durableSource === undefined &&
+    priorArgumentSchema !== undefined;
+  if (heldToPriorContract) {
     // Pattern update over existing state: hold a metadata-less linked doc to
     // the prior argument contract at this path (see the option's doc).
     durableSource = {
@@ -2080,7 +2084,7 @@ function resolveDurableSource(
       }
     }
   }
-  return { link, linkedCell, durableSource };
+  return { link, linkedCell, durableSource, heldToPriorContract };
 }
 
 /** Localize the destination contracts and derive their agreed outer shape. */
@@ -2414,9 +2418,11 @@ function provePreservedContracts(
 }
 
 /**
- * Whether an update retains both a committed handle and its input contract.
- * The producer's policy remains on the linked document; preserving the same
- * handle under the same contract changes neither its policy nor its authority.
+ * Whether an update retains both a committed handle and its input contract,
+ * where the handle is a direct one or a link to a metadata-less document that
+ * the prior contract governs. The producer's policy remains on the linked
+ * document; preserving the same handle under the same contract changes
+ * neither its policy nor its authority.
  * This proves consumer-contract continuity, not that the producer contract
  * was checked at link creation or has stayed unchanged. Producer enforcement
  * on access and commit governs the retained handle.
@@ -2504,6 +2510,8 @@ export function assertSuppliedLinkSchemasCompatible(
      * With `linksPreservedVerbatim`, this also proves an existing direct
      * handle's consumer contract unchanged. Such a handle keeps the linked
      * producer's policy without requiring that policy on the consumer schema.
+     * The same proof admits a committed link to a metadata-less document
+     * whose contract is unchanged, without the new-link proof.
      */
     priorArgumentSchema?: JSONSchema;
 
@@ -2549,16 +2557,17 @@ export function assertSuppliedLinkSchemasCompatible(
       suppliedLink.path,
       displayPath,
     );
-    const { link, linkedCell, durableSource } = resolveDurableSource(
-      suppliedLink,
-      linkBase,
-      baseCell,
-      fullPath,
-      pieces,
-      options.priorArgumentSchema,
-      displayPath,
-      options.allowUnprovenSource === true && isCell(suppliedLink.value),
-    );
+    const { link, linkedCell, durableSource, heldToPriorContract } =
+      resolveDurableSource(
+        suppliedLink,
+        linkBase,
+        baseCell,
+        fullPath,
+        pieces,
+        options.priorArgumentSchema,
+        displayPath,
+        options.allowUnprovenSource === true && isCell(suppliedLink.value),
+      );
     const { localizedTargets, targetOuter } = localizeTargetOuter(
       targetContracts,
       displayPath,
@@ -2589,6 +2598,23 @@ export function assertSuppliedLinkSchemasCompatible(
       );
     }
     if (preservedOuter === undefined) {
+      // A metadata-less document is held to the prior contract, so its
+      // producer proof compares that contract with the candidate's. When the
+      // link is the one already committed and the contract is unchanged, that
+      // proof can only refuse what new-link default insertion refuses, and a
+      // link carried over byte for byte is not new.
+      if (
+        heldToPriorContract &&
+        options.linksPreservedVerbatim === true &&
+        options.destinationIsStream !== true &&
+        retainsInputHandleContract(
+          suppliedLink,
+          baseCell,
+          basePath,
+          options.priorArgumentSchema,
+          targetContracts,
+        )
+      ) continue;
       proveRebuiltContracts(sourceContracts, targetContracts, displayPath);
     } else {
       const localized = policePreservedEnvelope(
