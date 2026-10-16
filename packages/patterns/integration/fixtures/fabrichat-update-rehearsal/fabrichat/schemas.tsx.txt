@@ -8,8 +8,9 @@
  * the records a room stores, and `room.tsx` the room's own output types over
  * them.
  *
- * Every recorded time is a `FabricEpochNsec`, unique in its room. Times are
- * compared through `nsecOf()`.
+ * Every recorded time is a `FabricEpochNsec`, the handler clock's reading when
+ * the room made the record, which two records can share. Times are compared
+ * through `nsecOf()`.
  */
 import {
   type Cell,
@@ -225,25 +226,25 @@ export interface ChatRoomPolicy {
   /** Whether an OWNER may obliterate messages. */
   ownersMayObliterate: boolean;
 
-  /** Whether an edit or a plain deletion keeps the version it replaces. */
+  /** Stated for the policy's shape, and read by nothing: a message keeps no history. */
   keepsHistory: boolean;
 
   /** Whether a sender's deletion of their own message obliterates it. */
   deletionIsObliteration: boolean;
 
-  /** How far before the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxAgeNsec: FabricDurationNsec;
 
-  /** How far after the room's clock a proposed time is accepted, in ns. */
+  /** Stated for the policy's shape, and read by nothing: a sender proposes no time. */
   proposedTimeMaxLeadNsec: FabricDurationNsec;
 
-  /** How long an entry stays in `recentActivity`, in ns. */
+  /** Stated for the policy's shape, and read by nothing: the room keeps no activity log. */
   recentActivityWindowNsec: FabricDurationNsec;
 
-  /** The most messages a message window holds. */
+  /** How many of the newest messages `messages.latest` holds. */
   maxWindowCount: number;
 
-  /** The most message windows a session can have open. */
+  /** Stated for the policy's shape, and read by nothing: the room offers no windows. */
   maxOpenWindows: number;
 }
 
@@ -337,13 +338,22 @@ export const reactionTalliesOf = (
     [],
   );
   return emoji.map((each) => {
-    const onThis = ordered.filter((reaction) => reaction.emoji === each);
+    // One reactor counts once, however many of their reactions with this
+    // emoji the message holds.
+    const reactors = ordered.filter((reaction) => reaction.emoji === each)
+      .reduce<ProfileCell[]>(
+        (found, reaction) =>
+          found.some((known) => equals(known, reaction.reactorProfile))
+            ? found
+            : [...found, reaction.reactorProfile],
+        [],
+      );
     return {
       emoji: each,
-      count: onThis.length,
+      count: reactors.length,
       mine: viewer !== undefined &&
-        onThis.some((reaction) => equals(reaction.reactorProfile, viewer)),
-      reactors: onThis.map((reaction) => reaction.reactorProfile),
+        reactors.some((reactor) => equals(reactor, viewer)),
+      reactors,
     };
   });
 };
