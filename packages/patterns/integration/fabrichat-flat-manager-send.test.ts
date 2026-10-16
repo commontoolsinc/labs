@@ -161,8 +161,10 @@ describe("FabriChat flat manager sends", () => {
    * Writes the viewer's Home in their home space: their manager's core, which
    * lists `people`, behind the wrapper and document-valued link Home keeps to
    * it, and Home's root, which names the wrapper as `chatManager` beside
-   * `profile`. A `labeled` core declares the viewer's `PersonalSpace` label
-   * over all of it. Returns the wrapper and the core's `offerRoom`.
+   * `profile`. The wrapper's `[UI]` links the core's, as Home's manager does,
+   * and is the slot a `#chatManager` wish reads for its view. A `labeled` core
+   * declares the viewer's `PersonalSpace` label over all of it. Returns the
+   * wrapper and the core's `offerRoom`.
    */
   const writeHome = async (
     labeled: boolean,
@@ -182,6 +184,7 @@ describe("FabriChat flat manager sends", () => {
     const managerSchema = {
       type: "object",
       properties: {
+        $UI: { asCell: ["cell"] },
         offerRoom: { asCell: ["stream"] },
         joinRoom: { asCell: ["stream"] },
         openDirect: { asCell: ["stream"] },
@@ -199,8 +202,11 @@ describe("FabriChat flat manager sends", () => {
         }
         : {}),
     } as const satisfies JSONSchema;
+    const view = runtime.getCell(home, "manager view", undefined, tx);
+    view.set({ type: "vnode", name: "div", props: {}, children: [] });
     const manager = runtime.getCell(home, "manager core", managerSchema, tx);
     manager.set({
+      $UI: view,
       offerRoom,
       joinRoom,
       openDirect,
@@ -213,6 +219,7 @@ describe("FabriChat flat manager sends", () => {
     mid.set(manager);
     const wrapper = runtime.getCell(home, "manager wrapper", undefined, tx);
     wrapper.set({
+      $UI: mid.key("$UI"),
       offerRoom: mid.key("offerRoom"),
       joinRoom: mid.key("joinRoom"),
       openDirect: mid.key("openDirect"),
