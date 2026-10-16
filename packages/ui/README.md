@@ -67,8 +67,12 @@ import { CFButton } from "./src/v2/components/cf-button/index.ts";
 ## 🎨 Theme System
 
 `cf-theme` provides subtree-level theme tokens for typography, colors, spacing,
-border radius, and motion. Use it for overall visual direction, then refine
-individual components with their documented `--cf-*` custom properties.
+border radius, and motion, and every component inside inherits them. A pattern
+inherits its host's theme; it may tint it with a nested `cf-theme` carrying only
+what it changes; the nested `cf-theme` sets those tokens and leaves the rest to
+the enclosing theme. A pattern never declares a full theme, and prefers theme
+tokens to literal colors and fonts. Refine individual components with their
+documented `--cf-*` custom properties.
 
 Useful references:
 

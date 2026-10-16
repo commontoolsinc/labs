@@ -1191,6 +1191,27 @@ function samePatternRef(
 }
 
 /**
+ * Whether the gate before the start of a piece a resume pre-sync has named
+ * takes the record of `link`, a cell an instance in the piece's tree owns,
+ * for the cell; the owning instance's result cell is at `ownerScope`. It does
+ * for a derived cell (`computed:`), which holds a value only once its
+ * computation has produced one: after the pre-sync has asked the store for
+ * it, a record holding no value is what the store holds. It does not for a
+ * cell owed a default at a scope narrower than its owner's result, which a
+ * start's preparation seeds when the cell holds no value.
+ */
+function ownedCellRecordSuffices(
+  link: NormalizedFullLink,
+  ownerScope: CellScope,
+): boolean {
+  if (entityKindOfIdString(link.id) !== "computed") return false;
+  const owesSeed = isObjectOrArray(link.schema) &&
+    link.schema.default !== undefined &&
+    scopeRank(link.scope) > scopeRank(ownerScope);
+  return !owesSeed;
+}
+
+/**
  * Whether the pattern pointer or the setup-completion marker on `resultCell`
  * names a pattern other than `entryRef`, which is what makes a setup of
  * `entryRef` there re-stage the stored argument. Each falls back to
@@ -2695,9 +2716,11 @@ export class Runner {
    * its stored argument and names what they read, so a name-sync of that
    * instance under the same pattern would make the same requests and
    * deliver nothing more; the gate before such an instance's own start
-   * probes its owned cells, which a seed may still be owed, and skips the
-   * argument walk. Bounded like `#locallyPreparedResults`: a missing entry
-   * costs a walk, never a wrong verdict.
+   * probes its owned cells, which a seed may still be owed, taking a
+   * derived cell's record for the cell where no seed is
+   * (`ownedCellRecordSuffices`), and skips the argument walk. Bounded like
+   * `#locallyPreparedResults`: a missing entry costs a walk, or a hold on a
+   * derived cell that holds no value, never a wrong verdict.
    */
   readonly #presyncNamedInstances = new BoundedKeyMap<string, string>(
     RESULT_SHORTCUT_LIMIT,
@@ -7293,21 +7316,23 @@ export class Runner {
 
   /**
    * Whether the document `link` names is on this replica, probed through
-   * `readTx`. A document is here when it holds a value. A stream's document
-   * never holds one, so for a link that declares a stream the record is
-   * probed instead: setup writes the `result` back-link onto it. Any other
+   * `readTx`. A document is here when it holds a value, or with `record`,
+   * when its record is: the `result` back-link setup writes onto it, with or
+   * without a value. A stream's document never holds a value, so for a link
+   * that declares a stream the record is probed either way. Any other
    * document that has its metadata and no value — a computed cell nothing
-   * has computed yet — reads absent.
+   * has computed yet — reads absent unless `record` is set.
    */
   #documentPresent(
     readTx: IExtendedStorageTransaction,
     link: NormalizedFullLink,
+    record = false,
   ): boolean {
     return readTx.readOrThrow(
       {
         space: link.space,
         id: link.id,
-        path: ContextualFlowControl.declaresStream(link.schema)
+        path: record || ContextualFlowControl.declaresStream(link.schema)
           ? []
           : ["value"],
         ...(link.scope !== undefined && { scope: link.scope }),
@@ -7367,7 +7392,11 @@ export class Runner {
    * names, when a pre-sync of this runner planned it under this pattern
    * (`#presyncNamedInstances`), the argument's links are not walked: that
    * pre-sync named what the nodes read through them, and a name-sync here
-   * would ask for the same documents again.
+   * would ask for the same documents again. A derived cell such a family
+   * owns is likewise here once its record is, unless a seed is owed to it
+   * (`ownedCellRecordSuffices`): the pre-sync's waves have landed, so a
+   * record holding no value is what the store holds, and a name-sync would
+   * deliver it again.
    */
   #familyAbsent(
     pattern: Pattern,
@@ -7393,13 +7422,13 @@ export class Runner {
     const cell = resultCell.withTx(readTx);
     let probes = this.#namingProbeBudget;
     let budgetSpent = false;
-    const present = (link: NormalizedFullLink): boolean => {
+    const present = (link: NormalizedFullLink, record = false): boolean => {
       if (probes === 0) {
         budgetSpent = true;
         return false;
       }
       probes--;
-      return this.#documentPresent(readTx, link);
+      return this.#documentPresent(readTx, link, record);
     };
     // The hold, with what decided it: a document of `stage` read absent, or
     // the budget ran out on a probe of that stage — the case worth a log,
@@ -7420,7 +7449,9 @@ export class Runner {
       return true;
     };
     if (!present(argumentLink)) return hold("the argument document");
-    if (this.#presyncNamedInstances.get(familyKey) !== entryKey) {
+    const presyncNamed =
+      this.#presyncNamedInstances.get(familyKey) === entryKey;
+    if (!presyncNamed) {
       if (
         this.#argumentLinksAbsent(
           argument,
@@ -7436,18 +7467,25 @@ export class Runner {
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
     // sub-pieces the run instantiates — the same walk the resume pre-sync
-    // syncs by name.
-    const owned: Cell<any>[] = [];
+    // syncs by name. Each is weighed against the instance that owns it,
+    // whose result's scope decides whether a seed is owed to it.
+    const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
       cell,
-      owned,
+      [],
       new Set(),
       readTx,
+      instances,
     );
-    for (const ownedCell of owned) {
-      if (!present(ownedCell.getAsNormalizedFullLink())) {
-        return hold("an owned cell");
+    for (const { pattern: owner, resultCell: ownerCell } of instances) {
+      const ownerScope = ownerCell.getAsNormalizedFullLink().scope;
+      for (const descriptor of owner.derivedInternalCells ?? []) {
+        const link = getDerivedInternalCell(ownerCell, descriptor)
+          .getAsNormalizedFullLink();
+        const record = presyncNamed &&
+          ownedCellRecordSuffices(link, ownerScope);
+        if (!present(link, record)) return hold("an owned cell");
       }
     }
     return false;
@@ -13046,7 +13084,6 @@ export class Runner {
         false,
         policyFacingIdentity,
       );
-      (action as Action & { lastFrame?: Frame }).lastFrame = frame;
       if (policyFacingIdentity) {
         setCfcImplementationIdentity(tx, policyFacingIdentity);
       }

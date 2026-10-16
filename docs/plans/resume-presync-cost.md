@@ -148,6 +148,59 @@ Exit: a schema is recomposed once per reference per registry epoch.
       rendering unchanged. The pre-sync no longer appears among the
       profile's top inclusive frames; pattern compilation and the render's
       sinks do.
+- [x] For an instance the pre-sync named, a derived cell it owns reads
+      present once its record has arrived. The cell's document can hold the
+      `result` back-link setup wrote and no value, in the store as on the
+      replica that loaded it: nothing has demanded its computation, the
+      computation yields `undefined`, or the client that set the instance
+      up closed before the commits of its values were applied. The gate
+      read value presence for every owned cell but a stream, so an instance
+      owning such a cell was held on every load for a name-sync with no
+      value to deliver, and a list's rows were held twice each: the element
+      piece, then the row it instantiates. `#familyAbsent` takes the record
+      for the cell, unless the cell is owed a default at a scope narrower
+      than the result of the instance that owns it, which a start's
+      preparation seeds (`ownedCellRecordSuffices`). A tree whose rows each
+      own a derived cell that yields `undefined` resumes with one
+      name-sync, as does one whose rows run a per-user sub-instance owning
+      a per-user cell with a default; a tree named by a synced run in a
+      caller's transaction, which seeds nothing, has each row's per-user
+      default seeded by the row's own start
+      (`packages/runner/test/resume-presync-plan-count.test.ts`).
+- [x] The field check, on a thirty-message room of sixty row instances
+      whose rows each own one derived cell nothing demands, five reloads
+      each way from copies of one store: `start/syncCellsForRunningPattern`
+      from 124 to 4 on every reload, `resumeCellSync` spans from 13,285 to
+      295, and all sixty rows instantiated inside their list's own run
+      where none had been. The record is
+      [`../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md`](../history/development/performance/2026-10-13-fabrichat-row-name-syncs.md).
+- [ ] Of the four name-syncs a room's reload still pays, three are its
+      nested instances' own, and two of those deliver nothing: the room
+      core and the add-member surface are each held on a cell no name-sync
+      can deliver. One kind is a cell that is not a derived one and holds
+      no value, such as the one a `wish` writes to. The other is the
+      session's own instance of a session-scoped cell, which no store holds
+      before the session writes it. The room core's name-sync plans the
+      whole tree a second time. The replica separates a document it has
+      examined from one it has not
+      (`IStorageProvider.unexaminedAbsences`), and a gate that asked it
+      would hold only for a document a name-sync could deliver. A hold's
+      preparation also seeds a scoped default that is owed, which stays a
+      reason of its own to hold.
+- [ ] An instance the pre-sync did not name is still held on a derived
+      cell that holds no value: one a caller's `run()` reaches, or one
+      whose pre-sync round had a sync that failed. Taking the record there
+      too changes what a start does when a policy manifest cannot be
+      loaded. In `packages/runner/test/cfc-policy-manifest-shared-install.test.ts`,
+      "starts it again for the participant who set it up when the manifest
+      cannot be loaded", the piece's per-user part is held on its derived
+      cell `known`, which nothing has computed, so the part starts in a
+      transaction of its own and its refused commit leaves the piece
+      running. A part that is not held starts inside the piece's
+      instantiation, and the refusal takes the piece's start with it. That
+      already happens once any reader has demanded `known`. Decide first
+      whether a part's start belongs in its parent's instantiation when a
+      manifest it needs is unreachable.
 
 Exit: a child's start names its family only when something a name-sync
 could deliver is missing.

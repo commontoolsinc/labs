@@ -360,6 +360,12 @@ export type AddRequestsCell = Writable<
  * `addMemberOfferId()`: its `delivery`, or, where the manager refused to tell
  * the member, `access-only`, with the manager's reason as
  * `deliveryRefusal`. An add whose verdict hasn't landed keeps none.
+ *
+ * Every outcome is a copy of the viewer's record, never the record itself,
+ * which would be stored as a link into the viewer's records. CFC derives a
+ * link's label from its source's stored label metadata, and those records,
+ * which no write labels, carry none, so a link into them is refused wherever
+ * the manager's data labels what reads them.
  */
 export const withDeliveries = (
   outcomes: Readonly<Record<string, AddMemberOutcome>>,
@@ -372,7 +378,7 @@ export const withDeliveries = (
         outcome?.status !== "done" || outcome.delivery !== undefined ||
         space === undefined
       ) {
-        return [id, outcome];
+        return [id, outcome === undefined ? outcome : { ...outcome }];
       }
       const verdict = requests?.[addMemberOfferId(space, id)];
       if (verdict?.status === "refused") {
@@ -385,7 +391,10 @@ export const withDeliveries = (
       const delivery = verdict?.status === "done"
         ? verdict.delivery
         : undefined;
-      return [id, delivery === undefined ? outcome : { ...outcome, delivery }];
+      return [id, {
+        ...outcome,
+        ...(delivery === undefined ? {} : { delivery }),
+      }];
     }),
   );
 
@@ -457,7 +466,7 @@ interface AddMemberState {
 /** The part of the viewer's manager `offerAddedMember` reaches. */
 interface OfferingManager {
   /** Offers the room to a member, and records how it told them. */
-  offerRoom?: Stream<OfferRoomRequest>;
+  offerRoom: Stream<OfferRoomRequest>;
 }
 
 /** What `offerAddedMember` is bound to. */
@@ -491,12 +500,11 @@ interface OfferAddedMemberState {
  * hasn't resolved, or a room that can't name itself, it records that the
  * person was told nothing.
  *
- * The manager is read here, as a value, rather than by what the room stores:
- * a stream bound to a manager that isn't there still reads as present, so
- * only the manager's own value says whether it has an `offerRoom`, and an
- * offer writes nothing in the room's space. A manager with no `offerRoom` has
- * been read by the time the record that the person was told nothing is
- * written, so that record carries whatever label the manager does.
+ * The manager is read here, as a value, rather than by what the room stores,
+ * and an offer writes nothing in the room's space. A declared stream reads as
+ * present whether or not the data holds one, so the manager's own value is
+ * what says whether there is a manager to ask, and its `offerRoom` is taken as
+ * given, as `RoomManager` declares it.
  */
 const offerAddedMember = handler<AddedMemberEvent, OfferAddedMemberState>(
   (event, state) => {
@@ -506,9 +514,9 @@ const offerAddedMember = handler<AddedMemberEvent, OfferAddedMemberState>(
     // The room decides first, so a room that can't name itself reads nothing
     // of the manager.
     if (self !== undefined && space !== undefined) {
-      const offerRoom = state.manager?.offerRoom;
-      if (offerRoom !== undefined) {
-        offerRoom.send({
+      const { manager } = state;
+      if (manager !== undefined) {
+        manager.offerRoom.send({
           requestId: addMemberOfferId(space, requestId),
           room: self,
           member,

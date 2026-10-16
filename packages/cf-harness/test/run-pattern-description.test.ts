@@ -30,19 +30,19 @@ describe("run-pattern description", () => {
 
   it("tells the model to bound a query's rows", () => {
     expect(runPatternToolDescriptor.description).toContain(
-      "Bound every query's rows with a LIMIT",
+      "Bound every query with a LIMIT",
     );
     expect(runPatternToolDescriptor.description).toContain(
-      "every result row is materialized as its own document in the space",
+      "each result row is written as its own document",
     );
   });
 
   it("exempts an aggregate from the LIMIT it asks of every other query", () => {
     expect(runPatternToolDescriptor.description).toContain(
-      "an aggregate returning one row per group",
+      "An aggregate (count(*), sum(), GROUP BY)",
     );
     expect(runPatternToolDescriptor.description).toContain(
-      "bounded by its own shape and needs no LIMIT",
+      "needs no LIMIT",
     );
   });
 });

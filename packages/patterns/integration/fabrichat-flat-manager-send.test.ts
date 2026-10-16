@@ -161,8 +161,10 @@ describe("FabriChat flat manager sends", () => {
    * Writes the viewer's Home in their home space: their manager's core, which
    * lists `people`, behind the wrapper and document-valued link Home keeps to
    * it, and Home's root, which names the wrapper as `chatManager` beside
-   * `profile`. A `labeled` core declares the viewer's `PersonalSpace` label
-   * over all of it. Returns the wrapper and the core's `offerRoom`.
+   * `profile`. The wrapper's `[UI]` links the core's, as Home's manager does,
+   * and is the slot a `#chatManager` wish reads for its view. A `labeled` core
+   * declares the viewer's `PersonalSpace` label over all of it. Returns the
+   * wrapper and the core's `offerRoom`.
    */
   const writeHome = async (
     labeled: boolean,
@@ -182,6 +184,7 @@ describe("FabriChat flat manager sends", () => {
     const managerSchema = {
       type: "object",
       properties: {
+        $UI: { asCell: ["cell"] },
         offerRoom: { asCell: ["stream"] },
         joinRoom: { asCell: ["stream"] },
         openDirect: { asCell: ["stream"] },
@@ -199,8 +202,11 @@ describe("FabriChat flat manager sends", () => {
         }
         : {}),
     } as const satisfies JSONSchema;
+    const view = runtime.getCell(home, "manager view", undefined, tx);
+    view.set({ type: "vnode", name: "div", props: {}, children: [] });
     const manager = runtime.getCell(home, "manager core", managerSchema, tx);
     manager.set({
+      $UI: view,
       offerRoom,
       joinRoom,
       openDirect,
@@ -213,6 +219,7 @@ describe("FabriChat flat manager sends", () => {
     mid.set(manager);
     const wrapper = runtime.getCell(home, "manager wrapper", undefined, tx);
     wrapper.set({
+      $UI: mid.key("$UI"),
       offerRoom: mid.key("offerRoom"),
       joinRoom: mid.key("joinRoom"),
       openDirect: mid.key("openDirect"),
@@ -430,9 +437,10 @@ describe("FabriChat flat manager sends", () => {
 
     // Root-private setup refuses what the room's space would store of the
     // manager's data: the picker's list of the people `candidates` reads from
-    // the manager, on each rendering, and the `outcomes` that merge the
-    // manager's verdicts into `addRequests`. This add guard bounds that known
-    // debt and permits no other refusal.
+    // the manager, once on the rendering before the add and once on the one
+    // after it, and the `outcomes` that merge the manager's verdicts into
+    // `addRequests`, a document of the viewer's own, once. This add guard
+    // bounds that known debt and permits no other refusal.
     const listsBob = (input: Refusal["refusals"][number]["inputs"][number]) => {
       const people = runtime.getCellFromLink(
         { ...input.read, path: [] } as Parameters<
@@ -456,14 +464,20 @@ describe("FabriChat flat manager sends", () => {
           listsBob(input)
         )
       );
-    const isOutcomes = ({ reasons }: Refusal) =>
-      reasons.length === 1 &&
-      /^missing link source metadata for of:\S+ at \/add-bob, linked into computed:\S+ at \/add-bob$/
-        .test(reasons[0]);
+    const isOutcomes = ({ reasons, refusals: details }: Refusal) =>
+      reasons.every((reason) =>
+        /^writer-fit confidentiality misfit for computed:\S+ at \/add-bob\S* .*PersonalSpace/
+          .test(reason)
+      ) &&
+      details.length > 0 &&
+      details.every(({ target }) =>
+        target?.space === space && target.scope === "user"
+      );
     for (const refusal of refusals) expect(refusal.terminal).toBe(true);
     expect(
       refusals.filter((refusal) => !isPicker(refusal) && !isOutcomes(refusal)),
     ).toEqual([]);
+    expect(refusals.filter(isPicker).length).toBeLessThanOrEqual(2);
     expect(refusals.filter(isOutcomes).length).toBeLessThanOrEqual(1);
   });
 });
