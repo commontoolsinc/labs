@@ -34,6 +34,7 @@
  * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
+import { debugStr } from "@commonfabric/data-model";
 import { isDID } from "@commonfabric/identity/did";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { LRUCache } from "@commonfabric/utils/cache";
@@ -65,12 +66,14 @@ import {
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   samePieceReconciliation,
+  samePieceSourceSnapshot,
   setPieceReconciliation,
 } from "./runner.ts";
 import type { Runtime } from "./runtime.ts";
 import { schemaRegistryEpoch } from "./schema-registry.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
+import { isTerminalRejection } from "./storage/rejection.ts";
 
 /**
  * What went wrong, as a reason a record can carry: a thrown error, or the
@@ -109,6 +112,10 @@ const logger = getLogger("runner.source-reconcile", {
  * - `updated`: the piece adopted new source.
  * - `incompatible`: the origin offered source that cannot replace what the
  *   piece runs, and its owner has not said to take it anyway.
+ * - `rejected`: the write that adopts the origin's source was refused for
+ *   good — a terminal rejection, which no retry of the same write can get
+ *   past. This runtime does not propose that source again until the
+ *   candidate, the piece's source state, or its stored argument changes.
  * - `unavailable`: the origin's current source could not be adopted this
  *   time — it could not be reached, the write that adopts it did not commit,
  *   or the piece changed underneath the attempt and the write it was going to
@@ -121,6 +128,7 @@ export type ReconcileOutcome =
   | "migrated"
   | "updated"
   | "incompatible"
+  | "rejected"
   | "unavailable";
 
 /**
@@ -145,6 +153,7 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
+  rejected: { outcome: "refused", reason: "apply-failed" },
   detached: undefined,
   unusable: undefined,
 };
@@ -235,6 +244,46 @@ type SourcePass = {
   done: Promise<unknown>;
 };
 
+/** Why a reconciliation's write did not commit. */
+type CommitFailure = {
+  /** The reason, as a record can carry it. */
+  detail: string;
+
+  /**
+   * Whether the store refused the write for good: a terminal rejection, which
+   * the same write is refused with again however often it is sent.
+   */
+  terminal: boolean;
+};
+
+/**
+ * An adoption whose write was refused for good, and the state that write was
+ * built from. The same write built from the same state is refused the same
+ * way, so a pass that finds all of it unchanged builds nothing.
+ *
+ * What it covers is what the write is built from: the candidate, the piece's
+ * source state, and the stored argument its setup restages. A change to a
+ * document the argument links to, or to what the store admits, is outside it.
+ * A runtime that starts again, which is when its own code can change, starts
+ * with none of these.
+ */
+type TerminalRefusal = {
+  /** The candidate the refused write would have adopted. */
+  offered: { identity: string; symbol: string };
+
+  /**
+   * The piece's source state the refused write was guarded against, which
+   * names the origin it followed.
+   */
+  snapshot: PieceSourceSnapshot;
+
+  /** Whether the piece's stored argument is still what the write restaged. */
+  argumentUnchanged: (candidate: Cell<unknown>) => boolean;
+
+  /** What the record of the refusal says. */
+  detail: string;
+};
+
 /**
  * Resolved source for one supplied origin in one destination space, and the
  * pattern it compiled to there once an open has verified it.
@@ -299,6 +348,17 @@ export class SourceReconciler {
    * replaced.
    */
   readonly #systemFollowers = new Map<string, Cell<unknown>>();
+
+  /**
+   * The adoptions this runtime saw refused for good, by follower key. Kept in
+   * the runtime rather than on the piece: a terminal rejection is a verdict
+   * of the runtime that built the write and the store it sent it to, and
+   * another runtime — a later build, a client under different enforcement —
+   * may build a write that is admitted. What the piece records is the
+   * refusal itself, which every runtime reports the same way.
+   */
+  readonly #terminalRefusals = new Map<string, TerminalRefusal>();
+
   readonly #passes = new Set<SourcePass>();
   readonly #suppliedSources = new LRUCache<string, SuppliedSource>({
     capacity: 32,
@@ -464,6 +524,7 @@ export class SourceReconciler {
     this.#fabricFollowers.clear();
     this.#cancelSessionReplaced?.();
     this.#systemFollowers.clear();
+    this.#terminalRefusals.clear();
     await this.idle();
   }
 
@@ -740,7 +801,8 @@ export class SourceReconciler {
       }
     }
     const advertised = answer.identity;
-    state.offered = { identity: advertised, symbol: state.running.symbol };
+    const offered = { identity: advertised, symbol: state.running.symbol };
+    state.offered = offered;
     // The identity route settles whether the source moved. It says nothing
     // about whether this space still holds the compiled artifact for it, and a
     // piece whose artifact is gone cannot start however current its identity
@@ -750,6 +812,7 @@ export class SourceReconciler {
       advertised === state.running.identity &&
       await this.#loadPattern(state.running, state.space) !== undefined
     ) return "current";
+    if (this.#refusedBefore(resultCell, state, offered)) return "rejected";
 
     const resolved = await this.#runtime.harness.resolve(
       new HttpProgramResolver(target.href, fetch),
@@ -1148,6 +1211,7 @@ export class SourceReconciler {
       target.identity === state.running.identity &&
       target.symbol === state.running.symbol
     ) return "current";
+    if (this.#refusedBefore(resultCell, state, target)) return "rejected";
 
     // Awaited directly rather than through the abort signal. The lookup
     // synchronizes a source closure against storage, and abandoning the await
@@ -1311,8 +1375,50 @@ export class SourceReconciler {
       return true;
     }, sourceUpdate);
     if (failure === undefined) return "updated";
-    state.detail = failure;
-    return "unavailable";
+    state.detail = failure.detail;
+    if (!failure.terminal) return "unavailable";
+    this.#terminalRefusals.set(this.#followerKey(resultCell), {
+      offered: candidateRef,
+      snapshot: state.snapshot,
+      argumentUnchanged,
+      detail: failure.detail,
+    });
+    return "rejected";
+  }
+
+  /**
+   * Whether this runtime saw the adoption of `offered` refused for good, and
+   * nothing that write was built from has changed since. When it did, the
+   * pass ends here with what the refusal recorded, which is the conclusion
+   * building and sending the same write would reach again. A remembered
+   * refusal something has moved under is forgotten.
+   */
+  #refusedBefore(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    offered: { identity: string; symbol: string },
+  ): boolean {
+    const key = this.#followerKey(resultCell);
+    const refused = this.#terminalRefusals.get(key);
+    if (refused === undefined) return false;
+    if (
+      refused.offered.identity !== offered.identity ||
+      refused.offered.symbol !== offered.symbol ||
+      !samePieceSourceSnapshot(refused.snapshot, state.snapshot) ||
+      !refused.argumentUnchanged(resultCell)
+    ) {
+      this.#terminalRefusals.delete(key);
+      return false;
+    }
+    state.offered = refused.offered;
+    state.detail = refused.detail;
+    logger.debug("reconcile-refusal-remembered", () => [
+      "not proposing source whose adoption was refused for good",
+      state.space,
+      resultCell.sourceURI,
+      refused.offered,
+    ]);
+    return true;
   }
 
   /**
@@ -1396,7 +1502,7 @@ export class SourceReconciler {
       },
     );
     if (failure === undefined) return "migrated";
-    state.detail = failure;
+    state.detail = failure.detail;
     return "unavailable";
   }
 
@@ -1405,9 +1511,10 @@ export class SourceReconciler {
    * re-checks that state, so a concurrent edit, detach, or repoint is never
    * overwritten by a decision taken before it.
    *
-   * Returns `undefined` once the write commits, and otherwise why it did not,
-   * as a reason a record can carry: the error that stopped the commit, or the
-   * piece having changed under the write.
+   * Returns `undefined` once the write commits, and otherwise why it did not:
+   * the error that stopped the commit, or the piece having changed under the
+   * write. A failure is logged as a summary of the error, not the error
+   * itself, which carries the whole transaction the store refused.
    */
   async #commit(
     resultCell: Cell<unknown>,
@@ -1415,7 +1522,7 @@ export class SourceReconciler {
     signal: AbortSignal | undefined,
     write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
     sourceUpdate?: PreparedSourceUpdate,
-  ): Promise<string | undefined> {
+  ): Promise<CommitFailure | undefined> {
     const runtime = this.#runtime;
     const result = await runtime.editWithRetry(
       (tx) => {
@@ -1450,18 +1557,27 @@ export class SourceReconciler {
       undefined,
       { sourceUpdate },
     );
-    if (signal?.aborted) return "the reconciliation was stopped";
-    if (result.error) {
-      logger.warn("reconcile-commit-failed", () => [
-        "source reconciliation could not commit",
-        state.space,
-        result.error,
-      ]);
-      return reconciliationDetail(result.error);
+    if (signal?.aborted) {
+      return { detail: "the reconciliation was stopped", terminal: false };
     }
-    return result.ok === true
-      ? undefined
-      : "the piece changed while its write was being prepared";
+    if (result.error) {
+      const { name, message } = result.error;
+      const terminal = isTerminalRejection(result.error);
+      logger.warn("reconcile-commit-failed", () => [
+        terminal
+          ? "the store refused a source reconciliation's write for good"
+          : "source reconciliation could not commit",
+        state.space,
+        resultCell.sourceURI,
+        state.offered,
+        debugStr`${name}: $long${message}`,
+      ]);
+      return { detail: reconciliationDetail(result.error), terminal };
+    }
+    return result.ok === true ? undefined : {
+      detail: "the piece changed while its write was being prepared",
+      terminal: false,
+    };
   }
 
   /**

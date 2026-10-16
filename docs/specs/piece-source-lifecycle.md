@@ -1302,11 +1302,12 @@ own.
 - **New source refused.** The origin resolved, and the piece did not adopt what
   it offered — the candidate is not an acceptable replacement for what the
   piece runs, its stored data does not satisfy the candidate's contract, the
-  source did not compile, or the source did not produce the identity its origin
-  advertised. This does not resolve itself. The panel names the reason, and
-  offers the actions that end it: take the candidate anyway, detach, or
-  repoint. What the attempt reported goes on a line of its own rather than
-  into a sentence, because a compiler's report is not a clause.
+  source did not compile, the source did not produce the identity its origin
+  advertised, or the write that would adopt it was refused for good. This does
+  not resolve itself. The panel names the reason, and offers the actions that
+  end it: take the candidate anyway, detach, or repoint. What the attempt
+  reported goes on a line of its own rather than into a sentence, because a
+  compiler's report is not a clause.
 
 A state that has nothing to report says nothing. A piece running what its
 origin offered gets its line in the panel's facts and no more: an explanation
@@ -1361,8 +1362,24 @@ so a refusal fails it whole, as the compatibility policy describes.
 Telling could-not-reach from refused needs the reconciliation to separate an
 origin it could not reach from one that resolved and offered source it could
 not use — a program that did not compile, one that did not produce the identity
-its origin advertised, one whose setup the piece's data refused. The first may
-fix itself and the rest will not, so they do not share a state on the panel.
+its origin advertised, one whose setup the piece's data refused, one whose
+adopting write was refused for good. The first may fix itself and the rest will
+not, so they do not share a state on the panel.
+
+A write refused for good carries a terminal rejection: a verdict on the write
+itself, from the store or from flow enforcement, which the same write receives
+again however often it is sent. The runtime that received it therefore does not
+build that write again while nothing it was built from has changed — the
+candidate the origin offers, the piece's source state, and the stored argument
+its setup restages. Any of those changing puts the candidate up for adoption
+again, and so does the runtime starting again. What the runtime remembers is
+its own: a terminal rejection is the verdict of the runtime that built the write
+and of the store it went to, and a later build, or a runtime under different
+enforcement, may build a write that is admitted. What the piece records is the
+refusal, which every runtime reports the same way. A refusal that is not for
+good — a conflict, a dropped connection — is proposed again on the next
+reconciliation, and an explicit ask builds and sends the write whatever was
+refused before.
 
 Distinguishing these needs the outcome of the last reconciliation to outlive
 the reconciliation, so the panel can show it to a reader who opened the piece
