@@ -408,8 +408,6 @@ export const entryFor = (
 export const isDeleted = (record: RepliedMessage | undefined): boolean =>
   record === undefined || typeof record.body !== "string";
 
-/** The reply-shown-in values the room accepts. */
-const SHOWN_IN: readonly ShownIn[] = ["main", "thread", "both"];
 
 /**
  * Whether the principal this code runs for holds OWNER in the room's space,
