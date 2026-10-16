@@ -1210,6 +1210,20 @@ the 2026-08-24 ruling; the owner may re-rule it).
   is what covers the gap, and its pure-derivation arm says how.
 - Failure isolation is per action: an aborted tx discards only its own
   writes; the wave keeps the rest.
+- A derivation run that read the value of a document its runtime refuses
+  by construction (protocol.md §2's foreign scoped read refusal) aborts
+  its tx rather than sealing it. What it derived came from an absence
+  that is not the document's state, and sealing it would overwrite the
+  instance a runtime that can read the document derives. The refusal is
+  the same on every run, so the abort takes no retry; the run's reads stay
+  subscribed, and a change to any other input runs it again.
+- A derivation run that read, through a link, an absent user- or
+  session-scoped instance of a document another derivation registered in
+  this runtime declares as a write (a builtin's stores included) aborts its
+  tx the same way: the serving loop has not produced that instance yet, so
+  the absence is not its state (speculation.md §2's serving-runtime
+  corollary to the scoped first-write carve-out). Its read of the instance
+  stays subscribed, so it runs again once the instance is produced.
 - On a client (OFF arm, and speculation in the ON arm) seal == commit /
   overlay-apply as today — one abstraction, two destinations. Anchor:
   `packages/runner/src/storage/extended-storage-transaction.ts`.

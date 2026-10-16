@@ -62,6 +62,7 @@ import { isCfcRejectedCommitError } from "../scheduler/cfc-rejection-report.ts";
 import { schemaRegistryEpoch } from "../schema-registry.ts";
 import {
   enrollRuntimeOwnedStore,
+  ownedStoreLinks,
   recordRuntimeOwnedStore,
 } from "./runtime-owned-store.ts";
 import { scopedCell } from "./scope-policy.ts";
@@ -3645,5 +3646,15 @@ export function wish(
       );
     }
   };
-  return { action, onActionRegistered: readiness.onActionRegistered };
+  return {
+    action,
+    onActionRegistered: readiness.onActionRegistered,
+    // The stores keyed by this node's cause alone. The others also name the
+    // demanding user, the situation a suggestion is for, or the interval a
+    // `#now` ticks at, none of which is known until the action runs.
+    storeWrites: ownedStoreLinks(runtime, parentCell, [
+      wishStoreCause("state", cause),
+      wishStoreCause("nowOneShot", cause),
+    ]),
+  };
 }

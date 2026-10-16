@@ -130,7 +130,11 @@ import {
   LLMToolSchema,
 } from "./llm-schemas.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
-import { ownedCell, recordRuntimeOwnedStore } from "./runtime-owned-store.ts";
+import {
+  ownedCell,
+  ownedStoreLinks,
+  recordRuntimeOwnedStore,
+} from "./runtime-owned-store.ts";
 import { setCfcImplementationIdentity } from "../storage/extended-storage-transaction.ts";
 import { hasInlineCellScheme } from "../immutable-cell.ts";
 
@@ -3433,6 +3437,13 @@ export function llmDialog(
   _awaitSync?: unknown,
   publicationBinding?: NormalizedFullLink,
 ): RawBuiltinResult {
+  // The stores this node keeps, each keyed by its cause alone, so the
+  // action declares them when it is set up.
+  const stores = {
+    result: { llmDialog: { result: cause } },
+    internal: { llmDialog: { internal: cause } },
+    pinnedCells: { llmDialog: { pinnedCells: cause } },
+  };
   const inputs = inputsCell.asSchema(LLMParamsSchema);
 
   // Helper function to create and register handlers
@@ -3556,7 +3567,7 @@ export function llmDialog(
         runtime,
         tx,
         parentCell,
-        { llmDialog: { result: cause } },
+        stores.result,
         resultSchema,
         outputScope,
       );
@@ -3569,7 +3580,7 @@ export function llmDialog(
         runtime,
         tx,
         parentCell,
-        { llmDialog: { internal: cause } },
+        stores.internal,
         internalSchema,
         outputScope,
       );
@@ -3591,7 +3602,7 @@ export function llmDialog(
         runtime,
         tx,
         parentCell,
-        { llmDialog: { pinnedCells: cause } },
+        stores.pinnedCells,
         pinnedCellsSchema,
         outputScope,
       );
@@ -4037,7 +4048,10 @@ export function llmDialog(
     ],
   });
 
-  return { action };
+  return {
+    action,
+    storeWrites: ownedStoreLinks(runtime, parentCell, Object.values(stores)),
+  };
 }
 
 async function startRequest(

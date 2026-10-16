@@ -2409,6 +2409,22 @@ function dedupeNormalizedLinks(
 }
 
 /**
+ * Each of `links` at every scope: a write to a document whose instance scope
+ * is decided only when it is written, declared so that a write surface keyed
+ * by scope covers whichever instance it turns out to be.
+ */
+function atEveryScope(
+  links: readonly NormalizedFullLink[],
+): NormalizedFullLink[] {
+  return links.flatMap((link) =>
+    (["space", "user", "session"] as const).map((scope) => ({
+      ...link,
+      scope,
+    }))
+  );
+}
+
+/**
  * A started piece's registration: the cancel that retires it, carrying
  * whether the pattern graph it was installed with is still there. The
  * registration outlives that graph — a refused instantiation commit retires
@@ -13933,6 +13949,9 @@ export class Runner {
     const builtinOnActionRegistered = isRawBuiltinResult(builtinResult)
       ? builtinResult.onActionRegistered
       : undefined;
+    const builtinStoreWrites = isRawBuiltinResult(builtinResult)
+      ? builtinResult.storeWrites ?? []
+      : [];
 
     // Name the raw action for debugging - use implementation name or fallback to "raw"
     const impl = module.implementation as ((...args: unknown[]) => Action) & {
@@ -13996,9 +14015,15 @@ export class Runner {
       ...outputCells,
       ...staticRedirectWriteTargets,
     ]);
+    // isEffect can come from module options or from the builtin result
+    const isEffect = module.isEffect ?? builtinIsEffect;
     Object.assign(action, builtinAction, {
       reads: inputCells,
-      writes: schedulingWrites,
+      // An effect takes no write surface, so its stores are not declared.
+      writes: isEffect ? schedulingWrites : dedupeNormalizedLinks([
+        ...schedulingWrites,
+        ...atEveryScope(builtinStoreWrites),
+      ]),
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),
@@ -14006,8 +14031,6 @@ export class Runner {
       pattern,
     });
 
-    // isEffect can come from module options or from the builtin result
-    const isEffect = module.isEffect ?? builtinIsEffect;
     const debounce = module.debounce ?? builtinDebounce;
     const noDebounce = module.noDebounce ?? builtinNoDebounce;
     const throttle = module.throttle ?? builtinThrottle;
