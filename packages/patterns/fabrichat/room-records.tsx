@@ -916,6 +916,17 @@ export const commitObliterate = handler<RoomStreamEvent, ObliterateState>(
 );
 
 /**
+ * The reaction list of the message at `target`, as the cell the message
+ * links, or `undefined` where the message links none. It is addressed as a
+ * cell rather than read off the message's value: a client addresses a message
+ * through the room's public type, where the reactions read as values.
+ */
+const reactionsOf = (target: MessageCell): ReactionsCell | undefined =>
+  target.get()?.reactions === undefined
+    ? undefined
+    : target.key("reactions").resolveAsCell() as never;
+
+/**
  * Adds the sender's reaction to a message, from `ChatReactSurface`: the
  * event's emoji, the one its control is bound to, or the text typed in. A
  * reaction the sender already has on the message with that emoji is not added
@@ -928,8 +939,9 @@ export const commitSendReaction = handler<RoomStreamEvent, AddReactionState>(
   ) => {
     const profile = resolvedProfile(myProfile);
     const emoji = emojiOf(event, bound);
-    const current = (event?.message ?? message)?.resolveAsCell().get();
-    const list = current?.reactions;
+    const target = (event?.message ?? message)?.resolveAsCell();
+    const current = target?.get();
+    const list = target === undefined ? undefined : reactionsOf(target);
     if (
       profile === undefined || !isSingleEmoji(emoji) || isDeleted(current) ||
       list === undefined
@@ -962,7 +974,8 @@ export const commitDeleteReaction = handler<
 >(
   (event, { myProfile, message, reaction }) => {
     const profile = resolvedProfile(myProfile);
-    const list = (event?.message ?? message)?.resolveAsCell().get()?.reactions;
+    const target = (event?.message ?? message)?.resolveAsCell();
+    const list = target === undefined ? undefined : reactionsOf(target);
     const removed = (event?.reaction ?? reaction)?.resolveAsCell();
     const record = removed?.get();
     if (
