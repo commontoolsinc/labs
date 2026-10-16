@@ -8,7 +8,7 @@
  * with the same words.
  */
 
-import type { JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import { isDID } from "@commonfabric/identity/did";
 import { isLink } from "@commonfabric/runner";
 import { cfcSchemaResolvedRoot } from "@commonfabric/runner/cfc/schema-refs";
@@ -299,6 +299,105 @@ export function undeclaredVerbFieldError(
       }`);
 }
 
+/** A value written where an `enum` names the values that position takes. */
+interface ValueOutsideOptions {
+  value: unknown;
+  position: string;
+  options: readonly unknown[];
+  labels?: readonly unknown[];
+}
+
+/**
+ * The first value in `value` at a position whose schema names its options in
+ * an `enum` and does not name that value, following the event's properties,
+ * its array items and local references. A position under `anyOf` or `oneOf`
+ * is passed over, as {@link firstUndeclaredEventField} passes it over, and the
+ * validation that follows judges it.
+ */
+function firstValueOutsideOptions(
+  value: unknown,
+  schema: JSONSchema | undefined,
+  root: JSONSchema,
+  position: string,
+): ValueOutsideOptions | undefined {
+  if (!isSchemaObject(schema) || isOpaqueReference(value)) return undefined;
+  const node = localRefTarget(schema, root);
+  if (!isSchemaObject(node)) return undefined;
+  if (node.anyOf !== undefined || node.oneOf !== undefined) return undefined;
+  const nodeRoot = node !== schema ? cfcSchemaResolvedRoot(node, root) : root;
+  // Only an enumeration of plain values is judged here; one holding an
+  // object is left to the validation that follows, which compares structure.
+  if (
+    Array.isArray(node.enum) &&
+    node.enum.every((option) =>
+      option === null || typeof option !== "object"
+    ) &&
+    !node.enum.includes(value as JSONValue)
+  ) {
+    return {
+      value,
+      position,
+      options: node.enum,
+      ...(Array.isArray(node["x-enum-labels"])
+        ? { labels: node["x-enum-labels"] }
+        : {}),
+    };
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const found = firstValueOutsideOptions(
+        value[index],
+        node.items as JSONSchema | undefined,
+        nodeRoot,
+        `${position}[${index}]`,
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (!isObjectNotArray(value) || !isObjectNotArray(node.properties)) {
+    return undefined;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const found = firstValueOutsideOptions(
+      child,
+      node.properties[key] as JSONSchema | undefined,
+      nodeRoot,
+      `${position}.${key}`,
+    );
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Refuse a payload holding a value its position's `enum` does not name,
+ * naming the options there are, each beside its label where the schema gives
+ * labels (`x-enum-labels`, which a verb listing writes beside the options it
+ * resolves from a piece's state).
+ */
+function valueOutsideOptionsError(
+  input: unknown,
+  schema: JSONSchema,
+): string | undefined {
+  const found = firstValueOutsideOptions(
+    input,
+    schema,
+    schema,
+    EVENT_ROOT_POSITION,
+  );
+  if (found === undefined) return undefined;
+  const options = found.options.map((option, index) => {
+    const label = found.labels?.[index];
+    return JSON.stringify(option) +
+      (typeof label === "string" && label !== String(option)
+        ? ` (${label})`
+        : "");
+  });
+  return `${JSON.stringify(found.value)} at ${found.position} is not one of ` +
+    `its options: ${options.join(", ")}`;
+}
+
 /**
  * Reject a payload that cannot satisfy the verb's event schema, before it is
  * sent.
@@ -333,6 +432,8 @@ export function verbInputSchemaError(
   if (schema === undefined || schema === true) return undefined;
   const undeclared = undeclaredVerbFieldError(input, schema);
   if (undeclared !== undefined) return undeclared;
+  const outside = valueOutsideOptionsError(input, schema);
+  if (outside !== undefined) return outside;
   // The option the dispatch gate has always passed
   // (`closedWorldEventRejection`, packages/runner/src/runner.ts). Without it
   // this validator measures the envelope against the schema of the value it

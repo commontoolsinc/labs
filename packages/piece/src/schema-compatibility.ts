@@ -131,6 +131,11 @@ const DESCRIPTIVE_ANNOTATION_KEYS: ReadonlySet<string> = new Set([
   // verbs` shows by default; `cf piece call` never consults it.
   "tier",
   "title",
+  // Where a property's options are read from in the piece's state, and the
+  // labels a verb listing resolves beside them: listing metadata, which
+  // validates nothing until a listing turns it into an `enum`.
+  "x-enum-labels",
+  "x-options",
 ]);
 
 /**

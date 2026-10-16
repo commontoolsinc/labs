@@ -199,7 +199,10 @@ export interface NoteAuthor {
 
 /** A cell as a caller names it: by the ring's identifier, a step and a lane. */
 export interface NoteSpec {
-  /** Identifier of the ring, such as `drums`. */
+  /**
+   * Identifier of the ring, such as `drums`.
+   * @options rings[].id rings[].label
+   */
   readonly ring: string;
 
   /** Step along the ring, from 0 at the top; a step is a sixteenth note. */

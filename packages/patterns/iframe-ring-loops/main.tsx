@@ -128,7 +128,10 @@ interface Attribution {
 
 /** The cell `addNote` places a note in, and who the note is by. */
 interface AddNoteEvent extends Attribution {
-  /** Id of the ring, as `rings` lists it. */
+  /**
+   * Id of the ring, as `rings` lists it.
+   * @options rings[].id rings[].label
+   */
   ring: string;
 
   /** Step along the ring, from 0; a step is a sixteenth note. */
@@ -167,7 +170,10 @@ interface AddNotesResult {
 
 /** The cell `removeNote` empties. */
 interface RemoveNoteEvent {
-  /** Id of the ring, as `rings` lists it. */
+  /**
+   * Id of the ring, as `rings` lists it.
+   * @options rings[].id rings[].label
+   */
   ring: string;
 
   /** Step along the ring, from 0. */
@@ -185,7 +191,10 @@ interface RemoveNoteResult {
 
 /** Which ring `clearNotes` empties, or every ring. */
 interface ClearNotesEvent {
-  /** Id of the one ring to clear. Left out, every ring is cleared. */
+  /**
+   * Id of the one ring to clear. Left out, every ring is cleared.
+   * @options rings[].id rings[].label
+   */
   ring?: string;
 }
 

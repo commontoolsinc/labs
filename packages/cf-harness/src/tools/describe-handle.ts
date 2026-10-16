@@ -799,8 +799,12 @@ interface DescribedReferent {
  * structure. A model cannot call a verb well without the author's account of
  * it, and that account is author text in model context: a prompt-injection
  * surface the reduction otherwise closes, and one no bound on property names
- * limits here. To harden, route the verbs through the CFC release check with
- * the pattern's own label, and disclose what that admits.
+ * limits here. A field declaring its options (`x-options`) crosses with
+ * those options resolved, which are the piece's state rather than the
+ * author's text: the values and labels at the paths the author named. To
+ * harden, route the verbs through the CFC release check with the pattern's
+ * own label and the label of the state the options were read from, and
+ * disclose what that admits.
  */
 const pieceVerbsOf = async (
   session: HarnessFabricSession,

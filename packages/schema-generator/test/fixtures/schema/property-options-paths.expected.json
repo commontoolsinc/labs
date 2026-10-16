@@ -1,0 +1,47 @@
+{
+  "properties": {
+    "cells": {
+      "items": {
+        "properties": {
+          "ring": {
+            "description": "Ring of the cell.",
+            "type": "string",
+            "x-options": {
+              "value": "rings[].id"
+            }
+          }
+        },
+        "required": [
+          "ring"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "lane": {
+      "type": "string",
+      "x-options": {
+        "value": "lanes[]"
+      }
+    },
+    "ring": {
+      "description": "Id of the ring, as `rings` lists it.",
+      "type": "string",
+      "x-options": {
+        "label": "rings[].label",
+        "value": "rings[].id"
+      }
+    },
+    "step": {
+      "description": "No options named.",
+      "type": "number"
+    }
+  },
+  "required": [
+    "cells",
+    "lane",
+    "ring",
+    "step"
+  ],
+  "type": "object"
+}

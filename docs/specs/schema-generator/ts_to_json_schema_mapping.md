@@ -1793,6 +1793,13 @@ producing alias in this package as of this writing.
   `VerbTierMarkTransformer` (current-behavior spec §12.1), not here.
   Fixture: stream-deprecated-mark.
 
+- **`@options <value path> [<label path>]` on a property → `x-options:
+  { value, label? }`** (`symbolOptionsTag` + `attachOptionsPaths`,
+  `doc-utils.ts` / `object-formatter.ts`): the paths in the piece's result
+  the property's options and their labels are read from, which a verb
+  listing resolves into `enum` (`docs/specs/json_schema.md`). Emitted on
+  any data property, at the root or nested. Fixture: property-options-paths.
+
 ## 13. The Hints Channel (`schemaHints`)
 
 Hint shape (`src/interface.ts`): `SchemaHints` is `WeakMap<ts.Node,

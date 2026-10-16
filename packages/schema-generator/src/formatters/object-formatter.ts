@@ -11,6 +11,7 @@ import {
   extractDocFromSymbolAndDecls,
   getDeclDocs,
   symbolHasDeprecatedTag,
+  symbolOptionsTag,
 } from "../doc-utils.ts";
 import type {
   BoundTypeArgument,
@@ -434,6 +435,7 @@ export class ObjectFormatter implements TypeFormatter {
           propName,
           checker,
         );
+        attachOptionsPaths(generated as Record<string, unknown>, prop, checker);
       }
       if (propName === "$UI") {
         const uiContract = getUiContractHint(context, propTypeNode);
@@ -548,6 +550,21 @@ export class ObjectFormatter implements TypeFormatter {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
+}
+
+/**
+ * A property whose declaration carries `@options <path> [<label path>]` JSDoc
+ * lowers to `x-options: { value, label? }`: its options are the values at
+ * that path in the piece's result, which a verb listing resolves into an
+ * `enum` when it lists a verb whose event holds the property.
+ */
+function attachOptionsPaths(
+  schema: Record<string, unknown>,
+  prop: ts.Symbol,
+  checker: ts.TypeChecker,
+): void {
+  const paths = symbolOptionsTag(prop, checker);
+  if (paths !== undefined) schema["x-options"] = paths;
 }
 
 /**

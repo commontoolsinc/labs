@@ -84,6 +84,35 @@ const TIMER_PATTERN_SOURCE = [
   "",
 ].join("\n");
 
+/**
+ * A board whose `tag` verb names a tag by the id `tags` lists, which its event
+ * declares with `@options`, so the tags a caller may name are the piece's
+ * state rather than prose.
+ */
+const TAGGER_PATTERN_SOURCE = [
+  "import { action, Default, pattern, Stream, Writable } from 'commonfabric';",
+  "interface TagEvent {",
+  "  /** Id of the tag, as `tags` lists it.",
+  "   * @options tags[].id tags[].name */",
+  "  tag: string;",
+  "}",
+  "interface Input { tagged?: Writable<string[] | Default<[]>>; }",
+  "interface Output {",
+  "  tags: { id: string; name: string }[];",
+  "  tagged: string[];",
+  "  tag: Stream<TagEvent>;",
+  "}",
+  "export default pattern<Input, Output>(({ tagged }) => {",
+  "  const tag = action<TagEvent>((event) => { tagged.push(event.tag); });",
+  "  return {",
+  "    tags: [{ id: 'urgent', name: 'Urgent' }, { id: 'later', name: 'Later' }],",
+  "    tagged,",
+  "    tag,",
+  "  };",
+  "});",
+  "",
+].join("\n");
+
 /** The context members the two tools read, and no others. */
 const contextWith = (
   session: HarnessFabricSession,
@@ -858,6 +887,59 @@ describe("call-verb", () => {
       expect(stored.map((entry) => entry["/"]["link@1"].id)).toEqual([
         parseLLMFriendlyLink(review, session.pieces.getSpace()).id,
       ]);
+    });
+  });
+
+  describe("a verb whose options are the piece's state", () => {
+    /** Runs the tagger and returns the reference to its result cell. */
+    const createTagger = async (): Promise<string> => {
+      const output = await runPatternTool.invoke(
+        contextWith(session),
+        { sourceText: TAGGER_PATTERN_SOURCE },
+      ) as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      return await hold(output.resultRef);
+    };
+
+    it("lists the options as the field's enum in describe_handle", async () => {
+      const ref = await createTagger();
+      const minted = await mintAddressHandle(
+        createHarnessHandleTable("run-call-verb"),
+        ref,
+      );
+
+      const output = await describeHandleTool.invoke(
+        contextWith(session, minted.table),
+        { token: minted.token },
+      );
+
+      const tag = output.verbs!.find((verb) => verb.name === "tag")!;
+      expect(tag.inputSchema).toMatchObject({
+        properties: {
+          tag: {
+            type: "string",
+            enum: ["urgent", "later"],
+            "x-enum-labels": ["Urgent", "Later"],
+          },
+        },
+      });
+    });
+
+    it("refuses a value outside the options in call_verb, naming them", async () => {
+      const ref = await createTagger();
+
+      const output = await callVerbTool.invoke(contextWith(session, held), {
+        token: ref,
+        verb: "tag",
+        event: { tag: "someday" },
+      });
+
+      expect(output.status).toBe("error");
+      expect((output as { message: string }).message).toContain(
+        '"someday" at <event>.tag is not one of its options: ' +
+          '"urgent" (Urgent), "later" (Later)',
+      );
+      expect(await readField(ref, "tagged")).toEqual([]);
     });
   });
 });

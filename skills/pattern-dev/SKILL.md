@@ -110,6 +110,18 @@ identify people by `equals()` on a cell reference, not display name. See
 `docs/common/patterns/multi-user-patterns.md#presenting-identity` and
 `docs/common/components/COMPONENTS.md#identity-components`.
 
+**Verb options:** when a verb's argument names something the piece lists — a
+ring, a column, a room — declare where the options live with an `@options` JSDoc
+tag on that event property: a path into the piece's result, then optionally a
+path to each option's label. Ring Loops
+(`packages/patterns/iframe-ring-loops/main.tsx`) writes
+`@options rings[].id rings[].label` on `addNote`'s `ring`, and the verb listing
+that `describe_handle` and the share sidecar read resolves it against the
+piece's state into a plain `enum` with `x-enum-labels`, so every reader of the
+listing sees the rings as an ordinary enumeration, and `call_verb` refuses an
+unknown one naming the options. `[]` steps into each element of an array; the
+label path starts with the same arrays as the value path.
+
 When working in a Pattern Factory Build workspace, also read:
 
 - `docs/common/ai/pattern-factory-build-guide.md`

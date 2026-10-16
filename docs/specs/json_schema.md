@@ -42,6 +42,15 @@ The authoritative field inventory is the `JSONSchema` type in
   never consults the mark. Annotation-class in the piece compat checker
   (adds and removes freely). Standard `deprecated: true` is the companion
   mark on the other axis, produced from `@deprecated` JSDoc.
+- **`x-options`**: where a property's options are found in the piece's
+  result, as `{ value, label? }` paths such as `rings[].id` and
+  `rings[].label` (`[]` steps into each element of an array), lowered from
+  `@options` JSDoc. A verb listing (`pieceVerbs`,
+  `packages/piece/src/verb-call.ts`) resolves it against the piece's state
+  into a plain `enum`, with each option's label at the same index of
+  **`x-enum-labels`**, and keeps the annotation beside them; a state holding
+  no options leaves the property without an `enum`. Annotation-class in the
+  piece compat checker.
 - **`ifc`**: Information Flow Control (IFC) annotations (see [IFC](#ifc))
 
 ### Streams are declarations, not views

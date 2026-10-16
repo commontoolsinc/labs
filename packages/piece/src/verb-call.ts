@@ -28,6 +28,7 @@ import { isInstance, isObjectNotArray } from "@commonfabric/utils/types";
 import { loadPiecePattern } from "./ops/piece-controller.ts";
 import { nearestName } from "./refusal.ts";
 import { verbEventForDispatch } from "./verb-input.ts";
+import { resolveVerbOptions } from "./verb-options.ts";
 import {
   handlerVerbEvents,
   type PieceCallableListing,
@@ -244,8 +245,32 @@ export const resultVerbs = (pattern: Pattern): PieceCallableListing[] =>
   );
 
 /**
+ * `verb` with the options its input schema declares (`x-options`) resolved
+ * against the state of the piece whose result cell is `piece`, as it stands
+ * now. A state that cannot be read leaves the verb as the pattern declares
+ * it: the options are an aid to the caller, and their absence costs the
+ * listing nothing else.
+ */
+const withOptions = async (
+  piece: Cell<unknown>,
+  verb: PieceCallableListing,
+): Promise<PieceCallableListing> => {
+  let inputSchema: JSONSchema | true;
+  try {
+    inputSchema = await resolveVerbOptions(
+      verb.inputSchema,
+      (property) =>
+        (piece as Cell<Record<string, unknown>>).key(property).pull(),
+    );
+  } catch {
+    return verb;
+  }
+  return inputSchema === verb.inputSchema ? verb : { ...verb, inputSchema };
+};
+
+/**
  * The verbs {@link callVerb} can call on the piece whose result cell is
- * `piece`.
+ * `piece`, each input schema's options resolved from the piece's state.
  *
  * @throws Error when the piece's pattern cannot be loaded.
  */
@@ -259,7 +284,9 @@ export async function pieceVerbs(
     piece.getAsNormalizedFullLink().space,
     { projectResult: false },
   );
-  return resultVerbs(pattern);
+  return await Promise.all(
+    resultVerbs(pattern).map((verb) => withOptions(piece, verb)),
+  );
 }
 
 /** What {@link callVerb} returns. */
@@ -356,10 +383,13 @@ export async function callVerb(
     };
   }
   const verbs = resultVerbs(pattern);
-  const listed = verbs.find((candidate) => candidate.name === verb);
-  if (listed === undefined) {
+  const found = verbs.find((candidate) => candidate.name === verb);
+  if (found === undefined) {
     return { status: "refused", message: notAVerbMessage(verb, verbs) };
   }
+  // The event is judged against the options the piece holds now, which are
+  // the ones a listing read at this moment would name.
+  const listed = await withOptions(cell, found);
 
   const schema = listed.inputSchema === true
     ? undefined

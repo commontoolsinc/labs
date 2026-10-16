@@ -2806,6 +2806,13 @@ export type JSONSchemaObj = {
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.
   readonly tags?: readonly string[];
+  // Where a property's options are found in the piece's result, lowered from
+  // `@options <value path> [<label path>]` JSDoc: a path of property names
+  // joined by `.`, where `[]` after a name steps into each element of the
+  // array there, as in `rings[].id`. A verb listing resolves it into `enum`,
+  // with each option's label at the same position of `x-enum-labels`.
+  readonly "x-options"?: { readonly value: string; readonly label?: string };
+  readonly "x-enum-labels"?: readonly string[];
   // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"

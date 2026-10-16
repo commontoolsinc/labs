@@ -157,3 +157,30 @@ export function symbolHasDeprecatedTag(
   if (!hasUserDecl) return false;
   return symbol.getJsDocTags(checker).some((tag) => tag.name === "deprecated");
 }
+
+/**
+ * The paths an `@options` JSDoc tag names on a non-declaration-file
+ * declaration of `symbol`: where in the piece's result the property's options
+ * are found, and where their labels are, as in
+ * `@options rings[].id rings[].label`. A verb listing resolves the paths
+ * against the piece's state into an `enum` (`packages/piece/src/verb-options.ts`).
+ * Returns `undefined` when no such tag names a path.
+ */
+export function symbolOptionsTag(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): { value: string; label?: string } | undefined {
+  if (!symbol) return undefined;
+  const hasUserDecl = (symbol.declarations ?? []).some((d) =>
+    !d.getSourceFile().isDeclarationFile
+  );
+  if (!hasUserDecl) return undefined;
+  const tag = symbol.getJsDocTags(checker).find((tag) =>
+    tag.name === "options"
+  );
+  // @ts-ignore - displayPartsToString exists on the TS namespace
+  const text: string = ts.displayPartsToString(tag?.text ?? []);
+  const [value, label] = text.trim().split(/\s+/);
+  if (!value) return undefined;
+  return label ? { value, label } : { value };
+}
