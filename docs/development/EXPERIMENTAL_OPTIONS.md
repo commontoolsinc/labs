@@ -790,7 +790,15 @@ holds the measurements and the conditions for revisiting.
   covers omitted, false, and true values in both execution modes. Cross-runtime
   session fixtures run with the flag off and are explicitly skipped when it is
   on; their user-scope counterparts run in both settings.
-- **Status (2026-10-15):** implemented, off by default; performance unmeasured.
+- **Status (2026-10-16):** implemented, off by default. On the FabriChat
+  room cold load it removes the session writes from a load's commits and
+  spares the three commits a load makes that read nothing shared, while 167
+  of the 168 it empties still carry shared reads and travel for validation;
+  the load's other counts and its wall time stay where they were
+  (`docs/history/development/performance/2026-10-16-fabrichat-room-cold-load-local-session-documents.md`).
+  The performance case for graduating it needs a load whose session-local
+  commits read nothing shared, or a client that settles a read-only commit
+  without the round trip.
 
 ### `sharedMemoryConnection`
 
