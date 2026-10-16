@@ -429,7 +429,6 @@ export function isInlineCellId(id: string): boolean {
   return isImmutableCellId(id) || isFabricDataUri(id);
 }
 
-/** Looks up a runtime-local snapshot without retaining its runtime. */
 /**
  * How many distinct snapshots any store in this process retains, element
  * stores included. A snapshot several stores share counts once; one released
@@ -439,6 +438,7 @@ export function liveImmutableSnapshotCount(): number {
   return snapshots.size;
 }
 
+/** Looks up a runtime-local snapshot without retaining its runtime. */
 export function immutableSnapshot(id: URI): ImmutableSnapshot {
   const snapshot = snapshots.get(id)?.value.deref();
   if (snapshot === undefined) {
