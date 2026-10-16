@@ -512,8 +512,13 @@ loop's duty).
   message, `eventWatermark` advances past it, and the unconditional
   dropped-write report still fires. A crash while preparing the commit
   is a distinct `CommitPreparationError`; it is a delivery failure,
-  not a CFC verdict. An explicit handler abort is a handler-error
-  consequence, not an infrastructure retry.
+  not a CFC verdict. So is a CFC refusal that is not wholly a verdict,
+  which keeps the retryable `StorageTransactionAborted` name: prepare
+  could not evaluate an input the transaction did not have, or the
+  prepared state drifted (`packages/runner/src/cfc/verdict-reason.ts`),
+  and a fresh attempt may land the write that sealing an error would
+  end. An explicit handler abort is a handler-error consequence, not an
+  infrastructure retry.
 - **Handler body DID NOT RUN — not a consequence (RULED 2026-08-27;
   mark/effects atomicity, the a04 write-side member).** A served
   dispatch whose handler body never executed — the runner's
@@ -594,7 +599,15 @@ loop's duty).
   active interval without erasing the accumulated time. A served
   `RetryImmediately` used for in-space name resolution is settlement
   and never creates or ages this checkpoint. Only a committed handler
-  consequence or terminal notice clears it.
+  consequence or terminal notice clears it. A commit-preparation
+  failure carries §2's arrival-order barrier as the other deferral arms
+  do: every later same-space arrival already queued behind the failed
+  head defers with it. A head retried after such a failure is the last
+  entry its drain pass queues, and a pass that finds that retry still
+  in flight queues nothing behind it, so the events behind it wait in
+  the drain for the pass its outcome arms rather than for the backstop
+  rescan a swept event waits for. An input wake such a pass takes is
+  kept for the attempt after the one in flight.
 - The failed-state budget is 60 seconds. This terminal-disposition
   budget is an explicit exception to the repository's no-timeout rule:
   it starts only after an observed failure, never cancels an in-flight
