@@ -1953,6 +1953,19 @@ export function planCompileCacheWriteChunks(
 }
 
 /**
+ * What a closure load found, for a caller that reports why a load missed:
+ * whether the entry document was absent, present but refused (no compiler
+ * integrity atom on its label, or a `code` link whose document did not
+ * arrive), or verified, and how many reached documents the walk refused the
+ * same way. A refused document drops silently from the closure, so without
+ * this a partial closure and a plain miss read alike.
+ */
+export type ClosureLoadTally = {
+  entry: "absent" | "unverified" | "verified";
+  dropped: number;
+};
+
+/**
  * Load the integrity-valid compiled documents reachable from `entryIdentity` by
  * following import links. A **single** `sync()` on the entry cell under the
  * recursive {@link COMPILED_DOC_SCHEMA} transitively loads the whole closure
@@ -1978,6 +1991,7 @@ export async function loadCompiledClosure(
   entryIdentity: string,
   opts: { runtimeVersion: string },
   tx: IExtendedStorageTransaction,
+  tally?: ClosureLoadTally,
 ): Promise<Map<string, CompiledDoc>> {
   const atom = COMPILED_INTEGRITY_ATOM;
   const out = new Map<string, CompiledDoc>();
@@ -2055,7 +2069,13 @@ export async function loadCompiledClosure(
   // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entryCell.sync();
   const entryDoc = verifiedDoc(entryCell);
-  if (entryDoc === undefined) return out;
+  if (entryDoc === undefined) {
+    if (tally !== undefined) {
+      tally.entry = entryCell.getRaw() === undefined ? "absent" : "unverified";
+    }
+    return out;
+  }
+  if (tally !== undefined) tally.entry = "verified";
 
   const queue: { doc: VerifiedCompiledDoc }[] = [{ doc: entryDoc }];
   while (queue.length > 0) {
@@ -2083,9 +2103,15 @@ export async function loadCompiledClosure(
       // Compiled-cache integrity and module delegation authority are attested
       // only in the linked cell's space. Mixed-space cache graphs fail closed
       // instead of rebasing a child space's attestation onto `space`.
-      if (linkedCell.space !== space) return new Map();
+      if (linkedCell.space !== space) {
+        if (tally !== undefined) tally.dropped++;
+        return new Map();
+      }
       const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
-      if (child === undefined) continue;
+      if (child === undefined) {
+        if (tally !== undefined) tally.dropped++;
+        continue;
+      }
       imports.push({ specifier: imp.specifier, identity: child.identity });
       if (!visited.has(child.identity)) queue.push({ doc: child });
     }

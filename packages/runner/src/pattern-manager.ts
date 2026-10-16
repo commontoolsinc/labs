@@ -23,6 +23,7 @@ import type { CfcMetadata } from "./cfc/types.ts";
 import { ColdLoadNegativeMemo } from "./cold-load-negative-memo.ts";
 import {
   buildSourceDocs,
+  type ClosureLoadTally,
   COMPILED_INTEGRITY_ATOM,
   compiledDocKey,
   deriveModuleDelegations,
@@ -408,6 +409,19 @@ type ProgramCompilation = {
   /** Spaces whose closures are registered for replication on completion. */
   readonly spaces: Set<MemorySpace>;
 };
+
+/**
+ * What a by-identity load's timing row names: the pattern, and how many
+ * documents its closure read refused, when it refused any.
+ */
+function byIdentityLoadDetail(
+  entryIdentity: string,
+  symbol: string,
+  tally: ClosureLoadTally,
+): string {
+  const name = `${entryIdentity}#${symbol}`;
+  return tally.dropped === 0 ? name : `${name} dropped=${tally.dropped}`;
+}
 
 /**
  * Helper for the program caches, which hashes a detached program in its
@@ -2389,6 +2403,18 @@ export class PatternManager {
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
+    const loadStart = performance.now();
+    const tally: ClosureLoadTally = { entry: "absent", dropped: 0 };
+    // One row per outcome, each naming the pattern and what the closure
+    // read found, so a capture says which pattern missed and why.
+    const record = (outcome: string) =>
+      logger.timeDetailed(
+        () => byIdentityLoadDetail(entryIdentity, symbol, tally),
+        loadStart,
+        "compile-cache",
+        "load-by-identity",
+        outcome,
+      );
     // Select the same cached variant the compile path wrote. A coverage-on
     // runtime resumes from the instrumented closure; reading the ordinary key
     // here would serve uninstrumented bodies for an instrumented run.
@@ -2397,6 +2423,7 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
+      record("no-version");
       return await this.#tryColdLoadByIdentity(
         entryIdentity,
         symbol,
@@ -2417,6 +2444,7 @@ export class PatternManager {
         entryIdentity,
         cacheOpts,
         readTx,
+        tally,
       );
       logger.time(readStart, "compile-cache", "load-pattern-by-identity");
     } finally {
@@ -2427,6 +2455,13 @@ export class PatternManager {
       (patternCoverage !== undefined &&
         !cacheEntriesIncludePatternCoverage(closure.values()))
     ) {
+      record(
+        closure.has(entryIdentity)
+          ? "coverage-missing"
+          : tally.entry === "unverified"
+          ? "entry-unverified"
+          : "entry-absent",
+      );
       this.#persistedCompileCacheClosures.delete(
         compileCachePersistenceSlotKey(space, entryIdentity, cacheOpts),
       );
@@ -2498,8 +2533,10 @@ export class PatternManager {
         compileCacheRecoveryKey(space, entryIdentity),
       );
       this.#esmCacheStats.byIdentityHits++;
+      record("hit");
       return pattern;
     } catch (error) {
+      record("eval-failed");
       logger.warn("load-pattern-by-identity-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,
@@ -2548,6 +2585,15 @@ export class PatternManager {
     options: { repairCache?: boolean } = {},
   ): Promise<Pattern | undefined> {
     const harness = this.#runtime.harness;
+    const coldStart = performance.now();
+    const record = (outcome: string) =>
+      logger.timeDetailed(
+        () => `${entryIdentity}#${symbol}`,
+        coldStart,
+        "compile-cache",
+        "cold-load",
+        outcome,
+      );
     const readTx = this.#runtime.edit();
     let sourceDocs;
     try {
@@ -2560,9 +2606,11 @@ export class PatternManager {
     } finally {
       readTx.abort?.("load-pattern-by-identity source read complete");
     }
-    if (sourceDocs === undefined) return undefined;
-    const entry = sourceDocs.get(entryIdentity);
-    if (entry === undefined) return undefined;
+    const entry = sourceDocs?.get(entryIdentity);
+    if (sourceDocs === undefined || entry === undefined) {
+      record("source-absent");
+      return undefined;
+    }
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
     const sourcePackages = [...sourceDocs.values()].map((doc) => ({
       entryPath: doc.filename,
@@ -2625,6 +2673,7 @@ export class PatternManager {
         },
       );
       const pattern = this.#patternFromMain(result, symbol, entryIdentity);
+      record("compiled");
       if (cacheOpts === undefined || options.repairCache === false) {
         this.#recordDeferredCacheRepair(
           space,
@@ -2656,6 +2705,7 @@ export class PatternManager {
       }
       return pattern;
     } catch (error) {
+      record("compile-failed");
       logger.warn("load-pattern-by-identity-source-miss", () => [
         `entry=${entryIdentity}`,
         `symbol=${symbol}`,

@@ -355,8 +355,13 @@ and most runtime code runs in a web worker, so its loggers are in a separate
 
 ```javascript
 // Shown inside a pattern body.
-// Fetch worker counts, timing, and flags
+// Fetch worker counts, timing, flags, CFC counters and compile-cache counters
 await commonfabric.rt.getLoggerCounts()
+// .compileCache = { hits, misses, byIdentityHits }; the `pattern-manager`
+// timing rows `compile-cache/load-by-identity/<outcome>` (hit, entry-absent,
+// entry-unverified, coverage-missing, eval-failed, no-version) and
+// `compile-cache/cold-load/<outcome>` (compiled, source-absent,
+// compile-failed) name the pattern in each row's `slowest` details
 
 // Control worker loggers
 await commonfabric.rt.setLoggerLevel("debug")         // all loggers

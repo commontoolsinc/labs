@@ -7248,14 +7248,21 @@ describe("runtime-processor", () => {
   describe("RuntimeProcessor.getLoggerCounts()", () => {
     // The handler reads process-global logger state, so each case raises its own
     // flag and clears it again rather than leaving one for the next. It also
-    // reads the runtime's CFC counters, which travel in the same response so a
-    // client comparing them against the timings has both from one moment —
-    // hence the stand-in below, the only runtime member this handler touches.
+    // reads the runtime's CFC counters and the pattern manager's compile-cache
+    // counters, which travel in the same response so a client comparing them
+    // against the timings has all three from one moment — hence the stand-in
+    // below, the only runtime members this handler touches.
 
     const cfcStats = { cfcRelevantTx: 7 };
+    const compileCacheStats = { hits: 2, misses: 1, byIdentityHits: 3 };
 
     function processorWithStats() {
-      return buildProcessor({ runtime: { getCfcStats: () => cfcStats } });
+      return buildProcessor({
+        runtime: {
+          getCfcStats: () => cfcStats,
+          patternManager: { getCompileCacheStats: () => compileCacheStats },
+        },
+      });
     }
 
     function withFlag(
@@ -7281,6 +7288,7 @@ describe("runtime-processor", () => {
 
         expect(Object.keys(response).sort()).toEqual([
           "cfc",
+          "compileCache",
           "counts",
           "flags",
           "metadata",
@@ -7290,6 +7298,7 @@ describe("runtime-processor", () => {
           a: 1,
         });
         expect(response.cfc).toEqual(cfcStats);
+        expect(response.compileCache).toEqual(compileCacheStats);
       });
     });
 
