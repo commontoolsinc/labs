@@ -2493,8 +2493,9 @@ export type SlowTiming = {
   epochMs: number;
 
   /**
-   * What the worker named this one measurement with, when it named it: a
-   * cell, document or pattern identity.
+   * What the worker named this one measurement with, when it named it: the
+   * label its caller chose, such as the cell a resume loaded or the action a
+   * run executed.
    */
   detail?: string;
 };
