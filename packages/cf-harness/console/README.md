@@ -117,7 +117,7 @@ CF_HARNESS_SANDBOX_RUNTIME=runsc \
   deno task --cwd packages/cf-harness console:launch --instance <loom-instance>
 deno task --cwd packages/cf-harness console:launch \
   --fabric-api-url http://localhost:8000 --store packages/toolshed/cache/memory \
-  --fabric-identity "$HOME/.cf/my-key.pkcs8" --fabric-space my-space
+  --fabric-identity "$HOME/.cf/my-key.pkcs8" --fabric-space <space-did>
 ```
 
 The first names the sandbox runtime, `runsc`, with its settings in the
@@ -155,7 +155,7 @@ would otherwise have resolved:
 ```sh
 export CF_HARNESS_FABRIC_API_URL=http://localhost:8000
 export CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8"
-export CF_HARNESS_FABRIC_SPACE=my-space
+export CF_HARNESS_FABRIC_SPACE=<space-did>
 export CF_HARNESS_PATTERN_INDEX_URL=https://index.example/   # optional
 export CF_HARNESS_SKILLS_REGISTRY_URL=https://www.skills.sh/  # optional
 
@@ -1157,7 +1157,7 @@ exist:
 | `allowedToolIds`          | the tools a new session's policy asks for                             |
 | `allowedSubagentProfiles` | the subagent profiles it authorizes                                   |
 | `artifactRoot`            | where runs are filed                                                  |
-| `fabricSpace`             | the space name runs build in                                          |
+| `fabricSpace`             | the space runs build in: a name, or a DID                             |
 | `sessionDbPath`           | the durable session store, or `null` when sessions are held in memory |
 
 The prompt crosses as a digest and never as text, so a client can check that

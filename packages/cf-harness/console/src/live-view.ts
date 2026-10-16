@@ -37,7 +37,7 @@ import {
 import { stepCfcRecorded, withheldView } from "./steps-view.ts";
 import type { ConsoleStep } from "../steps.ts";
 import type { ConsoleTurnResultPiece } from "../turn-result.ts";
-import { namedPieceAddress } from "../../src/piece-url.ts";
+import { pieceUrl } from "../../src/piece-url.ts";
 import type { BrowserToolAction } from "../../src/tools/browser.ts";
 import type { HarnessPolicyDecisionReasonCode } from "../../src/contracts/policy-trace.ts";
 import {
@@ -633,7 +633,7 @@ const piecesBaseFrom = (raw: string | null): string | undefined => {
  * Where one piece is opened. The host that renders pieces somewhere other than
  * the Fabric API says so with `piecesBase`, and the pane composes the address
  * from the space and the slug the run recorded, as every piece address is
- * composed (`namedPieceAddress`); with no base named, the URL the run recorded
+ * composed (`pieceUrl`); with no base named, the URL the run recorded
  * is used as it stands rather than rebuilt.
  */
 export const consoleLivePieceHref = (
@@ -643,7 +643,7 @@ export const consoleLivePieceHref = (
 ): string =>
   (piecesBase === undefined || spaceName === undefined
     ? undefined
-    : namedPieceAddress(piecesBase, spaceName, piece.slug)) ?? piece.url;
+    : pieceUrl(piecesBase, spaceName, piece.slug)) ?? piece.url;
 
 /**
  * What the address a pane was opened at names. The session is the last segment

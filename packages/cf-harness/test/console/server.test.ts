@@ -2779,6 +2779,44 @@ describe("console/server", () => {
       expect((await listSessions()).sessions).toHaveLength(0);
     });
 
+    it("answers 400 for a piece address naming another space than this console's DID", async () => {
+      // A console configured by DID is the session's own DID, so an address
+      // naming another DID is decidable from the text, as a name is.
+      const didServer = new ConsoleServer(
+        await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            CREATED_SPACE,
+            "--session-db",
+            "none",
+          ],
+          {},
+          "/console",
+        ),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: answeringLoop,
+            onEvent,
+          }),
+      );
+      const page = await didServer.handle(getRequest("/"));
+      await page.body?.cancel();
+      const response = await didServer.handle(jsonRequest("/api/task", {
+        text: "make the headings readable",
+        inputCells: [{
+          name: "pattern_1",
+          ref: "pattern:did:key:z6MkforeignSpaceForConsoleTest/bill-inbox",
+        }],
+      }, {}));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        `this session runs in \`${CREATED_SPACE}\``,
+      );
+    });
+
     it("answers 400 for a piece address whose slug is malformed", async () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "make the headings readable",

@@ -18,7 +18,7 @@ import { appViewToUrlPath, spaceViewRef } from "@commonfabric/navigation";
  * `space` is empty. A path on `base` is kept, so a host that renders pieces
  * under a path of its own gets addresses under it.
  */
-export const namedPieceAddress = (
+export const pieceUrl = (
   base: string | URL,
   space: string,
   slug: string,

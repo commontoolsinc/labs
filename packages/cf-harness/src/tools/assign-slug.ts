@@ -20,7 +20,7 @@ import {
 } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
-import { namedPieceAddress } from "../piece-url.ts";
+import { pieceUrl } from "../piece-url.ts";
 import { observedOutputsIn } from "../run-pattern-output-concerns.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
@@ -240,7 +240,7 @@ export const namedPieceUrl = (
   const spaceName = pieces.getSpaceName();
   return spaceName === undefined
     ? undefined
-    : namedPieceAddress(pieces.runtime.apiUrl, spaceName, slug);
+    : pieceUrl(pieces.runtime.apiUrl, spaceName, slug);
 };
 
 /**

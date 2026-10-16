@@ -2336,7 +2336,7 @@ deno task run -- \
   --workspace /path/to/workspace \
   --fabric-api-url https://toolshed.example/ \
   --fabric-identity ~/.cf/agent.pkcs8 \
-  --fabric-space my-space \
+  --fabric-space <space-did> \
   --prompt "Deploy a pattern that doubles its input and report the result."
 ```
 
@@ -3434,7 +3434,7 @@ deno task run -- \
   --workspace /path/to/workspace \
   --fabric-api-url https://toolshed.example/ \
   --fabric-identity ~/.cf/agent.pkcs8 \
-  --fabric-space my-space \
+  --fabric-space <space-did> \
   --skills-root labs/skills \
   --allow-subagent-profile pattern-author \
   --prompt "Answer the question about my space by delegating a pattern to a pattern-author child."

@@ -25,6 +25,7 @@
  * addressing rules per client.
  */
 
+import { isDID } from "@commonfabric/identity/did";
 import { type MemorySpace, validateSlug } from "@commonfabric/runner";
 import { AGENT_INPUT_NAME_PATTERN } from "@commonfabric/runner/agent-run";
 import {
@@ -131,25 +132,31 @@ export const parseNamedPieceAddress = (
  * another one is a mistake to report. Foreign attachments need a reference
  * carrying an operator-admitted DID.
  *
- * `spaceName` is the space as an address spells it: its NAME, or, for a space
- * created with a random key, which has no name, its DID. A name never matches
- * a DID, even the one it derives: the `MemorySpace` a mint checks a reference
- * against is the DID, and is never compared to a name.
+ * An address names a space the way the shell's addresses do: a segment that is
+ * a DID is the space's DID, and is held to `space`; any other segment is a
+ * name, and is held to `spaceName`. A space created with a random key has no
+ * name, so its DID is the only way to name it. A legacy space has both, and is
+ * named by either. A side that does not know one of the two answers nothing
+ * about an address in that form, and leaves it to a side that does.
  *
  * @throws Error naming both spaces.
  */
 export const checkNamedPieceAddressSpace = (
   address: NamedPieceAddress,
   spaceName: string | undefined,
+  space?: MemorySpace,
 ): void => {
-  if (
-    address.spaceName === undefined || spaceName === undefined ||
-    address.spaceName === spaceName
-  ) {
+  if (address.spaceName === undefined) {
+    return;
+  }
+  const expected = isDID(address.spaceName) ? space : spaceName;
+  if (expected === undefined || address.spaceName === expected) {
     return;
   }
   throw new Error(
-    `piece address names space \`${address.spaceName}\`, and this session runs in \`${spaceName}\`; only pieces in the session's own space can be attached`,
+    `piece address names space \`${address.spaceName}\`, and this session runs in \`${
+      spaceName ?? space
+    }\`; only pieces in the session's own space can be attached`,
   );
 };
 
@@ -198,7 +205,7 @@ export const checkInputCellSpec = (
   }
   if (address !== undefined) {
     try {
-      checkNamedPieceAddressSpace(address, spaceName);
+      checkNamedPieceAddressSpace(address, spaceName, space);
     } catch (error) {
       throw new Error(
         `--input-cell \`${spec.name}\` ${
@@ -271,10 +278,7 @@ export interface InputCellSessionResolution {
   /** Operator admission snapshot from the Fabric session. */
   foreignSpaces?: HarnessForeignSpaces;
 
-  /**
-   * The session's space as a named address spells it: its name, or the DID of
-   * a space created with a random key.
-   */
+  /** The session's space, by name; a space created by DID has none. */
   spaceName?: string;
 
   /**
@@ -316,9 +320,13 @@ const resolvedInputCellRef = async (
   // this side cannot check the name of is one the address cannot be
   // honoured against: the same slug in another space is a different piece,
   // and answering with this space's would hand back a cell nobody asked
-  // for. A session always spells its space, by name or by DID, so this
-  // fires for a resolution that was handed none.
-  if (address.spaceName !== undefined && session.spaceName === undefined) {
+  // for. A space created by DID has no name, which is exactly when this
+  // fires; an address naming the space by its DID was held to the DID by
+  // the check every input cell runs before this.
+  if (
+    address.spaceName !== undefined && !isDID(address.spaceName) &&
+    session.spaceName === undefined
+  ) {
     throw new Error(
       `--input-cell \`${spec.name}\` names space \`${address.spaceName}\`, and this session's space has no name to check that against; name the space, or attach the piece by reference`,
     );

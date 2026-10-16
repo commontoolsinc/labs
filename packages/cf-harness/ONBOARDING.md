@@ -188,6 +188,19 @@ checkout by a few commits usually runs fine. Restart from your checkout when a
 turn fails for a reason that reads like a protocol mismatch, or when you need
 the toolshed's CFC posture to match what this checkout documents.
 
+### Create its space, once
+
+The console writes the pieces it builds into a space you own. Create one and
+keep the DID it prints:
+
+```sh
+cf space create --api-url <toolshed-api-url> \
+  --identity <absolute-path-to-identity-keyfile> --label "cf-harness console"
+```
+
+Run it once. Each run creates another, empty space, and opening a name never
+creates one: a name reaches only a legacy space that already exists.
+
 ### Start the console
 
 | Variable                         | Value                                                                                          |
@@ -196,7 +209,7 @@ the toolshed's CFC posture to match what this checkout documents.
 | `CF_HARNESS_CONSOLE_DIR`         | Any absolute directory unique to this console. It holds sessions, runs, and the workspace.     |
 | `CF_HARNESS_FABRIC_API_URL`      | The toolshed API URL from above.                                                               |
 | `CF_HARNESS_FABRIC_IDENTITY`     | The absolute path to the keyfile from prerequisite 3.                                          |
-| `CF_HARNESS_FABRIC_SPACE`        | The DID `cf space create` printed, or the name of a legacy space.                              |
+| `CF_HARNESS_FABRIC_SPACE`        | The DID `cf space create` printed above, or the name of a legacy space.                        |
 | `MEMORY_DIR`                     | The toolshed's store directory from above, as a plain path.                                    |
 | `CF_HARNESS_PATTERN_INDEX_URL`   | Optional: `https://us-central1-pattern-index.cloudfunctions.net`, once prerequisite 5 is done. |
 | `CF_HARNESS_SKILLS_REGISTRY_URL` | Optional: `https://skills.sh`, which adds a metadata-only `search_skills` tool.                |
@@ -207,19 +220,13 @@ export CF_HARNESS_CONSOLE_PORT=<free-console-port>
 export CF_HARNESS_CONSOLE_DIR=<absolute-unique-console-directory>
 export CF_HARNESS_FABRIC_API_URL=<toolshed-api-url>
 export CF_HARNESS_FABRIC_IDENTITY=<absolute-path-to-identity-keyfile>
-export CF_HARNESS_FABRIC_SPACE="$(deno task cf space create --quiet \
-  --api-url "$CF_HARNESS_FABRIC_API_URL" \
-  --identity "$CF_HARNESS_FABRIC_IDENTITY" --label "cf-harness console")"
+export CF_HARNESS_FABRIC_SPACE=<space-did>
 export CF_HARNESS_FABRIC_CFC_POSTURE=max-enforcement
 export CF_HARNESS_FABRIC_CFC_FLOW_LABELS=persist
 export CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE=enforce-strict
 export MEMORY_DIR=<absolute-toolshed-cache-directory>
 deno task console
 ```
-
-`cf space create` prints the new space's DID, which the console takes as its
-space. Create it once and keep the DID: each run of `cf space create` makes
-another space, and a name reaches only a legacy space that already exists.
 
 The three CFC exports are the console's defaults, written out so the posture a
 run ran under is never a guess. Success is a startup summary naming the space,
@@ -627,7 +634,7 @@ deno task run -- \
   --workspace <absolute-workspace-directory> \
   --fabric-api-url <toolshed-api-url> \
   --fabric-identity <absolute-path-to-identity-keyfile> \
-  --fabric-space <space-name> \
+  --fabric-space <space-did> \
   --fabric-cfc-posture max-enforcement \
   --space-db <absolute-path-to-space-database> \
   --input-cell "transactions=/of:${INPUT_PIECE_ID}/account" \

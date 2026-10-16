@@ -116,7 +116,7 @@ Start the console with an index configured, from `packages/cf-harness`:
 CF_HARNESS_CONSOLE_PORT=8103 \
 CF_HARNESS_FABRIC_API_URL=http://localhost:8000 \
 CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8" \
-CF_HARNESS_FABRIC_SPACE=pattern-index-demo \
+CF_HARNESS_FABRIC_SPACE=<space-did> \
 CF_HARNESS_PATTERN_INDEX_URL=https://index.example \
 deno task console
 ```

@@ -40,7 +40,7 @@ import type {
 } from "../src/contracts/transcript.ts";
 import type { HarnessModelUsage } from "../src/model/client.ts";
 import { readHarnessModelUsage } from "../src/model/usage.ts";
-import { namedPieceAddress } from "../src/piece-url.ts";
+import { pieceUrl } from "../src/piece-url.ts";
 
 /** A named piece a completed console turn made openable. */
 export interface ConsoleTurnResultPiece {
@@ -50,7 +50,7 @@ export interface ConsoleTurnResultPiece {
   /**
    * Openable URL: the one returned beside the slug, or, for a space configured
    * by DID, whose model-facing output carries none, the console's own address
-   * for the slug (`namedPieceAddress`).
+   * for the slug (`pieceUrl`).
    */
   url: string;
 
@@ -402,16 +402,28 @@ const pieceFromAssignSlug = (
   // DID; the person is shown the address this console's own fabric and space
   // compose, which is what the URL would have been. Nothing crosses the
   // console boundary that the result does not already carry.
-  const url = "url" in output && typeof output.url === "string"
-    ? output.url
-    : namedPieceAddress(options.fabricApiUrl, options.spaceName, output.slug);
-  return url === undefined ? undefined : { slug: output.slug, url };
+  if ("url" in output && typeof output.url === "string") {
+    return { slug: output.slug, url: output.url };
+  }
+  const url = pieceUrl(options.fabricApiUrl, options.spaceName, output.slug);
+  if (url === undefined) {
+    // The console refuses at startup a fabric URL or space this cannot
+    // compose from, so a named piece is never dropped here unannounced.
+    throw new Error(
+      `no address composes for the piece \`${output.slug}\` from the fabric URL \`${options.fabricApiUrl}\``,
+    );
+  }
+  return { slug: output.slug, url };
 };
 
 /**
  * Reads one completed turn from its durable report and model-facing
  * transcript. The report supplies the run boundary and final text. Returns
  * `undefined` when the artifacts cannot establish a complete result.
+ *
+ * @throws Error when a named piece's address cannot be composed from
+ * `fabricApiUrl` and `spaceName`, which a configuration the console accepted
+ * rules out.
  */
 export const readConsoleTurnResult = async (
   options: ReadConsoleTurnResultOptions,

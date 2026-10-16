@@ -1185,8 +1185,8 @@ const createdSpaceSession = (asked: string[]) => () =>
 
 Deno.test("CfHarnessEngine resolves a piece address naming a space created by DID in that space", async () => {
   // A space created with a random key has no name, so the address a surface
-  // holds for one of its pieces names it by DID — the spelling the console
-  // reports its space in. The slug is then resolved in this session.
+  // holds for one of its pieces names it by DID, as the console's results do.
+  // The slug is then resolved in this session.
   const asked: string[] = [];
   const engine = new CfHarnessEngine({
     ...INERT_RUNSC,
@@ -1206,12 +1206,15 @@ Deno.test("CfHarnessEngine resolves a piece address naming a space created by DI
 });
 
 Deno.test("CfHarnessEngine refuses a piece address naming another space than one created by DID", async () => {
-  // Neither another DID nor a name is this space: a name derives a
-  // different space, and comparing it to a DID would assume they agree.
+  // Another DID is another space. A name cannot be checked against a space
+  // that has none, so it is refused rather than assumed to mean this one.
   for (
-    const space of [
-      "did:key:z6MkforeignSpaceForEngineSeedTest",
-      "reading-room",
+    const [space, refusal] of [
+      [
+        "did:key:z6MkforeignSpaceForEngineSeedTest",
+        `this session runs in \`${CREATED_SPACE}\``,
+      ],
+      ["reading-room", "has no name to check that against"],
     ]
   ) {
     const asked: string[] = [];
@@ -1224,14 +1227,43 @@ Deno.test("CfHarnessEngine refuses a piece address naming another space than one
       }],
       fabricSessionFactory: createdSpaceSession(asked),
     });
-    await assertRejects(
-      () => engine.establishInputCells(),
-      Error,
-      `this session runs in \`${CREATED_SPACE}\``,
-    );
+    await assertRejects(() => engine.establishInputCells(), Error, refusal);
     assertEquals(asked, []);
     assertEquals(engine.getRunState().inputCells, undefined);
   }
+});
+
+Deno.test("CfHarnessEngine resolves a piece address naming a legacy space by its DID", async () => {
+  // A legacy space has a name and the DID the name derives; either names it.
+  const asked: string[] = [];
+  const engine = new CfHarnessEngine({
+    ...INERT_RUNSC,
+    workspaceHostPath: "/host/project",
+    inputCells: [{
+      name: "pattern_1",
+      ref: `pattern:${CREATED_SPACE}/reading-list`,
+    }],
+    fabricSessionFactory: () =>
+      Promise.resolve(
+        {
+          pieces: {
+            getSpace: () => CREATED_SPACE,
+            getSpaceName: () => "demo-space",
+            get runtime(): never {
+              asked.push("reading-list");
+              throw new Error("no runtime in this session");
+            },
+          },
+          // deno-lint-ignore no-explicit-any
+        } as any,
+      ),
+  });
+  await assertRejects(
+    () => engine.establishInputCells(),
+    Error,
+    "names the piece `reading-list`, which this space does not hold",
+  );
+  assertEquals(asked, ["reading-list"]);
 });
 
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {

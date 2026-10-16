@@ -49,13 +49,15 @@
  * instead.
  *
  * The one piece of configuration this surface insists on is the fabric
- * session, whose space has to be a name rather than a `did:key`: `assign_slug`
- * composes a piece's URL from the name and offers none for a DID, and finishing
- * with a link rather than a transcript is what this surface is for.
+ * session, because finishing with a link rather than a transcript is what this
+ * surface is for. Its space is a name or the DID of a space created with a
+ * random key; for a DID, `assign_slug` gives the model no URL, and the turn
+ * result composes the person's link itself.
  */
 
 import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
+import { spaceViewRef } from "@commonfabric/navigation";
 import type { PatternIndexClient } from "@commonfabric/pattern-index/client";
 import {
   feedbackEventType,
@@ -397,9 +399,9 @@ const callPatternIndex = (
  *
  * A reference may also be a piece's NAME — `pattern:<space>/<slug>`, or a bare
  * slug meaning this console's own space — which is what a surface showing a
- * rendered piece holds. `spaceName` is this console's space as it was
- * configured — a name, or the DID of a space created with a random key, which
- * is how the console's results name it — and an address naming another one is
+ * rendered piece holds. `fabric` is this console's session configuration, whose
+ * space is a name or, for a space created with a random key, a DID, which is
+ * how the console's results name it; an address naming another space is
  * refused here: the caller cannot see which space this
  * console runs against, so a mismatch is this side's to explain. Whether the
  * space holds the slug is the turn's to find out, like every other reference
@@ -409,7 +411,7 @@ const callPatternIndex = (
  */
 const parseTaskInputCells = (
   value: unknown,
-  spaceName: string,
+  fabric: Pick<HarnessFabricSessionConfig, "space" | "foreignSpaces">,
 ): readonly HarnessInputCellSpec[] => {
   if (value === undefined || value === null) {
     return [];
@@ -417,6 +419,17 @@ const parseTaskInputCells = (
   if (!Array.isArray(value)) {
     throw new Error("inputCells must be an array");
   }
+  // A space configured by DID is the session's own DID, so references are
+  // held to it here as the mint holds them, with the foreign spaces the
+  // operator admitted. A legacy space configured by name has a DID this side
+  // does not derive, so only a named address in the name's form is checked.
+  const configured = spaceViewRef(fabric.space, undefined);
+  const space = configured !== undefined && "spaceDid" in configured
+    ? configured.spaceDid
+    : undefined;
+  const spaceName = configured !== undefined && "spaceName" in configured
+    ? configured.spaceName
+    : undefined;
   const specs: HarnessInputCellSpec[] = [];
   const names = new Set<string>();
   for (const entry of value) {
@@ -431,11 +444,11 @@ const parseTaskInputCells = (
     // to accept different references under the same name.
     const spec = parseInputCellArgument(`${name}=${ref}`);
     // And then once more against this console's own space, which the flag's
-    // parser cannot know. A named piece address spelling another space is a
+    // parser cannot know. A named piece address naming another space is a
     // caller mistake decidable from the text alone, so it is answered now
     // rather than spent on a turn; whether this space HOLDS the slug is not
     // decidable from the text, and the turn answers that one.
-    checkInputCellSpec(spec, undefined, spaceName);
+    checkInputCellSpec(spec, space, spaceName, fabric.foreignSpaces);
     if (names.has(spec.name)) {
       throw new Error(`inputCells names \`${spec.name}\` twice`);
     }
@@ -748,10 +761,8 @@ export interface ConsoleHost extends SandboxProcess {
 
 /**
  * Resolves configuration from flags over environment over defaults. The space
- * is rejected when it is a `did:key`: a run in such a space can build a piece
- * and never hand back an address for it, which is the one outcome this surface
- * exists to avoid. `host` says what applies where `env` names no sandbox
- * runtime.
+ * is a name or a DID, taken as configured. `host` says what applies where `env`
+ * names no sandbox runtime.
  *
  * @throws HarnessControlError where `env` names no sandbox runtime and
  * `host` says its caller must name one; and where it names none on macOS or
@@ -2193,7 +2204,7 @@ export class ConsoleServer {
     try {
       inputCells = parseTaskInputCells(
         body.inputCells,
-        this.#config.fabricSession.space,
+        this.#config.fabricSession,
       );
       checkTaskInputCellNames(inputCells, this.#config.connectorGrants);
       patternRefs = parseTaskPatternRefs(body.patternRefs);
