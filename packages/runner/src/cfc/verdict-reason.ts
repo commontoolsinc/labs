@@ -7,14 +7,20 @@
 // Re-running recomputes the identical refused write, so a verdict is terminal:
 // never retried, surfaced.
 //
-// A refusal for want of something stored state does not hold yet is not one,
-// even where reading again returns the same absence. Ending the retries on it
-// is sound only where the run DEPENDS on the state that would change the
-// answer, so that the value arriving there triggers the run again, as a fresh
-// trigger with a fresh budget rather than a retry. Prepare reads stored labels
-// invisibly to reactivity, so a producer has no such dependency to point at:
-// a write floor that finds a linked source's stored labels short of the floor
-// leaves its failure untagged.
+// A refusal for want of something stored state does not hold yet is one only
+// where the run DEPENDS on the state that would change the answer, so that the
+// value arriving there triggers the run again, as a fresh trigger with a fresh
+// budget rather than a retry. That reading again returns the same absence is
+// not enough. Prepare reads stored labels invisibly to reactivity, so a
+// producer that tags such a refusal makes that dependency itself. The write
+// floor does (`holdFloorEvidence` in `prepare.ts`): where every document whose
+// stored state decided its misses is one the transaction holds and could read,
+// it reads that state again visibly to reactivity and tags the failure. A miss
+// that rests on a document the transaction does not hold stays untagged, since
+// a document the replica has not pulled reads the same as one that lacks the
+// atom, and so does one resting on the flow of external content, which no
+// document holds, or on a schema document a source's stored labels name that
+// the transaction could not read.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not
@@ -28,22 +34,28 @@
 //
 // WATCH(cfc-verdict): THE DEFAULT IS "NOT A VERDICT", AND THAT IS DELIBERATE.
 //
-// An UNTAGGED reason is retryable. A reason is terminal only when its producer
+// An UNTAGGED reason keeps the rejection's retryable name,
+// `StorageTransactionAborted`. A reason is terminal only when its producer
 // says so by wrapping it in `verdictReason(...)`. Get the tagging wrong in the
-// safe direction — a deterministic refusal left untagged — and the cost is the
-// bounded-retry behaviour that predates this split: some doomed re-runs, then
-// the convergence budget. Get it wrong in the other direction and the cost is
-// a write that never lands and never retries: an absent pattern result, a
-// served-wish state that never materializes and whose UI silently never
-// mounts. It will not look like a labelling bug; it looks like the computation
-// simply stopped.
+// safe direction — a deterministic refusal left untagged — and the cost
+// depends on the writer. A reactive writer takes some doomed re-runs, then the
+// convergence budget; a client's own event is reported refused after one
+// attempt; a served event is deferred as a delivery failure
+// (`deferCommitPreparationFailure` in `scheduler/events.ts`), holding the
+// events behind it and retried on input until its failed-state budget is
+// spent and an attention notice covers it. Get it wrong in the other
+// direction and the cost is a write that never lands and never retries: an
+// absent pattern result, a served-wish state that never materializes and
+// whose UI silently never mounts. It will not look like a labelling bug; it
+// looks like the computation simply stopped.
 //
 // That asymmetry is why the default sits here rather than at "verdict". An
 // earlier revision of this work defaulted the other way, on the argument that
 // every reason was a verdict unless marked. A producer audit found that false
 // in both directions — several families are mixed, and several DISCARD an
 // availability reason they received upstream (`verifyWriteFloor` drops
-// `linkedSourceEvidence`'s; the `maxConfidentiality` input gate reports
+// `linkedSourceEvidence`'s, and judges availability itself from the documents
+// it weighed; the `maxConfidentiality` input gate reports
 // its resolution failures and withholds the tag; the sink-ceiling gate tags
 // its refusal only when its enforce-mode rewrite resolved every module
 // policy, since an unresolved manifest might carry the discharge that admits
