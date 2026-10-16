@@ -35,6 +35,7 @@ import {
 import { CATCH_RULE, emptyState } from "./test-selection/score.ts";
 import { CATCH_WEIGHT_MAIN } from "./test-selection/policy.ts";
 import { stateObjectName, statePrefix } from "./test-selection/store.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import { MANIFEST_SCHEMA_VERSION } from "./test-selection/manifest.ts";
 import {
   batchMeasurementName,
@@ -407,10 +408,30 @@ function object(
   file?: string,
   name = "space > writes",
 ): string {
-  const context: RunContext = {
+  const record: TestRecord = {
+    line: "record",
+    test: { k: "unit", s: "memory", n: name },
+    outcome,
+    durationMs: 40,
+    ...(file === undefined ? {} : { file }),
+  };
+  return buildObjectBody(
+    ciContext(`report-${commit}-${outcome}`, commit, at, branch),
+    [record],
+  );
+}
+
+/** The context of one CI report, at one commit. */
+function ciContext(
+  reportId: string,
+  commit: string,
+  at: string,
+  branch = "main",
+): RunContext {
+  return {
     schema: 1,
     line: "context",
-    reportId: `report-${commit}-${outcome}`,
+    reportId,
     repo: "commonfabric/labs",
     commit,
     dirty: false,
@@ -428,14 +449,6 @@ function object(
     denoVersion: "2.9.4",
     startedAt: at,
   };
-  const record: TestRecord = {
-    line: "record",
-    test: { k: "unit", s: "memory", n: name },
-    outcome,
-    durationMs: 40,
-    ...(file === undefined ? {} : { file }),
-  };
-  return buildObjectBody(context, [record]);
 }
 
 /** One object holding one run of one test on somebody's workstation. */
@@ -617,6 +630,44 @@ describe("publish()", () => {
     // `CATCH_WEIGHT_MAIN` written out: comparing against the dial would
     // hold just as well for a dial of zero and a catch never counted.
     expect(manifest!.entries[0]!.inputs.catches).toBe(1.5);
+  });
+
+  it("scores a coverage gate's record and packs it in no lane", async () => {
+    // A gate is a verdict the job joining the lanes reaches, so the
+    // publisher scores it like a test and leaves it out of the lanes it
+    // packs for reference.
+
+    const measured: Suite = {
+      ...TOPOLOGY[0]!,
+      measured: [{
+        member: "packages/memory",
+        reachedBy: ["packages/memory/"],
+        units: [UNIT],
+      }],
+    };
+    const gate = { k: "gate", s: "memory", n: "coverage-gate workspace-unit" };
+    const objects = seed();
+    objects[CI(DAY, "3")] = buildObjectBody(
+      ciContext("report-c2-gate", "c2", "2026-08-20T02:00:00.000Z"),
+      [{ line: "record", test: gate, outcome: "pass", durationMs: 3 }],
+    );
+    const { store, created } = fakeStore(objects);
+    await publish(
+      ["--bootstrap", "--days", "1"],
+      store,
+      NOW,
+      () => Promise.resolve([measured, coverageGateSuite([measured])]),
+      noPrevious,
+    );
+    const manifest = await publishedManifest(created);
+    expect(
+      manifest.entries.filter((entry) => entry.suite === "coverage-gate")
+        .map((entry) => [entry.test, entry.unit]),
+    ).toEqual([[gate, "workspace-unit/packages/memory"]]);
+    expect(manifest.lanes.flatMap((lane) => lane.batches.map((b) => b.suite)))
+      .not.toContain("coverage-gate");
+    expect(manifest.lanes.flatMap((lane) => lane.batches.map((b) => b.suite)))
+      .toContain("workspace-unit");
   });
 
   it("publishes what a lane costs beyond the tests it runs", async () => {

@@ -130,8 +130,10 @@ export interface Plan {
    * a run that stopped for it would make the branch red for something no
    * change caused, so the failure is reported and the run stays green.
    *
-   * Empty for a pull request, where such a test is held back rather than
-   * run.
+   * A pull request holds such a test back rather than running it, unless a
+   * gate it chose runs the test's unit: a gate measures what it judges
+   * whole, and the test's failure then fails that pull request for nothing
+   * its author can act on, so it is here.
    */
   nonGating: Manifest["withheld"];
 
@@ -181,6 +183,39 @@ export interface Plan {
    * of the corpus, is otherwise a plan with no line in it saying why.
    */
   crowding: CrowdingSuite[];
+
+  /**
+   * The gates this plan chose, each under the reason it was chosen for. A
+   * gate is a verdict reached outside the lanes over what they ran, so it
+   * is in no lane; what choosing it put in the lanes is there under
+   * `coverage-gate`. Under the full policy every gate is here.
+   */
+  gates: Selection[];
+}
+
+/**
+ * A gate a plan may choose: a verdict reached over every identity of the
+ * units it judges, once the lanes have run them.
+ *
+ * Choosing one runs all of those identities, wherever they fit, so a gate
+ * costs a plan what they add to its lanes, and is chosen only where the
+ * whole of that fits. A gate is scored like any test, by its own record.
+ */
+export interface GateChoice {
+  /** The gate's own identity, with its score. */
+  entry: ManifestEntry;
+
+  /** The suite whose units it judges. */
+  judges: string;
+
+  /** The key of every identity in the units it judges. */
+  members: readonly string[];
+
+  /**
+   * Whether the change reaches it. A budgeted plan chooses among the gates
+   * the change reaches and no others; the full policy runs every gate.
+   */
+  reached: boolean;
 }
 
 /** A suite whose fixed charge alone is past what a lane can fill around. */
@@ -246,6 +281,13 @@ export interface PlanInput {
    * topology.
    */
   wholeUnits: ReadonlySet<string>;
+
+  /**
+   * Every gate the topology declares. A gate is never placed in a lane, so
+   * an entry of the corpus that is one of these is not packed as one.
+   * Defaults to none.
+   */
+  gates?: readonly GateChoice[];
 }
 
 /**
@@ -1135,10 +1177,29 @@ function inKeyOrder(
  * and nothing else. Together they make every lane finish near the budget,
  * which is the number the pull request waits on. The mandatory pass is
  * bounded by neither, and reports how far past a lane it went.
+ *
+ * A gate the change reaches is a candidate of the last three passes like
+ * any test, taken by its own score. Choosing one places every identity it
+ * runs, across as many lanes as that takes, inside the same budgets and
+ * the same share, so a gate costs what running what it judges costs. The
+ * mandatory pass never places a gate, and under the budgeted policy a gate
+ * the change does not reach is never chosen.
  */
 export function plan(input: PlanInput): Plan {
+  const gateKeys = new Set(
+    (input.gates ?? []).map((gate) => testIdentityKey(gate.entry.test)),
+  );
+  // A gate is a verdict reached outside the lanes, so the corpus the lanes
+  // are packed from is everything else.
   const folding = foldWholeUnits(
-    { ...input.manifest, entries: inKeyOrder(input.manifest.entries) },
+    {
+      ...input.manifest,
+      entries: inKeyOrder(
+        input.manifest.entries.filter((entry) =>
+          !gateKeys.has(testIdentityKey(entry.test))
+        ),
+      ),
+    },
     input.wholeUnits,
   );
   const manifest: Manifest = { ...input.manifest, entries: folding.entries };
@@ -1384,6 +1445,50 @@ export function plan(input: PlanInput): Plan {
     0,
   );
 
+  // The gates the discretionary passes may choose, against what choosing
+  // each runs, costliest first for the reason the mandatory pass places
+  // its work that way. A gate held back, or one the change does not reach,
+  // is not among them. The full policy chooses every gate and needs none
+  // of this, since every identity a gate could run is already placed.
+  const open = new Map<string, OpenGate>();
+  for (const gate of everything ? [] : input.gates ?? []) {
+    const key = testIdentityKey(gate.entry.test);
+    if (!gate.reached || withheldKeys.has(key)) continue;
+    if (gate.entry.flakeRate > FLAKE_EXCLUSION_RATE) continue;
+    const runs = [...new Set(gate.members.map(placedAs))].map((member) => {
+      const entry = byKey.get(member);
+      // The same reasoning as a mandatory identity's: a gate whose runs the
+      // corpus does not carry would be chosen without running them.
+      if (entry === undefined) {
+        throw new Error(
+          `the gate ${key} runs ${member}, and the corpus this was given ` +
+            `does not carry it, so nothing here knows what would run it`,
+        );
+      }
+      return {
+        key: member,
+        entry,
+        cost: loneCost(manifest, input, around, entry, entry.repeats),
+      };
+    });
+    runs.sort((a, b) =>
+      b.cost - a.cost || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    );
+    open.set(key, { entry: gate.entry, runs: runs.map((run) => run.entry) });
+  }
+  const chosen: Selection[] = everything
+    ? inKeyOrder((input.gates ?? []).map((gate) => gate.entry)).map((
+      entry,
+    ) => ({ entry, reason: "full" as SelectionReason, repeats: 1 }))
+    : [];
+  /** The gates no pass has chosen yet, in the order of their keys. */
+  const openGates = (): ManifestEntry[] =>
+    inKeyOrder(
+      [...open].filter(([key]) => !taken.has(key)).map(([, gate]) =>
+        gate.entry
+      ),
+    );
+
   // The three shares are of what the mandatory pass left, so a change
   // that forced a great deal of work in does not then get a full budget
   // of discretionary tests on top of it.
@@ -1398,12 +1503,14 @@ export function plan(input: PlanInput): Plan {
     ceiling: mandatoryLoad + left * share,
     laneBudget,
     bound,
+    gates: open,
+    chosen,
   });
 
   // Value first: descending score, ignoring cost.
   fill(
     pass("value", FILL_VALUE_SHARE),
-    remaining().sort((a, b) => b.score - a.score),
+    [...remaining(), ...openGates()].sort((a, b) => b.score - a.score),
   );
 
   // Density: descending value per second of what each identity would cost
@@ -1411,6 +1518,7 @@ export function plan(input: PlanInput): Plan {
   fillDensest(
     pass("density", FILL_VALUE_SHARE + FILL_DENSITY_SHARE),
     remaining(),
+    openGates(),
   );
 
   // Exploration: a draw over what the value ordering did not pick, so
@@ -1424,7 +1532,7 @@ export function plan(input: PlanInput): Plan {
   // unvisited for as long as chance allowed. It also covers whatever the
   // value model is currently blind to, without anything having to know
   // what that is.
-  const pool = remaining();
+  const pool = [...remaining(), ...openGates()];
   const order = seededOrder(manifest.seed, pool.length);
   const drawn = order.map((i) => pool[i]!);
   // An identity nothing has run inside the aggregate's reach carries no
@@ -1439,29 +1547,44 @@ export function plan(input: PlanInput): Plan {
     drawn,
   );
 
+  const laid = lanes.map((lane) => ({
+    lane: lane.lane,
+    selections: lane.selections.flatMap((selection) => {
+      const members = folding.members.get(
+        testIdentityKey(selection.entry.test),
+      );
+      if (members === undefined) return [selection];
+      // On a full run, every test keeps the full run's reason. Otherwise a
+      // test the change made mandatory keeps its own reason, and the unit's
+      // other tests take the unit's reason.
+      return members.map((entry) => ({
+        ...selection,
+        entry,
+        reason: everything
+          ? selection.reason
+          : input.mandatory.get(testIdentityKey(entry.test)) ??
+            selection.reason,
+      }));
+    }),
+    projectedSeconds: lane.load,
+    capabilities: [...lane.capabilities].sort(),
+  }));
+  // A chosen gate runs every unit of what it judges, a unit held back with
+  // a withheld test among them, so what a lane runs is not held back.
+  const running = new Set(
+    laid.flatMap((lane) =>
+      lane.selections.map((selection) => testIdentityKey(selection.entry.test))
+    ),
+  );
+  const judged = new Set(
+    laid.flatMap((lane) =>
+      lane.selections
+        .filter((selection) => selection.reason === "coverage-gate")
+        .map((selection) => testIdentityKey(selection.entry.test))
+    ),
+  );
   return {
-    lanes: lanes.map((lane) => ({
-      lane: lane.lane,
-      selections: lane.selections.flatMap((selection) => {
-        const members = folding.members.get(
-          testIdentityKey(selection.entry.test),
-        );
-        if (members === undefined) return [selection];
-        // On a full run, every test keeps the full run's reason. Otherwise a
-        // test the change made mandatory keeps its own reason, and the unit's
-        // other tests take the unit's reason.
-        return members.map((entry) => ({
-          ...selection,
-          entry,
-          reason: everything
-            ? selection.reason
-            : input.mandatory.get(testIdentityKey(entry.test)) ??
-              selection.reason,
-        }));
-      }),
-      projectedSeconds: lane.load,
-      capabilities: [...lane.capabilities].sort(),
-    })),
+    lanes: laid,
     budgetSeconds: laneBudget,
     boundSeconds: bound,
     // A full run withholds nothing: every identity is required, so the
@@ -1472,26 +1595,36 @@ export function plan(input: PlanInput): Plan {
     // every reason the manifest gives holds a test back, and only a
     // flake rate excuses one.
     withheld: everything ? [] : manifest.withheld,
-    heldWithUnit,
-    nonGating: everything ? excused(manifest) : [],
+    heldWithUnit: heldWithUnit.filter((test) =>
+      !running.has(testIdentityKey(test))
+    ),
+    nonGating: excused(manifest).filter((held) =>
+      everything || judged.has(testIdentityKey(held.test))
+    ),
     overBudgetSeconds: overBudget,
     overflowed,
     unschedulable,
     crowding,
+    gates: chosen,
   };
 }
 
-/** The reasons the three discretionary passes place an identity for. */
+/**
+ * The reasons the three discretionary passes place an identity for, a gate
+ * they chose among them.
+ */
 const DISCRETIONARY: ReadonlySet<SelectionReason> = new Set([
   "value",
   "density",
   "exploration",
+  "coverage-gate",
 ]);
 
 /**
  * Whether a budgeted plan placed nothing beyond its mandatory identities,
  * which is what a plan does once the mandatory work leaves no room in any
- * lane for anything else.
+ * lane for anything else. A gate chosen over identities the mandatory pass
+ * had placed already placed nothing, so it is not counted.
  */
 export function placedOnlyMandatory(laid: Pick<Plan, "lanes">): boolean {
   return !laid.lanes.some((lane) =>
@@ -1657,6 +1790,90 @@ interface Pass {
   ceiling: number;
   laneBudget: number;
   bound: number;
+
+  /** The gates the passes may choose, by key. */
+  gates: ReadonlyMap<string, OpenGate>;
+
+  /** Every gate any pass has chosen, which every pass adds to. */
+  chosen: Selection[];
+}
+
+/** A gate a discretionary pass may choose, and what choosing it runs. */
+interface OpenGate {
+  entry: ManifestEntry;
+
+  /** The identities it runs, as the packer places them, costliest first. */
+  runs: readonly ManifestEntry[];
+}
+
+/** What choosing a gate would leave the lanes as, and what it adds. */
+interface GateTrial {
+  lanes: Filling[];
+  cost: number;
+}
+
+/** A lane that can be filled without changing `lane`. */
+function copyOf(lane: Filling): Filling {
+  return {
+    ...lane,
+    selections: [...lane.selections],
+    capabilities: new Set(lane.capabilities),
+    suites: new Set(lane.suites),
+    tests: new Map(lane.tests),
+    unitTime: new Map(
+      [...lane.unitTime].map(([suite, units]) => [suite, new Map(units)]),
+    ),
+    held: new Map(
+      [...lane.held].map(([suite, units]) => [
+        suite,
+        new Map([...units].map(([unit, names]) => [unit, new Set(names)])),
+      ]),
+    ),
+  };
+}
+
+/**
+ * What choosing `gate` would do to the lanes: every identity it runs that
+ * no pass has placed, placed the costliest first, each in the cheapest lane
+ * that holds it inside its budget, giving up repeats down to one run the
+ * way `take` does. Undefined where one of them fits in no lane, or where
+ * the whole takes the run past the pass's ceiling, since a gate reaches its
+ * verdict over every identity of what it judges or reaches none.
+ *
+ * Worked out on copies of the lanes, so that weighing a gate leaves them as
+ * they were.
+ */
+function gateTrial(pass: Pass, gate: OpenGate): GateTrial | undefined {
+  const lanes = pass.lanes.map(copyOf);
+  const before = laneLoad(lanes);
+  for (const entry of gate.runs) {
+    if (pass.taken.has(testIdentityKey(entry.test))) continue;
+    let placed = false;
+    for (let repeats = entry.repeats; repeats >= 1 && !placed; repeats--) {
+      const spot = spotsFor(
+        pass.input,
+        lanes,
+        entry,
+        repeats,
+        pass.laneBudget,
+        pass.bound,
+      ).fitting;
+      if (spot === undefined) continue;
+      if (laneLoad(lanes) + spot.cost > pass.ceiling) continue;
+      place(pass.input, spot, entry, "coverage-gate", repeats);
+      placed = true;
+    }
+    if (!placed) return undefined;
+  }
+  return { lanes, cost: laneLoad(lanes) - before };
+}
+
+/** Chooses `gate` for `pass`, leaving the lanes as `trial` found them. */
+function choose(pass: Pass, gate: OpenGate, trial: GateTrial): void {
+  pass.lanes.forEach((lane, at) => Object.assign(lane, trial.lanes[at]));
+  for (const entry of gate.runs) pass.taken.add(testIdentityKey(entry.test));
+  pass.taken.add(testIdentityKey(gate.entry.test));
+  pass.chosen.push({ entry: gate.entry, reason: pass.reason, repeats: 1 });
 }
 
 /**
@@ -1664,11 +1881,19 @@ interface Pass {
  * whole run's budget and no further. The share is of the whole rather
  * than of each lane, so an expensive test can have a lane to itself while
  * the others carry the tail; what stops any one lane running long is the
- * lane's own capacity, which `spotsFor` applies.
+ * lane's own capacity, which `spotsFor` applies. A gate among them is
+ * chosen where everything it runs fits.
  */
 function fill(pass: Pass, candidates: readonly ManifestEntry[]): void {
   for (const entry of candidates) {
-    if (pass.taken.has(testIdentityKey(entry.test))) continue;
+    const key = testIdentityKey(entry.test);
+    if (pass.taken.has(key)) continue;
+    const gate = pass.gates.get(key);
+    if (gate !== undefined) {
+      const trial = gateTrial(pass, gate);
+      if (trial !== undefined) choose(pass, gate, trial);
+      continue;
+    }
     const once = oneRun(pass, entry);
     if (once !== undefined) take(pass, entry, once);
   }
@@ -1764,8 +1989,19 @@ function density(entry: ManifestEntry, cost: number): number {
  * suite holds tens of thousands of candidates and sets what its lanes are
  * charged, each placement in it lowers what most of the rest cost, and
  * planning takes a hundred times as long.
+ *
+ * A gate is a candidate too, at its score over what choosing it adds to the
+ * lanes, which `gateTrial()` works out by placing every identity it runs.
+ * That is a packing of a whole set of tests, so a gate is weighed when it
+ * is first offered, when it reaches the head of the queue, and after a gate
+ * is chosen, rather than after every placement. A placement that lowers
+ * what a gate adds leaves it waiting at the density it was weighed at.
  */
-function fillDensest(pass: Pass, candidates: readonly ManifestEntry[]): void {
+function fillDensest(
+  pass: Pass,
+  candidates: readonly ManifestEntry[],
+  gates: readonly ManifestEntry[],
+): void {
   const { input, taken, around } = pass;
   /**
    * The most each candidate can add to a run of its unit: its own cost and
@@ -1803,16 +2039,47 @@ function fillDensest(pass: Pass, candidates: readonly ManifestEntry[]): void {
     queue.push({ density: at, key, entry });
   };
 
-  for (const entry of candidates) {
-    const once = oneRun(pass, entry);
-    if (once !== undefined) {
-      offer(entry, testIdentityKey(entry.test), density(entry, once.cost));
+  /** What one run of `entry` adds to the lanes as they stand, if it fits. */
+  const weigh = (entry: ManifestEntry, key: string): number | undefined => {
+    const gate = pass.gates.get(key);
+    return gate === undefined
+      ? oneRun(pass, entry)?.cost
+      : gateTrial(pass, gate)?.cost;
+  };
+  /** Offers again each candidate whose density has risen. */
+  const offerRisen = (entries: readonly ManifestEntry[]) => {
+    for (const entry of entries) {
+      const key = testIdentityKey(entry.test);
+      if (taken.has(key)) continue;
+      const cost = weigh(entry, key);
+      if (
+        cost !== undefined &&
+        density(entry, cost) > (offered.get(key) ?? -Infinity)
+      ) {
+        offer(entry, key, density(entry, cost));
+      }
     }
-  }
+  };
+  offerRisen([...candidates, ...gates]);
 
   for (let head = queue.pop(); head !== undefined; head = queue.pop()) {
     const { entry, key } = head;
     if (taken.has(key)) continue;
+    const gate = pass.gates.get(key);
+    if (gate !== undefined) {
+      const trial = gateTrial(pass, gate);
+      if (trial === undefined) {
+        offered.delete(key);
+      } else if (density(entry, trial.cost) !== head.density) {
+        offer(entry, key, density(entry, trial.cost));
+      } else {
+        choose(pass, gate, trial);
+        // A gate places work in any lane, so any candidate may now cost
+        // less, and every one is weighed again.
+        offerRisen([...candidates, ...gates]);
+      }
+      continue;
+    }
     const once = oneRun(pass, entry);
     if (once === undefined) {
       offered.delete(key);

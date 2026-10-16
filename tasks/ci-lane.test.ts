@@ -41,6 +41,7 @@ import {
   describeCoverage,
   describePlan,
   describeWithheld,
+  type Execution,
   fullLanes,
   type LaneDeps,
   type LaneOptions,
@@ -50,6 +51,7 @@ import {
   manifestMoment,
   markMeasuredFailures,
   measuredSetOfReport,
+  type Missed,
   parseLaneArgs,
   PATTERN_COVERAGE_DIR,
   planOver,
@@ -76,6 +78,8 @@ import {
   type PricedManifest,
   standIn,
 } from "./test-selection/census.ts";
+import type { CoverageGateSelection } from "./test-selection/coverage.ts";
+import { coverageGateSuite } from "./test-topology/coverage-gates.ts";
 import {
   type CommandContext,
   denoTestCommand,
@@ -170,10 +174,10 @@ function pricedFor(
       manifest,
       mandatory: new Map(),
       unmeasured: 0,
-      coverage: { sets: [], reached: [] },
+      gates: [],
     },
     suites,
-    full,
+    () => full,
   ).manifest;
 }
 
@@ -1205,7 +1209,7 @@ describe("how many lanes the full run asks for", () => {
     const seen = pricedForRun(
       census(deps.suites, (await deps.manifest()).manifest, new Set()),
       deps.suites,
-      true,
+      () => true,
     );
     const laid = plan({
       manifest: seen.manifest,
@@ -1268,7 +1272,7 @@ describe("how many lanes the full run asks for", () => {
     const seen = pricedForRun(
       census(deps.suites, undefined, new Set()),
       deps.suites,
-      true,
+      () => true,
     );
     expect(seen.manifest.calibration.prologue).toBe(0);
     const laid = plan({
@@ -2288,7 +2292,9 @@ describe("planning a lane the manifest chose", () => {
     for (const lane of [1, 2, 3, 4, 5]) {
       placed += counted(await planned([], lane));
     }
-    const suites = await loadTopology(root);
+    // A gate is a verdict rather than lane work, so no lane places one.
+    const suites = (await loadTopology(root))
+      .filter((suite) => suite.judges === undefined);
     const available = suites.reduce(
       (total, suite) =>
         total + suite.units.length -
@@ -3376,55 +3382,49 @@ describe("what a lane records about itself", () => {
     // "frosts" is on b-unit's list and is a skip in a-unit, so only a
     // list keyed by unit as well as by name keeps it.
     try {
-      const result = await runBatch(
-        {
-          suite: suite({
-            id: "workspace-unit",
-            units: ["a-unit", "b-unit"],
-            locate: (located) => ({
-              level: "unit",
-              unit: unitOf[located.test.n]!,
-            }),
-            command: (_units, context) =>
-              Promise.resolve([{
-                command: [
-                  Deno.execPath(),
-                  "eval",
-                  `Deno.writeTextFileSync(
-                    Deno.env.get("CF_TEST_RECORDS_DIR") + "/fragment-a.ndjson",
-                    ${
-                    JSON.stringify(
-                      record("bakes", "pass") + record("glazes", "skip") +
-                        record("frosts", "skip") + record("sugars", "skip"),
-                    )
-                  },
-                  )`,
-                ],
-                cwd: context.root,
-              }]),
+      const batch = {
+        suite: suite({
+          id: "workspace-unit",
+          units: ["a-unit", "b-unit"],
+          locate: (located) => ({
+            level: "unit",
+            unit: unitOf[located.test.n]!,
           }),
-          units: [
-            { unit: "a-unit", skip: ["glazes"] },
-            { unit: "b-unit", skip: ["sugars", "frosts"] },
-          ],
-          runs: new Map([["a-unit", 1], ["b-unit", 1]]),
-          projected: 0,
-        },
-        lane,
-        workDir,
-        undefined,
-        {},
-      );
+          command: (_units, context) =>
+            Promise.resolve([{
+              command: [
+                Deno.execPath(),
+                "eval",
+                `Deno.writeTextFileSync(
+                  Deno.env.get("CF_TEST_RECORDS_DIR") + "/fragment-a.ndjson",
+                  ${
+                  JSON.stringify(
+                    record("bakes", "pass") + record("glazes", "skip") +
+                      record("frosts", "skip") + record("sugars", "skip"),
+                  )
+                },
+                )`,
+              ],
+              cwd: context.root,
+            }]),
+        }),
+        units: [
+          { unit: "a-unit", skip: ["glazes"] },
+          { unit: "b-unit", skip: ["sugars", "frosts"] },
+        ],
+        runs: new Map([["a-unit", 1], ["b-unit", 1]]),
+        projected: 0,
+      };
+      const result = await runBatch(batch, lane, workDir, undefined, {});
       expect(result.records.map((kept) => kept.test.n)).toEqual([
         "bakes",
         "frosts",
       ]);
-      // What the lane skipped comes back apart, for accounting alone.
-      expect(result.passedOver.map((kept) => kept.test.n)).toEqual([
-        "glazes",
-        "sugars",
-      ]);
-      expect(result.silent).toEqual([]);
+      // What the lane skipped stays in the pass's records, for accounting.
+      expect(result.executions[0]!.records.map((kept) => kept.test.n))
+        .toEqual(["bakes", "glazes", "frosts", "sugars"]);
+      expect(accountFor(batch, [], result.executions, new Set()).silent)
+        .toEqual([]);
     } finally {
       await Deno.remove(workDir, { recursive: true });
     }
@@ -3630,8 +3630,11 @@ describe("writing the lane's records into its spool", () => {
 describe("reading a batch's records against what it was asked to run", () => {
   const UNIT = "packages/bakery/glaze.test.ts";
 
-  /** A batch of one unit, over a suite that locates by scope. */
-  function batch() {
+  /**
+   * A batch of one unit run `runs` times, over a suite that locates by
+   * scope.
+   */
+  function batch(runs = 1) {
     return {
       suite: suite({
         id: "workspace-unit",
@@ -3642,7 +3645,7 @@ describe("reading a batch's records against what it was asked to run", () => {
             : undefined,
       }),
       units: [{ unit: UNIT, skip: [] }],
-      runs: new Map([[UNIT, 1]]),
+      runs: new Map([[UNIT, runs]]),
       projected: 0,
     };
   }
@@ -3656,6 +3659,17 @@ describe("reading a batch's records against what it was asked to run", () => {
       durationMs: 1,
     };
   }
+
+  /** One pass over that unit, recording `records`, registering `registered`. */
+  function once(
+    records: TestRecord[],
+    registered = new Map<string, Set<string>>(),
+  ): Execution[] {
+    return [{ units: [UNIT], records, registered }];
+  }
+
+  /** The names of what the passes missed. */
+  const names = (missed: readonly Missed[]) => missed.map(({ name }) => name);
 
   /** The selections that ask for one identity of that unit. */
   function asked(n: string) {
@@ -3679,7 +3693,7 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       asked("glaze > sets"),
-      [record("glaze > sets", "pass")],
+      once([record("glaze > sets", "pass")]),
       new Set(),
     );
     expect(found).toEqual({
@@ -3687,6 +3701,7 @@ describe("reading a batch's records against what it was asked to run", () => {
       excused: [],
       unaccounted: [],
       absent: [],
+      silent: [],
       failedUnits: [],
     });
   });
@@ -3696,7 +3711,7 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       asked("flaky"),
-      [record("flaky", "fail"), record("glaze > sets", "fail")],
+      once([record("flaky", "fail"), record("glaze > sets", "fail")]),
       new Set([excused]),
     );
     expect(found.excused).toEqual([excused]);
@@ -3711,7 +3726,7 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       asked("glaze > sets"),
-      [record("glaze > sets", "fail"), record("glaze > sets", "fail")],
+      once([record("glaze > sets", "fail"), record("glaze > sets", "fail")]),
       new Set(),
     );
     expect(found.gating.length).toBe(1);
@@ -3725,7 +3740,7 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       asked("flaky"),
-      [record("flaky", "fail")],
+      once([record("flaky", "fail")]),
       new Set([excused]),
     );
     expect(found.failedUnits).toEqual([UNIT]);
@@ -3738,10 +3753,10 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       asked("glaze > sets"),
-      [record("glaze > sets under its new name", "pass")],
+      once([record("glaze > sets under its new name", "pass")]),
       new Set(),
     );
-    expect(found.unaccounted).toEqual([
+    expect(names(found.unaccounted)).toEqual([
       testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
     ]);
   });
@@ -3759,12 +3774,12 @@ describe("reading a batch's records against what it was asked to run", () => {
         ...asked("glazed"),
         ...asked("glaze > icing > sets > firmly"),
       ],
-      [record("glaze > icing > sets", "pass")],
+      once([record("glaze > icing > sets", "pass")]),
       new Set(),
     );
     // A name sharing only its first characters encloses nothing, and a
     // test inside the one recorded is not accounted for by it.
-    expect(found.unaccounted).toEqual(
+    expect(names(found.unaccounted)).toEqual(
       [key("glaze > icing > sets > firmly"), key("glazed")].sort(),
     );
   });
@@ -3778,10 +3793,10 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       [...asked("glaze > sets"), ...elsewhere],
-      [record("glaze > sets", "pass")],
+      once([record("glaze > sets", "pass")]),
       new Set(),
     );
-    expect(found.unaccounted).toEqual([]);
+    expect(names(found.unaccounted)).toEqual([]);
   });
 
   it("says what an excusal turned on, either way round", () => {
@@ -3799,10 +3814,10 @@ describe("reading a batch's records against what it was asked to run", () => {
             excused: ["unit\tbakery\tflaky"],
             unaccounted: [],
             absent: [],
+            silent: [{ name: UNIT, passes: [1], of: 1 }],
             failedUnits: [],
           },
           excusing,
-          [UNIT],
         );
       } finally {
         console.log = log;
@@ -3830,12 +3845,16 @@ describe("reading a batch's records against what it was asked to run", () => {
         {
           gating: ["unit\tbakery\tglaze > burns"],
           excused: ["unit\tbakery\tflaky"],
-          unaccounted: ["unit\tbakery\tglaze > sets"],
+          unaccounted: [{
+            name: "unit\tbakery\tglaze > sets",
+            passes: [1],
+            of: 1,
+          }],
           absent: ["unit\tbakery\tglaze > cools"],
+          silent: [{ name: UNIT, passes: [1], of: 1 }],
           failedUnits: [UNIT],
         },
         false,
-        [UNIT],
       );
     } finally {
       console.log = log;
@@ -3854,6 +3873,38 @@ describe("reading a batch's records against what it was asked to run", () => {
     }
   });
 
+  it("says which passes missed what only some of them missed", () => {
+    // A rename leaves an identity missing from every pass, and a pass
+    // that stopped part way leaves it missing from that pass alone. The
+    // reader needs to know which of the two it is.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeAccounting(
+        "workspace-unit",
+        {
+          gating: [],
+          excused: [],
+          unaccounted: [
+            { name: "unit\tbakery\trenamed", passes: [1, 2, 3], of: 3 },
+            { name: "unit\tbakery\tstopped", passes: [2], of: 3 },
+          ],
+          absent: [],
+          silent: [{ name: UNIT, passes: [1, 3], of: 3 }],
+          failedUnits: [],
+        },
+        false,
+      );
+    } finally {
+      console.log = log;
+    }
+    const text = lines.join("\n");
+    expect(text).toContain("- unit\tbakery\trenamed\n");
+    expect(text).toContain("- unit\tbakery\tstopped (pass 2 of 3)");
+    expect(text).toContain(`- ${UNIT} (passes 1 and 3 of 3)`);
+  });
+
   it("says nothing about a batch that did everything asked of it", () => {
     // A lane that found nothing to say adds nothing to the summary. The
     // batch's own measurement is what says it ran.
@@ -3868,10 +3919,10 @@ describe("reading a batch's records against what it was asked to run", () => {
           excused: [],
           unaccounted: [],
           absent: [],
+          silent: [],
           failedUnits: [UNIT],
         },
         true,
-        [],
       );
     } finally {
       console.log = log;
@@ -3886,10 +3937,129 @@ describe("reading a batch's records against what it was asked to run", () => {
     const found = accountFor(
       batch(),
       standIn,
-      [record("glaze > sets", "pass")],
+      once([record("glaze > sets", "pass")]),
       new Set(),
     );
-    expect(found.unaccounted).toEqual([]);
+    expect(names(found.unaccounted)).toEqual([]);
+  });
+
+  describe("over several passes", () => {
+    /** A pass that recorded `records` and said nothing it registered. */
+    const pass = (...records: TestRecord[]) => ({
+      units: [UNIT],
+      records,
+      registered: new Map<string, Set<string>>(),
+    });
+
+    it("names an identity one pass missed that another recorded", () => {
+      // The second pass stopped part way, so it did not run what it was
+      // asked to however much the first pass recorded.
+      const found = accountFor(
+        batch(3),
+        [...asked("glaze > sets"), ...asked("glaze > cools")],
+        [
+          pass(record("glaze > sets", "fail"), record("glaze > cools", "pass")),
+          pass(record("glaze > sets", "fail")),
+          pass(record("glaze > sets", "fail"), record("glaze > cools", "pass")),
+        ],
+        new Set(),
+      );
+      expect(found.unaccounted).toEqual([{
+        name: testIdentityKey({ k: "unit", s: "bakery", n: "glaze > cools" }),
+        passes: [2],
+        of: 3,
+      }]);
+    });
+
+    it("counts the passes that ran, where the lane stopped before the rest", () => {
+      // A lane told to stop starts no further pass, so the one pass that
+      // ran is every pass that could have recorded the identity.
+      const found = accountFor(
+        batch(3),
+        [...asked("glaze > sets"), ...asked("glaze > cools")],
+        [pass(record("glaze > sets", "fail"))],
+        new Set(),
+      );
+      expect(found.unaccounted).toEqual([{
+        name: testIdentityKey({ k: "unit", s: "bakery", n: "glaze > cools" }),
+        passes: [1],
+        of: 1,
+      }]);
+    });
+
+    it("names a unit one pass recorded nothing for", () => {
+      const found = accountFor(
+        batch(2),
+        asked("glaze > sets"),
+        [pass(record("glaze > sets", "pass")), pass()],
+        new Set(),
+      );
+      expect(found.silent).toEqual([{ name: UNIT, passes: [2], of: 2 }]);
+    });
+
+    it("asks a pass only for the units it was asked to run", () => {
+      // The unit runs once, so the batch's second pass is another unit's.
+      const found = accountFor(
+        batch(),
+        asked("glaze > sets"),
+        [
+          pass(record("glaze > sets", "pass")),
+          {
+            units: [],
+            records: [],
+            registered: new Map<string, Set<string>>(),
+          },
+        ],
+        new Set(),
+      );
+      expect(found.unaccounted).toEqual([]);
+      expect(found.silent).toEqual([]);
+    });
+
+    it("names the units a failure was seen in over every pass", () => {
+      // Coverage is measured through every pass, so a failure in any of
+      // them leaves the unit's number short.
+      const found = accountFor(
+        batch(2),
+        asked("glaze > sets"),
+        [
+          pass(record("glaze > sets", "pass")),
+          pass(record("glaze > sets", "fail")),
+        ],
+        new Set(),
+      );
+      expect(found.failedUnits).toEqual([UNIT]);
+      expect(found.gating).toEqual([
+        testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
+      ]);
+    });
+
+    it("judges each pass by what that pass registered", () => {
+      // The first pass's processes said the tree holds no `glaze > cools`.
+      // The second pass left no name map, as a process that stopped before
+      // its module loaded leaves none, so it cannot say the same.
+      const found = accountFor(
+        batch(2),
+        [...asked("glaze > sets"), ...asked("glaze > cools")],
+        [
+          {
+            units: [UNIT],
+            records: [record("glaze > sets", "fail")],
+            registered: new Map([[UNIT, new Set(["glaze > sets"])]]),
+          },
+          pass(record("glaze > sets", "fail")),
+        ],
+        new Set(),
+      );
+      expect([found.unaccounted, found.absent]).toEqual([
+        [{
+          name: testIdentityKey({ k: "unit", s: "bakery", n: "glaze > cools" }),
+          passes: [2],
+          of: 2,
+        }],
+        [],
+      ]);
+    });
   });
 
   describe("an identity no record accounts for, read against what its unit registered", () => {
@@ -3900,11 +4070,13 @@ describe("reading a batch's records against what it was asked to run", () => {
       return accountFor(
         batch(),
         asked(name),
-        [record("glaze > sets", "pass")],
+        once(
+          [record("glaze > sets", "pass")],
+          registered === undefined
+            ? new Map()
+            : new Map([[UNIT, new Set(registered)]]),
+        ),
         new Set(),
-        registered === undefined
-          ? new Map()
-          : new Map([[UNIT, new Set(registered)]]),
       );
     }
 
@@ -3912,7 +4084,7 @@ describe("reading a batch's records against what it was asked to run", () => {
       // The manifest carries a test the tree does not hold, renamed since
       // or only ever run on a branch. No run of this tree records it.
       const found = reading("glaze > cools", ["glaze", "glaze > sets"]);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [],
         [key("glaze > cools")],
       ]);
@@ -3926,7 +4098,7 @@ describe("reading a batch's records against what it was asked to run", () => {
         "glaze > sets",
         "glaze > cools",
       ]);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [key("glaze > cools")],
         [],
       ]);
@@ -3936,7 +4108,7 @@ describe("reading a batch's records against what it was asked to run", () => {
       // A process that stopped before its module loaded wrote no
       // registrations, and a suite without the preload writes none at all.
       const found = reading("glaze > cools", undefined);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [key("glaze > cools")],
         [],
       ]);
@@ -3950,7 +4122,7 @@ describe("reading a batch's records against what it was asked to run", () => {
         "glaze > sets",
         "glaze > icing > sets",
       ]);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [key("glaze > icing")],
         [],
       ]);
@@ -3961,7 +4133,7 @@ describe("reading a batch's records against what it was asked to run", () => {
       // outermost describe and nothing beneath it, which says nothing
       // about any leaf.
       const found = reading("glaze > cools", ["glaze"]);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [key("glaze > cools")],
         [],
       ]);
@@ -3969,7 +4141,7 @@ describe("reading a batch's records against what it was asked to run", () => {
 
     it("sets a leaf apart as absent where its unit never registered its outermost describe", () => {
       const found = reading("glaze > cools", ["proof", "proof > rises"]);
-      expect([found.unaccounted, found.absent]).toEqual([
+      expect([names(found.unaccounted), found.absent]).toEqual([
         [],
         [key("glaze > cools")],
       ]);
@@ -4080,15 +4252,19 @@ describe("glaze", () => {
             ...asking("glaze > sets > second"),
             ...asking("glaze > cools"),
           ],
-          [...result.records, ...result.passedOver],
+          result.executions,
           new Set([key("glaze > sets > first")]),
-          result.registered,
         );
         expect(found).toEqual({
           gating: [],
           excused: [key("glaze > sets > first")],
-          unaccounted: [key("glaze > sets > second")],
+          unaccounted: [{
+            name: key("glaze > sets > second"),
+            passes: [1],
+            of: 1,
+          }],
           absent: [key("glaze > cools")],
+          silent: [],
           failedUnits: [file],
         });
       } finally {
@@ -4143,7 +4319,7 @@ describe("what a batch reads of what a whole run registered", () => {
         dir,
         undefined,
         {},
-      )).registered;
+      )).executions[0]!.registered;
     } finally {
       console.log = log;
       await Deno.remove(dir, { recursive: true });
@@ -4662,6 +4838,58 @@ describe("what a lane does with the batches it was given", () => {
     }
   });
 
+  it("fails when a later execution stopped part way through its unit", async () => {
+    // The second execution records the flaky failure and stops before
+    // its unit's other test. The first execution recorded that test, so
+    // the batch's records taken as one list account for everything,
+    // while the second execution did not run what it was asked to.
+    const counter = await Deno.makeTempFile({ prefix: "lane-stopped-" });
+    const manifest = withholding();
+    manifest.entries.push({
+      ...manifest.entries[0]!,
+      test: { k: "unit", s: "bakery", n: "glaze > cools" },
+    });
+    manifest.withheld.push({
+      test: manifest.entries[1]!.test,
+      suite: "workspace-unit",
+      reason: "flaky",
+    });
+    for (const entry of manifest.entries) entry.repeats = 2;
+    try {
+      const { ok, measured } = await run([
+        Deno.execPath(),
+        "eval",
+        `const dir = Deno.env.get("CF_TEST_RECORDS_DIR");
+         const at = ${JSON.stringify(counter)};
+         const before = Number(Deno.readTextFileSync(at) || "0");
+         Deno.writeTextFileSync(at, String(before + 1));
+         const write = (n, outcome) => {
+           Deno.mkdirSync(dir, { recursive: true });
+           Deno.writeTextFileSync(
+             \`\${dir}/fragment-\${crypto.randomUUID()}.ndjson\`,
+             JSON.stringify({
+               line: "record",
+               test: { k: "unit", s: "bakery", n },
+               outcome,
+               durationMs: 1,
+             }) + "\\n",
+           );
+         };
+         write("glaze > sets", "fail");
+         if (before === 0) write("glaze > cools", "pass");
+         Deno.exit(1);`,
+      ], { full: true, manifest });
+      expect(ok).toBe(false);
+      expect(excusedIn(measured)).toEqual([]);
+      // Both executions ran, and then every rerun of the failure.
+      expect(Deno.readTextFileSync(counter)).toBe(
+        String(2 + RERUN_EXECUTIONS),
+      );
+    } finally {
+      await Deno.remove(counter);
+    }
+  });
+
   it("fails for an excused failure beside an identity nothing accounts for", async () => {
     // An invocation that recorded a withheld failure and then stopped
     // has run almost nothing while satisfying any weaker test, so the
@@ -5135,22 +5363,20 @@ describe("what a lane measures", () => {
     root: "/repo",
   };
 
-  const gated = (member: string) =>
-    census(
-      [suite({
-        id: "workspace-unit",
+  /** What a plan choosing the gate over `member`'s set measures. */
+  const gated = (member: string): CoverageGateSelection => {
+    const ref = {
+      suite: "workspace-unit",
+      set: {
+        member,
+        reachedBy: [`${member}/`],
         units: [`${member}/one.test.ts`],
-        measured: [{
-          member,
-          reachedBy: [`${member}/`],
-          units: [`${member}/one.test.ts`],
-        }],
-      })],
-      undefined,
-      new Set([`${member}/src/main.ts`]),
-    ).coverage;
+      },
+    };
+    return { sets: [ref], reached: [ref] };
+  };
 
-  it("measures the members of the sets the gate is scoring", () => {
+  it("measures the members of the sets whose gates the plan chose", () => {
     const coverage = batchCoverage(
       options,
       "workspace-unit",
@@ -5161,7 +5387,7 @@ describe("what a lane measures", () => {
     expect([...coverage!.members!]).toEqual(["packages/bakery"]);
   });
 
-  it("measures nothing in a suite the gate is not scoring", () => {
+  it("measures nothing in a suite whose gates the plan did not choose", () => {
     expect(batchCoverage(options, "runner-unit", gated("packages/bakery")))
       .toBeUndefined();
   });
@@ -5204,7 +5430,7 @@ describe("what a lane measures", () => {
   describe("what it charges a suite it measures", () => {
     const WITHOUT = { overhead: 5, correction: 1, unitOverhead: 0 };
     const WITH = { overhead: 20, correction: 2, unitOverhead: 0 };
-    const suites = [
+    const units = [
       suite({
         id: "workspace-unit",
         units: ["packages/bakery/one.test.ts"],
@@ -5216,7 +5442,16 @@ describe("what a lane measures", () => {
       }),
       suite({ id: "runner-unit", units: ["packages/oven/one.test.ts"] }),
     ];
+    const suites = [...units, coverageGateSuite(units)];
+    const gate = { k: "gate", s: "bakery", n: "coverage-gate workspace-unit" };
     const manifest = manifestOf([
+      {
+        test: gate,
+        suite: "coverage-gate",
+        unit: "workspace-unit/packages/bakery",
+        cost: 0,
+        score: 0.9,
+      },
       {
         test: { k: "unit", s: "bakery", n: "one" },
         unit: "packages/bakery/one.test.ts",
@@ -5257,7 +5492,11 @@ describe("what a lane measures", () => {
       expect(laid.lanes[0]!.projectedSeconds).toBe(80);
     });
 
-    it("charges a pull request's gated suite with coverage on, and the rest without", async () => {
+    /**
+     * A repository whose second commit touches `packages/bakery`, and the
+     * plan a pull request of it packs from `manifest`.
+     */
+    async function reaching(manifest: Manifest) {
       const repo = await Deno.makeTempDir({ prefix: "lane-charged-" });
       const git = (...args: string[]) =>
         new Deno.Command("git", {
@@ -5283,18 +5522,42 @@ describe("what a lane measures", () => {
         await Deno.writeTextFile(`${repo}/packages/bakery/glaze.ts`, "b");
         await git("add", ".");
         await git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "two");
-        const { seen } = await lanePlan(
+        return await lanePlan(
           { ...planning, root: repo, base: "base" },
           suites,
-          deps,
+          { manifest: () => Promise.resolve({ manifest }) },
         );
-        expect(seen.manifest.calibration.suites["workspace-unit"])
-          .toEqual(WITH);
-        expect(seen.manifest.calibration.suites["runner-unit"])
-          .toEqual(WITHOUT);
       } finally {
         await Deno.remove(repo, { recursive: true });
       }
+    }
+
+    it("charges a suite whose gate the plan chose with coverage on, and the rest without", async () => {
+      const { seen, laid, coverage } = await reaching(manifest);
+      expect(laid.gates.map((chosen) => chosen.entry.test)).toEqual([gate]);
+      expect(coverage.sets.map((ref) => ref.set.member))
+        .toEqual(["packages/bakery"]);
+      expect(seen.manifest.calibration.suites["workspace-unit"])
+        .toEqual(WITH);
+      expect(seen.manifest.calibration.suites["runner-unit"])
+        .toEqual(WITHOUT);
+    });
+
+    it("charges a suite whose gate the plan passed over what it costs without", async () => {
+      // Packed with the suite priced as measured, the plan chooses none of
+      // its gates, so it is packed again with the suite priced the way the
+      // lanes will then run it.
+
+      const { seen, laid, coverage } = await reaching({
+        ...manifest,
+        withheld: [{ test: gate, suite: "coverage-gate", reason: "flaky" }],
+      });
+      expect(laid.gates).toEqual([]);
+      expect(coverage.sets).toEqual([]);
+      expect(coverage.reached.map((ref) => ref.set.member))
+        .toEqual(["packages/bakery"]);
+      expect(seen.manifest.calibration.suites["workspace-unit"])
+        .toEqual(WITHOUT);
     });
 
     it("charges a pull request that measures nothing what it costs without", async () => {
@@ -5540,7 +5803,7 @@ describe("what a lane says about coverage", () => {
     expect(lines).toEqual([]);
   });
 
-  it("names the sets it is scoring, and the reports it wrote", () => {
+  it("names the sets whose gates the plan chose, and the reports it wrote", () => {
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -5560,8 +5823,15 @@ describe("what a lane says about coverage", () => {
       console.log = log;
     }
     const text = lines.join("\n");
-    expect(text).toContain("workspace-unit/packages/bakery");
-    expect(text).toContain("workspace-unit/packages__bakery");
+    // The set is named once among those chosen and once as the set its
+    // report belongs to, and its directory is not spelled out.
+    expect(
+      text.split("\n").filter((line) =>
+        line === "- workspace-unit/packages/bakery"
+      ),
+    ).toHaveLength(2);
+    expect(text).toContain("Reports this lane wrote");
+    expect(text).not.toContain("packages__bakery");
   });
 
   it("names a set whose number this run did not stand behind", () => {
@@ -5612,29 +5882,37 @@ describe("what a lane says about coverage", () => {
     expect(text).not.toContain("- workspace-unit/packages__bakery");
   });
 
-  it("says why nothing is forced, and what the change reached", () => {
+  it("names the sets whose gates the plan chose apart from those it did not", () => {
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
+    const ref = (member: string) => ({
+      suite: "workspace-unit",
+      set: {
+        member,
+        reachedBy: [`${member}/`],
+        units: [`${member}/one.test.ts`],
+      },
+    });
     try {
       describeCoverage({
-        sets: [],
-        reached: [{
-          suite: "workspace-unit",
-          set: {
-            member: "packages/bakery",
-            reachedBy: ["packages/bakery/"],
-            units: ["packages/bakery/one.test.ts"],
-          },
-        }],
-        off: "the change reaches 3 measured sets",
+        sets: [ref("packages/cellar")],
+        reached: [ref("packages/bakery"), ref("packages/cellar")],
       }, []);
     } finally {
       console.log = log;
     }
     const text = lines.join("\n");
-    expect(text).toContain("No measured set is forced");
-    expect(text).toContain("workspace-unit/packages/bakery");
+    const chosen = text.indexOf("whose gates the plan chose");
+    const passedOver = text.indexOf("did not choose");
+    expect(chosen).toBeGreaterThanOrEqual(0);
+    expect(passedOver).toBeGreaterThan(chosen);
+    expect(text.slice(chosen, passedOver)).toContain(
+      "workspace-unit/packages/cellar",
+    );
+    expect(text.slice(chosen, passedOver)).not.toContain("packages/bakery");
+    expect(text.slice(passedOver)).toContain("workspace-unit/packages/bakery");
+    expect(text.slice(passedOver)).not.toContain("packages/cellar");
   });
 });
 
