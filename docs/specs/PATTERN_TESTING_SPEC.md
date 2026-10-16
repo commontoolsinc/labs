@@ -87,7 +87,7 @@ import type { AssertRecord } from "commonfabric";
 type TestStep =
   | { assertion: Reactive<AssertRecord> } // from assert(() => condition)
   | {
-    action: Stream<unknown>; // from action(() => handler.send())
+    action: Stream<unknown, unknown>; // from action(() => handler.send())
     event?: unknown; // the payload, sent to the stream as authored
     trustedUi?: { surface: string; action: string };
   }
@@ -100,7 +100,8 @@ type TestStep =
 An action step's `event` is the payload the stream receives, sent as authored:
 an object arrives as an object. `trustedUi` names a trusted UI surface and the
 control inside it, for an action that must originate from rendered UI under
-enforcement.
+enforcement. The stream may answer with a result, of any type; the runner
+discards it, and a test that needs a result reads it some other way.
 
 `{ label }` and `{ await }` synchronize a multi-user test — a participant
 announces reaching `label`, and another blocks on `await` until it is
@@ -361,7 +362,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       // It's an action - invoke it via .key() access
       actionCount++;
       lastActionIndex = i;
-      const actionStream = testsCell.key(i).key("action") as Stream<unknown>;
+      const actionStream = testsCell.key(i).key("action") as Stream<
+        unknown,
+        unknown
+      >;
       // The step's payload, `undefined` for a plain void action. A
       // `trustedUi` step wraps it in the DOM provenance a renderer would
       // attach, so a write guarded by a UI contract sees a trusted gesture.
