@@ -174,7 +174,7 @@ export function unionMembersInSourceOrder(
   const members = union.types;
   const paired = unionNode &&
     pairWrittenMemberNodes(members, unionNode.types, checker, () => false);
-  return sourceOrderOfMembers(union, members, paired, checker).map((
+  return sourceOrderOfMembers(union, members, paired, unionNode, checker).map((
     index,
   ) => ({
     member: members[index]!,
@@ -217,20 +217,23 @@ function pairWrittenMemberNodes(
  * (`inSourceOrder()`): each member ranked by where the source writes the
  * node it is read at, and a member no written node stands for after those,
  * in the order of its type. `paired` is the members' pairing with the nodes
- * written for them where the union is read; where it holds no written node,
- * as where a transform built the node `union` is read at, the members are
- * ranked by the union `union`'s alias declares instead
- * (`declaredPairing()`).
+ * written for them where the union is read, at `siteNode`; where it holds no
+ * written node, the members are ranked by the union the property an indexed
+ * access `siteNode` writes declares (`indexedAccessPairing()`), or else by
+ * the union `union`'s alias declares (`declaredPairing()`), as where a
+ * transform built the node `union` is read at.
  */
 function sourceOrderOfMembers(
   union: ts.Type,
   members: readonly ts.Type[],
   paired: ReturnType<typeof pairWrittenMemberNodes> | undefined,
+  siteNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
 ): number[] {
   const ranking = paired?.memberNodes.some(isWrittenNode)
     ? paired
-    : declaredPairing(union, members, checker);
+    : indexedAccessPairing(siteNode, members, checker) ??
+      declaredPairing(union, members, checker);
   const rankOfNode = new Map<ts.TypeNode, number>();
   ranking?.memberNodes.forEach((node, index) => {
     if (isWrittenNode(node)) rankOfNode.set(node, index);
@@ -248,6 +251,52 @@ function sourceOrderOfMembers(
     members.map((_, index) => index),
     (index) => members[index]!,
     rankOf,
+  );
+}
+
+/**
+ * The pairing of `members` with the members of the union the property
+ * `siteNode` reads declares, where `siteNode` is an indexed access written
+ * with a literal key, as `Row["status"]` is, or `undefined`. It ranks the
+ * members and nothing else. Only a property of a type written without type
+ * arguments, declared in a declaration without type parameters, is read, for
+ * the reason `declaredPairing()` reads only an alias without them.
+ */
+function indexedAccessPairing(
+  siteNode: ts.TypeNode | undefined,
+  members: readonly ts.Type[],
+  checker: ts.TypeChecker,
+): ReturnType<typeof pairWrittenMemberNodes> | undefined {
+  if (siteNode === undefined || !isWrittenNode(siteNode)) return undefined;
+  const access = unwrapTypeParentheses(siteNode);
+  if (!ts.isIndexedAccessTypeNode(access)) return undefined;
+  const index = unwrapTypeParentheses(access.indexType);
+  if (!ts.isLiteralTypeNode(index) || !ts.isStringLiteral(index.literal)) {
+    return undefined;
+  }
+  const object = unwrapTypeParentheses(access.objectType);
+  if (!ts.isTypeReferenceNode(object) || object.typeArguments?.length) {
+    return undefined;
+  }
+  const property = checker.getTypeFromTypeNode(object).getProperty(
+    index.literal.text,
+  );
+  const declaration = property?.declarations?.find(ts.isPropertySignature) ??
+    property?.declarations?.find(ts.isPropertyDeclaration);
+  const owner = declaration?.parent;
+  if (
+    declaration?.type === undefined ||
+    (owner !== undefined &&
+      (ts.isInterfaceDeclaration(owner) || ts.isClassLike(owner)) &&
+      owner.typeParameters?.length)
+  ) {
+    return undefined;
+  }
+  return pairWrittenMemberNodes(
+    members,
+    [declaration.type],
+    checker,
+    () => false,
   );
 }
 
@@ -397,6 +446,7 @@ export class UnionFormatter implements TypeFormatter {
       type,
       checkerMembers,
       paired,
+      context.typeNode,
       context.typeChecker,
     );
     const members = order.map((index) => checkerMembers[index]!);

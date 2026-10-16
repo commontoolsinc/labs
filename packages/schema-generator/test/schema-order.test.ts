@@ -155,6 +155,26 @@ describe("schema-order", () => {
     });
   });
 
+  describe("a union read through an indexed access", () => {
+    it("emits the members in the order the property declares them", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export const early: "stale" | "complete" = "stale";',
+          'export interface Row { status: "complete" | "partial" | "stale" | "deleted"; }',
+          'export interface Wrap { status: Row["status"]; }',
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          status: { enum: ["complete", "partial", "stale", "deleted"] },
+        },
+      });
+    });
+  });
+
   describe("a union of cell wrappers alone", () => {
     it("emits the wrappers in the order they are written", async () => {
       const { lazy, checkedFirst } = await bothReadings(
@@ -247,6 +267,23 @@ describe("schema-order", () => {
         "zeta",
       ]);
       expect(view.required).toEqual(["alpha", "beta", "zeta"]);
+    });
+
+    it("emits a mapped type's numeric keys in the order they are written", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early: 1 = 1;",
+          "export interface Wrap { byKey: { [K in 2 | 1 | -1]: string }; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      // A JavaScript object lists integer-like keys in ascending order
+      // whatever order they are added in, so the order shows in `required`.
+      const byKey = (lazy as { properties: { byKey: { required: string[] } } })
+        .properties.byKey;
+      expect(byKey.required).toEqual(["2", "1", "-1"]);
     });
 
     it("emits the properties an interface inherits from an omission in their declaration order", async () => {

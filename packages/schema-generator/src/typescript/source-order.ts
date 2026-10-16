@@ -117,8 +117,8 @@ export function propertiesInSourceOrder(
 }
 
 /**
- * The string keys `node` writes for the mapped type it denotes, each by its
- * place: the key union of a mapped type written in place, or the key argument
+ * The keys `node` writes for the mapped type it denotes, by the names of the
+ * properties they make (`propertyNameOfKey()`), each by its place: the key union of a mapped type written in place, or the key argument
  * a reference passes to an alias of one, as `Record<"b" | "a", V>` passes
  * `"b" | "a"`. Returns `undefined` where `node` writes no key union, as it
  * does for an alias whose mapped type does not map over a parameter of its
@@ -139,12 +139,31 @@ function writtenMappedKeys(
   if (keyNode === undefined) return undefined;
   const keys = new Map<string, number>();
   for (const member of readUnionMemberNodes(keyNode, checker)) {
-    const key = unwrapTypeParentheses(member);
-    if (ts.isLiteralTypeNode(key) && ts.isStringLiteral(key.literal)) {
-      if (!keys.has(key.literal.text)) keys.set(key.literal.text, keys.size);
-    }
+    const name = propertyNameOfKey(unwrapTypeParentheses(member));
+    if (name !== undefined && !keys.has(name)) keys.set(name, keys.size);
   }
   return keys;
+}
+
+/**
+ * The property name the literal key `key` writes, as the checker names the
+ * property a mapped type makes for it: a string as written, a number in its
+ * canonical form (`1.0` names `"1"`, `-1` names `"-1"`). Returns `undefined`
+ * for any other key.
+ */
+function propertyNameOfKey(key: ts.TypeNode): string | undefined {
+  if (!ts.isLiteralTypeNode(key)) return undefined;
+  const { literal } = key;
+  if (ts.isStringLiteral(literal)) return literal.text;
+  if (ts.isNumericLiteral(literal)) return String(Number(literal.text));
+  if (
+    ts.isPrefixUnaryExpression(literal) &&
+    literal.operator === ts.SyntaxKind.MinusToken &&
+    ts.isNumericLiteral(literal.operand)
+  ) {
+    return String(-Number(literal.operand.text));
+  }
+  return undefined;
 }
 
 /**
