@@ -18,11 +18,6 @@ export default pattern<Input, ChatRoomOutput>((input) =>
   FabriChatRoomCore({
     myProfile: input.profile,
     messages: input.messages,
-    reactionLists: input.reactionLists,
-    requests: input.requests,
-    usedTimes: input.usedTimes,
-    activity: input.activity,
-    counters: input.counters,
     roster: input.participants,
     manager: input.manager,
   })

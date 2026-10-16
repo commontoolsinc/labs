@@ -1,7 +1,14 @@
+---
+status: historical
+created: 2026-09-29
+archived: 2026-10-15
+reason: "Superseded design; a room offers no message windows, and a client reads past its newest messages from the stored messages themselves."
+---
+
 # ChatMessageWindow
 
 A run of consecutive messages from one view of a conversation, opened by a
-client. A room's [`ChatMessageList`](ChatMessageList.md) keeps each of a
+client. A room's [`ChatMessageList`](../../../specs/fabrichat/ChatMessageList.md) keeps each of a
 session's open windows in `windows`, under the `windowId` the client chose.
 
 ```ts
@@ -30,7 +37,7 @@ interface ChatMessageWindow {
   the window, so a client can tell which of its requests it's seeing.
 - **`root`** links the thread's root in a thread's window, and is absent in a
   window of the main conversation.
-- **`messages`** are the window's [`ChatMessage`](ChatMessage.md)s, oldest
+- **`messages`** are the window's [`ChatMessage`](../../../specs/fabrichat/ChatMessage.md)s, oldest
   first: at most the request's `count`, and at most the room's `maxWindowCount`.
 - **`hasOlder`** and **`hasNewer`** say whether the view has messages older than
   the first one in the window, and newer than the last one, so a client knows
@@ -40,4 +47,4 @@ interface ChatMessageWindow {
 
 A window stays live as the messages in it change, and doesn't grow with new
 messages on its own (see
-[`ChatMessageList`](ChatMessageList.md#paging-and-following)).
+[`ChatMessageList`](../../../specs/fabrichat/ChatMessageList.md#paging-and-following)).

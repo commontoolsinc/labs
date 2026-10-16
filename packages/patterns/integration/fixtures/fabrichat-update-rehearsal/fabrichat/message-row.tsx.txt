@@ -18,14 +18,12 @@ import {
 } from "commonfabric";
 import type { ViewPlace } from "./logic.ts";
 import {
-  type ActivityCell,
-  type ActivityCountersCell,
   type ActRefusalCell,
   commitDelete,
   commitDeleteReaction,
   commitEdit,
   commitObliterate,
-  commitSend,
+  commitReply,
   commitSendReaction,
   type ComposerCell,
   entityKeyOf,
@@ -33,16 +31,12 @@ import {
   type JoinRoomRequest,
   type MessageCell,
   type MessageRecord,
-  type MessageRequestsCell,
   messageRightsOf,
   type MessagesCell,
   NO_MESSAGE_RIGHTS,
   ownersMayObliterateBy,
-  type ReactionListsCell,
-  type RequestsCell,
   type RoomStreamEvent,
   tellManagerJoined,
-  type UsedTimesCell,
   viewKeyOf,
 } from "./room-records.tsx";
 import {
@@ -152,26 +146,8 @@ export interface FabriChatMessageRowInput {
    */
   policy?: Cell<ChatRoomPolicy>;
 
-  /** The room's messages. */
+  /** The room's messages, which a reply is pushed onto. */
   messages: MessagesCell;
-
-  /** Every message's reaction list. */
-  reactionLists: ReactionListsCell;
-
-  /** The requests the room has acted on. */
-  requests: RequestsCell;
-
-  /** The times the room has recorded something at. */
-  usedTimes: UsedTimesCell;
-
-  /** The room's recent activity. */
-  activity: ActivityCell;
-
-  /** Where the activity's numbering stands. */
-  counters: ActivityCountersCell;
-
-  /** The sender's outcomes, by `requestId`; absent where none are kept. */
-  outcomes?: MessageRequestsCell;
 
   /**
    * Why the session's latest act was refused, which the composer shows;
@@ -244,12 +220,6 @@ export const FabriChatMessageRow = pattern<
     isOwner,
     policy,
     messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
-    outcomes,
     refusal,
     canJoin,
     container,
@@ -257,20 +227,6 @@ export const FabriChatMessageRow = pattern<
     self,
   } = input;
   const joined = tellManagerJoined({ canJoin, container, joinRoom, self });
-  const records = {
-    kind,
-    policy,
-    composer,
-    messages,
-    reactionLists,
-    requests,
-    usedTimes,
-    activity,
-    counters,
-    outcomes,
-    refusal,
-    joined,
-  };
   const pickerOpen = new Writable.perSession(false);
   const togglePicker = action(() => pickerOpen.set(!pickerOpen.get()));
   const tallies = computed(() => {
@@ -362,50 +318,67 @@ export const FabriChatMessageRow = pattern<
   const startEdit = action(() => composer.key("editing").set(message));
   const stopEdit = action(() => composer.key("editing").set(undefined));
 
+  // Each handler is bound to the cells it uses and no others; `messages`
+  // names the room's space to the acts, and takes the replies.
   const sendReaction = commitSendReaction({
     myProfile,
-    ...records,
+    room: messages,
     message,
     pickerOpen,
     closesPicker: true,
+    refusal,
+    joined,
   });
   const deleteReaction = commitDeleteReaction({
     myProfile,
-    ...records,
+    room: messages,
     message,
+    refusal,
   });
   const editMessage = commitEdit({
     myProfile,
-    ...records,
+    room: messages,
     message,
+    composer,
+    refusal,
   });
   const deleteMessage = commitDelete({
     myProfile,
-    ...records,
+    room: messages,
     message,
+    refusal,
   });
   const obliterateMessage = commitObliterate({
     myProfile,
-    ...records,
+    room: messages,
     message,
+    kind,
+    policy,
+    refusal,
   });
-  const replyInThread = commitSend({
+  const replyInThread = commitReply({
     myProfile,
-    ...records,
+    messages,
     message,
     shownIn: "thread",
+    refusal,
+    joined,
   });
-  const replyInBoth = commitSend({
+  const replyInBoth = commitReply({
     myProfile,
-    ...records,
+    messages,
     message,
     shownIn: "both",
+    refusal,
+    joined,
   });
-  const replyInMain = commitSend({
+  const replyInMain = commitReply({
     myProfile,
-    ...records,
+    messages,
     message,
     shownIn: "main",
+    refusal,
+    joined,
   });
 
   return {
@@ -502,19 +475,11 @@ export const FabriChatMessageRow = pattern<
                       disabled={cannotWrite}
                       onClick={commitSendReaction({
                         myProfile,
-                        kind,
-                        composer,
-                        messages,
-                        reactionLists,
-                        requests,
-                        usedTimes,
-                        activity,
-                        counters,
-                        outcomes,
-                        refusal,
-                        joined,
+                        room: messages,
                         message,
                         emoji: tally.emoji,
+                        refusal,
+                        joined,
                       })}
                     >
                       <span>
@@ -533,19 +498,10 @@ export const FabriChatMessageRow = pattern<
                       style={{ display: tally.mine ? "inline-flex" : "none" }}
                       onClick={commitDeleteReaction({
                         myProfile,
-                        kind,
-                        composer,
-                        messages,
-                        reactionLists,
-                        requests,
-                        usedTimes,
-                        activity,
-                        counters,
-                        outcomes,
-                        refusal,
-                        joined,
+                        room: messages,
                         message,
                         emoji: tally.emoji,
+                        refusal,
                       })}
                     >
                       ✕
@@ -592,21 +548,13 @@ export const FabriChatMessageRow = pattern<
                   disabled={cannotWrite}
                   onClick={commitSendReaction({
                     myProfile,
-                    kind,
-                    composer,
-                    messages,
-                    reactionLists,
-                    requests,
-                    usedTimes,
-                    activity,
-                    counters,
-                    outcomes,
-                    refusal,
-                    joined,
+                    room: messages,
                     message,
                     emoji,
                     pickerOpen,
                     closesPicker: true,
+                    refusal,
+                    joined,
                   })}
                 >
                   <span style={EMOJI_STYLE}>{emoji}</span>

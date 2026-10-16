@@ -494,17 +494,28 @@ specification does not require.
   longer refuses with "missing link source metadata"; it needs the source only
   when an assertion about linked content needs it. A list whose elements
   require an integrity atom refuses an unendorsed element through its floor
-  instead, which reads the element's own evidence. That refusal is not a
-  verdict, where the retired one was for a source whose root the transaction
-  could read: the floor cannot tell a source that lacks the atom from one
-  the transaction does not hold, and the run does not depend on the source's
-  stored labels. So a reactive writer takes its bounded retries, a client
-  that delivers its own events reports the refused commit after one attempt,
-  and a served event gets no error consequence sealed for it, which a
-  verdict's refusal does get. A floor's failure over a plain value is
-  disposed of the same way. A floor that refused with a verdict would need
-  its evidence to say whether every source it weighed was in hand, and a read
-  of the source's stored labels that reactivity sees.
+  instead, which reads the element's own evidence. Where the transaction
+  holds every document the floor weighed for that evidence, the element and
+  any document a reference on the way leads to, the refusal is a verdict, as
+  the retired one was for a source whose root the transaction could read. The
+  floor then reads those documents' stored labels, and the values along the
+  linked path, again where reactivity sees them, so a reactive writer it
+  refuses runs again when the element stores the atom, and a served event
+  gets an error consequence sealed for it. A client that delivers its own
+  events reports the verdict as a dropped write rather than through the error
+  channel, as it does any CFC verdict. Where the floor weighed a document the
+  transaction does not hold, which reads the same as one that lacks the atom,
+  the refusal is not a verdict: a reactive writer takes its bounded retries, a
+  client that delivers its own events reports the refused commit after one
+  attempt, and a served event is deferred as a commit-preparation delivery
+  failure, held at the head of its stream, retried on input, and covered for
+  attention once its failed-state budget is spent. A floor's failure over a
+  plain value is a verdict on the same terms, the documents being those whose
+  stored labels the flow join read; it is not one where the flow join also
+  weighed the flow of external content, which no document holds. Where several
+  contributions miss one floor, the refusal is a verdict only when every one
+  of them is decided that way, and a source whose stored labels name a schema
+  document the transaction could not read decides nothing.
 - A reference written at a concrete floor path whose schema mints the floor's
   atom is held to the source's evidence, where the mint used to credit it.
   The store keeps no stamp at a slot holding a reference, so a floor the mint

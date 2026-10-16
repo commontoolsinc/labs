@@ -33,15 +33,10 @@ import {
 import { FabriChatManagerCore, type ManagerStreamEvent } from "./manager.tsx";
 import { FabriChatMessageRow } from "./message-row.tsx";
 import {
-  type ActivityCounters,
   type ComposerState,
   type JoinRoomRequest,
   type MessagesValue,
-  type ReactionList,
-  type RequestMemo,
   type RoomStreamEvent,
-  type SentActivity,
-  type UsedTime,
 } from "./room-records.tsx";
 import {
   type ChatRoomOutput,
@@ -86,11 +81,6 @@ const typed = (text: string) => ({ type: "click", target: { value: text } });
 /** A room's records, which every viewer's room over them shares. */
 interface Setup {
   messages: Writable<MessagesValue>;
-  reactionLists: Writable<ReactionList[]>;
-  requests: Writable<RequestMemo[]>;
-  usedTimes: Writable<UsedTime[]>;
-  activity: Writable<SentActivity[]>;
-  counters: Writable<ActivityCounters[]>;
 
   /** Those who joined the room. */
   roster: Writable<ParticipantRoster>;
@@ -98,11 +88,6 @@ interface Setup {
 
 export const setup = pattern(() => ({
   messages: Writable.of<MessagesValue>([] as MessagesValue),
-  reactionLists: Writable.of<ReactionList[]>([] as ReactionList[]),
-  requests: Writable.of<RequestMemo[]>([]),
-  usedTimes: Writable.of<UsedTime[]>([]),
-  activity: Writable.of<SentActivity[]>([]),
-  counters: Writable.of<ActivityCounters[]>([]),
   roster: Writable.of<ParticipantRoster>({}),
 }));
 
@@ -230,11 +215,6 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     myProfile: profile,
     about: { kind: "group" as const, title: "Team" },
     messages: setup.messages,
-    reactionLists: setup.reactionLists,
-    requests: setup.requests,
-    usedTimes: setup.usedTimes,
-    activity: setup.activity,
-    counters: setup.counters,
     roster: setup.roster,
     self,
     manager: {
@@ -255,11 +235,6 @@ const Viewer = pattern<ViewerInput, ViewerOutput>((input) => {
     cannotWrite: false,
     isOwner: false,
     messages: setup.messages,
-    reactionLists: setup.reactionLists,
-    requests: setup.requests,
-    usedTimes: setup.usedTimes,
-    activity: setup.activity,
-    counters: setup.counters,
     canJoin: true,
     manager: { joinRoom: counted },
     self,
