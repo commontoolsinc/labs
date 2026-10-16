@@ -64,10 +64,12 @@ which itself slows the run it measures) lists 68 runs, about 0.4 s of them:
 
 - 22 render sinks, about a third of the run time: the view nodes that
   re-render for the new row.
-- The two `map`s that render rows, about a third: the main list is
+- The `map` that renders the main list's rows, about a third: it is
   `{messages.map(...)}` over the room's *stored* list, every message the room
-  holds with the rows outside the main conversation hidden, and the thread
-  pane maps its own, so each send re-maps all 31 links (161 link hops).
+  holds with the rows outside the main conversation hidden, and it ran twice
+  in the send's settle, re-mapping all 31 links each time (161 link hops in
+  all). The thread pane's map runs over an empty list while no thread is
+  open, as none is here, and costs nothing.
 - The room's derivations over the whole list, about a third: `messageEntries`
   (260 reads, resolving every element's link and reading its record),
   `viewPlaces`, `participantsOf` over the entries and the listed profiles
@@ -86,7 +88,7 @@ same send with a rendered tree 250 ms; nine storage watch refreshes run
 during a send and nothing on its path awaits them.
 
 So the pattern's share of a send is the shape of its derivations: every
-room-level derivation and both row maps walk the whole list for one pushed
+room-level derivation and the row map walk the whole list for one pushed
 element. Making them incremental, or at least not resolving every element's
 link again, is where the next cut comes from; the IPC round trips for a new
 row's cells are the other half, and the runtime's.
