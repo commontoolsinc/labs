@@ -1,7 +1,7 @@
 ---
 status: historical
-created: 2026-10-16
-archived: 2026-10-16
+created: 2026-10-15
+archived: 2026-10-15
 reason: "Measurement of what a FabriChat room's derivations cost on the thirty-first send, before and after they became one walk over plain entries (the change after commonfabric/labs#8931), with the costs that remain and are the runtime's, October 2026."
 ---
 
@@ -50,8 +50,9 @@ hops:
 | `participants` (`participantsOf`) | 95 | 95 | every entry's record and its author link, compared with `equals()` |
 | `mainEntries` (`entries.filter(isInMain)`) | 63 | 1 | every entry whole, through an imported helper |
 
-After, one derivation: 218 accesses and 126 hops, and nothing else over the
-list ran.
+After, one room-level derivation over the list: 218 accesses and 126 hops.
+No other room-level derivation ran; the main list's `map` still walked the
+list, as the next section says.
 
 | cut | cause |
 | --- | --- |
@@ -59,7 +60,7 @@ list ran.
 | `participants` leaves the list | the entries carry each author's key, `messageEntries()` lists each author once, and `participantsOf()` compares the listed profiles against the authors: as many comparisons as the room has people, however many messages |
 | `messageRights` leaves the records | each entry carries whether it is live and its author's key, and the reader's key is their resolved profile's, so the rule is decided from two plain values per entry |
 | `mainEntries` costs nothing | each entry carries `inMain`, decided where the record is read |
-| the open thread's root is not searched for | `openThreadKey` reads the root's own key and asks the places whether the room holds it, where it found the root's entry by `equals()` against every entry |
+| the open thread's root is not searched for | `openThreadKey` takes the root's own key, `viewKeyOf(root)`, and asks `places[key]` whether the room holds it; before, `entryFor()` found the root's entry by `equals()` against every entry |
 | the main list maps the main conversation | `facts.main` holds the main conversation's cells, so a reply shown only in a thread has no hidden row, and a row has no display computed and no conditional for it: two fewer runs per row |
 | the new row's rights read two fields | the row hands `messageRightsOf()` the message's author and body rather than the whole record: 8 accesses and 24 hops in place of 9 and 25, so the record's other links were not what that run resolved |
 

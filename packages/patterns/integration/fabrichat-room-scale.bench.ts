@@ -14,9 +14,10 @@
  *   already showing, timed until the message's row renders.
  *
  * A room renders a row for every message of its main conversation, however
- * many its own `latest` holds, so a room of three hundred messages builds
- * three hundred rows where none replies in a thread alone. The curve is what
- * says what that costs.
+ * many its own `latest` holds, so a room of three hundred messages builds a
+ * main-conversation row for each of them except the replies in the thread
+ * the fixture seeds, which are rows of the thread pane alone. The curve is
+ * what says what that costs.
  *
  * Every room has the twelve members of the fixed-size benchmark, each with a
  * profile of their own, so the members' share of a load is the same at every
