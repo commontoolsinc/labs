@@ -1,8 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { URI } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { immutableCellsFor } from "../src/immutable-cell.ts";
 import { Runtime, type RuntimeOptions } from "../src/runtime.ts";
@@ -246,14 +245,29 @@ describe("runtime-sizes", () => {
           runtime.getCell(space, "source", undefined, tx),
         );
       };
-      runtime.scheduler.subscribe(link, { isEffect: true });
+      let runs = 0;
+      const counted: Action = (tx) => {
+        runs += 1;
+        link(tx);
+      };
+      runtime.scheduler.subscribe(counted, { isEffect: true });
       await runtime.scheduler.idleWithPendingCommits();
 
-      expect(errors.map((error) => error.name)).toEqual([
-        "CfcCommitRefusalError",
-      ]);
-      expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
-        "missing link source metadata": 1,
+      const stats = runtime.getCfcStats();
+      expect({
+        runs,
+        errors: errors.map((error) => error.name),
+        relevant: stats.cfcRelevantTx,
+        prepared: stats.cfcPreparedTx,
+        rejects: stats.cfcPrepareRejects,
+        tally: runtime.getSizes().cfcRejectionsByReason,
+      }).toEqual({
+        runs: 1,
+        errors: ["CfcCommitRefusalError"],
+        relevant: 2,
+        prepared: 1,
+        rejects: 1,
+        tally: { "missing link source metadata": 1 },
       });
     });
 
@@ -296,11 +310,26 @@ describe("runtime-sizes", () => {
         candidates: [],
       });
       runtime.prepareTxForCommit(tx);
+      const prepare = tx.getCfcState().prepare;
       const result = await tx.commit().settled;
 
-      expect(result.error?.name).toBe("CommitPreparationError");
-      expect(runtime.getSizes().cfcRejectionsByReason).toEqual({
-        "CFC commit preparation crashed": 1,
+      const stats = runtime.getCfcStats();
+      expect({
+        error: result.error?.name,
+        relevant: tx.getCfcState().relevant,
+        status: prepare.status,
+        reasons: prepare.status === "invalidated" ? prepare.reasons.length : 0,
+        relevantTx: stats.cfcRelevantTx,
+        preparedTx: stats.cfcPreparedTx,
+        tally: runtime.getSizes().cfcRejectionsByReason,
+      }).toEqual({
+        error: "CommitPreparationError",
+        relevant: true,
+        status: "invalidated",
+        reasons: 1,
+        relevantTx: 2,
+        preparedTx: 1,
+        tally: { "CFC commit preparation crashed": 1 },
       });
     });
   });
