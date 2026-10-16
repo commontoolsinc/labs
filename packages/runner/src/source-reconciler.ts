@@ -154,6 +154,9 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
+  // The name is narrower than the refusal: the envelope that refused may be
+  // the result document's as well as the argument's. What the panel says for
+  // it, the data the piece holds, covers both.
   mismatched: { outcome: "refused", reason: "argument-mismatch" },
   detached: undefined,
   unusable: undefined,
@@ -259,15 +262,19 @@ type CommitFailure = {
 /**
  * An adoption refused in a way that repeats: the piece ran `running`, the
  * origin offered `candidate`, and the reconciliation concluded `outcome` for
- * `detail`. A refusal by a stored envelope also names the envelopes it was
- * reached over, `envelopes`, since a change to them can change the answer. A
- * write the store refused as too large has none: it grows with what the piece
- * holds, so a change to the piece's data rarely makes it fit.
+ * `detail`. A refusal by a stored envelope also names what else the merge
+ * that refused it read, since a change to either can change the answer: the
+ * envelopes it was reached over, `envelopes`, and, for a `system:` origin,
+ * whether the running source was retained, `retained`, which decides whether
+ * the attempt carried the release's writer inheritance. A write the store
+ * refused as too large has neither: it grows with what the piece holds, so a
+ * change to the piece's data rarely makes it fit.
  */
 type RefusedAdoption = {
   running: { identity: string; symbol: string };
   candidate: { identity: string; symbol: string };
   envelopes?: string;
+  retained?: boolean;
   outcome: ReconcileOutcome;
   detail: string;
 };
@@ -342,9 +349,10 @@ export class SourceReconciler {
    * at that cost, only to have it refused again. An entry applies while the
    * piece runs what it ran and its origin offers the same candidate, and, for
    * a refusal by a stored envelope, while the piece's documents store the
-   * envelopes it was refused over: a write under the schema the piece runs
-   * leaves them as they are, and a migration that rewrites them changes
-   * them. An entry is dropped when the piece stops or its space's memory
+   * envelopes it was refused over and its running source is retained as it
+   * was: a write under the schema the piece runs leaves the envelopes as they
+   * are, a migration that rewrites them changes them, and a source retained
+   * since lets the release's writer inheritance into the next attempt. An entry is dropped when the piece stops or its space's memory
    * session is replaced. A replacement can bring a store that admits what the
    * old one refused, and either event can come with a change the entry does
    * not see, such as an envelope on a document other than the two it reads;
@@ -792,6 +800,7 @@ export class SourceReconciler {
       return "unavailable";
     }
     let sourceRoots: readonly string[] = [];
+    let retained: boolean | undefined;
     // Attached roots participate in the stored identity. An entry-only match
     // therefore needs no stored-source verification or compiler-stack load.
     if (answer.identity !== state.running.identity) {
@@ -801,6 +810,7 @@ export class SourceReconciler {
           state.space,
         );
       signal.throwIfAborted();
+      retained = stored !== undefined;
       // Missing stored source permits rebuilding the entry and recording the
       // displaced identity. Roots can only be retained from a verified program.
       sourceRoots = stored?.sourceRoots ?? [];
@@ -833,7 +843,7 @@ export class SourceReconciler {
     const refused = this.#refusedBefore(resultCell, state, {
       identity: advertised,
       symbol: state.running.symbol,
-    });
+    }, retained);
     if (refused !== undefined) {
       state.detail = refused.detail;
       return refused.outcome;
@@ -1420,7 +1430,12 @@ export class SourceReconciler {
         running: { ...state.running },
         candidate: candidateRef,
         ...(failure.repeats === "stored-envelope"
-          ? { envelopes: this.#storedEnvelopes(resultCell) }
+          ? {
+            envelopes: this.#storedEnvelopes(resultCell),
+            ...(origin.kind === "system"
+              ? { retained: baseline.kind === "retain" }
+              : {}),
+          }
           : {}),
         outcome,
         detail: failure.detail,
@@ -1432,18 +1447,22 @@ export class SourceReconciler {
 
   /**
    * The refusal adopting `candidate` over what the piece runs met, if it
-   * repeats and nothing it answered for has changed since.
+   * repeats and nothing it answered for has changed since. `retained` is
+   * whether the running source is retained now, for a `system:` origin that
+   * has looked.
    */
   #refusedBefore(
     resultCell: Cell<unknown>,
     state: PieceState,
     candidate: { identity: string; symbol: string },
+    retained?: boolean,
   ): RefusedAdoption | undefined {
     const refused = this.#refusedAdoptions.get(this.#followerKey(resultCell));
     return refused?.running.identity === state.running.identity &&
         refused.running.symbol === state.running.symbol &&
         refused.candidate.identity === candidate.identity &&
         refused.candidate.symbol === candidate.symbol &&
+        (refused.retained === undefined || refused.retained === retained) &&
         (refused.envelopes === undefined ||
           refused.envelopes === this.#storedEnvelopes(resultCell))
       ? refused

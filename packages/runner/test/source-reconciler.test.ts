@@ -1321,6 +1321,41 @@ describe("piece source reconciliation", () => {
         expect(prepared.calls).toHaveLength(2);
       });
 
+      it("prepares the adoption again once the running source is retained", async () => {
+        // The release's writer inheritance, which the merge reads, comes only
+        // with a retained running source, so an attempt that can carry it is
+        // a different attempt from one that could not.
+
+        const v2Identity = await identityFor(source("v2"));
+        const piece = await preparePiece(
+          servingFetch(() => v2Identity, () => source("v2")),
+        );
+        await stampSource(piece, PARENT_SOURCE);
+        const running = getPatternIdentityRef(piece)!.identity;
+        using _refused = refuseAdoption(piece, UNSTABLE);
+        using prepared = spy(runtime.runner, "syncStoredPieceCells");
+        {
+          const lookup = runtime.patternManager
+            .getPatternSourceProgramByIdentity
+            .bind(runtime.patternManager);
+          using _unretained = stub(
+            runtime.patternManager,
+            "getPatternSourceProgramByIdentity",
+            (...args: Parameters<typeof lookup>) =>
+              args[0] === running
+                ? Promise.resolve(undefined)
+                : lookup(...args),
+          );
+          expect(await reconcile(piece)).toBe("mismatched");
+          expect(await reconcile(piece)).toBe("mismatched");
+          expect(prepared.calls).toHaveLength(1);
+        }
+
+        expect(await reconcile(piece)).toBe("mismatched");
+
+        expect(prepared.calls).toHaveLength(2);
+      });
+
       it("prepares the adoption again after a refusal whose reasons only say so in prose", async () => {
         // The class is read off the reason the boundary tagged, never off
         // the words of one it did not.
