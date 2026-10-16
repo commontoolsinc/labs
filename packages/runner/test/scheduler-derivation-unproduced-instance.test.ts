@@ -46,12 +46,25 @@ async function fixture(name: string, serving: boolean) {
   expect((await seed.commit().settled).error).toBeUndefined();
 
   let consumerRuns = 0;
-  const consumer = (tx: IExtendedStorageTransaction) => {
-    consumerRuns++;
-    const value = holder.withTx(tx).key("state").get();
-    output.withTx(tx).set(
-      value === undefined ? "derived from nothing" : `derived from ${value}`,
-    );
+  const consumerOf =
+    (read: (tx: IExtendedStorageTransaction) => unknown) =>
+    (tx: IExtendedStorageTransaction) => {
+      consumerRuns++;
+      const value = read(tx);
+      output.withTx(tx).set(
+        value === undefined ? "derived from nothing" : `derived from ${value}`,
+      );
+    };
+  const subscribeConsumer = async (
+    consumer: (tx: IExtendedStorageTransaction) => void,
+  ) => {
+    runtime.scheduler.subscribe(consumer, {
+      reads: [],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await runtime.idle();
+    await storage.synced();
   };
 
   return {
@@ -62,28 +75,34 @@ async function fixture(name: string, serving: boolean) {
     consumerRuns: () => consumerRuns,
 
     /**
-     * Registers a derivation that declares a write to `state` and never
-     * produces it, as one that has not run yet for this principal, or never
-     * does, would.
+     * Registers a derivation that declares a write to `state`, at `scope`
+     * when one is given, and never produces it, as one that has not run yet
+     * for this principal, or never does, would.
      */
-    registerWriter() {
+    registerWriter(scope?: "space" | "user" | "session") {
+      const link = state.getAsNormalizedFullLink();
       runtime.scheduler.subscribe(() => {}, {
         reads: [],
         shallowReads: [],
-        writes: [toMemorySpaceAddress(state.getAsNormalizedFullLink())],
+        writes: [toMemorySpaceAddress(scope ? { ...link, scope } : link)],
       });
     },
 
-    /** Starts the consumer, and waits for it to settle. */
-    async runConsumer() {
-      runtime.scheduler.subscribe(consumer, {
-        reads: [],
-        shallowReads: [],
-        writes: [],
-      }, { isEffect: true });
-      await runtime.idle();
-      await storage.synced();
-    },
+    /**
+     * Starts the consumer, which reads `state` through `holder`'s link, and
+     * waits for it to settle.
+     */
+    runConsumer: () =>
+      subscribeConsumer(
+        consumerOf((tx) => holder.withTx(tx).key("state").get()),
+      ),
+
+    /**
+     * Starts a consumer that reads `state` directly, following no link, and
+     * waits for it to settle.
+     */
+    runDirectConsumer: () =>
+      subscribeConsumer(consumerOf((tx) => state.withTx(tx).get())),
 
     async close() {
       await storage.synced();
@@ -127,6 +146,39 @@ describe("scheduler-derivation-unproduced-instance", () => {
 
       expect(f.consumerRuns()).toBe(1);
       expect(f.output.get()).toBe("as it was");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("commits nothing from a served derivation that read a user-scoped instance of a document a registered derivation declares at space scope", async () => {
+    // A derivation's output is declared at its binding's scope and written
+    // at the scope its reads narrow to, so a writer declared at any scope
+    // may be the one that produces this instance.
+
+    const f = await fixture("narrowed", true);
+    try {
+      f.registerWriter("space");
+      await f.runConsumer();
+
+      expect(f.consumerRuns()).toBe(1);
+      expect(f.output.get()).toBe("as it was");
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("commits the output of a served derivation that read a missing scoped instance directly, following no link", async () => {
+    // A run that addresses the document itself, as a builtin reads its own
+    // store before it mints it, reads the missing row as knowledge.
+
+    const f = await fixture("direct", true);
+    try {
+      f.registerWriter();
+      await f.runDirectConsumer();
+
+      expect(f.consumerRuns()).toBe(1);
+      expect(f.output.get()).toBe("derived from nothing");
     } finally {
       await f.close();
     }
