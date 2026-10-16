@@ -317,7 +317,8 @@ whose remote profile space is offline.
 
 There is no "list everyone's profiles" primitive. Each viewer contributes their
 own identity on join: push their live `#profile` **cell** into the shared
-`PerSpace` roster (plus a `{ displayName, picture }` snapshot for the offline
+`PerSpace` roster (plus a `{ displayName, ...profileLook(picture, avatar) }`
+snapshot for the offline
 fallback), and keep a `PerUser` pointer that is a **cell reference** to their own
 entry (see [Shared Directories And "Me"](#shared-directories-and-me)). Decide "is
 this me?" with `equals()` on the stored profile cell (or the entry reference) —
@@ -327,7 +328,8 @@ never by comparing the mutable, non-unique display name. The live demo
 ### Ownership and authorship
 
 "Who created this / who wrote this" is identity too. For display, snapshot the
-actor's `{ displayName, picture }`. For an *attested* claim the user cannot forge,
+actor's name and `profileLook(picture, avatar)`: the picture, or the avatar
+text for a profile with no picture. For an *attested* claim the user cannot forge,
 use the CFC wrappers `AuthoredByCurrentUser<T>` / `RepresentsCurrentUser<T>` and
 render with `cf-cfc-authorship`. Read-only display works today; note that
 owner-protected profile *writes* are currently constrained (see CT-1665).

@@ -64,8 +64,8 @@ export class NotAnImageError extends Error {
  * @attr {boolean} disabled - Disables the button
  *
  * @fires cf-change - The picked image. detail: { bytes: FabricBytes }
- * @fires cf-error - The picked file is not an image.
- *   detail: { message: string }
+ * @fires cf-error - The picked file is not an image, or the browser could not
+ *   draw it into a picture. detail: { message: string }
  */
 export class CFAvatarInput extends BaseElement {
   static override styles = [
@@ -102,8 +102,11 @@ export class CFAvatarInput extends BaseElement {
       const bytes = new FabricBytes(await avatarBytesFromImage(file), true);
       this.emit("cf-change", { bytes });
     } catch (error) {
-      if (!(error instanceof NotAnImageError)) throw error;
-      this.emit("cf-error", { message: `${file.name} is not an image` });
+      this.emit("cf-error", {
+        message: error instanceof NotAnImageError
+          ? `${file.name} is not an image`
+          : `${file.name} could not be made into a picture`,
+      });
     } finally {
       this._busy = false;
     }
@@ -113,7 +116,7 @@ export class CFAvatarInput extends BaseElement {
     return html`
       <input type="file" accept="image/*" @change="${this.#handleChange}" />
       <cf-button
-        variant="secondary"
+        variant="outline"
         ?disabled="${this.disabled || this._busy}"
         @click="${this.#handleClick}"
       >

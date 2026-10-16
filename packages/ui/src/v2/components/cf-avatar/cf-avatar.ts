@@ -174,7 +174,7 @@ export class CFAvatar extends BaseElement {
   protected override willUpdate(changed: PropertyValues): void {
     super.willUpdate(changed);
     // A new src gets a fresh chance to load before we fall back to initials.
-    if (changed.has("src")) this._imgError = false;
+    if (changed.has("src") || changed.has("bytes")) this._imgError = false;
     if (changed.has("size")) this.size = oneOf(this.size, avatarSizes, "md");
     if (changed.has("shape")) {
       this.shape = oneOf(this.shape, avatarShapes, "circle");
