@@ -163,18 +163,20 @@ export function pairUnionMemberNodes(
 }
 
 /**
- * The members of `union` in source order (`sourceOrderOfMembers()`), each
- * beside the node `unionNode` writes for it, where it writes one.
+ * The members of `union` in source order (`sourceOrderOfMembers()`), read
+ * at `siteNode`, each beside the node a union `siteNode` writes for it,
+ * where it writes one.
  */
 export function unionMembersInSourceOrder(
   union: ts.UnionType,
-  unionNode: ts.UnionTypeNode | undefined,
+  siteNode: ts.TypeNode | undefined,
   checker: ts.TypeChecker,
 ): Array<{ member: ts.Type; node: ts.TypeNode | undefined }> {
   const members = union.types;
-  const paired = unionNode &&
-    pairWrittenMemberNodes(members, unionNode.types, checker, () => false);
-  return sourceOrderOfMembers(union, members, paired, unionNode, checker).map((
+  const paired = siteNode && ts.isUnionTypeNode(siteNode)
+    ? pairWrittenMemberNodes(members, siteNode.types, checker, () => false)
+    : undefined;
+  return sourceOrderOfMembers(union, members, paired, siteNode, checker).map((
     index,
   ) => ({
     member: members[index]!,

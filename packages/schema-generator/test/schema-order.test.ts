@@ -176,6 +176,32 @@ describe("schema-order", () => {
   });
 
   describe("a union of cell wrappers alone", () => {
+    it("emits wrappers read through an indexed access in the order the property declares", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'import type { Cell } from "commonfabric";',
+          "export const early: Cell<Banana> | undefined = undefined;",
+          "export interface Apple { a: string; }",
+          "export interface Banana { b: number; }",
+          "export interface Row { fruit: Cell<Apple> | Cell<Banana>; }",
+          'export interface Wrap { fruit: Row["fruit"]; }',
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect(lazy).toMatchObject({
+        properties: {
+          fruit: {
+            anyOf: [
+              { $ref: "#/$defs/Apple", asCell: ["cell"] },
+              { $ref: "#/$defs/Banana", asCell: ["cell"] },
+            ],
+          },
+        },
+      });
+    });
+
     it("emits the wrappers in the order they are written", async () => {
       const { lazy, checkedFirst } = await bothReadings(
         [
@@ -203,6 +229,20 @@ describe("schema-order", () => {
   });
 
   describe("a union the source does not order", () => {
+    it("emits a TS enum's members and another declared type in one order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          "export const early = {} as M | E.Z | E.A;",
+          'export enum E { Z = "z", A = "a" }',
+          "export interface M { m: string; }",
+          "export interface Wrap { items: [E.Z, E.A, M]; }",
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+    });
+
     it("emits a checker-built literal union's values in value order", async () => {
       const { lazy, checkedFirst } = await bothReadings(
         [
@@ -284,6 +324,28 @@ describe("schema-order", () => {
       const byKey = (lazy as { properties: { byKey: { required: string[] } } })
         .properties.byKey;
       expect(byKey.required).toEqual(["2", "1", "-1"]);
+    });
+
+    it("emits an omission of an interface with two bases in their heritage order", async () => {
+      const { lazy, checkedFirst } = await bothReadings(
+        [
+          'export const early: "d" | "b" | "c" = "d";',
+          "export interface Left { a: string; c: string; }",
+          "export interface Right { b: string; d: string; }",
+          "export interface Full extends Left, Right { drop: string; }",
+          'export interface Wrap extends Omit<Full, "drop"> { own: number; }',
+        ].join("\n"),
+        interfaceSchema("Wrap"),
+      );
+
+      expect(checkedFirst).toEqual(lazy);
+      expect((lazy as { required: string[] }).required).toEqual([
+        "own",
+        "a",
+        "c",
+        "b",
+        "d",
+      ]);
     });
 
     it("emits the properties an interface inherits from an omission in their declaration order", async () => {

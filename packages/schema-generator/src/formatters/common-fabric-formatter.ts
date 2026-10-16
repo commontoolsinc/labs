@@ -4891,16 +4891,13 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
   ): MutableJSONSchema {
     const schemas: MutableJSONSchema[] = [];
-    const unionNode = context.typeNode && ts.isUnionTypeNode(context.typeNode)
-      ? context.typeNode
-      : undefined;
 
     // Process each union member, in source order and at its written node
     for (
       const { member: memberType, node: memberNode }
         of unionMembersInSourceOrder(
           unionType,
-          unionNode,
+          context.typeNode,
           context.typeChecker,
         )
     ) {

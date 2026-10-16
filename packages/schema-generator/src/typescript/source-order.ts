@@ -73,13 +73,18 @@ export function inSourceOrder<T>(
  *
  * A mapped type's properties follow the union of keys it maps over, so they
  * are put in the order `node` writes their keys in, where it writes a key
- * union for them (`writtenMappedKeys()`), and otherwise in the order of their
- * declarations, a property with neither after those with one, by name. Any
- * other type lists its own members as they are declared and then each base
- * type's properties, in the order its heritage clauses name them, and a base
- * can be a mapped type, as an interface extending an `Omit<…>` has: so each
- * run of consecutive properties declared in one place is put in the order of
- * their declarations there.
+ * union for them (`writtenMappedKeys()`); else in the source order of the
+ * type it maps, as `Omit<T, K>` maps `T` (`mappedSourceOrder()`); else in the
+ * order of their declarations, a property with neither after those with one,
+ * by name.
+ *
+ * An interface or a class without type parameters lists its own members as
+ * the checker lists them, and then each base type's properties, base by base
+ * in the order its heritage clauses name them, each base's in its own source
+ * order: a base can be a mapped type, as an `Omit<…>` is, whose checker
+ * order is its key union's (`inheritedSourceOrder()`). Any other type keeps
+ * the checker's order between declarations and orders each run of
+ * consecutive properties declared in one place by their declarations.
  */
 export function propertiesInSourceOrder(
   type: ts.Type,
@@ -90,13 +95,16 @@ export function propertiesInSourceOrder(
   const mapped = (type.flags & ts.TypeFlags.Object) !== 0 &&
     ((type as ts.ObjectType).objectFlags & ts.ObjectFlags.Mapped) !== 0;
   if (mapped) {
-    const keys = writtenMappedKeys(node, checker);
+    const keys = writtenMappedKeys(node, checker) ??
+      mappedSourceOrder(type, properties, checker);
     const rankOf = (property: ts.Symbol) =>
       keys?.get(property.getName()) ?? Number.POSITIVE_INFINITY;
     return [...properties].sort((left, right) =>
       rankOf(left) - rankOf(right) || compareByDeclaration(left, right)
     );
   }
+  const inherited = inheritedSourceOrder(type, properties, checker);
+  if (inherited !== undefined) return inherited;
   const ordered: ts.Symbol[] = [];
   let run: ts.Symbol[] = [];
   let runParent: ts.Node | undefined;
@@ -114,6 +122,95 @@ export function propertiesInSourceOrder(
   }
   flush();
   return ordered;
+}
+
+/**
+ * The properties of `type`, an interface or a class without type
+ * parameters, in source order: its own members as the checker lists them,
+ * then each base type's properties in turn, in the base's own source order,
+ * a property already placed not placed again. Returns `undefined` for any
+ * other type. Base types are read only once the checker has resolved them,
+ * as it has for a type whose properties it listed, so nothing is created.
+ */
+function inheritedSourceOrder(
+  type: ts.Type,
+  properties: readonly ts.Symbol[],
+  checker: ts.TypeChecker,
+): readonly ts.Symbol[] | undefined {
+  if (
+    !type.isClassOrInterface() ||
+    (type as ts.InterfaceType).typeParameters?.length
+  ) {
+    return undefined;
+  }
+  const bases = checker.getBaseTypes(type);
+  if (bases.length === 0) return undefined;
+  const byName = new Map(properties.map((property) => [
+    property.getName(),
+    property,
+  ]));
+  const ordered: ts.Symbol[] = [];
+  const place = (name: string) => {
+    const property = byName.get(name);
+    if (property === undefined) return;
+    byName.delete(name);
+    ordered.push(property);
+  };
+  const own = new Set<ts.Node>(type.getSymbol()?.declarations ?? []);
+  for (const property of properties) {
+    const owner = property.declarations?.[0]?.parent;
+    if (owner !== undefined && own.has(owner)) place(property.getName());
+  }
+  for (const base of bases) {
+    const baseProperties = checker.getPropertiesOfType(base);
+    for (
+      const property of propertiesInSourceOrder(
+        base,
+        baseProperties,
+        undefined,
+        checker,
+      )
+    ) {
+      place(property.getName());
+    }
+  }
+  for (const property of properties) place(property.getName());
+  return ordered;
+}
+
+/**
+ * The places, by property name, of the properties of the type a mapped type
+ * maps, as `Omit<T, K>` and `Pick<T, K>` map `T`, in that type's source
+ * order (`propertiesInSourceOrder()`): the first type argument of the alias
+ * `type` is read through, where every property of `type` is one of its.
+ * Returns `undefined` otherwise.
+ */
+function mappedSourceOrder(
+  type: ts.Type,
+  properties: readonly ts.Symbol[],
+  checker: ts.TypeChecker,
+): Map<string, number> | undefined {
+  const source = type.aliasTypeArguments?.[0];
+  if (source === undefined || (source.flags & ts.TypeFlags.Object) === 0) {
+    return undefined;
+  }
+  const sourceProperties = checker.getPropertiesOfType(source);
+  const names = new Set(sourceProperties.map((property) => property.getName()));
+  if (!properties.every((property) => names.has(property.getName()))) {
+    return undefined;
+  }
+  const places = new Map<string, number>();
+  for (
+    const property of propertiesInSourceOrder(
+      source,
+      sourceProperties,
+      undefined,
+      checker,
+    )
+  ) {
+    places.set(property.getName(), places.size);
+  }
+  return places;
 }
 
 /**
@@ -197,9 +294,9 @@ function aliasKeyArgument(
 /**
  * An order on types that reads only what the source states about them, never
  * the order the checker created them in: intrinsic types by name, then
- * literals by kind and value, then declared types — a TS enum's members as
- * they are declared in it, any other declared type by name and then by
- * declaration — and then every other type. Two instantiations of one
+ * literals by kind and value, then declared types (`compareDeclaredTypes()`:
+ * by name and declaration, a TS enum's members together, as the enum
+ * declares them) — and then every other type. Two instantiations of one
  * declaration, and two types neither declared nor literal, compare equal.
  *
  * It reads a type's flags, value, and symbol, and nothing the checker would
@@ -260,23 +357,52 @@ function tierOf(type: ts.Type): Tier {
 }
 
 /**
- * Compares two types the source declares: by the name of their symbol, then
- * by where that symbol is first declared. Two members of TS enums are
- * compared by where they are declared alone, so one enum's members keep their
- * declared order.
+ * Compares two types the source declares, by one key for every pair, so the
+ * order is transitive: the group a type belongs to, by the group's name and
+ * then where it is declared, and then where in its group the type is
+ * declared. A TS enum's member belongs to its enum, so one enum's members
+ * stay together in the order the enum declares them; any other declared
+ * type is a group of its own, its symbol's.
  */
 function compareDeclaredTypes(left: ts.Type, right: ts.Type): number {
-  const leftSymbol = left.getSymbol()!;
-  const rightSymbol = right.getSymbol()!;
-  const leftAt = declarationPlace(leftSymbol.declarations?.[0]);
-  const rightAt = declarationPlace(rightSymbol.declarations?.[0]);
-  const byPlace = compareStrings(leftAt?.file ?? "", rightAt?.file ?? "") ||
-    (leftAt?.pos ?? 0) - (rightAt?.pos ?? 0);
-  const enumMembers = (left.flags & right.flags & ts.TypeFlags.EnumLiteral) !==
-    0;
-  return enumMembers
-    ? byPlace
-    : compareStrings(leftSymbol.getName(), rightSymbol.getName()) || byPlace;
+  const leftKey = declaredKey(left);
+  const rightKey = declaredKey(right);
+  return compareStrings(leftKey.name, rightKey.name) ||
+    compareStrings(leftKey.file, rightKey.file) ||
+    leftKey.pos - rightKey.pos ||
+    leftKey.memberPos - rightKey.memberPos;
+}
+
+/**
+ * The key `compareDeclaredTypes()` orders a declared type by: its group's
+ * name, file and position, and the type's position in the group (`0` for a
+ * type that is its own group).
+ */
+function declaredKey(
+  type: ts.Type,
+): { name: string; file: string; pos: number; memberPos: number } {
+  const symbol = type.getSymbol()!;
+  const declaration = symbol.declarations?.[0];
+  if (
+    (type.flags & ts.TypeFlags.EnumLiteral) !== 0 &&
+    declaration !== undefined && ts.isEnumMember(declaration)
+  ) {
+    const owner = declaration.parent;
+    const at = declarationPlace(owner);
+    return {
+      name: owner.name.text,
+      file: at?.file ?? "",
+      pos: at?.pos ?? 0,
+      memberPos: declaration.pos,
+    };
+  }
+  const at = declarationPlace(declaration);
+  return {
+    name: symbol.getName(),
+    file: at?.file ?? "",
+    pos: at?.pos ?? 0,
+    memberPos: 0,
+  };
 }
 
 /**
