@@ -3544,6 +3544,14 @@ export type WishParams = {
    * Use this for programmatic discovery where no user interaction is needed.
    */
   headless?: boolean;
+
+  /**
+   * Whether an automatically selected result includes its piece's preview in
+   * `[UI]`. Defaults to true. False skips inspecting that piece's `[UI]` slot;
+   * combine with `headless: true` for discovery that only needs references.
+   * Picker and error surfaces otherwise retain their usual behavior.
+   */
+  preview?: boolean;
 };
 
 export type WishState<T> = {

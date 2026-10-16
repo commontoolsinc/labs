@@ -1653,10 +1653,10 @@ function isSharedHashtagSearchTarget(parsed: ParsedWishTarget): boolean {
 
 function canUseSharedHashtagResult(
   parsed: ParsedWishTarget,
-  options: { headless?: boolean },
+  options: { headless?: boolean; preview?: boolean },
 ): boolean {
   return isSharedHashtagSearchTarget(parsed) &&
-    options.headless === true;
+    options.headless === true && options.preview !== false;
 }
 
 function sharedHashtagResolverKey(
@@ -2081,7 +2081,9 @@ function wishResultUI(
   tx: IExtendedStorageTransaction,
   parsed: ParsedWishTarget,
   resultCell: Cell<unknown>,
-): VNode | Cell<unknown> {
+  preview = true,
+): VNode | Cell<unknown> | undefined {
+  if (!preview) return undefined;
   if (isProfilePersonaTarget(parsed)) {
     return cellLinkUI(resultCell);
   }
@@ -2249,6 +2251,7 @@ const TARGET_SCHEMA = internSchema(
       context: { type: "object", additionalProperties: { asCell: ["cell"] } },
       scope: { type: "array", items: { type: "string" } },
       headless: { type: "boolean" },
+      preview: { type: "boolean" },
     },
     required: ["query"],
   },
@@ -3220,7 +3223,7 @@ export function wish(
       );
 
       if (typeof targetValue === "object") {
-        const { query, path, schema, context, scope, headless } =
+        const { query, path, schema, context, scope, headless, preview } =
           targetValue as WishParams;
         const queryKey = sanitizeQueryKey(String(query ?? ""));
         actionQueryKey = queryKey;
@@ -3299,7 +3302,7 @@ export function wish(
             if (
               !targetMayUseHomeSpace &&
               wishOutputScope(schema, inputScope, false) === "space" &&
-              canUseSharedHashtagResult(activeParsed, { headless })
+              canUseSharedHashtagResult(activeParsed, { headless, preview })
             ) {
               const shared = getCurrentSharedHashtagResolver(ctx, activeParsed);
               usedSharedHashtagResolver = true;
@@ -3430,7 +3433,13 @@ export function wish(
                 "result-ui-get",
                 queryKey,
                 () =>
-                  wishResultUI(runtime, tx, activeParsed, uniqueResultCells[0]),
+                  wishResultUI(
+                    runtime,
+                    tx,
+                    activeParsed,
+                    uniqueResultCells[0],
+                    preview,
+                  ),
               );
               measureWishPhase(
                 "send-fast",
@@ -3486,6 +3495,7 @@ export function wish(
                       tx,
                       activeParsed,
                       uniqueResultCells[0],
+                      preview,
                     ),
                 );
                 measureWishPhase(

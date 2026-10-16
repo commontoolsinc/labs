@@ -393,6 +393,35 @@ describe("wish-result-view-labels", () => {
   };
 
   describe("labels", () => {
+    it("keeps preview labels off discovery that requests only references", async () => {
+      const piece = await written(profileSpace, "reference-piece", {
+        title: "Reference",
+        [UI]: emptyView,
+      });
+      await labelPath(piece.getAsNormalizedFullLink(), [UI], [sealedClause]);
+      await pin(piece, "#reference");
+      const result = await runPiece(
+        builder.pattern(() => ({
+          found: builder.wish({
+            query: "#reference",
+            scope: ["profile"],
+            headless: true,
+            preview: false,
+          }, pieceSchema),
+        })),
+        {},
+        "reference-finder",
+      );
+
+      expect(titleThrough(result).value).toBe("Reference");
+      expect(holdsSealedClause(stateShape(result))).toBe(false);
+      expect(result.key("found").key(UI).get()).toBeUndefined();
+      expect(holdsSealedClause(consumedReading(piece.key(UI)))).toBe(true);
+      expect(holdsSealedClause(
+        consumedReading(result.key("found").key("result").key(UI)),
+      )).toBe(true);
+    });
+
     it("leaves the sealed clause off the wish state when the found piece's view holds the sealed cell", async () => {
       const piece = await pieceShowingSealedCell();
       await pin(piece, "#sheet");
@@ -658,6 +687,49 @@ describe("wish-result-view-labels", () => {
   });
 
   describe("the shared state of a headless hashtag wish", () => {
+    for (const previewFirst of [true, false]) {
+      it(`keeps preview-free discovery independent when the preview resolver starts ${previewFirst ? "first" : "last"}`, async () => {
+        const piece = await written(patternSpace, "preview-choice", {
+          [NAME]: "previewchoice",
+          title: "Preview choice",
+          [UI]: emptyView,
+        });
+        await labelPath(piece.getAsNormalizedFullLink(), [UI], [{
+          anyOf: [sealedClause, cfcAtom.space(patternSpace)],
+        }]);
+        await mention(piece);
+        const reference = () =>
+          runPiece(
+            builder.pattern(() => ({
+              found: builder.wish({
+                query: "#previewchoice",
+                scope: ["."],
+                headless: true,
+                preview: false,
+              }, pieceSchema),
+            })),
+            {},
+            "reference-choice-finder",
+          );
+        const preview = () =>
+          runSharedWish("#previewchoice", "preview-choice-finder");
+        let referenceResult: Cell<unknown>;
+        let previewResult: Cell<unknown>;
+        if (previewFirst) {
+          previewResult = await preview();
+          referenceResult = await reference();
+        } else {
+          referenceResult = await reference();
+          previewResult = await preview();
+        }
+
+        expect(titleThrough(referenceResult).value).toBe("Preview choice");
+        expect(referenceResult.key("found").key(UI).get()).toBeUndefined();
+        expect(holdsSealedClause(stateShape(referenceResult))).toBe(false);
+        expect(holdsSealedClause(stateShape(previewResult))).toBe(true);
+      });
+    }
+
     it("holds a label covering the found piece's `[UI]` slot on the shared state", async () => {
       // The resolver the space shares for the query writes the state, so its
       // own transaction is the one that reads the slot.

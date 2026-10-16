@@ -40,6 +40,18 @@ const text = wishResult.result.content;
 return { [UI]: <div>{wishResult.result}</div> };
 ```
 
+### Discovery without a preview
+
+Use `headless: true, preview: false` when discovery only needs references.
+The wish skips inspecting the found piece's `[UI]` slot and leaves its own
+`[UI]` unset for an automatically selected result. This avoids consuming labels
+that cover the preview when the caller only needs a handle. Reading through
+the result still consumes the labels on whatever the caller reads.
+
+`preview` defaults to `true`. It controls the found piece's preview;
+`headless` controls picker, suggestion, and profile-creation surfaces. Error
+surfaces retain their usual behavior.
+
 ### Results wait for loading documents
 
 Wish waits for the backing documents of its discovery collections and candidates
