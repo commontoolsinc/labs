@@ -10973,7 +10973,12 @@ const attemptedWritePathsUnder = (
  * What credits the value (mirrors what this commit persists at the path):
  * - the schema-derived label — `addIntegrity` mints plus `exactCopyOf` and
  *   `projection` carries, evidence-gated by the write's authoring identity
- *   (a pattern cannot forge runtime-minted evidence to pass its own floor);
+ *   (a pattern cannot forge runtime-minted evidence to pass its own floor).
+ *   A mint credits only where the store keeps it, and the store keeps no
+ *   stamp at a position holding a reference: a link written at the path, or
+ *   above it, is credited by the declared label and the source's evidence
+ *   alone, while a link beneath a container the write stamps is covered by
+ *   that stamp;
  * - each link written at/under the path — the linked source's own label, the
  *   D2 by-reference contract on the write side. Every link must individually
  *   satisfy the floor (one endorsed sibling never launders another);
@@ -11145,15 +11150,35 @@ const verifyWriteFloor = function* (
       ),
     ) ?? [];
 
+    // A stamp credits a contribution only where the store keeps it, which is
+    // never at a position holding a reference (`reconcileMintedEntries`). A
+    // link at the floor path, or above it, leaves no value there to stamp,
+    // so its contribution is judged against the declared label alone; a link
+    // strictly beneath a container the write stamps is covered by that
+    // persisted stamp, as the minted list of a roster covers the references
+    // its roles hold.
+    const declaredBase =
+      gateRuntimeMintedIntegrity(declared, ctx.identityForPath(entry.path))
+        .integrity ?? [];
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    const contributions: (readonly CfcAtom[])[] = [];
+    const contributions: {
+      atoms: readonly CfcAtom[];
+      credit: readonly CfcAtom[];
+    }[] = [];
     for (const input of linksHere) {
       const derived = yield* ctx.linkLabels.evidence(input);
       // An underivable link (`reasons` set, `label` undefined) contributes empty
       // integrity — it fails the floor, fail-closed.
-      contributions.push(derived.label?.integrity ?? []);
+      const atSlot = arraysEqual(
+        canonicalizeLogicalPath(input.target.path),
+        entry.path,
+      );
+      contributions.push({
+        atoms: derived.label?.integrity ?? [],
+        credit: atSlot ? declaredBase : base,
+      });
     }
     for (const input of ancestorLinks) {
       // Re-point the derivation at the floor path INSIDE the linked source:
@@ -11175,11 +11200,12 @@ const verifyWriteFloor = function* (
         path: [...canonicalizeLogicalPath(input.source.path), ...relative],
       });
       if (resolved === "absent") continue;
-      contributions.push(
-        (yield* (resolved?.stored === true
+      contributions.push({
+        atoms: (yield* (resolved?.stored === true
           ? ctx.linkLabels.labelAt({ ...input, source: resolved.held }, [])
           : ctx.linkLabels.labelAt(input, relative)))?.integrity ?? [],
-      );
+        credit: declaredBase,
+      });
     }
     const written = writeValueForTarget(tx, { ...target, path: entry.path });
     // A value contribution exists when plain data lands at/under the floor
@@ -11216,10 +11242,12 @@ const verifyWriteFloor = function* (
       (written !== undefined && !isPureLinkStructure(written)) ||
       descendantValueWrite ||
       contributions.length === 0;
-    if (valueWritten) contributions.push(ctx.flowIntegrity);
+    if (valueWritten) {
+      contributions.push({ atoms: ctx.flowIntegrity, credit: base });
+    }
 
-    const misses = contributions.some((extra) =>
-      !cfcIntegritySatisfiesFloor([...base, ...extra], floor, trust)
+    const misses = contributions.some(({ atoms, credit }) =>
+      !cfcIntegritySatisfiesFloor([...credit, ...atoms], floor, trust)
     );
     if (misses) {
       failures.push(

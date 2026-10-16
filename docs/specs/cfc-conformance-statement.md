@@ -198,7 +198,10 @@ transaction stamps as a whole. Nothing of the source's labels is copied to the s
 and the write takes no dependency on the source's envelope. A write floor on
 the slot, including a floor declared under a wildcard on every element of a
 list, resolves the source's current evidence through `linkedSourceEvidence`,
-as §8.2.6 requires, and persists none of it; in that evidence the source's
+as §8.2.6 requires, and persists none of it. A stamp the writer's schema mints
+at the slot's path credits no reference written there, since the store keeps
+no stamp at a position holding a reference; a stamp at a container the write
+persists covers the references beneath it. In that evidence the source's
 stored integrity stands as stored, and only the link schema's integrity and
 a schema the transaction writes the source under are gated against
 runtime-minted atoms. A handle's carried view is still
