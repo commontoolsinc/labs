@@ -43,35 +43,53 @@ noise until repeated.
 
 ## Where a send's 1.2 s goes
 
-A worker CPU profile of one send at thirty messages (sampling every 0.5 ms,
-`CdpWorkerProfiler`), with the worker's logger rows differenced against the
-load that preceded it:
+The bench's send interval is `clickTrustedAction` plus `waitForSettledText`:
+a view settle before the click, the click, a view settle after it, and a
+settle before the row's text is checked. A harness that clicks without the
+trailing settle and waits for the row's text alone splits it (same room, same
+toolshed, three sends, the third after five seconds of quiet):
 
-- The worker is sampled for 1.8 s, of which 42% is idle. Nine
-  `storage.v2/watchRefresh/watchAddSync` calls run during the send, 1.75 s of
-  elapsed time in all, but nothing on the send path awaits them: a storage
-  `pull()` is awaited only by `cell.sync()` callers, which are piece start and
-  resume and a handler's input presync, and the measurement's own wait is the
-  page's `viewSettled()`, which waits for the worker's plain `idle()` and the
-  view's updates, never for a commit's confirmation. Those refreshes are
-  background loads whose round trips overlap the send. The idle share is the
-  worker waiting on the main thread, which the IPC rows show: four
-  `runner.loop/workerLag` spans of 1.5 s together, five `runtime:idle`
-  handles of 1.1 s, and main-to-worker deliveries queued behind the worker's
-  own work.
-- The scheduler runs 68 actions in 0.52 s, commits in 0.18 s. No pattern frame
-  reaches 1 ms of self time; the CPU is the runtime's: CFC label work
-  (`canonicalizeCfcLogicalPath`, `mergeCfcLabelViews`, `mergeLabel`,
-  `cfcLabelViewInDocument`, about 110 ms together), the value codec and
-  freezing (`update`, `utf8SortedKeysOf`, `addToDeepFrozenCache`,
-  `#feedPlainObject`, `freeze`, `cloneHelper`), and `sortEntries`.
-- IPC round trips the send adds: 5 `cell:subscribe`, 8 `cell:resolveAsCell`,
-  13 `cell:getCfcLabel`.
+| | right after load | right after a send | after 5 s quiet |
+| --- | --- | --- | --- |
+| click → row's text in the DOM | 0.98–1.2 s | 0.96–1.2 s | 0.85–0.92 s |
+| row → view settled | 0.3–0.4 s | 0.17–0.2 s | 0.17–0.22 s |
+| main-thread tasks over 50 ms, click → row | 0 | 0 | 0 |
 
-So the pattern's share of a send is gone; what remains is the runtime's cost
-per run, the main thread's render of the new row and the IPC around it, and
-the `joined` follow-up event's own run, which is where a further cut would
-come from.
+A person sees the row at about 0.9 s; the bench's remaining 0.3 s is the
+view settle, which waits for the worker's `idle()` — the `joined` follow-up
+event's run, which the wake shaper may hold — and for the view's updates.
+
+Inside the 0.9 s, the worker's scheduler telemetry (`scheduler.run.complete`,
+which itself slows the run it measures) lists 68 runs, about 0.4 s of them:
+
+- 22 render sinks, about a third of the run time: the view nodes that
+  re-render for the new row.
+- The two `map`s that render rows, about a third: the main list is
+  `{messages.map(...)}` over the room's *stored* list, every message the room
+  holds with the rows outside the main conversation hidden, and the thread
+  pane maps its own, so each send re-maps all 31 links (161 link hops).
+- The room's derivations over the whole list, about a third: `messageEntries`
+  (260 reads, resolving every element's link and reading its record),
+  `viewPlaces`, `participantsOf` over the entries and the listed profiles
+  (283 reads), the main-conversation filter and `latest`, and `messageRights`
+  — each 170–280 reads and 35–65 ms, each a full walk of the list for one
+  appended element.
+- The new row's own computeds: 17 runs, 15 ms in all.
+
+The other half of the 0.9 s is not on either thread's CPU: the renderer on
+the main thread reads the new row's cells from the worker over IPC
+(`cell:subscribe`, `cell:resolveAsCell`, `cell:getCfcLabel`: 26 round trips
+per send), each queued behind the worker's own passes, and the main thread
+runs no task longer than 50 ms. The pattern-test rig agrees on the worker's
+side: a send into an unrendered room is 29 ms of scheduler work, and the
+same send with a rendered tree 250 ms; nine storage watch refreshes run
+during a send and nothing on its path awaits them.
+
+So the pattern's share of a send is the shape of its derivations: every
+room-level derivation and both row maps walk the whole list for one pushed
+element. Making them incremental, or at least not resolving every element's
+link again, is where the next cut comes from; the IPC round trips for a new
+row's cells are the other half, and the runtime's.
 
 ## Where a cold load's 27 s goes
 
