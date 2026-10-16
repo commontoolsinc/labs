@@ -23,6 +23,7 @@ import {
   type Cell,
   cellAt,
   cellKey,
+  type CellMove,
   type CellShape,
   cellShape,
   defaultColor,
@@ -43,6 +44,7 @@ import {
   MAX_TEMPO_BPM,
   midiToFrequency,
   MIN_TEMPO_BPM,
+  neighborCell,
   normalizeTempo,
   NOTE_COLORS,
   noteAuthorName,
@@ -98,7 +100,19 @@ const RING_EXTENT = 0.97;
 
 const TAU = 2 * Math.PI;
 
-const HINT = "Click a cell to place a note, and click it again to remove it.";
+const HINT =
+  "Click a cell, or pick one with the arrow keys and press Enter, to place or remove a note.";
+
+/** Arrow keys, and where each moves the selected cell. */
+const CELL_KEYS = new Map<string, CellMove>([
+  ["ArrowRight", "clockwise"],
+  ["ArrowLeft", "anticlockwise"],
+  ["ArrowUp", "outward"],
+  ["ArrowDown", "inward"],
+]);
+
+/** Cell the keyboard selects first: the innermost lane at the top. */
+const FIRST_CELL: Cell = { ringIndex: 0, step: 0, lane: 0 };
 
 /** The audio graph every voice plays into. */
 interface AudioEngine {
@@ -192,13 +206,15 @@ const canvas = document.createElement("canvas");
 canvas.className = "rings";
 canvas.dataset.testid = "ring-canvas";
 canvas.dataset.ready = "false";
+canvas.tabIndex = 0;
 canvas.setAttribute(
   "aria-label",
-  "Rings of note cells. Click a cell to place or remove a note.",
+  "Rings of note cells. Move between cells with the arrow keys: left and right go around a ring, up and down go outward and inward. Enter or Space places or removes a note.",
 );
 const readout = document.createElement("p");
 readout.className = "readout";
 readout.dataset.testid = "cell-readout";
+readout.setAttribute("aria-live", "polite");
 readout.textContent = HINT;
 stage.append(canvas, readout);
 
@@ -1313,7 +1329,7 @@ function renderAuthors(): void {
 }
 
 /**
- * Describes the hovered cell beneath the canvas, or shows the hint. The step
+ * Describes the selected cell beneath the canvas, or shows the hint. The step
  * and the lane are the numbers a caller of the pattern's verbs names the cell
  * by, and a placed note names whoever placed it.
  */
@@ -1332,7 +1348,10 @@ function renderReadout(): void {
   }${placed ? ` · placed by ${authorNameOf(placed.note)}` : ""}`;
 }
 
-/** Records the cell under the pointer, and redraws where it changed. */
+/**
+ * Records the selected cell, under the pointer or picked with the arrow keys,
+ * and redraws where it changed.
+ */
 function setHover(cell: Cell | undefined): void {
   if (
     cell?.ringIndex === hoverCell?.ringIndex &&
@@ -1747,13 +1766,34 @@ canvas.addEventListener("pointermove", (event) => {
   publishPointer(event);
 }, { signal });
 canvas.addEventListener("pointerleave", () => {
-  setHover(undefined);
+  // The cell under the pointer stays selected while the canvas has focus, so
+  // the keyboard picks up where the pointer left off.
+  if (document.activeElement !== canvas) setHover(undefined);
   if (leaveRoom) publish(room.clearFacet(POINTER_FACET));
 }, { signal });
 canvas.addEventListener("pointerdown", rejoinIfLost, { signal });
 canvas.addEventListener("click", (event) => {
   const cell = cellUnder(event);
   if (cell) toggleCell(cell);
+}, { signal });
+canvas.addEventListener("focus", () => {
+  if (layout && !hoverCell) setHover(FIRST_CELL);
+}, { signal });
+canvas.addEventListener("blur", () => setHover(undefined), { signal });
+canvas.addEventListener("keydown", (event) => {
+  if (!layout || event.metaKey || event.ctrlKey || event.altKey) return;
+  const move = CELL_KEYS.get(event.key);
+  if (move) {
+    event.preventDefault();
+    setHover(neighborCell(layout, hoverCell ?? FIRST_CELL, move));
+    return;
+  }
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  if (event.repeat) return;
+  const cell = hoverCell ?? FIRST_CELL;
+  setHover(cell);
+  toggleCell(cell);
 }, { signal });
 
 playButton.addEventListener("click", () => {

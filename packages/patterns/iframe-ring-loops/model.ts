@@ -127,6 +127,9 @@ export interface Cell {
   readonly lane: number;
 }
 
+/** A direction the keyboard moves the selection from one cell to the next. */
+export type CellMove = "clockwise" | "anticlockwise" | "outward" | "inward";
+
 /** The annular sector a cell occupies, in radii and fractions of a turn. */
 export interface CellShape extends RingBand {
   /** Where the cell begins, clockwise from the top; a note sounds here. */
@@ -355,6 +358,34 @@ export function ringBands(count: number): RingBand[] {
     const inner = HUB_RADIUS + index * (width + RING_GAP);
     return { inner, outer: inner + width };
   });
+}
+
+/**
+ * Returns the cell next to `cell` in direction `move`. Along a ring the step
+ * wraps around. Outward and inward, a move past the edge of the band lands in
+ * the neighboring ring, on the step at the nearest angle; there is nothing past
+ * the innermost and the outermost lane, so a move there returns `cell`.
+ */
+export function neighborCell(
+  layout: RingLayout,
+  cell: Cell,
+  move: CellMove,
+): Cell {
+  const { steps } = layout.rings[cell.ringIndex];
+  switch (move) {
+    case "clockwise":
+      return { ...cell, step: (cell.step + 1) % steps };
+    case "anticlockwise":
+      return { ...cell, step: (cell.step + steps - 1) % steps };
+    case "outward":
+      return cell.lane + 1 < layout.lanes
+        ? { ...cell, lane: cell.lane + 1 }
+        : crossedCell(layout, cell, cell.ringIndex + 1, 0);
+    case "inward":
+      return cell.lane > 0
+        ? { ...cell, lane: cell.lane - 1 }
+        : crossedCell(layout, cell, cell.ringIndex - 1, layout.lanes - 1);
+  }
 }
 
 /**
@@ -752,6 +783,23 @@ function isIndexBelow(value: number, length: number): boolean {
 /** Returns whether `value` is a record whose fields can be read by name. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Helper for `neighborCell()`, which returns the cell of `lane` in ring
+ * `ringIndex` at the angle of the middle of `cell`, or `cell` where the layout
+ * has no such ring.
+ */
+function crossedCell(
+  layout: RingLayout,
+  cell: Cell,
+  ringIndex: number,
+  lane: number,
+): Cell {
+  const target = layout.rings[ringIndex];
+  if (!target) return cell;
+  const turn = (cell.step + 0.5) / layout.rings[cell.ringIndex].steps;
+  return { ringIndex, step: Math.floor(turn * target.steps), lane };
 }
 
 /**

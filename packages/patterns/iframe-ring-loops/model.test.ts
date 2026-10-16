@@ -36,6 +36,7 @@ import {
   maxJitterSteps,
   midiToFrequency,
   MIN_TEMPO_BPM,
+  neighborCell,
   normalizeTempo,
   NOTE_COLORS,
   noteAuthorName,
@@ -161,6 +162,63 @@ describe("model", () => {
         }
       }
       expect(bands[3].outer).toBeCloseTo(1, 12);
+    });
+  });
+
+  describe("neighborCell()", () => {
+    it("returns the next step clockwise, wrapping past the last", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 0, step: 15, lane: 2 }, "clockwise"),
+      ).toEqual({ ringIndex: 0, step: 0, lane: 2 });
+    });
+
+    it("returns the step before anticlockwise, wrapping past the first", () => {
+      expect(
+        neighborCell(
+          layout,
+          { ringIndex: 1, step: 0, lane: 1 },
+          "anticlockwise",
+        ),
+      ).toEqual({ ringIndex: 1, step: 19, lane: 1 });
+    });
+
+    it("returns the next lane outward within the band", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 2, step: 5, lane: 1 }, "outward"),
+      ).toEqual({ ringIndex: 2, step: 5, lane: 2 });
+    });
+
+    it("returns the lane before inward within the band", () => {
+      expect(
+        neighborCell(layout, { ringIndex: 2, step: 5, lane: 1 }, "inward"),
+      ).toEqual({ ringIndex: 2, step: 5, lane: 0 });
+    });
+
+    it("returns the first lane of the next ring, at the nearest angle, past the band's outer edge", () => {
+      // Step 8 of 16 is centered at 0.53 of a turn, which falls in step 10 of
+      // the next ring's 20.
+
+      expect(
+        neighborCell(layout, { ringIndex: 0, step: 8, lane: 4 }, "outward"),
+      ).toEqual({ ringIndex: 1, step: 10, lane: 0 });
+    });
+
+    it("returns the last lane of the ring inside, at the nearest angle, past the band's inner edge", () => {
+      // Step 10 of 20 is centered at 0.525 of a turn, which falls in step 8
+      // of the inner ring's 16.
+
+      expect(
+        neighborCell(layout, { ringIndex: 1, step: 10, lane: 0 }, "inward"),
+      ).toEqual({ ringIndex: 0, step: 8, lane: 4 });
+    });
+
+    it("returns the cell itself past the outermost and the innermost lane", () => {
+      const outermost = { ringIndex: 3, step: 5, lane: 4 };
+      const innermost = { ringIndex: 0, step: 3, lane: 0 };
+      expect([
+        neighborCell(layout, outermost, "outward"),
+        neighborCell(layout, innermost, "inward"),
+      ]).toEqual([outermost, innermost]);
     });
   });
 
