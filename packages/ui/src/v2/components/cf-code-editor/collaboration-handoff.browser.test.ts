@@ -19,10 +19,14 @@ import { CFCodeEditor } from "./index.ts";
 
 Deno.test("a failed collaboration startup keeps displaying Cell updates read-only", async () => {
   const cell = createMockCellHandle("initial", { schema: { type: "string" } });
+  const querying = Promise.withResolvers<void>();
   const queried = Promise.withResolvers<OperationFieldSnapshot>();
   const runtime = {
     operationCodecs: () => Promise.resolve([CODEMIRROR_CHANGESET_CODEC]),
-    queryOperationField: () => queried.promise,
+    queryOperationField: () => {
+      querying.resolve();
+      return queried.promise;
+    },
     closeOperationSession: () => Promise.resolve(),
   };
   Object.defineProperties(cell, {
@@ -42,6 +46,7 @@ Deno.test("a failed collaboration startup keeps displaying Cell updates read-onl
     if (view === undefined) throw new Error("The editor view is missing.");
     editor.collaborative = true;
     await editor.updateComplete;
+    await querying.promise;
     pushUpdate(cell, "while connecting");
     queried.reject(new Error("The initial collaboration query failed."));
     expect((await failed.promise).message).toBe(
