@@ -1778,11 +1778,19 @@ canvas.addEventListener("pointerleave", () => {
 }, { signal });
 canvas.addEventListener("pointerdown", rejoinIfLost, { signal });
 canvas.addEventListener("click", (event) => {
+  // A tap brings no pointer movement ahead of it, so the cell it toggles is
+  // selected here, for the readout and for the arrow keys to move on from.
   const cell = cellUnder(event);
-  if (cell) toggleCell(cell);
+  if (!cell) return;
+  setHover(cell);
+  toggleCell(cell);
 }, { signal });
 canvas.addEventListener("focus", () => {
-  if (layout && !hoverCell) setHover(FIRST_CELL);
+  // Only keyboard focus selects a cell; focus from a click or a tap leaves the
+  // selection to the cell under the pointer.
+  if (layout && !hoverCell && canvas.matches(":focus-visible")) {
+    setHover(FIRST_CELL);
+  }
 }, { signal });
 canvas.addEventListener("blur", () => setHover(undefined), { signal });
 canvas.addEventListener("keydown", (event) => {
