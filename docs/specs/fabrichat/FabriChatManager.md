@@ -23,8 +23,8 @@ each, and a row in the built-in targets table of
 ## State
 
 The manager keeps `direct`, `requests`, `outgoingNotices`, and
-`roomMembership` in the home space. `rooms` is derived per session from those
-membership choices and the user's shared-space catalog, Home's, which Home
+`roomMembership` in the home space. `rooms` it derives rather than keeps, from
+those membership choices and the user's shared-space catalog, Home's, which Home
 hands the manager
 ([`shared-space-catalog.md`](../../features/shared-space-catalog.md)).
 
@@ -60,8 +60,8 @@ choice is recorded. A discovered conversation's revision identifies its source
 catalog entry, that entry's revision, and the resolved room identity. Clients pass the revision back
 unchanged to `forget`; they need supply no container. A direct room's
 `counterpart` is the one `direct` holds the resolved room under, or else the
-room's labeled creator. `people` is drawn from listed rooms' rosters per
-session, keyed by the principal each profile attests.
+room's labeled creator. `people` is drawn from listed rooms' rosters, keyed by
+the principal each profile attests.
 
 The manager's rendering labels each listed room with its `about.title`, read
 through the room's link, so a retitle shows there once the room records it. A
@@ -164,8 +164,8 @@ Someone a user adds to a room later is told of it through `offerRoom`, which
 the room's `addMember` sends once it has granted them access. It runs as an
 event of its own, after the add has committed, and offers the room through the
 same steps as step 3: through the profile the add named, or, for an add naming
-only an address, through the profiles `people` lists for that person, as the
-session sending it reads `people`. It records `offered` or `noticed` under the
+only an address, through the profiles `people` lists for that person. It
+records `offered` or `noticed` under the
 request's id, which the room reads back as the add's `delivery`.
 
 ## Prerequisites

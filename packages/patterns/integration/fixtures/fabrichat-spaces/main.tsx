@@ -4,9 +4,20 @@
  * user's profile with `#profile`, which no session of a multi-runtime harness
  * has, and starts no chat without one; this hands its core a stand-in. Its
  * records are its own inputs, defaulted, as the real manager's are.
+ *
+ * The harness's sessions share the space this manager lives in, and a room's
+ * space refuses some of them, so each principal keeps the rooms and the people
+ * it derives, which the core derives per user.
  */
 
-import { type AddIntegrity, pattern, Writable } from "commonfabric";
+import {
+  type AddIntegrity,
+  NAME,
+  pattern,
+  UI,
+  VIEWS,
+  Writable,
+} from "commonfabric";
 import {
   FabriChatManagerCore,
   type FabriChatManagerInput,
@@ -26,12 +37,31 @@ type StandInProfile = AddIntegrity<
 export default pattern<FabriChatManagerInput, FabriChatManagerOutput>(
   ({ sharedSpaceCatalog, direct, requests, outgoingNotices }) => {
     const profile = Writable.of<StandInProfile>({ name: "Starter" });
-    return FabriChatManagerCore({
+    const core = FabriChatManagerCore({
       myProfile: profile,
       sharedSpaceCatalog,
       direct,
       requests,
       outgoingNotices,
     });
+    return {
+      [NAME]: core[NAME],
+      [UI]: core[UI],
+      [VIEWS]: core[VIEWS],
+      rooms: core.rooms,
+      sharedSpaceCatalog: core.sharedSpaceCatalog,
+      roomMembership: core.roomMembership,
+      direct: core.direct,
+      requests: core.requests,
+      outgoingNotices: core.outgoingNotices,
+      people: core.people,
+      openDirect: core.openDirect,
+      createGroup: core.createGroup,
+      offerRoom: core.offerRoom,
+      accept: core.accept,
+      joinRoom: core.joinRoom,
+      forget: core.forget,
+      delivered: core.delivered,
+    };
   },
 );

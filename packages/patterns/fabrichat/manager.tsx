@@ -50,6 +50,7 @@ import {
   NAME,
   pattern,
   type PerSession,
+  type PerUser,
   principalOf,
   spaceAccess,
   spaceOf,
@@ -331,7 +332,7 @@ export interface ManagerActState {
    * offers a room to a member it names by principal alone; absent for every
    * other act.
    */
-  people?: PerSession<Record<string, readonly ManagerProfileCell[]>>;
+  people?: Record<string, readonly ManagerProfileCell[]>;
 
   /** The session's group draft, which a rendered create reads. */
   draft: Writable<GroupDraft>;
@@ -1208,10 +1209,10 @@ const performManagerAct = (
     // A member named by principal alone is offered the room through the
     // profiles `people` lists for them, so a person this user shares no room
     // with is offered nothing.
-    // TODO(danfuzz): A served run can't read the session's instance of
-    // `people`, and finds none listed, so under server execution such a
-    // member gets a notice. Offer through `people` there too, once a served
-    // handler can read a per-session instance of its user's.
+    // TODO(danfuzz): A served run can't read the user's instance of `people`,
+    // and finds none listed, so under server execution such a member gets a
+    // notice. Offer through `people` there too, once a served handler can read
+    // a per-user instance of its user's.
     const profiles = named === undefined
       ? [...(state.people?.[member] ?? [])]
       : [named];
@@ -1579,7 +1580,7 @@ export interface FabriChatManagerOutput {
   [UI]: VNode;
 
   /** Every room this user belongs to and hasn't forgotten, newest first. */
-  rooms: PerSession<ChatIndexEntry[]>;
+  rooms: ChatIndexEntry[];
 
   /**
    * The stored catalog used for standalone membership and container discovery.
@@ -1605,7 +1606,7 @@ export interface FabriChatManagerOutput {
    * each one's profile attests, the profiles attesting it, each once, in the
    * order the rooms, newest first, list them.
    */
-  people: PerSession<Record<string, ManagerProfileCell[]>>;
+  people: Record<string, ManagerProfileCell[]>;
 
   /** Finds or creates the direct room with a person. */
   openDirect: Stream<ManagerStreamEvent>;
@@ -1794,18 +1795,27 @@ export const FabriChatManagerCore = pattern<
         )
         : [];
     });
-    // A room's space is read under the reader's own access, so a principal it
-    // refuses finds nothing there that the others find. Each room is found,
-    // and everything read from it derived, per session: a value stored once
-    // for every reader, which readers derive differently, is one their
-    // runtimes overwrite without end.
-    const found = savedRooms.map((entry) =>
-      FoundRoom.asScope("session")({ space: entry.space, kind: entry.kind })
+    // Each room found, and everything read from it, is stored per user. A
+    // room's space is read under the reader's own access, so a principal it
+    // refuses finds nothing there that the others find, and a value stored
+    // once for every reader, which readers derive differently, is one their
+    // runtimes overwrite without end. A home space admits its user alone, so
+    // there it is one instance, and a session reads what the one before it
+    // stored; a space more than one principal reads keeps each one's own.
+    //
+    // A Home that ran this pattern while it derived these per session holds
+    // them as links to a session's own instances: under the names `found`,
+    // `newestFirst`, `shown`, and `people`, and, for the rooms' rows, under
+    // the place in the rendering of the `map()` that made them. A cell
+    // created there under one of those is written per session still, so none
+    // here is.
+    const foundRooms = savedRooms.map((entry) =>
+      FoundRoom.asScope("user")({ space: entry.space, kind: entry.kind })
     );
     // Each saved room once it resolves and reads as a room, newest first. The
     // room's own records are read here, beside the entry they belong to, so
     // they are read in the run that lists them.
-    const newestFirst = computed((): PerSession<ChatIndexEntry[]> => {
+    const rooms = computed((): PerUser<ChatIndexEntry[]> => {
       const self = principalOf(myProfile, "represents-principal");
       const stored = direct.get() ?? {};
       const catalogValue = sharedSpaceCatalog.get();
@@ -1818,7 +1828,7 @@ export const FabriChatManagerCore = pattern<
       );
       const discovered = savedRooms.flatMap(
         (entry, index): ChatIndexEntry[] => {
-          const room = found[index]?.room;
+          const room = foundRooms[index]?.room;
           if (room === undefined) return [];
           const standalone = catalogEntries[spaceOf(room) ?? ""];
           if (
@@ -1864,14 +1874,14 @@ export const FabriChatManagerCore = pattern<
     });
     // The people the listed rooms' rosters hold, by the principal each
     // profile's own label attests, read beside the rooms that list them, and
-    // per session, as `newestFirst` is: a profile attests no one to a reader
-    // its space refuses. A profile attesting no principal, or a DID no
-    // principal can have, names no one to offer a room to, and this user's
-    // own are left out.
-    const people = computed(
-      (): PerSession<Record<string, ManagerProfileCell[]>> => {
+    // stored where `rooms` is: a profile attests no one to a reader its space
+    // refuses. A profile attesting no principal, or a DID no principal can
+    // have, names no one to offer a room to, and this user's own are left
+    // out.
+    const peopleByPrincipal = computed(
+      (): PerUser<Record<string, ManagerProfileCell[]>> => {
         const self = principalOf(myProfile, "represents-principal");
-        return newestFirst.reduce<Record<string, ManagerProfileCell[]>>(
+        return rooms.reduce<Record<string, ManagerProfileCell[]>>(
           (found, entry) =>
             (entry.room.key("roster").get() ?? []).reduce((known, profile) => {
               const principal = principalOf(profile, "represents-principal");
@@ -1900,10 +1910,10 @@ export const FabriChatManagerCore = pattern<
       draft,
       startRefusal,
     };
-    // Per session, as `newestFirst` is: a room's label is the title its room
-    // holds, which a direct room has only once a member sets one.
-    const shown = computed((): PerSession<ShownEntry[]> =>
-      newestFirst.map((entry) => ({
+    // Stored where `rooms` is: a room's label is the title its room holds,
+    // which a direct room has only once a member sets one.
+    const shownRooms = computed((): PerUser<ShownEntry[]> =>
+      rooms.map((entry) => ({
         room: entry.room,
         ...(entry.revision === undefined ? {} : { revision: entry.revision }),
         label: entry.room.key("about").get()?.title ??
@@ -1912,6 +1922,25 @@ export const FabriChatManagerCore = pattern<
             : "Group chat"),
       }))
     );
+    // Each room's row, made here under a name of its own, as the cells above
+    // are.
+    const roomRows = shownRooms.map((entry) => (
+      <cf-hstack gap="2" align="center">
+        <cf-cell-link $cell={entry.room} label={entry.label} />
+        <cf-button
+          size="sm"
+          variant="ghost"
+          onClick={commitManager({
+            act: "forget",
+            ...records,
+            room: entry.room,
+            revision: entry.revision,
+          })}
+        >
+          Forget
+        </cf-button>
+      </cf-hstack>
+    ));
     // A refusal differs by session, so it is always rendered and hidden by a
     // prop: a tree built differently per session is stored once for every
     // session, and runtimes that built it differently overwrite each other
@@ -1922,19 +1951,21 @@ export const FabriChatManagerCore = pattern<
     );
     // Each person once, by the first profile attesting them, and whether the
     // session's draft has picked them, by any profile of theirs, per session,
-    // as `people` is.
+    // as the draft is.
     const shownPeople = computed((): PerSession<ShownPerson[]> => {
       const picked = draft.get()?.picked ?? [];
-      return Object.values(people).flatMap((profiles): ShownPerson[] => {
-        const profile = profiles[0];
-        if (profile === undefined) return [];
-        return [{
-          profile,
-          label: picked.some((known) => samePerson(known, profile))
-            ? "Added"
-            : "Add",
-        }];
-      });
+      return Object.values(peopleByPrincipal).flatMap(
+        (profiles): ShownPerson[] => {
+          const profile = profiles[0];
+          if (profile === undefined) return [];
+          return [{
+            profile,
+            label: picked.some((known) => samePerson(known, profile))
+              ? "Added"
+              : "Add",
+          }];
+        },
+      );
     });
     const peopleDisplay = computed((): ChatDisplay =>
       shownPeople.length === 0 ? "none" : "block"
@@ -1959,20 +1990,24 @@ export const FabriChatManagerCore = pattern<
     const streams = {
       openDirect: commitStart({ act: "openDirect", ...records }),
       createGroup: commitStart({ act: "createGroup", ...records }),
-      offerRoom: commitManager({ act: "offerRoom", ...records, people }),
+      offerRoom: commitManager({
+        act: "offerRoom",
+        ...records,
+        people: peopleByPrincipal,
+      }),
       accept: commitManager({ act: "accept", ...records }),
       joinRoom: commitManager({ act: "joinRoom", ...records }),
       forget: commitManager({ act: "forget", ...records }),
       delivered: commitManager({ act: "delivered", ...records }),
     };
     const view = {
-      rooms: newestFirst,
+      rooms,
       sharedSpaceCatalog,
       roomMembership,
       direct,
       requests,
       outgoingNotices: noticeList,
-      people,
+      people: peopleByPrincipal,
       ...streams,
     };
 
@@ -1982,23 +2017,7 @@ export const FabriChatManagerCore = pattern<
         <cf-vstack gap="3" style={{ padding: "1rem" }}>
           <cf-heading level={3}>Chats</cf-heading>
           <cf-vstack id="fabrichat-rooms" gap="1">
-            {shown.map((entry) => (
-              <cf-hstack gap="2" align="center">
-                <cf-cell-link $cell={entry.room} label={entry.label} />
-                <cf-button
-                  size="sm"
-                  variant="ghost"
-                  onClick={commitManager({
-                    act: "forget",
-                    ...records,
-                    room: entry.room,
-                    revision: entry.revision,
-                  })}
-                >
-                  Forget
-                </cf-button>
-              </cf-hstack>
-            ))}
+            {roomRows}
           </cf-vstack>
           <div
             id="fabrichat-my-address"
