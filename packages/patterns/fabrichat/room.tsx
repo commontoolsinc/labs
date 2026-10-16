@@ -360,6 +360,12 @@ export type AddRequestsCell = Writable<
  * `addMemberOfferId()`: its `delivery`, or, where the manager refused to tell
  * the member, `access-only`, with the manager's reason as
  * `deliveryRefusal`. An add whose verdict hasn't landed keeps none.
+ *
+ * Every outcome is a copy of the viewer's record, never the record itself,
+ * which would be stored as a link into the viewer's records. CFC derives a
+ * link's label from its source's stored label metadata, and those records,
+ * which no write labels, carry none, so a link into them is refused wherever
+ * the manager's data labels what reads them.
  */
 export const withDeliveries = (
   outcomes: Readonly<Record<string, AddMemberOutcome>>,
@@ -372,7 +378,7 @@ export const withDeliveries = (
         outcome?.status !== "done" || outcome.delivery !== undefined ||
         space === undefined
       ) {
-        return [id, outcome];
+        return [id, outcome === undefined ? outcome : { ...outcome }];
       }
       const verdict = requests?.[addMemberOfferId(space, id)];
       if (verdict?.status === "refused") {
@@ -385,7 +391,10 @@ export const withDeliveries = (
       const delivery = verdict?.status === "done"
         ? verdict.delivery
         : undefined;
-      return [id, delivery === undefined ? outcome : { ...outcome, delivery }];
+      return [id, {
+        ...outcome,
+        ...(delivery === undefined ? {} : { delivery }),
+      }];
     }),
   );
 
