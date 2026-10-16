@@ -196,6 +196,17 @@ currency. The existing overlay and retirement rules below still apply.
      takes main's interim-undefined-then-heal. No shipped pattern
      routes link chains through user-scoped docs (the #6179 review's
      population audit).
+     A serving runtime's commit reads one such row differently (a
+     corollary that narrows the ruling above and awaits the owner's
+     ruling): an absent user- or session-scoped instance of a document
+     that another derivation registered in the same serving runtime
+     writes is one the serving loop owes and has not produced yet, so it
+     is transit for that runtime, not knowledge. The read still reads
+     `undefined`, but the served run that read it commits nothing
+     (serving-loop.md §3d) and runs again once the instance is produced.
+     A writer that never produces a principal's instance therefore holds
+     back its served readers' commits for that instance indefinitely;
+     the client's own echo of it persists (§4's arrival gate).
   2. **A lift that THROWS the error takes the same disposition.** The
      refusal propagates out of the lift body (the body did not catch
      it) and produces an undefined result through the ordinary result

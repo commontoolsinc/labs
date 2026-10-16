@@ -208,11 +208,12 @@ export function watchReactiveActionCommit(state: {
   readonly log: ReactivityLog;
 
   /**
-   * Whether the run read a document its runtime refuses by construction, so
-   * that its transaction was withdrawn before the commit and no retry can
-   * fare better.
+   * Whether the run's transaction was withdrawn before the commit for what it
+   * read: a document its runtime refuses by construction, or a scoped
+   * instance not yet produced. A retry cannot fare better; the run's reads
+   * are what run it again.
    */
-  readonly readRefusedDocument?: boolean;
+  readonly withdrawn?: boolean;
 
   readonly retries: WeakMap<Action, number>;
   readonly offBudgetRetries: WeakMap<Action, number>;
@@ -251,7 +252,7 @@ export function watchReactiveActionCommit(state: {
       return;
     }
 
-    if (state.readRefusedDocument === true) {
+    if (state.withdrawn === true) {
       state.retries.delete(state.action);
       state.offBudgetRetries.delete(state.action);
       abandonAction(state, error);
@@ -1227,11 +1228,26 @@ function finalizeReactiveActionCommit(
   // writes are withdrawn rather than sealed. The read is refused the same way
   // every time, so the run is not retried: it runs again when another of its
   // inputs changes, and withdraws again while it still reads the document.
+  //
+  // A served run that read a scoped instance the serving loop has not
+  // produced yet (`unproducedScopedInstance`) is withdrawn the same way, for
+  // the same reason: the absence it read is not that instance's state. Its
+  // read of the instance stays subscribed, so it runs again once the instance
+  // is produced.
   const refused = refusedReadIn(state.runtime.storageManager, args.tx);
-  if (refused !== undefined && args.tx.status().status === "ready") {
-    args.tx.abort(
-      new Error(`served derivation read a refused document: ${refused}`),
-    );
+  const unproduced = args.tx.tx.unproducedScopedInstance;
+  if (args.tx.status().status === "ready") {
+    if (refused !== undefined) {
+      args.tx.abort(
+        new Error(`served derivation read a refused document: ${refused}`),
+      );
+    } else if (unproduced !== undefined) {
+      args.tx.abort(
+        new Error(
+          `served derivation read a scoped instance not yet produced: ${unproduced}`,
+        ),
+      );
+    }
   }
   const commitPromise = startReactiveActionCommit({
     runtime: state.runtime,
@@ -1310,7 +1326,7 @@ function finalizeReactiveActionCommit(
     action: args.action,
     tx: args.tx,
     log: committedLog,
-    readRefusedDocument: refused !== undefined,
+    withdrawn: refused !== undefined || unproduced !== undefined,
     retries: state.retries,
     offBudgetRetries: state.offBudgetRetries,
     pending: state.pending,

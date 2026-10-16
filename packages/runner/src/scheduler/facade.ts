@@ -2025,6 +2025,25 @@ export class Scheduler {
   /**
    * Returns whether an action is registered as an effect.
    */
+  /**
+   * Whether an action registered here other than `except` declares a write to
+   * some instance of `address`'s document, at any scope.
+   */
+  hasOtherWriterOf(
+    address: Pick<IMemorySpaceAddress, "space" | "id">,
+    except: object,
+  ): boolean {
+    for (const scope of ["space", "user", "session"] as const) {
+      const writers = this.#writeIndex.writersByEntity.get(
+        entityNameKey({ ...address, scope }),
+      );
+      for (const writer of writers ?? []) {
+        if (writer !== except) return true;
+      }
+    }
+    return false;
+  }
+
   isEffect(action: Action): boolean {
     return this.#nodes.effects.has(action);
   }
