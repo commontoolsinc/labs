@@ -2023,11 +2023,13 @@ export class Scheduler {
   }
 
   /**
-   * Returns whether an action is registered as an effect.
-   */
-  /**
    * Whether an action registered here other than `except` declares a write to
    * some instance of `address`'s document, at any scope.
+   *
+   * The lookup spans every scope because the write index keys a derivation by
+   * its declared scope, while a JavaScript derivation writes its output at the
+   * scope its reads narrowed to: a user instance of an output declared at
+   * space scope has a writer indexed only at space scope.
    */
   hasOtherWriterOf(
     address: Pick<IMemorySpaceAddress, "space" | "id">,
@@ -2044,6 +2046,9 @@ export class Scheduler {
     return false;
   }
 
+  /**
+   * Returns whether an action is registered as an effect.
+   */
   isEffect(action: Action): boolean {
     return this.#nodes.effects.has(action);
   }

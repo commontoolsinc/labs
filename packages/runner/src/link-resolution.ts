@@ -1013,6 +1013,14 @@ export function resolveLinkTracingDereferences(
         // run's value was derived from an instance not yet there, which
         // withdraws the run's commit (`finalizeReactiveActionCommit` in
         // scheduler/run.ts).
+        //
+        // Only a walk that crossed a hop is read this way. A walk that crossed
+        // none dead-ends at the document the run addressed itself, as a
+        // builtin reads its own store before it mints it (`llmDialog` reads
+        // its `internal` store directly, per user and per session, while
+        // another registered action declares it). That run may be the one
+        // that produces the instance, and withdrawing its commit would then
+        // starve the instance it was about to write.
         tx.tx.unproducedScopedInstance ??=
           `${link.space}/${link.scope}/${link.id}`;
       }
