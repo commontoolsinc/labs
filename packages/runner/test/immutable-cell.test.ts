@@ -19,6 +19,7 @@ import {
   immutableCellsFor,
   ImmutableCellStore,
   immutableSnapshot,
+  mintedFromUnstoredValue,
   ownImmutableCells,
 } from "../src/immutable-cell.ts";
 import { decomposeSchema } from "../src/schema-decompose.ts";
@@ -464,6 +465,43 @@ describe("immutable-cell", () => {
       expect((snapshot.value as { child: unknown }).child).toBe(child);
       expect(findAndInlineDataUriLinks(linkRefFrom({ id: snapshot.id })))
         .toEqual({ child, n: 2 });
+    } finally {
+      store.dispose();
+    }
+  });
+
+  it("classifies a snapshot by the stored document at the root of its origins", () => {
+    // A snapshot with no origin was minted from a value no space has stored,
+    // and so was an element snapshot read out of it, however many elements
+    // deep. An element read out of a stored document was not.
+    const SPACE = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
+    const store = new ImmutableCellStore();
+    try {
+      const unstored = store.create({ items: [{ nested: [{ n: 1 }] }] });
+      const element = store.createElement({ nested: [{ n: 1 }] }, {
+        id: unstored.id,
+        space: SPACE,
+        scope: "space",
+        path: [],
+      });
+      const nested = store.createElement({ n: 1 }, {
+        id: element.id,
+        space: SPACE,
+        scope: "space",
+        path: [],
+      });
+      const stored = store.createElement({ n: 2 }, {
+        id: "of:stored-source",
+        space: SPACE,
+        scope: "space",
+        path: [],
+      });
+
+      expect(mintedFromUnstoredValue(unstored.id)).toBe(true);
+      expect(mintedFromUnstoredValue(element.id)).toBe(true);
+      expect(mintedFromUnstoredValue(nested.id)).toBe(true);
+      expect(mintedFromUnstoredValue(stored.id)).toBe(false);
+      expect(mintedFromUnstoredValue("of:stored-source")).toBe(false);
     } finally {
       store.dispose();
     }

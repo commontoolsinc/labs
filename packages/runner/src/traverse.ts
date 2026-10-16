@@ -77,7 +77,11 @@ import {
 import { cfcEnvelopeLabelDocumentHashes } from "./cfc/label-documents.ts";
 import { cfcSchemaWithInheritedDefs } from "./cfc/schema-refs.ts";
 import { FABRIC_SPECIAL_OBJECT_BRAND } from "./fabric-special-object-brand.ts";
-import { immutableCellsFor, pinImmutableCell } from "./immutable-cell.ts";
+import {
+  immutableCellsFor,
+  mintedFromUnstoredValue,
+  pinImmutableCell,
+} from "./immutable-cell.ts";
 import { type LastNode, readMaybeLink } from "./link-resolution.ts";
 import {
   type IMemorySpaceValueAddress,
@@ -3146,6 +3150,14 @@ function trackVisitedDoc(
  * is closure-transitive, so gating at the two places a schema enters a
  * traversal (the selector, a link) covers every interior resolution.
  *
+ * A referrer minted from a value no space has stored
+ * (`mintedFromUnstoredValue`) is the one exception: no query delivers such
+ * a document, and no space holds the closure behind its links' references,
+ * so a document the registry holds is taken from there — unread, untracked,
+ * and not credited to the space — and the verdict for such a referrer is
+ * the registry's. A document the registry lacks is read from the space as
+ * for a stored referrer.
+ *
  * Documents are read in the referrer's space at the canonical `"space"`
  * scope: schema documents are installed space-scoped, so a session- or
  * user-scoped referrer must not redirect the read to its own partition.
@@ -3157,20 +3169,33 @@ function loadExternalSchemaDocs(
   context: TraversalContext,
 ): boolean {
   if (!containsExternalSchemaRef(schema)) return true;
+  // A link inside a document minted from a value no space has stored was
+  // never written, so no space holds the closure its schema's reference
+  // names, and the registry that minted the reference does
+  // (`docs/specs/content-addressed-schemas.md`, "Space boundaries"). For
+  // such a referrer the registry decides, and what it supplies is never
+  // counted as available in the referrer's space: a stored document's
+  // reference is held to what that space delivers.
+  const registryHeld = mintedFromUnstoredValue(referrer.id);
   loadSchemaDocClosure(
     tx,
     referrer,
     collectExternalSchemaRefHashes(schema),
     context,
+    registryHeld,
   );
 
   // The verdict: every hash transitively reachable from the schema's own
   // refs was collected in this traversal (this call or an earlier one — the
-  // per-context set accumulates).
+  // per-context set accumulates), or, for a registry-held referrer, is in
+  // the registry, where a document read from the space was registered too.
   const { missing } = walkSchemaDocumentClosure({
     roots: collectExternalSchemaRefHashes(schema),
     load: (hash) => {
-      if (!context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)) {
+      if (
+        !registryHeld &&
+        !context.schemaDocsAvailable.has(`${referrer.space}/${hash}`)
+      ) {
         return undefined;
       }
       const document = lookupSchemaDocument(hash);
@@ -3182,12 +3207,20 @@ function loadExternalSchemaDocs(
   return missing.size === 0;
 }
 
+/**
+ * Helper for {@link loadExternalSchemaDocs}, which loads and verifies the
+ * closure behind `initialHashes` in `referrer`'s space. With `registryHeld`,
+ * a document the registry holds is taken from there without a read, and is
+ * not recorded as available in the space.
+ */
 function loadSchemaDocClosure(
   tx: IExtendedStorageTransaction,
   referrer: IMemorySpaceAddress,
   initialHashes: ReadonlySet<string>,
   context: TraversalContext,
+  registryHeld: boolean,
 ): void {
+  const fromRegistry = new Set<string>();
   walkSchemaDocumentClosure({
     roots: initialHashes,
     load: (hash) => {
@@ -3199,6 +3232,15 @@ function loadSchemaDocClosure(
       };
       const key = getTrackerKey(address, context.scopeKeyIdentity);
       if (context.schemaDocsLoaded.has(key)) return { kind: "settled" };
+      // A document the registry lacks is read from the space the referrer is
+      // addressed in, as for a stored document.
+      if (registryHeld) {
+        const registered = lookupSchemaDocument(hash);
+        if (registered !== undefined) {
+          fromRegistry.add(hash);
+          return { kind: "verified", schema: registered };
+        }
+      }
       context.schemaDocsLoaded.add(key);
       // A plain read: loads the document AND records the dependency, so an
       // absent document's later arrival re-triggers the reader.
@@ -3231,8 +3273,11 @@ function loadSchemaDocClosure(
     },
     onVerified: (hash, schema) => {
       registerSchemaDocument(hash, schema);
-      // Loaded in this space and verified.
-      context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+      // Loaded in this space and verified; one the registry supplied was not
+      // loaded here, and the space is not credited with it.
+      if (!fromRegistry.has(hash)) {
+        context.schemaDocsAvailable.add(`${referrer.space}/${hash}`);
+      }
     },
     onMissing: (hash, miss) => {
       // An absent document was reported where its read failed. One that is
