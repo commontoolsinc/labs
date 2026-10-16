@@ -3270,6 +3270,16 @@ describe("console/server", () => {
       expect(resolved.fabricSession.space).toBe(CREATED_SPACE);
     });
 
+    it("throws for a space no piece address can be written for", async () => {
+      await expect(
+        resolveConsoleConfig(
+          ["--fabric-identity", "k", "--fabric-space", "team/lunch"],
+          {},
+          "/console",
+        ),
+      ).rejects.toThrow("cannot be written in a piece's address");
+    });
+
     it("throws naming both ways to supply a fabric session when neither is given", async () => {
       await expect(resolveConsoleConfig([], {}, "/console")).rejects.toThrow(
         "a fabric session is required",

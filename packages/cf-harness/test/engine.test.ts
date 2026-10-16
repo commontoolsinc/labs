@@ -1167,15 +1167,18 @@ Deno.test("CfHarnessEngine refuses a piece address naming a space that is not th
 const CREATED_SPACE =
   "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 
-/** A session in a space created by DID, recording each slug it is asked for. */
-const createdSpaceSession = (asked: string[]) => () =>
+/**
+ * A session in a space created by DID, counting each time a slug resolution
+ * reaches it. It holds no pieces, so every resolution it is asked for fails.
+ */
+const createdSpaceSession = (reached: { resolutions: number }) => () =>
   Promise.resolve(
     {
       pieces: {
         getSpace: () => CREATED_SPACE,
         getSpaceName: () => undefined,
         get runtime(): never {
-          asked.push("reading-list");
+          reached.resolutions += 1;
           throw new Error("no runtime in this session");
         },
       },
@@ -1183,11 +1186,11 @@ const createdSpaceSession = (asked: string[]) => () =>
     } as any,
   );
 
-Deno.test("CfHarnessEngine resolves a piece address naming a space created by DID in that space", async () => {
+Deno.test("CfHarnessEngine asks a session in a space created by DID to resolve an address naming it by DID", async () => {
   // A space created with a random key has no name, so the address a surface
   // holds for one of its pieces names it by DID, as the console's results do.
-  // The slug is then resolved in this session.
-  const asked: string[] = [];
+  // The slug is then resolved in this session, which here holds none.
+  const reached = { resolutions: 0 };
   const engine = new CfHarnessEngine({
     ...INERT_RUNSC,
     workspaceHostPath: "/host/project",
@@ -1195,14 +1198,14 @@ Deno.test("CfHarnessEngine resolves a piece address naming a space created by DI
       name: "pattern_1",
       ref: `pattern:${CREATED_SPACE}/reading-list`,
     }],
-    fabricSessionFactory: createdSpaceSession(asked),
+    fabricSessionFactory: createdSpaceSession(reached),
   });
   await assertRejects(
     () => engine.establishInputCells(),
     Error,
     "names the piece `reading-list`, which this space does not hold",
   );
-  assertEquals(asked, ["reading-list"]);
+  assertEquals(reached.resolutions, 1);
 });
 
 Deno.test("CfHarnessEngine refuses a piece address naming another space than one created by DID", async () => {
@@ -1217,7 +1220,7 @@ Deno.test("CfHarnessEngine refuses a piece address naming another space than one
       ["reading-room", "has no name to check that against"],
     ]
   ) {
-    const asked: string[] = [];
+    const reached = { resolutions: 0 };
     const engine = new CfHarnessEngine({
       ...INERT_RUNSC,
       workspaceHostPath: "/host/project",
@@ -1225,17 +1228,17 @@ Deno.test("CfHarnessEngine refuses a piece address naming another space than one
         name: "pattern_1",
         ref: `pattern:${space}/reading-list`,
       }],
-      fabricSessionFactory: createdSpaceSession(asked),
+      fabricSessionFactory: createdSpaceSession(reached),
     });
     await assertRejects(() => engine.establishInputCells(), Error, refusal);
-    assertEquals(asked, []);
+    assertEquals(reached.resolutions, 0);
     assertEquals(engine.getRunState().inputCells, undefined);
   }
 });
 
-Deno.test("CfHarnessEngine resolves a piece address naming a legacy space by its DID", async () => {
+Deno.test("CfHarnessEngine asks a legacy space's session to resolve an address naming it by its DID", async () => {
   // A legacy space has a name and the DID the name derives; either names it.
-  const asked: string[] = [];
+  let resolutions = 0;
   const engine = new CfHarnessEngine({
     ...INERT_RUNSC,
     workspaceHostPath: "/host/project",
@@ -1250,7 +1253,7 @@ Deno.test("CfHarnessEngine resolves a piece address naming a legacy space by its
             getSpace: () => CREATED_SPACE,
             getSpaceName: () => "demo-space",
             get runtime(): never {
-              asked.push("reading-list");
+              resolutions += 1;
               throw new Error("no runtime in this session");
             },
           },
@@ -1263,7 +1266,7 @@ Deno.test("CfHarnessEngine resolves a piece address naming a legacy space by its
     Error,
     "names the piece `reading-list`, which this space does not hold",
   );
-  assertEquals(asked, ["reading-list"]);
+  assertEquals(resolutions, 1);
 });
 
 Deno.test("CfHarnessEngine rejects only cross-model Codex resume", () => {

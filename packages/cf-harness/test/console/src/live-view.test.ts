@@ -629,10 +629,10 @@ describe("console/src/live-view", () => {
   });
 
   describe("consoleLivePieceHref()", () => {
-    const piece = { slug: "reading list", url: "http://localhost:8000/s/r" };
+    const piece = { slug: "reading-list", url: "http://localhost:8000/s/r" };
 
     it("returns the address the run recorded when no base is named", () => {
-      expect(consoleLivePieceHref(piece, "my space", undefined)).toBe(
+      expect(consoleLivePieceHref(piece, "my-space", undefined)).toBe(
         "http://localhost:8000/s/r",
       );
     });
@@ -640,9 +640,18 @@ describe("console/src/live-view", () => {
     it("returns an address under the base a host renders pieces at", () => {
       expect(consoleLivePieceHref(
         piece,
+        "my-space",
+        "http://localhost:9901/pattern-pane",
+      )).toBe("http://localhost:9901/pattern-pane/my-space/reading-list");
+    });
+
+    it("returns the recorded address for a space no address can be written for", () => {
+      // The shell reads `my%20space` as a space of that name, not `my space`.
+      expect(consoleLivePieceHref(
+        piece,
         "my space",
         "http://localhost:9901/pattern-pane",
-      )).toBe("http://localhost:9901/pattern-pane/my%20space/reading%20list");
+      )).toBe("http://localhost:8000/s/r");
     });
 
     it("returns a space created by DID as the DID the shell reads", () => {

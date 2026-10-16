@@ -47,6 +47,14 @@ describe("pieceUrl()", () => {
     ).toBe("http://localhost:9901/pattern-pane/my-space/notes");
   });
 
+  it("returns no address for a name the shell would read as another piece", () => {
+    // `/` and `\\` divide a path, an escaped character reads as its escape,
+    // and a leading `@` is a mark: each address names something else.
+    for (const name of ["team/lunch", "team\\lunch", "team lunch", "@team"]) {
+      expect(pieceUrl("http://localhost:8000", name, "notes")).toBeUndefined();
+    }
+  });
+
   it("returns no address without a base URL or a space", () => {
     expect(pieceUrl("http://[invalid", "my-space", "notes")).toBeUndefined();
     expect(pieceUrl("http://localhost:8000", "", "notes")).toBeUndefined();

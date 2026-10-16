@@ -706,12 +706,16 @@ sentence as "done", "waiting for your answer", or "stopped", without a failure
 badge. Child agents report blockers to their parent; they cannot end the user's
 task themselves.
 
-When the run names a piece, the `assign_slug` result carries a `slug` and a
-`url`, and the page raises an **Open your piece** link above the feed. That link
-is the point of the surface: everything above it is the work, and the link is
-what the work produced. The same result is durable under
+When the run names a piece, the page raises an **Open your piece** link above
+the feed: as soon as the `assign_slug` result carries a `url`, and otherwise
+when the turn completes, from the address its result composed. A space
+configured by DID gives the model no URL, so its link appears at the end of the
+turn. That link is the point of the surface: everything above it is the work,
+and the link is what the work produced. The same result is durable under
 `<artifact-root>/<run-id>/tool-outputs/`; when a run ends without the link
-appearing, the Runs view below reads it back.
+appearing, the Runs view below reads it back. The Runs view shows what each run
+recorded, and lists runs from more than this console, so a piece named in a
+space configured by DID shows there by its slug, without a link.
 
 Cancel stops the running turn. The session survives a cancel and a page reload
 both — the stream resumes from the last event the page rendered rather than
@@ -811,13 +815,14 @@ address is the one `assign_slug` recorded, which is the Fabric API's; a host
 that shows pieces somewhere else — a pane of its own, say, where the API's
 address answers with a login gate instead of the piece — names its prefix here,
 and every piece link on the page is composed as `<piecesBase>/<space>/<slug>`
-from the space and slug the turn's result carries, each escaped. With no prefix
-named, the recorded URL is used as it stands rather than rebuilt. The prefix has
-to be an absolute `http` or `https` URL: it arrives from whatever opened the
-page and ends up in an `href`, so anything else — a `javascript:` URL, a
-relative path — is refused, the page says so, and the links stay on the recorded
-address. The console composes against a prefix it is given and knows nothing
-about the host that gave it.
+from the space and slug the turn's result carries, written as the shell writes
+an address, so a space's DID goes in as the DID. With no prefix named, the
+recorded URL is used as it stands rather than rebuilt. The prefix has to be an
+absolute `http` or `https` URL: it arrives from whatever opened the page and
+ends up in an `href`, so anything else — a `javascript:` URL, a relative path —
+is refused, the page says so, and the links stay on the recorded address. The
+console composes against a prefix it is given and knows nothing about the host
+that gave it.
 
 The pane reads the same event stream the console page reads, from sequence zero
 — so a pane opened halfway through a turn shows the steps that already happened

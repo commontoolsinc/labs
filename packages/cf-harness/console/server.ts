@@ -58,6 +58,7 @@
 import { readLoomAuthoringConfig } from "../src/loom-authoring.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import { spaceViewRef } from "@commonfabric/navigation";
+import { pieceUrl } from "../src/piece-url.ts";
 import type { PatternIndexClient } from "@commonfabric/pattern-index/client";
 import {
   feedbackEventType,
@@ -761,8 +762,9 @@ export interface ConsoleHost extends SandboxProcess {
 
 /**
  * Resolves configuration from flags over environment over defaults. The space
- * is a name or a DID, taken as configured. `host` says what applies where `env`
- * names no sandbox runtime.
+ * is a name or a DID, taken as configured; one no piece address can be written
+ * for is refused. `host` says what applies where `env` names no sandbox
+ * runtime.
  *
  * @throws HarnessControlError where `env` names no sandbox runtime and
  * `host` says its caller must name one; and where it names none on macOS or
@@ -888,6 +890,15 @@ export const resolveConsoleConfig = async (
       }
       : {}),
   };
+  // A run's pieces are opened by the address composed from these two, so a
+  // space no address can be written for is refused here rather than leaving
+  // every piece it names without a link. A DID always has one; a legacy name
+  // the shell would read back as another space has none (`pieceUrl`).
+  if (pieceUrl(fabricSession.apiUrl, space, "piece") === undefined) {
+    throw new Error(
+      `--fabric-space \`${space}\` cannot be written in a piece's address; name the space by its DID`,
+    );
+  }
 
   // The checkout's skills/ tree gives the pattern-author subagent its
   // preloaded pattern-dev + pattern-schema skills; without a skills root the

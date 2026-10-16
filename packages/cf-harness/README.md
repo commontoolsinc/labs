@@ -1474,11 +1474,14 @@ than it is told for a reference. It names a piece, not a cell inside one: a path
 after the slug is refused, and the general cell case is CT-2319's. The retired
 `piece:` spelling is not read as an address.
 
-A qualified name is resolved in the session's own space or not at all. A space
-the session cannot check the name of — one configured by `did:key`, which
-carries no name — refuses the qualified form rather than answering with this
-space's same-slug piece, because the same slug in another space is a different
-piece. A bare slug is unaffected: it names no space to disagree about.
+A qualified name is resolved in the session's own space or not at all, because
+the same slug in another space is a different piece. The space is read as the
+shell reads one: a segment that is a DID names the space with that DID, and any
+other segment names a space by name. A space created with a random key has no
+name, so `pattern:<its DID>/<slug>` names it and a name does not; a session that
+cannot check a name refuses that form rather than answering with this space's
+same-slug piece. A legacy space is named by its name or by the DID the name
+derives. A bare slug is unaffected: it names no space to disagree about.
 
 An input cell names a task target, so failure is closed and loud rather than
 tolerated: a malformed argument is a usage error, and a reference that does not
