@@ -493,6 +493,9 @@ async function gitOutput(
   return new TextDecoder().decode(result.stdout);
 }
 
+/** A full git object id, in either hash a repository can use. */
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 /** The paths in what `git … -z` printed. */
 function pathsOf(listing: string): Set<string> {
   return new Set(listing.split("\0").filter((path) => path.length > 0));
@@ -521,19 +524,20 @@ export async function changedFiles(
  * The files `until` gained after `since`, through a `git` that throws
  * when git fails. Where `since` is not an ancestor of `until`, only what
  * `until` gained after the two parted counts, so a file that `until`
- * still holds and `since` deleted is not one of them. A `since` naming no
- * commit `git` can find gives nothing.
+ * still holds and `since` deleted is not one of them.
+ *
+ * `since` comes from a manifest, which is untrusted, so it reaches git
+ * only as a full object id. One that is not an object id, or that names
+ * no commit `git` can find, gives nothing.
  */
 export async function gainedSince(
   git: (...args: string[]) => Promise<string>,
   since: string,
   until: string,
 ): Promise<Set<string>> {
-  try {
-    await git("cat-file", "-e", `${since}^{commit}`);
-  } catch {
-    return new Set();
-  }
+  if (!OBJECT_ID.test(since)) return new Set();
+  const found = await git("rev-list", "--no-walk", "--ignore-missing", since);
+  if (found.trim() === "") return new Set();
   return pathsOf(
     await git(
       "diff",

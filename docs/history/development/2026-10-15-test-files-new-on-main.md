@@ -232,13 +232,23 @@ for (const run of mine) {
     `--before=${run.created_at}`, "upstream/main")).trim();
   await git(worktree, "checkout", "-q", "-f", "--detach", base);
   await git(worktree, "clean", "-q", "-fdx");
-  await git(worktree, "-c", "user.name=replay", "-c",
-    "user.email=replay@example.com", "merge", "-q", "--no-ff", "--no-edit",
-    run.head_sha);
-  const { name, manifest } = (await manifestAt(run.created_at))! as any;
-  row.manifest = name;
+  try {
+    await git(worktree, "-c", "user.name=replay", "-c",
+      "user.email=replay@example.com", "merge", "-q", "--no-ff", "--no-edit",
+      run.head_sha);
+  } catch {
+    // The head does not merge cleanly: record it and go on to the next.
+    await new Deno.Command("git", { args: ["merge", "--abort"], cwd: worktree })
+      .output();
+    row.skipped = "merge conflict";
+    await Deno.writeTextFile(outPath, JSON.stringify(row) + "\n", { append: true });
+    continue;
+  }
+  const resolved = await manifestAt(run.created_at);
+  const manifest = resolved?.manifest as any;
+  row.manifest = resolved?.name;
   const changed = await changedFiles(worktree, base);
-  const landed = await landedFiles(worktree, base, manifest.commit);
+  const landed = await landedFiles(worktree, base, manifest?.commit);
   const suites = await loadTopology(worktree);
   const arm = (given: ReadonlySet<string>) => {
     const { seen, laid } = planOver({

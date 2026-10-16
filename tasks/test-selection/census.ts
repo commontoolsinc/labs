@@ -5,7 +5,8 @@
  * of them is worth and costs. Everything that chooses tests reads the
  * result of this rather than the manifest the store gave, so a unit the
  * manifest still names and the tree no longer has cannot be run, and a
- * unit the tree has and no manifest has seen cannot be missed. Both
+ * unit the tree has and no manifest has seen is carried on a stand-in
+ * rather than missed, whether or not it has to run. Both
  * mistakes were reachable while the full run read the tree and the
  * pull-request run read the manifest.
  */

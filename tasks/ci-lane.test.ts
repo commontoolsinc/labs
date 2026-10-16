@@ -42,6 +42,7 @@ import {
   describePlan,
   describeWithheld,
   type Execution,
+  gainedSince,
   landedFiles,
   type LaneDeps,
   type LaneOptions,
@@ -2700,22 +2701,43 @@ describe("the lane's own housekeeping", () => {
     await git("commit", "-q", "-m", "on the default branch");
     await git("checkout", "-q", "-");
     await git("merge", "-q", "--no-edit", "base");
-    expect([...await landedFiles(repo, "base", "published")]).toEqual([
+    const commitOf = async (ref: string) =>
+      new TextDecoder().decode(
+        (await new Deno.Command("git", {
+          args: ["rev-parse", ref],
+          cwd: repo,
+          stdout: "piped",
+        }).output()).stdout,
+      ).trim();
+    const published = await commitOf("published");
+    expect([...await landedFiles(repo, "base", published)]).toEqual([
       "landed.test.ts",
     ]);
     // A change branched off before the manifest's commit gained nothing
     // from after it, and a file the default branch deleted since is not
     // one it gained.
-    expect([...await landedFiles(repo, "published", "base")]).toEqual([]);
+    expect([...await landedFiles(repo, "published", await commitOf("base"))])
+      .toEqual([]);
     // With no base there is no change, and with no manifest's commit
     // nothing is known to have landed since it.
-    expect([...await landedFiles(repo, undefined, "published")]).toEqual([]);
+    expect([...await landedFiles(repo, undefined, published)]).toEqual([]);
     expect([...await landedFiles(repo, "base", undefined)]).toEqual([]);
     expect([...await landedFiles(repo, "base", "unknown")]).toEqual([]);
+    expect([...await landedFiles(repo, "base", "f".repeat(40))]).toEqual([]);
+    // A manifest is untrusted, so what it names as its commit reaches git
+    // only as an object id, and never as anything git reads as an option.
+    expect([...await landedFiles(repo, "base", "--output=written")])
+      .toEqual([]);
+    expect([...await landedFiles(repo, "base", "published")]).toEqual([]);
+    expect(await exists(`${repo}/written`)).toBe(false);
     // A lane that read fewer files than its siblings would pack a plan
-    // they are not following.
-    await expect(landedFiles(repo, "no-such-ref", "published")).rejects
-      .toThrow("cannot list the files no-such-ref gained after published");
+    // they are not following, so a git that failed is not read as one
+    // that found no such commit.
+    await expect(
+      gainedSince(() => Promise.reject(new Error("git died")), published, "x"),
+    ).rejects.toThrow("git died");
+    await expect(landedFiles(repo, "no-such-ref", published)).rejects
+      .toThrow(`cannot list the files no-such-ref gained after ${published}`);
     await Deno.remove(repo, { recursive: true });
   });
 

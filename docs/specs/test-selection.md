@@ -1181,8 +1181,10 @@ artifact follows from what it can do. It can only change *which* tests
 run. It cannot change what a test does, what a test asserts, or what the
 repository builds. That holds because of what a consumer lets its strings
 reach. The only ones that reach a command are suite and unit names, and
-only those matching a suite and a unit the tree defines. A test's name
-reaches nothing but the list of names a runner is told to skip.
+only those matching a suite and a unit the tree defines, and the commit
+the manifest names, only where it is a full object id, and only to ask
+git what the default branch gained after it. A test's name reaches
+nothing but the list of names a runner is told to skip.
 
 The worst a corrupted manifest achieves is a change that ran fewer tests
 than it should have, which the full run on the default branch catches.

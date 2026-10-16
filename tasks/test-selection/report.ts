@@ -430,7 +430,9 @@ function identityOf(key: string): TestIdentity {
  *
  * Its own records decide first, because whether it ran a test is a fact
  * about what it did rather than a projection of what it would have done.
- * The manifest only says why it did not.
+ * The plan packed over the manifest only says why it did not: a test the
+ * manifest holds by what the plan did with it, and one the manifest does
+ * not hold by what the plan did with its unit.
  */
 export function selectionOf(
   view: PullRequestView,
