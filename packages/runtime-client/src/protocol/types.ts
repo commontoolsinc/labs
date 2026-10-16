@@ -21,7 +21,7 @@ import type {
   PresenceFacets,
   PresenceRecord,
 } from "@commonfabric/memory/v2";
-import type { MetaField } from "@commonfabric/runner";
+import type { MetaField, RuntimeSizes } from "@commonfabric/runner";
 import type {
   CfcConfClause,
   CfcTrustConfigInput,
@@ -3814,8 +3814,10 @@ export type GraphSnapshotResponse = {
 
 /**
  * Everything the logger diagnostics read returns: counts, per-logger
- * metadata, timings, and active flags, gathered in one round trip because a
- * client comparing them wants them from the same moment.
+ * metadata, timings, active flags, the runtime's CFC counters, the pattern
+ * manager's compile-cache counters, and the sizes of the runtime's live
+ * structures, gathered in one round trip because a client comparing them
+ * wants them from the same moment.
  */
 export type LoggerCountsResponse = {
   /**
@@ -3858,6 +3860,36 @@ export type LoggerCountsResponse = {
    * tell a worker that recompiled once from one that never hits.
    */
   compileCache: Record<string, number>;
+
+  /**
+   * How large the runtime's live structures are at this moment: the
+   * scheduler's tables, storage's documents and subscriptions, the compiled
+   * code caches, and the worker's own subscription and mount tables. Each is
+   * a collection's own count, so a collection that keeps growing shows up
+   * here, while growth in what its entries hold does not.
+   */
+  sizes: RuntimeSizes & { worker: WorkerSizes };
+};
+
+/** Sizes of the tables the worker keeps on its clients' behalf. */
+export type WorkerSizes = {
+  /** Cell subscriptions, one per client per cell. */
+  cellSubscriptions: number;
+
+  /** Operation subscriptions. */
+  operationSubscriptions: number;
+
+  /** Operation sessions open. */
+  operationSessions: number;
+
+  /** Presence room memberships. */
+  presenceMemberships: number;
+
+  /** VDOM mounts. */
+  vdomMounts: number;
+
+  /** Spaces with a pieces controller. */
+  spaces: number;
 };
 
 /** The worker's pattern coverage, where this worker collects any. */

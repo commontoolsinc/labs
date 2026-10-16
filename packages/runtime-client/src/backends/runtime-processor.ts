@@ -3679,6 +3679,17 @@ export class RuntimeProcessor {
       flags,
       cfc: this.#runtime.getCfcStats(),
       compileCache: { ...this.#runtime.patternManager.getCompileCacheStats() },
+      sizes: {
+        ...this.#runtime.getSizes(),
+        worker: {
+          cellSubscriptions: this.#subscriptions.size,
+          operationSubscriptions: this.#operationSubscriptions.size,
+          operationSessions: this.#operationSessions.size,
+          presenceMemberships: this.#presenceMemberships.size,
+          vdomMounts: this.#vdomMounts.size,
+          spaces: this.#spaces.size,
+        },
+      },
     };
   }
 

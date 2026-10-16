@@ -59,6 +59,7 @@ import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
+import type { PatternManagerSizes } from "./runtime-sizes.ts";
 
 import {
   isFabricImportSpecifier,
@@ -931,6 +932,16 @@ export class PatternManager {
     byIdentityHits: number;
   } {
     return { ...this.#esmCacheStats };
+  }
+
+  /** The sizes of the in-memory compiled-code caches. */
+  getSizes(): PatternManagerSizes {
+    return {
+      compiledPrograms: this.#compiledByContent.size,
+      evaluatedModules: this.#modulesByIdentity.size,
+      indexedModules: this.#addressableByIdentity.size,
+      inProgressCompilations: this.#inProgressCompilations.size,
+    };
   }
 
   /** Resolve once all in-flight compiled-cache write-backs have settled. */

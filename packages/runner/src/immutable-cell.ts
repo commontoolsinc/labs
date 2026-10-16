@@ -435,6 +435,15 @@ export function isInlineCellId(id: string): boolean {
 }
 
 /**
+ * How many distinct snapshots any store in this process retains, element
+ * stores included. A snapshot several stores share counts once; one released
+ * by every owner, or whose owners were reclaimed, is gone from the count.
+ */
+export function liveImmutableSnapshotCount(): number {
+  return snapshots.size;
+}
+
+/**
  * Whether `id` names a snapshot minted from a value no space has stored: one
  * read out of no stored document, so with no origin, or an element snapshot
  * whose chain of origins ends at one rather than at a stored document. The

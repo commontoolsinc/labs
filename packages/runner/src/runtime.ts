@@ -118,7 +118,11 @@ import {
 import type { ConsoleMethod } from "./harness/console.ts";
 import { Engine } from "./harness/index.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
-import { immutableCellsFor, ownImmutableCells } from "./immutable-cell.ts";
+import {
+  immutableCellsFor,
+  liveImmutableSnapshotCount,
+  ownImmutableCells,
+} from "./immutable-cell.ts";
 import type { ConsoleMessage } from "./interface.ts";
 import { addressKey } from "./link-types.ts";
 import {
@@ -152,6 +156,7 @@ import {
   type RunSyncedWithCommitOptions,
 } from "./runner.ts";
 import { brandRuntime } from "./runtime-brand.ts";
+import { CfcRejectionTally, type RuntimeSizes } from "./runtime-sizes.ts";
 import { Action, Scheduler } from "./scheduler.ts";
 import {
   type CommitBackpressurePolicy,
@@ -1540,6 +1545,11 @@ export class Runtime {
   #queues = new Map<string, AsyncSemaphoreQueue>();
   #writeDebugContext = new WriteDebugContextStorage<string>();
   #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #cfcRejections = new CfcRejectionTally();
+
+  /** `editWithRetry()` calls whose commit was rejected and that are waiting
+   * to attempt again. */
+  #retryingEdits = 0;
 
   /**
    * The hooks every transaction `edit()` opens reports its CFC work through.
@@ -2811,6 +2821,9 @@ export class Runtime {
           terminal: refusal.terminal,
         });
       },
+      onCommitRejected: (reasons) => {
+        this.#cfcRejections.add(reasons);
+      },
       onDigestInvalidation: () => {
         this.#cfcStats.cfcDigestInvalidations += 1;
       },
@@ -3184,6 +3197,29 @@ export class Runtime {
     this.#cfcStats = initialCfcRuntimeStats();
   }
 
+  /**
+   * The sizes of the structures this runtime holds live, each read from the
+   * structure's own count, so the read is safe at any moment and walks
+   * nothing. A tracked collection that keeps growing shows up here; growth in
+   * what its entries hold, or in a structure not counted here, does not. The
+   * storage figure is `null` for a storage manager that reports no sizes.
+   */
+  getSizes(): RuntimeSizes {
+    return {
+      scheduler: this.scheduler.getSizes(),
+      storage: this.storageManager.getSizes?.() ?? null,
+      patterns: this.patternManager.getSizes(),
+      runtime: {
+        immutableSnapshots: liveImmutableSnapshotCount(),
+        pendingAsyncWork: this.#pendingAsyncWork.size,
+        retryingEdits: this.#retryingEdits,
+        modules: this.moduleRegistry.size,
+        policyManifests: this.#policyManifests.size,
+      },
+      cfcRejectionsByReason: this.#cfcRejections.snapshot(),
+    };
+  }
+
   getWriteDebugContext(): string | undefined {
     return this.#writeDebugContext.getStore() ?? this.scheduler.currentActionId;
   }
@@ -3358,10 +3394,12 @@ export class Runtime {
         if (error) {
           if (signal.aborted) return stoppedResult();
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-            await this.awaitCommitRetryReadiness(
-              error,
-              signal,
-            );
+            this.#retryingEdits += 1;
+            try {
+              await this.awaitCommitRetryReadiness(error, signal);
+            } finally {
+              this.#retryingEdits -= 1;
+            }
             if (signal.aborted) return stoppedResult();
             return this.editWithRetry<T>(fn, maxRetries - 1, options);
           } else {

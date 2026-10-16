@@ -99,7 +99,10 @@ import {
   diagnosticPrefix,
   type PendingCommitContext,
   type SpaceStorageDiagnostic,
+  type SpaceStorageSizes,
   type StorageDiagnostics,
+  type StorageSizes,
+  sumSpaceStorageSizes,
 } from "./diagnostics.ts";
 import type { Cell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -2705,6 +2708,22 @@ export class StorageManager implements IStorageManager {
     };
   }
 
+  /** @inheritDoc */
+  getSizes(): StorageSizes {
+    return {
+      ...sumSpaceStorageSizes(
+        [...this.#providers.values()].map((provider) =>
+          provider.replica.getSizes()
+        ),
+      ),
+      spaces: this.#providers.size,
+      pendingCommits: this.#pendingCommits.size,
+      pendingLoads: this.#pendingLoads.size,
+      pendingCrossingLoads: this.#pendingCrossingLoads.size,
+      pendingCrossSpace: this.#crossSpacePromises.size,
+    };
+  }
+
   hasPendingCommits(): boolean {
     return this.#pendingCommits.size > 0;
   }
@@ -4556,6 +4575,9 @@ export class SpaceReplica
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+
+  /** How many callbacks `#sinks` holds across every document. */
+  #sinkCount = 0;
   readonly #operationSinks = new Map<
     string,
     Set<(snapshot: OperationFieldSnapshot) => void>
@@ -4966,6 +4988,23 @@ export class SpaceReplica
     };
   }
 
+  /** @inheritDoc */
+  getSizes(): SpaceStorageSizes {
+    return {
+      documents: this.#docs.size,
+      subscribedDocuments: this.#sinks.size,
+      subscriptions: this.#sinkCount,
+      watchedDocuments: this.#watchedIds.size,
+      operationSinks: this.#operationSinks.size,
+      inFlightCommits: this.#commitPromises.size,
+      unsettledCommits: this.#commitOutcomeBySeq.size,
+      repairingCommits: this.#rejectedPendingLayers.size,
+      parkedAccepts: this.#parkedAccepts.size,
+      syncTasks: this.#syncTasks.size,
+      pendingReads: this.#syncPromises.size,
+    };
+  }
+
   /**
    * The scope INSTANCE key a local address keys under (see `docKey`):
    * the address's explicit `scopeKey` when it names one; else the scope
@@ -5150,11 +5189,12 @@ export class SpaceReplica
       subscribers = new Set();
       this.#sinks.set(key, subscribers);
     }
+    if (!subscribers.has(callback)) this.#sinkCount += 1;
     subscribers.add(callback);
     void this.sync(uri);
     return () => {
       const current = this.#sinks.get(key);
-      current?.delete(callback);
+      if (current?.delete(callback)) this.#sinkCount -= 1;
       if (current && current.size === 0) {
         this.#sinks.delete(key);
       }
